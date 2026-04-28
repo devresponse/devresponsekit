@@ -1,0 +1,28 @@
+/*
+ * Compact density mode for secure enterprise pages.
+ *
+ * Activated by a `data-density="compact"` attribute on a wrapping element.
+ * Public/auth pages keep `comfortable` density (the default).
+ */
+
+[data-density="compact"] {
+  --sh-control-height: 1.75rem;
+  --sh-control-padding-x: 0.5rem;
+  --sh-control-font-size: 0.8125rem;
+  --sh-row-padding-y: 0.25rem;
+  font-size: 0.875rem;
+}
+
+[data-density="compact"] button,
+[data-density="compact"] input,
+[data-density="compact"] select {
+  min-height: var(--sh-control-height);
+  font-size: var(--sh-control-font-size);
+}
+
+[data-density="comfortable"] {
+  --sh-control-height: 2.25rem;
+  --sh-control-padding-x: 0.75rem;
+  --sh-control-font-size: 0.9375rem;
+  --sh-row-padding-y: 0.5rem;
+}

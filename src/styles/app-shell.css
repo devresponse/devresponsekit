@@ -1,0 +1,96 @@
+/*
+ * Holy Grail application shell layout.
+ *
+ * Uses CSS Grid with named template areas. The shell can be nested
+ * (a parent shell can host child shells) by scoping the grid to
+ * a container element. Region visibility is parent-controlled.
+ *
+ * sh- prefix avoids collisions with Tailwind utility classes.
+ */
+
+.sh-container {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  min-height: 0;
+  background-color: var(--color-shell-bg);
+}
+
+.sh-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  height: var(--sh-top-bar-height, 3rem);
+  border-bottom: 1px solid var(--color-shell-border);
+  background-color: var(--color-shell-bg);
+}
+
+.sh-grid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns:
+    var(--sh-left-width, 16rem)
+    minmax(0, 1fr)
+    var(--sh-right-width, 0);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "header header header"
+    "left   main   right"
+    "footer footer footer";
+}
+
+.sh-grid[data-left-hidden="true"] {
+  grid-template-columns: 0 minmax(0, 1fr) var(--sh-right-width, 0);
+}
+.sh-grid[data-right-hidden="true"] {
+  grid-template-columns: var(--sh-left-width, 16rem) minmax(0, 1fr) 0;
+}
+.sh-grid[data-left-hidden="true"][data-right-hidden="true"] {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+.sh-header {
+  grid-area: header;
+  border-bottom: 1px solid var(--color-shell-border);
+  background-color: var(--color-shell-bg);
+}
+
+.sh-left {
+  grid-area: left;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-shell-border);
+  background-color: var(--color-shell-muted);
+}
+
+.sh-main {
+  grid-area: main;
+  overflow-y: auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sh-right {
+  grid-area: right;
+  overflow-y: auto;
+  border-left: 1px solid var(--color-shell-border);
+  background-color: var(--color-shell-muted);
+}
+
+.sh-footer {
+  grid-area: footer;
+  border-top: 1px solid var(--color-shell-border);
+  background-color: var(--color-shell-bg);
+}
+
+/* On mobile collapse left/right by default; parent can opt in via sheet. */
+@media (max-width: 768px) {
+  .sh-grid {
+    grid-template-columns: 0 minmax(0, 1fr) 0;
+  }
+  .sh-left,
+  .sh-right {
+    display: none;
+  }
+}

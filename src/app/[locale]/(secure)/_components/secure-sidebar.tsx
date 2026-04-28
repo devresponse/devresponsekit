@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";import { LocaleLink } from "@/components/i18n/locale-link";
+import { useTranslations } from "next-intl";
+import { LocaleLink } from "@/components/i18n/locale-link";
 import { SidebarMenuSkeleton } from "@/components/app-shell/navigation-menu-skeleton";
 import { fetchShellMenu, NavigationApiError } from "@/components/navigation/navigation-api-client";
 import type { NavigationMenuItem } from "@/components/navigation/menu-types";

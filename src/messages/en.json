@@ -51,6 +51,7 @@
     "loadingMenu": "Loading menu…",
     "menuLoadError": "Failed to load the menu.",
     "unauthorized": "You don't have permission to view this content.",
+    "noApplications": "No applications are available to you yet.",
     "showLeft": "Show left sidebar",
     "hideLeft": "Hide left sidebar",
     "showRight": "Show right sidebar",

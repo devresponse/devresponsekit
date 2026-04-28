@@ -51,6 +51,7 @@
     "loadingMenu": "Chargement du menu…",
     "menuLoadError": "Impossible de charger le menu.",
     "unauthorized": "Vous n'avez pas l'autorisation de voir ce contenu.",
+    "noApplications": "Aucune application n'est disponible pour vous pour l'instant.",
     "showLeft": "Afficher la barre latérale gauche",
     "hideLeft": "Masquer la barre latérale gauche",
     "showRight": "Afficher la barre latérale droite",

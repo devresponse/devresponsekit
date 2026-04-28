@@ -108,7 +108,7 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
             <AppSwitcherSkeleton />
           )
         ) : items.length === 0 ? (
-          <p className="text-sm text-neutral-600">{t("loadingMenu")}</p>
+          <p className="text-sm text-neutral-600">{t("noApplications")}</p>
         ) : (
           <ul className="flex flex-col gap-1" role="list">
             {items.map((item) => (

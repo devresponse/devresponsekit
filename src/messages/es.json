@@ -51,6 +51,7 @@
     "loadingMenu": "Cargando menú…",
     "menuLoadError": "No se pudo cargar el menú.",
     "unauthorized": "No tiene permiso para ver este contenido.",
+    "noApplications": "Aún no hay aplicaciones disponibles para usted.",
     "showLeft": "Mostrar barra lateral izquierda",
     "hideLeft": "Ocultar barra lateral izquierda",
     "showRight": "Mostrar barra lateral derecha",

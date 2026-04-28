@@ -40,10 +40,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "audience_not_configured" }, { status: 500 });
   }
 
-  // The audience MUST be set to the receiving application's identifier;
-  // for this scaffold we accept any audience that starts with the
-  // configured prefix and matches the current host's app id.
-  const expectedAudience = `${audiencePrefix}:${request.nextUrl.host.split(".")[0]}`;
+  // SECURITY: do NOT derive the expected audience from the request Host
+  // header — an attacker controlling DNS or a misconfigured proxy could
+  // bypass audience validation. Each receiving deployment MUST configure
+  // its own application id explicitly via `SSO_HANDOFF_APPLICATION_ID`.
+  const applicationId = process.env.SSO_HANDOFF_APPLICATION_ID;
+  if (!applicationId) {
+    return NextResponse.json({ error: "audience_not_configured" }, { status: 500 });
+  }
+  const expectedAudience = `${audiencePrefix}:${applicationId}`;
 
   try {
     const verified = await verifySsoHandoff({ token, expectedAudience });

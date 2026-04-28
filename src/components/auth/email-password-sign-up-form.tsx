@@ -54,7 +54,7 @@ export function EmailPasswordSignUpForm({ returnTo }: EmailPasswordSignUpFormPro
   return (
     <form onSubmit={onSubmit} className="space-y-4" noValidate>
       <div className="space-y-2">
-        <Label htmlFor="name">{tCommon("appName")}</Label>
+        <Label htmlFor="name">{tCommon("displayName")}</Label>
         <Input
           id="name"
           name="name"

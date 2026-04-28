@@ -15,7 +15,9 @@
     "openMenu": "Ouvrir le menu",
     "closeMenu": "Fermer le menu",
     "skipToMain": "Aller au contenu principal",
-    "skipToNavigation": "Aller à la navigation"
+    "skipToNavigation": "Aller à la navigation",
+    "displayName": "Nom",
+    "unexpectedError": "Une erreur inattendue est survenue. Veuillez réessayer."
   },
   "auth": {
     "signInTitle": "Connectez-vous à votre compte",
@@ -47,6 +49,8 @@
     "audit": "Journal d'audit",
     "switchApplication": "Changer d'application",
     "loadingMenu": "Chargement du menu…",
+    "menuLoadError": "Impossible de charger le menu.",
+    "unauthorized": "Vous n'avez pas l'autorisation de voir ce contenu.",
     "showLeft": "Afficher la barre latérale gauche",
     "hideLeft": "Masquer la barre latérale gauche",
     "showRight": "Afficher la barre latérale droite",

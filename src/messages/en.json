@@ -15,7 +15,9 @@
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
     "skipToMain": "Skip to main content",
-    "skipToNavigation": "Skip to navigation"
+    "skipToNavigation": "Skip to navigation",
+    "displayName": "Name",
+    "unexpectedError": "An unexpected error occurred. Please try again."
   },
   "auth": {
     "signInTitle": "Sign in to your account",
@@ -47,6 +49,8 @@
     "audit": "Audit log",
     "switchApplication": "Switch application",
     "loadingMenu": "Loading menu…",
+    "menuLoadError": "Failed to load the menu.",
+    "unauthorized": "You don't have permission to view this content.",
     "showLeft": "Show left sidebar",
     "hideLeft": "Hide left sidebar",
     "showRight": "Show right sidebar",

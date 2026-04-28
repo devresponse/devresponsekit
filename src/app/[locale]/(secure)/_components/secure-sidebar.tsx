@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
-import { LocaleLink } from "@/components/i18n/locale-link";
+import { useTranslations } from "next-intl";import { LocaleLink } from "@/components/i18n/locale-link";
 import { SidebarMenuSkeleton } from "@/components/app-shell/navigation-menu-skeleton";
 import { fetchShellMenu, NavigationApiError } from "@/components/navigation/navigation-api-client";
 import type { NavigationMenuItem } from "@/components/navigation/menu-types";
@@ -21,6 +20,7 @@ import type { NavigationMenuItem } from "@/components/navigation/menu-types";
  */
 export function SecureSidebar({ locale, permissions }: { locale: string; permissions: string[] }) {
   const t = useTranslations("shell");
+  const tCommon = useTranslations("common");
   const [items, setItems] = useState<NavigationMenuItem[] | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -54,13 +54,17 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
   if (errorStatus !== null) {
     return (
       <div className="space-y-2 p-3 text-sm">
-        <p className="text-red-700">{t("loadingMenu")}</p>
+        <p className="text-red-700">
+          {errorStatus === 401 || errorStatus === 403
+            ? t("unauthorized")
+            : t("menuLoadError")}
+        </p>
         <button
           type="button"
           className="border-shell-border hover:bg-shell-muted rounded-md border px-2 py-1 text-xs"
           onClick={() => setReloadKey((k) => k + 1)}
         >
-          {t("loadingMenu")}
+          {tCommon("retry")}
         </button>
       </div>
     );

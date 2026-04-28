@@ -3,6 +3,18 @@ import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 
 const JWT_ALG = "HS256";
 
+/**
+ * Hard upper bound on SSO handoff token TTL in seconds.
+ * Both the signer and any caller computing nonce expiries MUST clamp
+ * to this value so the token cannot outlive the persisted nonce row.
+ */
+export const SSO_HANDOFF_MAX_TTL_SECONDS = 60;
+
+/** Clamps a requested TTL into the allowed range `[1, SSO_HANDOFF_MAX_TTL_SECONDS]`. */
+export function clampSsoHandoffTtl(ttlSeconds: number): number {
+  return Math.min(Math.max(ttlSeconds, 1), SSO_HANDOFF_MAX_TTL_SECONDS);
+}
+
 export interface SsoHandoffClaims extends JWTPayload {
   email: string;
   organizationId: string;
@@ -42,7 +54,7 @@ export async function signSsoHandoff(input: SignSsoHandoffInput): Promise<string
   }
 
   const secret = new TextEncoder().encode(secretEnv);
-  const ttl = Math.min(Math.max(input.ttlSeconds, 1), 60);
+  const ttl = clampSsoHandoffTtl(input.ttlSeconds);
 
   return new SignJWT({ ...input.claims })
     .setProtectedHeader({ alg: JWT_ALG, typ: "JWT" })

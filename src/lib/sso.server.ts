@@ -2,7 +2,7 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
 import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
-import { signSsoHandoff, type SsoHandoffClaims } from "@/lib/jwt-handoff.server";
+import { signSsoHandoff, clampSsoHandoffTtl, type SsoHandoffClaims } from "@/lib/jwt-handoff.server";
 
 export interface CreateSsoHandoffRedirectInput {
   applicationId: string;
@@ -92,7 +92,7 @@ export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectIn
 
   const context = await loadSsoAccessContext(input.betterAuthUserId, input.applicationId);
 
-  const ttlSeconds = Math.min(Number(process.env.SSO_HANDOFF_TTL_SECONDS ?? 60), 60);
+  const ttlSeconds = clampSsoHandoffTtl(Number(process.env.SSO_HANDOFF_TTL_SECONDS ?? 60));
   const jti = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
 

@@ -92,8 +92,8 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
             <div className="space-y-2">
               <p className="text-sm text-red-700">
                 {errorStatus === 401 || errorStatus === 403
-                  ? tCommon("loading")
-                  : tCommon("unexpectedError" as never)}
+                  ? t("unauthorized")
+                  : tCommon("unexpectedError")}
               </p>
               <Button
                 type="button"

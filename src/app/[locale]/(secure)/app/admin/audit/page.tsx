@@ -1,4 +1,5 @@
 import { db } from "@/db/database";
+import { toDate } from "@/lib/db-types";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function AdminAuditPage() {
         <tbody>
           {events.map((e) => (
             <tr key={e.id} className="border-shell-border border-t">
-              <td className="px-2 py-1">{(e.created_at as unknown as Date).toISOString()}</td>
+              <td className="px-2 py-1">{toDate(e.created_at).toISOString()}</td>
               <td className="px-2 py-1">{e.event_type}</td>
               <td className="px-2 py-1">{e.outcome}</td>
               <td className="px-2 py-1">{e.email ?? "—"}</td>

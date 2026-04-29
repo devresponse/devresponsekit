@@ -1,0 +1,35 @@
+// @vitest-environment jsdom
+import { describe, expect, it } from "vitest";
+import { screen } from "@testing-library/react";
+import { TopShellBar } from "@/components/app-shell/top-shell-bar";
+import { ShellSkipLinks } from "@/components/app-shell/shell-skip-links";
+import { renderWithIntl } from "../helpers/render-with-intl";
+
+describe("TopShellBar", () => {
+  it("renders as a banner landmark with an accessible name", () => {
+    renderWithIntl(
+      <TopShellBar>
+        <span data-testid="brand">Brand</span>
+      </TopShellBar>,
+    );
+    const bar = screen.getByRole("banner", { name: /application brand bar/i });
+    expect(bar).toContainElement(screen.getByTestId("brand"));
+  });
+
+  it("forwards an extra className", () => {
+    renderWithIntl(<TopShellBar className="extra-bar">x</TopShellBar>);
+    expect(screen.getByRole("banner")).toHaveClass("extra-bar");
+  });
+});
+
+describe("ShellSkipLinks", () => {
+  it("renders skip links to #main and #navigation", () => {
+    renderWithIntl(<ShellSkipLinks />);
+    const nav = screen.getByRole("navigation", { name: /skip links/i });
+    expect(nav).toBeInTheDocument();
+    const links = screen.getAllByRole("link");
+    const hrefs = links.map((l) => l.getAttribute("href"));
+    expect(hrefs).toContain("#main");
+    expect(hrefs).toContain("#navigation");
+  });
+});

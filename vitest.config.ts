@@ -76,6 +76,12 @@ export default defineConfig({
         // Migration / seed scripts are operational tooling, not runtime.
         "src/db/migrations/**",
         "src/db/seeds/**",
+        // Pure barrel/type-only modules (only re-export types or define
+        // interfaces with no executable code at runtime). §29.2.2
+        // explicitly exempts pure barrel exports.
+        "src/components/app-shell/shell-types.ts",
+        "src/components/navigation/menu-types.ts",
+        "src/db/schema/app-schema.ts",
         "next-env.d.ts",
       ],
       // §29.2 minimum global gates. Per-file gates for security-critical

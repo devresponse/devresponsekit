@@ -1,0 +1,221 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as JwtHandoffModule from "@/lib/jwt-handoff.server";
+import type * as SsoServerModule from "@/lib/sso.server";
+
+/**
+ * Unit tests for `sso.server.ts > createSsoHandoffRedirect` and
+ * `consumeSsoHandoffNonce`. The DB layer and JWT signer are mocked so
+ * we can assert: missing context → throws `sso_denied:*`, application
+ * not in user's org → throws, success → returns a URL with the token
+ * appended to `/api/sso/consume` on the target origin, and nonce
+ * consumption is atomic (one update per call).
+ */
+
+const accessGetter = vi.fn();
+const signMock = vi.fn();
+
+const enterpriseTakeFirstOrThrow = vi.fn();
+const enterpriseTakeFirst = vi.fn();
+const rolesExecute = vi.fn();
+const nonceInsertExecute = vi.fn().mockResolvedValue(undefined);
+const nonceUpdateExecute = vi.fn();
+
+vi.mock("@/lib/auth-status", async () => {
+  const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
+  return {
+    ...actual,
+    getUserAccessContext: (id: string) => accessGetter(id),
+  };
+});
+vi.mock("@/lib/jwt-handoff.server", async () => {
+  const actual = await vi.importActual<typeof JwtHandoffModule>("@/lib/jwt-handoff.server");
+  return {
+    ...actual,
+    signSsoHandoff: (...args: unknown[]) => signMock(...args),
+  };
+});
+
+vi.mock("@/db/database", () => ({
+  db: {
+    selectFrom: (table: string) => {
+      if (table === "app_enterprise_applications") {
+        // Two call sites:
+        //   1. createSsoHandoffRedirect:        ...executeTakeFirstOrThrow
+        //   2. loadSsoAccessContext (internal): ...executeTakeFirst
+        return {
+          selectAll: () => ({
+            where: () => ({
+              where: () => ({
+                executeTakeFirstOrThrow: enterpriseTakeFirstOrThrow,
+                executeTakeFirst: enterpriseTakeFirst,
+              }),
+            }),
+          }),
+        };
+      }
+      // app_user_roles join chain
+      return {
+        innerJoin: () => ({
+          select: () => ({
+            where: () => ({ where: () => ({ execute: rolesExecute }) }),
+          }),
+        }),
+      };
+    },
+    insertInto: () => ({ values: () => ({ execute: nonceInsertExecute }) }),
+    updateTable: () => ({
+      set: () => ({
+        where: () => ({
+          where: () => ({
+            where: () => ({
+              returning: () => ({ executeTakeFirst: nonceUpdateExecute }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  },
+}));
+
+let mod: typeof SsoServerModule;
+
+const ACTIVE_ACCESS_FULL = {
+  appUserId: "u-1",
+  primaryEmail: "u@x.com",
+  status: "active" as const,
+  organizationId: "o-1",
+  membershipStatus: "active" as const,
+  preferredLocale: "en",
+  permissions: ["shell.view"],
+};
+
+beforeEach(async () => {
+  accessGetter.mockReset();
+  signMock.mockReset();
+  enterpriseTakeFirstOrThrow.mockReset();
+  enterpriseTakeFirst.mockReset();
+  rolesExecute.mockReset().mockResolvedValue([]);
+  nonceInsertExecute.mockClear();
+  nonceUpdateExecute.mockReset();
+  mod = await import("@/lib/sso.server");
+});
+afterEach(() => vi.resetModules());
+
+describe("createSsoHandoffRedirect", () => {
+  it("throws sso_denied:pending_approval when user is not allowed", async () => {
+    enterpriseTakeFirstOrThrow.mockResolvedValue({
+      id: "portal",
+      origin: "https://portal.x.com",
+      sso_audience: "devresponse-app:portal",
+      organization_id: null,
+      status: "available",
+    });
+    accessGetter.mockResolvedValue({
+      ...ACTIVE_ACCESS_FULL,
+      status: "pending_approval",
+      membershipStatus: "pending_approval",
+    });
+    await expect(
+      mod.createSsoHandoffRedirect({
+        applicationId: "portal",
+        betterAuthUserId: "ba-1",
+        request: { headers: new Headers() } as unknown as Parameters<
+          typeof mod.createSsoHandoffRedirect
+        >[0]["request"],
+      }),
+    ).rejects.toThrow(/sso_denied:pending_approval/);
+  });
+
+  it("throws sso_denied:application_unavailable when target app is not found", async () => {
+    enterpriseTakeFirstOrThrow.mockResolvedValue({
+      id: "portal",
+      origin: "https://portal.x.com",
+      sso_audience: "devresponse-app:portal",
+      organization_id: null,
+      status: "available",
+    });
+    accessGetter.mockResolvedValue(ACTIVE_ACCESS_FULL);
+    enterpriseTakeFirst.mockResolvedValue(undefined);
+    await expect(
+      mod.createSsoHandoffRedirect({
+        applicationId: "portal",
+        betterAuthUserId: "ba-1",
+        request: { headers: new Headers() } as unknown as Parameters<
+          typeof mod.createSsoHandoffRedirect
+        >[0]["request"],
+      }),
+    ).rejects.toThrow(/application_unavailable/);
+  });
+
+  it("throws when the application belongs to a different organization", async () => {
+    enterpriseTakeFirstOrThrow.mockResolvedValue({
+      id: "portal",
+      origin: "https://portal.x.com",
+      sso_audience: "devresponse-app:portal",
+      organization_id: null,
+      status: "available",
+    });
+    accessGetter.mockResolvedValue(ACTIVE_ACCESS_FULL);
+    enterpriseTakeFirst.mockResolvedValue({
+      id: "portal",
+      organization_id: "different-org",
+      status: "available",
+    });
+    await expect(
+      mod.createSsoHandoffRedirect({
+        applicationId: "portal",
+        betterAuthUserId: "ba-1",
+        request: { headers: new Headers() } as unknown as Parameters<
+          typeof mod.createSsoHandoffRedirect
+        >[0]["request"],
+      }),
+    ).rejects.toThrow(/application_not_in_organization/);
+  });
+
+  it("returns the consume URL with the signed token on success", async () => {
+    enterpriseTakeFirstOrThrow.mockResolvedValue({
+      id: "portal",
+      origin: "https://portal.x.com",
+      sso_audience: "devresponse-app:portal",
+      organization_id: null,
+      status: "available",
+    });
+    accessGetter.mockResolvedValue(ACTIVE_ACCESS_FULL);
+    enterpriseTakeFirst.mockResolvedValue({
+      id: "portal",
+      organization_id: null,
+      status: "available",
+    });
+    rolesExecute.mockResolvedValue([{ key: "member" }]);
+    signMock.mockResolvedValue("signed-token");
+
+    const url = await mod.createSsoHandoffRedirect({
+      applicationId: "portal",
+      betterAuthUserId: "ba-1",
+      request: { headers: new Headers() } as unknown as Parameters<
+        typeof mod.createSsoHandoffRedirect
+      >[0]["request"],
+    });
+
+    expect(url.toString()).toBe("https://portal.x.com/api/sso/consume?token=signed-token");
+    expect(nonceInsertExecute).toHaveBeenCalledTimes(1);
+    expect(signMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audience: "devresponse-app:portal",
+        ttlSeconds: expect.any(Number),
+        claims: expect.objectContaining({ targetApplicationId: "portal", roles: ["member"] }),
+      }),
+    );
+  });
+});
+
+describe("consumeSsoHandoffNonce", () => {
+  it("returns true exactly once per token (atomic update)", async () => {
+    nonceUpdateExecute.mockResolvedValueOnce({ jti: "j1" });
+    expect(await mod.consumeSsoHandoffNonce("j1")).toBe(true);
+
+    nonceUpdateExecute.mockResolvedValueOnce(undefined);
+    expect(await mod.consumeSsoHandoffNonce("j1")).toBe(false);
+  });
+});

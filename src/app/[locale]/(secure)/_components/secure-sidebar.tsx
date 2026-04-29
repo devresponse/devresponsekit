@@ -56,9 +56,7 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
     return (
       <div className="space-y-2 p-3 text-sm">
         <p className="text-red-700">
-          {errorStatus === 401 || errorStatus === 403
-            ? t("unauthorized")
-            : t("menuLoadError")}
+          {errorStatus === 401 || errorStatus === 403 ? t("unauthorized") : t("menuLoadError")}
         </p>
         <button
           type="button"

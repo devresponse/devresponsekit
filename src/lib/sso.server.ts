@@ -2,7 +2,11 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
 import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
-import { signSsoHandoff, clampSsoHandoffTtl, type SsoHandoffClaims } from "@/lib/jwt-handoff.server";
+import {
+  signSsoHandoff,
+  clampSsoHandoffTtl,
+  type SsoHandoffClaims,
+} from "@/lib/jwt-handoff.server";
 
 export interface CreateSsoHandoffRedirectInput {
   applicationId: string;

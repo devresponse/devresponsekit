@@ -65,7 +65,7 @@ function Body({ locale }: { locale: SupportedLocale }) {
       </header>
 
       {/* Hero section */}
-      <main id="main" className="flex-1" tabIndex={-1}>
+      <main id="main" className="flex-1">
         <section className="mx-auto max-w-5xl px-6 py-20 text-center">
           <h1 className="mb-4 text-4xl font-bold tracking-tight">
             {t("appName")}

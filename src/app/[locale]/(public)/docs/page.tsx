@@ -1,3 +1,10 @@
+/**
+ * DocsPage
+ *
+ * Public documentation index page at `/[locale]/docs`. Server Component.
+ * Part of the `(public)` route group; no authentication required.
+ * Does not call secure menu APIs.
+ */
 export default function DocsPage() {
   return (
     <main className="mx-auto max-w-2xl space-y-4 p-8">

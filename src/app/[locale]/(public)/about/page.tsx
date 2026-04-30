@@ -1,5 +1,12 @@
 import { useTranslations } from "next-intl";
 
+/**
+ * AboutPage
+ *
+ * Public marketing page at `/[locale]/about`. Server Component.
+ * Part of the `(public)` route group; no authentication required.
+ * Does not call secure menu APIs.
+ */
 export default function AboutPage() {
   const t = useTranslations("common");
   return (

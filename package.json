@@ -13,8 +13,8 @@
     "format:check": "prettier . --check",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
-    "db:auth:migrate": "tsx src/db/migrations/run-better-auth-migrate.ts",
-    "db:auth:generate": "tsx src/db/migrations/run-better-auth-generate.ts",
+    "db:auth:migrate": "pnpm dlx auth@latest migrate --config src/lib/auth.ts --yes",
+    "db:auth:generate": "pnpm dlx auth@latest generate --config src/lib/auth.ts --output src/db/migrations/better-auth-schema.sql --yes",
     "db:app:migrate": "tsx src/db/migrations/run-migrations.ts",
     "db:seed": "tsx src/db/seeds/seed-local.ts",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
@@ -24,8 +24,8 @@
     "test:integration": "vitest run tests/integration",
     "test:security": "vitest run tests/security",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test --config=playwright.config.ts tests/e2e",
-    "test:a11y": "playwright test --config=playwright.config.ts tests/accessibility",
+    "test:e2e": "playwright test tests/e2e",
+    "test:a11y": "playwright test tests/accessibility",
     "test:all": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:coverage && pnpm test:e2e && pnpm test:a11y"
   },
   "dependencies": {

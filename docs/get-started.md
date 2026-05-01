@@ -461,7 +461,7 @@ Prerequisites: Node 20+, `pnpm@10`, Docker (for Postgres).
 pnpm install
 cp .env.example .env.local      # then fill in secrets
 
-pnpm db:up                      # start local Postgres (docker compose)
+pnpm db:up                      # start local Postgres on localhost:5444
 pnpm db:auth:migrate            # Better Auth schema
 pnpm db:app:migrate             # application schema
 pnpm db:seed                    # local seed data

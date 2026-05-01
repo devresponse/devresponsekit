@@ -203,15 +203,19 @@ The repository ships a ready-to-use Postgres in
 ```yaml
 services:
   postgres:
-    image: postgres:18.3
-    container_name: devresponse-postgres
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5444:5432"
     environment:
       POSTGRES_USER: devresponse
       POSTGRES_PASSWORD: devresponse
       POSTGRES_DB: devresponse_db
+    volumes:
+      - postgres17-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+volumes:
+  postgres17-data:
 ```
 
 Local workflow:
@@ -238,15 +242,24 @@ pnpm dev
 ```
 
 The default `DATABASE_URL` in `.env.example` already targets this
-container:
+container on host port `5444` while Postgres continues listening on its
+internal default port `5432`:
 
 ```
-postgresql://devresponse:devresponse@localhost:5432/devresponse_db?schema=public
+postgresql://devresponse:devresponse@localhost:5444/devresponse_db?schema=public
 ```
 
-Stop the container with `docker compose down` (or `pnpm db:down`), which preserves the named volume
-`devresponse-postgres-data`. To wipe the database, run
-`docker compose down -v`.
+On first boot, Docker runs
+[`docker/postgres/init/01-extensions.sql`](../docker/postgres/init/01-extensions.sql)
+to enable `vector` and `pg_trgm`. `tsvector` support is built into
+PostgreSQL 17, so no extra extension install is required.
+
+The Compose file intentionally omits a fixed `container_name`, maps to
+host port `5444`, and uses a new `postgres17-data` volume so it does
+not collide with common local `5432` Postgres containers or reuse the
+previous local data directory.
+
+Stop the container with `docker compose down` (or `pnpm db:down`), which preserves the Compose-managed `postgres17-data` volume. To wipe the database, run `docker compose down -v`.
 
 > **Never** use the local credentials (`devresponse:devresponse`) in
 > any shared or production environment — they exist purely for
@@ -556,17 +569,17 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: devresponse
           POSTGRES_PASSWORD: devresponse
           POSTGRES_DB: devresponse_db
-        ports: ["5432:5432"]
+        ports: ["5444:5432"]
         options: >-
           --health-cmd "pg_isready -U devresponse"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5432/devresponse_db
+      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
       BETTER_AUTH_SECRET: ci-only-not-a-real-secret
       BETTER_AUTH_URL: http://localhost:3000
       SSO_HANDOFF_JWT_SECRET: ci-only-not-a-real-secret

@@ -1,16 +1,16 @@
 services:
   postgres:
-    image: postgres:18.3
-    container_name: devresponse-postgres
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_USER: devresponse
       POSTGRES_PASSWORD: devresponse
       POSTGRES_DB: devresponse_db
     ports:
-      - "5432:5432"
+      - "5444:5432"
     volumes:
-      - devresponse-postgres-data:/var/lib/postgresql/data
+      - postgres17-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U devresponse -d devresponse_db"]
       interval: 5s
@@ -18,4 +18,4 @@ services:
       retries: 10
 
 volumes:
-  devresponse-postgres-data:
+  postgres17-data:

@@ -21,7 +21,7 @@ if (!process.env["NODE_ENV"]) {
 }
 process.env.BETTER_AUTH_SECRET ??= "test-secret-test-secret-test-secret";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
-process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test";
+process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5444/test";
 process.env.SSO_HANDOFF_ISSUER ??= "https://test.devresponse.local";
 process.env.SSO_HANDOFF_AUDIENCE_PREFIX ??= "devresponse-app";
 process.env.SSO_HANDOFF_JWT_SECRET ??= "test-sso-secret-test-sso-secret";

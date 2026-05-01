@@ -265,6 +265,10 @@ A few things to know about `src/proxy.ts`:
   the route handlers themselves (and by Better Auth).
 - It composes two responsibilities in order: (1) cookie‑gated redirect
   for secure paths, (2) `next-intl` locale routing.
+- The `[locale]` segment exports `dynamicParams = false`, so requests for
+  unsupported locale-like paths (including dotted asset paths such as
+  `/favicon.png`) return a static 404 instead of falling through to
+  runtime rendering.
 
 ### 5.4 API routes
 

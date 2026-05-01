@@ -5,6 +5,13 @@ import { routing } from "@/i18n/routing";
 import type { ReactNode } from "react";
 
 /**
+ * Only supported locale segments are valid. Without this, dotted asset
+ * requests such as `/favicon.png` can fall through to the `[locale]`
+ * segment at runtime and force a static page into dynamic rendering.
+ */
+export const dynamicParams = false;
+
+/**
  * LocaleLayout
  *
  * Validates the locale segment and provides translated messages to all

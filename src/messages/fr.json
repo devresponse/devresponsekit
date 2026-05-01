@@ -39,6 +39,13 @@
     "invalidCredentials": "E-mail ou mot de passe invalide.",
     "unexpectedError": "Une erreur inattendue est survenue. Veuillez réessayer."
   },
+  "public": {
+    "heroEyebrow": "Ouvert. Localisé. Sécurisé.",
+    "heroTitle": "Construisez la réponse aux incidents sur une plateforme que toute votre équipe peut consulter.",
+    "heroSubtitle": "La Plateforme Entreprise DevResponse offre à chaque visiteur une page d’accueil publique et rapide par défaut. Découvrez le produit, lisez la documentation et connectez-vous uniquement lorsque c’est nécessaire.",
+    "heroPrimaryCta": "Commencer",
+    "heroSecondaryCta": "En savoir plus"
+  },
   "shell": {
     "applications": "Applications",
     "dashboard": "Tableau de bord",

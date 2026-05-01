@@ -39,6 +39,13 @@
     "invalidCredentials": "Correo electrónico o contraseña no válidos.",
     "unexpectedError": "Se produjo un error inesperado. Por favor, inténtalo de nuevo."
   },
+  "public": {
+    "heroEyebrow": "Abierto. Localizado. Seguro.",
+    "heroTitle": "Construye la respuesta a incidentes en una plataforma que todo tu equipo puede explorar.",
+    "heroSubtitle": "La Plataforma Empresarial DevResponse ofrece a cada visitante una página de inicio pública y rápida por defecto. Explora el producto, lee la documentación e inicia sesión solo cuando lo necesites.",
+    "heroPrimaryCta": "Empezar",
+    "heroSecondaryCta": "Más información"
+  },
   "shell": {
     "applications": "Aplicaciones",
     "dashboard": "Panel",

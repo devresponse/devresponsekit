@@ -16,6 +16,9 @@ export const metadata: Metadata = {
     template: "%s · DevResponse",
   },
   description: "Enterprise application shell.",
+  icons: {
+    icon: "/favicon.png",
+  },
 };
 
 export const viewport: Viewport = {

@@ -150,7 +150,7 @@ Secure app surfaces use compact density by default. Form-heavy secure pages may 
 Use a dedicated integration-test database or isolated schema. Recommended default:
 
 ```bash
-DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_app_test?schema=public"
+DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_db_test?schema=public"
 ```
 
 ---
@@ -800,8 +800,8 @@ BETTER_AUTH_SECRET="replace-with-strong-random-secret"
 BETTER_AUTH_URL="http://localhost:3000"
 
 # PostgreSQL
-DATABASE_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_app?schema=public"
-DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_app_test?schema=public"
+DATABASE_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_db?schema=public"
+DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_db_test?schema=public"
 
 # Google social login
 GOOGLE_CLIENT_ID=""
@@ -872,13 +872,13 @@ services:
     environment:
       POSTGRES_USER: devresponse
       POSTGRES_PASSWORD: devresponse
-      POSTGRES_DB: devresponse_app
+      POSTGRES_DB: devresponse_db
     ports:
       - "5432:5432"
     volumes:
       - devresponse-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U devresponse -d devresponse_app"]
+      test: ["CMD-SHELL", "pg_isready -U devresponse -d devresponse_db"]
       interval: 5s
       timeout: 5s
       retries: 10

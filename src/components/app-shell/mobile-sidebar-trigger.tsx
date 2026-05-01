@@ -32,10 +32,7 @@ export interface MobileSidebarTriggerProps {
  * Authority: this only flips a layout preference; route guards and
  * API authorization remain server-side per the shell store contract.
  */
-export function MobileSidebarTrigger({
-  scope = "root",
-  className,
-}: MobileSidebarTriggerProps) {
+export function MobileSidebarTrigger({ scope = "root", className }: MobileSidebarTriggerProps) {
   const t = useTranslations("common");
   const isVisible = useAppShellStore((s) => s.visibility[scope].leftVisible);
   const toggle = useAppShellStore((s) => s.toggleRegion);

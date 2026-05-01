@@ -12,13 +12,7 @@ import { cn } from "@/lib/cn";
  * Accessibility: rendered with `role="banner"` to expose the header
  * region as a landmark to assistive technologies.
  */
-export function ShellHeader({
-  children,
-  className,
-}: {
-  children?: ReactNode;
-  className?: string;
-}) {
+export function ShellHeader({ children, className }: { children?: ReactNode; className?: string }) {
   return (
     <header className={cn("sh-header", className)} role="banner">
       {children}

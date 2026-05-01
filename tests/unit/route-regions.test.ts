@@ -15,13 +15,7 @@ describe("classifyRoute", () => {
   });
 
   it("classifies localized auth segments as auth", () => {
-    for (const seg of [
-      "sign-in",
-      "sign-up",
-      "forgot-password",
-      "pending-approval",
-      "blocked",
-    ]) {
+    for (const seg of ["sign-in", "sign-up", "forgot-password", "pending-approval", "blocked"]) {
       expect(classifyRoute(`/en/${seg}`)).toBe("auth");
       expect(isLocalizedAuthPath(`/en/${seg}`)).toBe(true);
     }

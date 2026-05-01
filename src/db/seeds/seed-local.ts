@@ -135,7 +135,9 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
   const password = process.env.SEED_ADMIN_PASSWORD;
 
   if (!email || !password) {
-    console.log("[seed] skipping default admin user; SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD not configured");
+    console.log(
+      "[seed] skipping default admin user; SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD not configured",
+    );
     return;
   }
 
@@ -152,7 +154,7 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
 
   if (!hasUserTable) {
     throw new Error(
-      'Better Auth schema is missing. Run `pnpm db:auth:migrate` before `pnpm db:seed`.',
+      "Better Auth schema is missing. Run `pnpm db:auth:migrate` before `pnpm db:seed`.",
     );
   }
 

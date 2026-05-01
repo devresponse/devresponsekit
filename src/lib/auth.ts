@@ -148,9 +148,10 @@ function getPreferredLocale(context: GenericEndpointContext): string | undefined
 }
 
 function extractLocale(candidate: string): string | undefined {
-  const path = candidate.startsWith("http://") || candidate.startsWith("https://")
-    ? new URL(candidate).pathname
-    : candidate;
+  const path =
+    candidate.startsWith("http://") || candidate.startsWith("https://")
+      ? new URL(candidate).pathname
+      : candidate;
   const locale = path.split("/").filter(Boolean)[0];
 
   return locale && isSupportedLocale(locale) ? locale : undefined;

@@ -45,11 +45,7 @@ export default async function PublicLayout({
         footerVisible={false}
         branding={
           <TopShellBar>
-            <LocaleLink
-              href="/"
-              locale={safeLocale}
-              className="text-sm font-semibold"
-            >
+            <LocaleLink href="/" locale={safeLocale} className="text-sm font-semibold">
               {tCommon("appName")}
             </LocaleLink>
             <div className="ml-auto flex items-center gap-2">
@@ -64,7 +60,7 @@ export default async function PublicLayout({
               <LocaleLink
                 href="/sign-up"
                 locale={safeLocale}
-                className="bg-shell-fg text-shell-bg hover:opacity-90 rounded-md px-3 py-1.5 text-sm"
+                className="bg-shell-fg text-shell-bg rounded-md px-3 py-1.5 text-sm hover:opacity-90"
               >
                 {tCommon("signUp")}
               </LocaleLink>

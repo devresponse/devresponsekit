@@ -203,14 +203,15 @@ The repository ships a ready-to-use Postgres in
 ```yaml
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18.3
     container_name: devresponse-postgres
+    restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
       POSTGRES_USER: devresponse
       POSTGRES_PASSWORD: devresponse
-      POSTGRES_DB: devresponse_app
+      POSTGRES_DB: devresponse_db
 ```
 
 Local workflow:
@@ -220,10 +221,12 @@ Local workflow:
 cp .env.example .env
 
 # 2. Start Postgres in the background
-pnpm db:up        # = docker compose up -d postgres
+docker compose up -d postgres
+# or: pnpm db:up
 
-# 3. (optional) tail logs / verify
-docker logs -f devresponse-postgres
+# 3. Verify the container is healthy / inspect logs
+docker compose ps postgres
+docker compose logs -f postgres
 
 # 4. Run migrations + seed
 pnpm db:auth:migrate
@@ -238,10 +241,10 @@ The default `DATABASE_URL` in `.env.example` already targets this
 container:
 
 ```
-postgresql://devresponse:devresponse@localhost:5432/devresponse_app?schema=public
+postgresql://devresponse:devresponse@localhost:5432/devresponse_db?schema=public
 ```
 
-Stopping with `pnpm db:down` preserves the named volume
+Stop the container with `docker compose down` (or `pnpm db:down`), which preserves the named volume
 `devresponse-postgres-data`. To wipe the database, run
 `docker compose down -v`.
 
@@ -500,7 +503,7 @@ nginx, ALB) with:
 ```
 ENV NODE_ENV=production
 ENV BETTER_AUTH_URL=https://app.devresponse.com
-ENV DATABASE_URL=postgres://app_runtime:...@pgbouncer:6432/devresponse_app
+ENV DATABASE_URL=postgres://app_runtime:...@pgbouncer:6432/devresponse_db
 ENV BETTER_AUTH_SECRET=...    # injected from secret manager
 # OAuth + SSO handoff vars as in §5
 ```
@@ -557,13 +560,13 @@ jobs:
         env:
           POSTGRES_USER: devresponse
           POSTGRES_PASSWORD: devresponse
-          POSTGRES_DB: devresponse_app
+          POSTGRES_DB: devresponse_db
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U devresponse"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5432/devresponse_app
+      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5432/devresponse_db
       BETTER_AUTH_SECRET: ci-only-not-a-real-secret
       BETTER_AUTH_URL: http://localhost:3000
       SSO_HANDOFF_JWT_SECRET: ci-only-not-a-real-secret

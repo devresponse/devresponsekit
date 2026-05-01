@@ -5,10 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 
 /**
- * Localized landing page.
+ * Localized landing page (default home).
  *
- * Lightweight public page; intentionally does not call any secure menu
- * APIs nor hydrate the secure shell store. Comfortable density per §28.2.
+ * Lives in the `(public)` route group so the default home route
+ * `/[locale]` is unambiguously an unsecure page per spec §28.2:
+ * lightweight public shell, comfortable density, no secure menu API
+ * calls, and no secure shell hydration. Authentication is reachable
+ * only through explicit, locale-safe `LocaleLink`s to `/sign-in` and
+ * `/sign-up`.
  */
 export default async function LocaleHome({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;

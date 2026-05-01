@@ -1,4 +1,9 @@
 import { cn } from "@/lib/cn";
+import { ShellHeader } from "./shell-header";
+import { ShellLeft } from "./shell-left";
+import { ShellMain } from "./shell-main";
+import { ShellRight } from "./shell-right";
+import { ShellFooter } from "./shell-footer";
 import type { ShellGridContainerProps } from "./shell-types";
 
 /**
@@ -6,7 +11,9 @@ import type { ShellGridContainerProps } from "./shell-types";
  *
  * Holy Grail CSS Grid container. Server-compatible. The parent decides
  * which regions are visible via explicit props; this component only
- * arranges them. No local state, no client-only APIs.
+ * arranges them by composing the canonical `ShellHeader`, `ShellLeft`,
+ * `ShellMain`, `ShellRight`, and `ShellFooter` region components. No
+ * local state, no client-only APIs.
  *
  * Layout assumptions:
  *   - Bounded viewport. The grid uses `min-height: 0` so internal
@@ -48,33 +55,13 @@ export function ShellGridContainer(props: ShellGridContainerProps) {
       role="application"
       aria-label={ariaLabel}
     >
-      {header ? (
-        <header className="sh-header" role="banner">
-          {header}
-        </header>
-      ) : null}
-
-      {hasLeft ? (
-        <aside className="sh-left" aria-label="Primary navigation" id="navigation">
-          {left}
-        </aside>
-      ) : null}
-
-      <main id={mainId} className={cn("sh-main", mainClassName)} tabIndex={-1}>
+      {header ? <ShellHeader>{header}</ShellHeader> : null}
+      {hasLeft ? <ShellLeft>{left}</ShellLeft> : null}
+      <ShellMain id={mainId} className={mainClassName}>
         {children}
-      </main>
-
-      {hasRight ? (
-        <aside className="sh-right" aria-label="Inspector">
-          {right}
-        </aside>
-      ) : null}
-
-      {hasFooter ? (
-        <footer className="sh-footer" role="contentinfo">
-          {footer}
-        </footer>
-      ) : null}
+      </ShellMain>
+      {hasRight ? <ShellRight>{right}</ShellRight> : null}
+      {hasFooter ? <ShellFooter>{footer}</ShellFooter> : null}
     </div>
   );
 }

@@ -459,15 +459,18 @@ Prerequisites: Node 20+, `pnpm@10`, Docker (for Postgres).
 
 ```bash
 pnpm install
-cp .env.example .env.local      # then fill in secrets
+cp .env.example .env            # used by Next.js and the pnpm db:* scripts
 
-pnpm db:up                      # start local Postgres on localhost:5444
+pnpm db:up                      # start pgvector/pgvector:pg17 on localhost:5444
 pnpm db:auth:migrate            # Better Auth schema
 pnpm db:app:migrate             # application schema
 pnpm db:seed                    # local seed data
 
 pnpm dev                        # next dev on http://localhost:3000
 ```
+
+`pnpm db:up` maps the container's internal Postgres port `5432` to host
+port `5444`, matching the default `DATABASE_URL` in [`.env.example`](../.env.example).
 
 Quality gates (run these before opening a PR):
 

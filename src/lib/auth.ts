@@ -1,4 +1,5 @@
 import { betterAuth, type GenericEndpointContext } from "better-auth";
+import { admin } from "better-auth/plugins";
 import { Pool } from "pg";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
@@ -108,7 +109,7 @@ export const auth = betterAuth({
 
   // The nextCookies plugin makes Better Auth set cookies via Next.js
   // server actions and route handlers correctly.
-  plugins: [nextCookies()],
+  plugins: [admin(), nextCookies()],
 });
 
 /** Convenience type for the resolved session shape. */

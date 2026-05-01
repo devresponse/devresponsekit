@@ -222,6 +222,27 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
     throw new Error("seeded admin app user missing after upsert");
   }
 
+  const hasAuthRoleColumn = (
+    await pool.query<{ has_role_column: boolean }>(
+      `select exists (
+         select 1
+         from information_schema.columns
+         where table_schema = current_schema()
+           and table_name = 'user'
+           and column_name = 'role'
+       ) as has_role_column`,
+    )
+  ).rows[0]?.has_role_column;
+
+  if (hasAuthRoleColumn) {
+    await pool.query(
+      `update "user"
+       set role = 'admin'
+       where id = $1`,
+      [authUser.id],
+    );
+  }
+
   await pool.query(
     `insert into app_organization_memberships
        (organization_id, app_user_id, status, source_provider, provider_organization_key)

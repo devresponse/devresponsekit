@@ -12,13 +12,7 @@ import { cn } from "@/lib/cn";
  * Layout: height is driven by the `--sh-foot-h` CSS variable on
  * `.sh-grid` and shrinks for nested shells per spec §17.2.
  */
-export function ShellFooter({
-  children,
-  className,
-}: {
-  children?: ReactNode;
-  className?: string;
-}) {
+export function ShellFooter({ children, className }: { children?: ReactNode; className?: string }) {
   return (
     <footer className={cn("sh-footer", className)} role="contentinfo">
       {children}

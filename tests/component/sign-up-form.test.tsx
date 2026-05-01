@@ -1,10 +1,25 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import type * as NextNavigation from "next/navigation";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { SignUpForm } from "@/components/auth/sign-up-form";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
+const replace = vi.fn();
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof NextNavigation>();
+  return {
+    ...actual,
+    useRouter: () => ({ replace }),
+  };
+});
+
 describe("SignUpForm", () => {
+  beforeEach(() => {
+    replace.mockReset();
+  });
+
   it("renders the sign-up card with name/email/password and social buttons", () => {
     renderWithIntl(<SignUpForm locale="en" returnTo="/en/app/dashboard" />);
     expect(screen.getByRole("heading", { name: /create your account/i })).toBeInTheDocument();

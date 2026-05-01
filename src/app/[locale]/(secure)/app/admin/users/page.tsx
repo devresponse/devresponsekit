@@ -11,11 +11,7 @@ export const dynamic = "force-dynamic";
  * pending users so the integration tests in §29.6 have a UI surface to
  * approve against.
  */
-export default async function AdminUsersPage({
-  params,
-}: {
-  params: Promise<{ locale: string }>;
-}) {
+export default async function AdminUsersPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "shell" });
   const users = await db

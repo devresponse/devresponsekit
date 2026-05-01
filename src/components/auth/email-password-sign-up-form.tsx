@@ -19,9 +19,7 @@ export interface EmailPasswordSignUpFormProps {
  * localized pending-approval page immediately so the user never appears
  * stranded on the sign-up form after account creation.
  */
-export function EmailPasswordSignUpForm({
-  pendingApprovalHref,
-}: EmailPasswordSignUpFormProps) {
+export function EmailPasswordSignUpForm({ pendingApprovalHref }: EmailPasswordSignUpFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
   const router = useRouter();

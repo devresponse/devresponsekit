@@ -29,12 +29,12 @@ function Hero({ locale }: { locale: SupportedLocale }) {
       aria-labelledby="hero-heading"
       className="mx-auto flex max-w-4xl flex-col items-start gap-6 px-6 py-16 sm:py-24"
     >
-      <p className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+      <p className="text-sm font-medium tracking-wide text-neutral-500 uppercase">
         {t("heroEyebrow")}
       </p>
       <h1
         id="hero-heading"
-        className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl"
+        className="text-4xl leading-tight font-semibold tracking-tight sm:text-5xl"
       >
         {t("heroTitle")}
       </h1>
@@ -43,7 +43,7 @@ function Hero({ locale }: { locale: SupportedLocale }) {
         <LocaleLink
           href="/sign-up"
           locale={locale}
-          className="bg-shell-fg text-shell-bg hover:opacity-90 rounded-md px-4 py-2 text-sm font-medium"
+          className="bg-shell-fg text-shell-bg rounded-md px-4 py-2 text-sm font-medium hover:opacity-90"
         >
           {t("heroPrimaryCta")}
         </LocaleLink>

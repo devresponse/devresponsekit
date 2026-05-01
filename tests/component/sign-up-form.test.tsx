@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type * as NextNavigation from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { SignUpForm } from "@/components/auth/sign-up-form";
@@ -6,9 +7,13 @@ import { renderWithIntl } from "../helpers/render-with-intl";
 
 const replace = vi.fn();
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace }),
-}));
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof NextNavigation>();
+  return {
+    ...actual,
+    useRouter: () => ({ replace }),
+  };
+});
 
 describe("SignUpForm", () => {
   beforeEach(() => {

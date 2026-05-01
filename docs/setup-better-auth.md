@@ -241,6 +241,9 @@ pnpm db:seed
 pnpm dev
 ```
 
+Use `.env` for local onboarding so the Next.js app and the `pnpm db:*`
+scripts all read the same connection and Better Auth settings.
+
 The default `DATABASE_URL` in `.env.example` already targets this
 container on host port `5444` while Postgres continues listening on its
 internal default port `5432`:

@@ -3,7 +3,6 @@ import { Pool } from "pg";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { db } from "@/db/database";
-import { provisionUserFromAuth } from "@/lib/user-provisioning.server";
 
 /**
  * Better Auth server instance.
@@ -91,6 +90,8 @@ export const auth = betterAuth({
           if (existing) {
             return;
           }
+
+          const { provisionUserFromAuth } = await import("@/lib/user-provisioning.server");
 
           await provisionUserFromAuth({
             betterAuthUserId: authUser.id,

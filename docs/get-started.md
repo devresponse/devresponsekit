@@ -263,6 +263,9 @@ A few things to know about `src/proxy.ts`:
 - Its `config.matcher` excludes `api`, `_next/static`, `_next/image`,
   the favicon, and any path containing a `.`. API auth is enforced by
   the route handlers themselves (and by Better Auth).
+- `/favicon.png` is served as a static file from `public/` and declared in
+  the root metadata, so favicon requests never enter the localized App
+  Router tree.
 - It composes two responsibilities in order: (1) cookie‑gated redirect
   for secure paths, (2) `next-intl` locale routing.
 - The `[locale]` segment exports `dynamicParams = false`, so requests for

@@ -150,7 +150,7 @@ Secure app surfaces use compact density by default. Form-heavy secure pages may 
 Use a dedicated integration-test database or isolated schema. Recommended default:
 
 ```bash
-DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_db_test?schema=public"
+DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5444/devresponse_db_test?schema=public"
 ```
 
 ---
@@ -800,8 +800,8 @@ BETTER_AUTH_SECRET="replace-with-strong-random-secret"
 BETTER_AUTH_URL="http://localhost:3000"
 
 # PostgreSQL
-DATABASE_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_db?schema=public"
-DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5432/devresponse_db_test?schema=public"
+DATABASE_URL="postgresql://devresponse:devresponse@localhost:5444/devresponse_db?schema=public"
+DATABASE_TEST_URL="postgresql://devresponse:devresponse@localhost:5444/devresponse_db_test?schema=public"
 
 # Google social login
 GOOGLE_CLIENT_ID=""
@@ -866,17 +866,17 @@ Create `docker-compose.yml`.
 ```yaml
 services:
   postgres:
-    image: postgres:16-alpine
-    container_name: devresponse-postgres
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_USER: devresponse
       POSTGRES_PASSWORD: devresponse
       POSTGRES_DB: devresponse_db
     ports:
-      - "5432:5432"
+      - "5444:5432"
     volumes:
-      - devresponse-postgres-data:/var/lib/postgresql/data
+      - postgres17-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U devresponse -d devresponse_db"]
       interval: 5s
@@ -884,7 +884,7 @@ services:
       retries: 10
 
 volumes:
-  devresponse-postgres-data:
+  postgres17-data:
 ```
 
 ---

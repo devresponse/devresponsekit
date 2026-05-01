@@ -39,6 +39,13 @@
     "invalidCredentials": "Invalid email or password.",
     "unexpectedError": "An unexpected error occurred. Please try again."
   },
+  "public": {
+    "heroEyebrow": "Open. Localized. Secure.",
+    "heroTitle": "Build incident response on a platform your whole team can browse.",
+    "heroSubtitle": "DevResponse Enterprise Platform gives every visitor a fast, public-by-default home. Explore the product, read the docs, and sign in only when you need to.",
+    "heroPrimaryCta": "Get started",
+    "heroSecondaryCta": "Learn more"
+  },
   "shell": {
     "applications": "Applications",
     "dashboard": "Dashboard",

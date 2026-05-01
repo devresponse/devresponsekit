@@ -1,7 +1,5 @@
 import { useTranslations } from "next-intl";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 
 /**
@@ -12,45 +10,58 @@ import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
  * lightweight public shell, comfortable density, no secure menu API
  * calls, and no secure shell hydration. Authentication is reachable
  * only through explicit, locale-safe `LocaleLink`s to `/sign-in` and
- * `/sign-up`.
+ * `/sign-up` — visitors can browse the public section without signing in.
+ *
+ * The brand bar (locale switcher + sign-in / sign-up) is provided by
+ * `(public)/layout.tsx`; this page renders the hero section only.
  */
 export default async function LocaleHome({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const safeLocale: SupportedLocale = isSupportedLocale(locale) ? locale : "en";
-  return <Body locale={safeLocale} />;
+  return <Hero locale={safeLocale} />;
 }
 
-function Body({ locale }: { locale: SupportedLocale }) {
-  const t = useTranslations("common");
-  const tAuth = useTranslations("auth");
+function Hero({ locale }: { locale: SupportedLocale }) {
+  const t = useTranslations("public");
+  const tCommon = useTranslations("common");
   return (
-    <main className="mx-auto max-w-2xl space-y-6 p-8">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">{t("appName")}</h1>
-        <LocaleSwitcher current={locale} />
-      </header>
-      <Card>
-        <CardHeader>
-          <CardTitle>{tAuth("signInTitle")}</CardTitle>
-          <CardDescription>{tAuth("haveAccount")}</CardDescription>
-        </CardHeader>
-        <CardContent className="flex gap-3">
-          <LocaleLink
-            href="/sign-in"
-            locale={locale}
-            className="border-shell-border hover:bg-shell-muted rounded-md border px-3 py-1.5 text-sm"
-          >
-            {t("signIn")}
-          </LocaleLink>
-          <LocaleLink
-            href="/sign-up"
-            locale={locale}
-            className="border-shell-border hover:bg-shell-muted rounded-md border px-3 py-1.5 text-sm"
-          >
-            {t("signUp")}
-          </LocaleLink>
-        </CardContent>
-      </Card>
-    </main>
+    <section
+      aria-labelledby="hero-heading"
+      className="mx-auto flex max-w-4xl flex-col items-start gap-6 px-6 py-16 sm:py-24"
+    >
+      <p className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+        {t("heroEyebrow")}
+      </p>
+      <h1
+        id="hero-heading"
+        className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl"
+      >
+        {t("heroTitle")}
+      </h1>
+      <p className="max-w-2xl text-lg text-neutral-600">{t("heroSubtitle")}</p>
+      <div className="flex flex-wrap items-center gap-3 pt-2">
+        <LocaleLink
+          href="/sign-up"
+          locale={locale}
+          className="bg-shell-fg text-shell-bg hover:opacity-90 rounded-md px-4 py-2 text-sm font-medium"
+        >
+          {t("heroPrimaryCta")}
+        </LocaleLink>
+        <LocaleLink
+          href="/about"
+          locale={locale}
+          className="border-shell-border hover:bg-shell-muted rounded-md border px-4 py-2 text-sm font-medium"
+        >
+          {t("heroSecondaryCta")}
+        </LocaleLink>
+        <LocaleLink
+          href="/sign-in"
+          locale={locale}
+          className="hover:bg-shell-muted rounded-md px-4 py-2 text-sm font-medium"
+        >
+          {tCommon("signIn")}
+        </LocaleLink>
+      </div>
+    </section>
   );
 }

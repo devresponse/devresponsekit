@@ -29,7 +29,7 @@ export function SignUpForm({ locale, returnTo }: SignUpFormProps) {
         <CardDescription>{t("noAccount")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <EmailPasswordSignUpForm returnTo={returnTo} />
+        <EmailPasswordSignUpForm pendingApprovalHref={`/${locale}/pending-approval`} />
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />
           <span className="text-xs text-neutral-500 uppercase">{t("or")}</span>

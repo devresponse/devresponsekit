@@ -1,4 +1,4 @@
-import { useTranslations } from "next-intl";
+import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
 
 export const dynamic = "force-dynamic";
@@ -11,13 +11,18 @@ export const dynamic = "force-dynamic";
  * pending users so the integration tests in §29.6 have a UI surface to
  * approve against.
  */
-export default async function AdminUsersPage() {
-  const t = useTranslations("shell");
-  const pending = await db
+export default async function AdminUsersPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  const t = await getTranslations({ locale, namespace: "shell" });
+  const users = await db
     .selectFrom("app_users")
     .select(["id", "primary_email", "status"])
-    .where("status", "=", "pending_approval")
-    .limit(50)
+    .orderBy("created_at", "desc")
+    .limit(100)
     .execute();
 
   return (
@@ -31,7 +36,7 @@ export default async function AdminUsersPage() {
           </tr>
         </thead>
         <tbody>
-          {pending.map((u) => (
+          {users.map((u) => (
             <tr key={u.id} className="border-shell-border border-t">
               <td className="px-2 py-1">{u.primary_email}</td>
               <td className="px-2 py-1">{u.status}</td>

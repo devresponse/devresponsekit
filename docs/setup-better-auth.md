@@ -180,6 +180,13 @@ pnpm db:app:migrate
 pnpm db:seed
 ```
 
+With the default `.env.example`, `pnpm db:seed` creates the local admin
+login `admin@devresponse.local` / `ChangeMe-LocalOnly-123!`.
+
+If the seed reports `relation "user" does not exist`, the Better Auth
+schema has not been applied yet. Re-run `pnpm db:auth:migrate` before
+`pnpm db:seed`.
+
 In CI/CD, **always** run `db:auth:migrate` and `db:app:migrate`
 **before** the new application code starts serving traffic. See
 [§8.3 GitHub Actions](#83-github-actions) for the canonical pipeline.

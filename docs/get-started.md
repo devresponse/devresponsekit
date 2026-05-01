@@ -469,6 +469,14 @@ pnpm db:seed                    # local seed data
 pnpm dev                        # next dev on http://localhost:3000
 ```
 
+The default local admin created by `pnpm db:seed` is
+`admin@devresponse.local` / `ChangeMe-LocalOnly-123!` unless you override
+`SEED_ADMIN_EMAIL` or `SEED_ADMIN_PASSWORD` in `.env`.
+
+If `pnpm db:seed` fails with `relation "user" does not exist`, Better Auth's
+vendor tables were not created yet. Run `pnpm db:auth:migrate` before
+`pnpm db:seed`.
+
 `pnpm db:up` maps the container's internal Postgres port `5432` to host
 port `5444`, matching the default `DATABASE_URL` in [`.env.example`](../.env.example).
 

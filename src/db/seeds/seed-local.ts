@@ -1,15 +1,15 @@
 import "dotenv/config";
 import { Pool } from "pg";
 
+const LOCAL_ADMIN_NAME = "Local Admin";
+
 /**
  * Local development seed.
  *
  * Inserts the default organization, baseline roles and permissions, the
  * three placeholder enterprise applications referenced by the
- * application switcher, and stops short of seeding any user — admin
- * accounts are created via Better Auth's normal sign-up flow and then
- * provisioned by the application provisioning service. This avoids
- * persisting plaintext seed passwords in this script.
+ * application switcher, and the default local Better Auth admin user
+ * described in `.env.example`.
  *
  * Tests use their own dedicated factories under `tests/helpers/`.
  */
@@ -19,9 +19,11 @@ async function main() {
     throw new Error("DATABASE_URL is required to seed the database");
   }
   const pool = new Pool({ connectionString: databaseUrl });
+  let inTransaction = false;
 
   try {
     await pool.query("begin");
+    inTransaction = true;
 
     await pool.query(
       `insert into app_organizations (slug, name, status, is_default)
@@ -113,13 +115,131 @@ async function main() {
     }
 
     await pool.query("commit");
+    inTransaction = false;
+
+    await seedDefaultAdminUser(pool, orgId);
+
     console.log("[seed] local seed applied");
   } catch (error) {
-    await pool.query("rollback");
+    if (inTransaction) {
+      await pool.query("rollback");
+    }
     throw error;
   } finally {
     await pool.end();
   }
+}
+
+async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
+  const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.SEED_ADMIN_PASSWORD;
+
+  if (!email || !password) {
+    console.log("[seed] skipping default admin user; SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD not configured");
+    return;
+  }
+
+  const hasUserTable = (
+    await pool.query<{ has_user_table: boolean }>(
+      `select exists (
+         select 1
+         from information_schema.tables
+         where table_schema = current_schema()
+           and table_name = 'user'
+       ) as has_user_table`,
+    )
+  ).rows[0]?.has_user_table;
+
+  if (!hasUserTable) {
+    throw new Error(
+      'Better Auth schema is missing. Run `pnpm db:auth:migrate` before `pnpm db:seed`.',
+    );
+  }
+
+  const adminRoleId = (
+    await pool.query<{ id: string }>(
+      `select id from app_roles where organization_id = $1 and key = 'admin'`,
+      [organizationId],
+    )
+  ).rows[0]?.id;
+
+  if (!adminRoleId) {
+    throw new Error("admin role missing after seed");
+  }
+
+  let authUser = (
+    await pool.query<{ id: string; email: string; name: string | null }>(
+      `select id, email, name from "user" where lower(email) = lower($1)`,
+      [email],
+    )
+  ).rows[0];
+
+  if (!authUser) {
+    const { auth } = await import("@/lib/auth");
+    const baseUrl = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+    const created = await auth.api.signUpEmail({
+      body: {
+        name: LOCAL_ADMIN_NAME,
+        email,
+        password,
+        rememberMe: false,
+      },
+      headers: new Headers({
+        host: new URL(baseUrl).host,
+        origin: baseUrl,
+      }),
+    });
+
+    authUser = {
+      id: created.user.id,
+      email: created.user.email,
+      name: created.user.name,
+    };
+
+    console.log(`[seed] created Better Auth admin user ${authUser.email}`);
+  }
+
+  const appUserId = (
+    await pool.query<{ id: string }>(
+      `insert into app_users
+         (better_auth_user_id, primary_email, display_name, status, status_reason, preferred_locale)
+       values ($1, $2, $3, 'active', null, 'en')
+       on conflict (better_auth_user_id) do update set
+         primary_email = excluded.primary_email,
+         display_name = excluded.display_name,
+         status = 'active',
+         status_reason = null,
+         preferred_locale = excluded.preferred_locale,
+         updated_at = now()
+       returning id`,
+      [authUser.id, authUser.email, authUser.name ?? LOCAL_ADMIN_NAME],
+    )
+  ).rows[0]?.id;
+
+  if (!appUserId) {
+    throw new Error("seeded admin app user missing after upsert");
+  }
+
+  await pool.query(
+    `insert into app_organization_memberships
+       (organization_id, app_user_id, status, source_provider, provider_organization_key)
+     values ($1, $2, 'active', 'email', 'default')
+     on conflict (organization_id, app_user_id) do update set
+       status = 'active',
+       source_provider = excluded.source_provider,
+       provider_organization_key = excluded.provider_organization_key,
+       updated_at = now()`,
+    [organizationId, appUserId],
+  );
+
+  await pool.query(
+    `insert into app_user_roles (app_user_id, organization_id, role_id)
+     values ($1, $2, $3)
+     on conflict do nothing`,
+    [appUserId, organizationId, adminRoleId],
+  );
+
+  console.log(`[seed] ensured local admin ${authUser.email}`);
 }
 
 main().catch((error) => {

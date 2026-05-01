@@ -1,6 +1,9 @@
-import { betterAuth } from "better-auth";
+import { betterAuth, type GenericEndpointContext } from "better-auth";
 import { Pool } from "pg";
 import { nextCookies } from "better-auth/next-js";
+import { isSupportedLocale } from "@/config/i18n-config";
+import { db } from "@/db/database";
+import { provisionUserFromAuth } from "@/lib/user-provisioning.server";
 
 /**
  * Better Auth server instance.
@@ -66,6 +69,42 @@ export const auth = betterAuth({
     updateAge: 60 * 15,
   },
 
+  databaseHooks: {
+    session: {
+      create: {
+        after: async (session, context) => {
+          if (!context) {
+            return;
+          }
+
+          const authUser = await context.context.internalAdapter.findUserById(session.userId);
+          if (!authUser) {
+            return;
+          }
+
+          const existing = await db
+            .selectFrom("app_users")
+            .select(["id"])
+            .where("better_auth_user_id", "=", authUser.id)
+            .executeTakeFirst();
+
+          if (existing) {
+            return;
+          }
+
+          await provisionUserFromAuth({
+            betterAuthUserId: authUser.id,
+            email: authUser.email,
+            emailVerified: authUser.emailVerified,
+            displayName: authUser.name,
+            provider: getProvisioningProvider(context),
+            preferredLocale: getPreferredLocale(context),
+          });
+        },
+      },
+    },
+  },
+
   // The nextCookies plugin makes Better Auth set cookies via Next.js
   // server actions and route handlers correctly.
   plugins: [nextCookies()],
@@ -73,3 +112,45 @@ export const auth = betterAuth({
 
 /** Convenience type for the resolved session shape. */
 export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
+
+function getProvisioningProvider(
+  context: GenericEndpointContext,
+): "email" | "google" | "microsoft" | "github" {
+  const path = context.path || context.request?.url || "";
+
+  if (path.includes("/callback/google")) return "google";
+  if (path.includes("/callback/microsoft")) return "microsoft";
+  if (path.includes("/callback/github")) return "github";
+
+  return "email";
+}
+
+function getPreferredLocale(context: GenericEndpointContext): string | undefined {
+  const callbackUrl =
+    context.body && typeof context.body === "object" && "callbackURL" in context.body
+      ? context.body.callbackURL
+      : undefined;
+  const referer = context.request?.headers.get("referer") ?? undefined;
+
+  for (const candidate of [callbackUrl, referer]) {
+    if (typeof candidate !== "string") {
+      continue;
+    }
+
+    const locale = extractLocale(candidate);
+    if (locale) {
+      return locale;
+    }
+  }
+
+  return undefined;
+}
+
+function extractLocale(candidate: string): string | undefined {
+  const path = candidate.startsWith("http://") || candidate.startsWith("https://")
+    ? new URL(candidate).pathname
+    : candidate;
+  const locale = path.split("/").filter(Boolean)[0];
+
+  return locale && isSupportedLocale(locale) ? locale : undefined;
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,21 +9,22 @@ import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
 
 export interface EmailPasswordSignUpFormProps {
-  returnTo: string;
+  pendingApprovalHref: string;
 }
 
 /**
  * EmailPasswordSignUpForm
  *
- * Self-registration via Better Auth. The created user is provisioned in
- * a `pending_approval` state by the application provisioning service —
- * the form intentionally redirects to the localized pending-approval
- * page instead of the dashboard so the user does not see a flash of
- * secure UI before being blocked by the secure layout guard.
+ * Self-registration via Better Auth. Successful registrations move to the
+ * localized pending-approval page immediately so the user never appears
+ * stranded on the sign-up form after account creation.
  */
-export function EmailPasswordSignUpForm({ returnTo }: EmailPasswordSignUpFormProps) {
+export function EmailPasswordSignUpForm({
+  pendingApprovalHref,
+}: EmailPasswordSignUpFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -39,11 +41,14 @@ export function EmailPasswordSignUpForm({ returnTo }: EmailPasswordSignUpFormPro
         email,
         password,
         name,
-        callbackURL: returnTo,
+        callbackURL: pendingApprovalHref,
       });
       if (result.error) {
         setError(t("unexpectedError"));
+        return;
       }
+
+      router.replace(pendingApprovalHref);
     } catch {
       setError(t("unexpectedError"));
     } finally {

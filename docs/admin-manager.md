@@ -895,8 +895,117 @@ next inside the working branch.
   endpoints remain untouched — the new app lives alongside them.
 
 ### Phase 4 — Roles & permissions
-- Roles list/detail; permission catalog; role-permission editor;
-  role-member grid.
+- Build the roles endpoints under `/api/administrator/roles` per §5.2:
+  - `GET /api/administrator/roles` — `admin.roles.read`. Paginated via
+    `list-query.server.ts`; filters: organization, scope (global/org),
+    permission key, global search by `key`/`name`.
+  - `POST /api/administrator/roles` — `admin.roles.create`. Validates
+    uniqueness of `(organization_id, key)` (and global uniqueness of
+    `key` when `organization_id IS NULL`).
+  - `GET / PATCH / DELETE /api/administrator/roles/[id]` —
+    `admin.roles.read|update|delete`. DELETE returns the standard error
+    contract from §5.1 with code `role_in_use` (HTTP 409) when the role
+    is still referenced by `app_user_roles`.
+  - `GET / POST / DELETE /api/administrator/roles/[id]/permissions` —
+    `admin.roles.update`. POST/DELETE accept an `{ ids: string[] }`
+    body so the dual-list editor (§8.6) can persist its add/remove diff
+    in two atomic Kysely transactions. Both transactions audit as
+    `admin.role.permissions_changed` with the resulting permission set
+    captured in `app_audit_events.metadata`.
+  - `GET /api/administrator/roles/[id]/members` — `admin.roles.read`.
+    Paginated grid feed of users carrying the role, joined with
+    `app_users` and the user's organization membership.
+  - `POST /api/administrator/roles/[id]/duplicate` — `admin.roles.create`.
+    Server-side clone: in a single Kysely transaction, inserts a new
+    `app_roles` row (key suffixed with `-copy` and de-duplicated) and
+    copies every `app_role_permissions` entry from the source role.
+    Audited as `admin.role.duplicated` with `{ sourceRoleId }` in the
+    event metadata.
+- Build the permissions catalog endpoints under
+  `/api/administrator/permissions` per §5.2:
+  - `GET` — `admin.roles.read`. Paginated read of `app_permissions`
+    with a `usedByRoleCount` aggregate so the grid can render the
+    "Roles using this" column without N+1 queries.
+  - `POST / PATCH / DELETE` — `admin.permissions.manage`. DELETE is
+    blocked with code `permission_in_use` (HTTP 409) when the row is
+    referenced by any `app_role_permissions` entry.
+- Build the user → role assignment endpoints used by the User detail
+  "Roles" tab (the tab UI ships in Phase 3 but its data endpoints land
+  here because they are a roles concern):
+  - `GET / POST / DELETE /api/administrator/users/[id]/app-roles` —
+    `admin.roles.assign`. Mutations resolve the target user via the
+    shared `user-target.server.ts` helper, write `app_user_roles` in a
+    single transaction, and audit as `admin.user.role_assigned` /
+    `admin.user.role_revoked` with `{ roleKey, organizationId }`
+    metadata.
+- Add the new shared module `src/lib/admin/roles.server.ts`:
+  - `loadRoleOrThrow(id)` — fetches a role plus its permission keys and
+    member count.
+  - `assertRoleNotInUse(id)` — used by DELETE handlers; throws an
+    `AdminError("role_in_use")` consumed by the route handler to
+    produce the §5.1 error contract.
+  - `diffPermissions(current, next)` — pure helper returning
+    `{ toAdd, toRemove }` so route handlers, the dual-list editor, and
+    tests share one implementation.
+- Build the pages described in §8.5 / §8.6 / §8.7:
+  - `administrator/roles/page.tsx` — DataGrid (Phase 2) with the
+    columns and filters from §8.5; row actions: edit, delete (the
+    `role_in_use` 409 surfaces as a friendly toast), duplicate
+    (single server call to the dedicated
+    `/api/administrator/roles/[id]/duplicate` endpoint above — no
+    client-side orchestration).
+  - `administrator/roles/new/page.tsx` — `react-hook-form` + zod form
+    for `key`, `name`, `description`, organization scope (global vs.
+    org picker).
+  - `administrator/roles/[roleId]/page.tsx` — three tabs (`tabs`
+    primitive):
+    - **Permissions** — dual-list editor at
+      `_components/role-permissions-editor.tsx` built from `command`,
+      `scroll-area`, and `button-group`; groups permission keys by
+      their `admin.<area>` prefix; supports keyboard navigation and
+      search; persists the diff via the POST/DELETE endpoints above.
+    - **Members** — paginated DataGrid backed by
+      `/api/administrator/roles/[id]/members`; row action "Revoke"
+      calls DELETE on `/users/[id]/app-roles`.
+    - **Settings** — name, description, scope; `key` is read-only
+      after creation.
+  - `administrator/permissions/page.tsx` — read-mostly catalog
+    DataGrid; each row exposes a "Roles using this" `Sheet` listing
+    consuming roles, and (when `admin.permissions.manage` is held)
+    inline create/edit/delete actions with the `permission_in_use`
+    409 surfaced as a toast.
+- Wire the Roles, Permissions, and User-detail Roles tab entries into
+  the `AdministratorSidebar` (Phase 1 placeholders) and remove their
+  "Coming soon" empty states. Sidebar entries are gated by
+  `admin.roles.read` and `admin.permissions.manage` respectively, per
+  §6.2.
+- i18n: extend the `administrator.roles.*` and `administrator.permissions.*`
+  namespaces in `en.json`, `es.json`, `fr.json`, and `uk.json` with
+  fully translated strings — no English-only placeholders, per the
+  Phase 1 decision (§20.1 #20).
+- Audit: every mutation produces an `app_audit_events` row via
+  `auditRoleAction()` (§5.3) with one of `admin.role.created`,
+  `admin.role.updated`, `admin.role.deleted`, `admin.role.duplicated`,
+  `admin.role.permissions_changed`, `admin.permission.created`,
+  `admin.permission.updated`, `admin.permission.deleted`,
+  `admin.user.role_assigned`, or `admin.user.role_revoked`. Denied
+  attempts are also audited per §5.1.
+- Tests:
+  - Unit — `diffPermissions`, role list-query filters,
+    `assertRoleNotInUse`, permission `usedByRoleCount` aggregate.
+  - Component — role-permissions editor (add / remove / search / save
+    diff), roles grid filters, permissions catalog "Roles using this"
+    sheet.
+  - Integration — full lifecycle for `/api/administrator/roles`
+    (create → assign permissions → assign to user → in-use delete is
+    rejected → revoke → delete succeeds), and the `permission_in_use`
+    guard on `/api/administrator/permissions/[id]` DELETE.
+  - Security — denial paths for `admin.roles.read|create|update|delete`,
+    `admin.roles.assign`, and `admin.permissions.manage`; verify deny
+    attempts produce audit rows per §5.1.
+- Phase exit criteria: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and
+  `pnpm build` all green on the working branch (per §18 and the
+  preamble to §19).
 
 ### Phase 5 — Organizations & memberships
 - Organization list/detail with member/role/provider-binding tabs;

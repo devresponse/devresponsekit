@@ -191,6 +191,18 @@
         "expiresAt": "Expire {value}",
         "ipAddress": "IP",
         "userAgent": "Agent utilisateur"
+      },
+      "memberships": {
+        "columns": {
+          "organization": "Organisation",
+          "orgName": "Nom",
+          "status": "Statut",
+          "source": "Source",
+          "joinedAt": "Rejoint"
+        },
+        "removeButton": "Supprimer",
+        "removeConfirm": "Supprimer cette adhésion ?",
+        "removeError": "Impossible de supprimer l'adhésion."
       }
     },
     "grid": {
@@ -217,7 +229,12 @@
       "authBackendFailed": "Le backend d'authentification a rejeté la requête.",
       "roleInUse": "Ce rôle est encore attribué à un ou plusieurs utilisateurs et ne peut pas être supprimé.",
       "permissionInUse": "Cette permission est encore attribuée à un ou plusieurs rôles et ne peut pas être supprimée.",
-      "keyTaken": "Cette clé est déjà utilisée."
+      "keyTaken": "Cette clé est déjà utilisée.",
+      "slugTaken": "Ce slug est déjà utilisé.",
+      "organizationNotEmpty": "Cette organisation a encore des membres et ne peut pas être supprimée.",
+      "organizationIsDefault": "L'organisation par défaut ne peut pas être supprimée.",
+      "membershipExists": "Cet utilisateur est déjà membre de l'organisation.",
+      "bindingExists": "Cette liaison de fournisseur existe déjà."
     },
     "roles": {
       "title": "Rôles",
@@ -342,6 +359,86 @@
         "confirm": "Supprimer la permission"
       },
       "deleteError": "Impossible de supprimer la permission."
+    },
+    "orgs": {
+      "title": "Organisations",
+      "newButton": "Nouvelle organisation",
+      "deleteButton": "Supprimer",
+      "backToList": "Retour aux organisations",
+      "defaultYes": "Par défaut",
+      "columns": {
+        "slug": "Slug",
+        "name": "Nom",
+        "status": "Statut",
+        "isDefault": "Par défaut",
+        "memberCount": "Membres",
+        "createdAt": "Créé"
+      },
+      "fields": {
+        "slug": "Slug",
+        "slugHelp": "Lettres minuscules, chiffres, tirets. 1-64 caractères.",
+        "name": "Nom",
+        "status": "Statut",
+        "isDefault": "Définir comme organisation par défaut"
+      },
+      "tabs": {
+        "members": "Membres",
+        "providers": "Fournisseurs",
+        "settings": "Paramètres"
+      },
+      "new": {
+        "title": "Créer une organisation",
+        "description": "Ajouter une nouvelle organisation. Le slug est utilisé dans les URL et ne peut pas être facilement modifié.",
+        "submit": "Créer l'organisation",
+        "cancel": "Annuler",
+        "errorToast": "Impossible de créer l'organisation."
+      },
+      "settings": {
+        "save": "Enregistrer les modifications",
+        "saved": "Organisation mise à jour.",
+        "errorToast": "Impossible d'enregistrer les modifications.",
+        "statusActive": "Active",
+        "statusPending": "En attente",
+        "statusSuspended": "Suspendue",
+        "statusArchived": "Archivée"
+      },
+      "members": {
+        "columns": {
+          "user": "Utilisateur",
+          "status": "Statut",
+          "source": "Source",
+          "joinedAt": "Rejoint"
+        },
+        "removeButton": "Supprimer",
+        "removeConfirm": "Supprimer ce membre de l'organisation ?",
+        "removeError": "Impossible de supprimer le membre."
+      },
+      "providers": {
+        "columns": {
+          "provider": "Fournisseur",
+          "key": "Clé",
+          "displayName": "Nom affiché",
+          "boundAt": "Lié"
+        },
+        "removeButton": "Supprimer",
+        "removeConfirm": "Supprimer cette liaison de fournisseur ?",
+        "removeError": "Impossible de supprimer la liaison."
+      },
+      "deleteDialog": {
+        "title": "Supprimer l'organisation",
+        "description": "La suppression retire l'organisation. L'organisation doit être vide (sans membres)."
+      },
+      "deleteError": "Impossible de supprimer l'organisation."
+    },
+    "memberships": {
+      "title": "Adhésions",
+      "columns": {
+        "organization": "Organisation",
+        "user": "Utilisateur",
+        "status": "Statut",
+        "source": "Source",
+        "createdAt": "Créé"
+      }
     }
   }
 }

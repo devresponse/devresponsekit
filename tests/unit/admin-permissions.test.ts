@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import type * as AuthStatusModule from "@/lib/auth-status";
 
 /**
  * Unit tests for the centralized `requireAdminPermission` helper
@@ -15,7 +16,7 @@ vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
 }));
 vi.mock("@/lib/auth-status", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/auth-status")>("@/lib/auth-status");
+  const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return {
     ...actual,
     getUserAccessContext: (id: string) => accessGetter(id),

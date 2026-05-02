@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Pool } from "pg";
+import { ADMIN_PERMISSION_CATALOG } from "@/lib/admin/permissions";
 
 const LOCAL_ADMIN_NAME = "Local Admin";
 
@@ -45,34 +46,10 @@ async function main() {
     }
 
     // Administrator-app permission catalog (docs/admin-manager.md §6.1).
-    // Idempotent — `on conflict (key) do nothing` keeps the seed safe to
-    // re-run while letting human-edited descriptions stick if changed.
-    const adminPermissions: Array<[string, string]> = [
-      ["admin.users.read", "Read administrator user lists and details"],
-      ["admin.users.create", "Create new users"],
-      ["admin.users.update", "Edit user attributes"],
-      ["admin.users.delete", "Soft-delete and restore users"],
-      ["admin.users.ban", "Ban or unban users via Better Auth"],
-      ["admin.users.setRole", "Set Better Auth role on a user"],
-      ["admin.users.setPassword", "Set or reset a user's password"],
-      ["admin.users.sessions", "List or revoke user sessions"],
-      ["admin.users.impersonate", "Impersonate another user"],
-      ["admin.roles.read", "Read application roles and permissions"],
-      ["admin.roles.create", "Create application roles"],
-      ["admin.roles.update", "Edit application roles"],
-      ["admin.roles.delete", "Delete application roles"],
-      ["admin.roles.assign", "Assign or unassign roles to users"],
-      ["admin.permissions.manage", "Manage the permission catalog"],
-      ["admin.orgs.read", "Read organizations and memberships"],
-      ["admin.orgs.create", "Create organizations"],
-      ["admin.orgs.update", "Edit organizations"],
-      ["admin.orgs.delete", "Delete organizations"],
-      ["admin.orgs.manage", "Manage organization members and bindings"],
-      ["admin.apps.read", "Read enterprise application catalog"],
-      ["admin.apps.manage", "Create and edit enterprise applications"],
-      ["admin.audit.read", "Read the audit event log"],
-    ];
-    for (const [key, description] of adminPermissions) {
+    // Sourced from the single canonical list in
+    // `src/lib/admin/permissions.server.ts` so the seed cannot drift
+    // from the runtime check. Idempotent — `on conflict (key) do nothing`.
+    for (const { key, description } of ADMIN_PERMISSION_CATALOG) {
       await pool.query(
         `insert into app_permissions (key, description) values ($1, $2)
          on conflict (key) do nothing`,
@@ -91,36 +68,10 @@ async function main() {
       [
         "admin.platform",
         "Platform Administrator",
-        [
-          "shell.view",
-          // All admin.* permissions — keep in sync with `adminPermissions`
-          // above and `ADMIN_PERMISSION_CATALOG` in
-          // `src/lib/admin/permissions.server.ts`.
-          "admin.users.read",
-          "admin.users.create",
-          "admin.users.update",
-          "admin.users.delete",
-          "admin.users.manage",
-          "admin.users.ban",
-          "admin.users.setRole",
-          "admin.users.setPassword",
-          "admin.users.sessions",
-          "admin.users.impersonate",
-          "admin.roles.read",
-          "admin.roles.create",
-          "admin.roles.update",
-          "admin.roles.delete",
-          "admin.roles.assign",
-          "admin.permissions.manage",
-          "admin.orgs.read",
-          "admin.orgs.create",
-          "admin.orgs.update",
-          "admin.orgs.delete",
-          "admin.orgs.manage",
-          "admin.apps.read",
-          "admin.apps.manage",
-          "admin.audit.read",
-        ],
+        // Platform-administrator gets every admin.* permission. Sourced
+        // from the canonical catalog so adding a new key automatically
+        // grants it to platform admins on next seed run.
+        ["shell.view", ...ADMIN_PERMISSION_CATALOG.map((p) => p.key)],
       ],
     ];
     for (const [key, name, permKeys] of roles) {

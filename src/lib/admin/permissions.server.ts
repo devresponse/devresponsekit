@@ -111,40 +111,9 @@ export async function checkAdminPermissionServer(
 }
 
 /**
- * The full set of administrator permission keys (plan §6.1). Exported
- * for the seed script and for tests that pin the catalog. Adding a new
- * permission requires updating both this list and the seed migration.
+ * The full set of administrator permission keys (plan §6.1) and the
+ * "any admin" superset used by the layout. Sourced from the
+ * non-`server-only` catalog module so seed scripts can share the same
+ * definitions without resolving the `server-only` sentinel.
  */
-export const ADMIN_PERMISSION_CATALOG: ReadonlyArray<{ key: string; description: string }> = [
-  { key: "admin.users.read", description: "Read administrator user lists and details" },
-  { key: "admin.users.create", description: "Create new users" },
-  { key: "admin.users.update", description: "Edit user attributes" },
-  { key: "admin.users.delete", description: "Soft-delete and restore users" },
-  { key: "admin.users.manage", description: "Approve, block, suspend, reactivate users" },
-  { key: "admin.users.ban", description: "Ban or unban users via Better Auth" },
-  { key: "admin.users.setRole", description: "Set Better Auth role on a user" },
-  { key: "admin.users.setPassword", description: "Set or reset a user's password" },
-  { key: "admin.users.sessions", description: "List or revoke user sessions" },
-  { key: "admin.users.impersonate", description: "Impersonate another user" },
-  { key: "admin.roles.read", description: "Read application roles and permissions" },
-  { key: "admin.roles.create", description: "Create application roles" },
-  { key: "admin.roles.update", description: "Edit application roles" },
-  { key: "admin.roles.delete", description: "Delete application roles" },
-  { key: "admin.roles.assign", description: "Assign or unassign roles to users" },
-  { key: "admin.permissions.manage", description: "Manage the permission catalog" },
-  { key: "admin.orgs.read", description: "Read organizations and memberships" },
-  { key: "admin.orgs.create", description: "Create organizations" },
-  { key: "admin.orgs.update", description: "Edit organizations" },
-  { key: "admin.orgs.delete", description: "Delete organizations" },
-  { key: "admin.orgs.manage", description: "Manage organization members and bindings" },
-  { key: "admin.apps.read", description: "Read enterprise application catalog" },
-  { key: "admin.apps.manage", description: "Create and edit enterprise applications" },
-  { key: "admin.audit.read", description: "Read the audit event log" },
-] as const;
-
-/**
- * The set of permission keys that any *administrator* must have at
- * least one of in order to enter the workspace. Layouts use this for
- * the "indistinguishable from 404" route guard.
- */
-export const ANY_ADMIN_PERMISSION: ReadonlyArray<string> = ADMIN_PERMISSION_CATALOG.map((p) => p.key);
+export { ADMIN_PERMISSION_CATALOG, ANY_ADMIN_PERMISSION } from "./permissions";

@@ -34,36 +34,10 @@ vi.mock("@/lib/audit.server", () => ({
 // Minimal Kysely-builder stub. The handler chains:
 //   db.selectFrom("app_users")[.where(...)]*[.select(...)]
 //     .execute() | .executeTakeFirst()
-// We return a chainable object whose terminal `execute*` calls fall
-// through to the per-test mocks above.
-function makeBuilder(executeFn: ReturnType<typeof vi.fn>) {
-  const builder: Record<string, unknown> = {};
-  const proxy = new Proxy(builder, {
-    get(_, prop) {
-      if (prop === "execute") return executeFn;
-      if (prop === "executeTakeFirst") return executeFn;
-      // Special-case `where` accepting a callback (the q ilike branch).
-      return (...args: unknown[]) => {
-        const cb = args[0];
-        if (typeof cb === "function") {
-          // Invoke the eb callback so the handler doesn't crash on the
-          // `eb.or([...])` builder shape.
-          (cb as (eb: unknown) => unknown)(
-            new Proxy(
-              () => ({}),
-              {
-                get: () => () => ({}),
-                apply: () => ({}),
-              },
-            ),
-          );
-        }
-        return proxy;
-      };
-    },
-  });
-  return proxy;
-}
+// Two terminal-ish branches must be reachable: items.execute() and
+// total.executeTakeFirst(). The handler builds a `base` then forks;
+// both forks share the same chainable shape. We dispatch by terminal
+// method name — `execute()` is items, `executeTakeFirst()` is total.
 
 vi.mock("@/db/database", () => ({
   db: {

@@ -4,14 +4,13 @@ import { db } from "@/db/database";
 import {
   checkAdminPermissionServer,
 } from "@/lib/admin/permissions.server";
+import { isUuid } from "@/lib/admin/user-target.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserDetailTabs } from "./_user-detail-tabs";
 
 export const dynamic = "force-dynamic";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Administrator → User detail page (docs/admin-manager.md §8.4).
@@ -40,7 +39,7 @@ export default async function AdministratorUserDetailPage({
     notFound();
   }
 
-  if (!UUID_RE.test(userId)) {
+  if (!isUuid(userId)) {
     notFound();
   }
 

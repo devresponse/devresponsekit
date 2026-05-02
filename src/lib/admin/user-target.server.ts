@@ -18,6 +18,19 @@ export interface ResolvedTargetUser {
 }
 
 /**
+ * RFC 4122-shaped UUID regex. Exported so RSC pages and other helpers
+ * (`page.tsx` for the user detail route, etc.) share a single source
+ * of truth — duplicating this in multiple places would risk subtle
+ * drift if we ever needed to widen / tighten the pattern.
+ */
+export const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
+/**
  * Resolve the target `app_users` row by primary key. Returns either the
  * resolved row or a ready-to-return `NextResponse` for 404 / 400.
  *
@@ -58,9 +71,4 @@ export function isResolvedUserResponse(
   value: ResolvedTargetUser | NextResponse,
 ): value is NextResponse {
   return value instanceof NextResponse;
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isUuid(s: string): boolean {
-  return UUID_RE.test(s);
 }

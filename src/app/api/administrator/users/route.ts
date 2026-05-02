@@ -153,6 +153,12 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data;
+  // Normalise email to lowercase for both the duplicate check AND
+  // storage. Email comparison in `app_users` is already case-folded
+  // via `lower(primary_email)` below, so persisting the lowercased
+  // form keeps the stored value consistent and avoids surprising the
+  // SSO/OAuth lookup paths that compare case-sensitively.
+  const normalisedEmail = input.email.toLowerCase();
 
   // Reject duplicate emails up-front with a clean error rather than
   // letting Better Auth raise a generic constraint failure. This is a
@@ -161,7 +167,7 @@ export async function POST(request: NextRequest) {
   const existing = await db
     .selectFrom("app_users")
     .select(["id"])
-    .where(sql`lower(primary_email)`, "=", input.email.toLowerCase())
+    .where(sql`lower(primary_email)`, "=", normalisedEmail)
     .executeTakeFirst();
   if (existing) {
     return NextResponse.json({ error: "email_taken" }, { status: 409 });
@@ -171,9 +177,9 @@ export async function POST(request: NextRequest) {
   try {
     created = await createBetterAuthUser(
       {
-        email: input.email,
+        email: normalisedEmail,
         password: input.password,
-        name: input.name ?? input.email,
+        name: input.name ?? normalisedEmail,
         role: input.role,
       },
       request,
@@ -183,7 +189,7 @@ export async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: "00000000-0000-0000-0000-000000000000",
-      email: input.email,
+      email: normalisedEmail,
       reason: "auth_create_user_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
@@ -207,7 +213,7 @@ export async function POST(request: NextRequest) {
     .insertInto("app_users")
     .values({
       better_auth_user_id: betterAuthUserId,
-      primary_email: input.email,
+      primary_email: normalisedEmail,
       display_name: input.name ?? null,
       status: input.initialAppStatus,
       preferred_locale: input.preferredLocale ?? "en",

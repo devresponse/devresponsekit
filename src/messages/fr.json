@@ -234,7 +234,10 @@
       "organizationNotEmpty": "Cette organisation a encore des membres et ne peut pas être supprimée.",
       "organizationIsDefault": "L'organisation par défaut ne peut pas être supprimée.",
       "membershipExists": "Cet utilisateur est déjà membre de l'organisation.",
-      "bindingExists": "Cette liaison de fournisseur existe déjà."
+      "bindingExists": "Cette liaison de fournisseur existe déjà.",
+      "idTaken": "Cet identifiant est déjà utilisé.",
+      "invalidOrigin": "L'origine doit être une URL HTTPS sans chemin.",
+      "applicationInUse": "Cette application est encore référencée et ne peut pas être supprimée."
     },
     "roles": {
       "title": "Rôles",
@@ -438,6 +441,93 @@
         "status": "Statut",
         "source": "Source",
         "createdAt": "Créé"
+      }
+    },
+    "enterpriseApps": {
+      "title": "Applications d'entreprise",
+      "newButton": "Nouvelle application",
+      "deleteButton": "Supprimer",
+      "backToList": "Retour aux applications",
+      "global": "Global",
+      "columns": {
+        "id": "ID",
+        "label": "Libellé",
+        "subdomain": "Sous-domaine",
+        "status": "Statut",
+        "organization": "Organisation",
+        "sortOrder": "Ordre",
+        "createdAt": "Créé"
+      },
+      "fields": {
+        "id": "ID",
+        "idHelp": "Lettres minuscules, chiffres, point, tiret bas et tiret. 1 à 128 caractères. Non modifiable après création.",
+        "label": "Libellé",
+        "description": "Description",
+        "origin": "Origine",
+        "originHelp": "Doit être une URL HTTPS sans chemin, requête ni fragment (p. ex. https://docs.example.com).",
+        "subdomain": "Sous-domaine",
+        "subdomainHelp": "Libellé DNS valide : lettres minuscules, chiffres et tirets, 1 à 63 caractères.",
+        "ssoAudience": "Audience SSO",
+        "status": "Statut",
+        "sortOrder": "Ordre",
+        "organization": "Portée d'organisation"
+      },
+      "status": {
+        "available": "Disponible",
+        "disabled": "Désactivée"
+      },
+      "new": {
+        "title": "Créer une application d'entreprise",
+        "description": "Enregistrez une nouvelle application d'entreprise. L'ID est permanent après création car il est référencé par les enregistrements de SSO.",
+        "submit": "Créer l'application",
+        "cancel": "Annuler",
+        "errorToast": "Impossible de créer l'application."
+      },
+      "settings": {
+        "save": "Enregistrer",
+        "saved": "Application mise à jour.",
+        "errorToast": "Impossible d'enregistrer les modifications."
+      },
+      "deleteDialog": {
+        "title": "Supprimer l'application d'entreprise",
+        "description": "La suppression retire l'application du catalogue. Elle ne doit être référencée par aucun SSO."
+      },
+      "deleteError": "Impossible de supprimer l'application."
+    },
+    "audit": {
+      "title": "Journal d'audit",
+      "description": "Vue paginée en lecture seule des événements d'administration et d'authentification. Chaque ligne ouvre un panneau avec les métadonnées complètes, l'adresse IP, l'agent utilisateur et le motif.",
+      "viewDetail": "Voir",
+      "columns": {
+        "createdAt": "Heure",
+        "eventType": "Type d'événement",
+        "outcome": "Résultat",
+        "actor": "Acteur",
+        "target": "Cible"
+      },
+      "filters": {
+        "eventType": "Type d'événement",
+        "outcome": "Résultat",
+        "actor": "Acteur (ID utilisateur Better Auth)",
+        "actorPlaceholder": "ID utilisateur Better Auth",
+        "any": "Tous"
+      },
+      "outcome": {
+        "success": "Succès",
+        "failure": "Échec",
+        "denied": "Refusé"
+      },
+      "detail": {
+        "actor": "Acteur",
+        "appUser": "Utilisateur de l'app",
+        "organization": "Organisation",
+        "targetApplication": "Application cible",
+        "provider": "Fournisseur",
+        "email": "E-mail",
+        "ipAddress": "Adresse IP",
+        "userAgent": "Agent utilisateur",
+        "reason": "Motif",
+        "metadata": "Métadonnées"
       }
     }
   }

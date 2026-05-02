@@ -1,0 +1,127 @@
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { db } from "@/db/database";
+import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
+import {
+  isAdminPermissionDenial,
+  requireAdminPermission,
+} from "@/lib/admin/permissions.server";
+import {
+  AdminError,
+  assertPermissionNotInUse,
+} from "@/lib/admin/roles.server";
+import { isUuid } from "@/lib/admin/user-target.server";
+
+export const dynamic = "force-dynamic";
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+/**
+ * PATCH /api/administrator/permissions/[id]
+ *
+ * Edits the description of a permission. The `key` is read-only after
+ * creation — code-paths and audit rows reference the key by string and
+ * a rename would silently break them. Caller MUST hold
+ * `admin.permissions.manage`.
+ */
+const patchSchema = z
+  .object({
+    description: z.string().max(1000).nullable(),
+  })
+  .strict();
+
+export async function PATCH(request: NextRequest, ctx: RouteContext) {
+  const guard = await requireAdminPermission(request, "admin.permissions.manage");
+  if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const { id } = await ctx.params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
+
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+  const parsed = patchSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+
+  const existing = await db
+    .selectFrom("app_permissions")
+    .select(["id", "key"])
+    .where("id", "=", id)
+    .executeTakeFirst();
+  if (!existing) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  await db
+    .updateTable("app_permissions")
+    .set({ description: parsed.data.description })
+    .where("id", "=", id)
+    .execute();
+
+  await auditRoleAction("admin.permission.updated", "success", {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    metadata: { permissionId: id, key: existing.key },
+  });
+
+  return NextResponse.json({ ok: true });
+}
+
+/**
+ * DELETE /api/administrator/permissions/[id]
+ *
+ * Refuses with `permission_in_use` (HTTP 409) when the row is still
+ * referenced by `app_role_permissions`. Caller MUST hold
+ * `admin.permissions.manage`.
+ */
+export async function DELETE(request: NextRequest, ctx: RouteContext) {
+  const guard = await requireAdminPermission(request, "admin.permissions.manage");
+  if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const { id } = await ctx.params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
+
+  const existing = await db
+    .selectFrom("app_permissions")
+    .select(["id", "key"])
+    .where("id", "=", id)
+    .executeTakeFirst();
+  if (!existing) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  try {
+    await assertPermissionNotInUse(id);
+  } catch (err) {
+    if (err instanceof AdminError && err.code === "permission_in_use") {
+      await auditRoleAction("admin.permission.delete_blocked", "denied", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        reason: "permission_in_use",
+        metadata: { permissionId: id, key: existing.key },
+      });
+      return NextResponse.json({ error: "permission_in_use" }, { status: 409 });
+    }
+    throw err;
+  }
+
+  await db.deleteFrom("app_permissions").where("id", "=", id).execute();
+
+  await auditRoleAction("admin.permission.deleted", "success", {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    metadata: { permissionId: id, key: existing.key },
+  });
+
+  return NextResponse.json({ ok: true });
+}

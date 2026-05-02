@@ -1,0 +1,109 @@
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { sql } from "kysely";
+import { db } from "@/db/database";
+import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
+import {
+  isAdminPermissionDenial,
+  requireAdminPermission,
+} from "@/lib/admin/permissions.server";
+import { isUuid } from "@/lib/admin/user-target.server";
+
+export const dynamic = "force-dynamic";
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+/**
+ * POST /api/administrator/roles/[id]/duplicate
+ *
+ * Server-side clone of a role. In a single Kysely transaction:
+ *   1. Insert a new `app_roles` row with the source's organization,
+ *      name, and description. The `key` is suffixed with `-copy` and
+ *      de-duplicated (e.g. `admin-copy`, `admin-copy-2`, ...) so the
+ *      `(organization_id, key)` unique constraint never trips.
+ *   2. Copy every `app_role_permissions` entry from the source.
+ *
+ * Caller MUST hold `admin.roles.create`. Audited as
+ * `admin.role.duplicated` with the `sourceRoleId` in metadata so ops
+ * can distinguish manual creates from duplicates.
+ */
+export async function POST(request: NextRequest, ctx: RouteContext) {
+  const guard = await requireAdminPermission(request, "admin.roles.create");
+  if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const { id } = await ctx.params;
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
+
+  const source = await db
+    .selectFrom("app_roles")
+    .select(["id", "organization_id", "key", "name", "description"])
+    .where("id", "=", id)
+    .executeTakeFirst();
+  if (!source) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // Compute a unique key suffix. We collect all candidate "starts-with"
+  // matches in ONE query to avoid a loop of `select exists` round-trips.
+  const candidates = await db
+    .selectFrom("app_roles")
+    .select(["key"])
+    .where("organization_id", source.organization_id === null ? "is" : "=", source.organization_id)
+    .where("key", "like", `${source.key}-copy%`)
+    .execute();
+  const taken = new Set(candidates.map((c) => c.key));
+  let candidate = `${source.key}-copy`;
+  if (taken.has(candidate)) {
+    let i = 2;
+    while (taken.has(`${source.key}-copy-${i}`)) i++;
+    candidate = `${source.key}-copy-${i}`;
+  }
+  // Hard cap on key length per the create-schema contract (120). If the
+  // suffixed candidate is too long, refuse rather than silently mutate.
+  if (candidate.length > 120) {
+    return NextResponse.json({ error: "key_taken" }, { status: 409 });
+  }
+
+  const created = await db.transaction().execute(async (trx) => {
+    const newRole = await trx
+      .insertInto("app_roles")
+      .values({
+        organization_id: source.organization_id,
+        key: candidate,
+        name: source.name,
+        description: source.description,
+      })
+      .returning(["id", "key"])
+      .executeTakeFirstOrThrow();
+
+    // Copy permissions in one INSERT … SELECT.
+    await trx
+      .insertInto("app_role_permissions")
+      .columns(["role_id", "permission_id"])
+      .expression((eb) =>
+        eb
+          .selectFrom("app_role_permissions")
+          .select([sql.lit(newRole.id).as("role_id"), "permission_id"])
+          .where("role_id", "=", source.id),
+      )
+      .execute();
+
+    return newRole;
+  });
+
+  await auditRoleAction("admin.role.duplicated", "success", {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: source.organization_id,
+    metadata: {
+      sourceRoleId: source.id,
+      sourceKey: source.key,
+      roleId: created.id,
+      key: created.key,
+    },
+  });
+
+  return NextResponse.json({ ok: true, id: created.id, key: created.key }, { status: 201 });
+}

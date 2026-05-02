@@ -214,7 +214,134 @@
       "invalidBody": "Los datos enviados no son válidos.",
       "emailTaken": "Esa dirección de correo ya está en uso.",
       "notFound": "No se encontró el recurso solicitado.",
-      "authBackendFailed": "El backend de autenticación rechazó la solicitud."
+      "authBackendFailed": "El backend de autenticación rechazó la solicitud.",
+      "roleInUse": "Este rol todavía está asignado a uno o más usuarios y no se puede eliminar.",
+      "permissionInUse": "Este permiso todavía está asignado a uno o más roles y no se puede eliminar.",
+      "keyTaken": "Esa clave ya está en uso."
+    },
+    "roles": {
+      "title": "Roles",
+      "newButton": "Nuevo rol",
+      "duplicateButton": "Duplicar",
+      "deleteButton": "Eliminar",
+      "editButton": "Editar",
+      "backToList": "Volver a roles",
+      "scope": { "global": "Global", "org": "Organización" },
+      "columns": {
+        "key": "Clave",
+        "name": "Nombre",
+        "scope": "Ámbito",
+        "organization": "Organización",
+        "permissionCount": "Permisos",
+        "memberCount": "Miembros",
+        "createdAt": "Creado"
+      },
+      "filters": {
+        "scope": "Ámbito",
+        "organization": "Organización",
+        "permission": "Clave de permiso",
+        "search": "Buscar roles"
+      },
+      "tabs": {
+        "permissions": "Permisos",
+        "members": "Miembros",
+        "settings": "Configuración"
+      },
+      "fields": {
+        "key": "Clave",
+        "name": "Nombre",
+        "description": "Descripción",
+        "scope": "Ámbito",
+        "organization": "Organización"
+      },
+      "new": {
+        "title": "Crear rol",
+        "description": "Cree un nuevo rol de aplicación. Elija «Global» para un rol de toda la plataforma o asígnelo a una organización. La clave es permanente tras la creación.",
+        "submit": "Crear rol",
+        "cancel": "Cancelar",
+        "successToast": "Rol {key} creado.",
+        "errorToast": "No se pudo crear el rol."
+      },
+      "settings": {
+        "save": "Guardar cambios",
+        "saved": "Guardado.",
+        "errorToast": "No se pudieron guardar los cambios.",
+        "keyReadOnly": "La clave no se puede cambiar después de la creación."
+      },
+      "permissionsEditor": {
+        "title": "Gestionar permisos",
+        "available": "Disponibles",
+        "assigned": "Asignados",
+        "searchAvailable": "Buscar permisos disponibles",
+        "searchAssigned": "Buscar permisos asignados",
+        "add": "Añadir",
+        "remove": "Quitar",
+        "save": "Guardar cambios",
+        "saving": "Guardando…",
+        "saved": "Permisos actualizados.",
+        "noResults": "No hay permisos coincidentes.",
+        "empty": "Aún no hay permisos asignados.",
+        "errorToast": "No se pudieron actualizar los permisos."
+      },
+      "members": {
+        "empty": "Ningún miembro tiene este rol todavía.",
+        "revoke": "Revocar",
+        "revokeConfirm": "¿Revocar este rol de {email}?",
+        "errorToast": "No se pudo revocar el rol.",
+        "columns": {
+          "email": "Correo",
+          "name": "Nombre",
+          "organization": "Organización",
+          "assignedAt": "Asignado"
+        }
+      },
+      "deleteDialog": {
+        "title": "Eliminar rol",
+        "description": "Al eliminar se quita el rol y sus permisos asociados. El rol no debe estar asignado a ningún usuario.",
+        "confirm": "Eliminar rol"
+      },
+      "duplicateConfirm": "¿Crear una copia de este rol?",
+      "duplicateError": "No se pudo duplicar el rol.",
+      "deleteError": "No se pudo eliminar el rol."
+    },
+    "permissions": {
+      "title": "Permisos",
+      "description": "Catálogo de claves de permiso utilizadas por los roles de la aplicación.",
+      "newButton": "Nuevo permiso",
+      "editButton": "Editar",
+      "deleteButton": "Eliminar",
+      "columns": {
+        "key": "Clave",
+        "description": "Descripción",
+        "usedByRoleCount": "Roles que lo usan",
+        "actions": "Acciones"
+      },
+      "filters": { "search": "Buscar permisos" },
+      "fields": { "key": "Clave", "description": "Descripción" },
+      "new": {
+        "title": "Crear permiso",
+        "description": "Añada una nueva clave de permiso al catálogo. La clave se referencia desde el código y los registros de auditoría; elíjala con cuidado.",
+        "submit": "Crear permiso",
+        "cancel": "Cancelar",
+        "errorToast": "No se pudo crear el permiso."
+      },
+      "edit": {
+        "title": "Editar permiso",
+        "submit": "Guardar",
+        "cancel": "Cancelar",
+        "errorToast": "No se pudieron guardar los cambios."
+      },
+      "rolesUsing": {
+        "title": "Roles que usan este permiso",
+        "empty": "Ningún rol usa actualmente este permiso.",
+        "viewRole": "Ver rol"
+      },
+      "deleteDialog": {
+        "title": "Eliminar permiso",
+        "description": "Al eliminar se quita el permiso del catálogo. No debe estar referenciado por ningún rol.",
+        "confirm": "Eliminar permiso"
+      },
+      "deleteError": "No se pudo eliminar el permiso."
     }
   }
 }

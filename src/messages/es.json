@@ -234,7 +234,10 @@
       "organizationNotEmpty": "Esta organización todavía tiene miembros y no se puede eliminar.",
       "organizationIsDefault": "La organización predeterminada no se puede eliminar.",
       "membershipExists": "Este usuario ya es miembro de la organización.",
-      "bindingExists": "Este enlace de proveedor ya existe."
+      "bindingExists": "Este enlace de proveedor ya existe.",
+      "idTaken": "Ese identificador ya está en uso.",
+      "invalidOrigin": "El origen debe ser una URL HTTPS sin ruta.",
+      "applicationInUse": "Esta aplicación todavía está referenciada y no se puede eliminar."
     },
     "roles": {
       "title": "Roles",
@@ -438,6 +441,93 @@
         "status": "Estado",
         "source": "Fuente",
         "createdAt": "Creado"
+      }
+    },
+    "enterpriseApps": {
+      "title": "Aplicaciones empresariales",
+      "newButton": "Nueva aplicación",
+      "deleteButton": "Eliminar",
+      "backToList": "Volver a las aplicaciones",
+      "global": "Global",
+      "columns": {
+        "id": "ID",
+        "label": "Etiqueta",
+        "subdomain": "Subdominio",
+        "status": "Estado",
+        "organization": "Organización",
+        "sortOrder": "Orden",
+        "createdAt": "Creado"
+      },
+      "fields": {
+        "id": "ID",
+        "idHelp": "Letras minúsculas, dígitos, punto, guion bajo y guion. 1–128 caracteres. No se puede cambiar tras la creación.",
+        "label": "Etiqueta",
+        "description": "Descripción",
+        "origin": "Origen",
+        "originHelp": "Debe ser una URL HTTPS sin ruta, consulta ni fragmento (p. ej. https://docs.example.com).",
+        "subdomain": "Subdominio",
+        "subdomainHelp": "Etiqueta DNS válida: letras minúsculas, dígitos y guiones, 1–63 caracteres.",
+        "ssoAudience": "Audiencia SSO",
+        "status": "Estado",
+        "sortOrder": "Orden",
+        "organization": "Ámbito de organización"
+      },
+      "status": {
+        "available": "Disponible",
+        "disabled": "Deshabilitada"
+      },
+      "new": {
+        "title": "Crear aplicación empresarial",
+        "description": "Registra una nueva aplicación empresarial. El ID es permanente tras la creación porque lo referencian los registros de SSO.",
+        "submit": "Crear aplicación",
+        "cancel": "Cancelar",
+        "errorToast": "No se pudo crear la aplicación."
+      },
+      "settings": {
+        "save": "Guardar cambios",
+        "saved": "Aplicación actualizada.",
+        "errorToast": "No se pudieron guardar los cambios."
+      },
+      "deleteDialog": {
+        "title": "Eliminar aplicación empresarial",
+        "description": "Eliminar quita la aplicación del catálogo. La aplicación no debe ser referenciada por ningún SSO."
+      },
+      "deleteError": "No se pudo eliminar la aplicación."
+    },
+    "audit": {
+      "title": "Registro de auditoría",
+      "description": "Vista paginada de solo lectura de los eventos de administrador y de autenticación. Cada fila abre un panel con los metadatos completos, dirección IP, agente de usuario y motivo.",
+      "viewDetail": "Ver",
+      "columns": {
+        "createdAt": "Hora",
+        "eventType": "Tipo de evento",
+        "outcome": "Resultado",
+        "actor": "Actor",
+        "target": "Objetivo"
+      },
+      "filters": {
+        "eventType": "Tipo de evento",
+        "outcome": "Resultado",
+        "actor": "Actor (id de usuario de Better Auth)",
+        "actorPlaceholder": "id de usuario de Better Auth",
+        "any": "Cualquiera"
+      },
+      "outcome": {
+        "success": "Éxito",
+        "failure": "Fallo",
+        "denied": "Denegado"
+      },
+      "detail": {
+        "actor": "Actor",
+        "appUser": "Usuario de la app",
+        "organization": "Organización",
+        "targetApplication": "Aplicación objetivo",
+        "provider": "Proveedor",
+        "email": "Correo",
+        "ipAddress": "Dirección IP",
+        "userAgent": "Agente de usuario",
+        "reason": "Motivo",
+        "metadata": "Metadatos"
       }
     }
   }

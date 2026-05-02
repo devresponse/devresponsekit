@@ -234,7 +234,10 @@
       "organizationNotEmpty": "This organization still has members and cannot be deleted.",
       "organizationIsDefault": "The default organization cannot be deleted.",
       "membershipExists": "This user is already a member of the organization.",
-      "bindingExists": "This provider binding already exists."
+      "bindingExists": "This provider binding already exists.",
+      "idTaken": "That id is already in use.",
+      "invalidOrigin": "Origin must be an HTTPS URL with no path.",
+      "applicationInUse": "This application is still referenced and cannot be deleted."
     },
     "roles": {
       "title": "Roles",
@@ -446,6 +449,93 @@
         "status": "Status",
         "source": "Source",
         "createdAt": "Created"
+      }
+    },
+    "enterpriseApps": {
+      "title": "Enterprise applications",
+      "newButton": "New application",
+      "deleteButton": "Delete",
+      "backToList": "Back to applications",
+      "global": "Global",
+      "columns": {
+        "id": "ID",
+        "label": "Label",
+        "subdomain": "Subdomain",
+        "status": "Status",
+        "organization": "Organization",
+        "sortOrder": "Sort order",
+        "createdAt": "Created"
+      },
+      "fields": {
+        "id": "ID",
+        "idHelp": "Lowercase letters, digits, dot, underscore and hyphen. 1–128 characters. Cannot be changed after creation.",
+        "label": "Label",
+        "description": "Description",
+        "origin": "Origin",
+        "originHelp": "Must be an HTTPS URL with no path, query, or fragment (e.g. https://docs.example.com).",
+        "subdomain": "Subdomain",
+        "subdomainHelp": "Hostname-safe DNS label: lowercase letters, digits and hyphens, 1–63 characters.",
+        "ssoAudience": "SSO audience",
+        "status": "Status",
+        "sortOrder": "Sort order",
+        "organization": "Organization scope"
+      },
+      "status": {
+        "available": "Available",
+        "disabled": "Disabled"
+      },
+      "new": {
+        "title": "Create enterprise application",
+        "description": "Register a new enterprise application. The ID is permanent after creation because it is referenced by SSO handoff records.",
+        "submit": "Create application",
+        "cancel": "Cancel",
+        "errorToast": "Could not create application."
+      },
+      "settings": {
+        "save": "Save changes",
+        "saved": "Application updated.",
+        "errorToast": "Could not save changes."
+      },
+      "deleteDialog": {
+        "title": "Delete enterprise application",
+        "description": "Deleting removes the application from the catalog. The application must not be referenced by any SSO handoff."
+      },
+      "deleteError": "Could not delete the application."
+    },
+    "audit": {
+      "title": "Audit log",
+      "description": "Read-only paginated view of administrator and authentication events. Each row opens a panel with the full metadata, IP address, user agent, and reason.",
+      "viewDetail": "View",
+      "columns": {
+        "createdAt": "Time",
+        "eventType": "Event type",
+        "outcome": "Outcome",
+        "actor": "Actor",
+        "target": "Target"
+      },
+      "filters": {
+        "eventType": "Event type",
+        "outcome": "Outcome",
+        "actor": "Actor (Better Auth user id)",
+        "actorPlaceholder": "Better Auth user id",
+        "any": "Any"
+      },
+      "outcome": {
+        "success": "Success",
+        "failure": "Failure",
+        "denied": "Denied"
+      },
+      "detail": {
+        "actor": "Actor",
+        "appUser": "App user",
+        "organization": "Organization",
+        "targetApplication": "Target application",
+        "provider": "Provider",
+        "email": "Email",
+        "ipAddress": "IP address",
+        "userAgent": "User agent",
+        "reason": "Reason",
+        "metadata": "Metadata"
       }
     }
   }

@@ -67,5 +67,60 @@
     "hideFooter": "Hide footer",
     "skipToMain": "Skip to main content",
     "skipToNavigation": "Skip to navigation"
+  },
+  "administrator": {
+    "appTitle": "Administrator",
+    "appDescription": "Manage users, roles, organizations and audit activity.",
+    "nav": {
+      "overview": "Overview",
+      "identity": "Identity",
+      "users": "Users",
+      "sessions": "Sessions",
+      "access": "Access",
+      "roles": "Roles",
+      "permissions": "Permissions",
+      "tenancy": "Tenancy",
+      "organizations": "Organizations",
+      "memberships": "Memberships",
+      "apps": "Apps",
+      "enterpriseApps": "Enterprise applications",
+      "activity": "Activity",
+      "auditLog": "Audit log"
+    },
+    "overview": {
+      "title": "Administrator overview",
+      "description": "Pick an area from the left navigation to begin managing the platform."
+    },
+    "users": {
+      "title": "Users",
+      "columns": {
+        "email": "Email",
+        "displayName": "Name",
+        "status": "Status",
+        "createdAt": "Created"
+      },
+      "filters": {
+        "status": "Status",
+        "search": "Search users"
+      }
+    },
+    "grid": {
+      "loading": "Loading…",
+      "empty": "No results match the current filters.",
+      "error": "Failed to load. Try again.",
+      "retry": "Retry",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "pageOf": "Page {page} of {totalPages}",
+      "rowsPerPage": "Rows per page",
+      "totalRows": "{count, plural, one {# row} other {# rows}}",
+      "search": "Search",
+      "sortAsc": "Sorted ascending",
+      "sortDesc": "Sorted descending",
+      "sortNone": "Not sorted"
+    },
+    "errors": {
+      "forbidden": "You don't have permission to view this page."
+    }
   }
 }

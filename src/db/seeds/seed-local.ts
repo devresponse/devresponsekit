@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Pool } from "pg";
+import { ADMIN_PERMISSION_CATALOG } from "@/lib/admin/permissions";
 
 const LOCAL_ADMIN_NAME = "Local Admin";
 
@@ -44,6 +45,18 @@ async function main() {
       );
     }
 
+    // Administrator-app permission catalog (docs/admin-manager.md §6.1).
+    // Sourced from the single canonical list in
+    // `src/lib/admin/permissions.server.ts` so the seed cannot drift
+    // from the runtime check. Idempotent — `on conflict (key) do nothing`.
+    for (const { key, description } of ADMIN_PERMISSION_CATALOG) {
+      await pool.query(
+        `insert into app_permissions (key, description) values ($1, $2)
+         on conflict (key) do nothing`,
+        [key, description],
+      );
+    }
+
     const orgId = (
       await pool.query<{ id: string }>(`select id from app_organizations where slug = 'default'`)
     ).rows[0]?.id;
@@ -52,6 +65,14 @@ async function main() {
     const roles: Array<[string, string, string[]]> = [
       ["member", "Member", ["shell.view"]],
       ["admin", "Administrator", ["shell.view", "admin.users.manage", "audit.view"]],
+      [
+        "admin.platform",
+        "Platform Administrator",
+        // Platform-administrator gets every admin.* permission. Sourced
+        // from the canonical catalog so adding a new key automatically
+        // grants it to platform admins on next seed run.
+        ["shell.view", ...ADMIN_PERMISSION_CATALOG.map((p) => p.key)],
+      ],
     ];
     for (const [key, name, permKeys] of roles) {
       await pool.query(
@@ -261,6 +282,24 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
      on conflict do nothing`,
     [appUserId, organizationId, adminRoleId],
   );
+
+  // Also grant the platform-administrator role so the seeded admin can
+  // enter the new Administrator workspace (docs/admin-manager.md §6.1).
+  const platformRoleId = (
+    await pool.query<{ id: string }>(
+      `select id from app_roles where organization_id = $1 and key = 'admin.platform'`,
+      [organizationId],
+    )
+  ).rows[0]?.id;
+
+  if (platformRoleId) {
+    await pool.query(
+      `insert into app_user_roles (app_user_id, organization_id, role_id)
+       values ($1, $2, $3)
+       on conflict do nothing`,
+      [appUserId, organizationId, platformRoleId],
+    );
+  }
 
   console.log(`[seed] ensured local admin ${authUser.email}`);
 }

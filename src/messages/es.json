@@ -67,5 +67,60 @@
     "hideFooter": "Ocultar pie de página",
     "skipToMain": "Saltar al contenido principal",
     "skipToNavigation": "Saltar a la navegación"
+  },
+  "administrator": {
+    "appTitle": "Administrador",
+    "appDescription": "Gestione usuarios, roles, organizaciones y la actividad de auditoría.",
+    "nav": {
+      "overview": "Resumen",
+      "identity": "Identidad",
+      "users": "Usuarios",
+      "sessions": "Sesiones",
+      "access": "Acceso",
+      "roles": "Roles",
+      "permissions": "Permisos",
+      "tenancy": "Tenencia",
+      "organizations": "Organizaciones",
+      "memberships": "Miembros",
+      "apps": "Aplicaciones",
+      "enterpriseApps": "Aplicaciones empresariales",
+      "activity": "Actividad",
+      "auditLog": "Registro de auditoría"
+    },
+    "overview": {
+      "title": "Resumen del administrador",
+      "description": "Seleccione un área en la navegación izquierda para comenzar a gestionar la plataforma."
+    },
+    "users": {
+      "title": "Usuarios",
+      "columns": {
+        "email": "Correo electrónico",
+        "displayName": "Nombre",
+        "status": "Estado",
+        "createdAt": "Creado"
+      },
+      "filters": {
+        "status": "Estado",
+        "search": "Buscar usuarios"
+      }
+    },
+    "grid": {
+      "loading": "Cargando…",
+      "empty": "Ningún resultado coincide con los filtros actuales.",
+      "error": "Error al cargar. Inténtelo de nuevo.",
+      "retry": "Reintentar",
+      "previousPage": "Página anterior",
+      "nextPage": "Página siguiente",
+      "pageOf": "Página {page} de {totalPages}",
+      "rowsPerPage": "Filas por página",
+      "totalRows": "{count, plural, one {# fila} other {# filas}}",
+      "search": "Buscar",
+      "sortAsc": "Orden ascendente",
+      "sortDesc": "Orden descendente",
+      "sortNone": "Sin ordenar"
+    },
+    "errors": {
+      "forbidden": "No tiene permiso para ver esta página."
+    }
   }
 }

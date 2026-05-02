@@ -1,0 +1,244 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { NextRequest } from "next/server";
+import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as UsersRouteModule from "@/app/api/administrator/users/route";
+
+/**
+ * Integration tests for `GET /api/administrator/users` per
+ * docs/admin-manager.md §5.1, §5.3 and §17 (test plan).
+ *
+ * The DB layer is stubbed — these tests pin the *handler contract*:
+ * permission gate, response envelope, pageSize clamp, and the audit
+ * write on a denied attempt.
+ */
+const sessionGetter = vi.fn();
+const accessGetter = vi.fn();
+const auditMock = vi.fn();
+const itemsExecute = vi.fn();
+const totalExecute = vi.fn();
+
+vi.mock("@/lib/auth-guard", () => ({
+  getCurrentSession: () => sessionGetter(),
+}));
+vi.mock("@/lib/auth-status", async () => {
+  const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
+  return {
+    ...actual,
+    getUserAccessContext: (id: string) => accessGetter(id),
+  };
+});
+vi.mock("@/lib/audit.server", () => ({
+  auditEvent: (...args: unknown[]) => auditMock(...args),
+}));
+
+// Minimal Kysely-builder stub. The handler chains:
+//   db.selectFrom("app_users")[.where(...)]*[.select(...)]
+//     .execute() | .executeTakeFirst()
+// We return a chainable object whose terminal `execute*` calls fall
+// through to the per-test mocks above.
+function makeBuilder(executeFn: ReturnType<typeof vi.fn>) {
+  const builder: Record<string, unknown> = {};
+  const proxy = new Proxy(builder, {
+    get(_, prop) {
+      if (prop === "execute") return executeFn;
+      if (prop === "executeTakeFirst") return executeFn;
+      // Special-case `where` accepting a callback (the q ilike branch).
+      return (...args: unknown[]) => {
+        const cb = args[0];
+        if (typeof cb === "function") {
+          // Invoke the eb callback so the handler doesn't crash on the
+          // `eb.or([...])` builder shape.
+          (cb as (eb: unknown) => unknown)(
+            new Proxy(
+              () => ({}),
+              {
+                get: () => () => ({}),
+                apply: () => ({}),
+              },
+            ),
+          );
+        }
+        return proxy;
+      };
+    },
+  });
+  return proxy;
+}
+
+vi.mock("@/db/database", () => ({
+  db: {
+    selectFrom: () => {
+      // We need TWO terminal-ish branches to be reachable: items.execute()
+      // and total.executeTakeFirst(). The handler builds a `base` then
+      // forks; both forks share the same chainable shape. We dispatch by
+      // call order — first `execute` is items, first `executeTakeFirst`
+      // is total — using two separate mocks routed via the proxy below.
+      let kind: "items" | "total" | null = null;
+      const proxy: unknown = new Proxy(
+        {},
+        {
+          get(_, prop) {
+            if (prop === "select") {
+              return (cols: unknown) => {
+                // The total query passes a single sql expression aliased
+                // as "total" (an object with a `toOperationNode`-ish
+                // shape) — distinguish by argument shape.
+                if (Array.isArray(cols)) kind = "items";
+                else kind = "total";
+                return proxy;
+              };
+            }
+            if (prop === "execute") {
+              return kind === "items" ? itemsExecute : itemsExecute;
+            }
+            if (prop === "executeTakeFirst") {
+              return totalExecute;
+            }
+            return (...args: unknown[]) => {
+              const cb = args[0];
+              if (typeof cb === "function") {
+                (cb as (eb: unknown) => unknown)(
+                  new Proxy(() => ({}), {
+                    get: () => () => ({}),
+                    apply: () => ({}),
+                  }),
+                );
+              }
+              return proxy;
+            };
+          },
+        },
+      );
+      return proxy;
+    },
+  },
+}));
+
+function makeRequest(query: string): NextRequest {
+  const url = new URL(`http://test.local/api/administrator/users${query}`);
+  return {
+    nextUrl: url,
+    headers: new Headers(),
+  } as unknown as NextRequest;
+}
+
+let GET: typeof UsersRouteModule.GET;
+
+beforeEach(async () => {
+  sessionGetter.mockReset();
+  accessGetter.mockReset();
+  auditMock.mockReset();
+  itemsExecute.mockReset();
+  totalExecute.mockReset();
+  ({ GET } = await import("@/app/api/administrator/users/route"));
+});
+afterEach(() => vi.resetModules());
+
+describe("GET /api/administrator/users", () => {
+  it("returns 401 when not authenticated", async () => {
+    sessionGetter.mockResolvedValue(null);
+    const res = await GET(makeRequest(""));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 403 and audits a denied attempt for callers without admin.users.read", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "x@x.com",
+      status: "active",
+      organizationId: "o-1",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["shell.view"],
+    });
+    const res = await GET(makeRequest(""));
+    expect(res.status).toBe(403);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        outcome: "denied",
+        reason: "missing_admin_permission",
+      }),
+    );
+  });
+
+  it("returns the standard list envelope on success", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "admin@x.com",
+      status: "active",
+      organizationId: "o-1",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["admin.users.read"],
+    });
+    itemsExecute.mockResolvedValue([
+      {
+        id: "11111111-1111-4111-8111-111111111101",
+        better_auth_user_id: "ba-99",
+        primary_email: "ada@example.com",
+        display_name: "Ada",
+        status: "active",
+        preferred_locale: "en",
+        created_at: "2025-01-01T00:00:00.000Z",
+        updated_at: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    totalExecute.mockResolvedValue({ total: "42" });
+
+    const res = await GET(makeRequest(""));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      items: unknown[];
+      page: number;
+      pageSize: number;
+      total: number;
+      sort: { field: string; direction: string }[];
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.total).toBe(42);
+    expect(body.page).toBe(1);
+    expect(body.pageSize).toBe(25);
+    // Default sort applied when none requested.
+    expect(body.sort).toEqual([{ field: "created_at", direction: "desc" }]);
+  });
+
+  it("clamps oversize pageSize at 200 (no DOS via huge pages)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "admin@x.com",
+      status: "active",
+      organizationId: "o-1",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["admin.users.read"],
+    });
+    itemsExecute.mockResolvedValue([]);
+    totalExecute.mockResolvedValue({ total: "0" });
+    const res = await GET(makeRequest("?pageSize=999999"));
+    const body = (await res.json()) as { pageSize: number };
+    expect(body.pageSize).toBe(200);
+  });
+
+  it("ignores unknown sort fields", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "admin@x.com",
+      status: "active",
+      organizationId: "o-1",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["admin.users.read"],
+    });
+    itemsExecute.mockResolvedValue([]);
+    totalExecute.mockResolvedValue({ total: "0" });
+    const res = await GET(makeRequest("?sort=evil_secret_field:asc"));
+    const body = (await res.json()) as { sort: unknown[] };
+    // Falls back to default sort.
+    expect(body.sort).toEqual([{ field: "created_at", direction: "desc" }]);
+  });
+});

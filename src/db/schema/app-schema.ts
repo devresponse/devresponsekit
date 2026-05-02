@@ -44,6 +44,9 @@ export interface AppUsersTable {
   preferred_locale: ColumnType<string, string | undefined, string>;
   created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
+  deactivated_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  deactivated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  deactivated_reason: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 export interface AppOrganizationMembershipsTable {

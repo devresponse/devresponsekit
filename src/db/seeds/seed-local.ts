@@ -44,6 +44,42 @@ async function main() {
       );
     }
 
+    // Administrator-app permission catalog (docs/admin-manager.md §6.1).
+    // Idempotent — `on conflict (key) do nothing` keeps the seed safe to
+    // re-run while letting human-edited descriptions stick if changed.
+    const adminPermissions: Array<[string, string]> = [
+      ["admin.users.read", "Read administrator user lists and details"],
+      ["admin.users.create", "Create new users"],
+      ["admin.users.update", "Edit user attributes"],
+      ["admin.users.delete", "Soft-delete and restore users"],
+      ["admin.users.ban", "Ban or unban users via Better Auth"],
+      ["admin.users.setRole", "Set Better Auth role on a user"],
+      ["admin.users.setPassword", "Set or reset a user's password"],
+      ["admin.users.sessions", "List or revoke user sessions"],
+      ["admin.users.impersonate", "Impersonate another user"],
+      ["admin.roles.read", "Read application roles and permissions"],
+      ["admin.roles.create", "Create application roles"],
+      ["admin.roles.update", "Edit application roles"],
+      ["admin.roles.delete", "Delete application roles"],
+      ["admin.roles.assign", "Assign or unassign roles to users"],
+      ["admin.permissions.manage", "Manage the permission catalog"],
+      ["admin.orgs.read", "Read organizations and memberships"],
+      ["admin.orgs.create", "Create organizations"],
+      ["admin.orgs.update", "Edit organizations"],
+      ["admin.orgs.delete", "Delete organizations"],
+      ["admin.orgs.manage", "Manage organization members and bindings"],
+      ["admin.apps.read", "Read enterprise application catalog"],
+      ["admin.apps.manage", "Create and edit enterprise applications"],
+      ["admin.audit.read", "Read the audit event log"],
+    ];
+    for (const [key, description] of adminPermissions) {
+      await pool.query(
+        `insert into app_permissions (key, description) values ($1, $2)
+         on conflict (key) do nothing`,
+        [key, description],
+      );
+    }
+
     const orgId = (
       await pool.query<{ id: string }>(`select id from app_organizations where slug = 'default'`)
     ).rows[0]?.id;
@@ -52,6 +88,40 @@ async function main() {
     const roles: Array<[string, string, string[]]> = [
       ["member", "Member", ["shell.view"]],
       ["admin", "Administrator", ["shell.view", "admin.users.manage", "audit.view"]],
+      [
+        "admin.platform",
+        "Platform Administrator",
+        [
+          "shell.view",
+          // All admin.* permissions — keep in sync with `adminPermissions`
+          // above and `ADMIN_PERMISSION_CATALOG` in
+          // `src/lib/admin/permissions.server.ts`.
+          "admin.users.read",
+          "admin.users.create",
+          "admin.users.update",
+          "admin.users.delete",
+          "admin.users.manage",
+          "admin.users.ban",
+          "admin.users.setRole",
+          "admin.users.setPassword",
+          "admin.users.sessions",
+          "admin.users.impersonate",
+          "admin.roles.read",
+          "admin.roles.create",
+          "admin.roles.update",
+          "admin.roles.delete",
+          "admin.roles.assign",
+          "admin.permissions.manage",
+          "admin.orgs.read",
+          "admin.orgs.create",
+          "admin.orgs.update",
+          "admin.orgs.delete",
+          "admin.orgs.manage",
+          "admin.apps.read",
+          "admin.apps.manage",
+          "admin.audit.read",
+        ],
+      ],
     ];
     for (const [key, name, permKeys] of roles) {
       await pool.query(
@@ -261,6 +331,24 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
      on conflict do nothing`,
     [appUserId, organizationId, adminRoleId],
   );
+
+  // Also grant the platform-administrator role so the seeded admin can
+  // enter the new Administrator workspace (docs/admin-manager.md §6.1).
+  const platformRoleId = (
+    await pool.query<{ id: string }>(
+      `select id from app_roles where organization_id = $1 and key = 'admin.platform'`,
+      [organizationId],
+    )
+  ).rows[0]?.id;
+
+  if (platformRoleId) {
+    await pool.query(
+      `insert into app_user_roles (app_user_id, organization_id, role_id)
+       values ($1, $2, $3)
+       on conflict do nothing`,
+      [appUserId, organizationId, platformRoleId],
+    );
+  }
 
   console.log(`[seed] ensured local admin ${authUser.email}`);
 }

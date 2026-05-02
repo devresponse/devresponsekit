@@ -93,6 +93,7 @@
     },
     "users": {
       "title": "Users",
+      "newButton": "New user",
       "columns": {
         "email": "Email",
         "displayName": "Name",
@@ -102,6 +103,94 @@
       "filters": {
         "status": "Status",
         "search": "Search users"
+      },
+      "status": {
+        "active": "Active",
+        "pending_approval": "Pending approval",
+        "blocked": "Blocked",
+        "suspended": "Suspended",
+        "deactivated": "Deactivated"
+      },
+      "tabs": {
+        "overview": "Overview",
+        "roles": "Roles",
+        "memberships": "Memberships",
+        "sessions": "Sessions",
+        "audit": "Audit"
+      },
+      "detail": {
+        "backToList": "Back to users",
+        "notFound": "User not found.",
+        "metaCreated": "Created {value}",
+        "metaUpdated": "Updated {value}",
+        "betterAuthId": "Better Auth user ID",
+        "appUserId": "App user ID",
+        "deactivated": "Deactivated {value}",
+        "deactivatedBy": "Deactivated by {actor}",
+        "deactivatedReason": "Reason: {reason}"
+      },
+      "fields": {
+        "email": "Email",
+        "displayName": "Display name",
+        "preferredLocale": "Preferred locale",
+        "password": "Password",
+        "role": "Better Auth role",
+        "initialAppStatus": "Initial application status",
+        "reason": "Reason"
+      },
+      "new": {
+        "title": "Create user",
+        "description": "Create a Better Auth user and the matching application record. The user is created in the chosen application status; admin approval is recommended for non-trusted accounts.",
+        "submit": "Create user",
+        "cancel": "Cancel",
+        "passwordHint": "Minimum 8 characters. The password is forwarded to Better Auth and never logged.",
+        "successToast": "User {email} created.",
+        "errorToast": "Could not create user."
+      },
+      "actions": {
+        "viewDetail": "View",
+        "approve": "Approve",
+        "block": "Block",
+        "suspend": "Suspend",
+        "reactivate": "Reactivate",
+        "ban": "Ban",
+        "unban": "Unban",
+        "setRole": "Set Better Auth role",
+        "setPassword": "Set password",
+        "revokeSessions": "Revoke all sessions",
+        "softDelete": "Delete (soft)",
+        "restore": "Restore",
+        "confirm": "Confirm",
+        "cancel": "Cancel"
+      },
+      "dialogs": {
+        "ban": {
+          "title": "Ban user",
+          "description": "Banning prevents the user from signing in. A reason is required and is recorded in the audit log."
+        },
+        "softDelete": {
+          "title": "Delete user (soft)",
+          "description": "Soft delete bans the user in Better Auth and marks the application record as deactivated. The Restore action reverses this."
+        },
+        "setPassword": {
+          "title": "Set password",
+          "description": "Choose a mode. \"Set new password\" overrides the user's password directly. \"Send reset email\" triggers Better Auth to email a password-reset link.",
+          "modeSet": "Set new password",
+          "modeReset": "Send reset email"
+        },
+        "setRole": {
+          "title": "Set Better Auth role",
+          "description": "This is the auth-level role (admin / user), distinct from application roles."
+        }
+      },
+      "sessions": {
+        "title": "Active sessions",
+        "empty": "No active sessions.",
+        "revokeOne": "Revoke",
+        "revokeAll": "Revoke all sessions",
+        "expiresAt": "Expires {value}",
+        "ipAddress": "IP",
+        "userAgent": "User agent"
       }
     },
     "grid": {
@@ -120,7 +209,12 @@
       "sortNone": "Not sorted"
     },
     "errors": {
-      "forbidden": "You don't have permission to view this page."
+      "forbidden": "You don't have permission to view this page.",
+      "generic": "Something went wrong. Try again.",
+      "invalidBody": "The submitted data is invalid.",
+      "emailTaken": "That email address is already in use.",
+      "notFound": "The requested resource could not be found.",
+      "authBackendFailed": "The authentication backend rejected the request."
     }
   }
 }

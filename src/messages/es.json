@@ -93,6 +93,7 @@
     },
     "users": {
       "title": "Usuarios",
+      "newButton": "Nuevo usuario",
       "columns": {
         "email": "Correo electrónico",
         "displayName": "Nombre",
@@ -102,6 +103,94 @@
       "filters": {
         "status": "Estado",
         "search": "Buscar usuarios"
+      },
+      "status": {
+        "active": "Activo",
+        "pending_approval": "Pendiente de aprobación",
+        "blocked": "Bloqueado",
+        "suspended": "Suspendido",
+        "deactivated": "Desactivado"
+      },
+      "tabs": {
+        "overview": "Resumen",
+        "roles": "Roles",
+        "memberships": "Miembros",
+        "sessions": "Sesiones",
+        "audit": "Auditoría"
+      },
+      "detail": {
+        "backToList": "Volver a usuarios",
+        "notFound": "Usuario no encontrado.",
+        "metaCreated": "Creado {value}",
+        "metaUpdated": "Actualizado {value}",
+        "betterAuthId": "ID de usuario en Better Auth",
+        "appUserId": "ID de usuario de la aplicación",
+        "deactivated": "Desactivado {value}",
+        "deactivatedBy": "Desactivado por {actor}",
+        "deactivatedReason": "Motivo: {reason}"
+      },
+      "fields": {
+        "email": "Correo electrónico",
+        "displayName": "Nombre para mostrar",
+        "preferredLocale": "Idioma preferido",
+        "password": "Contraseña",
+        "role": "Rol de Better Auth",
+        "initialAppStatus": "Estado inicial en la aplicación",
+        "reason": "Motivo"
+      },
+      "new": {
+        "title": "Crear usuario",
+        "description": "Cree un usuario en Better Auth y el registro correspondiente en la aplicación. El usuario se crea con el estado seleccionado; se recomienda la aprobación manual para cuentas no confiables.",
+        "submit": "Crear usuario",
+        "cancel": "Cancelar",
+        "passwordHint": "Mínimo 8 caracteres. La contraseña se envía a Better Auth y nunca se registra.",
+        "successToast": "Usuario {email} creado.",
+        "errorToast": "No se pudo crear el usuario."
+      },
+      "actions": {
+        "viewDetail": "Ver",
+        "approve": "Aprobar",
+        "block": "Bloquear",
+        "suspend": "Suspender",
+        "reactivate": "Reactivar",
+        "ban": "Banear",
+        "unban": "Quitar baneo",
+        "setRole": "Cambiar rol de Better Auth",
+        "setPassword": "Establecer contraseña",
+        "revokeSessions": "Revocar todas las sesiones",
+        "softDelete": "Eliminar (suave)",
+        "restore": "Restaurar",
+        "confirm": "Confirmar",
+        "cancel": "Cancelar"
+      },
+      "dialogs": {
+        "ban": {
+          "title": "Banear usuario",
+          "description": "El baneo impide al usuario iniciar sesión. Es obligatorio indicar un motivo, que se registra en el historial de auditoría."
+        },
+        "softDelete": {
+          "title": "Eliminar usuario (suave)",
+          "description": "La eliminación suave banea al usuario en Better Auth y marca el registro de la aplicación como desactivado. La acción Restaurar revierte esta operación."
+        },
+        "setPassword": {
+          "title": "Establecer contraseña",
+          "description": "Elija un modo. «Establecer nueva contraseña» sobrescribe directamente la contraseña del usuario. «Enviar correo de restablecimiento» pide a Better Auth que envíe un enlace por correo.",
+          "modeSet": "Establecer nueva contraseña",
+          "modeReset": "Enviar correo de restablecimiento"
+        },
+        "setRole": {
+          "title": "Cambiar rol de Better Auth",
+          "description": "Este es el rol a nivel de autenticación (admin / user), distinto de los roles de la aplicación."
+        }
+      },
+      "sessions": {
+        "title": "Sesiones activas",
+        "empty": "Sin sesiones activas.",
+        "revokeOne": "Revocar",
+        "revokeAll": "Revocar todas las sesiones",
+        "expiresAt": "Caduca {value}",
+        "ipAddress": "IP",
+        "userAgent": "Agente de usuario"
       }
     },
     "grid": {
@@ -120,7 +209,12 @@
       "sortNone": "Sin ordenar"
     },
     "errors": {
-      "forbidden": "No tiene permiso para ver esta página."
+      "forbidden": "No tiene permiso para ver esta página.",
+      "generic": "Algo salió mal. Inténtelo de nuevo.",
+      "invalidBody": "Los datos enviados no son válidos.",
+      "emailTaken": "Esa dirección de correo ya está en uso.",
+      "notFound": "No se encontró el recurso solicitado.",
+      "authBackendFailed": "El backend de autenticación rechazó la solicitud."
     }
   }
 }

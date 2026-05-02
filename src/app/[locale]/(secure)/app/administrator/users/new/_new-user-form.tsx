@@ -60,14 +60,11 @@ export function NewUserForm({ locale }: { locale: string }) {
 
   const validate = (): FormErrors => {
     const next: FormErrors = {};
-    // Email validity: defer to the browser's `type="email"` constraint
-    // (set on the <Input>) plus the server-side `z.email()` check —
-    // duplicating a regex here would drift from the canonical
-    // validator. We only check that the field is non-empty so users
-    // get an immediate hint rather than a server round-trip on blur.
-    if (state.email.trim().length === 0) {
-      next.email = tErr("invalidBody");
-    }
+    // Email validity is enforced by the browser via `type="email"` +
+    // `required` on the <Input> below, plus the server-side
+    // `z.email()` which is the source of truth. Re-running a regex
+    // here would only drift from the canonical validator without
+    // changing user-visible behaviour.
     if (state.password.length < 8 || state.password.length > 128) {
       next.password = tErr("invalidBody");
     }

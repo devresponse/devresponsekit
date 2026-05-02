@@ -2,6 +2,7 @@
   "name": "devresponsekit",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Enterprise Next.js 16 Holy Grail Application Shell with Better Auth, Kysely, and next-intl.",
   "scripts": {
     "dev": "next dev",

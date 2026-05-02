@@ -6,35 +6,21 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { APP_ID_RE, SUBDOMAIN_RE, isHttpsOrigin } from "@/lib/admin/enterprise-apps";
 
 /**
  * Client-side new enterprise application form (docs/admin-manager.md
  * §8.10, Phase 6).
  *
  * Mirrors the new-organization form's controlled-input style. Validation
- * echoes the server Zod schema and the helpers in
- * `src/lib/admin/enterprise-apps.server.ts` so the user sees the same
- * rules the server enforces; the server is still the source of truth.
+ * helpers are imported from the shared `@/lib/admin/enterprise-apps`
+ * module so the form mirrors the server's Zod schema exactly; the
+ * server is still the source of truth.
  *
  * Note: the application `id` is a stable text primary key referenced by
  * SSO handoff nonces — chosen carefully here, not editable from the
  * detail page.
  */
-const APP_ID_RE = /^[a-z0-9](?:[a-z0-9._-]{0,127})$/;
-const SUBDOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-
-function isHttpsOriginClient(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:") return false;
-  if (url.pathname !== "/" && url.pathname !== "") return false;
-  if (url.search !== "" || url.hash !== "") return false;
-  return url.origin === value || url.origin + "/" === value;
-}
 
 export function NewEnterpriseAppForm({ locale }: { locale: string }) {
   const t = useTranslations("administrator.enterpriseApps");
@@ -63,7 +49,7 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
       setError(tErr("invalidBody"));
       return;
     }
-    if (!isHttpsOriginClient(origin)) {
+    if (!isHttpsOrigin(origin)) {
       setError(tErr("invalidOrigin"));
       return;
     }

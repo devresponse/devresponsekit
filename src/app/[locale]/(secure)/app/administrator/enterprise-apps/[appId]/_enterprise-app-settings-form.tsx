@@ -6,6 +6,11 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  APP_STATUS_VALUES,
+  SUBDOMAIN_RE,
+  isHttpsOrigin,
+} from "@/lib/admin/enterprise-apps";
 
 /**
  * Client-side enterprise application settings form (docs/admin-manager.md
@@ -17,23 +22,10 @@ import { Label } from "@/components/ui/label";
  * it.
  *
  * When `canManage` is false, the form is rendered in read-only mode for
- * users with `admin.apps.read` only.
+ * users with `admin.apps.read` only. Validation helpers are imported
+ * from the shared `@/lib/admin/enterprise-apps` module so the rules
+ * stay in lock-step with the server.
  */
-const SUBDOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const STATUS_VALUES = ["available", "disabled"] as const;
-
-function isHttpsOriginClient(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:") return false;
-  if (url.pathname !== "/" && url.pathname !== "") return false;
-  if (url.search !== "" || url.hash !== "") return false;
-  return url.origin === value || url.origin + "/" === value;
-}
 
 export interface EnterpriseAppSettingsValue {
   id: string;
@@ -78,7 +70,7 @@ export function EnterpriseAppSettingsForm({
       setError(tErr("invalidBody"));
       return;
     }
-    if (!isHttpsOriginClient(origin)) {
+    if (!isHttpsOrigin(origin)) {
       setError(tErr("invalidOrigin"));
       return;
     }
@@ -95,7 +87,7 @@ export function EnterpriseAppSettingsForm({
       setError(tErr("invalidBody"));
       return;
     }
-    if (!STATUS_VALUES.includes(status as (typeof STATUS_VALUES)[number])) {
+    if (!APP_STATUS_VALUES.includes(status as (typeof APP_STATUS_VALUES)[number])) {
       setError(tErr("invalidBody"));
       return;
     }
@@ -228,7 +220,7 @@ export function EnterpriseAppSettingsForm({
           onChange={(e) => setStatus(e.currentTarget.value)}
           className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
         >
-          {STATUS_VALUES.map((s) => (
+          {APP_STATUS_VALUES.map((s) => (
             <option key={s} value={s}>
               {t(`status.${s}`)}
             </option>

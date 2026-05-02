@@ -68,6 +68,8 @@ export default async function AdministratorUserDetailPage({
 
   const t = await getTranslations({ locale, namespace: "administrator.users" });
 
+  const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
+
   // ISO-string-ify timestamps so the value crosses the RSC/client
   // boundary cleanly (Date instances aren't serializable through
   // children props).
@@ -103,7 +105,7 @@ export default async function AdministratorUserDetailPage({
         <Badge variant="outline">{translateStatus(t, user.status)}</Badge>
       </div>
 
-      <UserDetailTabs user={userJson} />
+      <UserDetailTabs user={userJson} canUpdateMemberships={canUpdateMemberships} />
     </section>
   );
 }

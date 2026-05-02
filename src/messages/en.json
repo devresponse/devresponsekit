@@ -191,6 +191,18 @@
         "expiresAt": "Expires {value}",
         "ipAddress": "IP",
         "userAgent": "User agent"
+      },
+      "memberships": {
+        "columns": {
+          "organization": "Organization",
+          "orgName": "Name",
+          "status": "Status",
+          "source": "Source",
+          "joinedAt": "Joined"
+        },
+        "removeButton": "Remove",
+        "removeConfirm": "Remove this membership?",
+        "removeError": "Could not remove the membership."
       }
     },
     "grid": {
@@ -217,7 +229,12 @@
       "authBackendFailed": "The authentication backend rejected the request.",
       "roleInUse": "This role is still assigned to one or more users and cannot be deleted.",
       "permissionInUse": "This permission is still assigned to one or more roles and cannot be deleted.",
-      "keyTaken": "That key is already in use."
+      "keyTaken": "That key is already in use.",
+      "slugTaken": "That slug is already in use.",
+      "organizationNotEmpty": "This organization still has members and cannot be deleted.",
+      "organizationIsDefault": "The default organization cannot be deleted.",
+      "membershipExists": "This user is already a member of the organization.",
+      "bindingExists": "This provider binding already exists."
     },
     "roles": {
       "title": "Roles",
@@ -350,6 +367,86 @@
         "confirm": "Delete permission"
       },
       "deleteError": "Could not delete the permission."
+    },
+    "orgs": {
+      "title": "Organizations",
+      "newButton": "New organization",
+      "deleteButton": "Delete",
+      "backToList": "Back to organizations",
+      "defaultYes": "Default",
+      "columns": {
+        "slug": "Slug",
+        "name": "Name",
+        "status": "Status",
+        "isDefault": "Default",
+        "memberCount": "Members",
+        "createdAt": "Created"
+      },
+      "fields": {
+        "slug": "Slug",
+        "slugHelp": "Lowercase letters, numbers, hyphens. 1-64 characters.",
+        "name": "Name",
+        "status": "Status",
+        "isDefault": "Set as default organization"
+      },
+      "tabs": {
+        "members": "Members",
+        "providers": "Providers",
+        "settings": "Settings"
+      },
+      "new": {
+        "title": "Create organization",
+        "description": "Add a new organization. The slug is used in URLs and cannot be easily changed.",
+        "submit": "Create organization",
+        "cancel": "Cancel",
+        "errorToast": "Could not create organization."
+      },
+      "settings": {
+        "save": "Save changes",
+        "saved": "Organization updated.",
+        "errorToast": "Could not save changes.",
+        "statusActive": "Active",
+        "statusPending": "Pending",
+        "statusSuspended": "Suspended",
+        "statusArchived": "Archived"
+      },
+      "members": {
+        "columns": {
+          "user": "User",
+          "status": "Status",
+          "source": "Source",
+          "joinedAt": "Joined"
+        },
+        "removeButton": "Remove",
+        "removeConfirm": "Remove this member from the organization?",
+        "removeError": "Could not remove the member."
+      },
+      "providers": {
+        "columns": {
+          "provider": "Provider",
+          "key": "Key",
+          "displayName": "Display Name",
+          "boundAt": "Bound"
+        },
+        "removeButton": "Remove",
+        "removeConfirm": "Remove this provider binding?",
+        "removeError": "Could not remove the binding."
+      },
+      "deleteDialog": {
+        "title": "Delete organization",
+        "description": "Deleting removes the organization. The organization must be empty (no members)."
+      },
+      "deleteError": "Could not delete the organization."
+    },
+    "memberships": {
+      "title": "Memberships",
+      "columns": {
+        "organization": "Organization",
+        "user": "User",
+        "status": "Status",
+        "source": "Source",
+        "createdAt": "Created"
+      }
     }
   }
 }

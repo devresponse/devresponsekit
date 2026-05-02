@@ -1,0 +1,141 @@
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
+import type { ColumnDef } from "@tanstack/react-table";
+import { Button } from "@/components/ui/button";
+import { DataGrid } from "../../_components/grid/data-grid";
+
+/**
+ * Providers tab for the organization detail (docs/admin-manager.md §19).
+ *
+ * Shows the provider bindings (e.g., GitHub orgs) linked to this organization.
+ */
+interface BindingRow {
+  id: string;
+  provider: string;
+  provider_organization_key: string;
+  display_name: string | null;
+  created_at: string;
+}
+
+export function OrganizationProvidersGrid({
+  orgId,
+  canUpdate,
+}: {
+  orgId: string;
+  canUpdate: boolean;
+}) {
+  const t = useTranslations("administrator.orgs.providers");
+  const locale = useLocale();
+
+  const dateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
+    [locale],
+  );
+
+  const [reloadKey, setReloadKey] = useState(0);
+  const [rowError, setRowError] = useState<string | null>(null);
+
+  const onRemove = useCallback(
+    async (bindingId: string, provider: string, key: string) => {
+      if (!window.confirm(t("removeConfirm") + `\n\n${provider}: ${key}`)) return;
+      setRowError(null);
+      const res = await fetch(`/api/administrator/organizations/${orgId}/provider-bindings`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bindingIds: [bindingId] }),
+      });
+      if (!res.ok) {
+        setRowError(t("removeError"));
+        return;
+      }
+      setReloadKey((k) => k + 1);
+    },
+    [t, orgId],
+  );
+
+  const columns = useMemo<ColumnDef<BindingRow, unknown>[]>(
+    () => [
+      {
+        id: "provider",
+        accessorKey: "provider",
+        header: () => t("columns.provider"),
+        cell: ({ row }) => row.original.provider,
+      },
+      {
+        id: "provider_organization_key",
+        accessorKey: "provider_organization_key",
+        header: () => t("columns.key"),
+        cell: ({ row }) => (
+          <code className="text-xs">{row.original.provider_organization_key}</code>
+        ),
+      },
+      {
+        id: "display_name",
+        accessorKey: "display_name",
+        header: () => t("columns.displayName"),
+        cell: ({ row }) => row.original.display_name ?? "—",
+      },
+      {
+        id: "created_at",
+        accessorKey: "created_at",
+        header: () => t("columns.boundAt"),
+        cell: ({ row }) => {
+          const d = new Date(row.original.created_at);
+          return Number.isNaN(d.getTime())
+            ? row.original.created_at
+            : dateFormatter.format(d);
+        },
+      },
+      ...(canUpdate
+        ? [
+            {
+              id: "actions",
+              header: () => "",
+              cell: ({ row }: { row: { original: BindingRow } }) => (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      onRemove(
+                        row.original.id,
+                        row.original.provider,
+                        row.original.provider_organization_key,
+                      )
+                    }
+                  >
+                    {t("removeButton")}
+                  </Button>
+                </div>
+              ),
+            } as ColumnDef<BindingRow, unknown>,
+          ]
+        : []),
+    ],
+    [t, dateFormatter, canUpdate, onRemove],
+  );
+
+  return (
+    <div className="space-y-2">
+      {rowError ? (
+        <p className="text-sm text-red-600" role="alert">
+          {rowError}
+        </p>
+      ) : null}
+      <DataGrid<BindingRow>
+        key={reloadKey}
+        name={`administrator.org-providers.${orgId}`}
+        endpoint={`/api/administrator/organizations/${orgId}/provider-bindings`}
+        columns={columns}
+        options={{
+          defaultPageSize: 25,
+          defaultSort: [{ field: "created_at", direction: "desc" }],
+        }}
+      />
+    </div>
+  );
+}

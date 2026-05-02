@@ -191,6 +191,18 @@
         "expiresAt": "Caduca {value}",
         "ipAddress": "IP",
         "userAgent": "Agente de usuario"
+      },
+      "memberships": {
+        "columns": {
+          "organization": "Organización",
+          "orgName": "Nombre",
+          "status": "Estado",
+          "source": "Fuente",
+          "joinedAt": "Unido"
+        },
+        "removeButton": "Eliminar",
+        "removeConfirm": "¿Eliminar esta membresía?",
+        "removeError": "No se pudo eliminar la membresía."
       }
     },
     "grid": {
@@ -217,7 +229,12 @@
       "authBackendFailed": "El backend de autenticación rechazó la solicitud.",
       "roleInUse": "Este rol todavía está asignado a uno o más usuarios y no se puede eliminar.",
       "permissionInUse": "Este permiso todavía está asignado a uno o más roles y no se puede eliminar.",
-      "keyTaken": "Esa clave ya está en uso."
+      "keyTaken": "Esa clave ya está en uso.",
+      "slugTaken": "Ese slug ya está en uso.",
+      "organizationNotEmpty": "Esta organización todavía tiene miembros y no se puede eliminar.",
+      "organizationIsDefault": "La organización predeterminada no se puede eliminar.",
+      "membershipExists": "Este usuario ya es miembro de la organización.",
+      "bindingExists": "Este enlace de proveedor ya existe."
     },
     "roles": {
       "title": "Roles",
@@ -342,6 +359,86 @@
         "confirm": "Eliminar permiso"
       },
       "deleteError": "No se pudo eliminar el permiso."
+    },
+    "orgs": {
+      "title": "Organizaciones",
+      "newButton": "Nueva organización",
+      "deleteButton": "Eliminar",
+      "backToList": "Volver a organizaciones",
+      "defaultYes": "Predeterminada",
+      "columns": {
+        "slug": "Slug",
+        "name": "Nombre",
+        "status": "Estado",
+        "isDefault": "Predeterminada",
+        "memberCount": "Miembros",
+        "createdAt": "Creado"
+      },
+      "fields": {
+        "slug": "Slug",
+        "slugHelp": "Letras minúsculas, números, guiones. 1-64 caracteres.",
+        "name": "Nombre",
+        "status": "Estado",
+        "isDefault": "Establecer como organización predeterminada"
+      },
+      "tabs": {
+        "members": "Miembros",
+        "providers": "Proveedores",
+        "settings": "Configuración"
+      },
+      "new": {
+        "title": "Crear organización",
+        "description": "Añadir una nueva organización. El slug se usa en las URL y no se puede cambiar fácilmente.",
+        "submit": "Crear organización",
+        "cancel": "Cancelar",
+        "errorToast": "No se pudo crear la organización."
+      },
+      "settings": {
+        "save": "Guardar cambios",
+        "saved": "Organización actualizada.",
+        "errorToast": "No se pudieron guardar los cambios.",
+        "statusActive": "Activa",
+        "statusPending": "Pendiente",
+        "statusSuspended": "Suspendida",
+        "statusArchived": "Archivada"
+      },
+      "members": {
+        "columns": {
+          "user": "Usuario",
+          "status": "Estado",
+          "source": "Fuente",
+          "joinedAt": "Unido"
+        },
+        "removeButton": "Eliminar",
+        "removeConfirm": "¿Eliminar a este miembro de la organización?",
+        "removeError": "No se pudo eliminar al miembro."
+      },
+      "providers": {
+        "columns": {
+          "provider": "Proveedor",
+          "key": "Clave",
+          "displayName": "Nombre para mostrar",
+          "boundAt": "Vinculado"
+        },
+        "removeButton": "Eliminar",
+        "removeConfirm": "¿Eliminar este enlace de proveedor?",
+        "removeError": "No se pudo eliminar el enlace."
+      },
+      "deleteDialog": {
+        "title": "Eliminar organización",
+        "description": "Al eliminar se quita la organización. La organización debe estar vacía (sin miembros)."
+      },
+      "deleteError": "No se pudo eliminar la organización."
+    },
+    "memberships": {
+      "title": "Membresías",
+      "columns": {
+        "organization": "Organización",
+        "user": "Usuario",
+        "status": "Estado",
+        "source": "Fuente",
+        "createdAt": "Creado"
+      }
     }
   }
 }

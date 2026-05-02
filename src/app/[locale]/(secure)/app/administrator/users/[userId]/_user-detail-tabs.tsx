@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { UserSessionsPanel } from "./_user-sessions-panel";
+import { UserMembershipsPanel } from "./_user-memberships-panel";
 
 /**
  * Client-side tab container for the user detail page (plan §8.4).
@@ -30,7 +31,7 @@ export interface UserDetailJson {
   deactivated_reason: string | null;
 }
 
-export function UserDetailTabs({ user }: { user: UserDetailJson }) {
+export function UserDetailTabs({ user, canUpdateMemberships }: { user: UserDetailJson; canUpdateMemberships: boolean }) {
   const t = useTranslations("administrator.users");
   const locale = useLocale();
 
@@ -98,9 +99,8 @@ export function UserDetailTabs({ user }: { user: UserDetailJson }) {
         {/* Phase 4 placeholder. */}
         <p>—</p>
       </TabsContent>
-      <TabsContent value="memberships" className="mt-4 text-sm text-neutral-600">
-        {/* Phase 5 placeholder. */}
-        <p>—</p>
+      <TabsContent value="memberships" className="mt-4">
+        <UserMembershipsPanel userId={user.id} canUpdate={canUpdateMemberships} />
       </TabsContent>
 
       <TabsContent value="sessions" className="mt-4">

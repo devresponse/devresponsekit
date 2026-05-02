@@ -36,7 +36,16 @@ export type AdminErrorCode =
   | "role_in_use"
   | "permission_not_found"
   | "permission_in_use"
-  | "key_taken";
+  | "key_taken"
+  | "organization_not_found"
+  | "organization_not_empty"
+  | "organization_is_default"
+  | "slug_taken"
+  | "membership_not_found"
+  | "membership_exists"
+  | "binding_not_found"
+  | "binding_exists"
+  | "user_not_found";
 
 export class AdminError extends Error {
   readonly code: AdminErrorCode;

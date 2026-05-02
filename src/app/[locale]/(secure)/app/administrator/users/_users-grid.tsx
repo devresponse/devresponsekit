@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { DataGrid } from "../_components/grid/data-grid";
@@ -27,6 +27,14 @@ interface UserRow {
 
 export function AdministratorUsersGrid() {
   const t = useTranslations("administrator.users.columns");
+  const locale = useLocale();
+  // Memoize the formatter — `Intl.DateTimeFormat` construction is the
+  // expensive part; reusing it across rows and renders keeps the grid
+  // cheap.
+  const dateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
+    [locale],
+  );
 
   const columns = useMemo<ColumnDef<UserRow, unknown>[]>(
     () => [
@@ -51,10 +59,10 @@ export function AdministratorUsersGrid() {
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("createdAt"),
-        cell: ({ row }) => formatDate(row.original.created_at),
+        cell: ({ row }) => formatDate(row.original.created_at, dateFormatter),
       },
     ],
-    [t],
+    [t, dateFormatter],
   );
 
   return (
@@ -70,9 +78,10 @@ export function AdministratorUsersGrid() {
   );
 }
 
-function formatDate(value: string): string {
-  // Defensive: server returns ISO timestamps. Render falls back to the
-  // raw string if parsing fails so the cell never turns into "Invalid Date".
+function formatDate(value: string, formatter: Intl.DateTimeFormat): string {
+  // Defensive: the server returns ISO timestamps. Render falls back to
+  // the raw string if parsing fails so the cell never turns into
+  // "Invalid Date".
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : d.toISOString().slice(0, 10);
+  return Number.isNaN(d.getTime()) ? value : formatter.format(d);
 }

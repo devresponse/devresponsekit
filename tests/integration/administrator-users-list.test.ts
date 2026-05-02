@@ -42,35 +42,23 @@ vi.mock("@/lib/audit.server", () => ({
 vi.mock("@/db/database", () => ({
   db: {
     selectFrom: () => {
-      // We need TWO terminal-ish branches to be reachable: items.execute()
-      // and total.executeTakeFirst(). The handler builds a `base` then
-      // forks; both forks share the same chainable shape. We dispatch by
-      // call order — first `execute` is items, first `executeTakeFirst`
-      // is total — using two separate mocks routed via the proxy below.
-      let kind: "items" | "total" | null = null;
+      // The handler builds `base`, then forks into:
+      //   items: ...select([...]).execute()              -> itemsExecute
+      //   total: ...select(sql`count(*)`).executeTakeFirst() -> totalExecute
+      // We dispatch by *terminal* method so the test does not have to
+      // model the inner builder semantics — `where`, `select`, `orderBy`,
+      // `limit`, `offset` all return the same chainable proxy.
       const proxy: unknown = new Proxy(
         {},
         {
           get(_, prop) {
-            if (prop === "select") {
-              return (cols: unknown) => {
-                // The total query passes a single sql expression aliased
-                // as "total" (an object with a `toOperationNode`-ish
-                // shape) — distinguish by argument shape.
-                if (Array.isArray(cols)) kind = "items";
-                else kind = "total";
-                return proxy;
-              };
-            }
-            if (prop === "execute") {
-              return kind === "items" ? itemsExecute : itemsExecute;
-            }
-            if (prop === "executeTakeFirst") {
-              return totalExecute;
-            }
+            if (prop === "execute") return itemsExecute;
+            if (prop === "executeTakeFirst") return totalExecute;
             return (...args: unknown[]) => {
               const cb = args[0];
               if (typeof cb === "function") {
+                // Invoke the eb callback so the handler doesn't crash
+                // on the `eb.or([...])` builder shape.
                 (cb as (eb: unknown) => unknown)(
                   new Proxy(() => ({}), {
                     get: () => () => ({}),

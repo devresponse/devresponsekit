@@ -214,7 +214,142 @@
       "invalidBody": "The submitted data is invalid.",
       "emailTaken": "That email address is already in use.",
       "notFound": "The requested resource could not be found.",
-      "authBackendFailed": "The authentication backend rejected the request."
+      "authBackendFailed": "The authentication backend rejected the request.",
+      "roleInUse": "This role is still assigned to one or more users and cannot be deleted.",
+      "permissionInUse": "This permission is still assigned to one or more roles and cannot be deleted.",
+      "keyTaken": "That key is already in use."
+    },
+    "roles": {
+      "title": "Roles",
+      "newButton": "New role",
+      "duplicateButton": "Duplicate",
+      "deleteButton": "Delete",
+      "editButton": "Edit",
+      "backToList": "Back to roles",
+      "scope": {
+        "global": "Global",
+        "org": "Organization"
+      },
+      "columns": {
+        "key": "Key",
+        "name": "Name",
+        "scope": "Scope",
+        "organization": "Organization",
+        "permissionCount": "Permissions",
+        "memberCount": "Members",
+        "createdAt": "Created"
+      },
+      "filters": {
+        "scope": "Scope",
+        "organization": "Organization",
+        "permission": "Permission key",
+        "search": "Search roles"
+      },
+      "tabs": {
+        "permissions": "Permissions",
+        "members": "Members",
+        "settings": "Settings"
+      },
+      "fields": {
+        "key": "Key",
+        "name": "Name",
+        "description": "Description",
+        "scope": "Scope",
+        "organization": "Organization"
+      },
+      "new": {
+        "title": "Create role",
+        "description": "Create a new application role. Pick \"Global\" for a platform-wide role or assign it to an organization. The key is permanent after creation.",
+        "submit": "Create role",
+        "cancel": "Cancel",
+        "successToast": "Role {key} created.",
+        "errorToast": "Could not create role."
+      },
+      "settings": {
+        "save": "Save changes",
+        "saved": "Saved.",
+        "errorToast": "Could not save changes.",
+        "keyReadOnly": "The key cannot be changed after creation."
+      },
+      "permissionsEditor": {
+        "title": "Manage permissions",
+        "available": "Available",
+        "assigned": "Assigned",
+        "searchAvailable": "Search available permissions",
+        "searchAssigned": "Search assigned permissions",
+        "add": "Add",
+        "remove": "Remove",
+        "save": "Save changes",
+        "saving": "Saving…",
+        "saved": "Permissions updated.",
+        "noResults": "No matching permissions.",
+        "empty": "No permissions assigned yet.",
+        "errorToast": "Could not update permissions."
+      },
+      "members": {
+        "empty": "No members carry this role yet.",
+        "revoke": "Revoke",
+        "revokeConfirm": "Revoke this role from {email}?",
+        "errorToast": "Could not revoke the role.",
+        "columns": {
+          "email": "Email",
+          "name": "Name",
+          "organization": "Organization",
+          "assignedAt": "Assigned"
+        }
+      },
+      "deleteDialog": {
+        "title": "Delete role",
+        "description": "Deleting removes the role and its permission attachments. The role must not be assigned to any user.",
+        "confirm": "Delete role"
+      },
+      "duplicateConfirm": "Create a copy of this role?",
+      "duplicateError": "Could not duplicate the role.",
+      "deleteError": "Could not delete the role."
+    },
+    "permissions": {
+      "title": "Permissions",
+      "description": "The catalog of permission keys consumed by application roles.",
+      "newButton": "New permission",
+      "editButton": "Edit",
+      "deleteButton": "Delete",
+      "columns": {
+        "key": "Key",
+        "description": "Description",
+        "usedByRoleCount": "Roles using this",
+        "actions": "Actions"
+      },
+      "filters": {
+        "search": "Search permissions"
+      },
+      "fields": {
+        "key": "Key",
+        "description": "Description"
+      },
+      "new": {
+        "title": "Create permission",
+        "description": "Add a new permission key to the catalog. The key is referenced by code and audit rows; choose carefully.",
+        "submit": "Create permission",
+        "cancel": "Cancel",
+        "errorToast": "Could not create permission."
+      },
+      "edit": {
+        "title": "Edit permission",
+        "submit": "Save",
+        "cancel": "Cancel",
+        "errorToast": "Could not save changes."
+      },
+      "rolesUsing": {
+        "title": "Roles using this permission",
+        "empty": "No roles currently use this permission.",
+        "viewRole": "View role"
+      },
+      "deleteDialog": {
+        "title": "Delete permission",
+        "description": "Deleting removes the permission from the catalog. It must not be referenced by any role.",
+        "confirm": "Delete permission"
+      },
+      "deleteError": "Could not delete the permission."
     }
   }
 }

@@ -214,7 +214,134 @@
       "invalidBody": "Les données soumises ne sont pas valides.",
       "emailTaken": "Cette adresse e-mail est déjà utilisée.",
       "notFound": "La ressource demandée est introuvable.",
-      "authBackendFailed": "Le backend d'authentification a rejeté la requête."
+      "authBackendFailed": "Le backend d'authentification a rejeté la requête.",
+      "roleInUse": "Ce rôle est encore attribué à un ou plusieurs utilisateurs et ne peut pas être supprimé.",
+      "permissionInUse": "Cette permission est encore attribuée à un ou plusieurs rôles et ne peut pas être supprimée.",
+      "keyTaken": "Cette clé est déjà utilisée."
+    },
+    "roles": {
+      "title": "Rôles",
+      "newButton": "Nouveau rôle",
+      "duplicateButton": "Dupliquer",
+      "deleteButton": "Supprimer",
+      "editButton": "Modifier",
+      "backToList": "Retour aux rôles",
+      "scope": { "global": "Global", "org": "Organisation" },
+      "columns": {
+        "key": "Clé",
+        "name": "Nom",
+        "scope": "Portée",
+        "organization": "Organisation",
+        "permissionCount": "Permissions",
+        "memberCount": "Membres",
+        "createdAt": "Créé"
+      },
+      "filters": {
+        "scope": "Portée",
+        "organization": "Organisation",
+        "permission": "Clé de permission",
+        "search": "Rechercher des rôles"
+      },
+      "tabs": {
+        "permissions": "Permissions",
+        "members": "Membres",
+        "settings": "Paramètres"
+      },
+      "fields": {
+        "key": "Clé",
+        "name": "Nom",
+        "description": "Description",
+        "scope": "Portée",
+        "organization": "Organisation"
+      },
+      "new": {
+        "title": "Créer un rôle",
+        "description": "Créez un nouveau rôle d'application. Choisissez « Global » pour un rôle à l'échelle de la plateforme ou attribuez-le à une organisation. La clé est permanente après la création.",
+        "submit": "Créer le rôle",
+        "cancel": "Annuler",
+        "successToast": "Rôle {key} créé.",
+        "errorToast": "Impossible de créer le rôle."
+      },
+      "settings": {
+        "save": "Enregistrer les modifications",
+        "saved": "Enregistré.",
+        "errorToast": "Impossible d'enregistrer les modifications.",
+        "keyReadOnly": "La clé ne peut pas être modifiée après la création."
+      },
+      "permissionsEditor": {
+        "title": "Gérer les permissions",
+        "available": "Disponibles",
+        "assigned": "Attribuées",
+        "searchAvailable": "Rechercher dans les permissions disponibles",
+        "searchAssigned": "Rechercher dans les permissions attribuées",
+        "add": "Ajouter",
+        "remove": "Retirer",
+        "save": "Enregistrer",
+        "saving": "Enregistrement…",
+        "saved": "Permissions mises à jour.",
+        "noResults": "Aucune permission correspondante.",
+        "empty": "Aucune permission attribuée pour le moment.",
+        "errorToast": "Impossible de mettre à jour les permissions."
+      },
+      "members": {
+        "empty": "Aucun membre n'a encore ce rôle.",
+        "revoke": "Révoquer",
+        "revokeConfirm": "Révoquer ce rôle de {email} ?",
+        "errorToast": "Impossible de révoquer le rôle.",
+        "columns": {
+          "email": "E-mail",
+          "name": "Nom",
+          "organization": "Organisation",
+          "assignedAt": "Attribué"
+        }
+      },
+      "deleteDialog": {
+        "title": "Supprimer le rôle",
+        "description": "La suppression retire le rôle et ses permissions. Le rôle ne doit être attribué à aucun utilisateur.",
+        "confirm": "Supprimer le rôle"
+      },
+      "duplicateConfirm": "Créer une copie de ce rôle ?",
+      "duplicateError": "Impossible de dupliquer le rôle.",
+      "deleteError": "Impossible de supprimer le rôle."
+    },
+    "permissions": {
+      "title": "Permissions",
+      "description": "Catalogue des clés de permission utilisées par les rôles d'application.",
+      "newButton": "Nouvelle permission",
+      "editButton": "Modifier",
+      "deleteButton": "Supprimer",
+      "columns": {
+        "key": "Clé",
+        "description": "Description",
+        "usedByRoleCount": "Rôles l'utilisant",
+        "actions": "Actions"
+      },
+      "filters": { "search": "Rechercher des permissions" },
+      "fields": { "key": "Clé", "description": "Description" },
+      "new": {
+        "title": "Créer une permission",
+        "description": "Ajoutez une nouvelle clé de permission au catalogue. La clé est référencée par le code et les journaux d'audit ; choisissez-la avec soin.",
+        "submit": "Créer la permission",
+        "cancel": "Annuler",
+        "errorToast": "Impossible de créer la permission."
+      },
+      "edit": {
+        "title": "Modifier la permission",
+        "submit": "Enregistrer",
+        "cancel": "Annuler",
+        "errorToast": "Impossible d'enregistrer les modifications."
+      },
+      "rolesUsing": {
+        "title": "Rôles utilisant cette permission",
+        "empty": "Aucun rôle n'utilise actuellement cette permission.",
+        "viewRole": "Voir le rôle"
+      },
+      "deleteDialog": {
+        "title": "Supprimer la permission",
+        "description": "La suppression retire la permission du catalogue. Elle ne doit être référencée par aucun rôle.",
+        "confirm": "Supprimer la permission"
+      },
+      "deleteError": "Impossible de supprimer la permission."
     }
   }
 }

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
+import { z } from "zod";
 import { db } from "@/db/database";
 import {
   applySortAndPagination,
@@ -11,6 +12,8 @@ import {
   isAdminPermissionDenial,
   requireAdminPermission,
 } from "@/lib/admin/permissions.server";
+import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 
 export const dynamic = "force-dynamic";
 
@@ -102,4 +105,136 @@ export async function GET(request: NextRequest) {
   const total = Number(totalRow?.total ?? 0);
 
   return NextResponse.json(buildListResponse(items, total, query));
+}
+
+/**
+ * POST /api/administrator/users
+ *
+ * Creates a new Better Auth user (via the admin plugin) and persists
+ * the corresponding `app_users` row in a single transaction. Per
+ * docs/admin-manager.md §4 + §8.3:
+ *
+ *   - Caller MUST hold `admin.users.create`.
+ *   - Body validated with Zod (`.strict()` — unknown keys rejected).
+ *   - The Better Auth `role` field is the auth role (`user`/`admin`),
+ *     distinct from app roles managed by `app_user_roles`.
+ *   - Initial app status defaults to `pending_approval` so admin
+ *     approval is still required even when an admin creates the user.
+ *   - The new password is forwarded to Better Auth and never logged or
+ *     returned in the response or audit metadata.
+ */
+const createSchema = z
+  .object({
+    email: z.email(),
+    password: z.string().min(8).max(128),
+    name: z.string().min(1).max(200).optional(),
+    role: z.enum(["admin", "user"]).optional(),
+    initialAppStatus: z
+      .enum(["active", "pending_approval"])
+      .optional()
+      .default("pending_approval"),
+    preferredLocale: z.string().min(2).max(10).optional(),
+  })
+  .strict();
+
+export async function POST(request: NextRequest) {
+  const guard = await requireAdminPermission(request, "admin.users.create");
+  if (isAdminPermissionDenial(guard)) return guard.response;
+
+  let json: unknown;
+  try {
+    json = await request.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+  const parsed = createSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
+
+  const input = parsed.data;
+
+  // Reject duplicate emails up-front with a clean error rather than
+  // letting Better Auth raise a generic constraint failure. This is a
+  // best-effort check — the unique index on `app_users.primary_email`
+  // is the source of truth.
+  const existing = await db
+    .selectFrom("app_users")
+    .select(["id"])
+    .where(sql`lower(primary_email)`, "=", input.email.toLowerCase())
+    .executeTakeFirst();
+  if (existing) {
+    return NextResponse.json({ error: "email_taken" }, { status: 409 });
+  }
+
+  let created;
+  try {
+    created = await createBetterAuthUser(
+      {
+        email: input.email,
+        password: input.password,
+        name: input.name ?? input.email,
+        role: input.role,
+      },
+      request,
+    );
+  } catch (err) {
+    await auditUserAction("admin.user.create_failed", "failure", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: "00000000-0000-0000-0000-000000000000",
+      email: input.email,
+      reason: "auth_create_user_failed",
+      metadata: { message: err instanceof Error ? err.message : "unknown" },
+    });
+    return NextResponse.json({ error: "auth_create_failed" }, { status: 502 });
+  }
+
+  // Better Auth's create-user returns either `{ user: { id, ... } }` or
+  // a flat user object depending on plugin version; accept either shape.
+  const betterAuthUserId =
+    (created as { user?: { id?: string }; id?: string } | null | undefined)?.user?.id ??
+    (created as { id?: string } | null | undefined)?.id;
+  if (!betterAuthUserId) {
+    return NextResponse.json({ error: "auth_create_failed" }, { status: 502 });
+  }
+
+  // Insert the application user row. We deliberately do NOT auto-create
+  // a membership here — that's the responsibility of the membership
+  // endpoint (Phase 5), and admin-created users are explicitly approved
+  // (or not) by an admin in a follow-up action.
+  const appUser = await db
+    .insertInto("app_users")
+    .values({
+      better_auth_user_id: betterAuthUserId,
+      primary_email: input.email,
+      display_name: input.name ?? null,
+      status: input.initialAppStatus,
+      preferred_locale: input.preferredLocale ?? "en",
+    })
+    .returning(["id", "primary_email", "status"])
+    .executeTakeFirstOrThrow();
+
+  await auditUserAction("admin.user.created", "success", {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    appUserId: appUser.id,
+    email: appUser.primary_email,
+    metadata: {
+      betterAuthUserId,
+      initialAppStatus: appUser.status,
+      role: input.role ?? null,
+    },
+  });
+
+  return NextResponse.json(
+    {
+      ok: true,
+      id: appUser.id,
+      better_auth_user_id: betterAuthUserId,
+      primary_email: appUser.primary_email,
+      status: appUser.status,
+    },
+    { status: 201 },
+  );
 }

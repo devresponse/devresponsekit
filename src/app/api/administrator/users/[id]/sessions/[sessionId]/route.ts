@@ -1,0 +1,69 @@
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { revokeBetterAuthUserSession } from "@/lib/admin/auth-admin.server";
+import {
+  isAdminPermissionDenial,
+  requireAdminPermission,
+} from "@/lib/admin/permissions.server";
+import {
+  isResolvedUserResponse,
+  resolveTargetUser,
+} from "@/lib/admin/user-target.server";
+
+export const dynamic = "force-dynamic";
+
+type RouteContext = { params: Promise<{ id: string; sessionId: string }> };
+
+/**
+ * DELETE /api/administrator/users/[id]/sessions/[sessionId]
+ *
+ * Revokes one specific Better Auth session for the target user. The
+ * `sessionId` here is the Better Auth session token. Caller MUST hold
+ * `admin.users.sessions`.
+ *
+ * The user `id` parameter exists for URL clarity and audit grouping;
+ * Better Auth's revoke API only requires the session token. We still
+ * validate the user resolves so callers cannot probe by guessing only
+ * a session token.
+ */
+export async function DELETE(request: NextRequest, ctx: RouteContext) {
+  const guard = await requireAdminPermission(request, "admin.users.sessions");
+  if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const { id, sessionId } = await ctx.params;
+  if (!sessionId || sessionId.length < 1 || sessionId.length > 256) {
+    return NextResponse.json({ error: "invalid_session_id" }, { status: 400 });
+  }
+  const target = await resolveTargetUser(id);
+  if (isResolvedUserResponse(target)) return target;
+
+  try {
+    await revokeBetterAuthUserSession(sessionId, request);
+  } catch (err) {
+    await auditUserAction("admin.user.session_revoke_failed", "failure", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      reason: "auth_revoke_session_failed",
+      // Do NOT log the raw session token in metadata — fingerprint
+      // length only so ops can debug shape issues without leaking it.
+      metadata: {
+        message: err instanceof Error ? err.message : "unknown",
+        sessionTokenLength: sessionId.length,
+      },
+    });
+    return NextResponse.json({ error: "auth_revoke_session_failed" }, { status: 502 });
+  }
+
+  await auditUserAction("admin.user.session_revoked", "success", {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    appUserId: target.appUserId,
+    email: target.primaryEmail,
+    metadata: { sessionTokenLength: sessionId.length },
+  });
+
+  return NextResponse.json({ ok: true });
+}

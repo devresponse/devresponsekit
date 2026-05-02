@@ -93,6 +93,7 @@
     },
     "users": {
       "title": "Utilisateurs",
+      "newButton": "Nouvel utilisateur",
       "columns": {
         "email": "E-mail",
         "displayName": "Nom",
@@ -102,6 +103,94 @@
       "filters": {
         "status": "Statut",
         "search": "Rechercher des utilisateurs"
+      },
+      "status": {
+        "active": "Actif",
+        "pending_approval": "En attente d'approbation",
+        "blocked": "Bloqué",
+        "suspended": "Suspendu",
+        "deactivated": "Désactivé"
+      },
+      "tabs": {
+        "overview": "Vue d'ensemble",
+        "roles": "Rôles",
+        "memberships": "Adhésions",
+        "sessions": "Sessions",
+        "audit": "Audit"
+      },
+      "detail": {
+        "backToList": "Retour aux utilisateurs",
+        "notFound": "Utilisateur introuvable.",
+        "metaCreated": "Créé {value}",
+        "metaUpdated": "Mis à jour {value}",
+        "betterAuthId": "ID utilisateur Better Auth",
+        "appUserId": "ID utilisateur application",
+        "deactivated": "Désactivé {value}",
+        "deactivatedBy": "Désactivé par {actor}",
+        "deactivatedReason": "Motif : {reason}"
+      },
+      "fields": {
+        "email": "E-mail",
+        "displayName": "Nom affiché",
+        "preferredLocale": "Langue préférée",
+        "password": "Mot de passe",
+        "role": "Rôle Better Auth",
+        "initialAppStatus": "Statut applicatif initial",
+        "reason": "Motif"
+      },
+      "new": {
+        "title": "Créer un utilisateur",
+        "description": "Crée un utilisateur Better Auth et l'enregistrement applicatif correspondant. L'utilisateur est créé avec le statut applicatif choisi ; l'approbation manuelle est recommandée pour les comptes non fiables.",
+        "submit": "Créer l'utilisateur",
+        "cancel": "Annuler",
+        "passwordHint": "Au moins 8 caractères. Le mot de passe est transmis à Better Auth et n'est jamais journalisé.",
+        "successToast": "Utilisateur {email} créé.",
+        "errorToast": "Impossible de créer l'utilisateur."
+      },
+      "actions": {
+        "viewDetail": "Voir",
+        "approve": "Approuver",
+        "block": "Bloquer",
+        "suspend": "Suspendre",
+        "reactivate": "Réactiver",
+        "ban": "Bannir",
+        "unban": "Lever le bannissement",
+        "setRole": "Définir le rôle Better Auth",
+        "setPassword": "Définir le mot de passe",
+        "revokeSessions": "Révoquer toutes les sessions",
+        "softDelete": "Supprimer (soft)",
+        "restore": "Restaurer",
+        "confirm": "Confirmer",
+        "cancel": "Annuler"
+      },
+      "dialogs": {
+        "ban": {
+          "title": "Bannir l'utilisateur",
+          "description": "Le bannissement empêche l'utilisateur de se connecter. Un motif est obligatoire et est consigné dans le journal d'audit."
+        },
+        "softDelete": {
+          "title": "Supprimer l'utilisateur (soft)",
+          "description": "La suppression douce bannit l'utilisateur dans Better Auth et marque l'enregistrement applicatif comme désactivé. L'action Restaurer inverse cette opération."
+        },
+        "setPassword": {
+          "title": "Définir le mot de passe",
+          "description": "Choisissez un mode. « Définir un nouveau mot de passe » remplace directement le mot de passe de l'utilisateur. « Envoyer un e-mail de réinitialisation » demande à Better Auth d'envoyer un lien par e-mail.",
+          "modeSet": "Définir un nouveau mot de passe",
+          "modeReset": "Envoyer un e-mail de réinitialisation"
+        },
+        "setRole": {
+          "title": "Définir le rôle Better Auth",
+          "description": "Il s'agit du rôle au niveau de l'authentification (admin / user), distinct des rôles applicatifs."
+        }
+      },
+      "sessions": {
+        "title": "Sessions actives",
+        "empty": "Aucune session active.",
+        "revokeOne": "Révoquer",
+        "revokeAll": "Révoquer toutes les sessions",
+        "expiresAt": "Expire {value}",
+        "ipAddress": "IP",
+        "userAgent": "Agent utilisateur"
       }
     },
     "grid": {
@@ -120,7 +209,12 @@
       "sortNone": "Non trié"
     },
     "errors": {
-      "forbidden": "Vous n'avez pas l'autorisation de voir cette page."
+      "forbidden": "Vous n'avez pas l'autorisation de voir cette page.",
+      "generic": "Une erreur est survenue. Réessayez.",
+      "invalidBody": "Les données soumises ne sont pas valides.",
+      "emailTaken": "Cette adresse e-mail est déjà utilisée.",
+      "notFound": "La ressource demandée est introuvable.",
+      "authBackendFailed": "Le backend d'authentification a rejeté la requête."
     }
   }
 }

@@ -133,9 +133,15 @@ src/app/[locale]/(secure)/app/administrator/
 - `administrator/layout.tsx` renders an `ApplicationShell`
   (`@/components/app-shell/application-shell`) with:
   - `left` = `<AdministratorSidebar/>` — the workspace navigation,
-    distinct from the root shell sidebar.
-  - `header` = a slim per-app context bar: breadcrumbs + global "scope"
-    organization picker + global search box.
+    distinct from the root shell sidebar. Decision: the Administrator
+    workspace is fully self-contained and renders its own left rail in
+    addition to the root `SecureSidebar` (the two are intentionally
+    separate; the root sidebar exposes the application launcher entry,
+    the workspace sidebar exposes the in-app navigation).
+  - `header` = a slim per-app context bar: breadcrumbs + global search
+    box. There is **no** global organization scope picker — every grid
+    carries its own per-grid `organization` filter (decision: filtering
+    is per-grid only).
   - `children` = the active page's content.
 - The nested shell automatically picks up the `data-variant="nested"`
   CSS variables (per `application-shell.tsx`), giving the workspace its
@@ -203,13 +209,21 @@ Better Auth tables (`user`, `account`, `session`, `verification`) are
 **read** through `authClient.admin.*` / `auth.api.*` only; the
 Administrator app never writes to them through Kysely.
 
-A future read-optimization migration may add:
+A read-optimization migration `0002-administrator-indexes.sql` is delivered up-front (decision: add the indexes from the beginning,
+without waiting on profiling evidence) and adds:
 
-- Partial indexes on `app_audit_events(actor_better_auth_user_id, created_at desc)`.
-- Trigram (`pg_trgm`) index on `app_users(primary_email)` and
-  `app_users(display_name)` for the global search box. This goes in a
-  new `0002-administrator-indexes.sql` migration **only if** the load
-  test in §15.4 shows it is needed.
+- `pg_trgm` extension (`CREATE EXTENSION IF NOT EXISTS pg_trgm`).
+- Partial / btree indexes:
+  - `app_users (status)`, `app_users (created_at desc)`.
+  - `app_audit_events (created_at desc)`,
+    `app_audit_events (event_type, created_at desc)`,
+    `app_audit_events (actor_better_auth_user_id, created_at desc)`.
+  - `app_organization_memberships (app_user_id)`,
+    `app_organization_memberships (organization_id, status)`.
+  - `app_user_roles (app_user_id)`,
+    `app_user_roles (role_id)`.
+- Trigram (`pg_trgm`) GIN indexes on `app_users(primary_email)` and
+  `app_users(display_name)` for the global search box.
 
 ---
 
@@ -229,10 +243,10 @@ browser).
 | `admin.createUser` | Create user with email/password and initial role | "New user" dialog/form | `admin.users.create` | client |
 | `admin.updateUser` | Edit name / email / role | User overview tab | `admin.users.update` | client |
 | `admin.setRole` | Change Better Auth role (`admin` / `user`) | Inline select on user row + detail | `admin.users.setRole` | client |
-| `admin.setUserPassword` | Force-reset password | "Set password" dialog | `admin.users.setPassword` | client |
+| `admin.setUserPassword` | Force-reset password (direct set, or trigger reset email) | "Set password" dialog with two modes: **Set new password** (admin types it) and **Send reset email** (triggers password-reset link via Better Auth) | `admin.users.setPassword` | client |
 | `admin.banUser` | Revoke auth access with reason + optional duration | Ban dialog (reason + expires-at) | `admin.users.ban` | client |
 | `admin.unbanUser` | Restore auth access | Confirm dialog | `admin.users.ban` | client |
-| `admin.removeUser` | Delete a Better Auth user | Destructive confirm dialog | `admin.users.delete` | client |
+| `admin.removeUser` | **Not used.** v1 uses **soft delete** only — see §4.1 | — | — | — |
 | `admin.listUserSessions` | View active sessions for one user | Sessions tab | `admin.users.sessions` | client |
 | `admin.revokeUserSession` | Revoke a specific session | Row action | `admin.users.sessions` | client |
 | `admin.revokeUserSessions` | Force sign-out everywhere | Sessions toolbar action | `admin.users.sessions` | client |
@@ -245,13 +259,35 @@ mutations that are not part of the `admin()` plugin but layer on top of
 the same Better Auth users:
 
 - `app_users` status: approve / block / suspend / reactivate
-  (already implemented at `/api/admin/users/{approve,block,suspend,reactivate}`;
-  these endpoints are **reused** from the new app at
-  `/api/administrator/users/{id}/status`).
+  (already implemented at `/api/admin/users/{approve,block,suspend,reactivate}`).
+  Decision: the **legacy console and its endpoints stay unchanged for
+  now**. The new Administrator app introduces its own endpoints under
+  `/api/administrator/users/[id]/status` that wrap the same shared
+  `applyAdminStatusAction` helper; the old endpoints continue to serve
+  the legacy console untouched.
 - Role assignment in `app_user_roles`.
 - Membership lifecycle in `app_organization_memberships`.
 - Organization CRUD.
 - Role and permission catalog management.
+
+### 4.1 Soft-delete policy (decision)
+
+v1 **never hard-deletes** a Better Auth user. `auth.api.removeUser` is
+not called from the Administrator app. "Delete user" instead performs a
+two-step soft delete in a single Kysely transaction:
+
+1. `auth.api.banUser({ userId, banReason: "deleted", banExpiresIn: null })`
+   — indefinite ban so the user cannot sign in.
+2. `update app_users set status = 'deactivated', deactivated_at = now(),
+   deactivated_by = <actor>, deactivated_reason = <reason>` (status
+   value already supported by the existing schema; if a dedicated
+   `deactivated_*` column does not yet exist, the seed migration adds
+   it as part of `0002-administrator-indexes.sql`).
+
+A "Restore" action is the inverse (unban + clear status). Audit events
+use `event_type = "admin.user.soft_deleted"` /
+`"admin.user.restored"`. The `admin.users.delete` permission gates
+both.
 
 ---
 
@@ -260,10 +296,11 @@ the same Better Auth users:
 All admin server APIs live under `src/app/api/administrator/` and follow
 the existing `admin-status.server.ts` pattern: validate session →
 validate permission → validate body with Zod → mutate in a Kysely
-transaction → audit → respond JSON. Existing
-`/api/admin/users/{approve,block,suspend,reactivate}` endpoints stay in
-place (used by the legacy console) and are **wrapped** by the new
-endpoints to avoid duplication.
+transaction → audit → respond JSON. The legacy
+`/api/admin/users/{approve,block,suspend,reactivate}` endpoints remain
+untouched (decision: legacy console fate is unchanged for now); the new
+endpoints share the underlying `applyAdminStatusAction` helper rather
+than calling the legacy HTTP routes.
 
 ### 5.1 Conventions
 
@@ -306,11 +343,12 @@ endpoints to avoid duplication.
 |---|---|---|---|
 | `/api/administrator/users` | GET | `admin.users.read` | Paginated; joins `app_users` with Better Auth list (page-by-page join, never full table). |
 | `/api/administrator/users` | POST | `admin.users.create` | Server-side wrapper around `auth.api.createUser`. |
-| `/api/administrator/users/[id]` | GET, PATCH, DELETE | `admin.users.read/update/delete` | PATCH supports name/email/locale; DELETE proxies `auth.api.removeUser`. |
+| `/api/administrator/users/[id]` | GET, PATCH, DELETE | `admin.users.read/update/delete` | PATCH supports name/email/locale; DELETE performs **soft delete only** (indefinite Better Auth ban + `app_users.status = 'deactivated'`); see §4.1. |
+| `/api/administrator/users/[id]/restore` | POST | `admin.users.delete` | Inverse of soft delete: unban + clear `deactivated_*`. |
 | `/api/administrator/users/[id]/status` | POST | `admin.users.manage` | Wraps existing `applyAdminStatusAction`. |
 | `/api/administrator/users/[id]/ban` | POST | `admin.users.ban` | Wraps `auth.api.banUser`; persists reason in `app_audit_events.reason`. |
 | `/api/administrator/users/[id]/unban` | POST | `admin.users.ban` | Wraps `auth.api.unbanUser`. |
-| `/api/administrator/users/[id]/password` | POST | `admin.users.setPassword` | Wraps `auth.api.setUserPassword`. |
+| `/api/administrator/users/[id]/password` | POST | `admin.users.setPassword` | Body `{ mode: "set", password }` wraps `auth.api.setUserPassword`; body `{ mode: "reset_email" }` triggers a password-reset email via Better Auth. |
 | `/api/administrator/users/[id]/role` | POST | `admin.users.setRole` | Better Auth role; separate from app_roles. |
 | `/api/administrator/users/[id]/sessions` | GET, DELETE | `admin.users.sessions` | List / revoke-all. |
 | `/api/administrator/users/[id]/sessions/[sessionId]` | DELETE | `admin.users.sessions` | Revoke one. |
@@ -351,6 +389,13 @@ endpoints to avoid duplication.
 ## 6. Authorization model
 
 ### 6.1 Permission catalog (seeded into `app_permissions`)
+
+Decision: the 24-key catalog below is adopted in full as the v1 set.
+Permissions are **platform-wide** (decision: a single privileged user
+holding `admin.platform` — or any `admin.*.read/manage` permission —
+can see and manage **every** organization, not only orgs they are a
+member of). Per-org scoping for non-platform admins is left to a
+future iteration.
 
 ```
 admin.users.read
@@ -406,6 +451,12 @@ these rows idempotently and bundles them into a built-in role
 ## 7. Advanced data grids
 
 A reusable `DataGrid` is built once and reused on every list view.
+Decision: the grid is implemented on top of **`@tanstack/react-table`**
+(headless) — it is the only new runtime dependency introduced by this
+plan. The visible UI is composed exclusively from existing shadcn
+primitives in `src/components/ui/` (`table`, `pagination`, `popover`,
+`command`, `dropdown-menu`, `checkbox`, `calendar`, etc.) so the look
+and feel matches the rest of the application by default.
 
 ### 7.1 Capabilities
 
@@ -448,7 +499,9 @@ A reusable `DataGrid` is built once and reused on every list view.
 ### 7.2 Components (under `_components/grid/`)
 
 - `DataGrid<TRow>` — orchestrates state, fetches, renders
-  `Table` from `@/components/ui/table`.
+  `Table` from `@/components/ui/table`. Internally uses
+  `@tanstack/react-table` (`useReactTable`) in **manual** mode for
+  pagination/sorting/filtering (server is the source of truth).
 - `DataGridToolbar` — search input, faceted filters, density, export,
   column visibility, bulk-actions menu.
 - `DataGridPagination` — wraps `Pagination` plus a page-size
@@ -456,10 +509,12 @@ A reusable `DataGrid` is built once and reused on every list view.
 - `DataGridColumnHeader` — clickable sort indicator with
   `DropdownMenu` (sort asc/desc, hide column, filter…).
 - `DataGridFacetedFilter` — popover/command-based multi-select.
-- `useGridState` — hook that owns the URL ↔ internal state mapping and
-  runs the fetch via SWR-like semantics implemented with `useEffect` +
-  `AbortController` (no new dependency).
-- `useGridSelection` — selection state with "select all matching" mode.
+- `useGridState` — hook that owns the URL ↔ TanStack state mapping
+  (`PaginationState`, `SortingState`, `ColumnFiltersState`,
+  `VisibilityState`, `RowSelectionState`) and runs the fetch via
+  `useEffect` + `AbortController` (no SWR/React Query added).
+- `useGridSelection` — selection state wrapper supporting "select all
+  matching" mode in addition to TanStack's per-page selection.
 
 ### 7.3 Per-grid configuration
 
@@ -614,8 +669,9 @@ The Administrator app uses **only** components already present in
 - Buttons: `button`, `button-group`.
 
 If a primitive is missing, the component is built locally inside
-`administrator/_components/` from existing primitives — **no new
-dependencies are introduced** unless explicitly approved.
+`administrator/_components/` from existing primitives. The only new
+runtime dependency introduced by this plan is **`@tanstack/react-table`**
+(headless), per §7. No additional UI library is added.
 
 ---
 
@@ -637,8 +693,11 @@ dependencies are introduced** unless explicitly approved.
 
 ## 11. Internationalization
 
-- New namespace `administrator` added to every locale file under
-  `src/messages/`. Sub-namespaces:
+- New namespace `administrator` added to **every** locale file under
+  `src/messages/` (`en.json`, `es.json`, `fr.json`, `uk.json`).
+  Decision: **all four locales ship with complete translations from
+  the start** — no English-only placeholders, no machine-translation
+  follow-up. Sub-namespaces:
   `administrator.nav`, `administrator.users`, `administrator.roles`,
   `administrator.permissions`, `administrator.orgs`,
   `administrator.memberships`, `administrator.apps`,
@@ -689,9 +748,9 @@ dependencies are introduced** unless explicitly approved.
   `auth.api.listUsers`, then in a single Kysely query fetches matching
   `app_users` rows by `better_auth_user_id IN (...)` and merges. This
   keeps Better Auth as the system of record for identity.
-- Optimistic concurrency: every PATCH/DELETE accepts an
-  `If-Match: <updated_at-iso>` header. The server includes it in the
-  `where` clause; mismatch returns 409 with `error: "stale"`.
+- Decision: **no optimistic-concurrency / `If-Match` checks in v1.**
+  PATCH/DELETE accept the request and apply last-write-wins. (May be
+  re-introduced later if conflicting-edit incidents emerge.)
 
 ---
 
@@ -733,12 +792,13 @@ dependencies are introduced** unless explicitly approved.
 3. Faceted filter option lists are loaded lazily on popover open.
 4. Audit explorer queries always include a date range (defaults to
    last 30 days).
-5. Optional `0002-administrator-indexes.sql` migration adds indexes
-   for hot paths if profiling shows they are needed:
+5. The `0002-administrator-indexes.sql` migration (delivered up-front,
+   per §3) installs the indexes for hot paths:
    - `app_users (status)`, `app_users (created_at desc)`.
    - `app_audit_events (created_at desc)`,
-     `app_audit_events (event_type, created_at desc)`.
-   - `pg_trgm` indexes on `app_users.primary_email` and
+     `app_audit_events (event_type, created_at desc)`,
+     `app_audit_events (actor_better_auth_user_id, created_at desc)`.
+   - `pg_trgm` GIN indexes on `app_users.primary_email` and
      `app_users.display_name`.
 
 ---
@@ -766,7 +826,7 @@ dependencies are introduced** unless explicitly approved.
 |---|---|
 | **Unit** (`tests/unit/`) | `list-query.server.ts` parsing & query building; `requireAdminPermission`; CSV escaper; `useGridState` URL round-trip; reducers in `useGridSelection`. |
 | **Component** (`tests/component/`) | Each grid renders empty / loading / error / data states; toolbar filters update URL; column visibility persists; bulk actions open `AlertDialog`; create/edit forms validate via zod; user detail tabs render under each permission set. |
-| **Integration** (`tests/integration/`) | Each `/api/administrator/*` endpoint: happy path, permission denied (audited), validation error, optimistic concurrency 409, bulk caps. |
+| **Integration** (`tests/integration/`) | Each `/api/administrator/*` endpoint: happy path, permission denied (audited), validation error, bulk caps. |
 | **Security** (`tests/security/`) | Endpoints reject unauthenticated callers; reject callers missing the required permission; reject cross-origin requests; CSV cells with `=+-@` are escaped; impersonation gated. |
 | **E2E** (`tests/e2e/`) | Admin signs in → opens Administrator → searches a user → approves → bans → revokes session → opens audit and finds events. Includes role and org CRUD round-trips. |
 | **A11y** (`tests/accessibility/`) | axe pass on landing, users grid, user detail, role detail, audit. Keyboard-only flow to approve a user. |
@@ -793,32 +853,46 @@ The application MUST pass the standard repo gates already in use:
 
 ---
 
-## 19. Phased delivery
+## 19. Phased delivery (single final PR)
 
-The work is delivered in incremental, independently shippable phases.
+Decision: the work is implemented in the phases below for sequencing
+and review clarity, but is delivered as a **single pull request** that
+contains every phase. There are no intermediate PRs. Each phase below
+must be green (lint + typecheck + tests + build) before moving to the
+next inside the working branch.
 
-### Phase 1 — Skeleton & guards
-- Add namespaces in `messages/*.json`.
+### Phase 1 — Skeleton, guards & i18n
+- Add the complete `administrator.*` namespace with **fully translated
+  strings** to `en.json`, `es.json`, `fr.json`, and `uk.json` (decision:
+  no English-only placeholders).
 - Create `administrator/layout.tsx` (workspace shell), landing page,
   `AdministratorSidebar` with permission gating.
 - Add `requireAdminPermission` and migrate
-  `admin-status.server.ts` to use it.
-- Seed admin permissions catalog.
+  `admin-status.server.ts` to use it (the legacy
+  `/api/admin/users/*` endpoints continue to work unchanged).
+- Seed admin permissions catalog (24 keys, §6.1) and the
+  `admin.platform` built-in role.
 
-### Phase 2 — DataGrid foundation
-- Build `DataGrid` and helpers under `_components/grid/`.
+### Phase 2 — DataGrid foundation & indexes
+- Add `@tanstack/react-table` dependency.
+- Build `DataGrid` and helpers under `_components/grid/` on top of
+  `@tanstack/react-table` with shadcn primitives.
 - Build `list-query.server.ts` and `/api/administrator/users` GET.
 - Build users list page using the new grid.
+- Ship `0002-administrator-indexes.sql` (decision: indexes added
+  up-front, not deferred).
 - Tests: unit for query builder, component for grid, integration for
   GET endpoint.
 
 ### Phase 3 — Users module
-- POST/PATCH/DELETE for users (wrapping `auth.api.*`).
-- Status, ban/unban, password, role, sessions endpoints.
+- POST/PATCH/DELETE for users (DELETE = **soft delete** per §4.1; no
+  call to `auth.api.removeUser`).
+- Status, ban/unban, password (set / reset-email modes), role,
+  sessions, restore endpoints.
 - New-user form, user detail tabs (overview, roles, memberships,
   sessions, audit).
-- Migrate the legacy `AdminUsersConsole` to the new screens (keep the
-  old route as a redirect to the new one for one release cycle).
+- Decision: the legacy `AdminUsersConsole` and its `/api/admin/users/*`
+  endpoints remain untouched — the new app lives alongside them.
 
 ### Phase 4 — Roles & permissions
 - Roles list/detail; permission catalog; role-permission editor;
@@ -826,34 +900,70 @@ The work is delivered in incremental, independently shippable phases.
 
 ### Phase 5 — Organizations & memberships
 - Organization list/detail with member/role/provider-binding tabs;
-  cross-org membership search.
+  cross-org membership search. Platform-admin permissions allow viewing
+  and managing **every** organization (§6.1).
 
 ### Phase 6 — Enterprise apps & audit explorer
 - Enterprise applications grid; audit grid with filters and detail
   sheet.
 
 ### Phase 7 — Polish
-- Impersonation flow, bulk actions, CSV export, "select all matching"
-  selection mode, optional `0002-administrator-indexes.sql` migration
-  if load tests warrant.
+- Impersonation flow (decision: included in v1, gated by
+  `admin.users.impersonate`, double-confirm, audited as
+  `admin.user.impersonation_started/_stopped`).
+- Bulk actions (cap 500 ids), CSV export (cap 100k rows), "select all
+  matching" selection mode, in-memory token-bucket rate limit on
+  mutation endpoints.
 - Full a11y and e2e suites.
 
-Each phase ends with a green run of the validation commands in §18.
+The single final PR ends with a green run of the validation commands
+in §18 across all phases combined.
 
 ---
 
-## 20. Open questions / future work
+## 20. Resolved decisions & remaining future work
 
-- **Notifications** — should approve/block trigger user emails?
-  Deferred to a separate notification service.
+### 20.1 Resolved (locked in for v1)
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Legacy `/admin/users` console + `/api/admin/users/*` endpoints | Stay unchanged for now; new app lives alongside |
+| 2 | Permission catalog | Adopt the 24 `admin.*` keys in §6.1 |
+| 3 | Better Auth role vs. app roles | Surface as two distinct concepts in the UI |
+| 4 | Workspace shell | Fully self-contained — its own left rail in **addition** to the root `SecureSidebar` |
+| 5 | Path | `/[locale]/app/administrator` |
+| 6 | Filtering | Per-grid filters only — **no** global org scope picker |
+| 7 | Cross-org visibility | Platform-admin model — privileged users see/manage **all** organizations |
+| 8 | Indexes | `0002-administrator-indexes.sql` (incl. `pg_trgm`) shipped up-front in Phase 2 |
+| 9 | Optimistic concurrency | **Skipped** for v1 (no `If-Match`) |
+| 10 | Impersonation | **Included** in v1, gated + double-confirm + audited |
+| 11 | User deletion | **Soft delete only** (§4.1) — never call `auth.api.removeUser` |
+| 12 | Set password | Admin can set directly **and** can optionally trigger a password-reset email |
+| 13 | Grid library | Adopt `@tanstack/react-table` (headless), styled with shadcn defaults |
+| 14 | CSV export cap | 100k rows |
+| 15 | Bulk action cap | 500 ids per request; "select all matching" for larger sets |
+| 16 | Rate limiting | In-memory token bucket (pluggable for Redis later) |
+| 17 | Notifications on status changes | Deferred — no emails in v1 |
+| 18 | Audit | Per plan §12 |
+| 19 | Delivery | **Single final PR** containing all phases |
+| 20 | Localization | All four locales (`en`, `es`, `fr`, `uk`) translated **in full** from Phase 1 |
+
+### 20.2 Remaining future work
+
+- **Notifications** — outbound emails on approve / block / ban /
+  password change. Owned by a separate notification workstream.
 - **Webhooks** — outbound webhooks for admin events. Out of scope.
 - **MFA enrollment** — when MFA is added project-wide
-  (`specs.md` §2 currently excludes it), a Sessions tab section will
-  surface enrolled factors and reset flow.
-- **Soft delete of users** — current plan uses Better Auth
-  `removeUser` (hard delete). If retention requirements emerge, switch
-  to a `deactivated` status in `app_users` plus
-  `auth.api.banUser` indefinitely.
+  (`specs.md` §2 currently excludes it), the Sessions tab will surface
+  enrolled factors and a reset flow.
+- **Per-org admin permissions** — current model is platform-wide. A
+  follow-up may introduce per-organization scoping for the `admin.*`
+  permissions for delegated org admins.
+- **Optimistic concurrency** — re-introduce `If-Match` if conflicting
+  edits become a real-world problem.
+- **Hard delete / GDPR erasure** — if/when retention requirements
+  demand it, layer a true erasure flow on top of the soft-delete state
+  introduced in §4.1.
 
 ---
 

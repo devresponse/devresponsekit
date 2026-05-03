@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -37,18 +38,18 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const existing = await db
@@ -57,7 +58,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return adminErrorResponse("not_found", 404, request);
   }
 
   await db
@@ -88,7 +89,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const existing = await db
@@ -97,7 +98,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return adminErrorResponse("not_found", 404, request);
   }
 
   try {
@@ -110,7 +111,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
         reason: "permission_in_use",
         metadata: { permissionId: id, key: existing.key },
       });
-      return NextResponse.json({ error: "permission_in_use" }, { status: 409 });
+      return adminErrorResponse("permission_in_use", 409, request);
     }
     throw err;
   }

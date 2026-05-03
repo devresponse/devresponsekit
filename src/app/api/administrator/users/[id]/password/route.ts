@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   sendBetterAuthPasswordResetEmail,
   setBetterAuthUserPassword,
@@ -65,11 +66,11 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = passwordSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   if (parsed.data.mode === "set") {
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
         reason: "auth_set_password_failed",
         metadata: { message: err instanceof Error ? err.message : "unknown" },
       });
-      return NextResponse.json({ error: "auth_set_password_failed" }, { status: 502 });
+      return adminErrorResponse("auth_set_password_failed", 502, request);
     }
 
     await auditUserAction("admin.user.password_set", "success", {
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       reason: "auth_forgot_password_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_forgot_password_failed" }, { status: 502 });
+    return adminErrorResponse("auth_forgot_password_failed", 502, request);
   }
 
   await auditUserAction("admin.user.password_reset_email_sent", "success", {

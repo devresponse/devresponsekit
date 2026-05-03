@@ -1,5 +1,6 @@
 import "server-only";
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 
 /**
  * In-memory token-bucket rate limiter for Administrator mutation
@@ -167,16 +168,16 @@ export function enforceRateLimit(
   actorId: string,
   options: RateLimitOptions = DEFAULT_ADMIN_MUTATION_LIMIT,
   nowMs?: number,
+  request?: { headers: Headers },
+  requestId?: string,
 ): NextResponse | null {
   const result = consumeToken(rateLimitKey(scope, actorId), options, nowMs);
   if (result.ok) return null;
-  return NextResponse.json(
-    { error: "rate_limited", retryAfter: result.retryAfterSeconds },
-    {
-      status: 429,
-      headers: { "Retry-After": String(result.retryAfterSeconds) },
-    },
-  );
+  return adminErrorResponse("rate_limited", 429, request, {
+    requestId,
+    extra: { retryAfter: result.retryAfterSeconds },
+    headers: { "Retry-After": String(result.retryAfterSeconds) },
+  });
 }
 
 /**

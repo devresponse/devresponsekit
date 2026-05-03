@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   listBetterAuthUserSessions,
   revokeAllBetterAuthUserSessions,
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
       reason: "auth_list_sessions_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_list_sessions_failed" }, { status: 502 });
+    return adminErrorResponse("auth_list_sessions_failed", 502, request);
   }
 
   // Better Auth returns `{ sessions: [...] }` or a bare array depending
@@ -92,7 +93,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       reason: "auth_revoke_all_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_revoke_all_failed" }, { status: 502 });
+    return adminErrorResponse("auth_revoke_all_failed", 502, request);
   }
 
   await auditUserAction("admin.user.sessions_revoked_all", "success", {

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   impersonateBetterAuthUser,
   stopBetterAuthImpersonating,
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (isResolvedUserResponse(target)) return target;
 
   if (target.betterAuthUserId === guard.betterAuthUserId) {
-    return NextResponse.json({ error: "cannot_impersonate_self" }, { status: 400 });
+    return adminErrorResponse("cannot_impersonate_self", 400, request);
   }
 
   let result: unknown;
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       reason: "auth_impersonate_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_impersonate_failed" }, { status: 502 });
+    return adminErrorResponse("auth_impersonate_failed", 502, request);
   }
 
   await auditUserAction("admin.user.impersonation_started", "success", {
@@ -140,7 +141,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       reason: "auth_stop_impersonate_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_stop_impersonate_failed" }, { status: 502 });
+    return adminErrorResponse("auth_stop_impersonate_failed", 502, request);
   }
 
   await auditUserAction("admin.user.impersonation_stopped", "success", {

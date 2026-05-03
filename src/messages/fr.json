@@ -558,6 +558,7 @@
       },
       "outcome": {
         "success": "Succès",
+        "error": "Erreur",
         "failure": "Échec",
         "denied": "Refusé"
       },
@@ -574,5 +575,49 @@
         "metadata": "Métadonnées"
       }
     }
+  },
+  "errors": {
+    "application_in_use": "Cette application est utilisée et ne peut pas être supprimée.",
+    "application_not_found": "Application introuvable.",
+    "auth_ban_failed": "Le service d’authentification a refusé le bannissement.",
+    "auth_create_failed": "Le service d’authentification a refusé de créer l’utilisateur.",
+    "auth_forgot_password_failed": "Impossible d’envoyer l’e-mail de réinitialisation.",
+    "auth_impersonate_failed": "Impossible de démarrer l’usurpation.",
+    "auth_list_sessions_failed": "Impossible de lister les sessions.",
+    "auth_revoke_all_failed": "Impossible de révoquer toutes les sessions.",
+    "auth_revoke_session_failed": "Impossible de révoquer la session.",
+    "auth_set_password_failed": "Impossible de modifier le mot de passe.",
+    "auth_set_role_failed": "Impossible de modifier le rôle.",
+    "auth_stop_impersonate_failed": "Impossible d’arrêter l’usurpation.",
+    "auth_unban_failed": "Le service d’authentification a refusé de lever le bannissement.",
+    "binding_exists": "Cette liaison existe déjà.",
+    "binding_not_found": "Liaison introuvable.",
+    "cannot_impersonate_self": "Vous ne pouvez pas vous usurper vous-même.",
+    "email_taken": "Cet e-mail est déjà utilisé.",
+    "export_failed": "L’export a échoué avant l’envoi de la moindre ligne.",
+    "filters_required_for_select_all": "Les filtres sont requis pour tout sélectionner.",
+    "forbidden": "Vous n’avez pas la permission requise.",
+    "id_taken": "Cet identifiant est déjà utilisé.",
+    "invalid_body": "Le corps de la requête est invalide.",
+    "invalid_id": "L’identifiant fourni n’est pas un UUID valide.",
+    "invalid_origin": "L’origine de la requête n’est pas autorisée.",
+    "invalid_session_id": "L’identifiant de session est invalide.",
+    "key_taken": "Cette clé est déjà utilisée.",
+    "membership_exists": "Cette adhésion existe déjà.",
+    "membership_not_found": "Adhésion introuvable.",
+    "no_changes": "Aucune modification fournie.",
+    "not_deactivated": "L’utilisateur n’est pas désactivé.",
+    "not_found": "Introuvable.",
+    "organization_not_found": "Organisation introuvable.",
+    "permission_in_use": "Cette permission est utilisée.",
+    "rate_limited": "Trop de requêtes. Ralentissez s’il vous plaît.",
+    "role_in_use": "Ce rôle est utilisé.",
+    "role_not_found": "Rôle introuvable.",
+    "slug_taken": "Ce slug est déjà utilisé.",
+    "soft_delete_failed": "La suppression douce a échoué ; réessayez.",
+    "unauthenticated": "Connexion requise.",
+    "unknown_resource": "Ressource inconnue.",
+    "untrusted_origin": "L’origine de la requête n’est pas approuvée.",
+    "user_not_found": "Utilisateur introuvable."
   }
 }

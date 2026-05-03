@@ -14,6 +14,9 @@ import { auditEvent, type AuditEventInput } from "@/lib/audit.server";
  *   - `metadata` MUST NOT include secrets (passwords, tokens). The
  *     `auditEvent` JSDoc spells this out; these helpers preserve that
  *     contract by not transforming the metadata.
+ *   - Pass `requestId` (typically from the `requireAdminPermission`
+ *     grant) so every audit row written by a single request shares
+ *     the same correlation id.
  */
 export interface UserAuditContext {
   request: NextRequest | { headers: Headers };
@@ -21,6 +24,7 @@ export interface UserAuditContext {
   appUserId: string;
   email?: string | null;
   reason?: string | null;
+  requestId?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -37,6 +41,7 @@ export async function auditUserAction(
     email: ctx.email ?? null,
     reason: ctx.reason ?? null,
     request: ctx.request,
+    requestId: ctx.requestId ?? null,
     metadata: ctx.metadata,
   });
 }
@@ -46,6 +51,7 @@ export interface RoleAuditContext {
   actorBetterAuthUserId: string;
   organizationId?: string | null;
   reason?: string | null;
+  requestId?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -61,6 +67,7 @@ export async function auditRoleAction(
     organizationId: ctx.organizationId ?? null,
     reason: ctx.reason ?? null,
     request: ctx.request,
+    requestId: ctx.requestId ?? null,
     metadata: ctx.metadata,
   });
 }
@@ -71,6 +78,7 @@ export interface OrgAuditContext {
   organizationId?: string | null;
   appUserId?: string | null;
   reason?: string | null;
+  requestId?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -87,6 +95,8 @@ export async function auditOrgAction(
     appUserId: ctx.appUserId ?? null,
     reason: ctx.reason ?? null,
     request: ctx.request,
+    requestId: ctx.requestId ?? null,
     metadata: ctx.metadata,
   });
 }
+

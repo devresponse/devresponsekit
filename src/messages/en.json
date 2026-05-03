@@ -558,6 +558,7 @@
       },
       "outcome": {
         "success": "Success",
+        "error": "Error",
         "failure": "Failure",
         "denied": "Denied"
       },
@@ -574,5 +575,49 @@
         "metadata": "Metadata"
       }
     }
+  },
+  "errors": {
+    "application_in_use": "This application is in use and cannot be deleted.",
+    "application_not_found": "Application not found.",
+    "auth_ban_failed": "The authentication service refused the ban.",
+    "auth_create_failed": "The authentication service refused to create the user.",
+    "auth_forgot_password_failed": "Could not send the password reset email.",
+    "auth_impersonate_failed": "Could not start impersonation.",
+    "auth_list_sessions_failed": "Could not list sessions.",
+    "auth_revoke_all_failed": "Could not revoke all sessions.",
+    "auth_revoke_session_failed": "Could not revoke the session.",
+    "auth_set_password_failed": "Could not change the password.",
+    "auth_set_role_failed": "Could not change the user role.",
+    "auth_stop_impersonate_failed": "Could not stop impersonation.",
+    "auth_unban_failed": "The authentication service refused to lift the ban.",
+    "binding_exists": "This binding already exists.",
+    "binding_not_found": "Binding not found.",
+    "cannot_impersonate_self": "You cannot impersonate yourself.",
+    "email_taken": "This email is already in use.",
+    "export_failed": "Export failed before any rows could be sent.",
+    "filters_required_for_select_all": "Filters are required when selecting all.",
+    "forbidden": "You do not have permission to perform this action.",
+    "id_taken": "This identifier is already in use.",
+    "invalid_body": "The request body is invalid.",
+    "invalid_id": "The provided id is not a valid UUID.",
+    "invalid_origin": "The request origin is not allowed.",
+    "invalid_session_id": "The session id is invalid.",
+    "key_taken": "This key is already in use.",
+    "membership_exists": "This membership already exists.",
+    "membership_not_found": "Membership not found.",
+    "no_changes": "No changes were provided.",
+    "not_deactivated": "The user is not deactivated.",
+    "not_found": "Not found.",
+    "organization_not_found": "Organization not found.",
+    "permission_in_use": "This permission is in use.",
+    "rate_limited": "Too many requests. Please slow down.",
+    "role_in_use": "This role is in use.",
+    "role_not_found": "Role not found.",
+    "slug_taken": "This slug is already in use.",
+    "soft_delete_failed": "Soft delete failed; please retry.",
+    "unauthenticated": "Sign-in is required.",
+    "unknown_resource": "Unknown resource.",
+    "untrusted_origin": "The request origin is not trusted.",
+    "user_not_found": "User not found."
   }
 }

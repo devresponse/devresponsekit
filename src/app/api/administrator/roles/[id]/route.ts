@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   try {
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ role });
   } catch (err) {
     if (err instanceof AdminError && err.code === "role_not_found") {
-      return NextResponse.json({ error: "not_found" }, { status: 404 });
+      return adminErrorResponse("not_found", 404, request);
     }
     throw err;
   }
@@ -64,25 +65,25 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const updates: Record<string, unknown> = {};
   if (parsed.data.name !== undefined) updates.name = parsed.data.name;
   if (parsed.data.description !== undefined) updates.description = parsed.data.description;
   if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ error: "no_changes" }, { status: 400 });
+    return adminErrorResponse("no_changes", 400, request);
   }
 
   const existing = await db
@@ -91,7 +92,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return adminErrorResponse("not_found", 404, request);
   }
 
   await db.updateTable("app_roles").set(updates).where("id", "=", id).execute();
@@ -120,7 +121,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const existing = await db
@@ -129,7 +130,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return adminErrorResponse("not_found", 404, request);
   }
 
   try {
@@ -143,7 +144,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
         reason: "role_in_use",
         metadata: { roleId: id, key: existing.key },
       });
-      return NextResponse.json({ error: "role_in_use" }, { status: 409 });
+      return adminErrorResponse("role_in_use", 409, request);
     }
     throw err;
   }

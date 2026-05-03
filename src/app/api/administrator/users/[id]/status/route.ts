@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { applyAdminStatusAction } from "@/lib/admin-status.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -78,11 +78,11 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = statusSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const mapping = ACTION_TO_STATUS[parsed.data.action];

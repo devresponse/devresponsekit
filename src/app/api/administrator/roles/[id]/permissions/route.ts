@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const roleExists = await db
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!roleExists) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return adminErrorResponse("not_found", 404, request);
   }
 
   const rows = await db
@@ -97,22 +98,22 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = idsSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const role = await loadRoleHeader(id);
-  if (!role) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!role) return adminErrorResponse("not_found", 404, request);
 
   // Resolve key -> permission_id. Keys not in the catalog are dropped.
   const permRows = await db
@@ -164,22 +165,22 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = idsSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const role = await loadRoleHeader(id);
-  if (!role) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!role) return adminErrorResponse("not_found", 404, request);
 
   const permRows = await db
     .selectFrom("app_permissions")

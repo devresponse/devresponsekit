@@ -6,8 +6,10 @@ import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
   banBetterAuthUser,
+  unbanBetterAuthUser,
   updateBetterAuthUser,
 } from "@/lib/admin/auth-admin.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -97,11 +99,11 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const updates: Record<string, unknown> = { updated_at: sql`now()` };
@@ -113,7 +115,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   }
 
   if (Object.keys(updates).length === 1) {
-    return NextResponse.json({ error: "no_changes" }, { status: 400 });
+    return adminErrorResponse("no_changes", 400, request);
   }
 
   await db
@@ -135,7 +137,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
         request,
       );
     } catch (err) {
-      await auditUserAction("admin.user.update_auth_mirror_failed", "failure", {
+    await auditUserAction("admin.user.update_auth_mirror_failed", "error", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
@@ -191,7 +193,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   }
   const parsed = deleteSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const reason = parsed.data.reason ?? null;
 
@@ -208,41 +210,92 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       request,
     );
   } catch (err) {
-    await auditUserAction("admin.user.soft_delete_failed", "failure", {
+    await auditUserAction("admin.user.soft_delete_failed", "error", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
       email: target.primaryEmail,
+      requestId: guard.requestId,
       reason: "auth_ban_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_ban_failed" }, { status: 502 });
+    return adminErrorResponse("auth_ban_failed", 502, request, {
+      requestId: guard.requestId,
+    });
   }
 
-  // Step 2 — application soft-delete bookkeeping.
-  await db.transaction().execute(async (trx) => {
-    await trx
-      .updateTable("app_users")
-      .set({
-        status: "deactivated",
-        status_reason: reason,
-        deactivated_at: sql`now()`,
-        deactivated_by: guard.betterAuthUserId,
-        deactivated_reason: reason,
-        updated_at: sql`now()`,
-      })
-      .where("id", "=", target.appUserId)
-      .execute();
+  // Step 2 — application soft-delete bookkeeping. Wrapped in a saga:
+  // if the DB transaction fails after we already banned the user in
+  // Better Auth, we issue a compensating unban so the two stores
+  // don't drift (#B6).
+  try {
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable("app_users")
+        .set({
+          status: "deactivated",
+          status_reason: reason,
+          deactivated_at: sql`now()`,
+          deactivated_by: guard.betterAuthUserId,
+          deactivated_reason: reason,
+          updated_at: sql`now()`,
+        })
+        .where("id", "=", target.appUserId)
+        .execute();
 
-    // Cascade memberships to `blocked` so the user disappears from the
-    // active member views without losing the audit trail of which orgs
-    // they belonged to.
-    await trx
-      .updateTable("app_organization_memberships")
-      .set({ status: "blocked", updated_at: sql`now()` })
-      .where("app_user_id", "=", target.appUserId)
-      .execute();
-  });
+      // Cascade memberships to `blocked` so the user disappears from the
+      // active member views without losing the audit trail of which orgs
+      // they belonged to. Snapshot the prior status into
+      // `pre_deactivation_status` so the matching `restore` endpoint
+      // can return each membership to its original state instead of
+      // leaving them silently inaccessible (plan §4.1).
+      await trx
+        .updateTable("app_organization_memberships")
+        .set({
+          pre_deactivation_status: sql`status`,
+          status: "blocked",
+          updated_at: sql`now()`,
+        })
+        .where("app_user_id", "=", target.appUserId)
+        // Only snapshot rows that aren't already in the soft-delete
+        // state (defends against double-deletes overwriting the
+        // snapshot with the cascade value `'blocked'`).
+        .where("status", "!=", "blocked")
+        .execute();
+    });
+  } catch (err) {
+    // Compensate the Better Auth ban so the two systems stay in sync.
+    // Failure of the compensation itself is audited but does not
+    // change the response status — the caller still needs to know the
+    // operation failed.
+    try {
+      await unbanBetterAuthUser(target.betterAuthUserId, request);
+    } catch (unbanErr) {
+      await auditUserAction("admin.user.soft_delete_compensation_failed", "error", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        requestId: guard.requestId,
+        reason: "compensation_unban_failed",
+        metadata: {
+          message: unbanErr instanceof Error ? unbanErr.message : "unknown",
+        },
+      });
+    }
+    await auditUserAction("admin.user.soft_delete_failed", "error", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      requestId: guard.requestId,
+      reason: "db_cascade_failed",
+      metadata: { message: err instanceof Error ? err.message : "unknown" },
+    });
+    return adminErrorResponse("soft_delete_failed", 500, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   await auditUserAction("admin.user.soft_deleted", "success", {
     request,

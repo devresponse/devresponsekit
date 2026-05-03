@@ -4,6 +4,7 @@ import { sql } from "kysely";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   APP_ID_RE,
   APP_STATUS_VALUES,
@@ -146,16 +147,16 @@ export async function POST(request: NextRequest) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = createSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const input = parsed.data;
 
   if (!isHttpsOrigin(input.origin)) {
-    return NextResponse.json({ error: "invalid_origin" }, { status: 400 });
+    return adminErrorResponse("invalid_origin", 400, request);
   }
 
   try {
@@ -176,10 +177,10 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     if (/duplicate key|unique constraint/i.test(message)) {
-      return NextResponse.json({ error: "id_taken" }, { status: 409 });
+      return adminErrorResponse("id_taken", 409, request);
     }
     if (/foreign key/i.test(message)) {
-      return NextResponse.json({ error: "organization_not_found" }, { status: 409 });
+      return adminErrorResponse("organization_not_found", 409, request);
     }
     throw err;
   }

@@ -173,7 +173,10 @@ export function AdministratorAuditGrid() {
 
 function outcomeVariant(outcome: string): "default" | "destructive" | "secondary" | "outline" {
   if (outcome === "success") return "secondary";
-  if (outcome === "failure") return "destructive";
+  // Treat the deprecated `failure` value the same as the new `error`
+  // value (docs/admin-manager.md §12) so historical rows keep
+  // rendering correctly.
+  if (outcome === "failure" || outcome === "error") return "destructive";
   if (outcome === "denied") return "destructive";
   return "outline";
 }
@@ -220,8 +223,9 @@ function AuditFilterToolbar() {
         >
           <option value="">{t("filters.any")}</option>
           <option value="success">{t("outcome.success")}</option>
-          <option value="failure">{t("outcome.failure")}</option>
+          <option value="error">{t("outcome.error")}</option>
           <option value="denied">{t("outcome.denied")}</option>
+          <option value="failure">{t("outcome.failure")}</option>
         </select>
       </div>
       <div className="space-y-1">

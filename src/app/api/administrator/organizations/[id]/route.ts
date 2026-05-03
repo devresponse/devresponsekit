@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   AdminError,
   assertOrgEmpty,
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   try {
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return NextResponse.json(org);
   } catch (err) {
     if (err instanceof AdminError && err.code === "organization_not_found") {
-      return NextResponse.json({ error: err.code }, { status: 404 });
+      return adminErrorResponse(err.code, 404, request);
     }
     throw err;
   }
@@ -74,18 +75,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const input = parsed.data;
 
@@ -95,7 +96,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "organization_not_found" }, { status: 404 });
+    return adminErrorResponse("organization_not_found", 404, request);
   }
 
   const updates: Record<string, unknown> = {};
@@ -121,7 +122,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     if (/duplicate key|unique constraint/i.test(message)) {
-      return NextResponse.json({ error: "slug_taken" }, { status: 409 });
+      return adminErrorResponse("slug_taken", 409, request);
     }
     throw err;
   }
@@ -148,7 +149,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const existing = await db
@@ -157,7 +158,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "organization_not_found" }, { status: 404 });
+    return adminErrorResponse("organization_not_found", 404, request);
   }
 
   try {
@@ -171,7 +172,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         organizationId: id,
         metadata: { organizationId: id, slug: existing.slug, reason: err.code },
       });
-      return NextResponse.json({ error: err.code }, { status: 409 });
+      return adminErrorResponse(err.code, 409, request);
     }
     throw err;
   }

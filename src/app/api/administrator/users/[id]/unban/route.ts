@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       reason: "auth_unban_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_unban_failed" }, { status: 502 });
+    return adminErrorResponse("auth_unban_failed", 502, request);
   }
 
   await auditUserAction("admin.user.unbanned", "success", {

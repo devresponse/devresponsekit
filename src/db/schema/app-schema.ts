@@ -56,6 +56,17 @@ export interface AppOrganizationMembershipsTable {
   status: ColumnType<string, string | undefined, string>;
   source_provider: string | null;
   provider_organization_key: string | null;
+  /**
+   * Snapshot of the membership status taken when an admin soft-deleted
+   * the owning user (plan §4.1). Set by the cascade in DELETE
+   * `/api/administrator/users/[id]` and cleared by `/restore`. NULL
+   * outside that lifecycle.
+   */
+  pre_deactivation_status: ColumnType<
+    string | null,
+    string | null | undefined,
+    string | null
+  >;
   created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
 }
@@ -122,6 +133,12 @@ export interface AppAuditEventsTable {
   ip_address: string | null;
   user_agent: string | null;
   reason: string | null;
+  /**
+   * Correlation id (UUID) shared with the originating request's
+   * `x-request-id` response header. NULL on legacy rows written before
+   * migration `0003-audit-request-id-and-membership-snapshot.sql`.
+   */
+  request_id: ColumnType<string | null, string | null | undefined, string | null>;
   metadata: Json;
   created_at: Generated<Timestamp>;
 }

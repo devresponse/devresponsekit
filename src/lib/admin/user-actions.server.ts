@@ -133,7 +133,7 @@ async function performBan(
       actor.request,
     );
   } catch (err) {
-    await auditUserAction("admin.user.ban_failed", "failure", {
+    await auditUserAction("admin.user.ban_failed", "error", {
       request: actor.request,
       actorBetterAuthUserId: actor.betterAuthUserId,
       appUserId: target.appUserId,
@@ -161,7 +161,7 @@ async function performUnban(
   try {
     await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
   } catch (err) {
-    await auditUserAction("admin.user.unban_failed", "failure", {
+    await auditUserAction("admin.user.unban_failed", "error", {
       request: actor.request,
       actorBetterAuthUserId: actor.betterAuthUserId,
       appUserId: target.appUserId,
@@ -196,7 +196,7 @@ async function performSoftDelete(
       actor.request,
     );
   } catch (err) {
-    await auditUserAction("admin.user.soft_delete_failed", "failure", {
+    await auditUserAction("admin.user.soft_delete_failed", "error", {
       request: actor.request,
       actorBetterAuthUserId: actor.betterAuthUserId,
       appUserId: target.appUserId,
@@ -207,25 +207,62 @@ async function performSoftDelete(
     return { ok: false, appUserId: target.appUserId, error: "auth_ban_failed" };
   }
 
-  await db.transaction().execute(async (trx) => {
-    await trx
-      .updateTable("app_users")
-      .set({
-        status: "deactivated",
-        status_reason: reason,
-        deactivated_at: sql`now()`,
-        deactivated_by: actor.betterAuthUserId,
-        deactivated_reason: reason,
-        updated_at: sql`now()`,
-      })
-      .where("id", "=", target.appUserId)
-      .execute();
-    await trx
-      .updateTable("app_organization_memberships")
-      .set({ status: "blocked", updated_at: sql`now()` })
-      .where("app_user_id", "=", target.appUserId)
-      .execute();
-  });
+  try {
+    await db.transaction().execute(async (trx) => {
+      await trx
+        .updateTable("app_users")
+        .set({
+          status: "deactivated",
+          status_reason: reason,
+          deactivated_at: sql`now()`,
+          deactivated_by: actor.betterAuthUserId,
+          deactivated_reason: reason,
+          updated_at: sql`now()`,
+        })
+        .where("id", "=", target.appUserId)
+        .execute();
+      await trx
+        .updateTable("app_organization_memberships")
+        .set({
+          // Snapshot prior status so `restore` can reverse the cascade
+          // (plan §4.1). `where status != 'blocked'` keeps double-deletes
+          // from clobbering the snapshot with the cascaded value.
+          pre_deactivation_status: sql`status`,
+          status: "blocked",
+          updated_at: sql`now()`,
+        })
+        .where("app_user_id", "=", target.appUserId)
+        .where("status", "!=", "blocked")
+        .execute();
+    });
+  } catch (err) {
+    // Compensate the Better Auth ban so the two systems stay in sync
+    // when the application bookkeeping fails (#B6).
+    try {
+      await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
+    } catch (unbanErr) {
+      await auditUserAction("admin.user.soft_delete_compensation_failed", "error", {
+        request: actor.request,
+        actorBetterAuthUserId: actor.betterAuthUserId,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        reason: "compensation_unban_failed",
+        metadata: {
+          message: unbanErr instanceof Error ? unbanErr.message : "unknown",
+          bulk: true,
+        },
+      });
+    }
+    await auditUserAction("admin.user.soft_delete_failed", "error", {
+      request: actor.request,
+      actorBetterAuthUserId: actor.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      reason: "db_cascade_failed",
+      metadata: { message: err instanceof Error ? err.message : "unknown", bulk: true },
+    });
+    return { ok: false, appUserId: target.appUserId, error: "db_cascade_failed" };
+  }
 
   await auditUserAction("admin.user.soft_deleted", "success", {
     request: actor.request,
@@ -245,7 +282,7 @@ async function performRestore(
   try {
     await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
   } catch (err) {
-    await auditUserAction("admin.user.restore_failed", "failure", {
+    await auditUserAction("admin.user.restore_failed", "error", {
       request: actor.request,
       actorBetterAuthUserId: actor.betterAuthUserId,
       appUserId: target.appUserId,
@@ -255,18 +292,35 @@ async function performRestore(
     });
     return { ok: false, appUserId: target.appUserId, error: "auth_unban_failed" };
   }
-  await db
-    .updateTable("app_users")
-    .set({
-      status: "pending_approval",
-      status_reason: null,
-      deactivated_at: null,
-      deactivated_by: null,
-      deactivated_reason: null,
-      updated_at: sql`now()`,
-    })
-    .where("id", "=", target.appUserId)
-    .execute();
+  // Reverse the cascade applied by performSoftDelete: any membership
+  // that still carries a `pre_deactivation_status` snapshot is
+  // returned to that prior status, then the snapshot column cleared.
+  // Memberships without a snapshot were either never cascaded or
+  // already reversed — leave them alone.
+  await db.transaction().execute(async (trx) => {
+    await trx
+      .updateTable("app_users")
+      .set({
+        status: "pending_approval",
+        status_reason: null,
+        deactivated_at: null,
+        deactivated_by: null,
+        deactivated_reason: null,
+        updated_at: sql`now()`,
+      })
+      .where("id", "=", target.appUserId)
+      .execute();
+    await trx
+      .updateTable("app_organization_memberships")
+      .set({
+        status: sql`coalesce(pre_deactivation_status, status)`,
+        pre_deactivation_status: null,
+        updated_at: sql`now()`,
+      })
+      .where("app_user_id", "=", target.appUserId)
+      .where("pre_deactivation_status", "is not", null)
+      .execute();
+  });
   await auditUserAction("admin.user.restored", "success", {
     request: actor.request,
     actorBetterAuthUserId: actor.betterAuthUserId,

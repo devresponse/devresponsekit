@@ -161,7 +161,9 @@
         "softDelete": "Supprimer (soft)",
         "restore": "Restaurer",
         "confirm": "Confirmer",
-        "cancel": "Annuler"
+        "cancel": "Annuler",
+        "impersonate": "Usurper l’identité",
+        "stopImpersonating": "Arrêter l’usurpation"
       },
       "dialogs": {
         "ban": {
@@ -203,6 +205,30 @@
         "removeButton": "Supprimer",
         "removeConfirm": "Supprimer cette adhésion ?",
         "removeError": "Impossible de supprimer l'adhésion."
+      },
+      "bulk": {
+        "approve": "Approuver la sélection",
+        "block": "Bloquer la sélection",
+        "ban": "Bannir la sélection…",
+        "softDelete": "Supprimer la sélection (en douceur)…",
+        "reasonPrompt": "Motif (enregistré dans l’audit) :",
+        "confirmDelete": "Supprimer en douceur les utilisateurs sélectionnés ? Cela les bannit dans Better Auth et désactive l’enregistrement applicatif.",
+        "successToast": "{action} appliqué à {succeeded} utilisateur(s).",
+        "partialFailureToast": "{action} appliqué à {succeeded}/{attempted} utilisateur(s) ; {failed} en échec.",
+        "errorToast": "L’action en masse a échoué.",
+        "rateLimitedToast": "Trop de requêtes en masse. Réessayez dans un instant."
+      },
+      "impersonation": {
+        "confirmTitle": "Usurper l’identité de {email} ?",
+        "confirmDescription": "Vous serez connecté en tant que {email}. L’action est enregistrée dans le journal d’audit. Pour revenir à votre session, cliquez sur « Arrêter l’usurpation » dans la bannière qui apparaît sur chaque page.",
+        "confirmAck": "Je comprends que cette action sera auditée.",
+        "startButton": "Usurper cet utilisateur",
+        "startToast": "Usurpation de {email}…",
+        "stopButton": "Arrêter l’usurpation",
+        "stopToast": "Vous êtes revenu à votre propre session.",
+        "errorToast": "Impossible de démarrer l’usurpation.",
+        "selfError": "Vous ne pouvez pas usurper votre propre identité.",
+        "bannerLabel": "Vous usurpez l’identité de {email}."
       }
     },
     "grid": {
@@ -218,7 +244,15 @@
       "search": "Rechercher",
       "sortAsc": "Tri croissant",
       "sortDesc": "Tri décroissant",
-      "sortNone": "Non trié"
+      "sortNone": "Non trié",
+      "selectPage": "Tout sélectionner sur cette page",
+      "selectRow": "Sélectionner la ligne",
+      "selectionCount": "{count, plural, one {# sélectionné} other {# sélectionnés}}",
+      "selectionAllMatching": "Toutes les {total, number} lignes correspondantes sélectionnées",
+      "selectAllMatching": "Sélectionner les {total, number} lignes correspondantes",
+      "clearSelection": "Effacer la sélection",
+      "bulkActions": "Actions en masse",
+      "exportCsv": "Exporter en CSV"
     },
     "errors": {
       "forbidden": "Vous n'avez pas l'autorisation de voir cette page.",
@@ -237,7 +271,9 @@
       "bindingExists": "Cette liaison de fournisseur existe déjà.",
       "idTaken": "Cet identifiant est déjà utilisé.",
       "invalidOrigin": "L'origine doit être une URL HTTPS sans chemin.",
-      "applicationInUse": "Cette application est encore référencée et ne peut pas être supprimée."
+      "applicationInUse": "Cette application est encore référencée et ne peut pas être supprimée.",
+      "rateLimited": "Trop de requêtes. Réessayez dans un instant.",
+      "exportTruncated": "L’export a atteint la limite maximale de lignes. Affinez les filtres et relancez l’export pour obtenir le reste."
     },
     "roles": {
       "title": "Rôles",
@@ -246,7 +282,10 @@
       "deleteButton": "Supprimer",
       "editButton": "Modifier",
       "backToList": "Retour aux rôles",
-      "scope": { "global": "Global", "org": "Organisation" },
+      "scope": {
+        "global": "Global",
+        "org": "Organisation"
+      },
       "columns": {
         "key": "Clé",
         "name": "Nom",
@@ -336,8 +375,13 @@
         "usedByRoleCount": "Rôles l'utilisant",
         "actions": "Actions"
       },
-      "filters": { "search": "Rechercher des permissions" },
-      "fields": { "key": "Clé", "description": "Description" },
+      "filters": {
+        "search": "Rechercher des permissions"
+      },
+      "fields": {
+        "key": "Clé",
+        "description": "Description"
+      },
       "new": {
         "title": "Créer une permission",
         "description": "Ajoutez une nouvelle clé de permission au catalogue. La clé est référencée par le code et les journaux d'audit ; choisissez-la avec soin.",

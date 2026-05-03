@@ -7,7 +7,9 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import { useTranslations } from "next-intl";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, EmptyDescription, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -18,6 +20,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DataGridToolbar,
+  type BulkActionDescriptor,
+} from "./data-grid-toolbar";
+import type { UseGridSelectionResult } from "./use-grid-selection";
 import {
   useGridFetch,
   useGridState,
@@ -35,6 +42,11 @@ import {
  * toggle, row selection, bulk-actions and CSV export are layered on by
  * later phases without changing this component's signature.
  *
+ * Phase 7 adds optional row selection (per-page and "select all
+ * matching"), a bulk-actions menu, and CSV export — all gated behind
+ * the `selection` / `bulkActions` / `exportResource` props so the
+ * grid stays drop-in compatible for callers that don't opt in.
+ *
  * The grid is *manual* — TanStack Table renders headers + cells but the
  * server is the source of truth for sort, filter and pagination state.
  */
@@ -49,6 +61,26 @@ export interface DataGridProps<TItem> {
   options?: UseGridStateOptions;
   /** Optional initial server-rendered page (saves first round-trip). */
   initialData?: { items: TItem[]; total: number };
+  /**
+   * Optional row selection. When provided, a leading checkbox column
+   * is injected and the toolbar shows the selection summary. Callers
+   * use {@link useGridSelection} to own the state.
+   */
+  selection?: {
+    state: UseGridSelectionResult;
+    /** Pulls a stable id out of the row for selection bookkeeping. */
+    getRowId: (item: TItem) => string;
+  };
+  /**
+   * Optional bulk-action menu items. Each handler is responsible for
+   * issuing the API call and refreshing the grid. Hidden when empty.
+   */
+  bulkActions?: BulkActionDescriptor[];
+  /**
+   * Resource slug for the CSV exporter; when set, an "Export CSV"
+   * button is rendered in the toolbar that downloads the current view.
+   */
+  exportResource?: string;
 }
 
 const EMPTY_OPTIONS: UseGridStateOptions = {};
@@ -64,9 +96,20 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const isInitialLoading = fetched.isLoading && !props.initialData && fetched.data === null;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
 
+  const selection = props.selection;
+  const selectionColumn = useMemo<ColumnDef<TItem, unknown> | null>(() => {
+    if (!selection) return null;
+    return buildSelectionColumn<TItem>(selection.state, selection.getRowId, items, t);
+  }, [selection, items, t]);
+
+  const tableColumns = useMemo<ColumnDef<TItem, unknown>[]>(
+    () => (selectionColumn ? [selectionColumn, ...props.columns] : props.columns),
+    [selectionColumn, props.columns],
+  );
+
   const table = useReactTable({
     data: items,
-    columns: props.columns,
+    columns: tableColumns,
     getCoreRowModel: getCoreRowModel(),
     manualPagination: true,
     manualSorting: true,
@@ -74,8 +117,31 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
     pageCount: totalPages,
   });
 
+  const showToolbar =
+    !!selection || (props.bulkActions && props.bulkActions.length > 0) || !!props.exportResource;
+
   return (
     <div data-grid={props.name} className="flex flex-col gap-3">
+      {showToolbar ? (
+        <DataGridToolbar
+          totalRows={total}
+          pageRowCount={items.length}
+          selection={
+            selection
+              ? {
+                  mode: selection.state.mode,
+                  count: selection.state.selectedIds.size,
+                  onSelectAllMatching: selection.state.selectAllMatching,
+                  onClear: selection.state.clear,
+                }
+              : { mode: "page", count: 0, onSelectAllMatching: () => {}, onClear: () => {} }
+          }
+          bulkActions={props.bulkActions}
+          exportResource={props.exportResource}
+          exportState={state}
+        />
+      ) : null}
+
       {fetched.error ? (
         <Empty role="alert">
           <EmptyTitle>{t("error")}</EmptyTitle>
@@ -137,6 +203,49 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
       ) : null}
     </div>
   );
+}
+
+/**
+ * Builds the leading checkbox column injected when `selection` is
+ * enabled. The header checkbox toggles "all on this page"; per-row
+ * checkboxes toggle individual rows. Both reset the selection mode
+ * back to "page" so explicit toggles never accidentally extend the
+ * "select all matching" intent.
+ */
+function buildSelectionColumn<TItem>(
+  selection: UseGridSelectionResult,
+  getRowId: (item: TItem) => string,
+  items: TItem[],
+  t: ReturnType<typeof useTranslations>,
+): ColumnDef<TItem, unknown> {
+  const pageIds = items.map(getRowId);
+  const pageAllSelected =
+    selection.mode === "all" ||
+    (pageIds.length > 0 && pageIds.every((id) => selection.selectedIds.has(id)));
+  const pageSomeSelected =
+    !pageAllSelected && pageIds.some((id) => selection.selectedIds.has(id));
+
+  return {
+    id: "__select",
+    header: () => (
+      <Checkbox
+        aria-label={t("selectPage")}
+        checked={pageAllSelected ? true : pageSomeSelected ? "indeterminate" : false}
+        onCheckedChange={(v) => selection.togglePage(pageIds, v === true)}
+      />
+    ),
+    cell: ({ row }) => {
+      const id = getRowId(row.original);
+      const checked = selection.mode === "all" || selection.selectedIds.has(id);
+      return (
+        <Checkbox
+          aria-label={t("selectRow")}
+          checked={checked}
+          onCheckedChange={() => selection.toggle(id)}
+        />
+      );
+    },
+  };
 }
 
 interface PaginationProps {

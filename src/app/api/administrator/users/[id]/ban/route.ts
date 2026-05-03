@@ -8,6 +8,10 @@ import {
   requireAdminPermission,
 } from "@/lib/admin/permissions.server";
 import {
+  DEFAULT_ADMIN_MUTATION_LIMIT,
+  enforceRateLimit,
+} from "@/lib/admin/rate-limit.server";
+import {
   isResolvedUserResponse,
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
@@ -37,6 +41,9 @@ const banSchema = z
 export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.ban");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit("admin.users.ban", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  if (limited) return limited;
 
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id);

@@ -181,6 +181,44 @@ export async function revokeAllBetterAuthUserSessions(
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Impersonation                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Begins an impersonation session: Better Auth issues a new session
+ * cookie for the target user while remembering the original actor in
+ * `session.impersonatedBy` so {@link stopBetterAuthImpersonating} can
+ * restore the actor's session.
+ *
+ * Caller MUST gate this behind `admin.users.impersonate` and the
+ * UI MUST require a double-confirm — see docs/admin-manager.md §19
+ * Phase 7. Audit on both success and failure.
+ */
+export async function impersonateBetterAuthUser(
+  userId: string,
+  actor?: Headers | { headers: Headers },
+) {
+  return auth.api.impersonateUser({
+    body: { userId },
+    headers: await actorHeaders(actor),
+  } as Parameters<typeof auth.api.impersonateUser>[0]);
+}
+
+/**
+ * Ends an active impersonation session and restores the original
+ * actor's session. Safe to call when no impersonation is active —
+ * Better Auth returns a no-op error which callers may surface to the
+ * UI as "nothing to do".
+ */
+export async function stopBetterAuthImpersonating(
+  actor?: Headers | { headers: Headers },
+) {
+  return auth.api.stopImpersonating({
+    headers: await actorHeaders(actor),
+  } as Parameters<typeof auth.api.stopImpersonating>[0]);
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Password reset                                                            */
 /* -------------------------------------------------------------------------- */
 

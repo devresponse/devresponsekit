@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { z } from "zod";
 import { db } from "@/db/database";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   applySortAndPagination,
   buildListResponse,
@@ -152,11 +153,11 @@ export async function POST(request: NextRequest) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = createSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const input = parsed.data;
@@ -177,7 +178,7 @@ export async function POST(request: NextRequest) {
     .where(sql`lower(primary_email)`, "=", normalisedEmail)
     .executeTakeFirst();
   if (existing) {
-    return NextResponse.json({ error: "email_taken" }, { status: 409 });
+    return adminErrorResponse("email_taken", 409, request);
   }
 
   let created;
@@ -192,7 +193,7 @@ export async function POST(request: NextRequest) {
       request,
     );
   } catch (err) {
-    await auditUserAction("admin.user.create_failed", "failure", {
+    await auditUserAction("admin.user.create_failed", "error", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: "00000000-0000-0000-0000-000000000000",
@@ -200,7 +201,7 @@ export async function POST(request: NextRequest) {
       reason: "auth_create_user_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_create_failed" }, { status: 502 });
+    return adminErrorResponse("auth_create_failed", 502, request);
   }
 
   // Better Auth's create-user returns either `{ user: { id, ... } }` or
@@ -209,24 +210,47 @@ export async function POST(request: NextRequest) {
     (created as { user?: { id?: string }; id?: string } | null | undefined)?.user?.id ??
     (created as { id?: string } | null | undefined)?.id;
   if (!betterAuthUserId) {
-    return NextResponse.json({ error: "auth_create_failed" }, { status: 502 });
+    return adminErrorResponse("auth_create_failed", 502, request);
   }
 
   // Insert the application user row. We deliberately do NOT auto-create
   // a membership here — that's the responsibility of the membership
   // endpoint (Phase 5), and admin-created users are explicitly approved
   // (or not) by an admin in a follow-up action.
-  const appUser = await db
-    .insertInto("app_users")
-    .values({
-      better_auth_user_id: betterAuthUserId,
-      primary_email: normalisedEmail,
-      display_name: input.name ?? null,
-      status: input.initialAppStatus,
-      preferred_locale: input.preferredLocale ?? "en",
-    })
-    .returning(["id", "primary_email", "status"])
-    .executeTakeFirstOrThrow();
+  //
+  // The earlier `select` is best-effort — between the read and this
+  // write a concurrent `POST /users` with the same email could win
+  // the race. We catch Postgres' unique-violation (SQLSTATE 23505)
+  // here and translate it to the same `email_taken` 409 the up-front
+  // check returns, instead of bubbling a generic 500 (#B2).
+  let appUser;
+  try {
+    appUser = await db
+      .insertInto("app_users")
+      .values({
+        better_auth_user_id: betterAuthUserId,
+        primary_email: normalisedEmail,
+        display_name: input.name ?? null,
+        status: input.initialAppStatus,
+        preferred_locale: input.preferredLocale ?? "en",
+      })
+      .returning(["id", "primary_email", "status"])
+      .executeTakeFirstOrThrow();
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      await auditUserAction("admin.user.create_failed", "error", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        appUserId: "00000000-0000-0000-0000-000000000000",
+        email: normalisedEmail,
+        requestId: guard.requestId,
+        reason: "email_taken_race",
+        metadata: { betterAuthUserId },
+      });
+      return adminErrorResponse("email_taken", 409, request);
+    }
+    throw err;
+  }
 
   await auditUserAction("admin.user.created", "success", {
     request,
@@ -249,5 +273,20 @@ export async function POST(request: NextRequest) {
       status: appUser.status,
     },
     { status: 201 },
+  );
+}
+
+/**
+ * Postgres unique-constraint violation detector. The `pg` driver
+ * surfaces SQLSTATE on the error object as `code`. We use a structural
+ * check rather than `instanceof DatabaseError` so this works whether
+ * the error is wrapped by Kysely or surfaced raw.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "23505"
   );
 }

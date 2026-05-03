@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   applySortAndPagination,
   buildListResponse,
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const roleExists = await db
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!roleExists) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return adminErrorResponse("not_found", 404, request);
   }
 
   const query = parseListQuery(request.nextUrl.searchParams, {

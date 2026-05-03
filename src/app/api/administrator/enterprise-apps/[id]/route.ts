@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   APP_ID_RE,
   APP_STATUS_VALUES,
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
   if (!APP_ID_RE.test(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const row = await db
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     .where("a.id", "=", id)
     .executeTakeFirst();
   if (!row) {
-    return NextResponse.json({ error: "application_not_found" }, { status: 404 });
+    return adminErrorResponse("application_not_found", 404, request);
   }
 
   return NextResponse.json(row);
@@ -88,23 +89,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
   if (!APP_ID_RE.test(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const input = parsed.data;
 
   if (input.origin !== undefined && !isHttpsOrigin(input.origin)) {
-    return NextResponse.json({ error: "invalid_origin" }, { status: 400 });
+    return adminErrorResponse("invalid_origin", 400, request);
   }
 
   const existing = await db
@@ -113,7 +114,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "application_not_found" }, { status: 404 });
+    return adminErrorResponse("application_not_found", 404, request);
   }
 
   const updates: Record<string, unknown> = {};
@@ -139,7 +140,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     if (/foreign key/i.test(message)) {
-      return NextResponse.json({ error: "organization_not_found" }, { status: 409 });
+      return adminErrorResponse("organization_not_found", 409, request);
     }
     throw err;
   }
@@ -174,7 +175,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   const { id } = await context.params;
   if (!APP_ID_RE.test(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const existing = await db
@@ -183,7 +184,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
-    return NextResponse.json({ error: "application_not_found" }, { status: 404 });
+    return adminErrorResponse("application_not_found", 404, request);
   }
 
   try {
@@ -199,7 +200,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         request,
         metadata: { id, reason: "application_in_use" },
       });
-      return NextResponse.json({ error: "application_in_use" }, { status: 409 });
+      return adminErrorResponse("application_in_use", 409, request);
     }
     throw err;
   }

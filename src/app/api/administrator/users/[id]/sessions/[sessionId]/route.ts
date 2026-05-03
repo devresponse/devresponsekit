@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { revokeBetterAuthUserSession } from "@/lib/admin/auth-admin.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -33,7 +34,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
 
   const { id, sessionId } = await ctx.params;
   if (!sessionId || sessionId.length < 1 || sessionId.length > 256) {
-    return NextResponse.json({ error: "invalid_session_id" }, { status: 400 });
+    return adminErrorResponse("invalid_session_id", 400, request);
   }
   const target = await resolveTargetUser(id);
   if (isResolvedUserResponse(target)) return target;
@@ -54,7 +55,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
         sessionTokenLength: sessionId.length,
       },
     });
-    return NextResponse.json({ error: "auth_revoke_session_failed" }, { status: 502 });
+    return adminErrorResponse("auth_revoke_session_failed", 502, request);
   }
 
   await auditUserAction("admin.user.session_revoked", "success", {

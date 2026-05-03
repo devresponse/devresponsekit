@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -53,11 +54,11 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = banSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   try {
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       reason: "auth_ban_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_ban_failed" }, { status: 502 });
+    return adminErrorResponse("auth_ban_failed", 502, request);
   }
 
   await auditUserAction("admin.user.banned", "success", {

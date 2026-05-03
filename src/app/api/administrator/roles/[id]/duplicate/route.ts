@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
-    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+    return adminErrorResponse("invalid_id", 400, request);
   }
 
   const source = await db
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!source) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return adminErrorResponse("not_found", 404, request);
   }
 
   // Compute a unique key suffix. We collect all candidate "starts-with"
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // Hard cap on key length per the create-schema contract (120). If the
   // suffixed candidate is too long, refuse rather than silently mutate.
   if (candidate.length > 120) {
-    return NextResponse.json({ error: "key_taken" }, { status: 409 });
+    return adminErrorResponse("key_taken", 409, request);
   }
 
   const created = await db.transaction().execute(async (trx) => {

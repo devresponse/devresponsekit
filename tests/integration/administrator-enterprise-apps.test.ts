@@ -231,7 +231,7 @@ describe("POST /api/administrator/enterprise-apps", () => {
       }),
     );
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "invalid_body" });
+    expect(await res.json()).toMatchObject({ error: "invalid_body" });
   });
 
   it("returns 400 when subdomain is invalid", async () => {
@@ -262,7 +262,7 @@ describe("POST /api/administrator/enterprise-apps", () => {
       }),
     );
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "invalid_origin" });
+    expect(await res.json()).toMatchObject({ error: "invalid_origin" });
   });
 
   it("returns 409 id_taken when the row already exists", async () => {
@@ -281,7 +281,7 @@ describe("POST /api/administrator/enterprise-apps", () => {
       }),
     );
     expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: "id_taken" });
+    expect(await res.json()).toMatchObject({ error: "id_taken" });
   });
 
   it("returns 201 on successful creation and writes an audit row", async () => {
@@ -357,7 +357,7 @@ describe("PATCH /api/administrator/enterprise-apps/:id", () => {
       params: Promise.resolve({ id: "docs" }),
     });
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "invalid_origin" });
+    expect(await res.json()).toMatchObject({ error: "invalid_origin" });
   });
 
   it("returns 404 when target app does not exist", async () => {
@@ -416,7 +416,7 @@ describe("DELETE /api/administrator/enterprise-apps/:id", () => {
       params: Promise.resolve({ id: "docs" }),
     });
     expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: "application_in_use" });
+    expect(await res.json()).toMatchObject({ error: "application_in_use" });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.app.delete_blocked",

@@ -1,10 +1,23 @@
 import "server-only";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
+import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+
+/**
+ * Permitted audit outcomes (docs/admin-manager.md §12):
+ *
+ *   - `success` — the operation completed.
+ *   - `denied`  — authorization (permission/membership/status) refused.
+ *   - `error`   — an unexpected service failure (DB, Better Auth, IO).
+ *   - `failure` — DEPRECATED legacy alias kept for back-compat with
+ *                 historical SSO and pre-spec audit rows. New call
+ *                 sites MUST use `error`.
+ */
+export type AuditOutcome = "success" | "denied" | "error" | "failure";
 
 export interface AuditEventInput {
   eventType: string;
-  outcome: "success" | "failure" | "denied";
+  outcome: AuditOutcome;
   actorBetterAuthUserId?: string | null;
   appUserId?: string | null;
   organizationId?: string | null;
@@ -13,6 +26,11 @@ export interface AuditEventInput {
   email?: string | null;
   reason?: string | null;
   request?: NextRequest | { headers: Headers };
+  /**
+   * Optional pre-computed correlation id. When omitted we fall back to
+   * the request's `x-request-id` header (or generate one).
+   */
+  requestId?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -31,6 +49,8 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;
   const ipForwarded = reqHeaders?.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = reqHeaders?.get("user-agent") ?? null;
+  const requestId =
+    input.requestId ?? (input.request ? getOrCreateRequestId(input.request) : null);
 
   await db
     .insertInto("app_audit_events")
@@ -46,6 +66,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
       ip_address: ipForwarded,
       user_agent: userAgent,
       reason: input.reason ?? null,
+      request_id: requestId,
       metadata: JSON.stringify(input.metadata ?? {}),
     })
     .execute();

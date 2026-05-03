@@ -227,7 +227,7 @@ describe("POST /api/administrator/organizations", () => {
     const res = await POST(jsonReq({ slug: "taken", name: "Taken Org" }));
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body).toEqual({ error: "slug_taken" });
+    expect(body).toMatchObject({ error: "slug_taken" });
   });
 
   it("returns 201 with created org on success", async () => {
@@ -249,7 +249,7 @@ describe("GET /api/administrator/organizations/:id", () => {
     const res = await GET_BY_ID(idReq("GET", "not-a-uuid"), { params: Promise.resolve({ id: "not-a-uuid" }) });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body).toEqual({ error: "invalid_id" });
+    expect(body).toMatchObject({ error: "invalid_id" });
   });
 
   it("returns 404 when org not found", async () => {

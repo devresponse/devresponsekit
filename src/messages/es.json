@@ -558,6 +558,7 @@
       },
       "outcome": {
         "success": "Éxito",
+        "error": "Error",
         "failure": "Fallo",
         "denied": "Denegado"
       },
@@ -574,5 +575,49 @@
         "metadata": "Metadatos"
       }
     }
+  },
+  "errors": {
+    "application_in_use": "Esta aplicación está en uso y no se puede eliminar.",
+    "application_not_found": "Aplicación no encontrada.",
+    "auth_ban_failed": "El servicio de autenticación rechazó el bloqueo.",
+    "auth_create_failed": "El servicio de autenticación rechazó crear el usuario.",
+    "auth_forgot_password_failed": "No se pudo enviar el correo de restablecimiento.",
+    "auth_impersonate_failed": "No se pudo iniciar la suplantación.",
+    "auth_list_sessions_failed": "No se pudieron listar las sesiones.",
+    "auth_revoke_all_failed": "No se pudieron revocar todas las sesiones.",
+    "auth_revoke_session_failed": "No se pudo revocar la sesión.",
+    "auth_set_password_failed": "No se pudo cambiar la contraseña.",
+    "auth_set_role_failed": "No se pudo cambiar el rol.",
+    "auth_stop_impersonate_failed": "No se pudo detener la suplantación.",
+    "auth_unban_failed": "El servicio de autenticación rechazó levantar el bloqueo.",
+    "binding_exists": "Esta vinculación ya existe.",
+    "binding_not_found": "Vinculación no encontrada.",
+    "cannot_impersonate_self": "No puedes suplantarte a ti mismo.",
+    "email_taken": "Este correo ya está en uso.",
+    "export_failed": "La exportación falló antes de enviar filas.",
+    "filters_required_for_select_all": "Se requieren filtros al seleccionar todo.",
+    "forbidden": "No tienes permiso para realizar esta acción.",
+    "id_taken": "Este identificador ya está en uso.",
+    "invalid_body": "El cuerpo de la solicitud no es válido.",
+    "invalid_id": "El id no es un UUID válido.",
+    "invalid_origin": "El origen de la solicitud no está permitido.",
+    "invalid_session_id": "El id de sesión no es válido.",
+    "key_taken": "Esta clave ya está en uso.",
+    "membership_exists": "Esta membresía ya existe.",
+    "membership_not_found": "Membresía no encontrada.",
+    "no_changes": "No se proporcionaron cambios.",
+    "not_deactivated": "El usuario no está desactivado.",
+    "not_found": "No encontrado.",
+    "organization_not_found": "Organización no encontrada.",
+    "permission_in_use": "Este permiso está en uso.",
+    "rate_limited": "Demasiadas solicitudes. Más despacio.",
+    "role_in_use": "Este rol está en uso.",
+    "role_not_found": "Rol no encontrado.",
+    "slug_taken": "Este identificador ya está en uso.",
+    "soft_delete_failed": "El borrado lógico falló; reintenta.",
+    "unauthenticated": "Se requiere inicio de sesión.",
+    "unknown_resource": "Recurso desconocido.",
+    "untrusted_origin": "El origen no es de confianza.",
+    "user_not_found": "Usuario no encontrado."
   }
 }

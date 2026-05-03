@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -30,6 +30,11 @@ type RouteContext = { params: Promise<{ id: string }> };
  *      `deactivated_*` columns. We deliberately do NOT auto-restore to
  *      `active` — an admin should re-approve via the status endpoint so
  *      the approval intent is captured in audit.
+ *   3. Restore each membership to the status snapshotted in
+ *      `pre_deactivation_status` when the soft-delete cascade ran, then
+ *      clear the snapshot column. Without this step a restored user
+ *      would have all org memberships permanently `'blocked'` and could
+ *      not access anything.
  *
  * Caller MUST hold `admin.users.delete` (same permission gates both
  * directions of the soft-delete lifecycle, per plan §4.1).
@@ -38,7 +43,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit("admin.users.restore", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  const limited = enforceRateLimit(
+    "admin.users.restore",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+    undefined,
+    request,
+    guard.requestId,
+  );
   if (limited) return limited;
 
   const { id } = await ctx.params;
@@ -46,42 +58,65 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (isResolvedUserResponse(target)) return target;
 
   if (target.status !== "deactivated") {
-    return NextResponse.json({ error: "not_deactivated" }, { status: 409 });
+    return adminErrorResponse("not_deactivated", 409, request, {
+      requestId: guard.requestId,
+    });
   }
 
   try {
     await unbanBetterAuthUser(target.betterAuthUserId, request);
   } catch (err) {
-    await auditUserAction("admin.user.restore_failed", "failure", {
+    await auditUserAction("admin.user.restore_failed", "error", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
       email: target.primaryEmail,
+      requestId: guard.requestId,
       reason: "auth_unban_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "auth_unban_failed" }, { status: 502 });
+    return adminErrorResponse("auth_unban_failed", 502, request, {
+      requestId: guard.requestId,
+    });
   }
 
-  await db
-    .updateTable("app_users")
-    .set({
-      status: "pending_approval",
-      status_reason: null,
-      deactivated_at: null,
-      deactivated_by: null,
-      deactivated_reason: null,
-      updated_at: sql`now()`,
-    })
-    .where("id", "=", target.appUserId)
-    .execute();
+  await db.transaction().execute(async (trx) => {
+    await trx
+      .updateTable("app_users")
+      .set({
+        status: "pending_approval",
+        status_reason: null,
+        deactivated_at: null,
+        deactivated_by: null,
+        deactivated_reason: null,
+        updated_at: sql`now()`,
+      })
+      .where("id", "=", target.appUserId)
+      .execute();
+
+    await trx
+      .updateTable("app_organization_memberships")
+      .set({
+        status: sql`coalesce(pre_deactivation_status, status)`,
+        pre_deactivation_status: null,
+        updated_at: sql`now()`,
+      })
+      .where("app_user_id", "=", target.appUserId)
+      .where("pre_deactivation_status", "is not", null)
+      .execute();
+  });
 
   await auditUserAction("admin.user.restored", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
     email: target.primaryEmail,
+    requestId: guard.requestId,
   });
 
-  return NextResponse.json({ ok: true, status: "pending_approval" });
+  return adminJsonResponse(
+    { ok: true, status: "pending_approval" },
+    request,
+    { requestId: guard.requestId },
+  );
 }

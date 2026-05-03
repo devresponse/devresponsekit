@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -104,11 +105,11 @@ export async function POST(request: NextRequest) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = bulkSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const action: BulkUserAction = parsed.data.action;
@@ -137,7 +138,7 @@ export async function POST(request: NextRequest) {
   let targetIds: string[];
   if (parsed.data.ids === "*") {
     if (!parsed.data.filters) {
-      return NextResponse.json({ error: "filters_required_for_select_all" }, { status: 400 });
+      return adminErrorResponse("filters_required_for_select_all", 400, request);
     }
     let q = db.selectFrom("app_users").select(["id"]);
     const status = parsed.data.filters.status;

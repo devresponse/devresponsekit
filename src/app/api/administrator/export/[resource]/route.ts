@@ -1,9 +1,9 @@
 import "server-only";
 import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   parseListQuery,
   type FilterValue,
@@ -87,7 +87,7 @@ interface RouteContext {
 export async function GET(request: NextRequest, ctx: RouteContext) {
   const { resource: resourceParam } = await ctx.params;
   if (!VALID_RESOURCES.has(resourceParam as Resource)) {
-    return NextResponse.json({ error: "unknown_resource" }, { status: 404 });
+    return adminErrorResponse("unknown_resource", 404, request);
   }
   const resource = resourceParam as Resource;
 
@@ -111,6 +111,36 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   });
 
   const filename = buildFilename(resource);
+
+  // Validate the query and execute the FIRST page BEFORE we open the
+  // stream. If anything blows up at this stage (bad filter, missing
+  // table, transient DB error) we can still respond with a real HTTP
+  // status + JSON envelope. Once we hand a `ReadableStream` back to
+  // Next.js the status is locked at 200 and any later error can only
+  // be surfaced as a CSV body, which most consumers cannot detect.
+  let exporter: { header: string[]; fetchPage: (limit: number, offset: number) => Promise<unknown[][]> };
+  let firstPage: unknown[][];
+  try {
+    exporter = buildExporter(resource, query);
+    firstPage = await exporter.fetchPage(Math.min(PAGE_SIZE, MAX_EXPORT_ROWS), 0);
+  } catch (err) {
+    await auditEvent({
+      eventType: "admin.export.failed",
+      outcome: "error",
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      request,
+      requestId: guard.requestId,
+      reason: "export_failed",
+      metadata: {
+        resource,
+        rowsEmitted: 0,
+        phase: "preflight",
+        message: err instanceof Error ? err.message : "unknown",
+      },
+    });
+    return adminErrorResponse("export_failed", 502, request);
+  }
+
   let rowsEmitted = 0;
   let truncated = false;
 
@@ -120,31 +150,40 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
       const writeLine = (line: string) => controller.enqueue(encoder.encode(`${line}\n`));
 
       try {
-        const { header, fetchPage } = buildExporter(resource, query);
-        writeLine(header.map(csvEscape).join(","));
+        writeLine(exporter.header.map(csvEscape).join(","));
 
-        let offset = 0;
-        while (true) {
-          const remaining = MAX_EXPORT_ROWS - rowsEmitted;
-          if (remaining <= 0) {
-            truncated = true;
-            break;
+        // Emit the preflight page first.
+        for (const row of firstPage) {
+          writeLine(row.map(csvEscape).join(","));
+          rowsEmitted += 1;
+        }
+        let offset = firstPage.length;
+
+        // Continue streaming subsequent pages until exhausted or
+        // truncated. If the first page already exhausted the source
+        // we skip the loop entirely.
+        if (firstPage.length >= Math.min(PAGE_SIZE, MAX_EXPORT_ROWS)) {
+          while (true) {
+            const remaining = MAX_EXPORT_ROWS - rowsEmitted;
+            if (remaining <= 0) {
+              truncated = true;
+              break;
+            }
+            const limit = Math.min(PAGE_SIZE, remaining);
+            const rows = await exporter.fetchPage(limit, offset);
+            if (rows.length === 0) break;
+            for (const row of rows) {
+              writeLine(row.map(csvEscape).join(","));
+              rowsEmitted += 1;
+            }
+            if (rows.length < limit) break;
+            offset += rows.length;
           }
-          const limit = Math.min(PAGE_SIZE, remaining);
-          const rows = await fetchPage(limit, offset);
-          if (rows.length === 0) break;
-          for (const row of rows) {
-            writeLine(row.map(csvEscape).join(","));
-            rowsEmitted += 1;
-          }
-          if (rows.length < limit) break;
-          offset += rows.length;
         }
       } catch (err) {
         // We've already started streaming, so we can't change the
         // status. Append a sentinel comment so a curl reader sees the
         // error, and audit the failure.
-        const encoder = new TextEncoder();
         controller.enqueue(
           encoder.encode(
             `# export_failed: ${err instanceof Error ? err.message.replace(/\n/g, " ") : "unknown"}\n`,
@@ -152,26 +191,31 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
         );
         await auditEvent({
           eventType: "admin.export.failed",
-          outcome: "failure",
+          outcome: "error",
           actorBetterAuthUserId: guard.betterAuthUserId,
           request,
+          requestId: guard.requestId,
           reason: "export_failed",
           metadata: {
             resource,
             rowsEmitted,
+            phase: "stream",
             message: err instanceof Error ? err.message : "unknown",
           },
         });
       } finally {
         controller.close();
         // Best-effort completion audit. Failure during audit must not
-        // crash the stream's close.
+        // crash the stream's close. Truncated exports are recorded as
+        // `success` with `truncated: true` so operators can still query
+        // by outcome — a truncation is the contract, not a failure.
         try {
           await auditEvent({
             eventType: "admin.export.completed",
-            outcome: truncated ? "failure" : "success",
+            outcome: "success",
             actorBetterAuthUserId: guard.betterAuthUserId,
             request,
+            requestId: guard.requestId,
             reason: truncated ? "export_truncated" : null,
             metadata: { resource, rowsEmitted, truncated, limit: MAX_EXPORT_ROWS },
           });
@@ -189,6 +233,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
       "content-disposition": `attachment; filename="${filename}"`,
       "cache-control": "no-store",
       "x-export-limit": String(MAX_EXPORT_ROWS),
+      "x-request-id": guard.requestId,
     },
   });
 }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   isAdminPermissionDenial,
   requireAdminPermission,
@@ -89,11 +90,11 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = assignSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   // Validate role + org existence up front so the FK violation surfaces
@@ -103,14 +104,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     .select(["id", "key", "organization_id"])
     .where("id", "=", parsed.data.roleId)
     .executeTakeFirst();
-  if (!role) return NextResponse.json({ error: "role_not_found" }, { status: 404 });
+  if (!role) return adminErrorResponse("role_not_found", 404, request);
 
   const org = await db
     .selectFrom("app_organizations")
     .select(["id"])
     .where("id", "=", parsed.data.organizationId)
     .executeTakeFirst();
-  if (!org) return NextResponse.json({ error: "organization_not_found" }, { status: 404 });
+  if (!org) return adminErrorResponse("organization_not_found", 404, request);
 
   await db.transaction().execute(async (trx) => {
     await trx
@@ -160,11 +161,11 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = assignSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   // Pull the role's key for the audit row before deleting.

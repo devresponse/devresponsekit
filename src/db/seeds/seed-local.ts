@@ -36,6 +36,10 @@ async function main() {
       ["shell.view", "View the secure shell"],
       ["admin.users.manage", "Approve, block, suspend, reactivate users"],
       ["audit.view", "Read the audit log"],
+      [
+        "superuser",
+        "Superuser access level — full unrestricted access to every part of the application",
+      ],
     ];
     for (const [key, description] of permissions) {
       await pool.query(
@@ -72,6 +76,20 @@ async function main() {
         // from the canonical catalog so adding a new key automatically
         // grants it to platform admins on next seed run.
         ["shell.view", ...ADMIN_PERMISSION_CATALOG.map((p) => p.key)],
+      ],
+      [
+        "superuser",
+        "Superuser",
+        // Superuser is the default top-level access level. It holds
+        // every permission known to the system — including all admin.*
+        // capabilities and the `superuser` marker — so it acts as a
+        // true superuser, covering and exceeding `administrator`.
+        [
+          "shell.view",
+          "audit.view",
+          "superuser",
+          ...ADMIN_PERMISSION_CATALOG.map((p) => p.key),
+        ],
       ],
     ];
     for (const [key, name, permKeys] of roles) {
@@ -298,6 +316,30 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
        values ($1, $2, $3)
        on conflict do nothing`,
       [appUserId, organizationId, platformRoleId],
+    );
+  }
+
+  // Grant the default `superuser` access level so the canonical local
+  // admin holds the complete permission set without depending on
+  // per-permission grants. The role is created by both this seed
+  // (lines 80-92 above, which keep its permission grants in sync with
+  // the current ADMIN_PERMISSION_CATALOG) AND by migration
+  // 0004-default-superuser.sql (which creates the role/infrastructure
+  // at schema-application time). Either path leaves the role in place;
+  // here we only need to look it up and assign it.
+  const superuserRoleId = (
+    await pool.query<{ id: string }>(
+      `select id from app_roles where organization_id = $1 and key = 'superuser'`,
+      [organizationId],
+    )
+  ).rows[0]?.id;
+
+  if (superuserRoleId) {
+    await pool.query(
+      `insert into app_user_roles (app_user_id, organization_id, role_id)
+       values ($1, $2, $3)
+       on conflict do nothing`,
+      [appUserId, organizationId, superuserRoleId],
     );
   }
 

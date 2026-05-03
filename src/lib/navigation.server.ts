@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/db/database";
 import type { UserAccessContext } from "@/lib/auth-status";
+import { ANY_ADMIN_PERMISSION } from "@/lib/admin/permissions";
 import type {
   EnterpriseApplicationMenuItem,
   NavigationMenuItem,
@@ -10,17 +11,28 @@ import type {
 /**
  * Pure menu filtering helper.
  *
- * Removes any item that requires a permission the caller does not have.
+ * Removes any item that the caller cannot see based on the supplied
+ * permission set. An item is kept when:
+ *   - every key in `requiredPermissions` is granted (AND semantics), AND
+ *   - if `anyOfPermissions` is non-empty, at least one of those keys is
+ *     granted (OR semantics).
+ *
+ * The OR gate exists so menu entries can mirror the layout-level
+ * `ANY_ADMIN_PERMISSION` guard without enumerating every admin.* key
+ * in `requiredPermissions` (which would be AND'd and therefore wrong).
+ *
  * Kept pure so it can be unit-tested independently of the database.
  */
-export function filterMenuByPermissions<TItem extends { requiredPermissions?: string[] }>(
-  items: readonly TItem[],
-  permissions: readonly string[],
-): TItem[] {
+export function filterMenuByPermissions<
+  TItem extends { requiredPermissions?: string[]; anyOfPermissions?: string[] },
+>(items: readonly TItem[], permissions: readonly string[]): TItem[] {
   const granted = new Set(permissions);
   return items.filter((item) => {
     const required = item.requiredPermissions ?? [];
-    return required.every((p) => granted.has(p));
+    if (!required.every((p) => granted.has(p))) return false;
+    const anyOf = item.anyOfPermissions ?? [];
+    if (anyOf.length > 0 && !anyOf.some((p) => granted.has(p))) return false;
+    return true;
   });
 }
 
@@ -139,6 +151,7 @@ interface InternalMenuItem {
   href: string;
   icon?: string;
   requiredPermissions?: string[];
+  anyOfPermissions?: string[];
 }
 
 const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
@@ -153,6 +166,17 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
     label: "Workspace",
     href: "/app/workspace",
     requiredPermissions: ["shell.view"],
+  },
+  {
+    id: "administrator",
+    label: "Administrator",
+    href: "/app/administrator",
+    // Mirrors the layout-level guard in
+    // `src/app/[locale]/(secure)/app/administrator/layout.tsx`: any
+    // single `admin.*` permission is enough to enter the workspace, so
+    // the launcher entry surfaces for every administrator (including
+    // the canonical `superuser` role) without enumerating each key.
+    anyOfPermissions: [...ANY_ADMIN_PERMISSION],
   },
   {
     id: "admin-users",

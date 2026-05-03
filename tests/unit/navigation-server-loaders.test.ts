@@ -82,6 +82,9 @@ describe("loadShellMenu", () => {
     expect(ids).toContain("workspace");
     expect(ids).toContain("admin-audit");
     expect(ids).not.toContain("admin-users");
+    // No admin.* permission granted, so the Administrator launcher
+    // entry must not be visible.
+    expect(ids).not.toContain("administrator");
     // hrefs are prefixed with the locale
     expect(res.items[0]!.href.startsWith("/fr/")).toBe(true);
   });
@@ -89,6 +92,17 @@ describe("loadShellMenu", () => {
   it("returns no items when caller has no permissions", async () => {
     const res = await mod.loadShellMenu({ ...ACTIVE, permissions: [] }, "primary-sidebar", "en");
     expect(res.items).toEqual([]);
+  });
+
+  it("exposes the Administrator launcher entry to any caller holding an admin.* permission", async () => {
+    const res = await mod.loadShellMenu(
+      { ...ACTIVE, permissions: ["admin.audit.read"] },
+      "primary-sidebar",
+      "en",
+    );
+    const admin = res.items.find((i) => i.id === "administrator");
+    expect(admin).toBeDefined();
+    expect(admin!.href).toBe("/en/app/administrator");
   });
 });
 

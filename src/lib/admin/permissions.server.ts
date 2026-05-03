@@ -1,6 +1,5 @@
 import "server-only";
-import type { NextResponse} from "next/server";
-import { type NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { decideSecureAccess, getUserAccessContext, type UserAccessContext } from "@/lib/auth-status";

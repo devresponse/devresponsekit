@@ -62,7 +62,7 @@ export interface OriginCheckResult {
 }
 
 export function checkTrustedOrigin(
-  request: { method?: string; headers: Headers } | { method?: string; headers: Headers },
+  request: { method?: string; headers: Headers },
 ): OriginCheckResult {
   const method = (request.method ?? "GET").toUpperCase();
   if (!UNSAFE_METHODS.has(method)) return { ok: true };

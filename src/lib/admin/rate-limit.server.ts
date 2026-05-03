@@ -1,6 +1,5 @@
 import "server-only";
-import type { NextResponse} from "next/server";
-import { type NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 
 /**

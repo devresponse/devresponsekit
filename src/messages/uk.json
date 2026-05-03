@@ -558,8 +558,8 @@
       },
       "outcome": {
         "success": "Успіх",
-        "error": "Помилка сервера",
-        "failure": "Помилка",
+        "error": "Помилка",
+        "failure": "Збій",
         "denied": "Відмовлено"
       },
       "detail": {

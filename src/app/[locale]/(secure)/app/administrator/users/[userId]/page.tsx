@@ -8,6 +8,7 @@ import { isUuid } from "@/lib/admin/user-target.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ImpersonateUserButton } from "./_impersonate-button";
 import { UserDetailTabs } from "./_user-detail-tabs";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +70,8 @@ export default async function AdministratorUserDetailPage({
   const t = await getTranslations({ locale, namespace: "administrator.users" });
 
   const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
+  const canImpersonate = guard.access.permissions.includes("admin.users.impersonate");
+  const isSelfTarget = guard.betterAuthUserId === user.better_auth_user_id;
 
   // ISO-string-ify timestamps so the value crosses the RSC/client
   // boundary cleanly (Date instances aren't serializable through
@@ -102,7 +105,16 @@ export default async function AdministratorUserDetailPage({
           </h1>
           <p className="text-sm text-neutral-600">{user.primary_email}</p>
         </div>
-        <Badge variant="outline">{translateStatus(t, user.status)}</Badge>
+        <div className="flex items-center gap-2">
+          {canImpersonate ? (
+            <ImpersonateUserButton
+              userId={user.id}
+              email={user.primary_email}
+              isSelf={isSelfTarget}
+            />
+          ) : null}
+          <Badge variant="outline">{translateStatus(t, user.status)}</Badge>
+        </div>
       </div>
 
       <UserDetailTabs user={userJson} canUpdateMemberships={canUpdateMemberships} />

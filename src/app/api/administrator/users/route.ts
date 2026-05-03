@@ -12,6 +12,10 @@ import {
   isAdminPermissionDenial,
   requireAdminPermission,
 } from "@/lib/admin/permissions.server";
+import {
+  DEFAULT_ADMIN_MUTATION_LIMIT,
+  enforceRateLimit,
+} from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 
@@ -140,6 +144,9 @@ const createSchema = z
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit("admin.users.create", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  if (limited) return limited;
 
   let json: unknown;
   try {

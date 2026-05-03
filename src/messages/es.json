@@ -161,7 +161,9 @@
         "softDelete": "Eliminar (suave)",
         "restore": "Restaurar",
         "confirm": "Confirmar",
-        "cancel": "Cancelar"
+        "cancel": "Cancelar",
+        "impersonate": "Suplantar",
+        "stopImpersonating": "Detener suplantación"
       },
       "dialogs": {
         "ban": {
@@ -203,6 +205,30 @@
         "removeButton": "Eliminar",
         "removeConfirm": "¿Eliminar esta membresía?",
         "removeError": "No se pudo eliminar la membresía."
+      },
+      "bulk": {
+        "approve": "Aprobar selección",
+        "block": "Bloquear selección",
+        "ban": "Banear selección…",
+        "softDelete": "Eliminar selección (suave)…",
+        "reasonPrompt": "Motivo (registrado en auditoría):",
+        "confirmDelete": "¿Eliminar de forma suave los usuarios seleccionados? Se les baneará en Better Auth y se desactivará el registro de la aplicación.",
+        "successToast": "{action} aplicado a {succeeded} usuario(s).",
+        "partialFailureToast": "{action} aplicado a {succeeded}/{attempted} usuario(s); {failed} fallaron.",
+        "errorToast": "La acción masiva falló.",
+        "rateLimitedToast": "Demasiadas solicitudes masivas. Inténtelo de nuevo en breve."
+      },
+      "impersonation": {
+        "confirmTitle": "¿Suplantar a {email}?",
+        "confirmDescription": "Iniciará sesión como {email}. La acción se registra en el historial de auditoría. Para volver a su propia sesión, pulse «Detener suplantación» en el banner que aparecerá en cada página.",
+        "confirmAck": "Entiendo que esto se auditará.",
+        "startButton": "Suplantar a este usuario",
+        "startToast": "Suplantando a {email}…",
+        "stopButton": "Detener suplantación",
+        "stopToast": "Volvió a su propia sesión.",
+        "errorToast": "No se pudo iniciar la suplantación.",
+        "selfError": "No puede suplantarse a sí mismo.",
+        "bannerLabel": "Está suplantando a {email}."
       }
     },
     "grid": {
@@ -218,7 +244,15 @@
       "search": "Buscar",
       "sortAsc": "Orden ascendente",
       "sortDesc": "Orden descendente",
-      "sortNone": "Sin ordenar"
+      "sortNone": "Sin ordenar",
+      "selectPage": "Seleccionar todo en esta página",
+      "selectRow": "Seleccionar fila",
+      "selectionCount": "{count, plural, one {# seleccionado} other {# seleccionados}}",
+      "selectionAllMatching": "Todas las {total, number} filas coincidentes seleccionadas",
+      "selectAllMatching": "Seleccionar las {total, number} filas coincidentes",
+      "clearSelection": "Limpiar selección",
+      "bulkActions": "Acciones masivas",
+      "exportCsv": "Exportar CSV"
     },
     "errors": {
       "forbidden": "No tiene permiso para ver esta página.",
@@ -237,7 +271,9 @@
       "bindingExists": "Este enlace de proveedor ya existe.",
       "idTaken": "Ese identificador ya está en uso.",
       "invalidOrigin": "El origen debe ser una URL HTTPS sin ruta.",
-      "applicationInUse": "Esta aplicación todavía está referenciada y no se puede eliminar."
+      "applicationInUse": "Esta aplicación todavía está referenciada y no se puede eliminar.",
+      "rateLimited": "Demasiadas solicitudes. Inténtelo de nuevo en un momento.",
+      "exportTruncated": "La exportación alcanzó el límite máximo de filas. Refine los filtros y vuelva a exportar para obtener el resto."
     },
     "roles": {
       "title": "Roles",
@@ -246,7 +282,10 @@
       "deleteButton": "Eliminar",
       "editButton": "Editar",
       "backToList": "Volver a roles",
-      "scope": { "global": "Global", "org": "Organización" },
+      "scope": {
+        "global": "Global",
+        "org": "Organización"
+      },
       "columns": {
         "key": "Clave",
         "name": "Nombre",
@@ -336,8 +375,13 @@
         "usedByRoleCount": "Roles que lo usan",
         "actions": "Acciones"
       },
-      "filters": { "search": "Buscar permisos" },
-      "fields": { "key": "Clave", "description": "Descripción" },
+      "filters": {
+        "search": "Buscar permisos"
+      },
+      "fields": {
+        "key": "Clave",
+        "description": "Descripción"
+      },
       "new": {
         "title": "Crear permiso",
         "description": "Añada una nueva clave de permiso al catálogo. La clave se referencia desde el código y los registros de auditoría; elíjala con cuidado.",

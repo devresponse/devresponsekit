@@ -160,8 +160,34 @@
         "revokeSessions": "Revoke all sessions",
         "softDelete": "Delete (soft)",
         "restore": "Restore",
+        "impersonate": "Impersonate",
+        "stopImpersonating": "Stop impersonating",
         "confirm": "Confirm",
         "cancel": "Cancel"
+      },
+      "bulk": {
+        "approve": "Approve selected",
+        "block": "Block selected",
+        "ban": "Ban selected…",
+        "softDelete": "Delete selected (soft)…",
+        "reasonPrompt": "Reason (recorded in audit log):",
+        "confirmDelete": "Soft-delete the selected users? This bans them in Better Auth and deactivates the application record.",
+        "successToast": "{action} applied to {succeeded} user(s).",
+        "partialFailureToast": "{action} applied to {succeeded}/{attempted} user(s); {failed} failed.",
+        "errorToast": "Bulk action failed.",
+        "rateLimitedToast": "Too many bulk requests. Try again shortly."
+      },
+      "impersonation": {
+        "confirmTitle": "Impersonate {email}?",
+        "confirmDescription": "You will be signed in as {email}. The action is recorded in the audit log. To return to your own session, click \"Stop impersonating\" in the banner that appears on every page.",
+        "confirmAck": "I understand this will be audited.",
+        "startButton": "Impersonate this user",
+        "startToast": "Impersonating {email}…",
+        "stopButton": "Stop impersonating",
+        "stopToast": "Returned to your own session.",
+        "errorToast": "Could not start impersonation.",
+        "selfError": "You cannot impersonate yourself.",
+        "bannerLabel": "You are impersonating {email}."
       },
       "dialogs": {
         "ban": {
@@ -218,7 +244,15 @@
       "search": "Search",
       "sortAsc": "Sorted ascending",
       "sortDesc": "Sorted descending",
-      "sortNone": "Not sorted"
+      "sortNone": "Not sorted",
+      "selectPage": "Select all on this page",
+      "selectRow": "Select row",
+      "selectionCount": "{count, plural, one {# selected} other {# selected}}",
+      "selectionAllMatching": "All {total, number} matching rows selected",
+      "selectAllMatching": "Select all {total, number} matching rows",
+      "clearSelection": "Clear selection",
+      "bulkActions": "Bulk actions",
+      "exportCsv": "Export CSV"
     },
     "errors": {
       "forbidden": "You don't have permission to view this page.",
@@ -237,7 +271,9 @@
       "bindingExists": "This provider binding already exists.",
       "idTaken": "That id is already in use.",
       "invalidOrigin": "Origin must be an HTTPS URL with no path.",
-      "applicationInUse": "This application is still referenced and cannot be deleted."
+      "applicationInUse": "This application is still referenced and cannot be deleted.",
+      "rateLimited": "Too many requests. Try again in a moment.",
+      "exportTruncated": "Export hit the maximum row cap. Refine the filters and re-export to get the rest."
     },
     "roles": {
       "title": "Roles",

@@ -29,6 +29,7 @@
 
 .sh-grid {
   display: grid;
+  height: 100%;
   min-height: 0;
   grid-template-columns:
     var(--sh-left-width, 16rem)

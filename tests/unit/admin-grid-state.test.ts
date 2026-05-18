@@ -30,7 +30,7 @@ describe("readGridStateFromParams", () => {
   it("parses page, pageSize, sort, q and filters", () => {
     const s = readGridStateFromParams(
       new URLSearchParams(
-        "page=3&pageSize=50&sort=primary_email:asc&q=ada&filter[status]=active",
+        "page=3&pageSize=50&sort=primary_email.asc&q=ada&filter[status]=active",
       ),
       OPTS,
     );
@@ -85,7 +85,7 @@ describe("gridStateToSearchParams", () => {
     expect(params.get("page")).toBe("4");
     expect(params.get("pageSize")).toBe("50");
     expect(params.get("q")).toBe("ada");
-    expect(params.getAll("sort")).toEqual(["primary_email:asc"]);
+    expect(params.getAll("sort")).toEqual(["primary_email.asc"]);
     expect(params.getAll("filter[status]")).toEqual(["active", "blocked"]);
   });
 });

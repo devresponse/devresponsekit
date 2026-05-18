@@ -3,8 +3,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
 
@@ -43,6 +44,7 @@ export function AdministratorEnterpriseAppsGrid({
   const t = useTranslations("administrator.enterpriseApps");
   const tErr = useTranslations("administrator.errors");
   const intlLocale = useLocale();
+  const dialogs = useDialogs();
 
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
@@ -56,7 +58,12 @@ export function AdministratorEnterpriseAppsGrid({
 
   const onDelete = useCallback(
     async (id: string, label: string) => {
-      if (!window.confirm(t("deleteDialog.description") + "\n\n" + label)) return;
+      const ok = await dialogs.confirm({
+        title: t("deleteDialog.title"),
+        description: t("deleteDialog.description") + "\n\n" + label,
+        destructive: true,
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/enterprise-apps/${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -112,7 +119,7 @@ export function AdministratorEnterpriseAppsGrid({
         id: "status",
         accessorKey: "status",
         header: () => t("columns.status"),
-        cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "organization_slug",
@@ -139,23 +146,24 @@ export function AdministratorEnterpriseAppsGrid({
       },
       ...(canManage
         ? [
-            {
-              id: "actions",
-              header: () => "",
-              cell: ({ row }: { row: { original: EnterpriseAppRow } }) => (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onDelete(row.original.id, row.original.label)}
-                  >
-                    {t("deleteButton")}
-                  </Button>
-                </div>
-              ),
-            } as ColumnDef<EnterpriseAppRow, unknown>,
-          ]
+          {
+            id: "actions",
+            enableSorting: false,
+            header: () => "",
+            cell: ({ row }: { row: { original: EnterpriseAppRow } }) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onDelete(row.original.id, row.original.label)}
+                >
+                  {t("deleteButton")}
+                </Button>
+              </div>
+            ),
+          } as ColumnDef<EnterpriseAppRow, unknown>,
+        ]
         : []),
     ],
     [t, locale, dateFormatter, canManage, onDelete],

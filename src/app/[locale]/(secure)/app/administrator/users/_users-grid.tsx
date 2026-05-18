@@ -3,7 +3,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
 import type { BulkActionDescriptor } from "../_components/grid/data-grid-toolbar";
@@ -44,6 +45,7 @@ export function AdministratorUsersGrid({ locale }: { locale: string }) {
   const tBulk = useTranslations("administrator.users.bulk");
   const intlLocale = useLocale();
   const selection = useGridSelection();
+  const dialogs = useDialogs();
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -81,7 +83,7 @@ export function AdministratorUsersGrid({ locale }: { locale: string }) {
         id: "status",
         accessorKey: "status",
         header: () => t("status"),
-        cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "created_at",
@@ -130,11 +132,11 @@ export function AdministratorUsersGrid({ locale }: { locale: string }) {
         });
 
         if (res.status === 429) {
-          alert(tBulk("rateLimitedToast"));
+          await dialogs.notify({ description: tBulk("rateLimitedToast"), variant: "destructive" });
           return;
         }
         if (!res.ok) {
-          alert(tBulk("errorToast"));
+          await dialogs.notify({ description: tBulk("errorToast"), variant: "destructive" });
           return;
         }
 
@@ -146,22 +148,20 @@ export function AdministratorUsersGrid({ locale }: { locale: string }) {
         const message =
           result.failed > 0
             ? tBulk("partialFailureToast", {
-                action,
-                succeeded: result.succeeded,
-                attempted: result.attempted,
-                failed: result.failed,
-              })
+              action,
+              succeeded: result.succeeded,
+              attempted: result.attempted,
+              failed: result.failed,
+            })
             : tBulk("successToast", { action, succeeded: result.succeeded });
-        // Native alert is good enough for v1 — toast/sonner can be
-        // wired in a follow-up without changing the API surface.
-        alert(message);
+        await dialogs.notify({ description: message });
         selection.clear();
         setReloadKey((k) => k + 1);
       } finally {
         setBusy(false);
       }
     },
-    [busy, selection, tBulk],
+    [busy, selection, tBulk, dialogs],
   );
 
   const bulkActions = useMemo<BulkActionDescriptor[]>(
@@ -181,9 +181,15 @@ export function AdministratorUsersGrid({ locale }: { locale: string }) {
         label: tBulk("ban"),
         destructive: true,
         onSelect: () => {
-          const reason = window.prompt(tBulk("reasonPrompt"));
-          if (!reason) return;
-          void runBulkAction("ban", { reason });
+          void (async () => {
+            const reason = await dialogs.promptText({
+              title: tBulk("ban"),
+              label: tBulk("reasonPrompt"),
+              required: true,
+            });
+            if (!reason) return;
+            void runBulkAction("ban", { reason });
+          })();
         },
       },
       {
@@ -191,12 +197,19 @@ export function AdministratorUsersGrid({ locale }: { locale: string }) {
         label: tBulk("softDelete"),
         destructive: true,
         onSelect: () => {
-          if (!window.confirm(tBulk("confirmDelete"))) return;
-          void runBulkAction("soft_delete");
+          void (async () => {
+            const ok = await dialogs.confirm({
+              title: tBulk("softDelete"),
+              description: tBulk("confirmDelete"),
+              destructive: true,
+            });
+            if (!ok) return;
+            void runBulkAction("soft_delete");
+          })();
         },
       },
     ],
-    [tBulk, runBulkAction],
+    [tBulk, runBulkAction, dialogs],
   );
 
   return (

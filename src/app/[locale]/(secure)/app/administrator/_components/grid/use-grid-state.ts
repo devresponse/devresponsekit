@@ -38,7 +38,10 @@ export function readGridStateFromParams(
 
   const sort: { field: string; direction: "asc" | "desc" }[] = [];
   for (const raw of params.getAll("sort")) {
-    const [field, dirRaw] = raw.split(":");
+    // Use "." as the field/direction separator so the URL stays
+    // readable — ":" is encoded by `URLSearchParams.toString()` to
+    // `%3A`, while "." is an RFC 3986 unreserved character.
+    const [field, dirRaw] = raw.split(".");
     if (!field) continue;
     sort.push({ field, direction: dirRaw === "desc" ? "desc" : "asc" });
   }
@@ -73,7 +76,7 @@ export function gridStateToSearchParams(
 
   if (state.page !== 1) params.set("page", String(state.page));
   if (state.pageSize !== defaultPageSize) params.set("pageSize", String(state.pageSize));
-  for (const s of state.sort) params.append("sort", `${s.field}:${s.direction}`);
+  for (const s of state.sort) params.append("sort", `${s.field}.${s.direction}`);
   if (state.q) params.set("q", state.q);
   for (const [name, value] of Object.entries(state.filters)) {
     if (Array.isArray(value)) {

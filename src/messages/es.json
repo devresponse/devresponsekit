@@ -17,7 +17,13 @@
     "skipToMain": "Ir al contenido principal",
     "skipToNavigation": "Ir a la navegación",
     "displayName": "Nombre",
-    "unexpectedError": "Se ha producido un error inesperado. Inténtalo de nuevo."
+    "unexpectedError": "Se ha producido un error inesperado. Inténtalo de nuevo.",
+    "dialogs": {
+      "notifyTitle": "Aviso",
+      "ok": "Aceptar",
+      "confirm": "Confirmar",
+      "cancel": "Cancelar"
+    }
   },
   "auth": {
     "signInTitle": "Inicia sesión en tu cuenta",

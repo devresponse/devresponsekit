@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
 
@@ -67,7 +67,7 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
         id: "status",
         accessorKey: "status",
         header: () => t("columns.status"),
-        cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "source_provider",

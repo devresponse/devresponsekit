@@ -71,9 +71,8 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
   const onExport = () => {
     if (!exportResource) return;
     const qs = exportState ? gridStateToSearchParams(exportState).toString() : "";
-    const url = `/api/administrator/export/${encodeURIComponent(exportResource)}${
-      qs ? `?${qs}` : ""
-    }`;
+    const url = `/api/administrator/export/${encodeURIComponent(exportResource)}${qs ? `?${qs}` : ""
+      }`;
     // Use a transient anchor click so the browser handles the
     // download (and the Content-Disposition filename) natively. We
     // do NOT navigate — the page state should not be discarded just
@@ -103,7 +102,7 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
       data-testid="datagrid-toolbar"
       className="flex flex-wrap items-center justify-between gap-3 text-sm"
     >
-      <div className="flex flex-wrap items-center gap-2 text-neutral-600">
+      <div className="text-muted-foreground flex flex-wrap items-center gap-2">
         {summary ? (
           <>
             <span aria-live="polite">{summary}</span>

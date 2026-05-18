@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { DataGrid } from "../../_components/grid/data-grid";
 
 /**
@@ -28,6 +29,7 @@ export function OrganizationProvidersGrid({
 }) {
   const t = useTranslations("administrator.orgs.providers");
   const locale = useLocale();
+  const dialogs = useDialogs();
 
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
@@ -39,7 +41,12 @@ export function OrganizationProvidersGrid({
 
   const onRemove = useCallback(
     async (bindingId: string, provider: string, key: string) => {
-      if (!window.confirm(t("removeConfirm") + `\n\n${provider}: ${key}`)) return;
+      const ok = await dialogs.confirm({
+        title: t("removeConfirm"),
+        description: `${provider}: ${key}`,
+        destructive: true,
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/organizations/${orgId}/provider-bindings`, {
         method: "DELETE",
@@ -53,7 +60,7 @@ export function OrganizationProvidersGrid({
       }
       setReloadKey((k) => k + 1);
     },
-    [t, orgId],
+    [t, orgId, dialogs],
   );
 
   const columns = useMemo<ColumnDef<BindingRow, unknown>[]>(
@@ -91,29 +98,30 @@ export function OrganizationProvidersGrid({
       },
       ...(canUpdate
         ? [
-            {
-              id: "actions",
-              header: () => "",
-              cell: ({ row }: { row: { original: BindingRow } }) => (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      onRemove(
-                        row.original.id,
-                        row.original.provider,
-                        row.original.provider_organization_key,
-                      )
-                    }
-                  >
-                    {t("removeButton")}
-                  </Button>
-                </div>
-              ),
-            } as ColumnDef<BindingRow, unknown>,
-          ]
+          {
+            id: "actions",
+            enableSorting: false,
+            header: () => "",
+            cell: ({ row }: { row: { original: BindingRow } }) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    onRemove(
+                      row.original.id,
+                      row.original.provider,
+                      row.original.provider_organization_key,
+                    )
+                  }
+                >
+                  {t("removeButton")}
+                </Button>
+              </div>
+            ),
+          } as ColumnDef<BindingRow, unknown>,
+        ]
         : []),
     ],
     [t, dateFormatter, canUpdate, onRemove],

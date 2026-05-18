@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
 
@@ -43,6 +44,7 @@ export function AdministratorRolesGrid({
   const tErr = useTranslations("administrator.errors");
   const intlLocale = useLocale();
   const router = useRouter();
+  const dialogs = useDialogs();
 
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
@@ -56,9 +58,13 @@ export function AdministratorRolesGrid({
 
   const onDelete = useCallback(
     async (id: string, key: string) => {
-      // Use a native confirm to keep the per-row footprint small. A
-      // proper AlertDialog can be added later without touching the API.
-      if (!window.confirm(t("deleteDialog.description") + "\n\n" + key)) return;
+      const ok = await dialogs.confirm({
+        title: t("deleteDialog.title"),
+        description: t("deleteDialog.description") + "\n\n" + key,
+        confirmLabel: t("deleteDialog.confirm"),
+        destructive: true,
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/roles/${id}`, {
         method: "DELETE",
@@ -74,12 +80,16 @@ export function AdministratorRolesGrid({
       }
       setReloadKey((k) => k + 1);
     },
-    [t, tErr],
+    [t, tErr, dialogs],
   );
 
   const onDuplicate = useCallback(
     async (id: string) => {
-      if (!window.confirm(t("duplicateConfirm"))) return;
+      const ok = await dialogs.confirm({
+        title: t("duplicateConfirm"),
+        description: t("duplicateConfirm"),
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/roles/${id}/duplicate`, {
         method: "POST",
@@ -94,7 +104,7 @@ export function AdministratorRolesGrid({
       }
       setRowError(t("duplicateError"));
     },
-    [t, locale, router],
+    [t, locale, router, dialogs],
   );
 
   const columns = useMemo<ColumnDef<RoleRow, unknown>[]>(
@@ -121,6 +131,7 @@ export function AdministratorRolesGrid({
       },
       {
         id: "scope",
+        enableSorting: false,
         header: () => t("columns.scope"),
         cell: ({ row }) =>
           row.original.organization_id === null ? (
@@ -149,39 +160,40 @@ export function AdministratorRolesGrid({
       },
       ...(canDelete || canDuplicate
         ? [
-            {
-              id: "actions",
-              header: () => "",
-              cell: ({ row }: { row: { original: RoleRow } }) => (
-                <div className="flex justify-end gap-2">
-                  {canDuplicate ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onDuplicate(row.original.id)}
-                    >
-                      {t("duplicateButton")}
-                    </Button>
-                  ) : null}
-                  {canDelete ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onDelete(row.original.id, row.original.key)}
-                      // Avoid showing a delete button for in-use roles?
-                      // The server still enforces the rule and the inline
-                      // error keeps the UX honest without a per-row
-                      // database round-trip.
-                    >
-                      {t("deleteButton")}
-                    </Button>
-                  ) : null}
-                </div>
-              ),
-            } as ColumnDef<RoleRow, unknown>,
-          ]
+          {
+            id: "actions",
+            enableSorting: false,
+            header: () => "",
+            cell: ({ row }: { row: { original: RoleRow } }) => (
+              <div className="flex justify-end gap-2">
+                {canDuplicate ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onDuplicate(row.original.id)}
+                  >
+                    {t("duplicateButton")}
+                  </Button>
+                ) : null}
+                {canDelete ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onDelete(row.original.id, row.original.key)}
+                  // Avoid showing a delete button for in-use roles?
+                  // The server still enforces the rule and the inline
+                  // error keeps the UX honest without a per-row
+                  // database round-trip.
+                  >
+                    {t("deleteButton")}
+                  </Button>
+                ) : null}
+              </div>
+            ),
+          } as ColumnDef<RoleRow, unknown>,
+        ]
         : []),
     ],
     [t, locale, dateFormatter, canDelete, canDuplicate, onDelete, onDuplicate],

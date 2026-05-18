@@ -43,7 +43,15 @@ export async function GET(request: NextRequest) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["id", "label", "subdomain", "status", "sort_order", "created_at"],
+    allowedSortFields: [
+      "id",
+      "label",
+      "subdomain",
+      "status",
+      "sort_order",
+      "created_at",
+      "organization_slug",
+    ],
     allowedFilters: ["status", "organization_id"],
     defaultSort: [
       { field: "sort_order", direction: "asc" },

@@ -4,7 +4,7 @@ import { db } from "@/db/database";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps.server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { EnterpriseAppSettingsForm } from "./_enterprise-app-settings-form";
 
@@ -76,7 +76,7 @@ export default async function AdministratorEnterpriseAppDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline">{row.status}</Badge>
+          <StatusBadge status={row.status} />
         </div>
       </div>
 

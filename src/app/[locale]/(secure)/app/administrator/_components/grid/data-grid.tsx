@@ -7,7 +7,7 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import { useTranslations } from "next-intl";
-import { useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, EmptyDescription, EmptyTitle } from "@/components/ui/empty";
@@ -20,6 +20,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import {
+  DataGridColumnHeader,
+  type ColumnSortDirection,
+} from "./data-grid-column-header";
 import {
   DataGridToolbar,
   type BulkActionDescriptor,
@@ -28,6 +33,7 @@ import type { UseGridSelectionResult } from "./use-grid-selection";
 import {
   useGridFetch,
   useGridState,
+  type GridState,
   type UseGridStateOptions,
 } from "./use-grid-state";
 
@@ -35,20 +41,14 @@ import {
  * DataGrid
  *
  * The shared client-side grid used by every Administrator list view
- * (docs/admin-manager.md §7). This is the **foundation** rendered in
- * Phase 2 — it implements the URL-state contract, server-side
- * pagination, the empty/loading/error states and the table render. The
- * filter toolbar, faceted filters, column visibility menu, density
- * toggle, row selection, bulk-actions and CSV export are layered on by
- * later phases without changing this component's signature.
+ * (docs/admin-manager.md §7). Visual design matches the shadcn data
+ * table reference: bordered card container, muted header row, hover
+ * highlight and compact row heights for higher data density.
  *
- * Phase 7 adds optional row selection (per-page and "select all
- * matching"), a bulk-actions menu, and CSV export — all gated behind
- * the `selection` / `bulkActions` / `exportResource` props so the
- * grid stays drop-in compatible for callers that don't opt in.
- *
- * The grid is *manual* — TanStack Table renders headers + cells but the
- * server is the source of truth for sort, filter and pagination state.
+ * Every column that exposes an `accessorKey` is sortable by default —
+ * the header renders a `DataGridColumnHeader` button that drives the
+ * URL-backed sort state. Opt out per-column with `enableSorting:
+ * false` (used by row-action columns).
  */
 export interface DataGridProps<TItem> {
   /** Stable name used for local-storage / a11y (`administrator.users`, etc.). */
@@ -88,12 +88,13 @@ const EMPTY_OPTIONS: UseGridStateOptions = {};
 export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const t = useTranslations("administrator.grid");
   const options = props.options ?? EMPTY_OPTIONS;
-  const { state, setPage, setPageSize } = useGridState(options);
+  const { state, setPage, setPageSize, setSort } = useGridState(options);
   const fetched = useGridFetch<TItem>(props.endpoint, state, options);
 
   const items = fetched.data ?? props.initialData?.items ?? [];
   const total = fetched.data ? fetched.total : (props.initialData?.total ?? 0);
-  const isInitialLoading = fetched.isLoading && !props.initialData && fetched.data === null;
+  const isInitialLoading =
+    fetched.isLoading && !props.initialData && fetched.data === null;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
 
   const selection = props.selection;
@@ -117,8 +118,18 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
     pageCount: totalPages,
   });
 
+  const onSortToggle = useCallback(
+    (field: string, next: ColumnSortDirection) => {
+      if (next === null) setSort([]);
+      else setSort([{ field, direction: next }]);
+    },
+    [setSort],
+  );
+
   const showToolbar =
-    !!selection || (props.bulkActions && props.bulkActions.length > 0) || !!props.exportResource;
+    !!selection ||
+    (props.bulkActions && props.bulkActions.length > 0) ||
+    !!props.exportResource;
 
   return (
     <div data-grid={props.name} className="flex flex-col gap-3">
@@ -129,12 +140,17 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
           selection={
             selection
               ? {
-                  mode: selection.state.mode,
-                  count: selection.state.selectedIds.size,
-                  onSelectAllMatching: selection.state.selectAllMatching,
-                  onClear: selection.state.clear,
-                }
-              : { mode: "page", count: 0, onSelectAllMatching: () => {}, onClear: () => {} }
+                mode: selection.state.mode,
+                count: selection.state.selectedIds.size,
+                onSelectAllMatching: selection.state.selectAllMatching,
+                onClear: selection.state.clear,
+              }
+              : {
+                mode: "page",
+                count: 0,
+                onSelectAllMatching: () => { },
+                onClear: () => { },
+              }
           }
           bulkActions={props.bulkActions}
           exportResource={props.exportResource}
@@ -152,43 +168,62 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
           </EmptyDescription>
         </Empty>
       ) : isInitialLoading ? (
-        <div role="status" aria-live="polite" className="flex flex-col gap-2">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex flex-col gap-2 rounded-md border border-border p-3"
+        >
           <span className="sr-only">{t("loading")}</span>
           {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-9 w-full" />
+            <Skeleton key={i} className="h-8 w-full" />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <Empty>
-          <EmptyTitle>{t("empty")}</EmptyTitle>
-        </Empty>
+        <div className="rounded-md border border-border">
+          <Empty>
+            <EmptyTitle>{t("empty")}</EmptyTitle>
+          </Empty>
+        </div>
       ) : (
-        <Table aria-rowcount={total}>
-          <TableHeader>
-            {table.getHeaderGroups().map((hg) => (
-              <TableRow key={hg.id}>
-                {hg.headers.map((h) => (
-                  <TableHead key={h.id}>
-                    {h.isPlaceholder
-                      ? null
-                      : flexRender(h.column.columnDef.header, h.getContext())}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="rounded-md border border-border">
+          <Table aria-rowcount={total}>
+            <TableHeader className="bg-muted/50">
+              {table.getHeaderGroups().map((hg) => (
+                <TableRow key={hg.id} className="hover:bg-transparent">
+                  {hg.headers.map((h) => (
+                    <TableHead key={h.id} className="h-9 px-3 text-xs">
+                      {h.isPlaceholder
+                        ? null
+                        : renderSortableHeader(
+                          h.column.columnDef,
+                          h.getContext,
+                          state,
+                          onSortToggle,
+                        )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows.map((row) => (
+                <TableRow key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell
+                      key={cell.id}
+                      className={cn(
+                        "px-3 py-1.5 text-sm",
+                        cell.column.id === "__select" && "w-9",
+                      )}
+                    >
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {!fetched.error && items.length > 0 ? (
@@ -202,6 +237,46 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Wraps a column header in {@link DataGridColumnHeader} when the
+ * column is sortable. Sortability is inferred from:
+ *   1. Explicit `enableSorting: false` opts out.
+ *   2. The presence of an `accessorKey` (used as the server-side
+ *      sort field). Columns without an accessor (e.g. row actions,
+ *      synthetic cells) are not sortable.
+ * The selection column is always rendered raw.
+ */
+function renderSortableHeader<TItem>(
+  columnDef: ColumnDef<TItem, unknown>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getContext: () => any,
+  state: GridState,
+  onToggle: (field: string, next: ColumnSortDirection) => void,
+): ReactNode {
+  const ctx = getContext();
+  const raw = flexRender(columnDef.header, ctx);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const accessorKey = (columnDef as any).accessorKey as string | undefined;
+  const id = columnDef.id ?? accessorKey;
+  if (!id || id === "__select") return raw;
+  if (columnDef.enableSorting === false) return raw;
+  if (!accessorKey) return raw;
+
+  const active = state.sort.find((s) => s.field === accessorKey);
+  const direction: ColumnSortDirection = active ? active.direction : null;
+
+  return (
+    <DataGridColumnHeader
+      field={accessorKey}
+      direction={direction}
+      onToggle={(next) => onToggle(accessorKey, next)}
+    >
+      {raw}
+    </DataGridColumnHeader>
   );
 }
 
@@ -227,6 +302,7 @@ function buildSelectionColumn<TItem>(
 
   return {
     id: "__select",
+    enableSorting: false,
     header: () => (
       <Checkbox
         aria-label={t("selectPage")}
@@ -261,10 +337,8 @@ function DataGridPagination(props: PaginationProps) {
   const t = useTranslations("administrator.grid");
   const PAGE_SIZES = [10, 25, 50, 100];
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-      <span aria-live="polite">
-        {t("totalRows", { count: props.total })}
-      </span>
+    <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-3 text-sm">
+      <span aria-live="polite">{t("totalRows", { count: props.total })}</span>
       <div className="flex items-center gap-2">
         <label className="flex items-center gap-2">
           <span>{t("rowsPerPage")}</span>

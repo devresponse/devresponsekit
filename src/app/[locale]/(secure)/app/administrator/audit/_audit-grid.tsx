@@ -110,6 +110,7 @@ export function AdministratorAuditGrid() {
       },
       {
         id: "target",
+        enableSorting: false,
         header: () => t("columns.target"),
         cell: ({ row }) => {
           const parts: string[] = [];
@@ -132,6 +133,7 @@ export function AdministratorAuditGrid() {
       },
       {
         id: "actions",
+        enableSorting: false,
         header: () => "",
         cell: ({ row }) => (
           <div className="flex justify-end">

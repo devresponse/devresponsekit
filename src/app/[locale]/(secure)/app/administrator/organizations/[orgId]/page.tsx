@@ -5,6 +5,7 @@ import { AdminError, loadOrgOrThrow } from "@/lib/admin/orgs.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { OrganizationDetailTabs } from "./_organization-detail-tabs";
 
@@ -68,7 +69,7 @@ export default async function AdministratorOrganizationDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline">{org.status}</Badge>
+          <StatusBadge status={org.status} />
           {org.is_default ? <Badge variant="secondary">{t("defaultYes")}</Badge> : null}
         </div>
       </div>

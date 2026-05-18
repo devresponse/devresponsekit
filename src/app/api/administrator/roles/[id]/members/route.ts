@@ -48,7 +48,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   }
 
   const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["primary_email", "display_name", "created_at"],
+    allowedSortFields: ["primary_email", "display_name", "created_at", "organization_name"],
     defaultSort: [{ field: "primary_email", direction: "asc" }],
     defaultPageSize: 25,
     maxPageSize: 200,

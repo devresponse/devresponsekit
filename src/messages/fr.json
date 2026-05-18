@@ -17,7 +17,13 @@
     "skipToMain": "Aller au contenu principal",
     "skipToNavigation": "Aller à la navigation",
     "displayName": "Nom",
-    "unexpectedError": "Une erreur inattendue est survenue. Veuillez réessayer."
+    "unexpectedError": "Une erreur inattendue est survenue. Veuillez réessayer.",
+    "dialogs": {
+      "notifyTitle": "Information",
+      "ok": "OK",
+      "confirm": "Confirmer",
+      "cancel": "Annuler"
+    }
   },
   "auth": {
     "signInTitle": "Connectez-vous à votre compte",

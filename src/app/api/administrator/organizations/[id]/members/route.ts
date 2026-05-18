@@ -50,7 +50,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 
   const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["status", "created_at"],
+    allowedSortFields: ["status", "created_at", "user_display_name", "source_provider"],
     allowedFilters: ["status"],
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,

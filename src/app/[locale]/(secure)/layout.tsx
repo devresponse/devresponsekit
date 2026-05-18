@@ -4,6 +4,7 @@ import { ShellContainer } from "@/components/app-shell/shell-container";
 import { ShellSkipLinks } from "@/components/app-shell/shell-skip-links";
 import { TopShellBar } from "@/components/app-shell/top-shell-bar";
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
+import { DialogManagerProvider } from "@/components/ui/dialog-manager";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
@@ -54,7 +55,7 @@ export default async function SecureLayout({
         left={<SecureSidebar locale={safeLocale} permissions={access.permissions} />}
       >
         <ImpersonationBanner />
-        {children}
+        <DialogManagerProvider>{children}</DialogManagerProvider>
       </ShellContainer>
     </CompactDensityWrapper>
   );

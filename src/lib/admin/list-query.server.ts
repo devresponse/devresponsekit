@@ -81,7 +81,10 @@ export function parseListQuery(
 
   const sort: SortSpec[] = [];
   for (const raw of params.getAll("sort")) {
-    const [field, dirRaw] = raw.split(":");
+    // Separator MUST stay in sync with the client (`use-grid-state.ts`).
+    // We use "." instead of ":" because URLSearchParams encodes colons
+    // to `%3A`, which makes bookmarked URLs hard to read.
+    const [field, dirRaw] = raw.split(".");
     if (!field || !allowedSort.has(field)) continue;
     const direction: "asc" | "desc" = dirRaw === "desc" ? "desc" : "asc";
     sort.push({ field, direction });

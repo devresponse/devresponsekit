@@ -6,7 +6,7 @@ import {
 } from "@/lib/admin/permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { ImpersonateUserButton } from "./_impersonate-button";
 import { UserDetailTabs } from "./_user-detail-tabs";
@@ -113,7 +113,7 @@ export default async function AdministratorUserDetailPage({
               isSelf={isSelfTarget}
             />
           ) : null}
-          <Badge variant="outline">{translateStatus(t, user.status)}</Badge>
+          <StatusBadge status={user.status} label={translateStatus(t, user.status)} />
         </div>
       </div>
 

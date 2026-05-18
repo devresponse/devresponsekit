@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { getVisibleAdministratorNavigationGroups } from "./administrator-navigation";
 
 /**
  * AdministratorSidebar
@@ -20,116 +21,10 @@ export interface AdministratorSidebarProps {
   permissions: ReadonlyArray<string>;
 }
 
-interface NavItem {
-  id: string;
-  href: `/${string}`;
-  labelKey: string;
-  /** Caller must have at least one of these to see the item. */
-  requires: ReadonlyArray<string>;
-}
-
-interface NavGroup {
-  id: string;
-  labelKey: string;
-  items: NavItem[];
-}
-
-const GROUPS: ReadonlyArray<NavGroup> = [
-  {
-    id: "overview",
-    labelKey: "overview",
-    items: [
-      {
-        id: "overview-home",
-        href: "/app/administrator",
-        labelKey: "overview",
-        // Visible to anyone with any admin.* permission — gated by
-        // the layout itself.
-        requires: [],
-      },
-    ],
-  },
-  {
-    id: "identity",
-    labelKey: "identity",
-    items: [
-      {
-        id: "users",
-        href: "/app/administrator/users",
-        labelKey: "users",
-        requires: ["admin.users.read"],
-      },
-    ],
-  },
-  {
-    id: "access",
-    labelKey: "access",
-    items: [
-      {
-        id: "roles",
-        href: "/app/administrator/roles",
-        labelKey: "roles",
-        requires: ["admin.roles.read"],
-      },
-      {
-        id: "permissions",
-        href: "/app/administrator/permissions",
-        labelKey: "permissions",
-        requires: ["admin.roles.read"],
-      },
-    ],
-  },
-  {
-    id: "tenancy",
-    labelKey: "tenancy",
-    items: [
-      {
-        id: "organizations",
-        href: "/app/administrator/organizations",
-        labelKey: "organizations",
-        requires: ["admin.orgs.read"],
-      },
-      {
-        id: "memberships",
-        href: "/app/administrator/memberships",
-        labelKey: "memberships",
-        requires: ["admin.orgs.read"],
-      },
-    ],
-  },
-  {
-    id: "apps",
-    labelKey: "apps",
-    items: [
-      {
-        id: "enterprise-apps",
-        href: "/app/administrator/enterprise-apps",
-        labelKey: "enterpriseApps",
-        requires: ["admin.apps.read"],
-      },
-    ],
-  },
-  {
-    id: "activity",
-    labelKey: "activity",
-    items: [
-      {
-        id: "audit",
-        href: "/app/administrator/audit",
-        labelKey: "auditLog",
-        requires: ["admin.audit.read"],
-      },
-    ],
-  },
-];
-
 export function AdministratorSidebar({ locale, permissions }: AdministratorSidebarProps) {
   const t = useTranslations("administrator.nav");
-  const has = (item: NavItem) =>
-    item.requires.length === 0 || item.requires.some((p) => permissions.includes(p));
-
-  const visibleGroups = GROUPS.map((g) => ({ ...g, items: g.items.filter(has) })).filter(
-    (g) => g.items.length > 0,
+  const visibleGroups = getVisibleAdministratorNavigationGroups(permissions).filter(
+    (group) => group.items.length > 0,
   );
 
   return (

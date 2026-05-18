@@ -6,6 +6,7 @@ import {
   checkAdminPermissionServer,
 } from "@/lib/admin/permissions.server";
 import { AdministratorSidebar } from "./_components/administrator-sidebar";
+import { AdministratorTopHeader } from "./_components/administrator-top-header";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ export default async function AdministratorLayout({
   return (
     <ApplicationShell
       ariaLabel="Administrator"
+      header={<AdministratorTopHeader locale={locale} permissions={guard.access.permissions} />}
       left={<AdministratorSidebar locale={locale} permissions={guard.access.permissions} />}
     >
       {children}

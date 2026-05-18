@@ -17,7 +17,13 @@
     "skipToMain": "Skip to main content",
     "skipToNavigation": "Skip to navigation",
     "displayName": "Name",
-    "unexpectedError": "An unexpected error occurred. Please try again."
+    "unexpectedError": "An unexpected error occurred. Please try again.",
+    "dialogs": {
+      "notifyTitle": "Notice",
+      "ok": "OK",
+      "confirm": "Confirm",
+      "cancel": "Cancel"
+    }
   },
   "auth": {
     "signInTitle": "Sign in to your account",

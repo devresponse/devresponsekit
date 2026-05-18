@@ -6,6 +6,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import {
   Sheet,
   SheetContent,
@@ -40,6 +41,7 @@ type SheetMode =
 export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean }) {
   const t = useTranslations("administrator.permissions");
   const tErr = useTranslations("administrator.errors");
+  const dialogs = useDialogs();
 
   const [sheet, setSheet] = useState<SheetMode>({ kind: "closed" });
   const [reloadKey, setReloadKey] = useState(0);
@@ -47,7 +49,12 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
 
   const onDelete = useCallback(
     async (row: PermissionRow) => {
-      if (!window.confirm(t("deleteDialog.description") + "\n\n" + row.key)) return;
+      const ok = await dialogs.confirm({
+        title: t("deleteDialog.title"),
+        description: t("deleteDialog.description") + "\n\n" + row.key,
+        destructive: true,
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/permissions/${row.id}`, {
         method: "DELETE",
@@ -63,7 +70,7 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
       }
       setReloadKey((k) => k + 1);
     },
-    [t, tErr],
+    [t, tErr, dialogs],
   );
 
   const columns = useMemo<ColumnDef<PermissionRow, unknown>[]>(
@@ -98,31 +105,32 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
       },
       ...(canManage
         ? [
-            {
-              id: "actions",
-              header: () => t("columns.actions"),
-              cell: ({ row }: { row: { original: PermissionRow } }) => (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setSheet({ kind: "edit", row: row.original })}
-                  >
-                    {t("editButton")}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onDelete(row.original)}
-                  >
-                    {t("deleteButton")}
-                  </Button>
-                </div>
-              ),
-            } as ColumnDef<PermissionRow, unknown>,
-          ]
+          {
+            id: "actions",
+            enableSorting: false,
+            header: () => t("columns.actions"),
+            cell: ({ row }: { row: { original: PermissionRow } }) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSheet({ kind: "edit", row: row.original })}
+                >
+                  {t("editButton")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onDelete(row.original)}
+                >
+                  {t("deleteButton")}
+                </Button>
+              </div>
+            ),
+          } as ColumnDef<PermissionRow, unknown>,
+        ]
         : []),
     ],
     [t, canManage, onDelete],

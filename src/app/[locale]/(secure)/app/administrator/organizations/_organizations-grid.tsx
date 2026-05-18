@@ -4,7 +4,9 @@ import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
 
@@ -38,6 +40,7 @@ export function AdministratorOrganizationsGrid({
   const t = useTranslations("administrator.orgs");
   const tErr = useTranslations("administrator.errors");
   const intlLocale = useLocale();
+  const dialogs = useDialogs();
 
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
@@ -51,7 +54,12 @@ export function AdministratorOrganizationsGrid({
 
   const onDelete = useCallback(
     async (id: string, slug: string) => {
-      if (!window.confirm(t("deleteDialog.description") + "\n\n" + slug)) return;
+      const ok = await dialogs.confirm({
+        title: t("deleteDialog.title"),
+        description: t("deleteDialog.description") + "\n\n" + slug,
+        destructive: true,
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/organizations/${id}`, {
         method: "DELETE",
@@ -103,7 +111,7 @@ export function AdministratorOrganizationsGrid({
         id: "status",
         accessorKey: "status",
         header: () => t("columns.status"),
-        cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "is_default",
@@ -128,23 +136,24 @@ export function AdministratorOrganizationsGrid({
       },
       ...(canDelete
         ? [
-            {
-              id: "actions",
-              header: () => "",
-              cell: ({ row }: { row: { original: OrgRow } }) => (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onDelete(row.original.id, row.original.slug)}
-                  >
-                    {t("deleteButton")}
-                  </Button>
-                </div>
-              ),
-            } as ColumnDef<OrgRow, unknown>,
-          ]
+          {
+            id: "actions",
+            enableSorting: false,
+            header: () => "",
+            cell: ({ row }: { row: { original: OrgRow } }) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onDelete(row.original.id, row.original.slug)}
+                >
+                  {t("deleteButton")}
+                </Button>
+              </div>
+            ),
+          } as ColumnDef<OrgRow, unknown>,
+        ]
         : []),
     ],
     [t, locale, dateFormatter, canDelete, onDelete],

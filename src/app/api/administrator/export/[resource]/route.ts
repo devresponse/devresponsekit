@@ -244,12 +244,26 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 
 const ALLOWED_SORT_BY_RESOURCE: Record<Resource, string[]> = {
   users: ["created_at", "primary_email", "display_name", "status"],
-  audit: ["created_at", "event_type", "outcome"],
-  organizations: ["slug", "name", "status", "created_at"],
-  roles: ["key", "name", "created_at"],
-  permissions: ["key"],
-  memberships: ["status", "created_at"],
-  "enterprise-apps": ["id", "label", "subdomain", "status", "sort_order", "created_at"],
+  audit: ["created_at", "event_type", "outcome", "actor_better_auth_user_id"],
+  organizations: ["slug", "name", "status", "created_at", "is_default", "member_count"],
+  roles: ["key", "name", "created_at", "permission_count", "member_count"],
+  permissions: ["key", "description", "used_by_role_count"],
+  memberships: [
+    "status",
+    "created_at",
+    "user_display_name",
+    "organization_slug",
+    "source_provider",
+  ],
+  "enterprise-apps": [
+    "id",
+    "label",
+    "subdomain",
+    "status",
+    "sort_order",
+    "created_at",
+    "organization_slug",
+  ],
 };
 
 const ALLOWED_FILTERS_BY_RESOURCE: Record<Resource, string[]> = {

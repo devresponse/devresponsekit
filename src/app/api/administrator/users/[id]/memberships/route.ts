@@ -42,7 +42,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (isResolvedUserResponse(target)) return target;
 
   const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["status", "created_at", "organization_slug"],
+    allowedSortFields: [
+      "status",
+      "created_at",
+      "organization_slug",
+      "organization_name",
+      "source_provider",
+    ],
     allowedFilters: ["status", "organization_id"],
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,

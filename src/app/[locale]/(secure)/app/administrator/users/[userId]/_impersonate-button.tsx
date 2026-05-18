@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useDialogs } from "@/components/ui/dialog-manager";
 
 /**
  * Impersonate-user button for the user detail page (docs/admin-manager.md
@@ -45,6 +46,7 @@ export function ImpersonateUserButton({
   isSelf: boolean;
 }) {
   const t = useTranslations("administrator.users");
+  const dialogs = useDialogs();
   const [open, setOpen] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -67,7 +69,10 @@ export function ImpersonateUserButton({
         { method: "POST", credentials: "same-origin" },
       );
       if (!res.ok) {
-        alert(t("impersonation.errorToast"));
+        await dialogs.notify({
+          description: t("impersonation.errorToast"),
+          variant: "destructive",
+        });
         return;
       }
       // Force a full reload so every layer (RSC, client auth state,

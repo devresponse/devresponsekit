@@ -3,8 +3,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../../_components/grid/data-grid";
 
@@ -32,6 +33,7 @@ export function UserMembershipsPanel({
 }) {
   const t = useTranslations("administrator.users.memberships");
   const locale = useLocale();
+  const dialogs = useDialogs();
 
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
@@ -43,7 +45,12 @@ export function UserMembershipsPanel({
 
   const onRemove = useCallback(
     async (membershipId: string, orgSlug: string) => {
-      if (!window.confirm(t("removeConfirm") + "\n\n" + orgSlug)) return;
+      const ok = await dialogs.confirm({
+        title: t("removeConfirm"),
+        description: orgSlug,
+        destructive: true,
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/users/${userId}/memberships`, {
         method: "DELETE",
@@ -57,7 +64,7 @@ export function UserMembershipsPanel({
       }
       setReloadKey((k) => k + 1);
     },
-    [t, userId],
+    [t, userId, dialogs],
   );
 
   const columns = useMemo<ColumnDef<MembershipRow, unknown>[]>(
@@ -86,7 +93,7 @@ export function UserMembershipsPanel({
         id: "status",
         accessorKey: "status",
         header: () => t("columns.status"),
-        cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "source_provider",
@@ -107,25 +114,26 @@ export function UserMembershipsPanel({
       },
       ...(canUpdate
         ? [
-            {
-              id: "actions",
-              header: () => "",
-              cell: ({ row }: { row: { original: MembershipRow } }) => (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      onRemove(row.original.id, row.original.organization_slug)
-                    }
-                  >
-                    {t("removeButton")}
-                  </Button>
-                </div>
-              ),
-            } as ColumnDef<MembershipRow, unknown>,
-          ]
+          {
+            id: "actions",
+            enableSorting: false,
+            header: () => "",
+            cell: ({ row }: { row: { original: MembershipRow } }) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    onRemove(row.original.id, row.original.organization_slug)
+                  }
+                >
+                  {t("removeButton")}
+                </Button>
+              </div>
+            ),
+          } as ColumnDef<MembershipRow, unknown>,
+        ]
         : []),
     ],
     [t, locale, dateFormatter, canUpdate, onRemove],

@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["created_at", "event_type", "outcome"],
+    allowedSortFields: ["created_at", "event_type", "outcome", "actor_better_auth_user_id"],
     allowedFilters: [
       "event_type",
       "outcome",

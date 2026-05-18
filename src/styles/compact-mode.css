@@ -13,8 +13,8 @@
   font-size: 0.875rem;
 }
 
-[data-density="compact"] button,
-[data-density="compact"] input,
+[data-density="compact"] button:not([role="checkbox"]):not([role="switch"]):not([role="radio"]),
+[data-density="compact"] input:not([type="checkbox"]):not([type="radio"]),
 [data-density="compact"] select {
   min-height: var(--sh-control-height);
   font-size: var(--sh-control-font-size);

@@ -3,8 +3,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../../_components/grid/data-grid";
 
@@ -34,6 +35,7 @@ export function OrganizationMembersGrid({
 }) {
   const t = useTranslations("administrator.orgs.members");
   const locale = useLocale();
+  const dialogs = useDialogs();
 
   const dateFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
@@ -45,7 +47,12 @@ export function OrganizationMembersGrid({
 
   const onRemove = useCallback(
     async (membershipId: string, userName: string | null) => {
-      if (!window.confirm(t("removeConfirm") + "\n\n" + (userName ?? membershipId))) return;
+      const ok = await dialogs.confirm({
+        title: t("removeConfirm"),
+        description: userName ?? membershipId,
+        destructive: true,
+      });
+      if (!ok) return;
       setRowError(null);
       const res = await fetch(`/api/administrator/organizations/${orgId}/members`, {
         method: "DELETE",
@@ -59,7 +66,7 @@ export function OrganizationMembersGrid({
       }
       setReloadKey((k) => k + 1);
     },
-    [t, orgId],
+    [t, orgId, dialogs],
   );
 
   const columns = useMemo<ColumnDef<MemberRow, unknown>[]>(
@@ -82,7 +89,7 @@ export function OrganizationMembersGrid({
         id: "status",
         accessorKey: "status",
         header: () => t("columns.status"),
-        cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         id: "source_provider",
@@ -103,23 +110,24 @@ export function OrganizationMembersGrid({
       },
       ...(canUpdate
         ? [
-            {
-              id: "actions",
-              header: () => "",
-              cell: ({ row }: { row: { original: MemberRow } }) => (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onRemove(row.original.id, row.original.user_display_name)}
-                  >
-                    {t("removeButton")}
-                  </Button>
-                </div>
-              ),
-            } as ColumnDef<MemberRow, unknown>,
-          ]
+          {
+            id: "actions",
+            enableSorting: false,
+            header: () => "",
+            cell: ({ row }: { row: { original: MemberRow } }) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onRemove(row.original.id, row.original.user_display_name)}
+                >
+                  {t("removeButton")}
+                </Button>
+              </div>
+            ),
+          } as ColumnDef<MemberRow, unknown>,
+        ]
         : []),
     ],
     [t, locale, dateFormatter, canUpdate, onRemove],

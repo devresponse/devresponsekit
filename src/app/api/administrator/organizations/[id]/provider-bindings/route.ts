@@ -49,7 +49,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 
   const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["provider", "display_name", "created_at"],
+    allowedSortFields: ["provider", "display_name", "created_at", "provider_organization_key"],
     allowedFilters: ["provider"],
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,

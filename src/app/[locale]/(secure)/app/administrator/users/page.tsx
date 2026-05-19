@@ -36,17 +36,19 @@ export default async function AdministratorUsersPage({
 
   return (
     <section className="space-y-4 p-6">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold">{t("title")}</h1>
-        {canCreate ? (
-          <Button asChild size="sm">
-            <LocaleLink locale={locale} href="/app/administrator/users/new">
-              {t("newButton")}
-            </LocaleLink>
-          </Button>
-        ) : null}
-      </div>
-      <AdministratorUsersGrid locale={locale} />
+      <h1 className="text-lg font-semibold">{t("title")}</h1>
+      <AdministratorUsersGrid
+        locale={locale}
+        headerActions={
+          canCreate ? (
+            <Button asChild size="sm">
+              <LocaleLink locale={locale} href="/app/administrator/users/new">
+                {t("newButton")}
+              </LocaleLink>
+            </Button>
+          ) : null
+        }
+      />
     </section>
   );
 }

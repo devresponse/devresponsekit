@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -40,7 +40,13 @@ interface UserRow {
 
 type BulkActionKey = "approve" | "block" | "ban" | "soft_delete";
 
-export function AdministratorUsersGrid({ locale }: { locale: string }) {
+export function AdministratorUsersGrid({
+  locale,
+  headerActions,
+}: {
+  locale: string;
+  headerActions?: ReactNode;
+}) {
   const t = useTranslations("administrator.users.columns");
   const tBulk = useTranslations("administrator.users.bulk");
   const intlLocale = useLocale();
@@ -225,6 +231,7 @@ export function AdministratorUsersGrid({ locale }: { locale: string }) {
       selection={{ state: selection, getRowId: (row) => row.id }}
       bulkActions={bulkActions}
       exportResource="users"
+      headerActions={headerActions}
     />
   );
 }

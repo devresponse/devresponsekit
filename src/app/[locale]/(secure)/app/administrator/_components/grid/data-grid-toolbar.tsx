@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,11 +63,17 @@ export interface DataGridToolbarProps {
   exportResource?: string;
   /** Current grid URL state — used to forward filters/sort to /export. */
   exportState?: GridState;
+  /**
+   * Optional caller-provided action buttons (e.g. "New user"). Rendered
+   * in the same right-aligned action cluster as Bulk actions / Export
+   * CSV so all primary affordances share one row.
+   */
+  headerActions?: ReactNode;
 }
 
 export function DataGridToolbar(props: DataGridToolbarProps) {
   const t = useTranslations("administrator.grid");
-  const { selection, bulkActions, exportResource, exportState } = props;
+  const { selection, bulkActions, exportResource, exportState, headerActions } = props;
 
   const onExport = () => {
     if (!exportResource) return;
@@ -158,6 +165,7 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
             {t("exportCsv")}
           </Button>
         ) : null}
+        {headerActions}
       </div>
     </div>
   );

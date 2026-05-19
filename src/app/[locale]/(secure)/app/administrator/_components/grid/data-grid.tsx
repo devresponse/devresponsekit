@@ -81,6 +81,12 @@ export interface DataGridProps<TItem> {
    * button is rendered in the toolbar that downloads the current view.
    */
   exportResource?: string;
+  /**
+   * Optional action buttons rendered in the right-aligned cluster of
+   * the toolbar, alongside Bulk actions / Export CSV. Use this for
+   * page-level CTAs (e.g. "New user") that should share the same row.
+   */
+  headerActions?: ReactNode;
 }
 
 const EMPTY_OPTIONS: UseGridStateOptions = {};
@@ -129,7 +135,8 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const showToolbar =
     !!selection ||
     (props.bulkActions && props.bulkActions.length > 0) ||
-    !!props.exportResource;
+    !!props.exportResource ||
+    !!props.headerActions;
 
   return (
     <div data-grid={props.name} className="flex flex-col gap-3">
@@ -155,6 +162,7 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
           bulkActions={props.bulkActions}
           exportResource={props.exportResource}
           exportState={state}
+          headerActions={props.headerActions}
         />
       ) : null}
 

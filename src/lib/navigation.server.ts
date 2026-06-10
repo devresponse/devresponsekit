@@ -175,6 +175,11 @@ interface InternalMenuItem {
   /** `shell`-namespace message key resolved per request locale. */
   labelKey: "dashboard" | "workspace" | "admin" | "users" | "audit" | "settings";
   href: string;
+  /**
+   * Icon NAME (not a component) — resolved client-side through the
+   * allow-list in `src/components/navigation/menu-icons.ts`. Keys used
+   * here MUST exist in that map.
+   */
   icon?: string;
   requiredPermissions?: string[];
   anyOfPermissions?: string[];
@@ -185,18 +190,21 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
     id: "dashboard",
     labelKey: "dashboard",
     href: "/app/dashboard",
+    icon: "layout-dashboard",
     requiredPermissions: ["shell.view"],
   },
   {
     id: "workspace",
     labelKey: "workspace",
     href: "/app/workspace",
+    icon: "briefcase",
     requiredPermissions: ["shell.view"],
   },
   {
     id: "administrator",
     labelKey: "admin",
     href: "/app/administrator",
+    icon: "shield",
     // Mirrors the layout-level guard in
     // `src/app/[locale]/(secure)/app/administrator/layout.tsx`: any
     // single `admin.*` permission is enough to enter the workspace, so
@@ -208,12 +216,14 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
     id: "admin-users",
     labelKey: "users",
     href: "/app/administrator/users",
+    icon: "users",
     requiredPermissions: ["admin.users.manage"],
   },
   {
     id: "admin-audit",
     labelKey: "audit",
     href: "/app/administrator/audit",
+    icon: "scroll-text",
     requiredPermissions: ["audit.view"],
   },
 ];
@@ -223,6 +233,7 @@ const DEFAULT_NESTED_MENU: InternalMenuItem[] = [
     id: "settings",
     labelKey: "settings",
     href: "/app/workspace/settings",
+    icon: "settings",
     requiredPermissions: ["shell.view"],
   },
 ];

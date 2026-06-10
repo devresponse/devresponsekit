@@ -2,11 +2,8 @@ import "server-only";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
-import {
-  banBetterAuthUser,
-  unbanBetterAuthUser,
-} from "@/lib/admin/auth-admin.server";
-import { applyAdminStatusAction } from "@/lib/admin-status.server";
+import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { performAdminStatusChange } from "@/lib/admin-status.server";
 
 /**
  * Shared per-user mutation helpers used by both the per-id endpoints
@@ -58,29 +55,29 @@ const STATUS_ACTION_MAP: Partial<
     {
       newStatus: "active" | "blocked" | "suspended";
       newMembershipStatus: "active" | "blocked" | "suspended";
-      eventOverride: string;
+      eventType: string;
     }
   >
 > = {
   approve: {
     newStatus: "active",
     newMembershipStatus: "active",
-    eventOverride: "admin.user.approved",
+    eventType: "admin.user.approved",
   },
   block: {
     newStatus: "blocked",
     newMembershipStatus: "blocked",
-    eventOverride: "admin.user.blocked",
+    eventType: "admin.user.blocked",
   },
   suspend: {
     newStatus: "suspended",
     newMembershipStatus: "suspended",
-    eventOverride: "admin.user.suspended",
+    eventType: "admin.user.suspended",
   },
   reactivate: {
     newStatus: "active",
     newMembershipStatus: "active",
-    eventOverride: "admin.user.reactivated",
+    eventType: "admin.user.reactivated",
   },
 };
 
@@ -93,26 +90,24 @@ async function performStatusAction(
   const mapping = STATUS_ACTION_MAP[action];
   if (!mapping) return { ok: false, appUserId: target.appUserId, error: "invalid_action" };
 
-  // applyAdminStatusAction reads its body from the request, so we
-  // synthesize a request with the per-row body. Headers are reused so
-  // the audit row records the original IP / UA.
-  const proxiedRequest = new Request("http://internal/bulk", {
-    method: "POST",
-    headers: actor.request.headers,
-    body: JSON.stringify({ appUserId: target.appUserId, reason: options.reason }),
-  });
-
-  const res = await applyAdminStatusAction({
-    request: proxiedRequest as unknown as Parameters<typeof applyAdminStatusAction>[0]["request"],
+  // The bulk endpoint has already authenticated the actor and checked
+  // the action's permission; the core mutation is called once per row
+  // without re-resolving the session. Headers are forwarded so the
+  // audit row records the original IP / UA.
+  const result = await performAdminStatusChange({
+    actorBetterAuthUserId: actor.betterAuthUserId,
+    request: actor.request,
+    targetAppUserId: target.appUserId,
+    reason: options.reason,
     newStatus: mapping.newStatus,
     newMembershipStatus: mapping.newMembershipStatus,
-    eventOverride: mapping.eventOverride,
+    eventType: mapping.eventType,
   });
 
-  if (res.status >= 200 && res.status < 300) {
+  if (result.ok) {
     return { ok: true, appUserId: target.appUserId };
   }
-  return { ok: false, appUserId: target.appUserId, error: `status_${res.status}` };
+  return { ok: false, appUserId: target.appUserId, error: result.error };
 }
 
 async function performBan(
@@ -361,7 +356,11 @@ export async function executeBulkUserAction(
       // Exhaustive — TypeScript will flag a new variant added without
       // a case here.
       const exhaustive: never = action;
-      return { ok: false, appUserId: target.appUserId, error: `unknown_action_${String(exhaustive)}` };
+      return {
+        ok: false,
+        appUserId: target.appUserId,
+        error: `unknown_action_${String(exhaustive)}`,
+      };
     }
   }
 }

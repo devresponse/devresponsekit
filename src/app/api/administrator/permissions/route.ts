@@ -10,10 +10,7 @@ import {
   buildListResponse,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 
 export const dynamic = "force-dynamic";
 
@@ -128,8 +125,5 @@ export async function POST(request: NextRequest) {
     metadata: { permissionId: inserted.id, key: inserted.key },
   });
 
-  return NextResponse.json(
-    { ok: true, id: inserted.id, key: inserted.key },
-    { status: 201 },
-  );
+  return NextResponse.json({ ok: true, id: inserted.id, key: inserted.key }, { status: 201 });
 }

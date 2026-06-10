@@ -10,14 +10,8 @@ import {
   buildListResponse,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  isResolvedUserResponse,
-  resolveTargetUser,
-} from "@/lib/admin/user-target.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -165,13 +159,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
-      metadata: { organizationId: org.id, slug: org.slug, appUserId: target.appUserId, membershipId: inserted.id },
+      metadata: {
+        organizationId: org.id,
+        slug: org.slug,
+        appUserId: target.appUserId,
+        membershipId: inserted.id,
+      },
     }),
     auditOrgAction("admin.organization.member_added", "success", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       organizationId: org.id,
-      metadata: { organizationId: org.id, slug: org.slug, appUserId: target.appUserId, membershipId: inserted.id },
+      metadata: {
+        organizationId: org.id,
+        slug: org.slug,
+        appUserId: target.appUserId,
+        membershipId: inserted.id,
+      },
     }),
   ]);
 
@@ -246,7 +250,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         organizationId: m.organization_id,
-        metadata: { organizationId: m.organization_id, slug: m.slug, appUserId: target.appUserId, membershipId: m.id, status: input.status },
+        metadata: {
+          organizationId: m.organization_id,
+          slug: m.slug,
+          appUserId: target.appUserId,
+          membershipId: m.id,
+          status: input.status,
+        },
       }),
     ),
   ];
@@ -320,7 +330,12 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         organizationId: m.organization_id,
-        metadata: { organizationId: m.organization_id, slug: m.slug, appUserId: target.appUserId, membershipId: m.id },
+        metadata: {
+          organizationId: m.organization_id,
+          slug: m.slug,
+          appUserId: target.appUserId,
+          membershipId: m.id,
+        },
       }),
     ),
   ];

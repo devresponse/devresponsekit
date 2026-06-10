@@ -1,5 +1,5 @@
 import * as React from "react";
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 
 /**
  * Input primitive (shadcn-style). Forwards ref to the native input so

@@ -155,9 +155,11 @@ beforeEach(async () => {
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET, POST } = await import("@/app/api/administrator/organizations/route"));
-  ({ GET: GET_BY_ID, PATCH, DELETE } = await import(
-    "@/app/api/administrator/organizations/[id]/route"
-  ));
+  ({
+    GET: GET_BY_ID,
+    PATCH,
+    DELETE,
+  } = await import("@/app/api/administrator/organizations/[id]/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -173,9 +175,7 @@ describe("GET /api/administrator/organizations", () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["shell.view"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("returns the standard list envelope on success", async () => {
@@ -246,7 +246,9 @@ describe("GET /api/administrator/organizations/:id", () => {
   it("returns 400 for invalid UUID", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
-    const res = await GET_BY_ID(idReq("GET", "not-a-uuid"), { params: Promise.resolve({ id: "not-a-uuid" }) });
+    const res = await GET_BY_ID(idReq("GET", "not-a-uuid"), {
+      params: Promise.resolve({ id: "not-a-uuid" }),
+    });
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body).toMatchObject({ error: "invalid_id" });
@@ -256,10 +258,9 @@ describe("GET /api/administrator/organizations/:id", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
     selectFirst.mockResolvedValue(null);
-    const res = await GET_BY_ID(
-      idReq("GET", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-      { params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }) },
-    );
+    const res = await GET_BY_ID(idReq("GET", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
     expect(res.status).toBe(404);
   });
 });
@@ -280,10 +281,9 @@ describe("DELETE /api/administrator/organizations/:id", () => {
   it("returns 403 when caller lacks admin.orgs.delete", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
-    const res = await DELETE(
-      idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-      { params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }) },
-    );
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
     expect(res.status).toBe(403);
   });
 });

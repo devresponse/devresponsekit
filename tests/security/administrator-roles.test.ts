@@ -133,7 +133,8 @@ let PermsDelete: typeof PermissionByIdRouteModule.DELETE;
 let AppRolesPOST: typeof AppRolesRouteModule.POST;
 
 beforeEach(async () => {
-  for (const m of [sessionGetter, accessGetter, auditMock, itemsExecute, selectFirst]) m.mockReset();
+  for (const m of [sessionGetter, accessGetter, auditMock, itemsExecute, selectFirst])
+    m.mockReset();
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET: RolesGET, POST: RolesPOST } = await import("@/app/api/administrator/roles/route"));
@@ -157,9 +158,7 @@ describe("security: roles list", () => {
     const res = await RolesGET(rolesGet());
     expect(res.status).toBe(403);
     expect(itemsExecute).not.toHaveBeenCalled();
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("rejects suspended admins (status check beats permission check)", async () => {
@@ -179,10 +178,12 @@ describe("security: roles create requires admin.roles.create (not just read)", (
   it("403 when caller has read but not create", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(ACCESS(["admin.roles.read"]));
-    const res = await RolesPOST(jsonReq("http://test.local/api/administrator/roles", {
-      key: "x.y",
-      name: "X",
-    }));
+    const res = await RolesPOST(
+      jsonReq("http://test.local/api/administrator/roles", {
+        key: "x.y",
+        name: "X",
+      }),
+    );
     expect(res.status).toBe(403);
   });
 });
@@ -191,18 +192,23 @@ describe("security: permission catalog mutations require admin.permissions.manag
   it("rejects POST /permissions for callers with only admin.roles.read", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(ACCESS(["admin.roles.read", "admin.roles.create"]));
-    const res = await PermsPOST(jsonReq("http://test.local/api/administrator/permissions", {
-      key: "x.y",
-    }));
+    const res = await PermsPOST(
+      jsonReq("http://test.local/api/administrator/permissions", {
+        key: "x.y",
+      }),
+    );
     expect(res.status).toBe(403);
   });
 
   it("rejects DELETE /permissions/[id] for callers with only admin.roles.read", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(ACCESS(["admin.roles.read"]));
-    const res = await PermsDelete(jsonReq("http://test.local/api/administrator/permissions/p-1", {}), {
-      params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
-    });
+    const res = await PermsDelete(
+      jsonReq("http://test.local/api/administrator/permissions/p-1", {}),
+      {
+        params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
+      },
+    );
     expect(res.status).toBe(403);
   });
 });
@@ -211,15 +217,15 @@ describe("security: assigning roles to users requires admin.roles.assign", () =>
   it("403 when caller has admin.users.update but lacks admin.roles.assign", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(ACCESS(["admin.users.update"]));
-    const res = await AppRolesPOST(jsonReq(
-      "http://test.local/api/administrator/users/u-1/app-roles",
-      {
+    const res = await AppRolesPOST(
+      jsonReq("http://test.local/api/administrator/users/u-1/app-roles", {
         roleId: "11111111-1111-4111-8111-111111111111",
         organizationId: "22222222-2222-4222-8222-222222222222",
+      }),
+      {
+        params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
       },
-    ), {
-      params: Promise.resolve({ id: "11111111-1111-4111-8111-111111111111" }),
-    });
+    );
     expect(res.status).toBe(403);
   });
 });

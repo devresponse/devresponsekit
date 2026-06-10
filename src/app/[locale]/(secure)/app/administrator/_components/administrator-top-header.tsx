@@ -48,9 +48,9 @@ export function AdministratorTopHeader({ locale, permissions }: AdministratorTop
   const getActionLabel = (action: AdministratorNavigationAction) => actionLabels[action.id];
 
   return (
-    <div className="sticky top-0 z-30 overflow-x-auto bg-background">
+    <div className="bg-background sticky top-0 z-30 overflow-x-auto">
       <div className="flex h-9 min-w-max items-stretch">
-        <div className="text-muted-foreground flex shrink-0 items-center border-r px-3 text-[11px] font-semibold uppercase tracking-[0.16em]">
+        <div className="text-muted-foreground flex shrink-0 items-center border-r px-3 text-[11px] font-semibold tracking-[0.16em] uppercase">
           {tAdmin("appTitle")}
         </div>
         <Menubar
@@ -59,13 +59,13 @@ export function AdministratorTopHeader({ locale, permissions }: AdministratorTop
         >
           {visibleGroups.map((group) => (
             <MenubarMenu key={group.id}>
-              <MenubarTrigger className="text-foreground/80 focus:bg-muted data-[state=open]:bg-muted data-[state=open]:text-foreground h-full rounded-none border-r border-transparent px-3 py-0 text-[12px] font-medium data-[state=open]:border-border">
+              <MenubarTrigger className="text-foreground/80 focus:bg-muted data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:border-border h-full rounded-none border-r border-transparent px-3 py-0 text-[12px] font-medium">
                 {tNav(group.labelKey)}
               </MenubarTrigger>
               <MenubarContent
                 alignOffset={0}
                 sideOffset={0}
-                className="min-w-60 rounded-t-none rounded-b-lg border border-border bg-background p-0 shadow-lg"
+                className="border-border bg-background min-w-60 rounded-t-none rounded-b-lg border p-0 shadow-lg"
               >
                 {group.items.map((item) => (
                   <MenubarItem

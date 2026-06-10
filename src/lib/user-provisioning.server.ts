@@ -117,12 +117,15 @@ export async function provisionUserFromAuth(
     status = existing.status;
     linkedExisting = true;
 
+    // Only overwrite profile fields the provider actually supplied —
+    // re-provisioning must never clear an existing display name or
+    // reset a user's saved locale preference.
     await db
       .updateTable("app_users")
       .set({
         primary_email: input.email,
-        display_name: input.displayName ?? null,
-        preferred_locale: input.preferredLocale ?? "en",
+        ...(input.displayName ? { display_name: input.displayName } : {}),
+        ...(input.preferredLocale ? { preferred_locale: input.preferredLocale } : {}),
         updated_at: sql`now()`,
       })
       .where("id", "=", appUserId)

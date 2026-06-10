@@ -35,7 +35,10 @@ describe("AdministratorTopHeader", () => {
     const user = userEvent.setup();
 
     renderWithIntl(
-      <AdministratorTopHeader locale="en" permissions={["admin.users.read", "admin.users.create"]} />,
+      <AdministratorTopHeader
+        locale="en"
+        permissions={["admin.users.read", "admin.users.create"]}
+      />,
     );
 
     await user.click(screen.getByRole("menuitem", { name: "Identity" }));

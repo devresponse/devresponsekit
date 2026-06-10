@@ -23,13 +23,7 @@ export interface RoleDetailJson {
   memberCount: number;
 }
 
-export function RoleDetailTabs({
-  role,
-  canUpdate,
-}: {
-  role: RoleDetailJson;
-  canUpdate: boolean;
-}) {
+export function RoleDetailTabs({ role, canUpdate }: { role: RoleDetailJson; canUpdate: boolean }) {
   const t = useTranslations("administrator.roles");
 
   return (

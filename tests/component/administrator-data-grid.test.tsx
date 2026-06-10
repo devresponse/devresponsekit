@@ -54,9 +54,7 @@ describe("DataGrid", () => {
       json: async () => ({ items: [], total: 0 }),
     });
     renderWithIntl(<DataGrid<Row> name="t" endpoint="/api/test" columns={COLUMNS} />);
-    expect(
-      await screen.findByText("No results match the current filters."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("No results match the current filters.")).toBeInTheDocument();
   });
 
   it("renders fetched rows in a table", async () => {

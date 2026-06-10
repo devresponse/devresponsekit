@@ -38,9 +38,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 const requestIds = new WeakMap<object, string>();
 
-export function getOrCreateRequestId(
-  request: { headers: Headers } | Headers | undefined,
-): string {
+export function getOrCreateRequestId(request: { headers: Headers } | Headers | undefined): string {
   if (!request) return crypto.randomUUID();
 
   const headers = request instanceof Headers ? request : request.headers;

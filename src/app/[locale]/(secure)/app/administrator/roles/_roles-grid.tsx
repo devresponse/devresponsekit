@@ -160,40 +160,40 @@ export function AdministratorRolesGrid({
       },
       ...(canDelete || canDuplicate
         ? [
-          {
-            id: "actions",
-            enableSorting: false,
-            header: () => "",
-            cell: ({ row }: { row: { original: RoleRow } }) => (
-              <div className="flex justify-end gap-2">
-                {canDuplicate ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onDuplicate(row.original.id)}
-                  >
-                    {t("duplicateButton")}
-                  </Button>
-                ) : null}
-                {canDelete ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onDelete(row.original.id, row.original.key)}
-                  // Avoid showing a delete button for in-use roles?
-                  // The server still enforces the rule and the inline
-                  // error keeps the UX honest without a per-row
-                  // database round-trip.
-                  >
-                    {t("deleteButton")}
-                  </Button>
-                ) : null}
-              </div>
-            ),
-          } as ColumnDef<RoleRow, unknown>,
-        ]
+            {
+              id: "actions",
+              enableSorting: false,
+              header: () => "",
+              cell: ({ row }: { row: { original: RoleRow } }) => (
+                <div className="flex justify-end gap-2">
+                  {canDuplicate ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onDuplicate(row.original.id)}
+                    >
+                      {t("duplicateButton")}
+                    </Button>
+                  ) : null}
+                  {canDelete ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onDelete(row.original.id, row.original.key)}
+                      // Avoid showing a delete button for in-use roles?
+                      // The server still enforces the rule and the inline
+                      // error keeps the UX honest without a per-row
+                      // database round-trip.
+                    >
+                      {t("deleteButton")}
+                    </Button>
+                  ) : null}
+                </div>
+              ),
+            } as ColumnDef<RoleRow, unknown>,
+          ]
         : []),
     ],
     [t, locale, dateFormatter, canDelete, canDuplicate, onDelete, onDuplicate],

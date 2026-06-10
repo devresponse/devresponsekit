@@ -10,10 +10,7 @@ import {
   buildListResponse,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +31,7 @@ export const dynamic = "force-dynamic";
  * Caller MUST hold `admin.roles.read`.
  */
 const SCOPE_GLOBAL = "global";
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
@@ -83,9 +79,7 @@ export async function GET(request: NextRequest) {
 
   if (query.q) {
     const like = `%${query.q}%`;
-    base = base.where((eb) =>
-      eb.or([eb("r.key", "ilike", like), eb("r.name", "ilike", like)]),
-    );
+    base = base.where((eb) => eb.or([eb("r.key", "ilike", like), eb("r.name", "ilike", like)]));
   }
 
   const itemsQuery = applySortAndPagination(

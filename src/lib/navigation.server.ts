@@ -1,12 +1,35 @@
 import "server-only";
+import { createTranslator, type Messages } from "next-intl";
 import { db } from "@/db/database";
 import type { UserAccessContext } from "@/lib/auth-status";
 import { ANY_ADMIN_PERMISSION } from "@/lib/admin/permissions";
+import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import type {
   EnterpriseApplicationMenuItem,
   NavigationMenuItem,
   NavigationMenuResponse,
 } from "@/components/navigation/menu-types";
+
+/**
+ * Builds a `shell`-namespace translator for menu labels. Uses
+ * `createTranslator` with directly imported catalogs (rather than the
+ * request-scoped `getTranslations`) so the loaders stay callable from
+ * any server context, including tests. The loader map uses static
+ * specifiers so every bundler/test resolver can see them.
+ */
+const MESSAGE_LOADERS: Record<string, () => Promise<{ default: Messages }>> = {
+  en: () => import("@/messages/en.json"),
+  fr: () => import("@/messages/fr.json"),
+  es: () => import("@/messages/es.json"),
+  uk: () => import("@/messages/uk.json"),
+};
+
+async function shellTranslator(locale: string) {
+  const safeLocale = isSupportedLocale(locale) ? locale : defaultLocale;
+  const loader = MESSAGE_LOADERS[safeLocale] ?? MESSAGE_LOADERS[defaultLocale]!;
+  const messages = (await loader()).default;
+  return createTranslator({ locale: safeLocale, messages, namespace: "shell" });
+}
 
 /**
  * Pure menu filtering helper.
@@ -94,12 +117,13 @@ export async function loadShellMenu(
   scope: string,
   locale: string,
 ): Promise<NavigationMenuResponse<NavigationMenuItem>> {
+  const t = await shellTranslator(locale);
   const items: NavigationMenuItem[] = filterMenuByPermissions(
     DEFAULT_SHELL_MENU,
     access.permissions,
   ).map((item) => ({
     id: item.id,
-    label: item.label,
+    label: t(item.labelKey),
     href: `/${locale}${item.href}`,
     icon: item.icon,
   }));
@@ -126,12 +150,13 @@ export async function loadNestedAppsMenu(
   applicationId: string,
   locale: string,
 ): Promise<NavigationMenuResponse<NavigationMenuItem>> {
+  const t = await shellTranslator(locale);
   const items: NavigationMenuItem[] = filterMenuByPermissions(
     DEFAULT_NESTED_MENU,
     access.permissions,
   ).map((item) => ({
     id: `${applicationId}:${item.id}`,
-    label: item.label,
+    label: t(item.labelKey),
     href: `/${locale}${item.href}`,
     icon: item.icon,
   }));
@@ -147,7 +172,8 @@ export async function loadNestedAppsMenu(
 
 interface InternalMenuItem {
   id: string;
-  label: string;
+  /** `shell`-namespace message key resolved per request locale. */
+  labelKey: "dashboard" | "workspace" | "admin" | "users" | "audit" | "settings";
   href: string;
   icon?: string;
   requiredPermissions?: string[];
@@ -157,19 +183,19 @@ interface InternalMenuItem {
 const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
   {
     id: "dashboard",
-    label: "Dashboard",
+    labelKey: "dashboard",
     href: "/app/dashboard",
     requiredPermissions: ["shell.view"],
   },
   {
     id: "workspace",
-    label: "Workspace",
+    labelKey: "workspace",
     href: "/app/workspace",
     requiredPermissions: ["shell.view"],
   },
   {
     id: "administrator",
-    label: "Administrator",
+    labelKey: "admin",
     href: "/app/administrator",
     // Mirrors the layout-level guard in
     // `src/app/[locale]/(secure)/app/administrator/layout.tsx`: any
@@ -180,14 +206,14 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
   },
   {
     id: "admin-users",
-    label: "Users",
-    href: "/app/admin/users",
+    labelKey: "users",
+    href: "/app/administrator/users",
     requiredPermissions: ["admin.users.manage"],
   },
   {
     id: "admin-audit",
-    label: "Audit",
-    href: "/app/admin/audit",
+    labelKey: "audit",
+    href: "/app/administrator/audit",
     requiredPermissions: ["audit.view"],
   },
 ];
@@ -195,7 +221,7 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
 const DEFAULT_NESTED_MENU: InternalMenuItem[] = [
   {
     id: "settings",
-    label: "Settings",
+    labelKey: "settings",
     href: "/app/workspace/settings",
     requiredPermissions: ["shell.view"],
   },

@@ -15,10 +15,10 @@ import type * as SsoServerModule from "@/lib/sso.server";
 const accessGetter = vi.fn();
 const signMock = vi.fn();
 
-const enterpriseTakeFirstOrThrow = vi.fn();
 const enterpriseTakeFirst = vi.fn();
 const rolesExecute = vi.fn();
 const nonceInsertExecute = vi.fn().mockResolvedValue(undefined);
+const nonceDeleteExecute = vi.fn().mockResolvedValue(undefined);
 const nonceUpdateExecute = vi.fn();
 
 vi.mock("@/lib/auth-status", async () => {
@@ -40,14 +40,12 @@ vi.mock("@/db/database", () => ({
   db: {
     selectFrom: (table: string) => {
       if (table === "app_enterprise_applications") {
-        // Two call sites:
-        //   1. createSsoHandoffRedirect:        ...executeTakeFirstOrThrow
-        //   2. loadSsoAccessContext (internal): ...executeTakeFirst
+        // Single call site: createSsoHandoffRedirect looks the target
+        // app up once and passes it to loadSsoAccessContext.
         return {
           selectAll: () => ({
             where: () => ({
               where: () => ({
-                executeTakeFirstOrThrow: enterpriseTakeFirstOrThrow,
                 executeTakeFirst: enterpriseTakeFirst,
               }),
             }),
@@ -64,6 +62,7 @@ vi.mock("@/db/database", () => ({
       };
     },
     insertInto: () => ({ values: () => ({ execute: nonceInsertExecute }) }),
+    deleteFrom: () => ({ where: () => ({ execute: nonceDeleteExecute }) }),
     updateTable: () => ({
       set: () => ({
         where: () => ({
@@ -93,10 +92,10 @@ const ACTIVE_ACCESS_FULL = {
 beforeEach(async () => {
   accessGetter.mockReset();
   signMock.mockReset();
-  enterpriseTakeFirstOrThrow.mockReset();
   enterpriseTakeFirst.mockReset();
   rolesExecute.mockReset().mockResolvedValue([]);
   nonceInsertExecute.mockClear();
+  nonceDeleteExecute.mockClear();
   nonceUpdateExecute.mockReset();
   mod = await import("@/lib/sso.server");
 });
@@ -104,7 +103,7 @@ afterEach(() => vi.resetModules());
 
 describe("createSsoHandoffRedirect", () => {
   it("throws sso_denied:pending_approval when user is not allowed", async () => {
-    enterpriseTakeFirstOrThrow.mockResolvedValue({
+    enterpriseTakeFirst.mockResolvedValue({
       id: "portal",
       origin: "https://portal.x.com",
       sso_audience: "devresponse-app:portal",
@@ -128,13 +127,6 @@ describe("createSsoHandoffRedirect", () => {
   });
 
   it("throws sso_denied:application_unavailable when target app is not found", async () => {
-    enterpriseTakeFirstOrThrow.mockResolvedValue({
-      id: "portal",
-      origin: "https://portal.x.com",
-      sso_audience: "devresponse-app:portal",
-      organization_id: null,
-      status: "available",
-    });
     accessGetter.mockResolvedValue(ACTIVE_ACCESS_FULL);
     enterpriseTakeFirst.mockResolvedValue(undefined);
     await expect(
@@ -149,16 +141,11 @@ describe("createSsoHandoffRedirect", () => {
   });
 
   it("throws when the application belongs to a different organization", async () => {
-    enterpriseTakeFirstOrThrow.mockResolvedValue({
-      id: "portal",
-      origin: "https://portal.x.com",
-      sso_audience: "devresponse-app:portal",
-      organization_id: null,
-      status: "available",
-    });
     accessGetter.mockResolvedValue(ACTIVE_ACCESS_FULL);
     enterpriseTakeFirst.mockResolvedValue({
       id: "portal",
+      origin: "https://portal.x.com",
+      sso_audience: "devresponse-app:portal",
       organization_id: "different-org",
       status: "available",
     });
@@ -174,16 +161,11 @@ describe("createSsoHandoffRedirect", () => {
   });
 
   it("returns the consume URL with the signed token on success", async () => {
-    enterpriseTakeFirstOrThrow.mockResolvedValue({
-      id: "portal",
-      origin: "https://portal.x.com",
-      sso_audience: "devresponse-app:portal",
-      organization_id: null,
-      status: "available",
-    });
     accessGetter.mockResolvedValue(ACTIVE_ACCESS_FULL);
     enterpriseTakeFirst.mockResolvedValue({
       id: "portal",
+      origin: "https://portal.x.com",
+      sso_audience: "devresponse-app:portal",
       organization_id: null,
       status: "available",
     });

@@ -1,9 +1,6 @@
 import "server-only";
 import { NextResponse } from "next/server";
-import {
-  REQUEST_ID_HEADER,
-  getOrCreateRequestId,
-} from "@/lib/admin/request-id.server";
+import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 
 /**
  * Standard administrator error envelope (docs/admin-manager.md §5.1,

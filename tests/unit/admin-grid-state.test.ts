@@ -29,9 +29,7 @@ describe("readGridStateFromParams", () => {
 
   it("parses page, pageSize, sort, q and filters", () => {
     const s = readGridStateFromParams(
-      new URLSearchParams(
-        "page=3&pageSize=50&sort=primary_email.asc&q=ada&filter[status]=active",
-      ),
+      new URLSearchParams("page=3&pageSize=50&sort=primary_email.asc&q=ada&filter[status]=active"),
       OPTS,
     );
     expect(s).toEqual({

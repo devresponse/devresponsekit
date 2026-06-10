@@ -10,10 +10,7 @@ import {
   buildListResponse,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -176,13 +173,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       organizationId: id,
-      metadata: { organizationId: id, slug: org.slug, appUserId: input.appUserId, membershipId: inserted.id },
+      metadata: {
+        organizationId: id,
+        slug: org.slug,
+        appUserId: input.appUserId,
+        membershipId: inserted.id,
+      },
     }),
     auditUserAction("admin.user.membership_added", "success", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: input.appUserId,
-      metadata: { organizationId: id, slug: org.slug, appUserId: input.appUserId, membershipId: inserted.id },
+      metadata: {
+        organizationId: id,
+        slug: org.slug,
+        appUserId: input.appUserId,
+        membershipId: inserted.id,
+      },
     }),
   ]);
 
@@ -259,7 +266,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       organizationId: id,
-      metadata: { organizationId: id, slug: org.slug, membershipIds: input.membershipIds, status: input.status },
+      metadata: {
+        organizationId: id,
+        slug: org.slug,
+        membershipIds: input.membershipIds,
+        status: input.status,
+      },
     }),
     ...memberships.map((m) =>
       auditUserAction("admin.user.membership_updated", "success", {

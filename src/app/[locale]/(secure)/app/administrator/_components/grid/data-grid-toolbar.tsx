@@ -78,8 +78,9 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
   const onExport = () => {
     if (!exportResource) return;
     const qs = exportState ? gridStateToSearchParams(exportState).toString() : "";
-    const url = `/api/administrator/export/${encodeURIComponent(exportResource)}${qs ? `?${qs}` : ""
-      }`;
+    const url = `/api/administrator/export/${encodeURIComponent(exportResource)}${
+      qs ? `?${qs}` : ""
+    }`;
     // Use a transient anchor click so the browser handles the
     // download (and the Content-Disposition filename) natively. We
     // do NOT navigate — the page state should not be discarded just
@@ -93,9 +94,9 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
   };
 
   const hasSelection = selection.mode === "all" || selection.count > 0;
-  const allOnPageSelected = selection.mode === "page" && selection.count > 0 && selection.count >= props.pageRowCount;
-  const shouldOfferSelectAllMatching =
-    allOnPageSelected && props.totalRows > props.pageRowCount;
+  const allOnPageSelected =
+    selection.mode === "page" && selection.count > 0 && selection.count >= props.pageRowCount;
+  const shouldOfferSelectAllMatching = allOnPageSelected && props.totalRows > props.pageRowCount;
 
   const summary =
     selection.mode === "all"

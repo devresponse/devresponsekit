@@ -4,14 +4,8 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  DEFAULT_ADMIN_BULK_LIMIT,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_BULK_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import {
   BULK_USER_ACTION_PERMISSIONS,
@@ -95,7 +89,12 @@ const bulkSchema = z
     ]),
     ids: idsSchema,
     reason: z.string().min(1).max(500).optional(),
-    expiresInSeconds: z.number().int().positive().max(60 * 60 * 24 * 365).optional(),
+    expiresInSeconds: z
+      .number()
+      .int()
+      .positive()
+      .max(60 * 60 * 24 * 365)
+      .optional(),
     filters: filtersSchema,
   })
   .strict();
@@ -151,10 +150,7 @@ export async function POST(request: NextRequest) {
     if (parsed.data.filters.q) {
       const like = `%${parsed.data.filters.q}%`;
       q = q.where((eb) =>
-        eb.or([
-          eb("primary_email", "ilike", like),
-          eb("display_name", "ilike", like),
-        ]),
+        eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
       );
     }
     const rows = await q.limit(MAX_BULK_IDS).execute();
@@ -182,12 +178,7 @@ export async function POST(request: NextRequest) {
   // size.
   const targets = (await db
     .selectFrom("app_users")
-    .select([
-      "id",
-      "better_auth_user_id",
-      "primary_email",
-      "status",
-    ])
+    .select(["id", "better_auth_user_id", "primary_email", "status"])
     .where("id", "in", targetIds)
     .execute()) satisfies { id: string }[];
 
@@ -229,19 +220,23 @@ export async function POST(request: NextRequest) {
   // Single summary audit row in addition to the per-row events written
   // by the helpers — the audit explorer surfaces this for the "what
   // big bulk action ran at 11:42?" lookup.
-  await auditUserAction("admin.users.bulk_action", succeeded === results.length ? "success" : "failure", {
-    request,
-    actorBetterAuthUserId: guard.betterAuthUserId,
-    appUserId: results[0]?.appUserId ?? "00000000-0000-0000-0000-000000000000",
-    reason: parsed.data.reason ?? null,
-    metadata: {
-      action,
-      attempted: results.length,
-      succeeded,
-      failed,
-      ids: parsed.data.ids === "*" ? "*" : `${targetIds.length} ids`,
+  await auditUserAction(
+    "admin.users.bulk_action",
+    succeeded === results.length ? "success" : "failure",
+    {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: results[0]?.appUserId ?? "00000000-0000-0000-0000-000000000000",
+      reason: parsed.data.reason ?? null,
+      metadata: {
+        action,
+        attempted: results.length,
+        succeeded,
+        failed,
+        ids: parsed.data.ids === "*" ? "*" : `${targetIds.length} ids`,
+      },
     },
-  });
+  );
 
   // Touch the parsed action once so the audit row records the original
   // batch surface. Per-row events written by the helpers cover detail.

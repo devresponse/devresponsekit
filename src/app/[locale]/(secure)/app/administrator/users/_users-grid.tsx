@@ -154,11 +154,11 @@ export function AdministratorUsersGrid({
         const message =
           result.failed > 0
             ? tBulk("partialFailureToast", {
-              action,
-              succeeded: result.succeeded,
-              attempted: result.attempted,
-              failed: result.failed,
-            })
+                action,
+                succeeded: result.succeeded,
+                attempted: result.attempted,
+                failed: result.failed,
+              })
             : tBulk("successToast", { action, succeeded: result.succeeded });
         await dialogs.notify({ description: message });
         selection.clear();
@@ -243,4 +243,3 @@ function formatDate(value: string, formatter: Intl.DateTimeFormat): string {
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? value : formatter.format(d);
 }
-

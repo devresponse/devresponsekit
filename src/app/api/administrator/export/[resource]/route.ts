@@ -4,19 +4,9 @@ import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import {
-  parseListQuery,
-  type FilterValue,
-  type ListQuery,
-} from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  DEFAULT_ADMIN_EXPORT_LIMIT,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
+import { parseListQuery, type FilterValue, type ListQuery } from "@/lib/admin/list-query.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 
 export const dynamic = "force-dynamic";
 
@@ -118,7 +108,10 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   // status + JSON envelope. Once we hand a `ReadableStream` back to
   // Next.js the status is locked at 200 and any later error can only
   // be surfaced as a CSV body, which most consumers cannot detect.
-  let exporter: { header: string[]; fetchPage: (limit: number, offset: number) => Promise<unknown[][]> };
+  let exporter: {
+    header: string[];
+    fetchPage: (limit: number, offset: number) => Promise<unknown[][]>;
+  };
   let firstPage: unknown[][];
   try {
     exporter = buildExporter(resource, query);
@@ -354,10 +347,7 @@ function buildUsersExporter(query: ListQuery): Exporter {
       if (query.q) {
         const like = `%${query.q}%`;
         q = q.where((eb) =>
-          eb.or([
-            eb("primary_email", "ilike", like),
-            eb("display_name", "ilike", like),
-          ]),
+          eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
         );
       }
       let qSorted = q
@@ -567,14 +557,7 @@ function buildPermissionsExporter(query: ListQuery): Exporter {
 
 function buildMembershipsExporter(query: ListQuery): Exporter {
   return {
-    header: [
-      "id",
-      "app_user_id",
-      "organization_id",
-      "status",
-      "source_provider",
-      "created_at",
-    ],
+    header: ["id", "app_user_id", "organization_id", "status", "source_provider", "created_at"],
     fetchPage: async (limit, offset) => {
       let q = db.selectFrom("app_organization_memberships as m");
       const status = query.filters.status;
@@ -629,9 +612,7 @@ function buildEnterpriseAppsExporter(query: ListQuery): Exporter {
       if (typeof orgId === "string") q = q.where("a.organization_id", "=", orgId);
       if (query.q) {
         const like = `%${query.q}%`;
-        q = q.where((eb) =>
-          eb.or([eb("a.id", "ilike", like), eb("a.label", "ilike", like)]),
-        );
+        q = q.where((eb) => eb.or([eb("a.id", "ilike", like), eb("a.label", "ilike", like)]));
       }
       let qSorted = q
         .select([
@@ -668,9 +649,7 @@ function buildEnterpriseAppsExporter(query: ListQuery): Exporter {
 /*  Helpers                                                                   */
 /* -------------------------------------------------------------------------- */
 
-function isRangeFilter(
-  value: FilterValue | undefined,
-): value is { from?: string; to?: string } {
+function isRangeFilter(value: FilterValue | undefined): value is { from?: string; to?: string } {
   return (
     typeof value === "object" &&
     value !== null &&

@@ -6,11 +6,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  APP_STATUS_VALUES,
-  SUBDOMAIN_RE,
-  isHttpsOrigin,
-} from "@/lib/admin/enterprise-apps";
+import { APP_STATUS_VALUES, SUBDOMAIN_RE, isHttpsOrigin } from "@/lib/admin/enterprise-apps";
 
 /**
  * Client-side enterprise application settings form (docs/admin-manager.md
@@ -94,23 +90,20 @@ export function EnterpriseAppSettingsForm({
 
     setSubmitting(true);
     try {
-      const res = await fetch(
-        `/api/administrator/enterprise-apps/${encodeURIComponent(app.id)}`,
-        {
-          method: "PATCH",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            label: label.trim(),
-            description: description.trim() === "" ? null : description.trim(),
-            origin: origin.trim(),
-            subdomain: subdomain.trim(),
-            sso_audience: ssoAudience.trim(),
-            status,
-            sort_order: sortOrderNum,
-          }),
-        },
-      );
+      const res = await fetch(`/api/administrator/enterprise-apps/${encodeURIComponent(app.id)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          label: label.trim(),
+          description: description.trim() === "" ? null : description.trim(),
+          origin: origin.trim(),
+          subdomain: subdomain.trim(),
+          sso_audience: ssoAudience.trim(),
+          status,
+          sort_order: sortOrderNum,
+        }),
+      });
       if (res.ok) {
         setSaved(true);
         router.refresh();

@@ -84,12 +84,7 @@ async function main() {
         // every permission known to the system — including all admin.*
         // capabilities and the `superuser` marker — so it acts as a
         // true superuser, covering and exceeding `administrator`.
-        [
-          "shell.view",
-          "audit.view",
-          "superuser",
-          ...ADMIN_PERMISSION_CATALOG.map((p) => p.key),
-        ],
+        ["shell.view", "audit.view", "superuser", ...ADMIN_PERMISSION_CATALOG.map((p) => p.key)],
       ],
     ];
     for (const [key, name, permKeys] of roles) {

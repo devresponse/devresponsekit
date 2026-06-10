@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { db } from "@/db/database";
 
 /** Possible application-level user statuses. */
@@ -44,8 +45,16 @@ export function decideSecureAccess(
  * been provisioned into the application tables — this happens between
  * sign-up and the first call to the user-provisioning service. Pages that
  * call this function MUST treat any non-`active` status as a hard block.
+ *
+ * Wrapped in React `cache()` so the secure layout, nested layouts, and
+ * page-level guards resolving the same user within one request share a
+ * single set of DB round-trips. The memoization is per-request (and a
+ * no-op outside React rendering), so it never serves stale permissions
+ * across requests.
  */
-export async function getUserAccessContext(betterAuthUserId: string): Promise<UserAccessContext> {
+export const getUserAccessContext = cache(async function getUserAccessContext(
+  betterAuthUserId: string,
+): Promise<UserAccessContext> {
   const user = await db
     .selectFrom("app_users")
     .select(["id", "primary_email", "status", "preferred_locale"])
@@ -93,4 +102,4 @@ export async function getUserAccessContext(betterAuthUserId: string): Promise<Us
     preferredLocale: user.preferred_locale,
     permissions,
   };
-}
+});

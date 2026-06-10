@@ -4,11 +4,7 @@ import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 /**
  * "Roles using this permission" panel rendered inside the catalog Sheet
@@ -26,11 +22,7 @@ interface RoleRow {
   organization_id: string | null;
 }
 
-export function RolesUsingPermissionPanel({
-  permissionKey,
-}: {
-  permissionKey: string;
-}) {
+export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: string }) {
   const t = useTranslations("administrator.permissions.rolesUsing");
   const tErr = useTranslations("administrator.errors");
   const locale = useLocale();

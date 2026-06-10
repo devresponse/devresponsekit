@@ -101,9 +101,7 @@ describe("GET /api/administrator/audit", () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.users.read"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("returns the standard list envelope with default created_at desc sort", async () => {

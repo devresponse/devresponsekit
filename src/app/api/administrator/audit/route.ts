@@ -8,10 +8,7 @@ import {
   parseListQuery,
   type FilterValue,
 } from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +17,7 @@ export const dynamic = "force-dynamic";
  * Range filters are produced by `parseListQuery` for `filter[name][from]`
  * / `filter[name][to]` query-string syntax (§5.1).
  */
-function isRangeFilter(
-  value: FilterValue | undefined,
-): value is { from?: string; to?: string } {
+function isRangeFilter(value: FilterValue | undefined): value is { from?: string; to?: string } {
   return (
     typeof value === "object" &&
     value !== null &&

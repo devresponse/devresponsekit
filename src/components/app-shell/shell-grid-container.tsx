@@ -1,4 +1,4 @@
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 import { ShellHeader } from "./shell-header";
 import { ShellLeft } from "./shell-left";
 import { ShellMain } from "./shell-main";

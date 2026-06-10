@@ -48,13 +48,7 @@ export function StopImpersonationButton({
   };
 
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      onClick={onClick}
-      disabled={busy}
-    >
+    <Button type="button" size="sm" variant="outline" onClick={onClick} disabled={busy}>
       {label}
     </Button>
   );

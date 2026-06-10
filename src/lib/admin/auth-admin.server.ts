@@ -136,10 +136,7 @@ export async function banBetterAuthUser(
   } as Parameters<typeof auth.api.banUser>[0]);
 }
 
-export async function unbanBetterAuthUser(
-  userId: string,
-  actor?: Headers | { headers: Headers },
-) {
+export async function unbanBetterAuthUser(userId: string, actor?: Headers | { headers: Headers }) {
   return auth.api.unbanUser({
     body: { userId },
     headers: await actorHeaders(actor),
@@ -210,9 +207,7 @@ export async function impersonateBetterAuthUser(
  * Better Auth returns a no-op error which callers may surface to the
  * UI as "nothing to do".
  */
-export async function stopBetterAuthImpersonating(
-  actor?: Headers | { headers: Headers },
-) {
+export async function stopBetterAuthImpersonating(actor?: Headers | { headers: Headers }) {
   return auth.api.stopImpersonating({
     headers: await actorHeaders(actor),
   } as Parameters<typeof auth.api.stopImpersonating>[0]);

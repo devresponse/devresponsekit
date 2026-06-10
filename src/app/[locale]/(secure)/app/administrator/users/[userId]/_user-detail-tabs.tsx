@@ -31,7 +31,13 @@ export interface UserDetailJson {
   deactivated_reason: string | null;
 }
 
-export function UserDetailTabs({ user, canUpdateMemberships }: { user: UserDetailJson; canUpdateMemberships: boolean }) {
+export function UserDetailTabs({
+  user,
+  canUpdateMemberships,
+}: {
+  user: UserDetailJson;
+  canUpdateMemberships: boolean;
+}) {
   const t = useTranslations("administrator.users");
   const locale = useLocale();
 
@@ -65,10 +71,7 @@ export function UserDetailTabs({ user, canUpdateMemberships }: { user: UserDetai
           <Field label={t("fields.email")} value={user.primary_email} />
           <Field label={t("fields.displayName")} value={user.display_name ?? "—"} />
           <Field label={t("fields.preferredLocale")} value={user.preferred_locale} />
-          <Field
-            label={t("detail.appUserId")}
-            value={<code className="text-xs">{user.id}</code>}
-          />
+          <Field label={t("detail.appUserId")} value={<code className="text-xs">{user.id}</code>} />
           <Field
             label={t("detail.betterAuthId")}
             value={<code className="text-xs">{user.better_auth_user_id}</code>}
@@ -118,7 +121,7 @@ export function UserDetailTabs({ user, canUpdateMemberships }: { user: UserDetai
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
+      <dt className="text-xs tracking-wide text-neutral-500 uppercase">{label}</dt>
       <dd className="text-sm">{value}</dd>
     </div>
   );

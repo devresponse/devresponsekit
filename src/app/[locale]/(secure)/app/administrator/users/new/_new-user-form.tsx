@@ -201,10 +201,7 @@ export function NewUserForm({ locale }: { locale: string }) {
             className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
             value={state.initialAppStatus}
             onChange={(e) =>
-              update(
-                "initialAppStatus",
-                e.currentTarget.value as FormState["initialAppStatus"],
-              )
+              update("initialAppStatus", e.currentTarget.value as FormState["initialAppStatus"])
             }
           >
             <option value="pending_approval">{t("status.pending_approval")}</option>
@@ -219,10 +216,7 @@ export function NewUserForm({ locale }: { locale: string }) {
             className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
             value={state.preferredLocale}
             onChange={(e) =>
-              update(
-                "preferredLocale",
-                e.currentTarget.value as FormState["preferredLocale"],
-              )
+              update("preferredLocale", e.currentTarget.value as FormState["preferredLocale"])
             }
           >
             {VALID_LOCALES.map((l) => (

@@ -31,7 +31,7 @@ export function AdministratorSidebar({ locale, permissions }: AdministratorSideb
     <nav aria-label={t("overview")} className="flex flex-col gap-3 p-3 text-sm">
       {visibleGroups.map((group) => (
         <div key={group.id} className="flex flex-col gap-0.5">
-          <div className="text-muted-foreground px-2 py-1 text-xs font-semibold uppercase tracking-wide">
+          <div className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
             {t(group.labelKey)}
           </div>
           <ul className="flex flex-col gap-0.5">

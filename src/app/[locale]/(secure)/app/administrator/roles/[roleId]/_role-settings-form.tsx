@@ -75,7 +75,13 @@ export function RoleSettingsForm({
     <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
       <div className="space-y-2">
         <Label htmlFor="role-key-readonly">{tFields("key")}</Label>
-        <Input id="role-key-readonly" type="text" readOnly value={initialKey} aria-describedby="key-readonly-hint" />
+        <Input
+          id="role-key-readonly"
+          type="text"
+          readOnly
+          value={initialKey}
+          aria-describedby="key-readonly-hint"
+        />
         <p id="key-readonly-hint" className="text-xs text-neutral-500">
           {t("keyReadOnly")}
         </p>

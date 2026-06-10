@@ -62,10 +62,7 @@ const DEFAULT_MAX_PAGE_SIZE = 200;
  *     become an array. `filter[name][from]` / `[to]` produce a range.
  *   - Unknown filters (not in `allowedFilters`) are dropped.
  */
-export function parseListQuery(
-  params: URLSearchParams,
-  options: ParseListQueryOptions,
-): ListQuery {
+export function parseListQuery(params: URLSearchParams, options: ParseListQueryOptions): ListQuery {
   const allowedSort = new Set(options.allowedSortFields);
   const allowedFilters = options.allowedFilters ? new Set(options.allowedFilters) : null;
   const maxPageSize = options.maxPageSize ?? DEFAULT_MAX_PAGE_SIZE;
@@ -107,9 +104,7 @@ export function parseListQuery(
     if (sub === "from" || sub === "to") {
       const existing = filters[name];
       const range =
-        existing && typeof existing === "object" && !Array.isArray(existing)
-          ? { ...existing }
-          : {};
+        existing && typeof existing === "object" && !Array.isArray(existing) ? { ...existing } : {};
       range[sub] = value;
       filters[name] = range;
       continue;

@@ -78,10 +78,7 @@ export function useGridSelection(): UseGridSelectionResult {
     setSelectedIds(new Set());
   }, []);
 
-  const hasSelection = useMemo(
-    () => mode === "all" || selectedIds.size > 0,
-    [mode, selectedIds],
-  );
+  const hasSelection = useMemo(() => mode === "all" || selectedIds.size > 0, [mode, selectedIds]);
 
   return { selectedIds, mode, hasSelection, toggle, togglePage, selectAllMatching, clear };
 }

@@ -39,7 +39,13 @@ vi.mock("@/lib/audit.server", () => ({
 // both forks share the same chainable shape. We dispatch by terminal
 // method name — `execute()` is items, `executeTakeFirst()` is total.
 
-vi.mock("@/db/database", () => ({
+vi.mock("@/db/database", async () => ({
+  // `pgPool` is shared with Better Auth; the route's import graph
+  // reaches @/lib/auth, so the mock must provide a real (unconnected)
+  // Pool instance for the adapter's type detection.
+  pgPool: new (await import("pg")).Pool({
+    connectionString: "postgresql://test:test@localhost:5444/test",
+  }),
   db: {
     selectFrom: () => {
       // The handler builds `base`, then forks into:

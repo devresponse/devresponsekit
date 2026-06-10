@@ -31,7 +31,7 @@ interface SsoAccessContext {
  */
 async function loadSsoAccessContext(
   betterAuthUserId: string,
-  applicationId: string,
+  targetApp: { organization_id: string | null },
 ): Promise<SsoAccessContext> {
   const access = await getUserAccessContext(betterAuthUserId);
   const decision = decideSecureAccess(access.status, access.membershipStatus);
@@ -53,16 +53,6 @@ async function loadSsoAccessContext(
 
   // Verify access to the target application: either the application is
   // global (no organization_id) or it belongs to the user's organization.
-  const targetApp = await db
-    .selectFrom("app_enterprise_applications")
-    .selectAll()
-    .where("id", "=", applicationId)
-    .where("status", "=", "available")
-    .executeTakeFirst();
-
-  if (!targetApp) {
-    throw new Error("sso_denied:application_unavailable");
-  }
   if (targetApp.organization_id && targetApp.organization_id !== access.organizationId) {
     throw new Error("sso_denied:application_not_in_organization");
   }
@@ -92,13 +82,24 @@ export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectIn
     .selectAll()
     .where("id", "=", input.applicationId)
     .where("status", "=", "available")
-    .executeTakeFirstOrThrow();
+    .executeTakeFirst();
+  if (!targetApp) {
+    throw new Error("sso_denied:application_unavailable");
+  }
 
-  const context = await loadSsoAccessContext(input.betterAuthUserId, input.applicationId);
+  const context = await loadSsoAccessContext(input.betterAuthUserId, targetApp);
 
   const ttlSeconds = clampSsoHandoffTtl(Number(process.env.SSO_HANDOFF_TTL_SECONDS ?? 60));
   const jti = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+
+  // Opportunistically purge long-expired nonces so the table does not
+  // grow without bound; tokens live <= 60s, so anything expired for
+  // over an hour can never be consumed again.
+  await db
+    .deleteFrom("app_sso_handoff_nonces")
+    .where("expires_at", "<", new Date(Date.now() - 60 * 60 * 1000))
+    .execute();
 
   await db
     .insertInto("app_sso_handoff_nonces")

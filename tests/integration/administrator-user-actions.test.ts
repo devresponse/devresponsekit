@@ -88,10 +88,10 @@ vi.mock("@/db/database", () => ({
   },
 }));
 
-// Likewise stub the legacy admin-status helper used by the /status
-// route's wrapper (it is exercised end-to-end by its own legacy tests).
+// Likewise stub the shared status-mutation core used by the /status
+// route (it is exercised end-to-end by admin-status-action.test.ts).
 vi.mock("@/lib/admin-status.server", () => ({
-  applyAdminStatusAction: vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })),
+  performAdminStatusChange: vi.fn(async () => ({ ok: true, status: "active" })),
 }));
 
 const TARGET_ID = "11111111-1111-4111-8111-111111111101";

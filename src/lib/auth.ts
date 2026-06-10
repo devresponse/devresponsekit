@@ -1,9 +1,8 @@
 import { betterAuth, type BetterAuthOptions, type GenericEndpointContext } from "better-auth";
 import { admin } from "better-auth/plugins";
-import { Pool } from "pg";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
-import { db } from "@/db/database";
+import { db, pgPool } from "@/db/database";
 import { getServerEnv } from "@/lib/env";
 import { getTrustedOrigins } from "@/lib/trusted-origins";
 
@@ -11,9 +10,9 @@ import { getTrustedOrigins } from "@/lib/trusted-origins";
  * Better Auth server instance.
  *
  * Uses Better Auth's built-in Kysely-backed PostgreSQL integration. We
- * pass the `pg` Pool directly via the `database` option, which keeps the
- * project on a single Kysely-based database abstraction without
- * introducing Prisma or Drizzle.
+ * pass the shared `pgPool` directly via the `database` option, so auth
+ * storage and app storage share one connection pool (and one Kysely-
+ * based abstraction) without introducing Prisma or Drizzle.
  *
  * Note: account linking, session lifetime, and social providers are
  * configured here. All env access goes through `getServerEnv()` so a
@@ -22,10 +21,6 @@ import { getTrustedOrigins } from "@/lib/trusted-origins";
  * and secret are present.
  */
 const env = getServerEnv();
-
-const pool = new Pool({
-  connectionString: env.DATABASE_URL,
-});
 
 const socialProviders: NonNullable<BetterAuthOptions["socialProviders"]> = {};
 if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
@@ -51,7 +46,7 @@ if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
 }
 
 export const auth = betterAuth({
-  database: pool,
+  database: pgPool,
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
 
@@ -162,10 +157,18 @@ function getPreferredLocale(context: GenericEndpointContext): string | undefined
 }
 
 function extractLocale(candidate: string): string | undefined {
-  const path =
-    candidate.startsWith("http://") || candidate.startsWith("https://")
-      ? new URL(candidate).pathname
-      : candidate;
+  // `candidate` comes from a request body / Referer header, so a
+  // malformed URL must not throw inside the session-create hook.
+  let path: string;
+  if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+    try {
+      path = new URL(candidate).pathname;
+    } catch {
+      return undefined;
+    }
+  } else {
+    path = candidate;
+  }
   const locale = path.split("/").filter(Boolean)[0];
 
   return locale && isSupportedLocale(locale) ? locale : undefined;

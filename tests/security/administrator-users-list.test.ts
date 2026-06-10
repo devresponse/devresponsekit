@@ -29,7 +29,13 @@ vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
 
-vi.mock("@/db/database", () => ({
+vi.mock("@/db/database", async () => ({
+  // `pgPool` is shared with Better Auth; the route's import graph
+  // reaches @/lib/auth, so the mock must provide a real (unconnected)
+  // Pool instance for the adapter's type detection.
+  pgPool: new (await import("pg")).Pool({
+    connectionString: "postgresql://test:test@localhost:5444/test",
+  }),
   db: {
     selectFrom: () => {
       const proxy: unknown = new Proxy(

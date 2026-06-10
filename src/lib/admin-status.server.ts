@@ -1,85 +1,59 @@
 import "server-only";
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
-import { getCurrentSession } from "@/lib/auth-guard";
-import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 
 /**
- * Shared admin status mutation logic.
+ * Shared admin status mutation core.
  *
- * Validates that the caller is an admin (has `admin.users.manage`),
- * then updates the target user's status atomically and audits the
- * change with the admin event name appropriate for the action.
+ * Updates the target user's status (and the status of all their
+ * organization memberships) atomically and audits the change with the
+ * admin event name appropriate for the action.
  *
  * Threat / contract:
- *   - Caller MUST hold `admin.users.manage` permission. Anything less
- *     returns 403 and is itself audit-logged as a denied attempt.
+ *   - This function performs NO authorization. Callers MUST gate it
+ *     behind `requireAdminPermission("admin.users.manage")` (the
+ *     /status route and the bulk endpoint both do). Centralizing the
+ *     mutation without re-resolving the session keeps bulk batches at
+ *     one session/permission check per request instead of per row.
  *   - The `reason` field is optional and surfaces in audit metadata so
- *     ops teams can answer "who blocked this user and why".
+ *     ops teams can answer "who blocked this user and why". Callers
+ *     validate its length (max 500) at the route schema.
  */
-const requestSchema = z.object({
-  appUserId: z.uuid(),
-  reason: z.string().min(1).max(500).optional(),
-});
-
-const STATUS_TO_EVENT: Record<string, string> = {
-  active: "admin.user.approved",
-  blocked: "admin.user.blocked",
-  suspended: "admin.user.suspended",
-  // `active` after a previous suspension/block fires reactivated.
-  reactivated: "admin.user.reactivated",
-};
-
-export interface AdminStatusActionInput {
-  request: NextRequest;
+export interface AdminStatusChangeInput {
+  /** Better Auth user id of the acting administrator (audited). */
+  actorBetterAuthUserId: string;
+  /** Request context for the audit row's IP / UA / request-id. */
+  request?: NextRequest | { headers: Headers };
+  /** Correlation id shared with the route's other audit rows. */
+  requestId?: string;
+  /** `app_users.id` of the target. */
+  targetAppUserId: string;
   /** Target user status to set in `app_users.status`. */
   newStatus: "active" | "blocked" | "suspended" | "deactivated";
-  /** Membership status to set on the user's primary membership. */
+  /** Membership status cascaded to the user's memberships. */
   newMembershipStatus: "active" | "blocked" | "suspended" | "pending_approval";
-  /** Audit event override (used by reactivation). */
-  eventOverride?: string;
+  /** Audit event name (e.g. `admin.user.approved`). */
+  eventType: string;
+  /** Optional operator-supplied reason, stored and audited. */
+  reason?: string;
 }
 
-export async function applyAdminStatusAction(input: AdminStatusActionInput) {
-  const session = await getCurrentSession();
-  if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+export type AdminStatusChangeResult =
+  | { ok: true; status: AdminStatusChangeInput["newStatus"] }
+  | { ok: false; error: "not_found" };
 
-  const callerAccess = await getUserAccessContext(session.user.id);
-  const callerDecision = decideSecureAccess(callerAccess.status, callerAccess.membershipStatus);
-  if (callerDecision !== "allow" || !callerAccess.permissions.includes("admin.users.manage")) {
-    await auditEvent({
-      eventType: "administrator.access.denied",
-      outcome: "denied",
-      actorBetterAuthUserId: session.user.id,
-      reason: "missing_admin_permission",
-      request: input.request,
-    });
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  let json: unknown;
-  try {
-    json = await input.request.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
-  }
-  const parsed = requestSchema.safeParse(json);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
-  }
-
+export async function performAdminStatusChange(
+  input: AdminStatusChangeInput,
+): Promise<AdminStatusChangeResult> {
   const target = await db
     .selectFrom("app_users")
     .select(["id", "primary_email"])
-    .where("id", "=", parsed.data.appUserId)
+    .where("id", "=", input.targetAppUserId)
     .executeTakeFirst();
   if (!target) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    return { ok: false, error: "not_found" };
   }
 
   await db.transaction().execute(async (trx) => {
@@ -87,7 +61,7 @@ export async function applyAdminStatusAction(input: AdminStatusActionInput) {
       .updateTable("app_users")
       .set({
         status: input.newStatus,
-        status_reason: parsed.data.reason ?? null,
+        status_reason: input.reason ?? null,
         updated_at: sql`now()`,
       })
       .where("id", "=", target.id)
@@ -100,17 +74,16 @@ export async function applyAdminStatusAction(input: AdminStatusActionInput) {
       .execute();
   });
 
-  const eventType = input.eventOverride ?? STATUS_TO_EVENT[input.newStatus] ?? "admin.user.updated";
-
   await auditEvent({
-    eventType,
+    eventType: input.eventType,
     outcome: "success",
-    actorBetterAuthUserId: session.user.id,
+    actorBetterAuthUserId: input.actorBetterAuthUserId,
     appUserId: target.id,
     email: target.primary_email,
-    reason: parsed.data.reason,
+    reason: input.reason,
     request: input.request,
+    requestId: input.requestId,
   });
 
-  return NextResponse.json({ ok: true, status: input.newStatus });
+  return { ok: true, status: input.newStatus };
 }

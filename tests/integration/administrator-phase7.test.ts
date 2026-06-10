@@ -52,7 +52,7 @@ vi.mock("@/lib/admin/auth-admin.server", () => ({
   updateBetterAuthUser: vi.fn(),
 }));
 vi.mock("@/lib/admin-status.server", () => ({
-  applyAdminStatusAction: vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })),
+  performAdminStatusChange: vi.fn(async () => ({ ok: true, status: "active" })),
 }));
 
 // ---- DB stubbing (matches the pattern used by administrator-user-actions). --

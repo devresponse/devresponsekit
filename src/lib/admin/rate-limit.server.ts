@@ -59,6 +59,24 @@ export type RateLimitResult =
 const buckets = new Map<string, TokenBucket>();
 
 /**
+ * Eviction guard: once the store grows past this size, stale buckets
+ * (idle long enough to be fully refilled) are swept on the next
+ * consume. Keeps the map bounded by the set of recently active actors
+ * instead of growing one entry per actor x scope forever.
+ */
+const EVICTION_THRESHOLD = 1_000;
+const STALE_AFTER_MS = 10 * 60 * 1000;
+
+function evictStaleBuckets(nowMs: number): void {
+  if (buckets.size <= EVICTION_THRESHOLD) return;
+  for (const [key, bucket] of buckets) {
+    if (nowMs - bucket.lastRefillMs > STALE_AFTER_MS) {
+      buckets.delete(key);
+    }
+  }
+}
+
+/**
  * Test-only: fully reset the in-memory store. Intentionally not part
  * of the public contract — production callers must never need to wipe
  * the limiter mid-process.
@@ -81,6 +99,7 @@ export function consumeToken(
   options: RateLimitOptions,
   nowMs: number = Date.now(),
 ): RateLimitResult {
+  evictStaleBuckets(nowMs);
   const existing = buckets.get(key);
   const bucket: TokenBucket =
     existing ?? {

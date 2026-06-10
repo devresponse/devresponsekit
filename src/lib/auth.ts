@@ -1,9 +1,11 @@
-import { betterAuth, type GenericEndpointContext } from "better-auth";
+import { betterAuth, type BetterAuthOptions, type GenericEndpointContext } from "better-auth";
 import { admin } from "better-auth/plugins";
 import { Pool } from "pg";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { db } from "@/db/database";
+import { getServerEnv } from "@/lib/env";
+import { getTrustedOrigins } from "@/lib/trusted-origins";
 
 /**
  * Better Auth server instance.
@@ -14,44 +16,55 @@ import { db } from "@/db/database";
  * introducing Prisma or Drizzle.
  *
  * Note: account linking, session lifetime, and social providers are
- * configured here; OAuth secrets are read from validated env vars.
+ * configured here. All env access goes through `getServerEnv()` so a
+ * misconfigured deployment fails at boot instead of registering broken
+ * providers — a social provider is only enabled when BOTH its client id
+ * and secret are present.
  */
+const env = getServerEnv();
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: env.DATABASE_URL,
 });
+
+const socialProviders: NonNullable<BetterAuthOptions["socialProviders"]> = {};
+if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+  socialProviders.google = {
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+  };
+}
+if (env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET) {
+  socialProviders.microsoft = {
+    clientId: env.MICROSOFT_CLIENT_ID,
+    clientSecret: env.MICROSOFT_CLIENT_SECRET,
+    // Multi-tenant Entra ID work/school accounts.
+    tenantId: "organizations",
+    prompt: "select_account",
+  };
+}
+if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
+  socialProviders.github = {
+    clientId: env.GITHUB_CLIENT_ID,
+    clientSecret: env.GITHUB_CLIENT_SECRET,
+  };
+}
 
 export const auth = betterAuth({
   database: pool,
-  secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL,
+  secret: env.BETTER_AUTH_SECRET,
+  baseURL: env.BETTER_AUTH_URL,
 
-  trustedOrigins: [
-    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-    "https://app.devresponse.com",
-  ],
+  // Shared with the administrator origin guard; configured via
+  // NEXT_PUBLIC_APP_URL / BETTER_AUTH_URL / ADMIN_TRUSTED_ORIGINS.
+  trustedOrigins: getTrustedOrigins(),
 
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
   },
 
-  socialProviders: {
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-    },
-    microsoft: {
-      clientId: process.env.MICROSOFT_CLIENT_ID ?? "",
-      clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? "",
-      // Multi-tenant Entra ID work/school accounts.
-      tenantId: "organizations",
-      prompt: "select_account",
-    },
-    github: {
-      clientId: process.env.GITHUB_CLIENT_ID ?? "",
-      clientSecret: process.env.GITHUB_CLIENT_SECRET ?? "",
-    },
-  },
+  socialProviders,
 
   account: {
     accountLinking: {

@@ -1,4 +1,3 @@
-import "server-only";
 import { z } from "zod";
 
 /**
@@ -8,7 +7,15 @@ import { z } from "zod";
  * fail loudly if a required variable is missing. Public (NEXT_PUBLIC_*)
  * values are intentionally accessed via `process.env` directly elsewhere
  * because Next.js inlines them at build time.
+ *
+ * This module intentionally does NOT import the `server-only` sentinel:
+ * it must stay importable from `tsx` scripts (migrations, seeds) where
+ * that package cannot resolve. The runtime guard below provides the
+ * equivalent protection against accidental client-side use.
  */
+if (typeof window !== "undefined") {
+  throw new Error("env.ts must never be imported from client-side code");
+}
 const serverEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   BETTER_AUTH_SECRET: z.string().min(16, "BETTER_AUTH_SECRET must be at least 16 chars"),
@@ -25,6 +32,13 @@ const serverEnvSchema = z.object({
   SSO_HANDOFF_AUDIENCE_PREFIX: z.string().min(1),
   SSO_HANDOFF_JWT_SECRET: z.string().min(16, "SSO_HANDOFF_JWT_SECRET must be at least 16 chars"),
   SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
+  /** Identifier of THIS deployment when consuming SSO handoffs. */
+  SSO_HANDOFF_APPLICATION_ID: z.string().min(1).optional(),
+  /**
+   * Comma-separated list of additional trusted origins shared by Better
+   * Auth's `trustedOrigins` and the administrator origin guard.
+   */
+  ADMIN_TRUSTED_ORIGINS: z.string().optional(),
   SEED_ADMIN_EMAIL: z.string().email().optional(),
   SEED_ADMIN_PASSWORD: z.string().optional(),
   SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),

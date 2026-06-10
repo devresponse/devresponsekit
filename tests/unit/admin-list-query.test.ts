@@ -52,7 +52,7 @@ describe("parseListQuery", () => {
   });
 
   it("drops unknown sort fields and parses asc/desc", () => {
-    const q = parseListQuery(p("sort=created_at:desc&sort=evil_field:asc&sort=email:asc"), {
+    const q = parseListQuery(p("sort=created_at.desc&sort=evil_field.asc&sort=email.asc"), {
       allowedSortFields: ["created_at", "email"],
     });
     expect(q.sort).toEqual([
@@ -62,7 +62,7 @@ describe("parseListQuery", () => {
   });
 
   it("falls back to default sort when only invalid fields are passed", () => {
-    const q = parseListQuery(p("sort=evil:desc"), {
+    const q = parseListQuery(p("sort=evil.desc"), {
       allowedSortFields: ["created_at"],
       defaultSort: [{ field: "created_at", direction: "desc" }],
     });
@@ -139,7 +139,7 @@ describe("applySortAndPagination", () => {
       },
     };
 
-    const q = parseListQuery(p("page=2&pageSize=10&sort=email:asc"), {
+    const q = parseListQuery(p("page=2&pageSize=10&sort=email.asc"), {
       allowedSortFields: ["email"],
     });
     // Cast through unknown — the helper is generic over a Kysely type

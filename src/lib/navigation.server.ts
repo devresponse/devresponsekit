@@ -181,13 +181,13 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
   {
     id: "admin-users",
     label: "Users",
-    href: "/app/admin/users",
+    href: "/app/administrator/users",
     requiredPermissions: ["admin.users.manage"],
   },
   {
     id: "admin-audit",
     label: "Audit",
-    href: "/app/admin/audit",
+    href: "/app/administrator/audit",
     requiredPermissions: ["audit.view"],
   },
 ];

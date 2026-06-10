@@ -53,7 +53,7 @@ export async function applyAdminStatusAction(input: AdminStatusActionInput) {
   const callerDecision = decideSecureAccess(callerAccess.status, callerAccess.membershipStatus);
   if (callerDecision !== "allow" || !callerAccess.permissions.includes("admin.users.manage")) {
     await auditEvent({
-      eventType: "navigation.menu.denied",
+      eventType: "administrator.access.denied",
       outcome: "denied",
       actorBetterAuthUserId: session.user.id,
       reason: "missing_admin_permission",

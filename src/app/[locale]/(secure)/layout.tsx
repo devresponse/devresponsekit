@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { ApplicationSwitcherSheet } from "@/components/app-shell/application-switcher-sheet";
 import { CompactDensityWrapper } from "@/components/app-shell/compact-density-wrapper";
 import { ShellContainer } from "@/components/app-shell/shell-container";
@@ -5,6 +6,7 @@ import { ShellSkipLinks } from "@/components/app-shell/shell-skip-links";
 import { TopShellBar } from "@/components/app-shell/top-shell-bar";
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 import { DialogManagerProvider } from "@/components/ui/dialog-manager";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/flexsidebar";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
@@ -25,6 +27,14 @@ export const dynamic = "force-dynamic";
  *
  * Compact density per §28.4. The secure shell is bounded to the viewport
  * so child regions own their own scrolling.
+ *
+ * Sidebar collapse: the layout mounts the FlexSidebar `SidebarProvider`
+ * so the `SidebarTrigger` in the brand bar and the `SecureSidebar` in
+ * the left region share one state. `defaultOpen` is read from the
+ * `sidebar_state` cookie the provider writes, so the server-rendered
+ * first paint matches the user's last choice (no flash on reload).
+ * `--sh-left-width: auto` lets the grid's left column track the
+ * sidebar's own animated width (16rem expanded, 3rem icon rail).
  */
 export default async function SecureLayout({
   children,
@@ -37,26 +47,33 @@ export default async function SecureLayout({
   const safeLocale: SupportedLocale = isSupportedLocale(rawLocale) ? rawLocale : "en";
   const { access } = await requireSecureSession(safeLocale, `/${safeLocale}/app/dashboard`);
 
+  const cookieStore = await cookies();
+  const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
+
   return (
     <CompactDensityWrapper density="compact" className="h-screen">
-      <ShellSkipLinks />
-      <ShellContainer
-        ariaLabel="DevResponse Enterprise Application"
-        branding={
-          <TopShellBar>
-            <span className="text-sm font-semibold">DevResponse</span>
-            <div className="ml-auto flex items-center gap-2">
-              <ApplicationSwitcherSheet locale={safeLocale} />
-              <LocaleSwitcher current={safeLocale} persistAuthenticated />
-              <SignOutButton locale={safeLocale} />
-            </div>
-          </TopShellBar>
-        }
-        left={<SecureSidebar locale={safeLocale} permissions={access.permissions} />}
-      >
-        <ImpersonationBanner />
-        <DialogManagerProvider>{children}</DialogManagerProvider>
-      </ShellContainer>
+      <SidebarProvider defaultOpen={sidebarDefaultOpen} className="h-full">
+        <ShellSkipLinks />
+        <ShellContainer
+          className="w-full [--sh-left-width:auto]"
+          ariaLabel="DevResponse Enterprise Application"
+          branding={
+            <TopShellBar>
+              <SidebarTrigger className="-ml-1" />
+              <span className="text-sm font-semibold">DevResponse</span>
+              <div className="ml-auto flex items-center gap-2">
+                <ApplicationSwitcherSheet locale={safeLocale} />
+                <LocaleSwitcher current={safeLocale} persistAuthenticated />
+                <SignOutButton locale={safeLocale} />
+              </div>
+            </TopShellBar>
+          }
+          left={<SecureSidebar locale={safeLocale} permissions={access.permissions} />}
+        >
+          <ImpersonationBanner />
+          <DialogManagerProvider>{children}</DialogManagerProvider>
+        </ShellContainer>
+      </SidebarProvider>
     </CompactDensityWrapper>
   );
 }

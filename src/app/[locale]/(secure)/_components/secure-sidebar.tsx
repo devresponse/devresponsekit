@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { SidebarMenuSkeleton } from "@/components/app-shell/navigation-menu-skeleton";
+import { getMenuIcon } from "@/components/navigation/menu-icons";
 import { fetchShellMenu, NavigationApiError } from "@/components/navigation/navigation-api-client";
 import type { NavigationMenuItem } from "@/components/navigation/menu-types";
 
@@ -71,16 +72,20 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
 
   return (
     <nav aria-label="Primary" className="flex flex-col gap-0.5 p-2 text-sm">
-      {(items ?? []).map((item) => (
-        <LocaleLink
-          key={item.id}
-          href={item.href.replace(`/${locale}`, "") as "/"}
-          locale={locale}
-          className="hover:bg-shell-muted rounded-md px-2 py-1.5"
-        >
-          {item.label}
-        </LocaleLink>
-      ))}
+      {(items ?? []).map((item) => {
+        const Icon = getMenuIcon(item.icon);
+        return (
+          <LocaleLink
+            key={item.id}
+            href={item.href.replace(`/${locale}`, "") as "/"}
+            locale={locale}
+            className="hover:bg-shell-muted flex items-center gap-2 rounded-md px-2 py-1.5"
+          >
+            {Icon ? <Icon aria-hidden="true" className="size-4 shrink-0" /> : null}
+            <span className="truncate">{item.label}</span>
+          </LocaleLink>
+        );
+      })}
     </nav>
   );
 }

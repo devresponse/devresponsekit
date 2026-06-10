@@ -87,6 +87,12 @@ describe("loadShellMenu", () => {
     expect(ids).not.toContain("administrator");
     // hrefs are prefixed with the locale
     expect(res.items[0]!.href.startsWith("/fr/")).toBe(true);
+    // every default shell item serves an icon NAME (resolved client-side
+    // through the menu-icons allow-list)
+    for (const item of res.items) {
+      expect(item.icon, `item "${item.id}" is missing an icon name`).toBeTruthy();
+    }
+    expect(res.items.find((i) => i.id === "dashboard")!.icon).toBe("layout-dashboard");
   });
 
   it("returns no items when caller has no permissions", async () => {

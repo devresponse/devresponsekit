@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import * as LabelPrimitive from "@radix-ui/react-label";
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 
 /**
  * Label primitive backed by Radix to ensure correct htmlFor association

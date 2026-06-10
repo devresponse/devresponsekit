@@ -1,6 +1,12 @@
 "use client";
 
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
+import {
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+  type ColumnDef,
+  type HeaderContext,
+} from "@tanstack/react-table";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -244,16 +250,18 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
  */
 function renderSortableHeader<TItem>(
   columnDef: ColumnDef<TItem, unknown>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getContext: () => any,
+  getContext: () => HeaderContext<TItem, unknown>,
   state: GridState,
   onToggle: (field: string, next: ColumnSortDirection) => void,
 ): ReactNode {
   const ctx = getContext();
   const raw = flexRender(columnDef.header, ctx);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const accessorKey = (columnDef as any).accessorKey as string | undefined;
+  // `ColumnDef` is a union; only accessor-key columns are sortable.
+  const accessorKey =
+    "accessorKey" in columnDef && typeof columnDef.accessorKey === "string"
+      ? columnDef.accessorKey
+      : undefined;
   const id = columnDef.id ?? accessorKey;
   if (!id || id === "__select") return raw;
   if (columnDef.enableSorting === false) return raw;

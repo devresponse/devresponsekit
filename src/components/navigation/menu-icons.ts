@@ -1,11 +1,16 @@
 import {
+  AppWindow,
   Briefcase,
+  Building2,
   Circle,
+  Home,
+  KeyRound,
   LayoutDashboard,
   ScrollText,
   Settings,
   Shield,
   Users,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,6 +32,12 @@ export const MENU_ICONS: Record<string, LucideIcon> = {
   users: Users,
   "scroll-text": ScrollText,
   settings: Settings,
+  // Administrator workspace navigation.
+  home: Home,
+  "key-round": KeyRound,
+  "building-2": Building2,
+  "users-round": UsersRound,
+  "app-window": AppWindow,
 };
 
 /**

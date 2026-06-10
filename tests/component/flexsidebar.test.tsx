@@ -83,4 +83,31 @@ describe("FlexSidebar", () => {
     const root = container.querySelector("[data-state]")!;
     expect(root.children).toHaveLength(1);
   });
+
+  it("persists state under a custom cookie name for nested providers", async () => {
+    render(
+      <SidebarProvider cookieName="administrator_sidebar_state">
+        <FlexSidebar collapsible="icon">
+          <SidebarContent />
+        </FlexSidebar>
+        <SidebarTrigger />
+      </SidebarProvider>,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: /toggle sidebar/i }));
+    expect(document.cookie).toContain("administrator_sidebar_state=false");
+  });
+
+  it("does not react to Ctrl+B when the keyboard shortcut is disabled", async () => {
+    const { container } = render(
+      <SidebarProvider keyboardShortcut={null}>
+        <FlexSidebar collapsible="icon">
+          <SidebarContent />
+        </FlexSidebar>
+      </SidebarProvider>,
+    );
+    const root = container.querySelector("[data-state]")!;
+    expect(root.getAttribute("data-state")).toBe("expanded");
+    await userEvent.setup().keyboard("{Control>}b{/Control}");
+    expect(root.getAttribute("data-state")).toBe("expanded");
+  });
 });

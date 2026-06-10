@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
+import { SidebarTrigger } from "@/components/ui/flexsidebar";
 import {
   Menubar,
   MenubarContent,
@@ -50,6 +51,10 @@ export function AdministratorTopHeader({ locale, permissions }: AdministratorTop
   return (
     <div className="bg-background sticky top-0 z-30 overflow-x-auto">
       <div className="flex h-9 min-w-max items-stretch">
+        {/* Toggles the administrator sidebar (its own nested provider). */}
+        <div className="flex shrink-0 items-center border-r px-1">
+          <SidebarTrigger />
+        </div>
         <div className="text-muted-foreground flex shrink-0 items-center border-r px-3 text-[11px] font-semibold tracking-[0.16em] uppercase">
           {tAdmin("appTitle")}
         </div>

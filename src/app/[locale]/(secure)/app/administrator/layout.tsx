@@ -1,6 +1,8 @@
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { ApplicationShell } from "@/components/app-shell/application-shell";
+import { SidebarProvider } from "@/components/ui/flexsidebar";
 import { ANY_ADMIN_PERMISSION, checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { AdministratorSidebar } from "./_components/administrator-sidebar";
 import { AdministratorTopHeader } from "./_components/administrator-top-header";
@@ -26,7 +28,15 @@ export const dynamic = "force-dynamic";
  *     `TopShellBar` (per `application-shell.tsx` contract).
  *   - The `AdministratorSidebar` receives the caller's permissions so
  *     it can hide groups the caller cannot use.
+ *
+ * Sidebar collapse: the layout mounts its OWN FlexSidebar
+ * `SidebarProvider`, nested inside (and independent of) the root
+ * shell's provider — separate cookie, and no keyboard shortcut so
+ * Ctrl/Cmd+B keeps toggling only the root sidebar. The trigger lives
+ * in `AdministratorTopHeader`.
  */
+const SIDEBAR_COOKIE = "administrator_sidebar_state";
+
 export default async function AdministratorLayout({
   children,
   params,
@@ -40,13 +50,24 @@ export default async function AdministratorLayout({
     notFound();
   }
 
+  const cookieStore = await cookies();
+  const sidebarDefaultOpen = cookieStore.get(SIDEBAR_COOKIE)?.value !== "false";
+
   return (
-    <ApplicationShell
-      ariaLabel="Administrator"
-      header={<AdministratorTopHeader locale={locale} permissions={guard.access.permissions} />}
-      left={<AdministratorSidebar locale={locale} permissions={guard.access.permissions} />}
+    <SidebarProvider
+      defaultOpen={sidebarDefaultOpen}
+      cookieName={SIDEBAR_COOKIE}
+      keyboardShortcut={null}
+      className="h-full"
     >
-      {children}
-    </ApplicationShell>
+      <ApplicationShell
+        className="w-full"
+        ariaLabel="Administrator"
+        header={<AdministratorTopHeader locale={locale} permissions={guard.access.permissions} />}
+        left={<AdministratorSidebar locale={locale} permissions={guard.access.permissions} />}
+      >
+        {children}
+      </ApplicationShell>
+    </SidebarProvider>
   );
 }

@@ -78,6 +78,17 @@ const SidebarProvider = React.forwardRef<
     defaultOpen?: boolean;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
+    /**
+     * Cookie persisting the open state. Give each nested provider its
+     * own name (e.g. `administrator_sidebar_state`) so two sidebars on
+     * one page don't overwrite each other's persistence.
+     */
+    cookieName?: string;
+    /**
+     * Ctrl/Cmd+<key> toggle. Pass `null` to disable — required for
+     * nested providers, otherwise one keypress toggles every sidebar.
+     */
+    keyboardShortcut?: string | null;
   }
 >(
   (
@@ -85,6 +96,8 @@ const SidebarProvider = React.forwardRef<
       defaultOpen = true,
       open: openProp,
       onOpenChange: setOpenProp,
+      cookieName = SIDEBAR_COOKIE_NAME,
+      keyboardShortcut = SIDEBAR_KEYBOARD_SHORTCUT,
       className,
       style,
       children,
@@ -109,9 +122,9 @@ const SidebarProvider = React.forwardRef<
         }
 
         // This sets the cookie to keep the sidebar state.
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+        document.cookie = `${cookieName}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
       },
-      [setOpenProp, open],
+      [setOpenProp, open, cookieName],
     );
 
     // Helper to toggle the sidebar.
@@ -121,8 +134,9 @@ const SidebarProvider = React.forwardRef<
 
     // Adds a keyboard shortcut to toggle the sidebar.
     React.useEffect(() => {
+      if (!keyboardShortcut) return;
       const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+        if (event.key === keyboardShortcut && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
           toggleSidebar();
         }
@@ -130,7 +144,7 @@ const SidebarProvider = React.forwardRef<
 
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [toggleSidebar]);
+    }, [toggleSidebar, keyboardShortcut]);
 
     // We add a state so that we can do data-state="expanded" or "collapsed".
     // This makes it easier to style the sidebar with Tailwind classes.

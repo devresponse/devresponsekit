@@ -24,17 +24,22 @@ describe("getMenuIcon", () => {
     expect(getMenuIcon("")).toBeNull();
   });
 
-  it("covers every icon name used by the default shell menus", async () => {
-    // Read the server manifest's icon names from the API surface: load
-    // the menus with full permissions and assert every served name is
-    // in the allow-list, so a server-side rename cannot silently
+  it("covers every icon name used by the navigation manifests", async () => {
+    // Scan every manifest that serves icon names and assert each name
+    // is in the allow-list, so a manifest-side rename cannot silently
     // degrade to fallback glyphs.
     const { readFileSync } = await import("node:fs");
-    const source = readFileSync("src/lib/navigation.server.ts", "utf8");
-    const served = [...source.matchAll(/icon: "([^"]+)"/g)].map((m) => m[1]!);
-    expect(served.length).toBeGreaterThan(0);
-    for (const name of served) {
-      expect(MENU_ICONS, `icon "${name}" missing from MENU_ICONS`).toHaveProperty(name);
+    const manifests = [
+      "src/lib/navigation.server.ts",
+      "src/app/[locale]/(secure)/app/administrator/_components/administrator-navigation.ts",
+    ];
+    for (const file of manifests) {
+      const source = readFileSync(file, "utf8");
+      const served = [...source.matchAll(/icon: "([^"]+)"/g)].map((m) => m[1]!);
+      expect(served.length, `${file} serves no icon names`).toBeGreaterThan(0);
+      for (const name of served) {
+        expect(MENU_ICONS, `icon "${name}" (${file}) missing from MENU_ICONS`).toHaveProperty(name);
+      }
     }
   });
 });

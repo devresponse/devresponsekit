@@ -52,6 +52,31 @@
   grid-template-columns: 0 minmax(0, 1fr) 0;
 }
 
+/*
+ * FlexSidebar icon collapse: when the left region hosts an
+ * icon-collapsed FlexSidebar (data-collapsible="icon" is only present
+ * while collapsed), pin the left column to the icon-rail width. Both
+ * states use FIXED track sizes — never `auto`/content sizing — so
+ * active-item styling, font-weight changes, or scrollbars can never
+ * shift the column when navigating.
+ *
+ * Scoped to data-left-hidden="false" and desktop widths so the
+ * full-hide toggle and the mobile collapse rules below keep winning.
+ *
+ * The width flip is intentionally NOT transitioned: an animated grid
+ * track can stall (throttled tabs, unsupported engines) and leave the
+ * column desynced from the sidebar — an instant flip between two fixed
+ * sizes can never shift or wobble.
+ */
+@media (min-width: 769px) {
+  .sh-grid[data-left-hidden="false"]:has(.sh-left [data-collapsible="icon"]) {
+    grid-template-columns:
+      var(--sidebar-width-icon, 3rem)
+      minmax(0, 1fr)
+      var(--sh-right-width, 0);
+  }
+}
+
 .sh-header {
   grid-area: header;
   border-bottom: 1px solid var(--color-shell-border);

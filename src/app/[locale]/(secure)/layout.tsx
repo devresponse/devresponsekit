@@ -33,8 +33,10 @@ export const dynamic = "force-dynamic";
  * the left region share one state. `defaultOpen` is read from the
  * `sidebar_state` cookie the provider writes, so the server-rendered
  * first paint matches the user's last choice (no flash on reload).
- * `--sh-left-width: auto` lets the grid's left column track the
- * sidebar's own animated width (16rem expanded, 3rem icon rail).
+ * The grid's left column stays at its FIXED 16rem default; the
+ * icon-collapsed 3rem width is pinned by the `.sh-grid:has(...)` rule
+ * in app-shell.css — fixed track sizes in both states, so navigation
+ * and active-item styling can never shift the column.
  */
 export default async function SecureLayout({
   children,
@@ -55,7 +57,7 @@ export default async function SecureLayout({
       <SidebarProvider defaultOpen={sidebarDefaultOpen} className="h-full">
         <ShellSkipLinks />
         <ShellContainer
-          className="w-full [--sh-left-width:auto]"
+          className="w-full"
           ariaLabel="DevResponse Enterprise Application"
           branding={
             <TopShellBar>

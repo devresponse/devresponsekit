@@ -111,7 +111,10 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
 
   return (
     // `.sh-left` already draws the region border; drop the sidebar's own.
-    <FlexSidebar collapsible="icon" className="border-r-0">
+    // `transition-none` keeps the panel width in lockstep with the grid
+    // column, which flips instantly between its two fixed sizes (16rem /
+    // 3rem) — see the .sh-grid:has(...) rule in app-shell.css.
+    <FlexSidebar collapsible="icon" className="border-r-0 transition-none">
       <SidebarContent>{body}</SidebarContent>
     </FlexSidebar>
   );

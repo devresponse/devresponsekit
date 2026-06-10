@@ -2,27 +2,44 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { usePathname } from "@/i18n/navigation";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { SidebarMenuSkeleton } from "@/components/app-shell/navigation-menu-skeleton";
 import { getMenuIcon } from "@/components/navigation/menu-icons";
+import {
+  FlexSidebar,
+  SidebarContent,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/flexsidebar";
 import { fetchShellMenu, NavigationApiError } from "@/components/navigation/navigation-api-client";
 import type { NavigationMenuItem } from "@/components/navigation/menu-types";
 
 /**
  * SecureSidebar
  *
- * Loads the primary sidebar menu from `/api/navigation/shell-menu`.
+ * Loads the primary sidebar menu from `/api/navigation/shell-menu` and
+ * renders it inside a {@link FlexSidebar} (the container-bounded shadcn
+ * variant), so the sidebar collapses to an icon rail via the
+ * `SidebarTrigger` in the top bar / Ctrl+B without ever escaping the
+ * shell grid's left region.
+ *
  * The component does NOT import any menu manifest directly per §6 strict
  * rule — only the API result is rendered, which is filtered server-side
- * by role/permission.
+ * by role/permission. Icon names from the API resolve through the
+ * `menu-icons` allow-list.
  *
  * `permissions` is only used to decide whether to bother fetching at all
  * (an unprivileged caller would receive an empty list anyway, but
  * skipping the fetch saves a round-trip).
+ *
+ * Requires an ancestor `SidebarProvider` (mounted by the secure layout).
  */
 export function SecureSidebar({ locale, permissions }: { locale: string; permissions: string[] }) {
   const t = useTranslations("shell");
   const tCommon = useTranslations("common");
+  const pathname = usePathname();
   const [items, setItems] = useState<NavigationMenuItem[] | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -49,12 +66,11 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
     };
   }, [locale, permissions, reloadKey]);
 
+  let body: React.ReactNode;
   if (items === null && errorStatus === null) {
-    return <SidebarMenuSkeleton />;
-  }
-
-  if (errorStatus !== null) {
-    return (
+    body = <SidebarMenuSkeleton />;
+  } else if (errorStatus !== null) {
+    body = (
       <div className="space-y-2 p-3 text-sm">
         <p className="text-red-700">
           {errorStatus === 401 || errorStatus === 403 ? t("unauthorized") : t("menuLoadError")}
@@ -68,24 +84,38 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
         </button>
       </div>
     );
+  } else {
+    body = (
+      <nav aria-label="Primary" className="p-2">
+        <SidebarMenu>
+          {(items ?? []).map((item) => {
+            const Icon = getMenuIcon(item.icon);
+            // Menu hrefs arrive locale-prefixed; LocaleLink re-applies
+            // the prefix, and `usePathname` compares locale-less paths.
+            const target = item.href.replace(`/${locale}`, "") || "/";
+            return (
+              <SidebarMenuItem key={item.id}>
+                <SidebarMenuButton asChild isActive={pathname === target} tooltip={item.label}>
+                  <LocaleLink href={target as "/"} locale={locale}>
+                    {Icon ? <Icon aria-hidden="true" /> : null}
+                    <span>{item.label}</span>
+                  </LocaleLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            );
+          })}
+        </SidebarMenu>
+      </nav>
+    );
   }
 
   return (
-    <nav aria-label="Primary" className="flex flex-col gap-0.5 p-2 text-sm">
-      {(items ?? []).map((item) => {
-        const Icon = getMenuIcon(item.icon);
-        return (
-          <LocaleLink
-            key={item.id}
-            href={item.href.replace(`/${locale}`, "") as "/"}
-            locale={locale}
-            className="hover:bg-shell-muted flex items-center gap-2 rounded-md px-2 py-1.5"
-          >
-            {Icon ? <Icon aria-hidden="true" className="size-4 shrink-0" /> : null}
-            <span className="truncate">{item.label}</span>
-          </LocaleLink>
-        );
-      })}
-    </nav>
+    // `.sh-left` already draws the region border; drop the sidebar's own.
+    // `transition-none` keeps the panel width in lockstep with the grid
+    // column, which flips instantly between its two fixed sizes (16rem /
+    // 3rem) — see the .sh-grid:has(...) rule in app-shell.css.
+    <FlexSidebar collapsible="icon" className="border-r-0 transition-none">
+      <SidebarContent>{body}</SidebarContent>
+    </FlexSidebar>
   );
 }

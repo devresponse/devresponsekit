@@ -27,6 +27,23 @@ process.env.SSO_HANDOFF_AUDIENCE_PREFIX ??= "devresponse-app";
 process.env.SSO_HANDOFF_JWT_SECRET ??= "test-sso-secret-test-sso-secret";
 process.env.SSO_HANDOFF_TTL_SECONDS ??= "60";
 
+// jsdom does not implement `window.matchMedia`, which `useIsMobile`
+// (and therefore the sidebar components) call during render. Stub a
+// non-matching MediaQueryList so components take the desktop branch.
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+
 if (typeof globalThis.Element !== "undefined") {
   const ElementProto = globalThis.Element.prototype as Element & {
     hasPointerCapture?: (pointerId: number) => boolean;

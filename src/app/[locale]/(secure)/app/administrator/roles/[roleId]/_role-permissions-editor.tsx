@@ -46,9 +46,7 @@ export function RolePermissionsEditor({
 
   const [catalog, setCatalog] = useState<CatalogRow[] | null>(null);
   const [assigned, setAssigned] = useState<string[]>([...initialAssigned].sort());
-  const [serverAssigned, setServerAssigned] = useState<string[]>(
-    [...initialAssigned].sort(),
-  );
+  const [serverAssigned, setServerAssigned] = useState<string[]>([...initialAssigned].sort());
 
   const [availableSelected, setAvailableSelected] = useState<string[]>([]);
   const [assignedSelected, setAssignedSelected] = useState<string[]>([]);
@@ -129,30 +127,24 @@ export function RolePermissionsEditor({
         return;
       }
       if (toAdd.length > 0) {
-        const res = await fetch(
-          `/api/administrator/roles/${roleId}/permissions`,
-          {
-            method: "POST",
-            credentials: "same-origin",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ids: toAdd }),
-          },
-        );
+        const res = await fetch(`/api/administrator/roles/${roleId}/permissions`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids: toAdd }),
+        });
         if (!res.ok) {
           setError(t("errorToast"));
           return;
         }
       }
       if (toRemove.length > 0) {
-        const res = await fetch(
-          `/api/administrator/roles/${roleId}/permissions`,
-          {
-            method: "DELETE",
-            credentials: "same-origin",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ids: toRemove }),
-          },
-        );
+        const res = await fetch(`/api/administrator/roles/${roleId}/permissions`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids: toRemove }),
+        });
         if (!res.ok) {
           setError(t("errorToast"));
           return;
@@ -160,10 +152,9 @@ export function RolePermissionsEditor({
       }
       // Re-sync against the server's reported set (the POST/DELETE
       // responses both echo the resulting permission list).
-      const fresh = await fetch(
-        `/api/administrator/roles/${roleId}/permissions`,
-        { credentials: "same-origin" },
-      );
+      const fresh = await fetch(`/api/administrator/roles/${roleId}/permissions`, {
+        credentials: "same-origin",
+      });
       if (fresh.ok) {
         const body = (await fresh.json()) as { permissions: string[] };
         const sorted = [...body.permissions].sort();
@@ -245,12 +236,7 @@ export function RolePermissionsEditor({
           {t("remove")}
         </Button>
         <div className="flex-1" />
-        <Button
-          type="button"
-          size="sm"
-          onClick={onSave}
-          disabled={!canUpdate || saving || !dirty}
-        >
+        <Button type="button" size="sm" onClick={onSave} disabled={!canUpdate || saving || !dirty}>
           {saving ? t("saving") : t("save")}
         </Button>
       </div>

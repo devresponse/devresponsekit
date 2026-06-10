@@ -103,31 +103,29 @@ export function OrganizationMembersGrid({
         header: () => t("columns.joinedAt"),
         cell: ({ row }) => {
           const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime())
-            ? row.original.created_at
-            : dateFormatter.format(d);
+          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
         },
       },
       ...(canUpdate
         ? [
-          {
-            id: "actions",
-            enableSorting: false,
-            header: () => "",
-            cell: ({ row }: { row: { original: MemberRow } }) => (
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onRemove(row.original.id, row.original.user_display_name)}
-                >
-                  {t("removeButton")}
-                </Button>
-              </div>
-            ),
-          } as ColumnDef<MemberRow, unknown>,
-        ]
+            {
+              id: "actions",
+              enableSorting: false,
+              header: () => "",
+              cell: ({ row }: { row: { original: MemberRow } }) => (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onRemove(row.original.id, row.original.user_display_name)}
+                  >
+                    {t("removeButton")}
+                  </Button>
+                </div>
+              ),
+            } as ColumnDef<MemberRow, unknown>,
+          ]
         : []),
     ],
     [t, locale, dateFormatter, canUpdate, onRemove],

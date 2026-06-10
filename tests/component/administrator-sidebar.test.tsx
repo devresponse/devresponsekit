@@ -22,9 +22,7 @@ describe("AdministratorSidebar", () => {
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Roles" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Organizations" })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Enterprise applications" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Enterprise applications" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Audit log" })).not.toBeInTheDocument();
   });
 
@@ -67,9 +65,7 @@ describe("AdministratorSidebar", () => {
     expect(screen.getByRole("link", { name: "Permissions" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Organizations" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Memberships" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Enterprise applications" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Enterprise applications" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Audit log" })).toBeInTheDocument();
   });
 });

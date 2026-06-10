@@ -101,12 +101,12 @@ describe("loadOrgOrThrow", () => {
   it("throws organization_not_found when row missing", async () => {
     selectFirst.mockResolvedValue(undefined);
     const { loadOrgOrThrow, AdminError } = await load();
-    await expect(
-      loadOrgOrThrow("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-    ).rejects.toThrow(AdminError);
-    await expect(
-      loadOrgOrThrow("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-    ).rejects.toMatchObject({ code: "organization_not_found" });
+    await expect(loadOrgOrThrow("a1b2c3d4-e5f6-7890-abcd-ef1234567890")).rejects.toThrow(
+      AdminError,
+    );
+    await expect(loadOrgOrThrow("a1b2c3d4-e5f6-7890-abcd-ef1234567890")).rejects.toMatchObject({
+      code: "organization_not_found",
+    });
   });
 
   it("returns LoadedOrg when row exists", async () => {

@@ -113,9 +113,7 @@ function listReq(query: string = ""): NextRequest {
 function jsonReq(body: unknown): NextRequest {
   const headers = new Headers({ "content-type": "application/json" });
   return {
-    nextUrl: new URL(
-      `http://test.local/api/administrator/organizations/${ORG_ID}/members`,
-    ),
+    nextUrl: new URL(`http://test.local/api/administrator/organizations/${ORG_ID}/members`),
     headers,
     json: async () => body,
   } as unknown as NextRequest;
@@ -157,9 +155,8 @@ beforeEach(async () => {
     updated_at: "2025-01-01T00:00:00Z",
     total: "0",
   });
-  ({ GET, POST, PATCH, DELETE } = await import(
-    "@/app/api/administrator/organizations/[id]/members/route"
-  ));
+  ({ GET, POST, PATCH, DELETE } =
+    await import("@/app/api/administrator/organizations/[id]/members/route"));
 });
 afterEach(() => vi.resetModules());
 

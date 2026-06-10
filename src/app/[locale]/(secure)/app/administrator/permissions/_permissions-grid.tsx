@@ -105,32 +105,32 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
       },
       ...(canManage
         ? [
-          {
-            id: "actions",
-            enableSorting: false,
-            header: () => t("columns.actions"),
-            cell: ({ row }: { row: { original: PermissionRow } }) => (
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSheet({ kind: "edit", row: row.original })}
-                >
-                  {t("editButton")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onDelete(row.original)}
-                >
-                  {t("deleteButton")}
-                </Button>
-              </div>
-            ),
-          } as ColumnDef<PermissionRow, unknown>,
-        ]
+            {
+              id: "actions",
+              enableSorting: false,
+              header: () => t("columns.actions"),
+              cell: ({ row }: { row: { original: PermissionRow } }) => (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSheet({ kind: "edit", row: row.original })}
+                  >
+                    {t("editButton")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onDelete(row.original)}
+                  >
+                    {t("deleteButton")}
+                  </Button>
+                </div>
+              ),
+            } as ColumnDef<PermissionRow, unknown>,
+          ]
         : []),
     ],
     [t, canManage, onDelete],

@@ -11,10 +11,7 @@ import {
   SUBDOMAIN_RE,
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 
 export const dynamic = "force-dynamic";
 
@@ -132,11 +129,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   try {
-    await db
-      .updateTable("app_enterprise_applications")
-      .set(updates)
-      .where("id", "=", id)
-      .execute();
+    await db.updateTable("app_enterprise_applications").set(updates).where("id", "=", id).execute();
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     if (/foreign key/i.test(message)) {
@@ -149,8 +142,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     eventType: "admin.app.updated",
     outcome: "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
-    organizationId:
-      input.organization_id !== undefined ? (input.organization_id ?? null) : null,
+    organizationId: input.organization_id !== undefined ? (input.organization_id ?? null) : null,
     targetApplicationId: id,
     request,
     metadata: { id, changes: input },

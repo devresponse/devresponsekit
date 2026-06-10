@@ -6,18 +6,9 @@ import {
   listBetterAuthUserSessions,
   revokeAllBetterAuthUserSessions,
 } from "@/lib/admin/auth-admin.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  DEFAULT_ADMIN_MUTATION_LIMIT,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
-import {
-  isResolvedUserResponse,
-  resolveTargetUser,
-} from "@/lib/admin/user-target.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +66,11 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.sessions");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit("admin.users.sessions", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  const limited = enforceRateLimit(
+    "admin.users.sessions",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
   if (limited) return limited;
 
   const { id } = await ctx.params;

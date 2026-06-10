@@ -47,9 +47,7 @@ export interface RateLimitOptions {
  * proceed; `ok: false` carries the integer seconds until the next
  * retry.
  */
-export type RateLimitResult =
-  | { ok: true }
-  | { ok: false; retryAfterSeconds: number };
+export type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: number };
 
 /**
  * Module-scoped Map serving as the in-memory store. Exported via the
@@ -101,13 +99,12 @@ export function consumeToken(
 ): RateLimitResult {
   evictStaleBuckets(nowMs);
   const existing = buckets.get(key);
-  const bucket: TokenBucket =
-    existing ?? {
-      tokens: options.capacity,
-      lastRefillMs: nowMs,
-      capacity: options.capacity,
-      refillPerSec: options.refillPerSec,
-    };
+  const bucket: TokenBucket = existing ?? {
+    tokens: options.capacity,
+    lastRefillMs: nowMs,
+    capacity: options.capacity,
+    refillPerSec: options.refillPerSec,
+  };
 
   // Allow callers to lower / raise the limit between requests
   // (e.g. different endpoints sharing one key). Re-set the per-bucket
@@ -116,10 +113,7 @@ export function consumeToken(
   bucket.refillPerSec = options.refillPerSec;
 
   const elapsedSec = Math.max(0, (nowMs - bucket.lastRefillMs) / 1000);
-  const refilled = Math.min(
-    bucket.capacity,
-    bucket.tokens + elapsedSec * bucket.refillPerSec,
-  );
+  const refilled = Math.min(bucket.capacity, bucket.tokens + elapsedSec * bucket.refillPerSec);
   bucket.tokens = refilled;
   bucket.lastRefillMs = nowMs;
 
@@ -206,9 +200,7 @@ export function enforceRateLimit(
  * used by callers that need to throttle pre-auth (e.g. open list
  * endpoints); admin mutations should always rate-limit by actor id.
  */
-export function actorIdFromRequest(
-  request: NextRequest | { headers: Headers },
-): string {
+export function actorIdFromRequest(request: NextRequest | { headers: Headers }): string {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return ip && ip.length > 0 ? `ip:${ip}` : "anon";
 }

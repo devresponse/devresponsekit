@@ -77,7 +77,7 @@ export function AdministratorAuditGrid() {
         cell: ({ row }) => {
           const d = new Date(row.original.created_at);
           return (
-            <span className="whitespace-nowrap text-xs">
+            <span className="text-xs whitespace-nowrap">
               {Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d)}
             </span>
           );
@@ -275,9 +275,7 @@ function AuditDetail({
         <Field label={t("detail.actor")}>{row.actor_better_auth_user_id ?? "—"}</Field>
         <Field label={t("detail.appUser")}>{row.app_user_id ?? "—"}</Field>
         <Field label={t("detail.organization")}>{row.organization_id ?? "—"}</Field>
-        <Field label={t("detail.targetApplication")}>
-          {row.target_application_id ?? "—"}
-        </Field>
+        <Field label={t("detail.targetApplication")}>{row.target_application_id ?? "—"}</Field>
         <Field label={t("detail.provider")}>{row.provider ?? "—"}</Field>
         <Field label={t("detail.email")}>{row.email ?? "—"}</Field>
         <Field label={t("detail.ipAddress")}>{row.ip_address ?? "—"}</Field>
@@ -299,10 +297,10 @@ function AuditDetail({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
-      <dt className="text-muted-foreground col-span-1 text-xs font-medium uppercase tracking-wide">
+      <dt className="text-muted-foreground col-span-1 text-xs font-medium tracking-wide uppercase">
         {label}
       </dt>
-      <dd className="col-span-2 break-all text-sm">{children}</dd>
+      <dd className="col-span-2 text-sm break-all">{children}</dd>
     </>
   );
 }

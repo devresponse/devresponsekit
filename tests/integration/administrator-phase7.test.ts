@@ -82,9 +82,7 @@ vi.mock("@/db/database", () => ({
 }));
 
 vi.mock("@/lib/admin/rate-limit.server", async () => {
-  const actual = await vi.importActual<typeof RateLimitModule>(
-    "@/lib/admin/rate-limit.server",
-  );
+  const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
   return actual;
 });
 
@@ -139,8 +137,7 @@ afterEach(() => vi.resetModules());
 /* -------------------------------------------------------------------------- */
 
 describe("POST /api/administrator/users/[id]/impersonate", () => {
-  const importRoute = () =>
-    import("@/app/api/administrator/users/[id]/impersonate/route");
+  const importRoute = () => import("@/app/api/administrator/users/[id]/impersonate/route");
   const url = `http://test.local/api/administrator/users/${TARGET_ID}/impersonate`;
 
   it("returns 401 without a session", async () => {
@@ -160,9 +157,7 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
       params: Promise.resolve({ id: TARGET_ID }),
     });
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("rejects self-impersonation with 400", async () => {
@@ -221,8 +216,7 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
 });
 
 describe("DELETE /api/administrator/users/[id]/impersonate", () => {
-  const importRoute = () =>
-    import("@/app/api/administrator/users/[id]/impersonate/route");
+  const importRoute = () => import("@/app/api/administrator/users/[id]/impersonate/route");
   const url = `http://test.local/api/administrator/users/${TARGET_ID}/impersonate`;
 
   it("stops impersonation and audits success", async () => {
@@ -322,10 +316,9 @@ describe("GET /api/administrator/export/[resource]", () => {
     sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.read"));
     const { GET } = await importRoute();
-    const res = await GET(
-      makeRequest("http://test.local/api/administrator/export/nope"),
-      { params: Promise.resolve({ resource: "nope" }) },
-    );
+    const res = await GET(makeRequest("http://test.local/api/administrator/export/nope"), {
+      params: Promise.resolve({ resource: "nope" }),
+    });
     expect(res.status).toBe(404);
   });
 
@@ -333,10 +326,9 @@ describe("GET /api/administrator/export/[resource]", () => {
     sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
     accessGetter.mockResolvedValue(grantedAccess("admin.audit.read"));
     const { GET } = await importRoute();
-    const res = await GET(
-      makeRequest("http://test.local/api/administrator/export/users"),
-      { params: Promise.resolve({ resource: "users" }) },
-    );
+    const res = await GET(makeRequest("http://test.local/api/administrator/export/users"), {
+      params: Promise.resolve({ resource: "users" }),
+    });
     expect(res.status).toBe(403);
   });
 
@@ -345,10 +337,9 @@ describe("GET /api/administrator/export/[resource]", () => {
     accessGetter.mockResolvedValue(grantedAccess("admin.users.read"));
     // Empty execute result — we just want the header row + closure.
     const { GET } = await importRoute();
-    const res = await GET(
-      makeRequest("http://test.local/api/administrator/export/users"),
-      { params: Promise.resolve({ resource: "users" }) },
-    );
+    const res = await GET(makeRequest("http://test.local/api/administrator/export/users"), {
+      params: Promise.resolve({ resource: "users" }),
+    });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/csv");
     expect(res.headers.get("content-disposition")).toContain("attachment");

@@ -22,53 +22,52 @@ import { cn } from "@/lib/utils";
 export type ColumnSortDirection = "asc" | "desc" | null;
 
 export interface DataGridColumnHeaderProps {
-    field: string;
-    direction: ColumnSortDirection;
-    onToggle: (next: ColumnSortDirection) => void;
-    children: ReactNode;
-    align?: "left" | "right" | "center";
-    className?: string;
+  field: string;
+  direction: ColumnSortDirection;
+  onToggle: (next: ColumnSortDirection) => void;
+  children: ReactNode;
+  align?: "left" | "right" | "center";
+  className?: string;
 }
 
 export function DataGridColumnHeader({
-    field: _field,
-    direction,
-    onToggle,
-    children,
-    align = "left",
-    className,
+  field: _field,
+  direction,
+  onToggle,
+  children,
+  align = "left",
+  className,
 }: DataGridColumnHeaderProps) {
-    const t = useTranslations("administrator.grid");
+  const t = useTranslations("administrator.grid");
 
-    const next: ColumnSortDirection =
-        direction === null ? "asc" : direction === "asc" ? "desc" : null;
+  const next: ColumnSortDirection =
+    direction === null ? "asc" : direction === "asc" ? "desc" : null;
 
-    const ariaSort =
-        direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none";
-    const stateLabel =
-        direction === "asc" ? t("sortAsc") : direction === "desc" ? t("sortDesc") : t("sortNone");
+  const ariaSort = direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none";
+  const stateLabel =
+    direction === "asc" ? t("sortAsc") : direction === "desc" ? t("sortDesc") : t("sortNone");
 
-    return (
-        <button
-            type="button"
-            onClick={() => onToggle(next)}
-            aria-sort={ariaSort}
-            aria-label={`${typeof children === "string" ? children : ""} — ${stateLabel}`.trim()}
-            className={cn(
-                "hover:bg-muted/60 focus-visible:ring-ring -mx-2 -my-1 flex h-7 items-center gap-1.5 rounded px-2 text-left text-xs font-medium focus-visible:outline-none focus-visible:ring-1",
-                align === "right" && "justify-end",
-                align === "center" && "justify-center",
-                className,
-            )}
-        >
-            <span>{children}</span>
-            {direction === "asc" ? (
-                <ArrowUp className="size-3.5" aria-hidden />
-            ) : direction === "desc" ? (
-                <ArrowDown className="size-3.5" aria-hidden />
-            ) : (
-                <ArrowUpDown className="text-muted-foreground/50 size-3.5" aria-hidden />
-            )}
-        </button>
-    );
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(next)}
+      aria-sort={ariaSort}
+      aria-label={`${typeof children === "string" ? children : ""} — ${stateLabel}`.trim()}
+      className={cn(
+        "hover:bg-muted/60 focus-visible:ring-ring -mx-2 -my-1 flex h-7 items-center gap-1.5 rounded px-2 text-left text-xs font-medium focus-visible:ring-1 focus-visible:outline-none",
+        align === "right" && "justify-end",
+        align === "center" && "justify-center",
+        className,
+      )}
+    >
+      <span>{children}</span>
+      {direction === "asc" ? (
+        <ArrowUp className="size-3.5" aria-hidden />
+      ) : direction === "desc" ? (
+        <ArrowDown className="size-3.5" aria-hidden />
+      ) : (
+        <ArrowUpDown className="text-muted-foreground/50 size-3.5" aria-hidden />
+      )}
+    </button>
+  );
 }

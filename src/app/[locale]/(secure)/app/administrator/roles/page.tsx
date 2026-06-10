@@ -47,11 +47,7 @@ export default async function AdministratorRolesPage({
           </Button>
         ) : null}
       </div>
-      <AdministratorRolesGrid
-        locale={locale}
-        canDelete={canDelete}
-        canDuplicate={canDuplicate}
-      />
+      <AdministratorRolesGrid locale={locale} canDelete={canDelete} canDuplicate={canDuplicate} />
     </section>
   );
 }

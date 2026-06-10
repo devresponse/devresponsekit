@@ -148,9 +148,11 @@ beforeEach(async () => {
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET, POST } = await import("@/app/api/administrator/enterprise-apps/route"));
-  ({ GET: GET_BY_ID, PATCH, DELETE } = await import(
-    "@/app/api/administrator/enterprise-apps/[id]/route"
-  ));
+  ({
+    GET: GET_BY_ID,
+    PATCH,
+    DELETE,
+  } = await import("@/app/api/administrator/enterprise-apps/[id]/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -166,9 +168,7 @@ describe("GET /api/administrator/enterprise-apps", () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["shell.view"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("returns the standard list envelope on success", async () => {
@@ -268,9 +268,7 @@ describe("POST /api/administrator/enterprise-apps", () => {
   it("returns 409 id_taken when the row already exists", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
-    insertExecute.mockRejectedValue(
-      new Error("duplicate key value violates unique constraint"),
-    );
+    insertExecute.mockRejectedValue(new Error("duplicate key value violates unique constraint"));
     const res = await POST(
       jsonReq({
         id: "docs",

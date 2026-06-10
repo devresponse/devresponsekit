@@ -11,10 +11,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { SLUG_RE } from "@/lib/admin/orgs.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 
 export const dynamic = "force-dynamic";
 
@@ -60,9 +57,7 @@ export async function GET(request: NextRequest) {
 
   if (query.q) {
     const like = `%${query.q}%`;
-    base = base.where((eb) =>
-      eb.or([eb("o.slug", "ilike", like), eb("o.name", "ilike", like)]),
-    );
+    base = base.where((eb) => eb.or([eb("o.slug", "ilike", like), eb("o.name", "ilike", like)]));
   }
 
   const itemsQuery = applySortAndPagination(

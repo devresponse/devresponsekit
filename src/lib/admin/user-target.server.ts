@@ -24,8 +24,7 @@ export interface ResolvedTargetUser {
  * of truth — duplicating this in multiple places would risk subtle
  * drift if we ever needed to widen / tighten the pattern.
  */
-export const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isUuid(value: string): boolean {
   return UUID_RE.test(value);
@@ -53,13 +52,7 @@ export async function resolveTargetUser(
   }
   const row = await db
     .selectFrom("app_users")
-    .select([
-      "id",
-      "better_auth_user_id",
-      "primary_email",
-      "display_name",
-      "status",
-    ])
+    .select(["id", "better_auth_user_id", "primary_email", "display_name", "status"])
     .where("id", "=", id)
     .executeTakeFirst();
   if (!row) {

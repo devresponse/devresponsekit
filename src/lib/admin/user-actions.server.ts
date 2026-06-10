@@ -2,10 +2,7 @@ import "server-only";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
-import {
-  banBetterAuthUser,
-  unbanBetterAuthUser,
-} from "@/lib/admin/auth-admin.server";
+import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 
 /**
@@ -359,7 +356,11 @@ export async function executeBulkUserAction(
       // Exhaustive — TypeScript will flag a new variant added without
       // a case here.
       const exhaustive: never = action;
-      return { ok: false, appUserId: target.appUserId, error: `unknown_action_${String(exhaustive)}` };
+      return {
+        ok: false,
+        appUserId: target.appUserId,
+        error: `unknown_action_${String(exhaustive)}`,
+      };
     }
   }
 }

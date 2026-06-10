@@ -2,7 +2,11 @@ import "server-only";
 import type { NextRequest, NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
-import { decideSecureAccess, getUserAccessContext, type UserAccessContext } from "@/lib/auth-status";
+import {
+  decideSecureAccess,
+  getUserAccessContext,
+  type UserAccessContext,
+} from "@/lib/auth-status";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";

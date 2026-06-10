@@ -142,18 +142,13 @@ beforeEach(async () => {
     m.mockReset();
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
-  ({ GET: OrgsGET, POST: OrgsPOST } = await import(
-    "@/app/api/administrator/organizations/route"
-  ));
-  ({ PATCH: OrgPATCH, DELETE: OrgDELETE } = await import(
-    "@/app/api/administrator/organizations/[id]/route"
-  ));
-  ({ POST: MembersPOST } = await import(
-    "@/app/api/administrator/organizations/[id]/members/route"
-  ));
-  ({ POST: ProvidersPOST } = await import(
-    "@/app/api/administrator/organizations/[id]/provider-bindings/route"
-  ));
+  ({ GET: OrgsGET, POST: OrgsPOST } = await import("@/app/api/administrator/organizations/route"));
+  ({ PATCH: OrgPATCH, DELETE: OrgDELETE } =
+    await import("@/app/api/administrator/organizations/[id]/route"));
+  ({ POST: MembersPOST } =
+    await import("@/app/api/administrator/organizations/[id]/members/route"));
+  ({ POST: ProvidersPOST } =
+    await import("@/app/api/administrator/organizations/[id]/provider-bindings/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -171,9 +166,7 @@ describe("security: organizations list", () => {
     const res = await OrgsGET(orgsGet());
     expect(res.status).toBe(403);
     expect(itemsExecute).not.toHaveBeenCalled();
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("rejects suspended admins (status check beats permission check)", async () => {
@@ -200,9 +193,7 @@ describe("security: organizations create requires admin.orgs.create (not just re
       }),
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 });
 
@@ -217,9 +208,7 @@ describe("security: organization update requires admin.orgs.update", () => {
       { params: Promise.resolve({ id: ORG_ID }) },
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 });
 
@@ -232,9 +221,7 @@ describe("security: organization delete requires admin.orgs.delete", () => {
       { params: Promise.resolve({ id: ORG_ID }) },
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 });
 
@@ -249,9 +236,7 @@ describe("security: member management requires admin.orgs.update", () => {
       { params: Promise.resolve({ id: ORG_ID }) },
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 });
 
@@ -260,15 +245,13 @@ describe("security: provider binding requires admin.orgs.update", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(ACCESS(["admin.orgs.read"]));
     const res = await ProvidersPOST(
-      jsonReq(
-        `http://test.local/api/administrator/organizations/${ORG_ID}/provider-bindings`,
-        { provider: "github", providerOrganizationKey: "acme-org" },
-      ),
+      jsonReq(`http://test.local/api/administrator/organizations/${ORG_ID}/provider-bindings`, {
+        provider: "github",
+        providerOrganizationKey: "acme-org",
+      }),
       { params: Promise.resolve({ id: ORG_ID }) },
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 });

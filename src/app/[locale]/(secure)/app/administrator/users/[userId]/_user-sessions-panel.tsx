@@ -138,7 +138,9 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
               <li key={token ?? idx} className="flex items-start justify-between gap-3 p-3">
                 <div className="space-y-1">
                   <p>
-                    <span className="text-neutral-500">{t("sessions.expiresAt", { value: formatExpires(s.expiresAt) })}</span>
+                    <span className="text-neutral-500">
+                      {t("sessions.expiresAt", { value: formatExpires(s.expiresAt) })}
+                    </span>
                   </p>
                   {s.ipAddress ? (
                     <p className="text-xs text-neutral-500">

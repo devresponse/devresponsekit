@@ -62,11 +62,7 @@ export interface AppOrganizationMembershipsTable {
    * `/api/administrator/users/[id]` and cleared by `/restore`. NULL
    * outside that lifecycle.
    */
-  pre_deactivation_status: ColumnType<
-    string | null,
-    string | null | undefined,
-    string | null
-  >;
+  pre_deactivation_status: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
 }

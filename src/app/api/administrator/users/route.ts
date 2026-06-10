@@ -9,14 +9,8 @@ import {
   buildListResponse,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  DEFAULT_ADMIN_MUTATION_LIMIT,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 
@@ -80,25 +74,21 @@ export async function GET(request: NextRequest) {
   if (query.q) {
     const like = `%${query.q}%`;
     base = base.where((eb) =>
-      eb.or([
-        eb("primary_email", "ilike", like),
-        eb("display_name", "ilike", like),
-      ]),
+      eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
     );
   }
 
   const itemsQuery = applySortAndPagination(
-    base
-      .select([
-        "id",
-        "better_auth_user_id",
-        "primary_email",
-        "display_name",
-        "status",
-        "preferred_locale",
-        "created_at",
-        "updated_at",
-      ]),
+    base.select([
+      "id",
+      "better_auth_user_id",
+      "primary_email",
+      "display_name",
+      "status",
+      "preferred_locale",
+      "created_at",
+      "updated_at",
+    ]),
     query,
   );
 
@@ -134,10 +124,7 @@ const createSchema = z
     password: z.string().min(8).max(128),
     name: z.string().min(1).max(200).optional(),
     role: z.enum(["admin", "user"]).optional(),
-    initialAppStatus: z
-      .enum(["active", "pending_approval"])
-      .optional()
-      .default("pending_approval"),
+    initialAppStatus: z.enum(["active", "pending_approval"]).optional().default("pending_approval"),
     preferredLocale: z.string().min(2).max(10).optional(),
   })
   .strict();
@@ -146,7 +133,11 @@ export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit("admin.users.create", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  const limited = enforceRateLimit(
+    "admin.users.create",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
   if (limited) return limited;
 
   let json: unknown;

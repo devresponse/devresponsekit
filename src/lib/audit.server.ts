@@ -49,8 +49,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;
   const ipForwarded = reqHeaders?.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = reqHeaders?.get("user-agent") ?? null;
-  const requestId =
-    input.requestId ?? (input.request ? getOrCreateRequestId(input.request) : null);
+  const requestId = input.requestId ?? (input.request ? getOrCreateRequestId(input.request) : null);
 
   await db
     .insertInto("app_audit_events")

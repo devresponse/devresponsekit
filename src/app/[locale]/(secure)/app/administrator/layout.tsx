@@ -1,10 +1,7 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { ApplicationShell } from "@/components/app-shell/application-shell";
-import {
-  ANY_ADMIN_PERMISSION,
-  checkAdminPermissionServer,
-} from "@/lib/admin/permissions.server";
+import { ANY_ADMIN_PERMISSION, checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { AdministratorSidebar } from "./_components/administrator-sidebar";
 import { AdministratorTopHeader } from "./_components/administrator-top-header";
 

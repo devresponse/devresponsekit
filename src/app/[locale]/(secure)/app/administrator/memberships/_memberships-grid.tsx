@@ -81,9 +81,7 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
         header: () => t("columns.createdAt"),
         cell: ({ row }) => {
           const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime())
-            ? row.original.created_at
-            : dateFormatter.format(d);
+          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
         },
       },
     ],

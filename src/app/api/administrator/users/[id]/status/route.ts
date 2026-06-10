@@ -3,14 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  isResolvedUserResponse,
-  resolveTargetUser,
-} from "@/lib/admin/user-target.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 

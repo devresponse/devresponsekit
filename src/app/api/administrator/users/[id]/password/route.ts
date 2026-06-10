@@ -7,18 +7,9 @@ import {
   sendBetterAuthPasswordResetEmail,
   setBetterAuthUserPassword,
 } from "@/lib/admin/auth-admin.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  DEFAULT_ADMIN_MUTATION_LIMIT,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
-import {
-  isResolvedUserResponse,
-  resolveTargetUser,
-} from "@/lib/admin/user-target.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +46,11 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.setPassword");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit("admin.users.password", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  const limited = enforceRateLimit(
+    "admin.users.password",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
   if (limited) return limited;
 
   const { id } = await ctx.params;
@@ -107,11 +102,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 
   // mode === "reset_email"
   try {
-    await sendBetterAuthPasswordResetEmail(
-      target.primaryEmail,
-      parsed.data.redirectTo,
-      request,
-    );
+    await sendBetterAuthPasswordResetEmail(target.primaryEmail, parsed.data.redirectTo, request);
   } catch (err) {
     await auditUserAction("admin.user.password_reset_email_failed", "failure", {
       request,

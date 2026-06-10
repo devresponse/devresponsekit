@@ -91,37 +91,35 @@ export function OrganizationProvidersGrid({
         header: () => t("columns.boundAt"),
         cell: ({ row }) => {
           const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime())
-            ? row.original.created_at
-            : dateFormatter.format(d);
+          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
         },
       },
       ...(canUpdate
         ? [
-          {
-            id: "actions",
-            enableSorting: false,
-            header: () => "",
-            cell: ({ row }: { row: { original: BindingRow } }) => (
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    onRemove(
-                      row.original.id,
-                      row.original.provider,
-                      row.original.provider_organization_key,
-                    )
-                  }
-                >
-                  {t("removeButton")}
-                </Button>
-              </div>
-            ),
-          } as ColumnDef<BindingRow, unknown>,
-        ]
+            {
+              id: "actions",
+              enableSorting: false,
+              header: () => "",
+              cell: ({ row }: { row: { original: BindingRow } }) => (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      onRemove(
+                        row.original.id,
+                        row.original.provider,
+                        row.original.provider_organization_key,
+                      )
+                    }
+                  >
+                    {t("removeButton")}
+                  </Button>
+                </div>
+              ),
+            } as ColumnDef<BindingRow, unknown>,
+          ]
         : []),
     ],
     [t, dateFormatter, canUpdate, onRemove],

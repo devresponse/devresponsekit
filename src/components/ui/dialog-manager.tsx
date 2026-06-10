@@ -4,22 +4,22 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState } fro
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,45 +53,45 @@ import { cn } from "@/lib/utils";
 type Variant = "default" | "destructive";
 
 interface NotifyOptions {
-    title?: string;
-    description: string;
-    variant?: Variant;
-    confirmLabel?: string;
+  title?: string;
+  description: string;
+  variant?: Variant;
+  confirmLabel?: string;
 }
 
 interface ConfirmOptions {
-    title: string;
-    description: string;
-    confirmLabel?: string;
-    cancelLabel?: string;
-    destructive?: boolean;
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive?: boolean;
 }
 
 interface PromptOptions {
-    title: string;
-    description?: string;
-    label: string;
-    defaultValue?: string;
-    placeholder?: string;
-    required?: boolean;
-    confirmLabel?: string;
-    cancelLabel?: string;
+  title: string;
+  description?: string;
+  label: string;
+  defaultValue?: string;
+  placeholder?: string;
+  required?: boolean;
+  confirmLabel?: string;
+  cancelLabel?: string;
 }
 
 interface DialogContextValue {
-    notify: (options: NotifyOptions) => Promise<void>;
-    confirm: (options: ConfirmOptions) => Promise<boolean>;
-    promptText: (options: PromptOptions) => Promise<string | null>;
+  notify: (options: NotifyOptions) => Promise<void>;
+  confirm: (options: ConfirmOptions) => Promise<boolean>;
+  promptText: (options: PromptOptions) => Promise<string | null>;
 }
 
 const DialogContext = createContext<DialogContextValue | null>(null);
 
 export function useDialogs(): DialogContextValue {
-    const ctx = useContext(DialogContext);
-    if (!ctx) {
-        throw new Error("useDialogs must be used within <DialogManagerProvider>");
-    }
-    return ctx;
+  const ctx = useContext(DialogContext);
+  if (!ctx) {
+    throw new Error("useDialogs must be used within <DialogManagerProvider>");
+  }
+  return ctx;
 }
 
 type NotifyState = NotifyOptions & { resolve: () => void };
@@ -99,221 +99,218 @@ type ConfirmState = ConfirmOptions & { resolve: (v: boolean) => void };
 type PromptState = PromptOptions & { resolve: (v: string | null) => void };
 
 export function DialogManagerProvider({ children }: { children: ReactNode }) {
-    const t = useTranslations("common.dialogs");
-    const [notifyState, setNotifyState] = useState<NotifyState | null>(null);
-    const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
-    const [promptState, setPromptState] = useState<PromptState | null>(null);
+  const t = useTranslations("common.dialogs");
+  const [notifyState, setNotifyState] = useState<NotifyState | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [promptState, setPromptState] = useState<PromptState | null>(null);
 
-    const notify = useCallback((options: NotifyOptions) => {
-        return new Promise<void>((resolve) => {
-            setNotifyState({ ...options, resolve });
-        });
-    }, []);
+  const notify = useCallback((options: NotifyOptions) => {
+    return new Promise<void>((resolve) => {
+      setNotifyState({ ...options, resolve });
+    });
+  }, []);
 
-    const confirm = useCallback((options: ConfirmOptions) => {
-        return new Promise<boolean>((resolve) => {
-            setConfirmState({ ...options, resolve });
-        });
-    }, []);
+  const confirm = useCallback((options: ConfirmOptions) => {
+    return new Promise<boolean>((resolve) => {
+      setConfirmState({ ...options, resolve });
+    });
+  }, []);
 
-    const promptText = useCallback((options: PromptOptions) => {
-        return new Promise<string | null>((resolve) => {
-            setPromptState({ ...options, resolve });
-        });
-    }, []);
+  const promptText = useCallback((options: PromptOptions) => {
+    return new Promise<string | null>((resolve) => {
+      setPromptState({ ...options, resolve });
+    });
+  }, []);
 
-    const value = useMemo<DialogContextValue>(
-        () => ({ notify, confirm, promptText }),
-        [notify, confirm, promptText],
-    );
+  const value = useMemo<DialogContextValue>(
+    () => ({ notify, confirm, promptText }),
+    [notify, confirm, promptText],
+  );
 
-    return (
-        <DialogContext.Provider value={value}>
-            {children}
-            <NotifyDialog
-                state={notifyState}
-                defaultTitle={t("notifyTitle")}
-                defaultOk={t("ok")}
-                onClose={() => {
-                    notifyState?.resolve();
-                    setNotifyState(null);
-                }}
-            />
-            <ConfirmDialog
-                state={confirmState}
-                defaultConfirm={t("confirm")}
-                defaultCancel={t("cancel")}
-                onResult={(value) => {
-                    confirmState?.resolve(value);
-                    setConfirmState(null);
-                }}
-            />
-            <PromptDialog
-                state={promptState}
-                defaultConfirm={t("ok")}
-                defaultCancel={t("cancel")}
-                onResult={(value) => {
-                    promptState?.resolve(value);
-                    setPromptState(null);
-                }}
-            />
-        </DialogContext.Provider>
-    );
+  return (
+    <DialogContext.Provider value={value}>
+      {children}
+      <NotifyDialog
+        state={notifyState}
+        defaultTitle={t("notifyTitle")}
+        defaultOk={t("ok")}
+        onClose={() => {
+          notifyState?.resolve();
+          setNotifyState(null);
+        }}
+      />
+      <ConfirmDialog
+        state={confirmState}
+        defaultConfirm={t("confirm")}
+        defaultCancel={t("cancel")}
+        onResult={(value) => {
+          confirmState?.resolve(value);
+          setConfirmState(null);
+        }}
+      />
+      <PromptDialog
+        state={promptState}
+        defaultConfirm={t("ok")}
+        defaultCancel={t("cancel")}
+        onResult={(value) => {
+          promptState?.resolve(value);
+          setPromptState(null);
+        }}
+      />
+    </DialogContext.Provider>
+  );
 }
 
 function NotifyDialog({
-    state,
-    defaultTitle,
-    defaultOk,
-    onClose,
+  state,
+  defaultTitle,
+  defaultOk,
+  onClose,
 }: {
-    state: NotifyState | null;
-    defaultTitle: string;
-    defaultOk: string;
-    onClose: () => void;
+  state: NotifyState | null;
+  defaultTitle: string;
+  defaultOk: string;
+  onClose: () => void;
 }) {
-    const open = state !== null;
-    return (
-        <AlertDialog
-            open={open}
-            onOpenChange={(v) => {
-                if (!v) onClose();
-            }}
-        >
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>{state?.title ?? defaultTitle}</AlertDialogTitle>
-                    <AlertDialogDescription className={cn(state?.variant === "destructive" && "text-destructive")}>
-                        {state?.description}
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogAction onClick={() => onClose()}>
-                        {state?.confirmLabel ?? defaultOk}
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
-    );
+  const open = state !== null;
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{state?.title ?? defaultTitle}</AlertDialogTitle>
+          <AlertDialogDescription
+            className={cn(state?.variant === "destructive" && "text-destructive")}
+          >
+            {state?.description}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogAction onClick={() => onClose()}>
+            {state?.confirmLabel ?? defaultOk}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
 
 function ConfirmDialog({
-    state,
-    defaultConfirm,
-    defaultCancel,
-    onResult,
+  state,
+  defaultConfirm,
+  defaultCancel,
+  onResult,
 }: {
-    state: ConfirmState | null;
-    defaultConfirm: string;
-    defaultCancel: string;
-    onResult: (value: boolean) => void;
+  state: ConfirmState | null;
+  defaultConfirm: string;
+  defaultCancel: string;
+  onResult: (value: boolean) => void;
 }) {
-    const open = state !== null;
-    return (
-        <AlertDialog
-            open={open}
-            onOpenChange={(v) => {
-                if (!v) onResult(false);
-            }}
-        >
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>{state?.title}</AlertDialogTitle>
-                    <AlertDialogDescription className="whitespace-pre-line">
-                        {state?.description}
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel onClick={() => onResult(false)}>
-                        {state?.cancelLabel ?? defaultCancel}
-                    </AlertDialogCancel>
-                    <AlertDialogAction
-                        className={cn(
-                            state?.destructive &&
-                            "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20",
-                        )}
-                        onClick={() => onResult(true)}
-                    >
-                        {state?.confirmLabel ?? defaultConfirm}
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
-    );
+  const open = state !== null;
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onResult(false);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{state?.title}</AlertDialogTitle>
+          <AlertDialogDescription className="whitespace-pre-line">
+            {state?.description}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => onResult(false)}>
+            {state?.cancelLabel ?? defaultCancel}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            className={cn(
+              state?.destructive &&
+                "bg-destructive hover:bg-destructive/90 focus-visible:ring-destructive/20 text-white",
+            )}
+            onClick={() => onResult(true)}
+          >
+            {state?.confirmLabel ?? defaultConfirm}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
 
 function PromptDialog({
-    state,
-    defaultConfirm,
-    defaultCancel,
-    onResult,
+  state,
+  defaultConfirm,
+  defaultCancel,
+  onResult,
 }: {
-    state: PromptState | null;
-    defaultConfirm: string;
-    defaultCancel: string;
-    onResult: (value: string | null) => void;
+  state: PromptState | null;
+  defaultConfirm: string;
+  defaultCancel: string;
+  onResult: (value: string | null) => void;
 }) {
-    const open = state !== null;
-    const [value, setValue] = useState("");
-    const initializedFor = useRef<PromptState | null>(null);
-    // Reset local input each time a new prompt opens.
-    if (state && initializedFor.current !== state) {
-        initializedFor.current = state;
-        setValue(state.defaultValue ?? "");
-    }
-    if (!state && initializedFor.current) {
-        initializedFor.current = null;
-    }
+  const open = state !== null;
+  const [value, setValue] = useState("");
+  const initializedFor = useRef<PromptState | null>(null);
+  // Reset local input each time a new prompt opens.
+  if (state && initializedFor.current !== state) {
+    initializedFor.current = state;
+    setValue(state.defaultValue ?? "");
+  }
+  if (!state && initializedFor.current) {
+    initializedFor.current = null;
+  }
 
-    const submit = () => {
-        if (state?.required && value.trim() === "") return;
-        onResult(value);
-    };
+  const submit = () => {
+    if (state?.required && value.trim() === "") return;
+    onResult(value);
+  };
 
-    return (
-        <Dialog
-            open={open}
-            onOpenChange={(v) => {
-                if (!v) onResult(null);
-            }}
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onResult(null);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{state?.title}</DialogTitle>
+          {state?.description ? <DialogDescription>{state.description}</DialogDescription> : null}
+        </DialogHeader>
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
         >
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>{state?.title}</DialogTitle>
-                    {state?.description ? (
-                        <DialogDescription>{state.description}</DialogDescription>
-                    ) : null}
-                </DialogHeader>
-                <form
-                    className="space-y-2"
-                    onSubmit={(e) => {
-                        e.preventDefault();
-                        submit();
-                    }}
-                >
-                    <label className="text-sm font-medium" htmlFor="dialog-prompt-input">
-                        {state?.label}
-                    </label>
-                    <Input
-                        id="dialog-prompt-input"
-                        autoFocus
-                        value={value}
-                        placeholder={state?.placeholder}
-                        onChange={(e) => setValue(e.target.value)}
-                    />
-                    <DialogFooter className="pt-2">
-                        <Button type="button" variant="outline" onClick={() => onResult(null)}>
-                            {state?.cancelLabel ?? defaultCancel}
-                        </Button>
-                        <Button
-                            type="submit"
-                            disabled={state?.required ? value.trim() === "" : false}
-                        >
-                            {state?.confirmLabel ?? defaultConfirm}
-                        </Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
-    );
+          <label className="text-sm font-medium" htmlFor="dialog-prompt-input">
+            {state?.label}
+          </label>
+          <Input
+            id="dialog-prompt-input"
+            autoFocus
+            value={value}
+            placeholder={state?.placeholder}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <DialogFooter className="pt-2">
+            <Button type="button" variant="outline" onClick={() => onResult(null)}>
+              {state?.cancelLabel ?? defaultCancel}
+            </Button>
+            <Button type="submit" disabled={state?.required ? value.trim() === "" : false}>
+              {state?.confirmLabel ?? defaultConfirm}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 }

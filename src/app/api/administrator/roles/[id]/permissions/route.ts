@@ -4,10 +4,7 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";

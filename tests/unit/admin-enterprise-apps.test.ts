@@ -15,28 +15,16 @@ import {
  */
 describe("enterprise-apps validators", () => {
   describe("SUBDOMAIN_RE", () => {
-    it.each([
-      "a",
-      "docs",
-      "my-app",
-      "my-app-1",
-      "abc123",
-      "a".repeat(63),
-    ])("accepts %s", (s) => {
+    it.each(["a", "docs", "my-app", "my-app-1", "abc123", "a".repeat(63)])("accepts %s", (s) => {
       expect(SUBDOMAIN_RE.test(s)).toBe(true);
     });
 
-    it.each([
-      "",
-      "-leading",
-      "trailing-",
-      "UPPER",
-      "with_underscore",
-      "with.dot",
-      "a".repeat(64),
-    ])("rejects %s", (s) => {
-      expect(SUBDOMAIN_RE.test(s)).toBe(false);
-    });
+    it.each(["", "-leading", "trailing-", "UPPER", "with_underscore", "with.dot", "a".repeat(64)])(
+      "rejects %s",
+      (s) => {
+        expect(SUBDOMAIN_RE.test(s)).toBe(false);
+      },
+    );
   });
 
   describe("APP_ID_RE", () => {
@@ -44,12 +32,9 @@ describe("enterprise-apps validators", () => {
       expect(APP_ID_RE.test(s)).toBe(true);
     });
 
-    it.each(["", "-leading", "Upper", "has space", "a".repeat(129)])(
-      "rejects %s",
-      (s) => {
-        expect(APP_ID_RE.test(s)).toBe(false);
-      },
-    );
+    it.each(["", "-leading", "Upper", "has space", "a".repeat(129)])("rejects %s", (s) => {
+      expect(APP_ID_RE.test(s)).toBe(false);
+    });
   });
 
   describe("SSO_AUDIENCE_RE", () => {

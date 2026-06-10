@@ -1,9 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
-import {
-  checkAdminPermissionServer,
-} from "@/lib/admin/permissions.server";
+import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -100,9 +98,7 @@ export default async function AdministratorUserDetailPage({
               ← {t("detail.backToList")}
             </LocaleLink>
           </Button>
-          <h1 className="text-lg font-semibold">
-            {user.display_name ?? user.primary_email}
-          </h1>
+          <h1 className="text-lg font-semibold">{user.display_name ?? user.primary_email}</h1>
           <p className="text-sm text-neutral-600">{user.primary_email}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -136,10 +132,7 @@ const KNOWN_STATUSES: ReadonlySet<string> = new Set([
   "deactivated",
 ]);
 
-function translateStatus(
-  t: Awaited<ReturnType<typeof getTranslations>>,
-  status: string,
-): string {
+function translateStatus(t: Awaited<ReturnType<typeof getTranslations>>, status: string): string {
   // Only call into the i18n catalog with known keys to avoid the
   // "missing message" warning + render the raw status verbatim if a
   // future status enum value lands before the translation does.

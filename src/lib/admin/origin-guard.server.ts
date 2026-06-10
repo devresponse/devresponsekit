@@ -33,9 +33,10 @@ export interface OriginCheckResult {
   reason?: "missing_origin" | "untrusted_origin";
 }
 
-export function checkTrustedOrigin(
-  request: { method?: string; headers: Headers },
-): OriginCheckResult {
+export function checkTrustedOrigin(request: {
+  method?: string;
+  headers: Headers;
+}): OriginCheckResult {
   const method = (request.method ?? "GET").toUpperCase();
   if (!UNSAFE_METHODS.has(method)) return { ok: true };
 
@@ -59,8 +60,7 @@ export function checkTrustedOrigin(
   if (process.env.NODE_ENV === "test") return { ok: true };
 
   const candidate =
-    parseOrigin(request.headers.get("origin")) ??
-    parseOrigin(request.headers.get("referer"));
+    parseOrigin(request.headers.get("origin")) ?? parseOrigin(request.headers.get("referer"));
   if (!candidate) return { ok: false, reason: "missing_origin" };
   if (!allowed.includes(candidate)) return { ok: false, reason: "untrusted_origin" };
   return { ok: true };

@@ -54,7 +54,13 @@ export function ImpersonateUserButton({
   if (isSelf) {
     // Render a disabled button with an explanatory tooltip via title.
     return (
-      <Button type="button" variant="outline" size="sm" disabled title={t("impersonation.selfError")}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled
+        title={t("impersonation.selfError")}
+      >
         {t("actions.impersonate")}
       </Button>
     );

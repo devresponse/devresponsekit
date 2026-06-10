@@ -81,10 +81,13 @@ vi.mock("@/db/database", () => ({
     selectFrom: () => makeChain(),
     updateTable: () => makeChain(),
     insertInto: () => makeChain(),
-    transaction: () => ({ execute: async (cb: (trx: unknown) => Promise<unknown>) => cb({
-      updateTable: () => makeChain(),
-      insertInto: () => makeChain(),
-    }) }),
+    transaction: () => ({
+      execute: async (cb: (trx: unknown) => Promise<unknown>) =>
+        cb({
+          updateTable: () => makeChain(),
+          insertInto: () => makeChain(),
+        }),
+    }),
   },
 }));
 
@@ -214,9 +217,7 @@ describe("POST /api/administrator/users/[id]/ban", () => {
       { params: Promise.resolve({ id: TARGET_ID }) },
     );
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("rejects an invalid id with 400 before hitting the DB", async () => {
@@ -321,11 +322,7 @@ describe("POST /api/administrator/users/[id]/password", () => {
       { params: Promise.resolve({ id: TARGET_ID }) },
     );
     expect(res.status).toBe(200);
-    expect(authForget).toHaveBeenCalledWith(
-      "target@example.com",
-      undefined,
-      expect.anything(),
-    );
+    expect(authForget).toHaveBeenCalledWith("target@example.com", undefined, expect.anything());
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.user.password_reset_email_sent" }),
     );
@@ -381,9 +378,8 @@ describe("DELETE /api/administrator/users/[id]/sessions/[sessionId]", () => {
     accessGetter.mockResolvedValue(grantedAccess("admin.users.sessions"));
     dbMock.mockResolvedValue(targetRow);
     authRevokeSession.mockResolvedValue({ ok: true });
-    const { DELETE } = await import(
-      "@/app/api/administrator/users/[id]/sessions/[sessionId]/route"
-    );
+    const { DELETE } =
+      await import("@/app/api/administrator/users/[id]/sessions/[sessionId]/route");
     const sessionToken = "sup3r-secret-session-token-AbCdEf";
     const res = await DELETE(
       makeRequest(

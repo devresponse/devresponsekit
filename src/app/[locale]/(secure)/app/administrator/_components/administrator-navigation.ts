@@ -161,6 +161,8 @@ export function getVisibleAdministratorNavigationGroups(
   return ADMINISTRATOR_NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter((item) => hasAdministratorPermission(permissions, item.requires)),
-    actions: group.actions.filter((action) => hasAdministratorPermission(permissions, action.requires)),
+    actions: group.actions.filter((action) =>
+      hasAdministratorPermission(permissions, action.requires),
+    ),
   })).filter((group) => group.items.length > 0 || group.actions.length > 0);
 }

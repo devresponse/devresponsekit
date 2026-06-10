@@ -46,13 +46,8 @@ export async function ImpersonationBanner() {
       role="alert"
       className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900"
     >
-      <span>
-        {t("bannerLabel", { email: targetRow?.primary_email ?? targetBetterAuthId })}
-      </span>
-      <StopImpersonationButton
-        targetAppUserId={targetRow?.id ?? null}
-        label={t("stopButton")}
-      />
+      <span>{t("bannerLabel", { email: targetRow?.primary_email ?? targetBetterAuthId })}</span>
+      <StopImpersonationButton targetAppUserId={targetRow?.id ?? null} label={t("stopButton")} />
     </div>
   );
 }

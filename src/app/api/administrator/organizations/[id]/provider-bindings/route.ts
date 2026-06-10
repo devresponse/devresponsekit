@@ -10,10 +10,7 @@ import {
   buildListResponse,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -56,9 +53,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     maxPageSize: 200,
   });
 
-  let base = db
-    .selectFrom("app_provider_organizations as p")
-    .where("p.organization_id", "=", id);
+  let base = db.selectFrom("app_provider_organizations as p").where("p.organization_id", "=", id);
 
   const providerFilter = query.filters.provider;
   if (typeof providerFilter === "string" && providerFilter.length > 0) {

@@ -36,16 +36,6 @@ export function getTrustedOrigins(): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const candidates = [
-    process.env.NEXT_PUBLIC_APP_URL,
-    process.env.BETTER_AUTH_URL,
-    ...fromEnv,
-  ];
-  return [
-    ...new Set(
-      candidates
-        .map((v) => parseOrigin(v))
-        .filter((v): v is string => v !== null),
-    ),
-  ];
+  const candidates = [process.env.NEXT_PUBLIC_APP_URL, process.env.BETTER_AUTH_URL, ...fromEnv];
+  return [...new Set(candidates.map((v) => parseOrigin(v)).filter((v): v is string => v !== null))];
 }

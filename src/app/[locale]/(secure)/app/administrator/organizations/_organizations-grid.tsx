@@ -118,9 +118,7 @@ export function AdministratorOrganizationsGrid({
         accessorKey: "is_default",
         header: () => t("columns.isDefault"),
         cell: ({ row }) =>
-          row.original.is_default ? (
-            <Badge variant="secondary">{t("defaultYes")}</Badge>
-          ) : null,
+          row.original.is_default ? <Badge variant="secondary">{t("defaultYes")}</Badge> : null,
       },
       {
         id: "member_count",
@@ -136,24 +134,24 @@ export function AdministratorOrganizationsGrid({
       },
       ...(canDelete
         ? [
-          {
-            id: "actions",
-            enableSorting: false,
-            header: () => "",
-            cell: ({ row }: { row: { original: OrgRow } }) => (
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onDelete(row.original.id, row.original.slug)}
-                >
-                  {t("deleteButton")}
-                </Button>
-              </div>
-            ),
-          } as ColumnDef<OrgRow, unknown>,
-        ]
+            {
+              id: "actions",
+              enableSorting: false,
+              header: () => "",
+              cell: ({ row }: { row: { original: OrgRow } }) => (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onDelete(row.original.id, row.original.slug)}
+                  >
+                    {t("deleteButton")}
+                  </Button>
+                </div>
+              ),
+            } as ColumnDef<OrgRow, unknown>,
+          ]
         : []),
     ],
     [t, locale, dateFormatter, canDelete, onDelete],

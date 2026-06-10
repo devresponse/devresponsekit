@@ -10,18 +10,9 @@ import {
   updateBetterAuthUser,
 } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  DEFAULT_ADMIN_MUTATION_LIMIT,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
-import {
-  isResolvedUserResponse,
-  resolveTargetUser,
-} from "@/lib/admin/user-target.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +79,11 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit("admin.users.mutate", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  const limited = enforceRateLimit(
+    "admin.users.mutate",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
   if (limited) return limited;
 
   const { id } = await ctx.params;
@@ -118,11 +113,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("no_changes", 400, request);
   }
 
-  await db
-    .updateTable("app_users")
-    .set(updates)
-    .where("id", "=", target.appUserId)
-    .execute();
+  await db.updateTable("app_users").set(updates).where("id", "=", target.appUserId).execute();
 
   // Mirror display name to Better Auth so the auth-side `name` stays
   // in sync. Failures here do not roll back the app update — the auth
@@ -137,7 +128,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
         request,
       );
     } catch (err) {
-    await auditUserAction("admin.user.update_auth_mirror_failed", "error", {
+      await auditUserAction("admin.user.update_auth_mirror_failed", "error", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
@@ -169,15 +160,17 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
  * Hard delete via `auth.api.removeUser` is intentionally NOT exposed in
  * v1 (decision §20.1.11). A `restore` endpoint inverts this action.
  */
-const deleteSchema = z
-  .object({ reason: z.string().min(1).max(500).optional() })
-  .strict();
+const deleteSchema = z.object({ reason: z.string().min(1).max(500).optional() }).strict();
 
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit("admin.users.mutate", guard.betterAuthUserId, DEFAULT_ADMIN_MUTATION_LIMIT);
+  const limited = enforceRateLimit(
+    "admin.users.mutate",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
   if (limited) return limited;
 
   const { id } = await ctx.params;

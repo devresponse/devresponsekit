@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-  type ColumnDef,
-} from "@tanstack/react-table";
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -21,14 +16,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import {
-  DataGridColumnHeader,
-  type ColumnSortDirection,
-} from "./data-grid-column-header";
-import {
-  DataGridToolbar,
-  type BulkActionDescriptor,
-} from "./data-grid-toolbar";
+import { DataGridColumnHeader, type ColumnSortDirection } from "./data-grid-column-header";
+import { DataGridToolbar, type BulkActionDescriptor } from "./data-grid-toolbar";
 import type { UseGridSelectionResult } from "./use-grid-selection";
 import {
   useGridFetch,
@@ -99,8 +88,7 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
 
   const items = fetched.data ?? props.initialData?.items ?? [];
   const total = fetched.data ? fetched.total : (props.initialData?.total ?? 0);
-  const isInitialLoading =
-    fetched.isLoading && !props.initialData && fetched.data === null;
+  const isInitialLoading = fetched.isLoading && !props.initialData && fetched.data === null;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
 
   const selection = props.selection;
@@ -147,17 +135,17 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
           selection={
             selection
               ? {
-                mode: selection.state.mode,
-                count: selection.state.selectedIds.size,
-                onSelectAllMatching: selection.state.selectAllMatching,
-                onClear: selection.state.clear,
-              }
+                  mode: selection.state.mode,
+                  count: selection.state.selectedIds.size,
+                  onSelectAllMatching: selection.state.selectAllMatching,
+                  onClear: selection.state.clear,
+                }
               : {
-                mode: "page",
-                count: 0,
-                onSelectAllMatching: () => { },
-                onClear: () => { },
-              }
+                  mode: "page",
+                  count: 0,
+                  onSelectAllMatching: () => {},
+                  onClear: () => {},
+                }
           }
           bulkActions={props.bulkActions}
           exportResource={props.exportResource}
@@ -179,7 +167,7 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
         <div
           role="status"
           aria-live="polite"
-          className="flex flex-col gap-2 rounded-md border border-border p-3"
+          className="border-border flex flex-col gap-2 rounded-md border p-3"
         >
           <span className="sr-only">{t("loading")}</span>
           {Array.from({ length: 5 }).map((_, i) => (
@@ -187,13 +175,13 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="rounded-md border border-border">
+        <div className="border-border rounded-md border">
           <Empty>
             <EmptyTitle>{t("empty")}</EmptyTitle>
           </Empty>
         </div>
       ) : (
-        <div className="rounded-md border border-border">
+        <div className="border-border rounded-md border">
           <Table aria-rowcount={total}>
             <TableHeader className="bg-muted/50">
               {table.getHeaderGroups().map((hg) => (
@@ -203,11 +191,11 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
                       {h.isPlaceholder
                         ? null
                         : renderSortableHeader(
-                          h.column.columnDef,
-                          h.getContext,
-                          state,
-                          onSortToggle,
-                        )}
+                            h.column.columnDef,
+                            h.getContext,
+                            state,
+                            onSortToggle,
+                          )}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -219,10 +207,7 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}
-                      className={cn(
-                        "px-3 py-1.5 text-sm",
-                        cell.column.id === "__select" && "w-9",
-                      )}
+                      className={cn("px-3 py-1.5 text-sm", cell.column.id === "__select" && "w-9")}
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
@@ -305,8 +290,7 @@ function buildSelectionColumn<TItem>(
   const pageAllSelected =
     selection.mode === "all" ||
     (pageIds.length > 0 && pageIds.every((id) => selection.selectedIds.has(id)));
-  const pageSomeSelected =
-    !pageAllSelected && pageIds.some((id) => selection.selectedIds.has(id));
+  const pageSomeSelected = !pageAllSelected && pageIds.some((id) => selection.selectedIds.has(id));
 
   return {
     id: "__select",

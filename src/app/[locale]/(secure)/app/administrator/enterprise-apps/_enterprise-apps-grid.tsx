@@ -146,24 +146,24 @@ export function AdministratorEnterpriseAppsGrid({
       },
       ...(canManage
         ? [
-          {
-            id: "actions",
-            enableSorting: false,
-            header: () => "",
-            cell: ({ row }: { row: { original: EnterpriseAppRow } }) => (
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onDelete(row.original.id, row.original.label)}
-                >
-                  {t("deleteButton")}
-                </Button>
-              </div>
-            ),
-          } as ColumnDef<EnterpriseAppRow, unknown>,
-        ]
+            {
+              id: "actions",
+              enableSorting: false,
+              header: () => "",
+              cell: ({ row }: { row: { original: EnterpriseAppRow } }) => (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onDelete(row.original.id, row.original.label)}
+                  >
+                    {t("deleteButton")}
+                  </Button>
+                </div>
+              ),
+            } as ColumnDef<EnterpriseAppRow, unknown>,
+          ]
         : []),
     ],
     [t, locale, dateFormatter, canManage, onDelete],

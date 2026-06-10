@@ -68,9 +68,7 @@ export function RoleMembersGrid({ roleId }: { roleId: string }) {
         header: () => t("columns.assignedAt"),
         cell: ({ row }) => {
           const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime())
-            ? row.original.created_at
-            : dateFormatter.format(d);
+          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
         },
       },
     ],

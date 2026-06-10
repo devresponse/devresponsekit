@@ -3,14 +3,8 @@ import { NextResponse } from "next/server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { revokeBetterAuthUserSession } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import {
-  isAdminPermissionDenial,
-  requireAdminPermission,
-} from "@/lib/admin/permissions.server";
-import {
-  isResolvedUserResponse,
-  resolveTargetUser,
-} from "@/lib/admin/user-target.server";
+import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 

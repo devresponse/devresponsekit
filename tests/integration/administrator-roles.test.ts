@@ -85,7 +85,9 @@ vi.mock("@/db/database", () => {
         }),
       }),
       updateTable: () => ({
-        set: () => ({ where: () => ({ execute: itemsExecute, returning: () => ({ execute: itemsExecute }) }) }),
+        set: () => ({
+          where: () => ({ execute: itemsExecute, returning: () => ({ execute: itemsExecute }) }),
+        }),
       }),
       deleteFrom: () => ({
         where: () => ({
@@ -134,9 +136,7 @@ beforeEach(async () => {
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET, POST } = await import("@/app/api/administrator/roles/route"));
-  ({ DELETE: DELETE_BY_ID } = await import(
-    "@/app/api/administrator/roles/[id]/route"
-  ));
+  ({ DELETE: DELETE_BY_ID } = await import("@/app/api/administrator/roles/[id]/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -162,9 +162,7 @@ describe("GET /api/administrator/roles", () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["shell.view"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied" }),
-    );
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
   });
 
   it("returns the standard list envelope on success", async () => {

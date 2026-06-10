@@ -28,14 +28,16 @@ vi.mock("@/lib/auth-status", async () => {
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
+// The route module imports createBetterAuthUser (for POST), whose
+// import graph reaches @/lib/auth. Mock the wrapper so the real Better
+// Auth instance never initializes inside the test runner — its
+// discarded async init work otherwise surfaces as unhandled rejections
+// attributed to unrelated test files sharing the worker.
+vi.mock("@/lib/admin/auth-admin.server", () => ({
+  createBetterAuthUser: vi.fn(),
+}));
 
-vi.mock("@/db/database", async () => ({
-  // `pgPool` is shared with Better Auth; the route's import graph
-  // reaches @/lib/auth, so the mock must provide a real (unconnected)
-  // Pool instance for the adapter's type detection.
-  pgPool: new (await import("pg")).Pool({
-    connectionString: "postgresql://test:test@localhost:5444/test",
-  }),
+vi.mock("@/db/database", () => ({
   db: {
     selectFrom: () => {
       const proxy: unknown = new Proxy(

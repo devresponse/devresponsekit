@@ -49,6 +49,32 @@ export type ServerEnv = z.infer<typeof serverEnvSchema>;
 let cached: ServerEnv | null = null;
 
 /**
+ * `next build` evaluates server modules while collecting page data, and
+ * CI/preview builders (e.g. Vercel) typically have no runtime secrets
+ * configured. In that phase we substitute placeholders instead of
+ * failing the build — the instances constructed with them are discarded
+ * after collection, and the strict parse re-runs at real server boot.
+ * `SKIP_ENV_VALIDATION` covers non-Next build harnesses (Docker, CI).
+ */
+function isBuildPhase(): boolean {
+  return (
+    process.env.NEXT_PHASE === "phase-production-build" || Boolean(process.env.SKIP_ENV_VALIDATION)
+  );
+}
+
+function buildPhasePlaceholders(): ServerEnv {
+  return serverEnvSchema.parse({
+    NODE_ENV: "production",
+    BETTER_AUTH_SECRET: "build-placeholder-secret-0000",
+    BETTER_AUTH_URL: "http://localhost:3000",
+    DATABASE_URL: "postgresql://build:build@localhost:5432/build",
+    SSO_HANDOFF_ISSUER: "build-placeholder",
+    SSO_HANDOFF_AUDIENCE_PREFIX: "build-placeholder",
+    SSO_HANDOFF_JWT_SECRET: "build-placeholder-secret-0000",
+  });
+}
+
+/**
  * Returns the parsed and validated server environment.
  *
  * Throws on first access if any required variable is missing or invalid.
@@ -58,6 +84,11 @@ export function getServerEnv(): ServerEnv {
   if (cached) return cached;
   const parsed = serverEnvSchema.safeParse(process.env);
   if (!parsed.success) {
+    if (isBuildPhase()) {
+      // Intentionally NOT cached: only the build worker should ever see
+      // placeholder values.
+      return buildPhasePlaceholders();
+    }
     // Do not echo secrets back; only emit which keys were invalid.
     const invalidKeys = parsed.error.issues.map((issue) => issue.path.join(".")).join(", ");
     throw new Error(`Invalid server environment variables: ${invalidKeys}`);

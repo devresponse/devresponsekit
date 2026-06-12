@@ -95,7 +95,17 @@
     },
     "overview": {
       "title": "Aperçu de l'administrateur",
-      "description": "Choisissez une section dans la navigation de gauche pour commencer à gérer la plateforme."
+      "description": "Choisissez une section dans la navigation de gauche pour commencer à gérer la plateforme.",
+      "metrics": {
+        "users": "Utilisateurs",
+        "usersHint": "{active} actifs · {pending} en attente d'approbation",
+        "organizations": "Organisations",
+        "roles": "Rôles",
+        "permissions": "Permissions",
+        "enterpriseApps": "Applications d'entreprise",
+        "enterpriseAppsHint": "{available} disponibles",
+        "none": "Vous n'avez pas encore la permission de voir des métriques."
+      }
     },
     "users": {
       "title": "Utilisateurs",

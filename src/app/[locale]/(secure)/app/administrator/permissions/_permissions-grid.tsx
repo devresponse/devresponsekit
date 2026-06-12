@@ -1,29 +1,25 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDialogs } from "@/components/ui/dialog-manager";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DataGrid } from "../_components/grid/data-grid";
 import { RolesUsingPermissionPanel } from "./_roles-using-sheet";
 
 /**
  * Permissions catalog grid (docs/admin-manager.md §8.7).
  *
- * Inline create + edit affordances live in a slide-over Sheet to keep
- * the catalog grid uncluttered. The "Used by N roles" cell opens a
- * second sheet listing the roles holding the permission so the
- * operator can pivot directly into role detail.
+ * Creation follows the standard new-record pattern (`permissions/new`
+ * page; the page supplies the link via `headerActions`). Inline edit
+ * stays in a slide-over Sheet to keep the catalog grid uncluttered,
+ * and the "Used by N roles" cell opens a second sheet listing the
+ * roles holding the permission so the operator can pivot directly
+ * into role detail.
  */
 interface PermissionRow {
   id: string;
@@ -34,11 +30,16 @@ interface PermissionRow {
 
 type SheetMode =
   | { kind: "closed" }
-  | { kind: "create" }
   | { kind: "edit"; row: PermissionRow }
   | { kind: "rolesUsing"; row: PermissionRow };
 
-export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean }) {
+export function AdministratorPermissionsGrid({
+  canManage,
+  headerActions,
+}: {
+  canManage: boolean;
+  headerActions?: ReactNode;
+}) {
   const t = useTranslations("administrator.permissions");
   const tErr = useTranslations("administrator.errors");
   const dialogs = useDialogs();
@@ -140,14 +141,6 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
 
   return (
     <div className="space-y-3">
-      {canManage ? (
-        <div className="flex justify-end">
-          <Button size="sm" onClick={() => setSheet({ kind: "create" })}>
-            {t("newButton")}
-          </Button>
-        </div>
-      ) : null}
-
       {rowError ? (
         <p className="text-destructive text-sm" role="alert">
           {rowError}
@@ -159,6 +152,7 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
         name="administrator.permissions"
         endpoint="/api/administrator/permissions"
         columns={columns}
+        headerActions={headerActions}
         options={{
           defaultPageSize: 50,
           defaultSort: [{ field: "key", direction: "asc" }],
@@ -167,18 +161,8 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
 
       <Sheet open={sheet.kind !== "closed"} onOpenChange={(open) => !open && closeSheet()}>
         <SheetContent side="right" className="w-full max-w-md sm:max-w-lg">
-          {sheet.kind === "create" ? (
-            <PermissionFormPanel
-              mode="create"
-              onClose={closeSheet}
-              onDone={() => {
-                closeSheet();
-                setReloadKey((k) => k + 1);
-              }}
-            />
-          ) : sheet.kind === "edit" ? (
-            <PermissionFormPanel
-              mode="edit"
+          {sheet.kind === "edit" ? (
+            <EditPermissionPanel
               row={sheet.row}
               onClose={closeSheet}
               onDone={() => {
@@ -197,16 +181,12 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
 
 /* -------------------------------------------------------------------------- */
 
-const KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
-
-function PermissionFormPanel({
-  mode,
+function EditPermissionPanel({
   row,
   onClose,
   onDone,
 }: {
-  mode: "create" | "edit";
-  row?: PermissionRow;
+  row: PermissionRow;
   onClose(): void;
   onDone(): void;
 }) {
@@ -214,61 +194,35 @@ function PermissionFormPanel({
   const tFields = useTranslations("administrator.permissions.fields");
   const tErr = useTranslations("administrator.errors");
 
-  const [key, setKey] = useState(row?.key ?? "");
-  const [description, setDescription] = useState(row?.description ?? "");
+  const [description, setDescription] = useState(row.description ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
-
-    if (mode === "create") {
-      if (!KEY_RE.test(key) || key.length === 0) {
-        setError(tErr("invalidBody"));
-        return;
-      }
-    }
-
     setSaving(true);
     try {
-      let res: Response;
-      if (mode === "create") {
-        res = await fetch("/api/administrator/permissions", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            key: key.trim(),
-            description: description.trim() || undefined,
-          }),
-        });
-      } else {
-        res = await fetch(`/api/administrator/permissions/${row!.id}`, {
-          method: "PATCH",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            description: description.trim().length > 0 ? description.trim() : null,
-          }),
-        });
-      }
+      const res = await fetch(`/api/administrator/permissions/${row.id}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          description: description.trim().length > 0 ? description.trim() : null,
+        }),
+      });
 
       if (res.ok) {
         onDone();
-        return;
-      }
-      if (res.status === 409) {
-        setError(tErr("keyTaken"));
         return;
       }
       if (res.status === 400) {
         setError(tErr("invalidBody"));
         return;
       }
-      setError(mode === "create" ? t("new.errorToast") : t("edit.errorToast"));
+      setError(t("edit.errorToast"));
     } catch {
-      setError(mode === "create" ? t("new.errorToast") : t("edit.errorToast"));
+      setError(t("edit.errorToast"));
     } finally {
       setSaving(false);
     }
@@ -277,22 +231,13 @@ function PermissionFormPanel({
   return (
     <>
       <SheetHeader>
-        <SheetTitle>{mode === "create" ? t("new.title") : t("edit.title")}</SheetTitle>
-        {mode === "create" ? <SheetDescription>{t("new.description")}</SheetDescription> : null}
+        <SheetTitle>{t("edit.title")}</SheetTitle>
       </SheetHeader>
 
       <form className="mt-4 space-y-4" onSubmit={onSubmit} noValidate>
         <div className="space-y-2">
           <Label htmlFor="permission-key">{tFields("key")}</Label>
-          <Input
-            id="permission-key"
-            type="text"
-            required
-            maxLength={120}
-            value={key}
-            onChange={(e) => setKey(e.currentTarget.value)}
-            disabled={mode === "edit"}
-          />
+          <Input id="permission-key" type="text" value={row.key} disabled />
         </div>
 
         <div className="space-y-2">
@@ -314,10 +259,10 @@ function PermissionFormPanel({
 
         <div className="flex items-center gap-2">
           <Button type="submit" disabled={saving}>
-            {mode === "create" ? t("new.submit") : t("edit.submit")}
+            {t("edit.submit")}
           </Button>
           <Button type="button" variant="outline" disabled={saving} onClick={onClose}>
-            {mode === "create" ? t("new.cancel") : t("edit.cancel")}
+            {t("edit.cancel")}
           </Button>
         </div>
       </form>

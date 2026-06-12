@@ -155,7 +155,6 @@
         "audit": "Audit"
       },
       "detail": {
-        "backToList": "Back to users",
         "notFound": "User not found.",
         "metaCreated": "Created {value}",
         "metaUpdated": "Updated {value}",
@@ -317,7 +316,6 @@
       "duplicateButton": "Duplicate",
       "deleteButton": "Delete",
       "editButton": "Edit",
-      "backToList": "Back to roles",
       "scope": {
         "global": "Global",
         "org": "Organization"
@@ -447,7 +445,6 @@
       "title": "Organizations",
       "newButton": "New organization",
       "deleteButton": "Delete",
-      "backToList": "Back to organizations",
       "defaultYes": "Default",
       "columns": {
         "slug": "Slug",
@@ -527,7 +524,6 @@
       "title": "Enterprise applications",
       "newButton": "New application",
       "deleteButton": "Delete",
-      "backToList": "Back to applications",
       "global": "Global",
       "columns": {
         "id": "ID",

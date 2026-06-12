@@ -155,7 +155,6 @@
         "audit": "Аудит"
       },
       "detail": {
-        "backToList": "Повернутися до списку",
         "notFound": "Користувача не знайдено.",
         "metaCreated": "Створено {value}",
         "metaUpdated": "Оновлено {value}",
@@ -317,7 +316,6 @@
       "duplicateButton": "Дублювати",
       "deleteButton": "Видалити",
       "editButton": "Редагувати",
-      "backToList": "Назад до ролей",
       "scope": {
         "global": "Глобальна",
         "org": "Організація"
@@ -447,7 +445,6 @@
       "title": "Організації",
       "newButton": "Нова організація",
       "deleteButton": "Видалити",
-      "backToList": "Назад до організацій",
       "defaultYes": "За замовчуванням",
       "columns": {
         "slug": "Slug",
@@ -527,7 +524,6 @@
       "title": "Корпоративні застосунки",
       "newButton": "Новий застосунок",
       "deleteButton": "Видалити",
-      "backToList": "Назад до застосунків",
       "global": "Глобальний",
       "columns": {
         "id": "ID",

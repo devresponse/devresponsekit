@@ -165,6 +165,16 @@
     border-color: var(--color-border);
   }
 
+  /* One hover cursor everywhere: Tailwind v4 preflight gives buttons
+     `cursor: default`, so button-based controls (menubar triggers,
+     sidebar trigger, form buttons) showed an arrow while link-based
+     sidebar items showed a hand. Enabled interactive controls always
+     get the pointer. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
   html,
   body {
     height: 100%;

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Superseded runs on the same ref are wasted compute — cancel them.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, lint, format, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # Matches docker-compose.yml. The vitest suites stub the DB layer
+      # and don't need it today; the service is groundwork for the
+      # Playwright e2e/a11y suites (seeded DB + `next start`) so adding
+      # them later is a job step, not an infrastructure change.
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: devresponse
+          POSTGRES_PASSWORD: devresponse
+          POSTGRES_DB: devresponse_db
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U devresponse -d devresponse_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # vitest.setup.ts provides test defaults for required env vars;
+      # DATABASE_URL points at the service for future DB-backed suites.
+      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        # Version comes from the packageManager field in package.json.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Tests with coverage gate
+        run: pnpm test:coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: ignore

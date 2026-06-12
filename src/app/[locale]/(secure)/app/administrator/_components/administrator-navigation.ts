@@ -2,6 +2,12 @@ export interface AdministratorNavigationItem {
   id: string;
   href: `/${string}`;
   labelKey: string;
+  /**
+   * Icon NAME resolved client-side through the allow-list in
+   * `src/components/navigation/menu-icons.ts`. Keys used here MUST
+   * exist in that map.
+   */
+  icon: string;
   requires: ReadonlyArray<string>;
 }
 
@@ -40,6 +46,7 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "overview-home",
         href: "/app/administrator",
         labelKey: "overview",
+        icon: "home",
         requires: [],
       },
     ],
@@ -53,6 +60,7 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "users",
         href: "/app/administrator/users",
         labelKey: "users",
+        icon: "users",
         requires: ["admin.users.read"],
       },
     ],
@@ -72,12 +80,14 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "roles",
         href: "/app/administrator/roles",
         labelKey: "roles",
+        icon: "shield",
         requires: ["admin.roles.read"],
       },
       {
         id: "permissions",
         href: "/app/administrator/permissions",
         labelKey: "permissions",
+        icon: "key-round",
         requires: ["admin.roles.read"],
       },
     ],
@@ -97,12 +107,14 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "organizations",
         href: "/app/administrator/organizations",
         labelKey: "organizations",
+        icon: "building-2",
         requires: ["admin.orgs.read"],
       },
       {
         id: "memberships",
         href: "/app/administrator/memberships",
         labelKey: "memberships",
+        icon: "users-round",
         requires: ["admin.orgs.read"],
       },
     ],
@@ -122,6 +134,7 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "enterprise-apps",
         href: "/app/administrator/enterprise-apps",
         labelKey: "enterpriseApps",
+        icon: "app-window",
         requires: ["admin.apps.read"],
       },
     ],
@@ -141,6 +154,7 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "audit",
         href: "/app/administrator/audit",
         labelKey: "auditLog",
+        icon: "scroll-text",
         requires: ["admin.audit.read"],
       },
     ],

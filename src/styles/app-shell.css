@@ -69,7 +69,13 @@
  * sizes can never shift or wobble.
  */
 @media (min-width: 769px) {
-  .sh-grid[data-left-hidden="false"]:has(.sh-left [data-collapsible="icon"]) {
+  /*
+   * Child combinators (> .sh-left > ...) scope the match to the grid's
+   * OWN left region: shells nest (root shell hosts the Administrator
+   * ApplicationShell), and a descendant match would collapse the root
+   * column whenever a nested sidebar collapses.
+   */
+  .sh-grid[data-left-hidden="false"]:has(> .sh-left > [data-collapsible="icon"]) {
     grid-template-columns:
       var(--sidebar-width-icon, 3rem)
       minmax(0, 1fr)

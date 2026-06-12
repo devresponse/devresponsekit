@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AdministratorTopHeader } from "@/app/[locale]/(secure)/app/administrator/_components/administrator-top-header";
+import { SidebarProvider } from "@/components/ui/flexsidebar";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 const push = vi.fn();
@@ -11,9 +12,14 @@ vi.mock("@/i18n/navigation", () => ({
   useRouter: () => ({ push }),
 }));
 
+/** The header hosts a SidebarTrigger, which needs the admin layout's provider. */
+function renderHeader(ui: React.ReactElement) {
+  return renderWithIntl(<SidebarProvider>{ui}</SidebarProvider>);
+}
+
 describe("AdministratorTopHeader", () => {
   it("renders a square desktop menubar with only visible administrator groups", () => {
-    renderWithIntl(
+    renderHeader(
       <AdministratorTopHeader
         locale="en"
         permissions={["admin.users.read", "admin.users.create", "admin.roles.read"]}
@@ -34,7 +40,7 @@ describe("AdministratorTopHeader", () => {
     push.mockReset();
     const user = userEvent.setup();
 
-    renderWithIntl(
+    renderHeader(
       <AdministratorTopHeader
         locale="en"
         permissions={["admin.users.read", "admin.users.create"]}
@@ -60,7 +66,7 @@ describe("AdministratorTopHeader", () => {
   it("hides create actions when the caller only has read access", async () => {
     const user = userEvent.setup();
 
-    renderWithIntl(<AdministratorTopHeader locale="en" permissions={["admin.users.read"]} />);
+    renderHeader(<AdministratorTopHeader locale="en" permissions={["admin.users.read"]} />);
 
     await user.click(screen.getByRole("menuitem", { name: "Identity" }));
 

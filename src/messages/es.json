@@ -105,6 +105,26 @@
         "enterpriseApps": "Aplicaciones empresariales",
         "enterpriseAppsHint": "{available} disponibles",
         "none": "Aún no tienes permiso para ver ninguna métrica."
+      },
+      "recent": {
+        "registrationsTitle": "Últimos registros",
+        "sessionsTitle": "Últimos inicios de sesión",
+        "auditTitle": "Últimos eventos de auditoría",
+        "organizationsTitle": "Últimas organizaciones",
+        "viewAll": "Ver todo",
+        "empty": "Aún no hay nada aquí.",
+        "columns": {
+          "user": "Usuario",
+          "status": "Estado",
+          "created": "Creado",
+          "ip": "Dirección IP",
+          "signedIn": "Inicio de sesión",
+          "event": "Evento",
+          "outcome": "Resultado",
+          "when": "Cuándo",
+          "name": "Nombre",
+          "slug": "Slug"
+        }
       }
     },
     "users": {

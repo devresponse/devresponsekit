@@ -105,6 +105,26 @@
         "enterpriseApps": "Корпоративні застосунки",
         "enterpriseAppsHint": "{available} доступно",
         "none": "У вас поки немає дозволу на перегляд метрик."
+      },
+      "recent": {
+        "registrationsTitle": "Останні реєстрації",
+        "sessionsTitle": "Останні входи",
+        "auditTitle": "Останні події аудиту",
+        "organizationsTitle": "Останні організації",
+        "viewAll": "Переглянути всі",
+        "empty": "Поки що тут нічого немає.",
+        "columns": {
+          "user": "Користувач",
+          "status": "Статус",
+          "created": "Створено",
+          "ip": "IP-адреса",
+          "signedIn": "Вхід",
+          "event": "Подія",
+          "outcome": "Результат",
+          "when": "Коли",
+          "name": "Назва",
+          "slug": "Slug"
+        }
       }
     },
     "users": {

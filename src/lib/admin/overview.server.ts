@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
+import { toDate } from "@/lib/db-types";
 
 /**
  * Query layer for the Administrator overview dashboard
@@ -118,4 +119,152 @@ export async function getAdministratorOverviewMetrics(
   ]);
 
   return { users, organizations, roles, permissions, enterpriseApps };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Recent activity (the dashboard's second tier)                             */
+/* -------------------------------------------------------------------------- */
+
+const ACTIVITY_LIMIT = 10;
+
+export interface RecentRegistration {
+  id: string;
+  email: string;
+  displayName: string | null;
+  status: string;
+  /** ISO timestamp — normalized at the query boundary. */
+  createdAt: string;
+}
+
+export interface RecentLoginSession {
+  id: string;
+  userEmail: string;
+  userName: string;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+export interface RecentAuditEvent {
+  id: string;
+  eventType: string;
+  outcome: string;
+  email: string | null;
+  createdAt: string;
+}
+
+export interface RecentOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface OverviewActivity {
+  registrations?: RecentRegistration[];
+  sessions?: RecentLoginSession[];
+  auditEvents?: RecentAuditEvent[];
+  organizations?: RecentOrganization[];
+}
+
+export interface OverviewActivityInclude {
+  registrations: boolean;
+  sessions: boolean;
+  auditEvents: boolean;
+  organizations: boolean;
+}
+
+async function listRecentRegistrations(): Promise<RecentRegistration[]> {
+  const rows = await db
+    .selectFrom("app_users")
+    .select(["id", "primary_email", "display_name", "status", "created_at"])
+    .orderBy("created_at", "desc")
+    .limit(ACTIVITY_LIMIT)
+    .execute();
+
+  return rows.map((r) => ({
+    id: r.id,
+    email: r.primary_email,
+    displayName: r.display_name,
+    status: r.status,
+    createdAt: toDate(r.created_at).toISOString(),
+  }));
+}
+
+async function listRecentSessions(): Promise<RecentLoginSession[]> {
+  // Better Auth owns the `session`/`user` tables; this is a read-only
+  // reporting join (see the schema note in app-schema.ts).
+  const rows = await db
+    .selectFrom("session")
+    .innerJoin("user", "user.id", "session.userId")
+    .select([
+      "session.id as id",
+      "user.email as userEmail",
+      "user.name as userName",
+      "session.ipAddress as ipAddress",
+      "session.createdAt as createdAt",
+    ])
+    .orderBy("session.createdAt", "desc")
+    .limit(ACTIVITY_LIMIT)
+    .execute();
+
+  return rows.map((r) => ({
+    id: r.id,
+    userEmail: r.userEmail,
+    userName: r.userName,
+    ipAddress: r.ipAddress,
+    createdAt: toDate(r.createdAt).toISOString(),
+  }));
+}
+
+async function listRecentAuditEvents(): Promise<RecentAuditEvent[]> {
+  const rows = await db
+    .selectFrom("app_audit_events")
+    .select(["id", "event_type", "outcome", "email", "created_at"])
+    .orderBy("created_at", "desc")
+    .limit(ACTIVITY_LIMIT)
+    .execute();
+
+  return rows.map((r) => ({
+    id: r.id,
+    eventType: r.event_type,
+    outcome: r.outcome,
+    email: r.email,
+    createdAt: toDate(r.created_at).toISOString(),
+  }));
+}
+
+async function listRecentOrganizations(): Promise<RecentOrganization[]> {
+  const rows = await db
+    .selectFrom("app_organizations")
+    .select(["id", "name", "slug", "status", "created_at"])
+    .orderBy("created_at", "desc")
+    .limit(ACTIVITY_LIMIT)
+    .execute();
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    status: r.status,
+    createdAt: toDate(r.created_at).toISOString(),
+  }));
+}
+
+/**
+ * Loads the requested recent-activity lists in parallel — same
+ * permission-driven `include` contract as the metric slices: excluded
+ * lists are never queried.
+ */
+export async function getAdministratorOverviewActivity(
+  include: OverviewActivityInclude,
+): Promise<OverviewActivity> {
+  const [registrations, sessions, auditEvents, organizations] = await Promise.all([
+    include.registrations ? listRecentRegistrations() : undefined,
+    include.sessions ? listRecentSessions() : undefined,
+    include.auditEvents ? listRecentAuditEvents() : undefined,
+    include.organizations ? listRecentOrganizations() : undefined,
+  ]);
+
+  return { registrations, sessions, auditEvents, organizations };
 }

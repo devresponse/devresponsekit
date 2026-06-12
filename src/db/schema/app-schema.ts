@@ -162,6 +162,34 @@ export interface AppDatabase {
   app_sso_handoff_nonces: AppSsoHandoffNoncesTable;
   app_audit_events: AppAuditEventsTable;
   app_user_locale_preferences: AppUserLocalePreferencesTable;
+  session: BetterAuthSessionTable;
+  user: BetterAuthUserTable;
+}
+
+/*
+ * Better Auth-owned tables, typed READ-ONLY (inserts/updates are
+ * `never`) for reporting queries such as the Administrator overview's
+ * recent-logins list. All writes to these tables go through the Better
+ * Auth API — never through Kysely. Column names are camelCase because
+ * Better Auth creates them quoted.
+ */
+export interface BetterAuthSessionTable {
+  id: ColumnType<string, never, never>;
+  token: ColumnType<string, never, never>;
+  userId: ColumnType<string, never, never>;
+  createdAt: ColumnType<Date, never, never>;
+  updatedAt: ColumnType<Date, never, never>;
+  expiresAt: ColumnType<Date, never, never>;
+  ipAddress: ColumnType<string | null, never, never>;
+  userAgent: ColumnType<string | null, never, never>;
+  impersonatedBy: ColumnType<string | null, never, never>;
+}
+
+export interface BetterAuthUserTable {
+  id: ColumnType<string, never, never>;
+  name: ColumnType<string, never, never>;
+  email: ColumnType<string, never, never>;
+  createdAt: ColumnType<Date, never, never>;
 }
 
 export type AppOrganization = Selectable<AppOrganizationsTable>;

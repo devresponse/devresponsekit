@@ -16,19 +16,28 @@ vi.mock("@/db/database", () => ({
   db: {
     selectFrom: (table: string) => {
       queriedTables.push(table);
-      return {
-        select: () => ({
-          groupBy: () => ({
-            execute: executeByTable.get(table) ?? vi.fn().mockResolvedValue([]),
-          }),
-          executeTakeFirst: takeFirstByTable.get(table) ?? vi.fn().mockResolvedValue(undefined),
-        }),
+      // One chainable stub covers both query shapes:
+      //   counts:   select(...).groupBy(...).execute() / select(...).executeTakeFirst()
+      //   activity: [innerJoin(...)].select(...).orderBy(...).limit(...).execute()
+      const chain = {
+        innerJoin: () => chain,
+        select: () => chain,
+        groupBy: () => chain,
+        orderBy: () => chain,
+        limit: () => chain,
+        execute: () => (executeByTable.get(table) ?? vi.fn().mockResolvedValue([]))(),
+        executeTakeFirst: () =>
+          (takeFirstByTable.get(table) ?? vi.fn().mockResolvedValue(undefined))(),
       };
+      return chain;
     },
   },
 }));
 
-import { getAdministratorOverviewMetrics } from "@/lib/admin/overview.server";
+import {
+  getAdministratorOverviewActivity,
+  getAdministratorOverviewMetrics,
+} from "@/lib/admin/overview.server";
 
 const ALL = {
   users: true,
@@ -96,5 +105,120 @@ describe("getAdministratorOverviewMetrics", () => {
     expect(metrics.roles).toBeUndefined();
     expect(metrics.permissions).toBeUndefined();
     expect(metrics.enterpriseApps).toBeUndefined();
+  });
+});
+
+const ALL_ACTIVITY = {
+  registrations: true,
+  sessions: true,
+  auditEvents: true,
+  organizations: true,
+};
+
+describe("getAdministratorOverviewActivity", () => {
+  it("maps rows to the activity shapes and normalizes timestamps to ISO", async () => {
+    executeByTable.set(
+      "app_users",
+      vi.fn().mockResolvedValue([
+        {
+          id: "u1",
+          primary_email: "a@x.com",
+          display_name: "Ada",
+          status: "active",
+          created_at: new Date("2026-06-01T10:00:00Z"),
+        },
+      ]),
+    );
+    executeByTable.set(
+      "session",
+      vi.fn().mockResolvedValue([
+        {
+          id: "s1",
+          userEmail: "a@x.com",
+          userName: "Ada",
+          ipAddress: "10.0.0.1",
+          // pg may surface timestamps as strings in some paths.
+          createdAt: "2026-06-02T11:30:00Z",
+        },
+      ]),
+    );
+    executeByTable.set(
+      "app_audit_events",
+      vi.fn().mockResolvedValue([
+        {
+          id: "e1",
+          event_type: "admin.user.approved",
+          outcome: "success",
+          email: "a@x.com",
+          created_at: new Date("2026-06-03T12:00:00Z"),
+        },
+      ]),
+    );
+    executeByTable.set(
+      "app_organizations",
+      vi.fn().mockResolvedValue([
+        {
+          id: "o1",
+          name: "Default",
+          slug: "default",
+          status: "active",
+          created_at: new Date("2026-06-04T13:00:00Z"),
+        },
+      ]),
+    );
+
+    const activity = await getAdministratorOverviewActivity(ALL_ACTIVITY);
+
+    expect(activity.registrations).toEqual([
+      {
+        id: "u1",
+        email: "a@x.com",
+        displayName: "Ada",
+        status: "active",
+        createdAt: "2026-06-01T10:00:00.000Z",
+      },
+    ]);
+    expect(activity.sessions).toEqual([
+      {
+        id: "s1",
+        userEmail: "a@x.com",
+        userName: "Ada",
+        ipAddress: "10.0.0.1",
+        createdAt: "2026-06-02T11:30:00.000Z",
+      },
+    ]);
+    expect(activity.auditEvents).toEqual([
+      {
+        id: "e1",
+        eventType: "admin.user.approved",
+        outcome: "success",
+        email: "a@x.com",
+        createdAt: "2026-06-03T12:00:00.000Z",
+      },
+    ]);
+    expect(activity.organizations).toEqual([
+      {
+        id: "o1",
+        name: "Default",
+        slug: "default",
+        status: "active",
+        createdAt: "2026-06-04T13:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("never queries lists excluded by the permission flags", async () => {
+    const activity = await getAdministratorOverviewActivity({
+      registrations: false,
+      sessions: true,
+      auditEvents: false,
+      organizations: false,
+    });
+
+    expect(queriedTables).toEqual(["session"]);
+    expect(activity.sessions).toEqual([]);
+    expect(activity.registrations).toBeUndefined();
+    expect(activity.auditEvents).toBeUndefined();
+    expect(activity.organizations).toBeUndefined();
   });
 });

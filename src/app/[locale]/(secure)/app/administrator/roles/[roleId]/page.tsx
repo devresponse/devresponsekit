@@ -3,9 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { AdminError, loadRoleOrThrow } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { RoleDetailTabs } from "./_role-detail-tabs";
 
 export const dynamic = "force-dynamic";
@@ -57,11 +55,6 @@ export default async function AdministratorRoleDetailPage({
     <section className="space-y-4 p-6">
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-1">
-          <Button asChild variant="link" className="h-auto px-0 text-sm">
-            <LocaleLink locale={locale} href="/app/administrator/roles">
-              ← {t("backToList")}
-            </LocaleLink>
-          </Button>
           <h1 className="text-lg font-semibold">{role.name}</h1>
           <p className="text-muted-foreground text-sm">
             <code className="text-xs">{role.key}</code>

@@ -1,11 +1,8 @@
 import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps.server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { Button } from "@/components/ui/button";
 import { EnterpriseAppSettingsForm } from "./_enterprise-app-settings-form";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +23,7 @@ export default async function AdministratorEnterpriseAppDetailPage({
 }: {
   params: Promise<{ locale: string; appId: string }>;
 }) {
-  const { locale, appId } = await params;
+  const { appId } = await params;
 
   const guard = await checkAdminPermissionServer("admin.apps.read");
   if (guard === "denied" || guard === "unauthenticated") {
@@ -57,19 +54,12 @@ export default async function AdministratorEnterpriseAppDetailPage({
     notFound();
   }
 
-  const t = await getTranslations({ locale, namespace: "administrator.enterpriseApps" });
-
   const canManage = guard.access.permissions.includes("admin.apps.manage");
 
   return (
     <section className="space-y-4 p-6">
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-1">
-          <Button asChild variant="link" className="h-auto px-0 text-sm">
-            <LocaleLink locale={locale} href="/app/administrator/enterprise-apps">
-              ← {t("backToList")}
-            </LocaleLink>
-          </Button>
           <h1 className="text-lg font-semibold">{row.label}</h1>
           <p className="text-muted-foreground text-sm">
             <code className="text-xs">{row.id}</code>

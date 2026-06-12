@@ -155,7 +155,6 @@
         "audit": "Audit"
       },
       "detail": {
-        "backToList": "Retour aux utilisateurs",
         "notFound": "Utilisateur introuvable.",
         "metaCreated": "Créé {value}",
         "metaUpdated": "Mis à jour {value}",
@@ -317,7 +316,6 @@
       "duplicateButton": "Dupliquer",
       "deleteButton": "Supprimer",
       "editButton": "Modifier",
-      "backToList": "Retour aux rôles",
       "scope": {
         "global": "Global",
         "org": "Organisation"
@@ -447,7 +445,6 @@
       "title": "Organisations",
       "newButton": "Nouvelle organisation",
       "deleteButton": "Supprimer",
-      "backToList": "Retour aux organisations",
       "defaultYes": "Par défaut",
       "columns": {
         "slug": "Slug",
@@ -527,7 +524,6 @@
       "title": "Applications d'entreprise",
       "newButton": "Nouvelle application",
       "deleteButton": "Supprimer",
-      "backToList": "Retour aux applications",
       "global": "Global",
       "columns": {
         "id": "ID",

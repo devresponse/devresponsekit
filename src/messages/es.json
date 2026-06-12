@@ -95,7 +95,17 @@
     },
     "overview": {
       "title": "Resumen del administrador",
-      "description": "Seleccione un área en la navegación izquierda para comenzar a gestionar la plataforma."
+      "description": "Seleccione un área en la navegación izquierda para comenzar a gestionar la plataforma.",
+      "metrics": {
+        "users": "Usuarios",
+        "usersHint": "{active} activos · {pending} pendientes de aprobación",
+        "organizations": "Organizaciones",
+        "roles": "Roles",
+        "permissions": "Permisos",
+        "enterpriseApps": "Aplicaciones empresariales",
+        "enterpriseAppsHint": "{available} disponibles",
+        "none": "Aún no tienes permiso para ver ninguna métrica."
+      }
     },
     "users": {
       "title": "Usuarios",

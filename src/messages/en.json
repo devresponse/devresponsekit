@@ -95,7 +95,17 @@
     },
     "overview": {
       "title": "Administrator overview",
-      "description": "Pick an area from the left navigation to begin managing the platform."
+      "description": "Pick an area from the left navigation to begin managing the platform.",
+      "metrics": {
+        "users": "Users",
+        "usersHint": "{active} active · {pending} pending approval",
+        "organizations": "Organizations",
+        "roles": "Roles",
+        "permissions": "Permissions",
+        "enterpriseApps": "Enterprise applications",
+        "enterpriseAppsHint": "{available} available",
+        "none": "You don't have permission to view any metrics yet."
+      }
     },
     "users": {
       "title": "Users",

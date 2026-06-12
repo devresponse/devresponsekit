@@ -81,4 +81,34 @@ describe("ShellGridContainer", () => {
     );
     expect(screen.queryByText("L")).toBeNull();
   });
+
+  it("defaults to the header-first layout", () => {
+    renderWithIntl(
+      <ShellGridContainer variant="nested" depth={1}>
+        <span>main</span>
+      </ShellGridContainer>,
+    );
+    const grid = screen.getByText("main").closest("[data-layout]")!;
+    expect(grid.getAttribute("data-layout")).toBe("header-first");
+  });
+
+  it("emits the sidebar-first layout attribute that drives the CSS area map", () => {
+    renderWithIntl(
+      <ShellGridContainer
+        variant="nested"
+        depth={1}
+        layout="sidebar-first"
+        header={<span>H</span>}
+        left={<span>L</span>}
+      >
+        <span>main</span>
+      </ShellGridContainer>,
+    );
+    const grid = screen.getByText("main").closest("[data-layout]")!;
+    expect(grid.getAttribute("data-layout")).toBe("sidebar-first");
+    // Regions render the same DOM in both layouts — only the grid
+    // areas change (app-shell.css) — so landmarks must be unaffected.
+    expect(screen.getByRole("banner")).toHaveTextContent("H");
+    expect(screen.getByLabelText("Primary navigation")).toHaveTextContent("L");
+  });
 });

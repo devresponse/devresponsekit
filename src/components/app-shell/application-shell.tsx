@@ -12,11 +12,16 @@ import type { ApplicationShellProps } from "./shell-types";
  * dimensions. MUST NOT render its own `TopShellBar` — the brand bar
  * lives at root depth only.
  *
+ * `layout` picks the region arrangement: `header-first` (default,
+ * header spans the full width) or `sidebar-first` (the left region
+ * spans the full height and the header sits adjacent to it).
+ *
  * Why a Client Component? It reads the shell-depth context to compute
  * `depth + 1`. The context boundary is intentional so server pages can
  * still render this component synchronously inside a client tree.
  */
 export function ApplicationShell({
+  layout,
   header,
   left,
   right,
@@ -36,6 +41,7 @@ export function ApplicationShell({
     <ShellGridContainer
       variant="nested"
       depth={parentDepth + 1}
+      layout={layout}
       header={header}
       left={left}
       right={right}

@@ -42,6 +42,20 @@
     "footer footer footer";
 }
 
+/*
+ * sidebar-first arrangement: the left region owns column 1 for ALL
+ * rows and the header sits adjacent to it, spanning only the content
+ * columns. Columns and rows are identical to the default, so the
+ * fixed-width tokens, the icon-collapse rule, the visibility flags,
+ * and the mobile collapse below apply unchanged.
+ */
+.sh-grid[data-layout="sidebar-first"] {
+  grid-template-areas:
+    "left header header"
+    "left main   right"
+    "left footer footer";
+}
+
 .sh-grid[data-left-hidden="true"] {
   grid-template-columns: 0 minmax(0, 1fr) var(--sh-right-width, 0);
 }

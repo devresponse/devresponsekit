@@ -82,7 +82,7 @@ export function AdministratorOrganizationsGrid({
       }
       setReloadKey((k) => k + 1);
     },
-    [t, tErr],
+    [dialogs, t, tErr],
   );
 
   const columns = useMemo<ColumnDef<OrgRow, unknown>[]>(

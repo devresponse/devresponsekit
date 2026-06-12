@@ -34,14 +34,15 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "@typescript-eslint/no-explicit-any": "warn",
-      // React-Compiler-era hooks checks (new in react-hooks v6 via
-      // eslint-config-next 16). Several pre-existing patterns — mostly
-      // in vendored shadcn/ui primitives — trip them. Keep the findings
-      // visible as warnings rather than blocking the lint gate; tighten
-      // back to errors as the flagged components get reworked.
-      "react-hooks/refs": "warn",
-      "react-hooks/purity": "warn",
-      "react-hooks/set-state-in-effect": "warn",
+      // React-Compiler-era hooks checks (react-hooks v6 via
+      // eslint-config-next 16) run at their default ERROR severity —
+      // the flagged patterns (refs during render, setState in effects,
+      // impure render) have all been reworked.
+      //
+      // `incompatible-library` is informational only: it reports that
+      // the React Compiler skips files using @tanstack/react-table.
+      // This project does not use the compiler, so the notice is noise.
+      "react-hooks/incompatible-library": "off",
     },
   },
 );

@@ -2,7 +2,7 @@
 
 import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -10,13 +10,19 @@ import { Button } from "@/components/ui/button";
  *
  * Switches between light and dark. Renders a stable placeholder until
  * mounted — `resolvedTheme` is unknowable during SSR, and rendering a
- * guess would flash the wrong icon (hydration mismatch).
+ * guess would flash the wrong icon (hydration mismatch). Mounted-ness
+ * is derived via `useSyncExternalStore` (server snapshot `false`,
+ * client snapshot `true`) instead of a setState-in-effect.
  */
+const emptySubscribe = () => () => {};
+
 export function ThemeToggle({ className }: { className?: string }) {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
 
   const isDark = mounted && resolvedTheme === "dark";
 

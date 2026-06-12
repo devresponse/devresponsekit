@@ -1,7 +1,14 @@
 import { getTranslations } from "next-intl/server";
-import { getAdministratorOverviewMetrics, type OverviewMetrics } from "@/lib/admin/overview.server";
+import { Badge } from "@/components/ui/badge";
+import {
+  getAdministratorOverviewActivity,
+  getAdministratorOverviewMetrics,
+  type OverviewActivity,
+  type OverviewMetrics,
+} from "@/lib/admin/overview.server";
 import { ANY_ADMIN_PERMISSION, checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { MetricCard, type MetricCardProps } from "./_components/metric-card";
+import { OverviewListCard, type OverviewListCardProps } from "./_components/overview-list-card";
 
 export const dynamic = "force-dynamic";
 
@@ -70,17 +77,29 @@ export default async function AdministratorPage({
   const visible = METRIC_DESCRIPTORS.filter((d) => permissions.includes(d.permission));
   const visibleIds = new Set<MetricId>(visible.map((d) => d.id));
 
-  const metrics = await getAdministratorOverviewMetrics({
-    users: visibleIds.has("users"),
-    organizations: visibleIds.has("organizations"),
-    roles: visibleIds.has("roles"),
-    permissions: visibleIds.has("permissions"),
-    enterpriseApps: visibleIds.has("enterpriseApps"),
-  });
+  const [metrics, activity] = await Promise.all([
+    getAdministratorOverviewMetrics({
+      users: visibleIds.has("users"),
+      organizations: visibleIds.has("organizations"),
+      roles: visibleIds.has("roles"),
+      permissions: visibleIds.has("permissions"),
+      enterpriseApps: visibleIds.has("enterpriseApps"),
+    }),
+    getAdministratorOverviewActivity({
+      registrations: permissions.includes("admin.users.read"),
+      // Session rows carry IPs — gate on the session-management
+      // permission, not the broader users.read.
+      sessions: permissions.includes("admin.users.sessions"),
+      auditEvents: permissions.includes("admin.audit.read"),
+      organizations: permissions.includes("admin.orgs.read"),
+    }),
+  ]);
 
   const cards = visible
     .map((d) => toCard(d, metrics, t, locale))
     .filter((c): c is MetricCardProps => c !== null);
+
+  const lists = buildActivityLists(activity, t, locale);
 
   return (
     <section className="space-y-6 p-6">
@@ -98,8 +117,129 @@ export default async function AdministratorPage({
       ) : (
         <p className="text-muted-foreground text-sm">{t("metrics.none")}</p>
       )}
+
+      {lists.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {lists.map((list) => (
+            <OverviewListCard key={list.title} {...list} />
+          ))}
+        </div>
+      ) : null}
     </section>
   );
+}
+
+/**
+ * Joins the permitted activity slices with their localized table
+ * shapes. Each list renders only when its slice was fetched (i.e. the
+ * caller holds the read permission for that area).
+ */
+function buildActivityLists(
+  activity: OverviewActivity,
+  t: Awaited<ReturnType<typeof getTranslations>>,
+  locale: string,
+): OverviewListCardProps[] {
+  const formatTime = (iso: string) =>
+    new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
+      new Date(iso),
+    );
+  const time = (iso: string) => (
+    <span className="text-muted-foreground whitespace-nowrap">{formatTime(iso)}</span>
+  );
+
+  const lists: OverviewListCardProps[] = [];
+
+  if (activity.registrations) {
+    lists.push({
+      title: t("recent.registrationsTitle"),
+      viewAllHref: "/app/administrator/users",
+      viewAllLabel: t("recent.viewAll"),
+      emptyLabel: t("recent.empty"),
+      locale,
+      headers: [t("recent.columns.user"), t("recent.columns.status"), t("recent.columns.created")],
+      rows: activity.registrations.map((r) => ({
+        key: r.id,
+        cells: [
+          <span key="user" className="block max-w-48 truncate" title={r.email}>
+            {r.displayName ?? r.email}
+          </span>,
+          <Badge key="status" variant="outline">
+            {r.status}
+          </Badge>,
+          time(r.createdAt),
+        ],
+      })),
+    });
+  }
+
+  if (activity.sessions) {
+    lists.push({
+      title: t("recent.sessionsTitle"),
+      emptyLabel: t("recent.empty"),
+      locale,
+      headers: [t("recent.columns.user"), t("recent.columns.ip"), t("recent.columns.signedIn")],
+      rows: activity.sessions.map((s) => ({
+        key: s.id,
+        cells: [
+          <span key="user" className="block max-w-48 truncate" title={s.userEmail}>
+            {s.userName || s.userEmail}
+          </span>,
+          <code key="ip" className="text-muted-foreground">
+            {s.ipAddress ?? "—"}
+          </code>,
+          time(s.createdAt),
+        ],
+      })),
+    });
+  }
+
+  if (activity.auditEvents) {
+    lists.push({
+      title: t("recent.auditTitle"),
+      viewAllHref: "/app/administrator/audit",
+      viewAllLabel: t("recent.viewAll"),
+      emptyLabel: t("recent.empty"),
+      locale,
+      headers: [t("recent.columns.event"), t("recent.columns.outcome"), t("recent.columns.when")],
+      rows: activity.auditEvents.map((e) => ({
+        key: e.id,
+        cells: [
+          <span key="event" className="block max-w-56 truncate" title={e.email ?? undefined}>
+            {e.eventType}
+          </span>,
+          <Badge key="outcome" variant={e.outcome === "success" ? "outline" : "destructive"}>
+            {e.outcome}
+          </Badge>,
+          time(e.createdAt),
+        ],
+      })),
+    });
+  }
+
+  if (activity.organizations) {
+    lists.push({
+      title: t("recent.organizationsTitle"),
+      viewAllHref: "/app/administrator/organizations",
+      viewAllLabel: t("recent.viewAll"),
+      emptyLabel: t("recent.empty"),
+      locale,
+      headers: [t("recent.columns.name"), t("recent.columns.slug"), t("recent.columns.created")],
+      rows: activity.organizations.map((o) => ({
+        key: o.id,
+        cells: [
+          <span key="name" className="block max-w-48 truncate">
+            {o.name}
+          </span>,
+          <code key="slug" className="text-muted-foreground">
+            {o.slug}
+          </code>,
+          time(o.createdAt),
+        ],
+      })),
+    });
+  }
+
+  return lists;
 }
 
 /** Joins a descriptor with its metric slice into MetricCard props. */

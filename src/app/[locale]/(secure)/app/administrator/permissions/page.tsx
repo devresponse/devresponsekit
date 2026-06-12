@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { LocaleLink } from "@/components/i18n/locale-link";
+import { Button } from "@/components/ui/button";
 import { AdministratorPermissionsGrid } from "./_permissions-grid";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +35,18 @@ export default async function AdministratorPermissionsPage({
         <h1 className="text-lg font-semibold">{t("title")}</h1>
         <p className="text-muted-foreground text-sm">{t("description")}</p>
       </div>
-      <AdministratorPermissionsGrid canManage={canManage} />
+      <AdministratorPermissionsGrid
+        canManage={canManage}
+        headerActions={
+          canManage ? (
+            <Button asChild size="sm">
+              <LocaleLink locale={locale} href="/app/administrator/permissions/new">
+                {t("newButton")}
+              </LocaleLink>
+            </Button>
+          ) : undefined
+        }
+      />
     </section>
   );
 }

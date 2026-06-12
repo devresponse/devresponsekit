@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * shadcn sidebar — the SINGLE SOURCE for the sidebar system.
+ *
+ * This module owns the provider/context/state machine (cookie
+ * persistence, keyboard shortcut, mobile sheet) and every sub-component
+ * (trigger, rail, inset, menu, groups, ...). Two container variants
+ * build on it:
+ *   - `Sidebar` (here): the stock shadcn fixed-position panel that
+ *     overlays the full viewport height.
+ *   - `FlexSidebar` (`flexsidebar.tsx`): the container-bounded in-flow
+ *     variant used inside the Holy Grail shell. It re-exports
+ *     everything from this file and overrides only the container,
+ *     the provider wrapper sizing, and the inset sizing.
+ *
+ * Fix shared behavior HERE — never in both files.
+ */
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -54,6 +70,17 @@ const SidebarProvider = React.forwardRef<
     defaultOpen?: boolean;
     open?: boolean;
     onOpenChange?: (open: boolean) => void;
+    /**
+     * Cookie persisting the open state. Give each nested provider its
+     * own name (e.g. `administrator_sidebar_state`) so two sidebars on
+     * one page don't overwrite each other's persistence.
+     */
+    cookieName?: string;
+    /**
+     * Ctrl/Cmd+<key> toggle. Pass `null` to disable — required for
+     * nested providers, otherwise one keypress toggles every sidebar.
+     */
+    keyboardShortcut?: string | null;
   }
 >(
   (
@@ -61,6 +88,8 @@ const SidebarProvider = React.forwardRef<
       defaultOpen = true,
       open: openProp,
       onOpenChange: setOpenProp,
+      cookieName = SIDEBAR_COOKIE_NAME,
+      keyboardShortcut = SIDEBAR_KEYBOARD_SHORTCUT,
       className,
       style,
       children,
@@ -85,9 +114,9 @@ const SidebarProvider = React.forwardRef<
         }
 
         // This sets the cookie to keep the sidebar state.
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+        document.cookie = `${cookieName}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
       },
-      [setOpenProp, open],
+      [setOpenProp, open, cookieName],
     );
 
     // Helper to toggle the sidebar.
@@ -97,8 +126,9 @@ const SidebarProvider = React.forwardRef<
 
     // Adds a keyboard shortcut to toggle the sidebar.
     React.useEffect(() => {
+      if (!keyboardShortcut) return;
       const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+        if (event.key === keyboardShortcut && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
           toggleSidebar();
         }
@@ -106,7 +136,7 @@ const SidebarProvider = React.forwardRef<
 
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [toggleSidebar]);
+    }, [toggleSidebar, keyboardShortcut]);
 
     // We add a state so that we can do data-state="expanded" or "collapsed".
     // This makes it easier to style the sidebar with Tailwind classes.
@@ -146,6 +176,61 @@ const SidebarProvider = React.forwardRef<
 );
 SidebarProvider.displayName = "SidebarProvider";
 
+/**
+ * Shared `collapsible="none"` branch: a static, always-expanded column.
+ * Used by both `Sidebar` and `FlexSidebar` so the non-collapsing form
+ * cannot drift between the two variants.
+ */
+const SidebarStatic = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
+  ({ className, children, ...props }, ref) => (
+    <div
+      className={cn(
+        "bg-sidebar text-sidebar-foreground flex h-full w-[--sidebar-width] flex-col",
+        className,
+      )}
+      ref={ref}
+      {...props}
+    >
+      {children}
+    </div>
+  ),
+);
+SidebarStatic.displayName = "SidebarStatic";
+
+/**
+ * Shared mobile branch: the sidebar rendered as a Sheet drawer. Used by
+ * both `Sidebar` and `FlexSidebar`; reads open state from the provider.
+ */
+function SidebarMobileSheet({
+  side = "left",
+  children,
+  ...props
+}: React.ComponentProps<"div"> & { side?: "left" | "right" }) {
+  const { openMobile, setOpenMobile } = useSidebar();
+
+  return (
+    <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
+      <SheetContent
+        data-sidebar="sidebar"
+        data-mobile="true"
+        className="bg-sidebar text-sidebar-foreground w-[--sidebar-width] p-0 [&>button]:hidden"
+        style={
+          {
+            "--sidebar-width": "var(--sidebar-width-mobile, 18rem)",
+          } as React.CSSProperties
+        }
+        side={side}
+      >
+        <SheetHeader className="sr-only">
+          <SheetTitle>Sidebar</SheetTitle>
+          <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+        </SheetHeader>
+        <div className="flex h-full w-full flex-col">{children}</div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 const Sidebar = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div"> & {
@@ -165,44 +250,21 @@ const Sidebar = React.forwardRef<
     },
     ref,
   ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+    const { isMobile, state } = useSidebar();
 
     if (collapsible === "none") {
       return (
-        <div
-          className={cn(
-            "bg-sidebar text-sidebar-foreground flex h-full w-[--sidebar-width] flex-col",
-            className,
-          )}
-          ref={ref}
-          {...props}
-        >
+        <SidebarStatic className={className} ref={ref} {...props}>
           {children}
-        </div>
+        </SidebarStatic>
       );
     }
 
     if (isMobile) {
       return (
-        <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
-          <SheetContent
-            data-sidebar="sidebar"
-            data-mobile="true"
-            className="bg-sidebar text-sidebar-foreground w-[--sidebar-width] p-0 [&>button]:hidden"
-            style={
-              {
-                "--sidebar-width": "var(--sidebar-width-mobile, 18rem)",
-              } as React.CSSProperties
-            }
-            side={side}
-          >
-            <SheetHeader className="sr-only">
-              <SheetTitle>Sidebar</SheetTitle>
-              <SheetDescription>Displays the mobile sidebar.</SheetDescription>
-            </SheetHeader>
-            <div className="flex h-full w-full flex-col">{children}</div>
-          </SheetContent>
-        </Sheet>
+        <SidebarMobileSheet side={side} {...props}>
+          {children}
+        </SidebarMobileSheet>
       );
     }
 
@@ -714,6 +776,8 @@ SidebarMenuSubButton.displayName = "SidebarMenuSubButton";
 
 export {
   Sidebar,
+  SidebarStatic,
+  SidebarMobileSheet,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,

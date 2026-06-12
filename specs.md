@@ -1371,22 +1371,25 @@ Responsibilities:
 7. Audit provisioning and account-linking events.
 8. Never grant secure access from client-side state.
 
-Admin routes:
+Admin routes (status transitions live in the Administrator app; the
+former `/api/admin/users/*` endpoints were removed because they
+bypassed the hardened guard pipeline — see `docs/admin-manager.md` §5):
 
 ```text
-POST /api/admin/users/[user-id]/approve
-POST /api/admin/users/[user-id]/block
-POST /api/admin/users/[user-id]/suspend
-POST /api/admin/users/[user-id]/reactivate
+POST /api/administrator/users/[user-id]/status   { action: approve | block | suspend | reactivate }
+POST /api/administrator/users/bulk               { action, ids | "*" }
 ```
 
 Admin route rules:
 
 1. Require active session.
-2. Require `admin.users.manage` permission.
+2. Require `admin.users.manage` permission via `requireAdminPermission`
+   (origin guard, rate limit, request-id correlation included).
 3. Return JSON only.
 4. Audit success and failure.
 5. Never expose raw Better Auth internals in response bodies.
+6. Both routes share the `performAdminStatusChange` mutation core so
+   single and bulk transitions emit identical audit events.
 
 Pending and blocked browser pages:
 
@@ -2003,6 +2006,7 @@ export type ShellVariant = "root" | "nested";
 export type ShellDensity = "comfortable" | "compact";
 export type ShellSidebarMode = "static" | "drawer" | "hidden";
 export type ShellFooterMode = "visible" | "hidden";
+export type ShellLayout = "header-first" | "sidebar-first";
 export type ShellRegion = "left" | "right" | "footer";
 export type ShellVisibilityScope = "root" | "workspace";
 
@@ -2020,6 +2024,7 @@ export interface ShellControlledVisibilityProps {
 export interface ShellGridContainerProps extends ShellControlledVisibilityProps {
   variant: ShellVariant;
   depth: number;
+  layout?: ShellLayout;
   header?: ReactNode;
   left?: ReactNode;
   right?: ReactNode;
@@ -2049,6 +2054,7 @@ export interface ShellContainerProps extends ShellControlledVisibilityProps {
 }
 
 export interface ApplicationShellProps extends ShellControlledVisibilityProps {
+  layout?: ShellLayout;
   header?: ReactNode;
   left?: ReactNode;
   right?: ReactNode;
@@ -2060,6 +2066,42 @@ export interface ApplicationShellProps extends ShellControlledVisibilityProps {
   mainId?: string;
 }
 ```
+
+### 17.7 Layout arrangements
+
+The grid supports two region arrangements, selected per shell instance
+via the `layout` prop on `ApplicationShell` / `ShellGridContainer` and
+emitted as a `data-layout` attribute on `.sh-grid`:
+
+1. `header-first` (default — classic Holy Grail): the header spans the
+   full width; left/right regions start below it.
+
+   ```text
+   header header header
+   left   main   right
+   footer footer footer
+   ```
+
+2. `sidebar-first`: the left region owns column 1 for ALL rows; the
+   header sits adjacent to it, spanning only the content columns.
+
+   ```text
+   left header header
+   left main   right
+   left footer footer
+   ```
+
+Rules:
+
+1. Columns and rows are identical between arrangements — only
+   `grid-template-areas` changes. The fixed sidebar width tokens, the
+   FlexSidebar icon-collapse rule, the visibility flags
+   (`data-left-hidden` etc.), and the mobile collapse therefore apply
+   unchanged to both.
+2. The root shell stays `header-first` (its brand bar renders above
+   the grid, outside it).
+3. The Administrator workspace uses `sidebar-first`: its menubar
+   header is adjacent to the full-height admin sidebar.
 
 ---
 
@@ -2830,9 +2872,16 @@ Rules:
 ```text
 /en/app/dashboard
 /en/app/workspace
-/en/app/admin/users
-/en/app/admin/audit
+/en/app/administrator
+/en/app/administrator/users
+/en/app/administrator/audit
 ```
+
+(The former `/en/app/admin/users` and `/en/app/admin/audit` placeholder
+pages were removed — they lacked admin permission checks. The
+Administrator workspace at `/app/administrator/*` is the only admin
+surface; its layout re-validates `admin.*` permissions and renders 404
+for non-admins.)
 
 Rules:
 
@@ -3372,7 +3421,59 @@ These are not part of V9 but the architecture should not block them:
 
 ---
 
-## 34. Source references for implementation alignment
+## 34. Theme architecture and design tokens
+
+The framework ships one themed token pipeline, structured exactly as
+documented at https://ui.shadcn.com/docs/theming (see
+`src/app/globals.css`):
+
+1. Raw palette values live on `:root` (light) and `.dark` as plain CSS
+   custom properties. The palette is the **shadcn/ui default theme
+   (neutral base), verbatim** — re-theming means swapping the whole
+   block (the format shadcn theme generators emit), never hand-tuning
+   individual entries. `color-scheme` follows the theme.
+2. `@theme inline` maps the palette into Tailwind utility tokens
+   (`bg-background`, `border-border`, `bg-accent`, ...) as `var()`
+   references, so toggling the `dark` class on `<html>` swaps every
+   color. The documented `--radius` token and `radius-sm/md/lg/xl`
+   scale are mapped the same way.
+3. `next-themes` is mounted in the root layout
+   (`attribute="class"`, system default, via
+   `src/components/theme/theme-provider.tsx`); `ThemeToggle` in the
+   secure top bar switches light/dark.
+4. Custom tokens follow the documented extension pattern:
+   `success`/`success-foreground`, `warning`/`warning-foreground`, and
+   `destructive-foreground` (used by button/badge variants; not part of
+   the v4 default list).
+5. The legacy `shell-*` tokens are ALIASES of the semantic tokens
+   (`shell-bg`=`background`, `shell-border`=`border`,
+   `shell-muted`=`muted`, `shell-accent`=`primary`) consumed only by
+   `app-shell.css` — one palette, two vocabularies. New code uses the
+   semantic names.
+6. Layout tokens are global: `--sidebar-width` (16rem),
+   `--sidebar-width-icon` (3rem), `--sidebar-width-mobile` (18rem) are
+   the single source for every sidebar and the shell grid columns.
+
+Component rules:
+
+1. Components MUST use semantic tokens — never raw palette classes
+   (`text-red-600`, `bg-neutral-100`, ...). Errors use
+   `text-destructive`, secondary text `text-muted-foreground`, success
+   notes `text-success`, warning banners the `warning` pair.
+2. A base-layer rule pins `border-color` to `var(--color-border)`, so
+   bare `border-*` utilities are themed (Tailwind v4 preflight would
+   otherwise leave them `currentColor`).
+3. Enabled `button` / `[role="button"]` elements get `cursor: pointer`
+   via a base-layer rule; menu primitives use `cursor-pointer` so
+   button-based controls match link affordances.
+4. Hover treatment is the `accent` pair everywhere interactive lists
+   and menus are concerned (sidebar items, menubar triggers and items);
+   neutral surfaces hover with `bg-muted`. Modal overlays intentionally
+   keep `bg-black/80` in both themes.
+
+---
+
+## 35. Source references for implementation alignment
 
 Implementation must verify exact API names against installed package versions.
 
@@ -3394,6 +3495,7 @@ Implementation must verify exact API names against installed package versions.
 - Next.js internationalization: https://nextjs.org/docs/app/guides/internationalization
 - next-intl App Router: https://next-intl.dev/docs/getting-started/app-router
 - shadcn/ui: https://ui.shadcn.com
+- shadcn/ui Theming: https://ui.shadcn.com/docs/theming
 - shadcn/ui Sheet: https://ui.shadcn.com/docs/components/sheet
 - shadcn/ui Skeleton: https://ui.shadcn.com/docs/components/skeleton
 - Tailwind CSS theme variables: https://tailwindcss.com/docs/theme

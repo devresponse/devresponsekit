@@ -69,7 +69,7 @@ Out of scope (explicitly):
 | Concern | Requirement |
 |---|---|
 | Performance | Each list view P95 ≤ 400 ms server time at 100k users / 10k roles per organization. Server pagination only — never load the full set into memory or the browser. |
-| Security | Every mutation goes through `applyAdminStatusAction`-style guards (caller must hold `admin.users.manage` or finer-grained permission; deny attempts are themselves audited). |
+| Security | Every mutation goes through `requireAdminPermission` (origin guard → session → status → permission; deny attempts are themselves audited) before reaching the `performAdminStatusChange`-style mutation cores. |
 | Auditing | Every mutation produces an `app_audit_events` row with actor, target, reason, and request metadata. |
 | Accessibility | WCAG 2.1 AA. All grids keyboard-navigable; all dialogs trap focus. |
 | Internationalization | All strings come from `messages/*.json` under namespace `administrator.*`. |
@@ -258,13 +258,15 @@ In addition, the Administrator app exposes **application-level**
 mutations that are not part of the `admin()` plugin but layer on top of
 the same Better Auth users:
 
-- `app_users` status: approve / block / suspend / reactivate
-  (already implemented at `/api/admin/users/{approve,block,suspend,reactivate}`).
-  Decision: the **legacy console and its endpoints stay unchanged for
-  now**. The new Administrator app introduces its own endpoints under
-  `/api/administrator/users/[id]/status` that wrap the same shared
-  `applyAdminStatusAction` helper; the old endpoints continue to serve
-  the legacy console untouched.
+- `app_users` status: approve / block / suspend / reactivate, served by
+  `/api/administrator/users/[id]/status` and the bulk endpoint, both
+  sharing the `performAdminStatusChange` mutation core
+  (`src/lib/admin-status.server.ts`).
+  > Superseded decision: the original plan kept the legacy console and
+  > its `/api/admin/users/*` endpoints alongside the new app. They were
+  > **removed** in the security hardening pass — the pages lacked admin
+  > permission checks and the endpoints bypassed the guard pipeline.
+  > The Administrator app is the only admin surface (§20.1 #1).
 - Role assignment in `app_user_roles`.
 - Membership lifecycle in `app_organization_memberships`.
 - Organization CRUD.
@@ -294,13 +296,13 @@ both.
 ## 5. Server API surface
 
 All admin server APIs live under `src/app/api/administrator/` and follow
-the existing `admin-status.server.ts` pattern: validate session →
-validate permission → validate body with Zod → mutate in a Kysely
-transaction → audit → respond JSON. The legacy
-`/api/admin/users/{approve,block,suspend,reactivate}` endpoints remain
-untouched (decision: legacy console fate is unchanged for now); the new
-endpoints share the underlying `applyAdminStatusAction` helper rather
-than calling the legacy HTTP routes.
+one pipeline: `requireAdminPermission` (origin guard → session → status
+→ permission) → validate body with Zod → mutate in a Kysely
+transaction → audit → respond JSON. Status transitions share the
+`performAdminStatusChange` mutation core in `admin-status.server.ts`
+between the per-id `/status` route and the bulk endpoint. (The legacy
+`/api/admin/users/{approve,block,suspend,reactivate}` endpoints were
+removed — see §20.1 #1.)
 
 ### 5.1 Conventions
 
@@ -334,8 +336,8 @@ than calling the legacy HTTP routes.
 - All endpoints require `admin.<area>.<verb>` permission and audit on
   both success and denial via `auditEvent()`.
 - All endpoints use the shared `requireAdminPermission(request, perm)`
-  helper to centralize authz (replaces ad-hoc copies of the check in
-  `admin-status.server.ts`).
+  helper to centralize authz; mutation helpers like
+  `performAdminStatusChange` perform no authorization of their own.
 
 ### 5.2 Endpoints (summary)
 
@@ -345,7 +347,7 @@ than calling the legacy HTTP routes.
 | `/api/administrator/users` | POST | `admin.users.create` | Server-side wrapper around `auth.api.createUser`. |
 | `/api/administrator/users/[id]` | GET, PATCH, DELETE | `admin.users.read/update/delete` | PATCH supports name/email/locale; DELETE performs **soft delete only** (indefinite Better Auth ban + `app_users.status = 'deactivated'`); see §4.1. |
 | `/api/administrator/users/[id]/restore` | POST | `admin.users.delete` | Inverse of soft delete: unban + clear `deactivated_*`. |
-| `/api/administrator/users/[id]/status` | POST | `admin.users.manage` | Wraps existing `applyAdminStatusAction`. |
+| `/api/administrator/users/[id]/status` | POST | `admin.users.manage` | Shares the `performAdminStatusChange` core with the bulk endpoint. |
 | `/api/administrator/users/[id]/ban` | POST | `admin.users.ban` | Wraps `auth.api.banUser`; persists reason in `app_audit_events.reason`. |
 | `/api/administrator/users/[id]/unban` | POST | `admin.users.ban` | Wraps `auth.api.unbanUser`. |
 | `/api/administrator/users/[id]/password` | POST | `admin.users.setPassword` | Body `{ mode: "set", password }` wraps `auth.api.setUserPassword`; body `{ mode: "reset_email" }` triggers a password-reset email via Better Auth. |
@@ -374,7 +376,10 @@ than calling the legacy HTTP routes.
 ### 5.3 Shared server modules
 
 - `src/lib/admin/permissions.server.ts` — `requireAdminPermission()`
-  helper consolidating the duplicated check in `admin-status.server.ts`.
+  helper centralizing authorization for every administrator entry point.
+- `src/lib/admin-status.server.ts` — `performAdminStatusChange()`, the
+  shared status-mutation core (no authorization of its own; callers
+  gate via `requireAdminPermission`).
 - `src/lib/admin/list-query.server.ts` — generic Kysely query builder
   that takes the parsed `ListQuery` (page, sort, filter, q) and applies
   it to a typed `SelectQueryBuilder`. Returns `{ items, total }`.
@@ -869,7 +874,8 @@ next inside the working branch.
   `AdministratorSidebar` with permission gating.
 - Add `requireAdminPermission` and migrate
   `admin-status.server.ts` to use it (the legacy
-  `/api/admin/users/*` endpoints continue to work unchanged).
+  `/api/admin/users/*` endpoints continued to work at this phase; they
+  were later removed — see §20.1 #1).
 - Seed admin permissions catalog (24 keys, §6.1) and the
   `admin.platform` built-in role.
 
@@ -891,8 +897,10 @@ next inside the working branch.
   sessions, restore endpoints.
 - New-user form, user detail tabs (overview, roles, memberships,
   sessions, audit).
-- Decision: the legacy `AdminUsersConsole` and its `/api/admin/users/*`
-  endpoints remain untouched — the new app lives alongside them.
+- Decision (superseded): the legacy `AdminUsersConsole` and its
+  `/api/admin/users/*` endpoints remained untouched during this phase;
+  both were later removed in the security hardening pass — see
+  §20.1 #1.
 
 ### Phase 4 — Roles & permissions
 - Build the roles endpoints under `/api/administrator/roles` per §5.2:
@@ -1036,7 +1044,7 @@ in §18 across all phases combined.
 
 | # | Topic | Decision |
 |---|---|---|
-| 1 | Legacy `/admin/users` console + `/api/admin/users/*` endpoints | Stay unchanged for now; new app lives alongside |
+| 1 | Legacy `/admin/users` console + `/api/admin/users/*` endpoints | **Superseded — removed.** Originally kept alongside the new app, they were deleted in the security hardening pass: the pages lacked admin permission checks (any active user could read user statuses and the audit log) and the endpoints bypassed the origin-guard / rate-limit / request-id pipeline. The Administrator app is the only admin surface; status mutations live at `/api/administrator/users/[id]/status` + `/bulk` on the shared `performAdminStatusChange` core. |
 | 2 | Permission catalog | Adopt the 24 `admin.*` keys in §6.1 |
 | 3 | Better Auth role vs. app roles | Surface as two distinct concepts in the UI |
 | 4 | Workspace shell | Fully self-contained — its own left rail in **addition** to the root `SecureSidebar` |

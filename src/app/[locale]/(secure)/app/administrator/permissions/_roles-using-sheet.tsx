@@ -64,7 +64,7 @@ export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: st
 
       <div className="mt-4">
         {error ? (
-          <p className="text-sm text-red-600" role="alert">
+          <p className="text-destructive text-sm" role="alert">
             {error}
           </p>
         ) : rows === null ? (
@@ -73,14 +73,14 @@ export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: st
             <Skeleton className="h-8 w-full" />
           </div>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-neutral-500">{t("empty")}</p>
+          <p className="text-muted-foreground text-sm">{t("empty")}</p>
         ) : (
           <ul className="divide-y rounded-md border text-sm">
             {rows.map((r) => (
               <li key={r.id} className="flex items-center justify-between gap-3 p-3">
                 <div className="space-y-1">
                   <p className="font-medium">{r.name}</p>
-                  <code className="text-xs text-neutral-500">{r.key}</code>
+                  <code className="text-muted-foreground text-xs">{r.key}</code>
                 </div>
                 <LocaleLink
                   locale={locale}

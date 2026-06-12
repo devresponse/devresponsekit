@@ -82,7 +82,7 @@ export function RoleSettingsForm({
           value={initialKey}
           aria-describedby="key-readonly-hint"
         />
-        <p id="key-readonly-hint" className="text-xs text-neutral-500">
+        <p id="key-readonly-hint" className="text-muted-foreground text-xs">
           {t("keyReadOnly")}
         </p>
       </div>
@@ -113,12 +113,12 @@ export function RoleSettingsForm({
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}
       {saved ? (
-        <p className="text-sm text-green-700" role="status">
+        <p className="text-success text-sm" role="status">
           {saved}
         </p>
       ) : null}

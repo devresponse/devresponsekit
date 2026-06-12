@@ -232,7 +232,7 @@ function ConfirmDialog({
           <AlertDialogAction
             className={cn(
               state?.destructive &&
-                "bg-destructive hover:bg-destructive/90 focus-visible:ring-destructive/20 text-white",
+                "bg-destructive hover:bg-destructive/90 focus-visible:ring-destructive/20 text-destructive-foreground",
             )}
             onClick={() => onResult(true)}
           >

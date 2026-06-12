@@ -53,14 +53,14 @@ export default async function PublicLayout({
               <LocaleLink
                 href="/sign-in"
                 locale={safeLocale}
-                className="border-shell-border hover:bg-shell-muted rounded-md border px-3 py-1.5 text-sm"
+                className="border-border hover:bg-muted rounded-md border px-3 py-1.5 text-sm"
               >
                 {tCommon("signIn")}
               </LocaleLink>
               <LocaleLink
                 href="/sign-up"
                 locale={safeLocale}
-                className="bg-shell-fg text-shell-bg rounded-md px-3 py-1.5 text-sm hover:opacity-90"
+                className="bg-foreground text-background rounded-md px-3 py-1.5 text-sm hover:opacity-90"
               >
                 {tCommon("signUp")}
               </LocaleLink>

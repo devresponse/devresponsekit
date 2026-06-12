@@ -63,7 +63,7 @@ export default async function AdministratorRoleDetailPage({
             </LocaleLink>
           </Button>
           <h1 className="text-lg font-semibold">{role.name}</h1>
-          <p className="text-sm text-neutral-600">
+          <p className="text-muted-foreground text-sm">
             <code className="text-xs">{role.key}</code>
           </p>
         </div>

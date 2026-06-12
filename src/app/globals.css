@@ -3,68 +3,184 @@
 @import "../styles/compact-mode.css";
 
 /*
- * Tailwind 4 design tokens for the enterprise shell.
- * Colors are kept neutral so the shell works in light/dark contexts.
+ * Design tokens for the enterprise shell.
+ *
+ * Architecture (in preparation for global theme changes):
+ *   1. Raw palette values live on `:root` (light) and `.dark` as plain
+ *      CSS custom properties. `next-themes` toggles the `dark` class on
+ *      <html>, so every token below swaps automatically.
+ *   2. `@theme inline` maps the palette into Tailwind utility tokens
+ *      (`bg-background`, `border-border`, ...). `inline` keeps them as
+ *      var() references so the `.dark` override flows through.
+ *   3. The legacy `shell-*` tokens are ALIASES of the semantic tokens —
+ *      one palette, two vocabularies. New code should prefer the
+ *      semantic names; `app-shell.css` consumes the aliases.
+ *   4. Layout tokens (sidebar widths) are defined once here so every
+ *      consumer — FlexSidebar, the stock sidebar, and the shell grid —
+ *      collapses to identical sizes.
  */
-@theme {
-  --color-shell-bg: #ffffff;
-  --color-shell-fg: #0a0a0a;
-  --color-shell-muted: #f5f5f5;
-  --color-shell-border: #e5e5e5;
-  --color-shell-accent: #2563eb;
-  --color-background: #ffffff;
-  --color-foreground: #0a0a0a;
-  --color-card: #ffffff;
-  --color-card-foreground: #0a0a0a;
-  --color-popover: #ffffff;
-  --color-popover-foreground: #0a0a0a;
-  --color-primary: #2563eb;
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #f5f5f5;
-  --color-secondary-foreground: #171717;
-  --color-muted: #f5f5f5;
-  --color-muted-foreground: #737373;
-  --color-accent: #eff6ff;
-  --color-accent-foreground: #1d4ed8;
-  --color-destructive: #dc2626;
-  --color-destructive-foreground: #ffffff;
-  --color-border: #e5e5e5;
-  --color-input: #e5e5e5;
-  --color-ring: #2563eb;
-  --color-chart-1: #2563eb;
-  --color-chart-2: #0f766e;
-  --color-chart-3: #ca8a04;
-  --color-chart-4: #9333ea;
-  --color-chart-5: #dc2626;
-  --color-sidebar: #fafafa;
-  --color-sidebar-foreground: #171717;
-  --color-sidebar-primary: #2563eb;
-  --color-sidebar-primary-foreground: #ffffff;
-  --color-sidebar-accent: #eff6ff;
-  --color-sidebar-accent-foreground: #1d4ed8;
-  --color-sidebar-border: #e5e5e5;
-  --color-sidebar-ring: #2563eb;
-}
 
 :root {
   color-scheme: light;
+
+  /* Layout — single source for sidebar dimensions. */
+  --sidebar-width: 16rem;
+  --sidebar-width-icon: 3rem;
+  --sidebar-width-mobile: 18rem;
+
+  /* Light palette. */
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373;
+  --accent: #eff6ff;
+  --accent-foreground: #1d4ed8;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --success: #15803d;
+  --success-foreground: #ffffff;
+  --warning: #f59e0b;
+  --warning-foreground: #78350f;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #2563eb;
+  --chart-1: #2563eb;
+  --chart-2: #0f766e;
+  --chart-3: #ca8a04;
+  --chart-4: #9333ea;
+  --chart-5: #dc2626;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #171717;
+  --sidebar-primary: #2563eb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eff6ff;
+  --sidebar-accent-foreground: #1d4ed8;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #2563eb;
 }
 
-html,
-body {
-  height: 100%;
-  margin: 0;
-  background-color: var(--color-shell-bg);
-  color: var(--color-shell-fg);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    Arial,
-    sans-serif;
+.dark {
+  color-scheme: dark;
+
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --accent: #172554;
+  --accent-foreground: #93c5fd;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --success: #4ade80;
+  --success-foreground: #052e16;
+  --warning: #fbbf24;
+  --warning-foreground: #fef3c7;
+  --border: #262626;
+  --input: #262626;
+  --ring: #3b82f6;
+  --chart-1: #3b82f6;
+  --chart-2: #2dd4bf;
+  --chart-3: #facc15;
+  --chart-4: #c084fc;
+  --chart-5: #f87171;
+  --sidebar: #171717;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #172554;
+  --sidebar-accent-foreground: #93c5fd;
+  --sidebar-border: #262626;
+  --sidebar-ring: #3b82f6;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Legacy shell-* vocabulary — aliases of the semantic tokens above.
+     Kept so `app-shell.css` and any straggler utilities stay on the
+     one true palette; prefer the semantic names in new code. */
+  --color-shell-bg: var(--background);
+  --color-shell-fg: var(--foreground);
+  --color-shell-muted: var(--muted);
+  --color-shell-border: var(--border);
+  --color-shell-accent: var(--primary);
+}
+
+@layer base {
+  /* One border color everywhere: bare `border-*` utilities pick up the
+     themed token instead of currentColor (Tailwind v4 preflight). */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      Roboto,
+      "Helvetica Neue",
+      Arial,
+      sans-serif;
+  }
 }
 
 /* Skip-link visible on focus */
@@ -76,8 +192,8 @@ body {
 }
 .sh-skip-link:focus {
   left: 0;
-  background: var(--color-shell-bg);
-  color: var(--color-shell-fg);
+  background: var(--color-background);
+  color: var(--color-foreground);
   padding: 0.5rem 1rem;
-  border: 2px solid var(--color-shell-accent);
+  border: 2px solid var(--color-primary);
 }

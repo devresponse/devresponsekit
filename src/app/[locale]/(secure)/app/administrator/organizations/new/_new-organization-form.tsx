@@ -97,7 +97,7 @@ export function NewOrganizationForm({ locale }: { locale: string }) {
           onChange={(e) => setSlug(e.currentTarget.value.toLowerCase())}
           aria-invalid={error !== null && !SLUG_RE.test(slug) ? true : undefined}
         />
-        <p className="text-xs text-neutral-500">{t("fields.slugHelp")}</p>
+        <p className="text-muted-foreground text-xs">{t("fields.slugHelp")}</p>
       </div>
 
       <div className="space-y-2">
@@ -122,7 +122,7 @@ export function NewOrganizationForm({ locale }: { locale: string }) {
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}

@@ -18,7 +18,7 @@ export default function ForgotPasswordPage() {
           <CardTitle>{t("forgotPassword")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-neutral-600">
+          <p className="text-muted-foreground text-sm">
             Password reset request flow is intentionally minimal in this scaffold.
           </p>
         </CardContent>

@@ -90,7 +90,7 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
         {loading || items === null ? (
           errorStatus ? (
             <div className="space-y-2">
-              <p className="text-sm text-red-700">
+              <p className="text-destructive text-sm">
                 {errorStatus === 401 || errorStatus === 403
                   ? t("unauthorized")
                   : tCommon("unexpectedError")}
@@ -108,7 +108,7 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
             <AppSwitcherSkeleton />
           )
         ) : items.length === 0 ? (
-          <p className="text-sm text-neutral-600">{t("noApplications")}</p>
+          <p className="text-muted-foreground text-sm">{t("noApplications")}</p>
         ) : (
           <ul className="flex flex-col gap-1" role="list">
             {items.map((item) => (
@@ -120,13 +120,13 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
                 */}
                 <a
                   href={item.ssoLaunchUrl}
-                  className="hover:bg-shell-muted focus-visible:ring-shell-accent block rounded-md p-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+                  className="hover:bg-muted focus-visible:ring-ring block rounded-md p-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
                   data-status={item.status}
                   rel="nofollow noreferrer"
                 >
                   <span className="font-medium">{item.label}</span>
                   {item.description ? (
-                    <span className="block text-xs text-neutral-600">{item.description}</span>
+                    <span className="text-muted-foreground block text-xs">{item.description}</span>
                   ) : null}
                 </a>
               </li>

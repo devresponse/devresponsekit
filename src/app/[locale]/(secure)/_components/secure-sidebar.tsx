@@ -72,12 +72,12 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
   } else if (errorStatus !== null) {
     body = (
       <div className="space-y-2 p-3 text-sm">
-        <p className="text-red-700">
+        <p className="text-destructive">
           {errorStatus === 401 || errorStatus === 403 ? t("unauthorized") : t("menuLoadError")}
         </p>
         <button
           type="button"
-          className="border-shell-border hover:bg-shell-muted rounded-md border px-2 py-1 text-xs"
+          className="border-border hover:bg-muted rounded-md border px-2 py-1 text-xs"
           onClick={() => setReloadKey((k) => k + 1)}
         >
           {tCommon("retry")}

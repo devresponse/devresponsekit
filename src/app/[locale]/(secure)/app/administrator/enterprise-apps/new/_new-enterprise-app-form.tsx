@@ -138,7 +138,7 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
           value={id}
           onChange={(e) => setId(e.currentTarget.value.toLowerCase())}
         />
-        <p className="text-xs text-neutral-500">{t("fields.idHelp")}</p>
+        <p className="text-muted-foreground text-xs">{t("fields.idHelp")}</p>
       </div>
 
       <div className="space-y-2">
@@ -175,7 +175,7 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
           onChange={(e) => setOrigin(e.currentTarget.value)}
           placeholder="https://example.com"
         />
-        <p className="text-xs text-neutral-500">{t("fields.originHelp")}</p>
+        <p className="text-muted-foreground text-xs">{t("fields.originHelp")}</p>
       </div>
 
       <div className="space-y-2">
@@ -188,7 +188,7 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
           value={subdomain}
           onChange={(e) => setSubdomain(e.currentTarget.value.toLowerCase())}
         />
-        <p className="text-xs text-neutral-500">{t("fields.subdomainHelp")}</p>
+        <p className="text-muted-foreground text-xs">{t("fields.subdomainHelp")}</p>
       </div>
 
       <div className="space-y-2">
@@ -217,7 +217,7 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}

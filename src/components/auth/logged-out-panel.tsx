@@ -27,7 +27,7 @@ export function LoggedOutPanel({ locale, className }: LoggedOutPanelProps) {
         <LocaleLink
           href="/sign-in"
           locale={locale}
-          className="border-shell-border hover:bg-shell-muted inline-block rounded-md border px-3 py-1.5 text-sm"
+          className="border-border hover:bg-muted inline-block rounded-md border px-3 py-1.5 text-sm"
         >
           {tCommon("signIn")}
         </LocaleLink>

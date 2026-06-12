@@ -81,12 +81,12 @@ export function UserDetailTabs({
           ) : null}
         </dl>
         <Separator />
-        <p className="text-xs text-neutral-500">
+        <p className="text-muted-foreground text-xs">
           {t("detail.metaCreated", { value: formatDate(user.created_at) })} ·{" "}
           {t("detail.metaUpdated", { value: formatDate(user.updated_at) })}
         </p>
         {user.deactivated_at ? (
-          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <div className="border-warning/40 bg-warning/10 text-warning-foreground rounded-md border p-3 text-xs">
             <p>{t("detail.deactivated", { value: formatDate(user.deactivated_at) })}</p>
             {user.deactivated_by ? (
               <p>{t("detail.deactivatedBy", { actor: user.deactivated_by })}</p>
@@ -98,7 +98,7 @@ export function UserDetailTabs({
         ) : null}
       </TabsContent>
 
-      <TabsContent value="roles" className="mt-4 text-sm text-neutral-600">
+      <TabsContent value="roles" className="text-muted-foreground mt-4 text-sm">
         {/* Phase 4 placeholder. */}
         <p>—</p>
       </TabsContent>
@@ -110,7 +110,7 @@ export function UserDetailTabs({
         <UserSessionsPanel userId={user.id} />
       </TabsContent>
 
-      <TabsContent value="audit" className="mt-4 text-sm text-neutral-600">
+      <TabsContent value="audit" className="text-muted-foreground mt-4 text-sm">
         {/* Phase 6 placeholder — will render the audit grid filtered by app_user_id. */}
         <p>—</p>
       </TabsContent>
@@ -121,7 +121,7 @@ export function UserDetailTabs({
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <dt className="text-xs tracking-wide text-neutral-500 uppercase">{label}</dt>
+      <dt className="text-muted-foreground text-xs tracking-wide uppercase">{label}</dt>
       <dd className="text-sm">{value}</dd>
     </div>
   );

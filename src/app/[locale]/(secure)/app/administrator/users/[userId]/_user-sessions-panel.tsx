@@ -118,7 +118,7 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}
@@ -129,7 +129,7 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
           <Skeleton className="h-8 w-full" />
         </div>
       ) : sessions.length === 0 ? (
-        <p className="text-sm text-neutral-500">{t("sessions.empty")}</p>
+        <p className="text-muted-foreground text-sm">{t("sessions.empty")}</p>
       ) : (
         <ul className="divide-y rounded-md border text-sm">
           {sessions.map((s, idx) => {
@@ -138,17 +138,17 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
               <li key={token ?? idx} className="flex items-start justify-between gap-3 p-3">
                 <div className="space-y-1">
                   <p>
-                    <span className="text-neutral-500">
+                    <span className="text-muted-foreground">
                       {t("sessions.expiresAt", { value: formatExpires(s.expiresAt) })}
                     </span>
                   </p>
                   {s.ipAddress ? (
-                    <p className="text-xs text-neutral-500">
+                    <p className="text-muted-foreground text-xs">
                       {t("sessions.ipAddress")}: <code>{s.ipAddress}</code>
                     </p>
                   ) : null}
                   {s.userAgent ? (
-                    <p className="truncate text-xs text-neutral-500" title={s.userAgent}>
+                    <p className="text-muted-foreground truncate text-xs" title={s.userAgent}>
                       {t("sessions.userAgent")}: {s.userAgent}
                     </p>
                   ) : null}

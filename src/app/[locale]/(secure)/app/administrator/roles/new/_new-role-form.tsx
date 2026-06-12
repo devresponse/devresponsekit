@@ -127,7 +127,7 @@ export function NewRoleForm({ locale }: { locale: string }) {
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}

@@ -22,7 +22,7 @@ export default async function AdministratorPage({
   return (
     <section className="space-y-3 p-6">
       <h1 className="text-lg font-semibold">{t("title")}</h1>
-      <p className="text-sm text-neutral-600">{t("description")}</p>
+      <p className="text-muted-foreground text-sm">{t("description")}</p>
     </section>
   );
 }

@@ -71,7 +71,7 @@ export default async function AdministratorEnterpriseAppDetailPage({
             </LocaleLink>
           </Button>
           <h1 className="text-lg font-semibold">{row.label}</h1>
-          <p className="text-sm text-neutral-600">
+          <p className="text-muted-foreground text-sm">
             <code className="text-xs">{row.id}</code>
           </p>
         </div>

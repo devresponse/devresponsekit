@@ -149,7 +149,7 @@ export function AdministratorPermissionsGrid({ canManage }: { canManage: boolean
       ) : null}
 
       {rowError ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {rowError}
         </p>
       ) : null}
@@ -307,7 +307,7 @@ function PermissionFormPanel({
         </div>
 
         {error ? (
-          <p className="text-sm text-red-600" role="alert">
+          <p className="text-destructive text-sm" role="alert">
             {error}
           </p>
         ) : null}

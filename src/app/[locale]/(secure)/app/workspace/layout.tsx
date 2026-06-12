@@ -23,7 +23,7 @@ function WorkspaceSidebar() {
   return (
     <nav aria-label="Workspace" className="p-3 text-sm">
       <ul className="flex flex-col gap-1">
-        <li className="hover:bg-shell-muted rounded-md px-2 py-1.5">{t("settings")}</li>
+        <li className="hover:bg-muted rounded-md px-2 py-1.5">{t("settings")}</li>
       </ul>
     </nav>
   );

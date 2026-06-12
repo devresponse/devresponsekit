@@ -84,7 +84,7 @@ export function AdministratorEnterpriseAppsGrid({
       }
       setReloadKey((k) => k + 1);
     },
-    [t, tErr],
+    [dialogs, t, tErr],
   );
 
   const columns = useMemo<ColumnDef<EnterpriseAppRow, unknown>[]>(

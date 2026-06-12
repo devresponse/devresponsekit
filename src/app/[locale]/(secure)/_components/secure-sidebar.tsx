@@ -40,21 +40,24 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
   const t = useTranslations("shell");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
-  const [items, setItems] = useState<NavigationMenuItem[] | null>(null);
+  const [fetchedItems, setFetchedItems] = useState<NavigationMenuItem[] | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // An unprivileged caller would receive an empty list anyway; derive
+  // it instead of fetching (and instead of setState inside the effect).
+  const hasPermissions = permissions.length > 0;
+  const items = hasPermissions ? fetchedItems : [];
+
   useEffect(() => {
-    if (permissions.length === 0) {
-      setItems([]);
-      return;
-    }
+    if (!hasPermissions) return;
     let cancelled = false;
-    setErrorStatus(null);
 
     fetchShellMenu("primary-sidebar", locale)
       .then((res) => {
-        if (!cancelled) setItems(res.items);
+        if (cancelled) return;
+        setFetchedItems(res.items);
+        setErrorStatus(null);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -64,7 +67,7 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
     return () => {
       cancelled = true;
     };
-  }, [locale, permissions, reloadKey]);
+  }, [locale, hasPermissions, reloadKey]);
 
   let body: React.ReactNode;
   if (items === null && errorStatus === null) {
@@ -78,7 +81,12 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
         <button
           type="button"
           className="border-border hover:bg-muted rounded-md border px-2 py-1 text-xs"
-          onClick={() => setReloadKey((k) => k + 1)}
+          onClick={() => {
+            // Clearing in the click handler (not the effect) restores
+            // the skeleton while the retry is in flight.
+            setErrorStatus(null);
+            setReloadKey((k) => k + 1);
+          }}
         >
           {tCommon("retry")}
         </button>

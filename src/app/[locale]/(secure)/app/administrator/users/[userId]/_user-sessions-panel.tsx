@@ -32,7 +32,9 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
 
   const [sessions, setSessions] = useState<RawSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Starts true: the mount effect fetches immediately, and deriving the
+  // initial busy state avoids a synchronous setState inside the effect.
+  const [busy, setBusy] = useState(true);
 
   const formatExpires = useCallback(
     (iso: string | null | undefined): string => {
@@ -48,59 +50,68 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
     [locale],
   );
 
-  const reload = useCallback(async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/administrator/users/${userId}/sessions`, {
-        credentials: "same-origin",
-      });
-      if (!res.ok) {
-        setError(tGrid("error"));
-        setSessions([]);
-        return;
-      }
-      const body = (await res.json()) as { sessions?: RawSession[] };
-      setSessions(body.sessions ?? []);
-    } catch {
-      setError(tGrid("error"));
-      setSessions([]);
-    } finally {
-      setBusy(false);
-    }
-  }, [userId, tGrid]);
+  // Refetch trigger: handlers bump the token (after their own sync
+  // busy/error resets — events may set state synchronously, effects
+  // must not), and the effect performs the fetch with all state
+  // commits inside async continuations. `busy` clears when the fetch
+  // settles, so it stays true across a revoke + refetch sequence.
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    let cancelled = false;
+
+    fetch(`/api/administrator/users/${userId}/sessions`, { credentials: "same-origin" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`http_${res.status}`);
+        return (await res.json()) as { sessions?: RawSession[] };
+      })
+      .then((body) => {
+        if (cancelled) return;
+        setSessions(body.sessions ?? []);
+        setBusy(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError(tGrid("error"));
+        setSessions([]);
+        setBusy(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, tGrid, reloadToken]);
 
   const revokeOne = async (token: string | undefined) => {
     if (!token) return;
     setBusy(true);
+    setError(null);
     try {
       const res = await fetch(
         `/api/administrator/users/${userId}/sessions/${encodeURIComponent(token)}`,
         { method: "DELETE", credentials: "same-origin" },
       );
       if (!res.ok) setError(tGrid("error"));
-      await reload();
-    } finally {
-      setBusy(false);
+    } catch {
+      setError(tGrid("error"));
     }
+    // The refetch clears `busy` when it settles.
+    setReloadToken((t) => t + 1);
   };
 
   const revokeAll = async () => {
     setBusy(true);
+    setError(null);
     try {
       const res = await fetch(`/api/administrator/users/${userId}/sessions`, {
         method: "DELETE",
         credentials: "same-origin",
       });
       if (!res.ok) setError(tGrid("error"));
-      await reload();
-    } finally {
-      setBusy(false);
+    } catch {
+      setError(tGrid("error"));
     }
+    setReloadToken((t) => t + 1);
   };
 
   return (

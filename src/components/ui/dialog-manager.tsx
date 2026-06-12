@@ -96,7 +96,12 @@ export function useDialogs(): DialogContextValue {
 
 type NotifyState = NotifyOptions & { resolve: () => void };
 type ConfirmState = ConfirmOptions & { resolve: (v: boolean) => void };
-type PromptState = PromptOptions & { resolve: (v: string | null) => void };
+type PromptState = PromptOptions & {
+  resolve: (v: string | null) => void;
+  /** Monotonic instance id — keys the prompt form so a new prompt
+   * mounts with fresh input state (no ref-based reset during render). */
+  id: number;
+};
 
 export function DialogManagerProvider({ children }: { children: ReactNode }) {
   const t = useTranslations("common.dialogs");
@@ -116,9 +121,11 @@ export function DialogManagerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const promptSeq = useRef(0);
   const promptText = useCallback((options: PromptOptions) => {
     return new Promise<string | null>((resolve) => {
-      setPromptState({ ...options, resolve });
+      promptSeq.current += 1;
+      setPromptState({ ...options, resolve, id: promptSeq.current });
     });
   }, []);
 
@@ -256,21 +263,6 @@ function PromptDialog({
   onResult: (value: string | null) => void;
 }) {
   const open = state !== null;
-  const [value, setValue] = useState("");
-  const initializedFor = useRef<PromptState | null>(null);
-  // Reset local input each time a new prompt opens.
-  if (state && initializedFor.current !== state) {
-    initializedFor.current = state;
-    setValue(state.defaultValue ?? "");
-  }
-  if (!state && initializedFor.current) {
-    initializedFor.current = null;
-  }
-
-  const submit = () => {
-    if (state?.required && value.trim() === "") return;
-    onResult(value);
-  };
 
   return (
     <Dialog
@@ -284,33 +276,67 @@ function PromptDialog({
           <DialogTitle>{state?.title}</DialogTitle>
           {state?.description ? <DialogDescription>{state.description}</DialogDescription> : null}
         </DialogHeader>
-        <form
-          className="space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-        >
-          <label className="text-sm font-medium" htmlFor="dialog-prompt-input">
-            {state?.label}
-          </label>
-          <Input
-            id="dialog-prompt-input"
-            autoFocus
-            value={value}
-            placeholder={state?.placeholder}
-            onChange={(e) => setValue(e.target.value)}
+        {state ? (
+          // Keyed by the prompt instance id: each new prompt mounts a
+          // fresh form with its own input state — no ref bookkeeping or
+          // render-phase resets.
+          <PromptForm
+            key={state.id}
+            state={state}
+            defaultConfirm={defaultConfirm}
+            defaultCancel={defaultCancel}
+            onResult={onResult}
           />
-          <DialogFooter className="pt-2">
-            <Button type="button" variant="outline" onClick={() => onResult(null)}>
-              {state?.cancelLabel ?? defaultCancel}
-            </Button>
-            <Button type="submit" disabled={state?.required ? value.trim() === "" : false}>
-              {state?.confirmLabel ?? defaultConfirm}
-            </Button>
-          </DialogFooter>
-        </form>
+        ) : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PromptForm({
+  state,
+  defaultConfirm,
+  defaultCancel,
+  onResult,
+}: {
+  state: PromptState;
+  defaultConfirm: string;
+  defaultCancel: string;
+  onResult: (value: string | null) => void;
+}) {
+  const [value, setValue] = useState(state.defaultValue ?? "");
+
+  const submit = () => {
+    if (state.required && value.trim() === "") return;
+    onResult(value);
+  };
+
+  return (
+    <form
+      className="space-y-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <label className="text-sm font-medium" htmlFor="dialog-prompt-input">
+        {state.label}
+      </label>
+      <Input
+        id="dialog-prompt-input"
+        autoFocus
+        value={value}
+        placeholder={state.placeholder}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <DialogFooter className="pt-2">
+        <Button type="button" variant="outline" onClick={() => onResult(null)}>
+          {state.cancelLabel ?? defaultCancel}
+        </Button>
+        <Button type="submit" disabled={state.required ? value.trim() === "" : false}>
+          {state.confirmLabel ?? defaultConfirm}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }

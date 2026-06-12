@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 /**
@@ -97,26 +97,45 @@ export interface UseGridStateResult {
   setFilter(name: string, value: string | string[] | null): void;
 }
 
+/**
+ * Rebuilds an options object from its primitive snapshots so memo/
+ * callback dependencies stay primitive — callers usually pass a fresh
+ * options literal every render, and depending on its identity would
+ * defeat the memoization entirely.
+ */
+function optionsFromKeys(defaultPageSize: number | undefined, defaultSortKey: string) {
+  return {
+    defaultPageSize,
+    defaultSort: (JSON.parse(defaultSortKey) as GridState["sort"] | null) ?? undefined,
+  } satisfies UseGridStateOptions;
+}
+
 export function useGridState(options: UseGridStateOptions = {}): UseGridStateResult {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const searchParamsKey = searchParams.toString();
+  const defaultPageSize = options.defaultPageSize;
   const defaultSortKey = JSON.stringify(options.defaultSort ?? null);
   const state = useMemo(
-    () => readGridStateFromParams(new URLSearchParams(searchParamsKey), options),
+    () =>
+      readGridStateFromParams(
+        new URLSearchParams(searchParamsKey),
+        optionsFromKeys(defaultPageSize, defaultSortKey),
+      ),
     // Keys are primitive snapshots so re-renders with structurally equal
     // inputs do not produce a new state reference.
-    [searchParamsKey, options.defaultPageSize, defaultSortKey, options],
+    [searchParamsKey, defaultPageSize, defaultSortKey],
   );
 
   const replace = useCallback(
     (next: GridState) => {
-      const qs = gridStateToSearchParams(next, options).toString();
+      const opts = optionsFromKeys(defaultPageSize, defaultSortKey);
+      const qs = gridStateToSearchParams(next, opts).toString();
       router.replace(`${pathname}${qs ? `?${qs}` : ""}`);
     },
-    [router, pathname, options],
+    [router, pathname, defaultPageSize, defaultSortKey],
   );
 
   return {
@@ -155,21 +174,36 @@ export function useGridFetch<TItem>(
   state: GridState,
   options: UseGridStateOptions = {},
 ): UseGridFetchResult<TItem> {
-  const [data, setData] = useState<TItem[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [isLoading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
 
+  // Primitive structural snapshots: changes in URL state retrigger the
+  // fetch without re-triggering on every parent render that produces a
+  // new `state`/`options` object identity.
   const stateKey = JSON.stringify(state);
+  const defaultPageSize = options.defaultPageSize;
+  const defaultSortKey = JSON.stringify(options.defaultSort ?? null);
+  const fetchKey = `${endpoint}|${stateKey}|${defaultPageSize ?? ""}|${defaultSortKey}|${reloadToken}`;
+
+  // Loading is DERIVED (result is stamped with the key it answered),
+  // so the effect never sets state synchronously: a new fetchKey means
+  // "loading" by definition until its result lands. Previous items are
+  // kept while the next page loads, matching the old behavior.
+  const [result, setResult] = useState<{
+    forKey: string;
+    items: TItem[] | null;
+    total: number;
+    error: string | null;
+  }>({ forKey: "", items: null, total: 0, error: null });
+
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
+    const snapshot = JSON.parse(stateKey) as GridState;
+    const opts: UseGridStateOptions = {
+      defaultPageSize,
+      defaultSort: (JSON.parse(defaultSortKey) as GridState["sort"] | null) ?? undefined,
+    };
 
-    const qs = gridStateToSearchParams(state, optionsRef.current).toString();
+    const qs = gridStateToSearchParams(snapshot, opts).toString();
     const url = `${endpoint}${qs ? `?${qs}` : ""}`;
 
     fetch(url, { signal: controller.signal, headers: { accept: "application/json" } })
@@ -180,27 +214,27 @@ export function useGridFetch<TItem>(
         return (await res.json()) as { items: TItem[]; total: number };
       })
       .then((body) => {
-        setData(body.items);
-        setTotal(body.total);
-        setLoading(false);
+        setResult({ forKey: fetchKey, items: body.items, total: body.total, error: null });
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : "unknown_error");
-        setLoading(false);
+        setResult((prev) => ({
+          forKey: fetchKey,
+          items: prev.items,
+          total: prev.total,
+          error: err instanceof Error ? err.message : "unknown_error",
+        }));
       });
 
     return () => controller.abort();
-    // `stateKey` is a primitive structural snapshot — change in URL
-    // state retriggers the fetch without re-triggering on every parent
-    // render that produces a new `state` object identity.
-  }, [endpoint, stateKey, reloadToken]);
+  }, [fetchKey, endpoint, stateKey, defaultPageSize, defaultSortKey]);
 
+  const settled = result.forKey === fetchKey;
   return {
-    data,
-    total,
-    isLoading,
-    error,
+    data: result.items,
+    total: result.total,
+    isLoading: !settled,
+    error: settled ? result.error : null,
     reload: () => setReloadToken((t) => t + 1),
   };
 }

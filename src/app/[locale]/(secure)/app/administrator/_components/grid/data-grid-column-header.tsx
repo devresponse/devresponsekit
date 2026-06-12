@@ -43,7 +43,9 @@ export function DataGridColumnHeader({
   const next: ColumnSortDirection =
     direction === null ? "asc" : direction === "asc" ? "desc" : null;
 
-  const ariaSort = direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none";
+  // `aria-sort` lives on the wrapping <th> (set by DataGrid) — the
+  // attribute is not valid on the button role. The button conveys the
+  // current state through its accessible name instead.
   const stateLabel =
     direction === "asc" ? t("sortAsc") : direction === "desc" ? t("sortDesc") : t("sortNone");
 
@@ -51,7 +53,6 @@ export function DataGridColumnHeader({
     <button
       type="button"
       onClick={() => onToggle(next)}
-      aria-sort={ariaSort}
       aria-label={`${typeof children === "string" ? children : ""} — ${stateLabel}`.trim()}
       className={cn(
         "hover:bg-muted/60 focus-visible:ring-ring -mx-2 -my-1 flex h-7 items-center gap-1.5 rounded px-2 text-left text-xs font-medium focus-visible:ring-1 focus-visible:outline-none",

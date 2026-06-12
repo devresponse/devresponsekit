@@ -92,7 +92,11 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const { state, setPage, setPageSize, setSort } = useGridState(options);
   const fetched = useGridFetch<TItem>(props.endpoint, state, options);
 
-  const items = fetched.data ?? props.initialData?.items ?? [];
+  const initialItems = props.initialData?.items;
+  const items = useMemo<TItem[]>(
+    () => fetched.data ?? initialItems ?? [],
+    [fetched.data, initialItems],
+  );
   const total = fetched.data ? fetched.total : (props.initialData?.total ?? 0);
   const isInitialLoading = fetched.isLoading && !props.initialData && fetched.data === null;
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
@@ -193,7 +197,11 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
               {table.getHeaderGroups().map((hg) => (
                 <TableRow key={hg.id} className="hover:bg-transparent">
                   {hg.headers.map((h) => (
-                    <TableHead key={h.id} className="h-9 px-3 text-xs">
+                    <TableHead
+                      key={h.id}
+                      aria-sort={ariaSortFor(h.column.columnDef, state)}
+                      className="h-9 px-3 text-xs"
+                    >
                       {h.isPlaceholder
                         ? null
                         : renderSortableHeader(
@@ -237,6 +245,27 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
       ) : null}
     </div>
   );
+}
+
+/**
+ * `aria-sort` value for a column's `<th>` (the columnheader role owns
+ * the attribute — putting it on the inner button is invalid per
+ * jsx-a11y). `undefined` = column not sortable, attribute omitted.
+ */
+function ariaSortFor<TItem>(
+  columnDef: ColumnDef<TItem, unknown>,
+  state: GridState,
+): "ascending" | "descending" | "none" | undefined {
+  const accessorKey =
+    "accessorKey" in columnDef && typeof columnDef.accessorKey === "string"
+      ? columnDef.accessorKey
+      : undefined;
+  const id = columnDef.id ?? accessorKey;
+  if (!id || id === "__select" || columnDef.enableSorting === false || !accessorKey) {
+    return undefined;
+  }
+  const active = state.sort.find((s) => s.field === accessorKey);
+  return active ? (active.direction === "asc" ? "ascending" : "descending") : "none";
 }
 
 /**

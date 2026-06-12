@@ -44,16 +44,19 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
   const [loading, setLoading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // The loading/error resets live in the open + retry handlers (events
+  // may set state synchronously; effects must not), so the effect only
+  // performs the fetch and commits results asynchronously.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setLoading(true);
-    setErrorStatus(null);
 
     fetchApplicationsMenu(locale)
       .then((res) => {
         if (cancelled) return;
         setItems(res.items);
+        setErrorStatus(null);
+        setLoading(false);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -62,9 +65,7 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
         } else {
           setErrorStatus(500);
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       });
 
     return () => {
@@ -73,7 +74,16 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
   }, [open, locale, reloadKey]);
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          setLoading(true);
+          setErrorStatus(null);
+        }
+        setOpen(next);
+      }}
+    >
       <SheetTrigger asChild>
         <Button type="button" variant="outline" size="sm" aria-label={t("switchApplication")}>
           <LayoutGrid className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -99,7 +109,11 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setReloadKey((k) => k + 1)}
+                onClick={() => {
+                  setLoading(true);
+                  setErrorStatus(null);
+                  setReloadKey((k) => k + 1);
+                }}
               >
                 {tCommon("retry")}
               </Button>

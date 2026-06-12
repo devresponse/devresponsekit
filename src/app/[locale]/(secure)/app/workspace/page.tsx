@@ -5,7 +5,7 @@ export default function WorkspacePage() {
   return (
     <section className="space-y-3 p-6">
       <h1 className="text-lg font-semibold">{t("workspace")}</h1>
-      <p className="text-sm text-neutral-600">Nested shell content area.</p>
+      <p className="text-muted-foreground text-sm">Nested shell content area.</p>
     </section>
   );
 }

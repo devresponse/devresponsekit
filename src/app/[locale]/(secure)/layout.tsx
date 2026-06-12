@@ -7,6 +7,7 @@ import { TopShellBar } from "@/components/app-shell/top-shell-bar";
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 import { DialogManagerProvider } from "@/components/ui/dialog-manager";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/flexsidebar";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
@@ -65,6 +66,7 @@ export default async function SecureLayout({
               <span className="text-sm font-semibold">DevResponse</span>
               <div className="ml-auto flex items-center gap-2">
                 <ApplicationSwitcherSheet locale={safeLocale} />
+                <ThemeToggle />
                 <LocaleSwitcher current={safeLocale} persistAuthenticated />
                 <SignOutButton locale={safeLocale} />
               </div>

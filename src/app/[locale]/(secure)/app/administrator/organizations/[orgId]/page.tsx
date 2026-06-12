@@ -64,7 +64,7 @@ export default async function AdministratorOrganizationDetailPage({
             </LocaleLink>
           </Button>
           <h1 className="text-lg font-semibold">{org.name}</h1>
-          <p className="text-sm text-neutral-600">
+          <p className="text-muted-foreground text-sm">
             <code className="text-xs">{org.slug}</code>
           </p>
         </div>

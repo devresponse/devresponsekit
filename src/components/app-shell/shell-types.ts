@@ -8,6 +8,14 @@ export type ShellDensity = "comfortable" | "compact";
 export type ShellSidebarMode = "static" | "drawer" | "hidden";
 /** Footer mode controls whether a footer slot is rendered at all. */
 export type ShellFooterMode = "visible" | "hidden";
+/**
+ * Region arrangement of the grid:
+ *   - `header-first` (default): the header spans the full width and the
+ *     left/right regions start below it (classic Holy Grail).
+ *   - `sidebar-first`: the left region spans the full height and the
+ *     header sits adjacent to it, over the content columns only.
+ */
+export type ShellLayout = "header-first" | "sidebar-first";
 /** Identifier for shell regions whose visibility can be toggled. */
 export type ShellRegion = "left" | "right" | "footer";
 /** Visibility scope distinguishes the root shell from nested workspaces. */
@@ -27,6 +35,7 @@ export interface ShellControlledVisibilityProps {
 export interface ShellGridContainerProps extends ShellControlledVisibilityProps {
   variant: ShellVariant;
   depth: number;
+  layout?: ShellLayout;
   header?: ReactNode;
   left?: ReactNode;
   right?: ReactNode;
@@ -56,6 +65,7 @@ export interface ShellContainerProps extends ShellControlledVisibilityProps {
 }
 
 export interface ApplicationShellProps extends ShellControlledVisibilityProps {
+  layout?: ShellLayout;
   header?: ReactNode;
   left?: ReactNode;
   right?: ReactNode;

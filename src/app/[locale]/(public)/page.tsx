@@ -29,7 +29,7 @@ function Hero({ locale }: { locale: SupportedLocale }) {
       aria-labelledby="hero-heading"
       className="mx-auto flex max-w-4xl flex-col items-start gap-6 px-6 py-16 sm:py-24"
     >
-      <p className="text-sm font-medium tracking-wide text-neutral-500 uppercase">
+      <p className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
         {t("heroEyebrow")}
       </p>
       <h1
@@ -38,26 +38,26 @@ function Hero({ locale }: { locale: SupportedLocale }) {
       >
         {t("heroTitle")}
       </h1>
-      <p className="max-w-2xl text-lg text-neutral-600">{t("heroSubtitle")}</p>
+      <p className="text-muted-foreground max-w-2xl text-lg">{t("heroSubtitle")}</p>
       <div className="flex flex-wrap items-center gap-3 pt-2">
         <LocaleLink
           href="/sign-up"
           locale={locale}
-          className="bg-shell-fg text-shell-bg rounded-md px-4 py-2 text-sm font-medium hover:opacity-90"
+          className="bg-foreground text-background rounded-md px-4 py-2 text-sm font-medium hover:opacity-90"
         >
           {t("heroPrimaryCta")}
         </LocaleLink>
         <LocaleLink
           href="/about"
           locale={locale}
-          className="border-shell-border hover:bg-shell-muted rounded-md border px-4 py-2 text-sm font-medium"
+          className="border-border hover:bg-muted rounded-md border px-4 py-2 text-sm font-medium"
         >
           {t("heroSecondaryCta")}
         </LocaleLink>
         <LocaleLink
           href="/sign-in"
           locale={locale}
-          className="hover:bg-shell-muted rounded-md px-4 py-2 text-sm font-medium"
+          className="hover:bg-muted rounded-md px-4 py-2 text-sm font-medium"
         >
           {tCommon("signIn")}
         </LocaleLink>

@@ -12,15 +12,15 @@ import { cn } from "@/lib/utils";
  */
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-shell-accent focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
-        default: "bg-shell-accent text-white hover:opacity-90",
-        outline: "border border-shell-border bg-transparent hover:bg-shell-muted",
-        ghost: "hover:bg-shell-muted",
-        destructive: "bg-red-600 text-white hover:bg-red-700",
-        link: "text-shell-accent underline-offset-4 hover:underline",
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        outline: "border border-border bg-transparent hover:bg-muted",
+        ghost: "hover:bg-muted",
+        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
         default: "h-9 px-4 py-2",

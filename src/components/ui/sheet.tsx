@@ -53,7 +53,7 @@ const SheetContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "bg-shell-bg border-shell-border fixed z-50 flex flex-col gap-4 p-6 shadow-lg transition ease-in-out",
+        "bg-background border-border fixed z-50 flex flex-col gap-4 p-6 shadow-lg transition ease-in-out",
         SHEET_SIDE_CLASSES[side],
         className,
       )}
@@ -61,7 +61,7 @@ const SheetContent = React.forwardRef<
     >
       {children}
       <DialogPrimitive.Close
-        className="ring-offset-background focus:ring-shell-accent absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-none disabled:pointer-events-none"
+        className="ring-offset-background focus:ring-ring absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-none disabled:pointer-events-none"
         aria-label={closeLabel}
       >
         <X className="h-4 w-4" aria-hidden="true" />
@@ -82,7 +82,7 @@ const SheetTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Title
     ref={ref}
-    className={cn("text-shell-fg text-base font-semibold", className)}
+    className={cn("text-foreground text-base font-semibold", className)}
     {...props}
   />
 ));
@@ -94,7 +94,7 @@ const SheetDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Description
     ref={ref}
-    className={cn("text-sm text-neutral-600", className)}
+    className={cn("text-muted-foreground text-sm", className)}
     {...props}
   />
 ));

@@ -99,7 +99,7 @@ export default async function AdministratorUserDetailPage({
             </LocaleLink>
           </Button>
           <h1 className="text-lg font-semibold">{user.display_name ?? user.primary_email}</h1>
-          <p className="text-sm text-neutral-600">{user.primary_email}</p>
+          <p className="text-muted-foreground text-sm">{user.primary_email}</p>
         </div>
         <div className="flex items-center gap-2">
           {canImpersonate ? (

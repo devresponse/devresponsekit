@@ -183,12 +183,12 @@ export function RolePermissionsEditor({
   return (
     <div className="space-y-3">
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}
       {info ? (
-        <p className="text-sm text-green-700" role="status">
+        <p className="text-success text-sm" role="status">
           {info}
         </p>
       ) : null}

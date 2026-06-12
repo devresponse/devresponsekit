@@ -174,7 +174,7 @@ export function EnterpriseAppSettingsForm({
           disabled={disabled}
           onChange={(e) => setOrigin(e.currentTarget.value)}
         />
-        <p className="text-xs text-neutral-500">{t("fields.originHelp")}</p>
+        <p className="text-muted-foreground text-xs">{t("fields.originHelp")}</p>
       </div>
 
       <div className="space-y-2">
@@ -188,7 +188,7 @@ export function EnterpriseAppSettingsForm({
           disabled={disabled}
           onChange={(e) => setSubdomain(e.currentTarget.value.toLowerCase())}
         />
-        <p className="text-xs text-neutral-500">{t("fields.subdomainHelp")}</p>
+        <p className="text-muted-foreground text-xs">{t("fields.subdomainHelp")}</p>
       </div>
 
       <div className="space-y-2">
@@ -237,22 +237,22 @@ export function EnterpriseAppSettingsForm({
 
       <div className="space-y-2">
         <Label>{t("fields.organization")}</Label>
-        <p className="text-sm text-neutral-700">
+        <p className="text-foreground text-sm">
           {app.organizationSlug ? (
             <code className="text-xs">{app.organizationSlug}</code>
           ) : (
-            <span className="text-neutral-500">{t("global")}</span>
+            <span className="text-muted-foreground">{t("global")}</span>
           )}
         </p>
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}
       {saved ? (
-        <p className="text-sm text-green-700" role="status">
+        <p className="text-success text-sm" role="status">
           {t("settings.saved")}
         </p>
       ) : null}

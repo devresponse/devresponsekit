@@ -86,7 +86,7 @@ export function LanguageMenu({
         <DropdownMenu.Content
           align="end"
           sideOffset={4}
-          className="border-shell-border bg-shell-surface z-50 min-w-[10rem] rounded-md border p-1 text-sm shadow-md"
+          className="border-border bg-card z-50 min-w-[10rem] rounded-md border p-1 text-sm shadow-md"
         >
           <DropdownMenu.RadioGroup
             value={current}
@@ -96,7 +96,7 @@ export function LanguageMenu({
               <DropdownMenu.RadioItem
                 key={locale}
                 value={locale}
-                className="hover:bg-shell-muted focus:bg-shell-muted cursor-pointer rounded px-2 py-1.5 outline-none data-[state=checked]:font-semibold"
+                className="hover:bg-muted focus:bg-muted cursor-pointer rounded px-2 py-1.5 outline-none data-[state=checked]:font-semibold"
               >
                 {LOCALE_LABELS[locale]}
               </DropdownMenu.RadioItem>

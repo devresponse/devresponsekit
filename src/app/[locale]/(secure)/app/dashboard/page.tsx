@@ -12,7 +12,7 @@ export default function DashboardPage() {
   return (
     <section className="space-y-4 p-6">
       <h1 className="text-xl font-semibold">{t("dashboard")}</h1>
-      <p className="text-sm text-neutral-600">
+      <p className="text-muted-foreground text-sm">
         Welcome to the secure DevResponse Enterprise shell.
       </p>
     </section>

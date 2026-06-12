@@ -31,7 +31,7 @@ export default async function AdministratorPermissionsPage({
     <section className="space-y-4 p-6">
       <div className="space-y-1">
         <h1 className="text-lg font-semibold">{t("title")}</h1>
-        <p className="text-sm text-neutral-600">{t("description")}</p>
+        <p className="text-muted-foreground text-sm">{t("description")}</p>
       </div>
       <AdministratorPermissionsGrid canManage={canManage} />
     </section>

@@ -128,7 +128,7 @@ export function OrganizationProvidersGrid({
   return (
     <div className="space-y-2">
       {rowError ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {rowError}
         </p>
       ) : null}

@@ -105,7 +105,7 @@ export function AdministratorAuditGrid() {
           row.original.actor_better_auth_user_id ? (
             <code className="text-xs">{row.original.actor_better_auth_user_id}</code>
           ) : (
-            <span className="text-neutral-500">—</span>
+            <span className="text-muted-foreground">—</span>
           ),
       },
       {
@@ -119,7 +119,7 @@ export function AdministratorAuditGrid() {
           if (row.original.target_application_id)
             parts.push(`app:${row.original.target_application_id}`);
           return parts.length === 0 ? (
-            <span className="text-neutral-500">—</span>
+            <span className="text-muted-foreground">—</span>
           ) : (
             <span className="space-y-1 text-xs">
               {parts.map((p) => (
@@ -286,9 +286,7 @@ function AuditDetail({
       </dl>
       <div className="space-y-1">
         <h4 className="text-sm font-semibold">{t("detail.metadata")}</h4>
-        <pre className="bg-shell-muted overflow-x-auto rounded-md p-3 text-xs">
-          {metadataString}
-        </pre>
+        <pre className="bg-muted overflow-x-auto rounded-md p-3 text-xs">{metadataString}</pre>
       </div>
     </div>
   );

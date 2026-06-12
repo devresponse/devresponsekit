@@ -34,7 +34,7 @@ export default async function AdministratorAuditPage({
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-lg font-semibold">{t("title")}</h1>
       </div>
-      <p className="text-sm text-neutral-600">{t("description")}</p>
+      <p className="text-muted-foreground text-sm">{t("description")}</p>
       <AdministratorAuditGrid />
     </section>
   );

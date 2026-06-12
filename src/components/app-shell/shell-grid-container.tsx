@@ -23,6 +23,7 @@ import type { ShellGridContainerProps } from "./shell-types";
 export function ShellGridContainer(props: ShellGridContainerProps) {
   const {
     variant,
+    layout = "header-first",
     header,
     left,
     right,
@@ -49,6 +50,7 @@ export function ShellGridContainer(props: ShellGridContainerProps) {
     <div
       className={cn("sh-grid", className)}
       data-variant={variant}
+      data-layout={layout}
       data-left-hidden={(!hasLeft).toString()}
       data-right-hidden={(!hasRight).toString()}
       data-footer-hidden={(!hasFooter).toString()}

@@ -139,7 +139,7 @@ export function NewUserForm({ locale }: { locale: string }) {
           aria-invalid={errors.email ? true : undefined}
         />
         {errors.email ? (
-          <p className="text-xs text-red-600" role="alert">
+          <p className="text-destructive text-xs" role="alert">
             {errors.email}
           </p>
         ) : null}
@@ -170,11 +170,11 @@ export function NewUserForm({ locale }: { locale: string }) {
           aria-invalid={errors.password ? true : undefined}
           aria-describedby="password-hint"
         />
-        <p id="password-hint" className="text-xs text-neutral-500">
+        <p id="password-hint" className="text-muted-foreground text-xs">
           {t("new.passwordHint")}
         </p>
         {errors.password ? (
-          <p className="text-xs text-red-600" role="alert">
+          <p className="text-destructive text-xs" role="alert">
             {errors.password}
           </p>
         ) : null}
@@ -229,7 +229,7 @@ export function NewUserForm({ locale }: { locale: string }) {
       </div>
 
       {errors.submit ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {errors.submit}
         </p>
       ) : null}

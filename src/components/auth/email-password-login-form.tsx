@@ -79,7 +79,7 @@ export function EmailPasswordLoginForm({ returnTo }: EmailPasswordLoginFormProps
       </div>
 
       {error ? (
-        <p role="alert" className="text-sm text-red-700">
+        <p role="alert" className="text-destructive text-sm">
           {error}
         </p>
       ) : null}

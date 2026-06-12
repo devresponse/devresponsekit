@@ -31,7 +31,7 @@ export function SignInForm({ locale, returnTo }: SignInFormProps) {
         <EmailPasswordLoginForm returnTo={returnTo} />
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />
-          <span className="text-xs text-neutral-500 uppercase">{t("or")}</span>
+          <span className="text-muted-foreground text-xs uppercase">{t("or")}</span>
           <Separator className="flex-1" />
         </div>
         <SocialLoginButtons returnTo={returnTo} />

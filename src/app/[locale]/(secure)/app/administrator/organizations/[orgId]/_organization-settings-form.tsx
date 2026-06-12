@@ -108,7 +108,7 @@ export function OrganizationSettingsForm({
           disabled={!canUpdate}
           aria-invalid={error !== null && !SLUG_RE.test(slug) ? true : undefined}
         />
-        <p className="text-xs text-neutral-500">{tFields("slugHelp")}</p>
+        <p className="text-muted-foreground text-xs">{tFields("slugHelp")}</p>
       </div>
 
       <div className="space-y-2">
@@ -150,12 +150,12 @@ export function OrganizationSettingsForm({
       </div>
 
       {error ? (
-        <p className="text-sm text-red-600" role="alert">
+        <p className="text-destructive text-sm" role="alert">
           {error}
         </p>
       ) : null}
       {saved ? (
-        <p className="text-sm text-green-700" role="status">
+        <p className="text-success text-sm" role="status">
           {saved}
         </p>
       ) : null}

@@ -64,7 +64,7 @@ export function AdministratorTopHeader({ locale, permissions }: AdministratorTop
         >
           {visibleGroups.map((group) => (
             <MenubarMenu key={group.id}>
-              <MenubarTrigger className="text-foreground/80 focus:bg-muted data-[state=open]:bg-muted data-[state=open]:text-foreground data-[state=open]:border-border h-full rounded-none border-r border-transparent px-3 py-0 text-[12px] font-medium">
+              <MenubarTrigger className="text-foreground/80 hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground data-[state=open]:border-border h-full rounded-none border-r border-transparent px-3 py-0 text-[12px] font-medium">
                 {tNav(group.labelKey)}
               </MenubarTrigger>
               <MenubarContent

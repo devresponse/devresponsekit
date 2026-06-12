@@ -35,7 +35,7 @@ export default async function AdministratorNewRolePage({
           </LocaleLink>
         </Button>
         <h1 className="text-lg font-semibold">{t("new.title")}</h1>
-        <p className="text-sm text-neutral-600">{t("new.description")}</p>
+        <p className="text-muted-foreground text-sm">{t("new.description")}</p>
       </div>
       <NewRoleForm locale={locale} />
     </section>

@@ -61,6 +61,7 @@ export default async function AdministratorLayout({
       className="h-full"
     >
       <ApplicationShell
+        layout="sidebar-first"
         className="w-full"
         ariaLabel="Administrator"
         header={<AdministratorTopHeader locale={locale} permissions={guard.access.permissions} />}

@@ -85,7 +85,8 @@
     "hideFooter": "Hide footer",
     "skipToMain": "Skip to main content",
     "skipToNavigation": "Skip to navigation",
-    "account": "Account"
+    "account": "Account",
+    "documentation": "Documentation"
   },
   "administrator": {
     "appTitle": "Administrator",
@@ -827,5 +828,17 @@
       "sessionsLoadFailed": "Could not load your sessions.",
       "sessionsRevokeFailed": "Could not revoke the session."
     }
+  },
+  "docs": {
+    "appTitle": "Documentation",
+    "index": {
+      "title": "Documentation",
+      "description": "Browse guides and reference material for the platform."
+    },
+    "emptyCatalog": "No documents are available to you yet.",
+    "onThisPage": "On this page",
+    "lastUpdated": "Last updated {date}",
+    "breadcrumbHome": "Documentation",
+    "readDocument": "Read"
   }
 }

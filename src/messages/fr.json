@@ -85,7 +85,8 @@
     "hideFooter": "Masquer le pied de page",
     "skipToMain": "Aller au contenu principal",
     "skipToNavigation": "Aller à la navigation",
-    "account": "Compte"
+    "account": "Compte",
+    "documentation": "Documentation"
   },
   "administrator": {
     "appTitle": "Administrateur",
@@ -827,5 +828,17 @@
       "sessionsLoadFailed": "Impossible de charger vos sessions.",
       "sessionsRevokeFailed": "Impossible de révoquer la session."
     }
+  },
+  "docs": {
+    "appTitle": "Documentation",
+    "index": {
+      "title": "Documentation",
+      "description": "Parcourez les guides et la documentation de référence de la plateforme."
+    },
+    "emptyCatalog": "Aucun document n'est disponible pour vous pour le moment.",
+    "onThisPage": "Sur cette page",
+    "lastUpdated": "Dernière mise à jour {date}",
+    "breadcrumbHome": "Documentation",
+    "readDocument": "Lire"
   }
 }

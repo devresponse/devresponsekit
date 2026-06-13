@@ -1,0 +1,160 @@
+import "server-only";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import remarkRehype from "remark-rehype";
+import rehypeSanitize from "rehype-sanitize";
+import rehypeSlug from "rehype-slug";
+import rehypeAutolinkHeadings from "rehype-autolink-headings";
+import rehypePrettyCode from "rehype-pretty-code";
+import rehypeStringify from "rehype-stringify";
+import { docsSanitizeSchema } from "./sanitize-schema";
+
+/**
+ * Markdown → safe HTML pipeline for the documentation viewer.
+ *
+ * Ordering is a security decision: untrusted content is **sanitized
+ * first**, then the trusted transforms (heading ids, anchor links,
+ * Shiki highlighting, link/image rewriting) run on the already-safe
+ * tree. Because the highlighter runs after sanitize, the only inline
+ * styles in the output come from the trusted theme — never from author
+ * input. No author JavaScript is ever executed (`allowDangerousHtml:
+ * false` keeps raw HTML out; MDX expressions are dropped, not run).
+ */
+
+export interface DocHeading {
+  depth: number;
+  id: string;
+  text: string;
+}
+
+export interface RenderedDoc {
+  html: string;
+  headings: DocHeading[];
+}
+
+export interface RenderOptions {
+  /** Active locale — used to rewrite relative doc links into the route. */
+  locale: string;
+  /** Cache key (typically `slug|updatedAt`); skips re-rendering when hit. */
+  cacheKey?: string;
+}
+
+/* ----------------------------- hast helpers ----------------------------- */
+
+interface HastNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+
+function textOf(node: HastNode): string {
+  if (node.type === "text") return node.value ?? "";
+  if (!node.children) return "";
+  return node.children.map(textOf).join("");
+}
+
+function walk(node: HastNode, visit: (n: HastNode) => void): void {
+  visit(node);
+  if (node.children) for (const child of node.children) walk(child, visit);
+}
+
+/**
+ * Collects heading ids/text into `sink` (after rehype-slug has assigned
+ * ids). Depths 2–4 only — h1 is the page title, deeper headings rarely
+ * belong in a TOC.
+ */
+function rehypeCollectHeadings(sink: DocHeading[]) {
+  return (tree: HastNode) => {
+    walk(tree, (node) => {
+      if (node.type !== "element" || !node.tagName) return;
+      const match = /^h([1-6])$/.exec(node.tagName);
+      if (!match) return;
+      const depth = Number(match[1]);
+      if (depth < 2 || depth > 4) return;
+      const id = typeof node.properties?.id === "string" ? node.properties.id : "";
+      if (!id) return;
+      sink.push({ depth, id, text: textOf(node).trim() });
+    });
+  };
+}
+
+const EXTERNAL = /^https?:\/\//i;
+const DOC_LINK = /\.mdx?(?=$|[#?])/i;
+
+/**
+ * Rewrites links and images on the sanitized tree:
+ *   - relative `*.md`/`*.mdx` links → `/{locale}/app/docs/{slug}` routes
+ *   - relative image `src` → the path-safe asset route
+ *   - external links get `target="_blank"` + `rel="noopener noreferrer"`
+ *
+ * Hash links and already-absolute in-app links are left untouched. Author
+ * hrefs with dangerous protocols were already removed by sanitize.
+ */
+function rehypeRewriteLinks(locale: string) {
+  return (tree: HastNode) => {
+    walk(tree, (node) => {
+      if (node.type !== "element") return;
+      const props = node.properties ?? (node.properties = {});
+
+      if (node.tagName === "a" && typeof props.href === "string") {
+        const href = props.href;
+        if (EXTERNAL.test(href)) {
+          props.target = "_blank";
+          props.rel = "noopener noreferrer";
+        } else if (!href.startsWith("#") && !href.startsWith("/") && DOC_LINK.test(href)) {
+          const clean = href.replace(/^\.\//, "").replace(DOC_LINK, "");
+          props.href = `/${locale}/app/docs/${clean}`;
+        }
+      }
+
+      if (node.tagName === "img" && typeof props.src === "string") {
+        const src = props.src;
+        if (!EXTERNAL.test(src) && !src.startsWith("/")) {
+          const clean = src.replace(/^\.\//, "");
+          props.src = `/api/docs/asset/${clean}`;
+        }
+      }
+    });
+  };
+}
+
+/* ------------------------------ rendering ------------------------------- */
+
+const renderCache = new Map<string, RenderedDoc>();
+
+/** Test seam: clear the rendered-document cache. */
+export function clearRenderCache(): void {
+  renderCache.clear();
+}
+
+export async function renderDocument(body: string, options: RenderOptions): Promise<RenderedDoc> {
+  const { locale, cacheKey } = options;
+  if (cacheKey) {
+    const hit = renderCache.get(cacheKey);
+    if (hit) return hit;
+  }
+
+  const headings: DocHeading[] = [];
+  const file = await unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .use(remarkRehype, { allowDangerousHtml: false })
+    .use(rehypeSanitize, docsSanitizeSchema)
+    .use(rehypeSlug)
+    .use(rehypeAutolinkHeadings, { behavior: "wrap" })
+    .use(() => rehypeCollectHeadings(headings))
+    .use(() => rehypeRewriteLinks(locale))
+    .use(rehypePrettyCode, {
+      theme: { light: "github-light", dark: "github-dark" },
+      keepBackground: true,
+    })
+    .use(rehypeStringify)
+    .process(body);
+
+  const rendered: RenderedDoc = { html: String(file), headings };
+  if (cacheKey) renderCache.set(cacheKey, rendered);
+  return rendered;
+}

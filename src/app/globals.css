@@ -273,3 +273,30 @@
 .prose :where(code):not([data-theme]) {
   word-break: break-word;
 }
+
+/*
+ * Mermaid diagram mounts (rendered client-side by DocArticle). Centered,
+ * with the SVG scaled to fit. Before the client renders — or if it fails —
+ * the mount holds the raw diagram source, shown as a muted monospace block
+ * so it degrades gracefully instead of as an unstyled wall of text.
+ */
+.prose .mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 1.5rem 0;
+}
+.prose .mermaid[data-rendered="true"] svg {
+  max-width: 100%;
+  height: auto;
+}
+.prose .mermaid:not([data-rendered="true"]) {
+  justify-content: flex-start;
+  white-space: pre;
+  overflow-x: auto;
+  padding: 1rem;
+  border: 1px solid var(--color-border, var(--border));
+  border-radius: var(--radius);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.8125rem;
+  color: var(--color-muted-foreground, var(--muted-foreground));
+}

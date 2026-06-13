@@ -61,4 +61,26 @@ describe("renderDocument", () => {
     const second = await renderDocument("# DIFFERENT", { locale: "en", cacheKey: "k|1" });
     expect(second.html).toBe(first.html);
   });
+
+  it("extracts mermaid blocks into a client mount instead of highlighting them", async () => {
+    const md = [
+      "```mermaid",
+      "erDiagram",
+      "  A ||--o{ B : has",
+      "```",
+      "",
+      "```js",
+      "const x = 1;",
+      "```",
+    ].join("\n");
+    const { html } = await renderDocument(md, { locale: "en" });
+    // Mermaid block becomes a .mermaid mount holding the raw source...
+    expect(html).toMatch(/<div class="mermaid not-prose">/);
+    expect(html).toContain("erDiagram");
+    expect(html).toContain("A ||--o{ B : has");
+    // ...and is NOT run through the syntax highlighter.
+    expect(html).not.toContain('data-language="mermaid"');
+    // The adjacent js block IS still highlighted, proving only mermaid is special-cased.
+    expect(html).toMatch(/data-language="js"/);
+  });
 });

@@ -50,7 +50,7 @@ Key design choices in this repo:
   No Prisma or Drizzle is introduced.
 - **Application tables are kept separate from Better Auth tables.**
   App tables are prefixed `app_` (see
-  [`src/db/migrations/0001-app-core.sql`](../src/db/migrations/0001-app-core.sql))
+  [`src/db/migrations/0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql))
   and link to Better Auth users by storing `better_auth_user_id`
   rather than embedding into Better Auth's own tables.
 - **Cookie handling** uses Better Auth's `nextCookies()` plugin so that
@@ -317,6 +317,12 @@ are:
 | `SSO_HANDOFF_JWT_SECRET`       | ✅       | Separate from `BETTER_AUTH_SECRET`. Used by the subdomain SSO handoff.      |
 | `SSO_HANDOFF_AUDIENCE_PREFIX`  | ✅       | Used to validate handoff JWT audience.                                      |
 | `SSO_HANDOFF_APPLICATION_ID`   | ✅       | Per-deployment audience suffix; prevents Host-header spoofing.              |
+| `AUTH_RATE_LIMIT_DISABLED`     | ⛔ test  | `"1"` disables Better Auth's built-in rate limiter. **Test/CI only** — the browser suites sign in faster than the production limit allows. Never set in production. |
+
+Outbound email (password reset, admin/account flows) is configured
+through `EMAIL_PROVIDER` / `EMAIL_FROM` / `RESEND_*` / `MAILGUN_*` — see
+[setup-email.md](setup-email.md) for the full list. With no provider
+configured, emails are recorded in the outbox and never sent.
 
 > The build itself reads `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
 > `SSO_HANDOFF_JWT_SECRET`, and `SSO_HANDOFF_AUDIENCE_PREFIX` —

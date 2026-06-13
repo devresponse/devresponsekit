@@ -22,6 +22,7 @@ shells) so that you can land your first change with confidence.
    - 4.2 [The two-layer access boundary](#42-the-two-layer-access-boundary)
    - 4.3 [Session lifecycle and provisioning](#43-session-lifecycle-and-provisioning)
    - 4.4 [Client-side auth helpers](#44-client-side-auth-helpers)
+   - 4.5 [Outbound email](#45-outbound-email)
 5. [Routing](#5-routing)
    - 5.1 [Localized App Router tree](#51-localized-app-router-tree)
    - 5.2 [Route regions: secure / auth / public](#52-route-regions-secure--auth--public)
@@ -43,9 +44,11 @@ shells) so that you can land your first change with confidence.
 `devresponsekit` is an **enterprise Next.js 16 “Holy Grail” application
 shell** with first‑class authentication, internationalization, and a
 nestable shell layout. The product surface lives behind
-`/[locale]/app/*` and is composed of three top‑level applications
-(Dashboard, Workspace, Admin) inside a single shell that you can extend
-with new sub‑applications.
+`/[locale]/app/*` and is composed of top‑level applications — Dashboard,
+Account (self-service), Workspace, and Administrator — inside a single
+shell that you can extend with new sub‑applications. Supporting
+subsystems include outbound email (outbox-first, Resend/Mailgun) and
+cross-subdomain SSO handoff.
 
 The defining architectural choices are:
 
@@ -84,20 +87,20 @@ React Query, Redux, or another router — those choices are intentional.
 ```
 src/
 ├── app/                          Next.js App Router tree
-│   ├── layout.tsx                Root <html>/<body> shell
-│   ├── page.tsx                  Root redirect to default locale
-│   ├── api/                      Route handlers (auth, navigation, sso, ...)
+│   ├── (root)/                   Bare "/" → default-locale redirect (own minimal root layout)
+│   ├── api/                      Route handlers (auth, account, administrator, navigation, sso, preferences)
 │   └── [locale]/
-│       ├── layout.tsx            Locale validation + NextIntlClientProvider
+│       ├── layout.tsx            Root layout: <html lang> + theme + NextIntlClientProvider
 │       ├── (public)/             Marketing / docs / logged-out pages
-│       ├── (auth)/               sign-in, sign-up, forgot-password, ...
+│       ├── (auth)/               sign-in, sign-up, forgot-password, reset-password, status pages
 │       └── (secure)/             Authenticated product surface
 │           ├── layout.tsx        Server-side auth boundary + root shell
 │           ├── _components/      Route-private client components
 │           └── app/
-│               ├── dashboard/    Top-level app
+│               ├── dashboard/    Landing workspace
+│               ├── account/      Self-service account (user-level, self-scoped)
 │               ├── workspace/    Nested ApplicationShell example
-│               └── admin/        Admin app (permission-gated)
+│               └── administrator/  Admin console (permission-gated; users, roles, orgs, apps, audit, email)
 │
 ├── components/
 │   ├── app-shell/                ShellContainer, ApplicationShell, regions
@@ -139,10 +142,14 @@ A few conventions to internalize early:
 The single Better Auth instance lives at `src/lib/auth.ts`. It is wired
 to PostgreSQL through the `pg` Pool and configured for:
 
-- email + password,
+- email + password, including password reset (`sendResetPassword`
+  renders and records the email through the outbox — see §4.5),
 - Google, Microsoft (Entra ID, multi‑tenant), and GitHub social logins,
 - account linking only when the verified email matches,
-- 8‑hour rolling sessions, refreshed every 15 minutes of activity.
+- 8‑hour rolling sessions, refreshed every 15 minutes of activity,
+- plugins, in order: `admin()` (ban/impersonation), `ssoSession()`
+  (a server-only endpoint that establishes the consumer session on SSO
+  handoff — never mounted on HTTP), and `nextCookies()` (must stay last).
 
 It exports both `auth` (the server API) and an `AuthSession` type alias.
 Anything server‑side that needs the session reads it through
@@ -203,17 +210,39 @@ block — `decideSecureAccess` already encodes that rule; do not bypass it.
 For cross‑application handoff (single sign‑on into satellite apps), the
 short‑lived JWT mint lives in `src/lib/jwt-handoff.server.ts` and is
 exposed under `/api/sso/*`. It requires `SSO_HANDOFF_JWT_SECRET` and
-`SSO_HANDOFF_AUDIENCE_PREFIX` env vars at build time.
+`SSO_HANDOFF_AUDIENCE_PREFIX` env vars at build time. `/api/sso/consume`
+verifies the token, consumes its one‑time `jti` nonce, and then
+establishes a real Better Auth session for the verified subject through
+the server‑only `ssoSession` plugin, forwarding the signed session
+cookie on the dashboard redirect — so a launched user lands signed in.
 
 ### 4.4 Client-side auth helpers
 
 - `src/lib/auth-client.ts` — Better Auth browser client; use it for
-  sign‑in/sign‑up forms in `src/components/auth/*`.
+  sign‑in/sign‑up forms in `src/components/auth/*`, the password-reset
+  request/complete forms, and self-service password change + session
+  management in the Account app.
 - `src/components/auth/sign-out-button.tsx` — the canonical sign‑out
   control rendered in the secure top bar.
 
 Client components must never read sessions directly from cookies — they
 either receive what they need as props (preferred) or call an API route.
+
+### 4.5 Outbound email
+
+Email is **outbox-first**: every message is rendered and recorded in
+`app_outbox` *before* any delivery attempt, so the outbox is a complete
+record regardless of whether a provider is configured. The sender
+(`src/lib/email/send.server.ts`) resolves an editable template
+(`app_email_templates`, falling back to the code defaults in
+`src/lib/email/templates.ts`), inserts the outbox row, then delegates
+delivery to a pluggable provider (`src/lib/email/providers.server.ts` —
+Resend or Mailgun, selected by `EMAIL_PROVIDER`). With no provider set
+(local dev and CI), rows stay `logged` and nothing is sent. Delivery
+failures are recorded, never thrown. Administrators inspect the outbox
+and edit templates under `/app/administrator/email`
+(`admin.email.read` / `admin.email.manage`). See
+[setup-email.md](setup-email.md) for the full integration guide.
 
 ---
 
@@ -282,8 +311,15 @@ Route handlers live under `src/app/api/`:
   `SecureSidebar` (see §6.3). Per the menu‑filter rule, client components
   **never** import a menu manifest directly — they always go through this
   API so role/permission filtering happens server‑side.
-- `sso/` — short‑lived JWT mint for cross‑app handoff.
-- `preferences/`, `admin/` — user settings and admin endpoints.
+- `sso/` — short‑lived JWT mint for cross‑app handoff (`launch`) and the
+  consumer endpoint that burns the nonce and establishes the session
+  (`consume`).
+- `account/` — self-service account endpoints (`profile`, `preferences`),
+  guarded by `requireAccountUser` and **strictly self-scoped** to the
+  session user (no id is accepted from the client).
+- `administrator/` — the guarded admin REST API (users, roles,
+  permissions, orgs, enterprise apps, audit, email).
+- `preferences/` — the user's locale preference.
 
 Each handler is responsible for its own auth check; the proxy does not
 gate them.
@@ -455,7 +491,7 @@ through a child.
 
 ## 8. Local setup and common commands
 
-Prerequisites: Node 20+, `pnpm@10`, Docker (for Postgres).
+Prerequisites: Node 22+, `pnpm@10`, Docker (for Postgres).
 
 ```bash
 pnpm install

@@ -57,9 +57,9 @@ In scope:
 Out of scope (explicitly):
 
 - New auth providers (managed by the existing `lib/auth.ts`).
-- Schema-changing migrations beyond the existing `0001-app-core.sql`
-  (this plan only adds a small read-optimization migration if profiling
-  warrants it; see §13).
+- Schema-changing migrations beyond the consolidated
+  `0001-initial-schema.sql` (the administrator indexes and audit columns
+  this plan called for are folded into that single schema file; see §3).
 - MFA management (project-wide decision per `specs.md` §2).
 - Email/notification delivery (administrator only triggers status
   changes; downstream notifications are a separate workstream).

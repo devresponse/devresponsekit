@@ -369,10 +369,10 @@ admin.users.impersonate                           admin.clients.read
 ```
 
 The last four (`admin.apikeys.*` / `admin.clients.*`) govern the
-machine-credential admin routes under `/api/v1/admin/*` and were added by
-`0003-api-credentials.sql`. These catalog keys are also the **scope**
-strings used by the `/api/v1` surface (plus four `account.*` scopes — see
-`docs/design-api-keys-and-tokens.md`).
+machine-credential admin routes under `/api/v1/admin/*`. All 30 keys are
+defined in the single `0001-initial-schema.sql`. These catalog keys are
+also the **scope** strings used by the `/api/v1` surface (plus four
+`account.*` scopes — see `docs/design-api-keys-and-tokens.md`).
 
 A caller's effective permissions are computed per request by joining
 `app_user_roles → app_role_permissions → app_permissions` for the user's

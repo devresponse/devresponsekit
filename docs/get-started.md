@@ -539,7 +539,7 @@ cp .env.example .env            # used by Next.js and the pnpm db:* scripts
 
 pnpm db:up                      # start pgvector/pgvector:pg17 on localhost:5444
 pnpm db:auth:migrate            # Better Auth (vendor) schema
-pnpm db:app:migrate             # applies ALL app migrations in order (0001 initial + 0003 api-credentials)
+pnpm db:app:migrate             # the complete application schema (single 0001-initial-schema.sql)
 pnpm db:seed                    # local seed data (baseline roles, apps, admin user)
 
 pnpm dev                        # next dev on http://localhost:3000

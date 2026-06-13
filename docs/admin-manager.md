@@ -455,11 +455,10 @@ admin.clients.read         # read OAuth client registrations
 admin.clients.manage       # create, rotate, and revoke OAuth clients
 ```
 
-The initial schema `0001-initial-schema.sql` defines the first 26 keys
-(through `admin.email.*`) and grants the full catalog to `superuser`. The
-four machine-credential keys (`admin.apikeys.*` / `admin.clients.*`) are
-added by `0003-api-credentials.sql`, which also grants them to both
-`superuser` and `admin.platform`. They govern the `/api/v1/admin/api-keys`
+The single `0001-initial-schema.sql` defines all 30 keys (including the
+four machine-credential keys `admin.apikeys.*` / `admin.clients.*`) and
+grants the full catalog to `superuser`; the seed re-grants the catalog to
+`admin.platform`. The credential keys govern the `/api/v1/admin/api-keys`
 and `/api/v1/admin/oauth-clients` endpoints (see specs.md §37).
 
 A **seed** script (`src/db/seeds/seed-admin-permissions.ts`) inserts

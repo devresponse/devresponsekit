@@ -96,29 +96,27 @@ upgrading; new columns are introduced via the auth migration tooling
 
 ### 2.2 Application tables (managed by us)
 
-The application schema **starts** from a consolidated initial migration,
+The **entire** application schema is a single consolidated setup script,
 [`src/db/migrations/0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
-(every core `app_*` table, index, and baseline row for a first-time
-setup), and is extended by **further numbered migrations** — currently
-[`0003-api-credentials.sql`](../src/db/migrations/0003-api-credentials.sql),
-which adds the machine-API tables. See §3 for how migrations are applied.
+— one file that creates every `app_*` table, index, and baseline row for a
+first-time setup. There are no other application migration files.
 
-| Table                          | Migration | Purpose                                                                                                  |
-| ------------------------------ | --------- | -------------------------------------------------------------------------------------------------------- |
-| `app_organizations`            | 0001 | Tenant/organization records (slug, name, status, is_default).                                            |
-| `app_provider_organizations`   | 0001 | Maps an external IdP organization (e.g. an Entra tenant, a GitHub org) to an internal `app_organization`. |
-| `app_users`                    | 0001 | Application-side user profile. Links to Better Auth via `better_auth_user_id` (unique). Includes soft-delete bookkeeping. |
-| `app_organization_memberships` | 0001 | Membership of an `app_user` in an `app_organization`, with status and source provider.                   |
-| `app_roles` / `app_permissions` / `app_role_permissions` / `app_user_roles` | 0001 | RBAC: roles, the permission catalog, and their assignments. |
-| `app_enterprise_applications`  | 0001 | Enterprise application catalog used by the app switcher and SSO.                                          |
-| `app_sso_handoff_nonces`       | 0001 | One-time nonces for the cross-subdomain SSO handoff.                                                      |
-| `app_audit_events`             | 0001 | Structured audit log (with `request_id` correlation).                                                    |
-| `app_user_locale_preferences`  | 0001 | Per-user locale / formatting preferences.                                                                |
-| `app_email_templates` / `app_outbox` | 0001 | Editable email templates and the outbox-first delivery log (see [setup-email.md](setup-email.md)). |
-| `app_api_keys`                 | 0003 | Machine API keys — stores only a SHA-256 `key_hash` (never plaintext), plus scopes, status, expiry, and last-used info. Authority derives from the owner `app_user_id`. |
-| `app_oauth_clients`            | 0003 | OAuth2 client-credentials principals (machine identities) with a hashed `client_secret` and scopes. |
-| `app_revoked_tokens`           | 0003 | Revocation list (`jti`) for stateless JWT access tokens killed before their `exp`. |
-| `app_schema_migrations`        | runner | Migration ledger written by `run-migrations.ts`.                                                         |
+| Table                          | Purpose                                                                                                  |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `app_organizations`            | Tenant/organization records (slug, name, status, is_default).                                            |
+| `app_provider_organizations`   | Maps an external IdP organization (e.g. an Entra tenant, a GitHub org) to an internal `app_organization`. |
+| `app_users`                    | Application-side user profile. Links to Better Auth via `better_auth_user_id` (unique). Includes soft-delete bookkeeping. |
+| `app_organization_memberships` | Membership of an `app_user` in an `app_organization`, with status and source provider.                   |
+| `app_roles` / `app_permissions` / `app_role_permissions` / `app_user_roles` | RBAC: roles, the permission catalog, and their assignments. |
+| `app_enterprise_applications`  | Enterprise application catalog used by the app switcher and SSO.                                          |
+| `app_sso_handoff_nonces`       | One-time nonces for the cross-subdomain SSO handoff.                                                      |
+| `app_audit_events`             | Structured audit log (with `request_id` correlation).                                                    |
+| `app_user_locale_preferences`  | Per-user locale / formatting preferences.                                                                |
+| `app_email_templates` / `app_outbox` | Editable email templates and the outbox-first delivery log (see [setup-email.md](setup-email.md)). |
+| `app_api_keys`                 | Machine API keys — stores only a SHA-256 `key_hash` (never plaintext), plus scopes, status, expiry, and last-used info. Authority derives from the owner `app_user_id`. |
+| `app_oauth_clients`            | OAuth2 client-credentials principals (machine identities) with a hashed `client_secret` and scopes. |
+| `app_revoked_tokens`           | Revocation list (`jti`) for stateless JWT access tokens killed before their `exp`. |
+| `app_schema_migrations`        | Migration ledger written by `run-migrations.ts`.                                                         |
 
 Design rules:
 
@@ -154,19 +152,18 @@ order and are wired up as `pnpm` scripts in
 
 - **Runner:** [`src/db/migrations/run-migrations.ts`](../src/db/migrations/run-migrations.ts)
 - **Command:** `pnpm db:app:migrate`
-- **Consolidated baseline + appended migrations:** The schema starts from
+- **Single consolidated schema:** The entire application schema lives in
+  one file,
   [`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
-  (all core `app_*` tables, indexes, and baseline rows) and grows by
-  appending further numbered files — currently
-  [`0003-api-credentials.sql`](../src/db/migrations/0003-api-credentials.sql)
-  (machine-API tables + the four `admin.apikeys.*` / `admin.clients.*`
-  permissions). A first-time setup therefore applies **both** files. (There
-  is no `0002` on disk — a tolerated numbering gap.)
+  — every core `app_*` table, index, and baseline row, **including** the
+  machine-API tables and the four `admin.apikeys.*` / `admin.clients.*`
+  permissions. A first-time setup applies just this one file; there are no
+  other application migrations.
 - **Pattern:** Plain `.sql` files in `src/db/migrations/`, applied in
   lexical order, each wrapped in a transaction. Applied filenames are
   recorded in `app_schema_migrations` so each runs at most once. The
-  initial schema is never edited after release; new schema changes are
-  appended as new `NNNN-short-name.sql` files.
+  runner stays multi-file capable, so a future schema change can be
+  appended as a new `NNNN-short-name.sql` file if ever needed.
 - **Filtering:** Files starting with `better-auth` are skipped (those
   are owned by the auth track).
 - **Idempotent:** Every statement uses `create … if not exists` /
@@ -197,8 +194,8 @@ pnpm db:up
 #    better_auth_user_id always resolve.
 pnpm db:auth:migrate
 
-# 3. Apply all application migrations (0001 initial + 0003 api-credentials,
-#    applied in order; the runner records each in app_schema_migrations).
+# 3. Apply the application schema (the single 0001-initial-schema.sql;
+#    the runner records it in app_schema_migrations).
 pnpm db:app:migrate
 
 # 4. (Local only) seed the baseline roles, enterprise apps, and the

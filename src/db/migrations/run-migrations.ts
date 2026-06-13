@@ -12,12 +12,12 @@ import { Pool } from "pg";
  * migration tooling). Tracks applied filenames in an
  * `app_schema_migrations` table so each file runs at most once.
  *
- * The schema baseline is `0001-initial-schema.sql` (every core `app_*`
- * table, index, and baseline row for a first-time setup). Additive
- * changes ship as further numbered files — currently
- * `0003-api-credentials.sql` (API keys, OAuth clients, JWT revocation
- * list). The runner applies all `NNNN-*.sql` files in lexical order;
- * numbering gaps (there is no `0002` on disk) are tolerated.
+ * The entire application schema lives in ONE file,
+ * `0001-initial-schema.sql`, which provisions every `app_*` table,
+ * index, and baseline row for a first-time setup — no further
+ * application migrations are required. The runner stays multi-file
+ * capable (applying every `NNNN-*.sql` in lexical order) so future
+ * schema changes can be appended as new files if ever needed.
  */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

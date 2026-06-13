@@ -3,15 +3,18 @@
 -- COMPLETE initial application database schema.
 --
 -- This single script provisions EVERY application-owned table, index,
--- and baseline row needed for a first-time database setup. It is the
--- consolidation of the original incremental migrations
--- (0001-app-core, 0002-administrator-indexes,
--- 0003-audit-request-id-and-membership-snapshot, 0004-default-superuser,
--- 0005-superuser-admin-permissions, 0006-email-outbox-and-templates)
--- into one authoritative definition. A fresh database needs only this
--- file (plus the Better Auth vendor schema applied by
--- `pnpm db:auth:migrate`, and `pnpm db:seed` for the local admin user
--- and baseline roles). No further application migrations are required.
+-- and baseline row needed for a first-time database setup — there is
+-- exactly ONE application schema file and ONE setup process. It is the
+-- consolidation of every incremental migration the project has ever had:
+-- the original core/indexes/audit/superuser/email migrations AND the
+-- later machine-API credentials (`app_api_keys`, `app_oauth_clients`,
+-- `app_revoked_tokens`, the `admin.apikeys.*` / `admin.clients.*`
+-- permissions), all folded into one authoritative definition.
+--
+-- A fresh database needs only this file, plus the Better Auth vendor
+-- schema applied by `pnpm db:auth:migrate`, and `pnpm db:seed` for the
+-- local admin user and baseline roles. There are no other application
+-- migration files and no further application migrations are required.
 --
 -- Scope note: the Better Auth tables (`user`, `session`, `account`,
 -- `verification`, …) are owned and created by Better Auth's own
@@ -255,6 +258,68 @@ create index if not exists idx_app_outbox_status
   on app_outbox (status);
 
 -- ---------------------------------------------------------------------------
+-- Machine API credentials (design docs/design-api-keys-and-tokens.md §4):
+-- API keys, OAuth2 client-credentials principals, and a JWT revocation list
+-- for the versioned `/api/v1` surface. Disabled by default at runtime
+-- (API_KEYS_ENABLED / API_JWT_ENABLED) — the tables exist regardless.
+-- ---------------------------------------------------------------------------
+
+-- Machine API keys. Plaintext is NEVER stored; only a SHA-256 hash. A key
+-- borrows its owner's authority (app_user_id) intersected with `scopes`,
+-- so deleting/blocking the owner transitively disables the key.
+create table if not exists app_api_keys (
+  id              uuid primary key default gen_random_uuid(),
+  app_user_id     uuid not null references app_users(id) on delete cascade,
+  organization_id uuid references app_organizations(id),
+  name            text not null,
+  key_prefix      text not null,
+  key_hash        text not null unique,
+  scopes          text[] not null default '{}',
+  status          text not null default 'active',   -- active | revoked
+  expires_at      timestamptz,
+  last_used_at    timestamptz,
+  last_used_ip    inet,
+  created_by      uuid references app_users(id),
+  created_at      timestamptz not null default now(),
+  revoked_at      timestamptz,
+  revoked_by      uuid references app_users(id),
+  revoked_reason  text
+);
+create index if not exists idx_app_api_keys_user   on app_api_keys(app_user_id);
+create index if not exists idx_app_api_keys_status  on app_api_keys(status);
+create index if not exists idx_app_api_keys_org     on app_api_keys(organization_id);
+
+-- Named machine identities (OAuth2 client-credentials principals). The
+-- `app_user_id` points at a dedicated service user row so the same
+-- status / membership gates apply.
+create table if not exists app_oauth_clients (
+  id                 uuid primary key default gen_random_uuid(),
+  client_id          text not null unique,
+  client_secret_hash text not null,
+  app_user_id        uuid not null references app_users(id) on delete cascade,
+  organization_id    uuid references app_organizations(id),
+  name               text not null,
+  scopes             text[] not null default '{}',
+  status             text not null default 'active',  -- active | revoked
+  created_at         timestamptz not null default now(),
+  created_by         uuid references app_users(id),
+  revoked_at         timestamptz,
+  revoked_by         uuid references app_users(id)
+);
+create index if not exists idx_app_oauth_clients_status on app_oauth_clients(status);
+
+-- Revocation list for stateless JWTs killed before natural expiry. Rows
+-- are purged once `expires_at` passes (the token would be rejected by the
+-- signature/exp check anyway after that point).
+create table if not exists app_revoked_tokens (
+  jti         text primary key,
+  expires_at  timestamptz not null,
+  revoked_at  timestamptz not null default now(),
+  reason      text
+);
+create index if not exists idx_app_revoked_tokens_exp on app_revoked_tokens(expires_at);
+
+-- ---------------------------------------------------------------------------
 -- Baseline data: default organization, permission catalog, superuser role
 -- ---------------------------------------------------------------------------
 -- These rows let a migrated-but-not-yet-seeded database already recognise
@@ -300,7 +365,11 @@ insert into app_permissions (key, description) values
   ('admin.apps.manage', 'Create and edit enterprise applications'),
   ('admin.audit.read', 'Read the audit event log'),
   ('admin.email.read', 'Read the email outbox and templates'),
-  ('admin.email.manage', 'Edit email templates and send test emails')
+  ('admin.email.manage', 'Edit email templates and send test emails'),
+  ('admin.apikeys.read', 'Read API keys across users and organizations'),
+  ('admin.apikeys.manage', 'Revoke and manage any user''s API keys'),
+  ('admin.clients.read', 'Read OAuth client registrations'),
+  ('admin.clients.manage', 'Create, rotate, and revoke OAuth clients')
 on conflict (key) do nothing;
 
 -- Superuser role on the default organization.

@@ -314,6 +314,16 @@ session (user-level), not an `admin.*` permission.
 | `/api/account/preferences` | PUT | `{ preferredLocale, timeZone?, dateFormat, numberFormatLocale }` | Locale/formatting prefs; validated against allow-lists. |
 | `/api/preferences/locale` | POST | `{ locale }` | Persists preferred locale (pending users allowed; blocked users `403`). |
 
+Personal **API keys** are also self-service: a user manages their own
+keys at **Account → API keys**
+([`/app/account/api-keys`](../src/app/[locale]/(secure)/app/account/api-keys/page.tsx))
+over the self-scoped `/api/v1/me/api-keys` endpoints (GET / POST /
+`{id}` DELETE / `{id}/rotate`). See
+[design-api-keys-and-tokens.md §9.1](design-api-keys-and-tokens.md#91-self-service-account-surface).
+Org-wide governance of any user's keys lives in the Administrator
+console — see [§5.4](#54-organizations-memberships-apps-audit-email-export)
+and [admin-manager.md §8.12](admin-manager.md).
+
 ---
 
 ## 7. SSO handoff API (`/api/sso/*`)

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
+import { useTranslations } from "next-intl";
+import { DiagramModal } from "./diagram-modal";
 
 /**
  * DocArticle
@@ -15,15 +17,31 @@ import { useTheme } from "next-themes";
  * Mermaid blocks arrive as `<div class="mermaid">` mounts whose text is
  * the raw diagram source (the pipeline extracts ```mermaid fences before
  * the syntax highlighter). We lazily import Mermaid ONLY when such a mount
- * exists — so docs without diagrams never pay for the (large) library —
- * render each to SVG with `securityLevel: "strict"`, and re-render on
- * theme change. The original source is stashed in `data-src` so a failed
- * render (or a theme re-render) can fall back to readable text.
+ * exists, render each to SVG with `securityLevel: "strict"`, re-render on
+ * theme change, and fall back to source on error.
+ *
+ * Each rendered diagram is then made interactive: clicking (or pressing
+ * Enter/Space on) it opens {@link DiagramModal}, a full-view lightbox —
+ * inline diagrams are often too small to read on a large screen. The open
+ * handler is delegated from the article root so it survives theme
+ * re-renders without rebinding per diagram.
  */
+const MERMAID_SELECTOR = '.mermaid[data-rendered="true"]';
+
 export function DocArticle({ html }: { html: string }) {
   const ref = useRef<HTMLElement>(null);
   const { resolvedTheme } = useTheme();
+  const t = useTranslations("docs");
+  // Latest translator without forcing the render effect to re-run on every
+  // render (which would re-import and re-render Mermaid needlessly).
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  });
 
+  const [diagramSvg, setDiagramSvg] = useState<string | null>(null);
+
+  // Render Mermaid mounts to SVG and make each one an interactive control.
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
@@ -43,7 +61,6 @@ export function DocArticle({ html }: { html: string }) {
 
       for (let i = 0; i < mounts.length; i++) {
         const el = mounts[i]!;
-        // Capture the source once; subsequent (theme) re-renders reuse it.
         const source = el.dataset.src ?? el.textContent ?? "";
         el.dataset.src = source;
         try {
@@ -51,9 +68,12 @@ export function DocArticle({ html }: { html: string }) {
           if (cancelled) return;
           el.innerHTML = svg;
           el.dataset.rendered = "true";
+          // Expose the diagram as a button that opens the full view.
+          el.setAttribute("role", "button");
+          el.setAttribute("tabindex", "0");
+          el.setAttribute("aria-label", tRef.current("diagram.expand"));
         } catch {
           if (cancelled) return;
-          // Fallback: show the source as plain text rather than a broken box.
           el.textContent = source;
           el.dataset.rendered = "error";
         }
@@ -65,13 +85,45 @@ export function DocArticle({ html }: { html: string }) {
     };
   }, [html, resolvedTheme]);
 
+  // Delegated open handler — one listener on the root, regardless of how
+  // many diagrams the document has or how often they re-render.
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+
+    const openFrom = (target: EventTarget | null) => {
+      const el = target instanceof Element ? target.closest<HTMLElement>(MERMAID_SELECTOR) : null;
+      if (el) setDiagramSvg(el.innerHTML);
+    };
+    const onClick = (e: MouseEvent) => openFrom(e.target);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target instanceof Element && e.target.closest(MERMAID_SELECTOR)) {
+        e.preventDefault();
+        openFrom(e.target);
+      }
+    };
+
+    root.addEventListener("click", onClick);
+    root.addEventListener("keydown", onKeyDown);
+    return () => {
+      root.removeEventListener("click", onClick);
+      root.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
   return (
-    <article
-      ref={ref}
-      className="prose prose-sm dark:prose-invert max-w-none"
-      // Safe: `html` is sanitized by rehype-sanitize in the render pipeline
-      // (scripts, handlers, and dangerous URLs removed) before it reaches here.
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <>
+      <article
+        ref={ref}
+        className="prose prose-sm dark:prose-invert max-w-none"
+        // Safe: `html` is sanitized by rehype-sanitize in the render pipeline
+        // (scripts, handlers, and dangerous URLs removed) before it reaches here.
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      {diagramSvg !== null ? (
+        <DiagramModal svg={diagramSvg} onClose={() => setDiagramSvg(null)} />
+      ) : null}
+    </>
   );
 }

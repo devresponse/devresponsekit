@@ -839,6 +839,13 @@
     "onThisPage": "En esta página",
     "lastUpdated": "Última actualización {date}",
     "breadcrumbHome": "Documentación",
-    "readDocument": "Leer"
+    "readDocument": "Leer",
+    "diagram": {
+      "expand": "Ampliar el diagrama a vista completa",
+      "title": "Diagrama — vista completa",
+      "zoomIn": "Acercar",
+      "zoomOut": "Alejar",
+      "reset": "Restablecer el zoom"
+    }
   }
 }

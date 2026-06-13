@@ -121,6 +121,52 @@ function rehypeRewriteLinks(locale: string) {
   };
 }
 
+/** Reads a hast `className` (array or space-separated string) as a list. */
+function classList(node: HastNode): string[] {
+  const cls = node.properties?.className;
+  if (Array.isArray(cls)) return cls.map(String);
+  if (typeof cls === "string") return cls.split(/\s+/);
+  return [];
+}
+
+/** A `<pre>` is a Mermaid block when its `<code>` carries `language-mermaid`. */
+function asMermaidSource(node: HastNode): string | null {
+  if (node.type !== "element" || node.tagName !== "pre" || !node.children) return null;
+  const code = node.children.find((c) => c.type === "element" && c.tagName === "code");
+  if (!code || !classList(code).includes("language-mermaid")) return null;
+  return textOf(code).replace(/\n$/, "");
+}
+
+/**
+ * Converts ```mermaid fenced blocks into a `<div class="mermaid not-prose">`
+ * mount point whose text content is the raw diagram source. Runs AFTER
+ * sanitize (so the source is already safe text) and BEFORE the syntax
+ * highlighter (which therefore skips these blocks — they are no longer
+ * `pre > code`). The client `DocArticle` lazily renders these mounts with
+ * Mermaid; if its JS never runs, the source stays visible as a fallback.
+ */
+function rehypeMermaid() {
+  return (tree: HastNode) => {
+    const transform = (node: HastNode): void => {
+      if (!node.children) return;
+      node.children = node.children.map((child) => {
+        const source = asMermaidSource(child);
+        if (source !== null) {
+          return {
+            type: "element",
+            tagName: "div",
+            properties: { className: ["mermaid", "not-prose"] },
+            children: [{ type: "text", value: source }],
+          } satisfies HastNode;
+        }
+        transform(child);
+        return child;
+      });
+    };
+    transform(tree);
+  };
+}
+
 /* ------------------------------ rendering ------------------------------- */
 
 const renderCache = new Map<string, RenderedDoc>();
@@ -147,6 +193,7 @@ export async function renderDocument(body: string, options: RenderOptions): Prom
     .use(rehypeAutolinkHeadings, { behavior: "wrap" })
     .use(() => rehypeCollectHeadings(headings))
     .use(() => rehypeRewriteLinks(locale))
+    .use(rehypeMermaid)
     .use(rehypePrettyCode, {
       theme: { light: "github-light", dark: "github-dark" },
       keepBackground: true,

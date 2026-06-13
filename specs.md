@@ -549,8 +549,7 @@ src/
   db/
     database.ts
     migrations/
-      0001-app-core.sql
-      0002-seed-local-dev.sql
+      0001-initial-schema.sql   # complete app schema — all app_* tables
       run-migrations.ts
     seeds/
       seed-local.ts
@@ -943,7 +942,13 @@ export const pgPool = pool;
 
 ### 10.3 Application core schema
 
-Create `src/db/migrations/0001-app-core.sql`.
+The complete application schema is consolidated into a single
+authoritative file, `src/db/migrations/0001-initial-schema.sql`, which
+provisions every `app_*` table, index, and baseline row for a first-time
+setup — no further application migrations are required. The core-table
+DDL below is the heart of that file (it also folds in the administrator
+indexes, audit `request_id`, soft-delete columns, the permission catalog
++ superuser provisioning, and the email tables).
 
 ```sql
 create extension if not exists "pgcrypto";
@@ -3490,7 +3495,7 @@ is configured. Delivery is delegated to a pluggable provider
 
 ### 35.1 Data model
 
-Migration `0006-email-outbox-and-templates.sql` adds:
+The consolidated initial schema `0001-initial-schema.sql` includes:
 
 - `app_email_templates (key, locale, subject, body_html, body_text,
   description)` — editable templates, unique on `(key, locale)`. Seeded
@@ -3504,8 +3509,8 @@ Migration `0006-email-outbox-and-templates.sql` adds:
   - `pending` → `sent` | `failed` when a provider is configured;
   - `logged` when no provider is configured (recorded only — the right
     mode for local dev and CI).
-- New administrator permissions `admin.email.read` /
-  `admin.email.manage`, granted to `superuser` like migration 0005.
+- The `admin.email.read` / `admin.email.manage` permissions, granted to
+  `superuser` alongside the rest of the catalog.
 
 ### 35.2 Modules
 

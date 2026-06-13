@@ -318,9 +318,10 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
   // admin holds the complete permission set without depending on
   // per-permission grants. The role is created by both this seed
   // (lines 80-92 above, which keep its permission grants in sync with
-  // the current ADMIN_PERMISSION_CATALOG) AND by migration
-  // 0004-default-superuser.sql (which creates the role/infrastructure
-  // at schema-application time). Either path leaves the role in place;
+  // the current ADMIN_PERMISSION_CATALOG) AND by the consolidated
+  // initial schema 0001-initial-schema.sql (which creates the
+  // role/infrastructure at schema-application time). Either path leaves
+  // the role in place;
   // here we only need to look it up and assign it.
   const superuserRoleId = (
     await pool.query<{ id: string }>(

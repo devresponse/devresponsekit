@@ -462,9 +462,9 @@ pnpm install
 cp .env.example .env            # used by Next.js and the pnpm db:* scripts
 
 pnpm db:up                      # start pgvector/pgvector:pg17 on localhost:5444
-pnpm db:auth:migrate            # Better Auth schema
-pnpm db:app:migrate             # application schema
-pnpm db:seed                    # local seed data
+pnpm db:auth:migrate            # Better Auth (vendor) schema
+pnpm db:app:migrate             # complete application schema — single initial-schema file, all app_* tables
+pnpm db:seed                    # local seed data (baseline roles, apps, admin user)
 
 pnpm dev                        # next dev on http://localhost:3000
 ```

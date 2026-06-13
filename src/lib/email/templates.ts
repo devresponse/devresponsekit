@@ -22,8 +22,8 @@ export interface EmailTemplateDefinition {
 }
 
 /**
- * Built-in defaults. Keep in sync with the seeds in migration
- * `0006-email-outbox-and-templates.sql`.
+ * Built-in defaults. Keep in sync with the seeded templates in the
+ * initial schema `0001-initial-schema.sql`.
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {

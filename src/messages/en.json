@@ -852,6 +852,10 @@
       "security": {
         "title": "Security",
         "description": "Password and active sessions."
+      },
+      "apiKeys": {
+        "title": "API keys",
+        "description": "Create and manage personal API keys for programmatic access to your account."
       }
     },
     "fields": {
@@ -920,6 +924,57 @@
       "passwordChangeFailed": "Could not change your password. Check your current password.",
       "sessionsLoadFailed": "Could not load your sessions.",
       "sessionsRevokeFailed": "Could not revoke the session."
+    },
+    "apiKeys": {
+      "listTitle": "Your API keys",
+      "empty": "You don’t have any API keys yet.",
+      "loadError": "Could not load your API keys.",
+      "never": "Never",
+      "noExpiry": "No expiry",
+      "noScopes": "No scopes",
+      "status": {
+        "active": "Active",
+        "revoked": "Revoked"
+      },
+      "created": "Created {value}",
+      "lastUsed": "Last used {value}",
+      "expires": "Expires {value}",
+      "actions": {
+        "rotate": "Rotate",
+        "revoke": "Revoke"
+      },
+      "rotateError": "Could not rotate the key.",
+      "revokeError": "Could not revoke the key.",
+      "revokeConfirm": {
+        "title": "Revoke API key",
+        "description": "This permanently invalidates the key. Any client using it stops working immediately. This cannot be undone."
+      },
+      "rotateConfirm": {
+        "title": "Rotate API key",
+        "description": "A new secret is issued with the same scopes and expiry, and this key is revoked. Update your client with the new secret — the old one stops working immediately."
+      },
+      "reveal": {
+        "title": "Copy your key now",
+        "description": "This is the only time the full secret is shown. Store it somewhere safe — it can’t be retrieved again. If you lose it, rotate the key.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "done": "Done"
+      },
+      "create": {
+        "title": "Create a new key",
+        "name": "Name",
+        "namePlaceholder": "e.g. My laptop CLI",
+        "expiresInDays": "Expires in (days)",
+        "expiresInDaysPlaceholder": "Leave empty for no expiry",
+        "expiresInDaysHelp": "Optional. After this many days the key stops working.",
+        "scopes": "Scopes",
+        "scopesHelp": "Select what this key may do. A key can never exceed your own permissions.",
+        "noScopesAvailable": "No scopes are available to grant.",
+        "submit": "Create key",
+        "nameRequired": "Enter a name.",
+        "error": "Could not create the key.",
+        "invalidScope": "You can’t grant these scopes: {scopes}"
+      }
     }
   },
   "docs": {

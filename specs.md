@@ -3480,7 +3480,94 @@ Component rules:
 
 ---
 
-## 35. Source references for implementation alignment
+## 35. Email subsystem
+
+Outbound email is **outbox-first**: every email is rendered and recorded
+in `app_outbox` BEFORE any delivery attempt, so the outbox is a complete,
+inspectable record regardless of whether a third-party delivery provider
+is configured. Delivery is delegated to a pluggable provider
+(Resend / Mailgun) selected by environment configuration.
+
+### 35.1 Data model
+
+Migration `0006-email-outbox-and-templates.sql` adds:
+
+- `app_email_templates (key, locale, subject, body_html, body_text,
+  description)` — editable templates, unique on `(key, locale)`. Seeded
+  with the built-in defaults. The runtime falls back to the code-level
+  defaults in `src/lib/email/templates.ts` when a row is missing, so
+  deleting or breaking a row can never block a flow.
+- `app_outbox (template_key, to_email, from_email, subject, body_html,
+  body_text, variables, status, provider, provider_message_id, error,
+  related_better_auth_user_id, created_at, sent_at)` — one row per
+  outbound email. `status` lifecycle:
+  - `pending` → `sent` | `failed` when a provider is configured;
+  - `logged` when no provider is configured (recorded only — the right
+    mode for local dev and CI).
+- New administrator permissions `admin.email.read` /
+  `admin.email.manage`, granted to `superuser` like migration 0005.
+
+### 35.2 Modules
+
+- `src/lib/email/templates.ts` — template catalog + `renderEmailTemplate`.
+  Free of `server-only` so the seed and unit tests import it under plain
+  Node. `{{variable}}` placeholders; in HTML mode every variable VALUE is
+  entity-escaped so user-controlled values (names, emails) cannot inject
+  markup. Unknown placeholders are left verbatim.
+- `src/lib/email/providers.server.ts` — thin `fetch` wrappers around the
+  vendor REST APIs (no SDK dependencies). `getConfiguredEmailProvider()`
+  returns `null` when delivery is not configured.
+- `src/lib/email/send.server.ts` — `sendAppEmail()`, the outbox-first
+  sender. Resolves the recipient locale (input → app user → default),
+  prefers the editable DB template over the code default, renders,
+  inserts the outbox row, then attempts delivery. **Delivery failures
+  are recorded, never thrown** — a password-reset request must not 500
+  because a third-party API hiccuped; operators watch the outbox.
+
+### 35.3 Flows
+
+- Password reset is wired through Better Auth's `sendResetPassword`
+  callback in `src/lib/auth.ts`, which calls `sendAppEmail` with the
+  `password_reset` template. Public pages: `/[locale]/forgot-password`
+  (request) and `/[locale]/reset-password` (complete, token in the
+  emailed link). The administrator "send reset email" action
+  (`/api/administrator/users/[id]/password`, mode `reset_email`) uses the
+  same Better Auth flow.
+- The administrator "send test email" action
+  (`/api/administrator/email/test`) sends the `test_email` template
+  through the full pipeline — the canonical way to verify provider
+  configuration.
+
+### 35.4 Administrator Email workspace
+
+Under `/[locale]/app/administrator/email`:
+
+- Outbox explorer (`admin.email.read`) — paginated grid over `app_outbox`
+  with status/template filters and a per-row detail sheet. Bodies are
+  rendered as TEXT, never `dangerouslySetInnerHTML`. A "send test email"
+  toolbar action requires `admin.email.manage`.
+- Templates list + standard edit page (`admin.email.manage`). `key` and
+  `locale` are immutable — flows send against the key.
+
+### 35.5 Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `EMAIL_PROVIDER` | `resend` \| `mailgun` \| unset (no delivery → `logged`) |
+| `EMAIL_FROM` | From header, e.g. `App <no-reply@example.com>` |
+| `RESEND_API_KEY` | Required when `EMAIL_PROVIDER=resend` |
+| `MAILGUN_API_KEY` / `MAILGUN_DOMAIN` | Required when `EMAIL_PROVIDER=mailgun` |
+| `MAILGUN_BASE_URL` | Override for the EU region (`https://api.eu.mailgun.net`) |
+
+`env.ts` `superRefine` fails at boot if a provider is selected without
+its credentials. With no provider set, every flow still works — emails
+are rendered and recorded as `logged`. Adding a provider = implement
+`EmailProvider`, wire the env, extend the `EMAIL_PROVIDER` enum. See
+[docs/setup-email.md](docs/setup-email.md) for the full integration guide.
+
+---
+
+## 36. Source references for implementation alignment
 
 Implementation must verify exact API names against installed package versions.
 
@@ -3513,3 +3600,7 @@ Implementation must verify exact API names against installed package versions.
 - Playwright: https://playwright.dev/docs/intro
 - axe-core Playwright: https://github.com/dequelabs/axe-core-npm/tree/develop/packages/playwright
 - WCAG overview: https://www.w3.org/WAI/standards-guidelines/wcag/
+- Better Auth password reset: https://www.better-auth.com/docs/authentication/email-password#forget-password
+- Better Auth plugins (server-only endpoints): https://www.better-auth.com/docs/concepts/plugins
+- Resend send email API: https://resend.com/docs/api-reference/emails/send-email
+- Mailgun send API: https://documentation.mailgun.com/docs/mailgun/api-reference/send/

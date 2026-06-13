@@ -3,6 +3,7 @@ import { admin } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
+import { ssoSession } from "@/lib/auth-sso-session";
 import { getServerEnv } from "@/lib/env";
 import { getTrustedOrigins } from "@/lib/trusted-origins";
 
@@ -63,6 +64,21 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
+    // Outbox-first delivery (specs.md §35): the email is rendered and
+    // recorded in `app_outbox` even when no provider is configured, so
+    // the forgot-password flow and the administrator "send reset email"
+    // action are observable in every environment. Lazy import keeps the
+    // email module out of the auth chain for tooling that only needs
+    // the instance shape.
+    sendResetPassword: async ({ user, url }) => {
+      const { sendAppEmail } = await import("@/lib/email/send.server");
+      await sendAppEmail({
+        to: user.email,
+        templateKey: "password_reset",
+        variables: { name: user.name || user.email, resetUrl: url },
+        relatedBetterAuthUserId: user.id,
+      });
+    },
   },
 
   socialProviders,
@@ -122,8 +138,8 @@ export const auth = betterAuth({
   },
 
   // The nextCookies plugin makes Better Auth set cookies via Next.js
-  // server actions and route handlers correctly.
-  plugins: [admin(), nextCookies()],
+  // server actions and route handlers correctly — it MUST stay last.
+  plugins: [admin(), ssoSession(), nextCookies()],
 });
 
 /** Convenience type for the resolved session shape. */

@@ -185,6 +185,10 @@ Sidebar groups (every entry localized, every entry permission-gated):
 - **Apps**
   - Enterprise applications — `administrator/enterprise-apps`
     (req: `admin.apps.read`)
+- **Communication**
+  - Email outbox — `administrator/email` (req: `admin.email.read`)
+  - Email templates — `administrator/email/templates`
+    (req: `admin.email.read`; editing req: `admin.email.manage`)
 - **Activity**
   - Audit log — `administrator/audit` (req: `admin.audit.read`)
 
@@ -371,6 +375,10 @@ removed — see §20.1 #1.)
 | `/api/administrator/enterprise-apps` | GET, POST | `admin.apps.read/manage` | Manages `app_enterprise_applications`. |
 | `/api/administrator/enterprise-apps/[id]` | GET, PATCH, DELETE | `admin.apps.manage` | |
 | `/api/administrator/audit` | GET | `admin.audit.read` | Paginated read of `app_audit_events`. Supports range and filter on `event_type`, `outcome`, `actor`, `target`. |
+| `/api/administrator/email/outbox` | GET | `admin.email.read` | Paginated read of `app_outbox`. Filter on `status`, `template_key`. |
+| `/api/administrator/email/templates` | GET | `admin.email.read` | Full editable-template list (`app_email_templates`). |
+| `/api/administrator/email/templates/[id]` | GET, PUT | `admin.email.read` / `admin.email.manage` | Edit subject/bodies/description; `key` and `locale` immutable. |
+| `/api/administrator/email/test` | POST | `admin.email.manage` | Sends the `test_email` template through the outbox pipeline. |
 | `/api/administrator/export/<resource>` | GET | corresponding `read` perm | Streams CSV using same filter/sort. Capped at 100k rows. |
 
 ### 5.3 Shared server modules
@@ -395,7 +403,7 @@ removed — see §20.1 #1.)
 
 ### 6.1 Permission catalog (seeded into `app_permissions`)
 
-Decision: the 24-key catalog below is adopted in full as the v1 set.
+Decision: the 26-key catalog below is adopted in full as the v1 set.
 Permissions are **platform-wide** (decision: a single privileged user
 holding `admin.platform` — or any `admin.*.read/manage` permission —
 can see and manage **every** organization, not only orgs they are a
@@ -427,7 +435,12 @@ admin.orgs.manage
 admin.apps.read
 admin.apps.manage
 admin.audit.read
+admin.email.read           # read the email outbox and templates
+admin.email.manage         # edit email templates, send test emails
 ```
+
+Migration `0006-email-outbox-and-templates.sql` adds the two
+`admin.email.*` keys and re-grants the full catalog to `superuser`.
 
 A **seed** script (`src/db/seeds/seed-admin-permissions.ts`) inserts
 these rows idempotently and bundles them into a built-in role
@@ -876,7 +889,8 @@ next inside the working branch.
   `admin-status.server.ts` to use it (the legacy
   `/api/admin/users/*` endpoints continued to work at this phase; they
   were later removed — see §20.1 #1).
-- Seed admin permissions catalog (24 keys, §6.1) and the
+- Seed admin permissions catalog (§6.1, 24 keys at this phase; the two
+  `admin.email.*` keys were added later with the email subsystem) and the
   `admin.platform` built-in role.
 
 ### Phase 2 — DataGrid foundation & indexes

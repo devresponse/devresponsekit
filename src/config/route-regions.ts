@@ -28,6 +28,7 @@ export const AUTH_PATH_SEGMENTS = [
   "sign-in",
   "sign-up",
   "forgot-password",
+  "reset-password",
   "pending-approval",
   "blocked",
 ] as const;

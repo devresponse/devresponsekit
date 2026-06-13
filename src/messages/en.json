@@ -43,7 +43,19 @@
     "blockedTitle": "Account access is restricted",
     "blockedDescription": "Your account is currently blocked, suspended, or deactivated. Contact your administrator.",
     "invalidCredentials": "Invalid email or password.",
-    "unexpectedError": "An unexpected error occurred. Please try again."
+    "unexpectedError": "An unexpected error occurred. Please try again.",
+    "forgotPasswordDescription": "Enter your account email and we will send you a link to reset your password.",
+    "sendResetLink": "Send reset link",
+    "resetEmailSent": "If an account exists for that address, a password reset link is on its way.",
+    "resetPasswordTitle": "Choose a new password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "setNewPassword": "Set new password",
+    "passwordTooShort": "Password must be at least 8 characters.",
+    "passwordMismatch": "Passwords do not match.",
+    "resetTokenInvalid": "This reset link is invalid or has expired.",
+    "requestNewResetLink": "Request a new link",
+    "resetPasswordDone": "Your password has been updated."
   },
   "public": {
     "heroEyebrow": "Open. Localized. Secure.",
@@ -91,7 +103,10 @@
       "apps": "Apps",
       "enterpriseApps": "Enterprise applications",
       "activity": "Activity",
-      "auditLog": "Audit log"
+      "auditLog": "Audit log",
+      "communication": "Communication",
+      "emailOutbox": "Email outbox",
+      "emailTemplates": "Email templates"
     },
     "overview": {
       "title": "Administrator overview",
@@ -605,6 +620,76 @@
         "userAgent": "User agent",
         "reason": "Reason",
         "metadata": "Metadata"
+      }
+    },
+    "email": {
+      "title": "Email outbox",
+      "description": "Every outbound email is recorded here before any delivery attempt — including environments without a configured delivery provider.",
+      "viewDetail": "View",
+      "columns": {
+        "createdAt": "Created",
+        "to": "To",
+        "subject": "Subject",
+        "template": "Template",
+        "status": "Status"
+      },
+      "status": {
+        "pending": "Pending",
+        "sent": "Sent",
+        "failed": "Failed",
+        "logged": "Logged"
+      },
+      "filters": {
+        "status": "Status",
+        "template": "Template key",
+        "any": "Any"
+      },
+      "test": {
+        "placeholder": "recipient@example.com",
+        "send": "Send test email",
+        "error": "Sending the test email failed.",
+        "result": {
+          "sent": "Test email sent.",
+          "failed": "Delivery failed — see the outbox row.",
+          "logged": "Recorded in the outbox (no delivery provider configured)."
+        }
+      },
+      "detail": {
+        "from": "From",
+        "to": "To",
+        "template": "Template",
+        "provider": "Provider",
+        "providerMessageId": "Provider message id",
+        "createdAt": "Created",
+        "sentAt": "Sent",
+        "relatedUser": "Related user",
+        "error": "Error",
+        "bodyText": "Text body",
+        "bodyHtml": "HTML body"
+      },
+      "templates": {
+        "title": "Email templates",
+        "description": "Editable templates used for outbound email. Deleting or breaking a template can never block a flow — built-in defaults apply as fallback.",
+        "empty": "No templates found. Run the database migrations to seed the defaults.",
+        "edit": "Edit",
+        "editTitle": "Edit email template",
+        "columns": {
+          "key": "Key",
+          "locale": "Locale",
+          "subject": "Subject",
+          "updatedAt": "Updated"
+        },
+        "fields": {
+          "subject": "Subject",
+          "bodyHtml": "HTML body",
+          "bodyText": "Text body",
+          "bodyTextHint": "Optional plain-text alternative. Leave empty to send HTML only.",
+          "description": "Description"
+        },
+        "variablesHint": "Available variables:",
+        "save": "Save template",
+        "cancel": "Cancel",
+        "saveError": "Saving the template failed."
       }
     }
   },

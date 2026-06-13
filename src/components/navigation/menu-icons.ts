@@ -6,6 +6,8 @@ import {
   Home,
   KeyRound,
   LayoutDashboard,
+  Mail,
+  MailOpen,
   ScrollText,
   Settings,
   Shield,
@@ -38,6 +40,8 @@ export const MENU_ICONS: Record<string, LucideIcon> = {
   "building-2": Building2,
   "users-round": UsersRound,
   "app-window": AppWindow,
+  mail: Mail,
+  "mail-open": MailOpen,
 };
 
 /**

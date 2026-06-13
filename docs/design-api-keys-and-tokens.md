@@ -15,9 +15,10 @@
 **Built (Phases 1–5 backend), `pnpm typecheck` + `pnpm lint` + `pnpm build`
 + unit tests all green:**
 
-- **Phase 1 — resolver & schema.** `0003-api-credentials.sql`
-  (`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens` + the four
-  `admin.{apikeys,clients}.*` permissions), Kysely types, and the keystone
+- **Phase 1 — resolver & schema.** The credential tables (`app_api_keys`,
+  `app_oauth_clients`, `app_revoked_tokens` + the four
+  `admin.{apikeys,clients}.*` permissions) — now folded into the single
+  `0001-initial-schema.sql` — plus Kysely types, and the keystone
   [`resolveCaller`](../src/lib/api-auth/resolve-caller.server.ts).
   `requireAdminPermission` and `requireAccountUser` were refactored to use
   it, with the **bearer-aware conditional origin guard** (§10.3) and the
@@ -191,10 +192,10 @@ gains API-key/JWT support for free, gated by the same permission keys.
 
 ## 4. Data model
 
-New `app_*` tables, appended as `0003-api-credentials.sql` (the initial
-schema in [`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
-is never edited after release — the runner is multi-file capable; see
-[`docs/setup-better-auth.md`](setup-better-auth.md) §3.1).
+The credential `app_*` tables are part of the single consolidated
+[`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
+(the DDL below is reproduced from it; see
+[`docs/setup-better-auth.md`](setup-better-auth.md) §2.2).
 
 ```sql
 -- Machine API keys. Plaintext is NEVER stored; only a SHA-256 hash.
@@ -236,7 +237,7 @@ create table if not exists app_oauth_clients (
   revoked_at       timestamptz,                  -- set when status → revoked
   revoked_by       uuid references app_users(id)
 );
--- (The shipped 0003-api-credentials.sql also adds indexes
+-- (0001-initial-schema.sql also adds indexes
 --  idx_app_oauth_clients_status and idx_app_api_keys_org.)
 
 -- Revocation list for stateless JWTs killed before natural expiry.
@@ -652,8 +653,8 @@ Each phase is independently shippable behind its feature flag and must be
 green on `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 
 **Phase 1 — Resolver & schema (no new surface).**
-`resolveCaller`, `0003-api-credentials.sql`, refactor
-`requireAdminPermission` / `requireAccountUser` to use it, conditional
+`resolveCaller`, the credential schema (now in `0001-initial-schema.sql`),
+refactor `requireAdminPermission` / `requireAccountUser` to use it, conditional
 origin guard for bearer. Cookie behavior byte-for-byte unchanged
 (regression-gated by the existing security suite).
 

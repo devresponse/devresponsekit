@@ -13,9 +13,9 @@ handoff.
   (ban, impersonation), and a server-only plugin that establishes the
   consumer-side session on SSO handoff
 - **PostgreSQL + Kysely** — typed SQL for app tables; Better Auth shares
-  the same `pg` pool. The schema starts from a consolidated initial
-  migration (`0001-initial-schema.sql`); later additive changes ship as
-  appended numbered files (currently `0003-api-credentials.sql`)
+  the same `pg` pool. The **entire** application schema is a single
+  consolidated setup script (`0001-initial-schema.sql`) — one file, one
+  setup process, no further application migrations
 - **Machine API** — a versioned `/api/v1` REST surface authenticated by
   API keys (`drk_…`) or Ed25519 JWT access tokens, with a published
   JWKS document, OAuth client-credentials, and an OpenAPI spec. Ships
@@ -39,7 +39,7 @@ cp .env.example .env          # then edit secrets
 
 pnpm db:up                    # start PostgreSQL (docker compose)
 pnpm db:auth:migrate          # Better Auth (vendor) tables
-pnpm db:app:migrate           # apply all app migrations (0001 initial + 0003 api-credentials)
+pnpm db:app:migrate           # complete application schema (single 0001-initial-schema.sql)
 pnpm db:seed                  # default org, baseline roles, local admin user
 
 pnpm dev                      # http://localhost:3000

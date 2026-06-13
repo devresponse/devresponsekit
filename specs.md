@@ -952,10 +952,10 @@ app_revoked_tokens            # §37 machine API — JWT (jti) revocation list
 app_schema_migrations         # migration ledger written by run-migrations.ts
 ```
 
-The first twelve tables are created by `0001-initial-schema.sql`; the
-three `app_api_keys` / `app_oauth_clients` / `app_revoked_tokens` tables
-are created by `0003-api-credentials.sql` (see §10.3 and §37);
-`app_schema_migrations` is created by the runner itself.
+All of these tables (including the machine-API credential tables
+`app_api_keys` / `app_oauth_clients` / `app_revoked_tokens`, see §37) are
+created by the single `0001-initial-schema.sql`; `app_schema_migrations`
+is created by the runner itself.
 
 Roles, permissions, organization memberships, app access, and account status are application concerns. Do not store them inside Better Auth core tables.
 
@@ -988,23 +988,21 @@ export const pgPool = pool;
 
 ### 10.3 Application core schema
 
-The application schema **begins** with a consolidated initial migration,
-`src/db/migrations/0001-initial-schema.sql`, which provisions the core
-`app_*` tables, indexes, and baseline rows for a first-time setup (it
-folds in the administrator indexes, audit `request_id`, soft-delete
-columns, the permission catalog + superuser provisioning, and the email
-tables). The core-table DDL below is the heart of that file.
+The **entire** application schema is a single consolidated setup script,
+`src/db/migrations/0001-initial-schema.sql` — one file, one setup
+process. It provisions every `app_*` table, index, and baseline row for a
+first-time setup, folding in the administrator indexes, audit
+`request_id`, soft-delete columns, the permission catalog + superuser
+provisioning, the email tables, **and** the machine-API credential tables
+(`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens`) and the four
+`admin.apikeys.*` / `admin.clients.*` permissions (see §37). The core-table
+DDL below is the heart of that file. There are no other application
+migration files and no further application migrations are required.
 
-Additive changes after the initial release ship as **further numbered
-migrations** — currently `0003-api-credentials.sql`, which adds the
-machine-API tables (`app_api_keys`, `app_oauth_clients`,
-`app_revoked_tokens`) and the four `admin.apikeys.*` / `admin.clients.*`
-permissions (see §37). The runner `src/db/migrations/run-migrations.ts`
-applies every `NNNN-*.sql` file in lexical order and records applied
-filenames in `app_schema_migrations`, so each runs at most once. (There
-is a numbering gap — no `0002` on disk — which the lexical-order runner
-tolerates.) The initial schema is never edited after release; new schema
-changes are appended as new files.
+The runner `src/db/migrations/run-migrations.ts` stays multi-file capable
+(it applies every `NNNN-*.sql` in lexical order and records applied
+filenames in `app_schema_migrations`, so each runs at most once), so a
+future schema change can be appended as a new file if ever needed.
 
 ```sql
 create extension if not exists "pgcrypto";
@@ -2867,9 +2865,8 @@ Seed data:
    `admin.permissions.manage`, `admin.orgs.*`, `admin.apps.*`,
    `admin.audit.read`, `admin.email.read` / `admin.email.manage`, and the
    machine-credential keys `admin.apikeys.read` / `admin.apikeys.manage`
-   / `admin.clients.read` / `admin.clients.manage`. The first 26 are
-   seeded by `0001-initial-schema.sql`; the four credential keys are
-   seeded by `0003-api-credentials.sql`. Do not hard-code a count
+   / `admin.clients.read` / `admin.clients.manage`. All 30 are seeded by
+   the single `0001-initial-schema.sql`. Do not hard-code a count
    elsewhere — derive it from `ADMIN_PERMISSION_CATALOG`.
 5. Enterprise applications:
    - `enterprise-core`, origin `https://app.devresponse.com`, audience `devresponse-app:enterprise-core`
@@ -3013,9 +3010,9 @@ Testing is a first-class deliverable. A feature is incomplete until its tests ar
 **CI** (`.github/workflows/ci.yml`) runs two jobs against a Postgres
 service: a **quality** job (typecheck, lint, format check, vitest with
 the coverage ratchet) and a **browser** job that builds, migrates
-(all app migrations via `db:app:migrate`), seeds, runs `next start`,
-then executes the `test:e2e` and `test:a11y` suites against the
-production server. The
+(the single application schema via `db:app:migrate`), seeds, runs
+`next start`, then executes the `test:e2e` and `test:a11y` suites against
+the production server. The
 browser job sets `AUTH_RATE_LIMIT_DISABLED=1` (a validated, test-only
 env escape hatch) because the suites sign in faster than Better Auth's
 production rate limit allows.

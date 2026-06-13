@@ -34,6 +34,24 @@
 - **Phase 5 — REST surface.** problem+json, ETag/If-Match, per-credential
   rate limiting, `/api/v1/{me,users,users/[id],users/[id]/status,
   audit-events,admin/api-keys}`, and a generated `/api/v1/openapi.json`.
+- **Phase 6 — management UI (API keys).** In-app pages so keys are
+  managed without curl:
+  - **Administrator** governance console at
+    [`/app/administrator/api-keys`](../src/app/[locale]/(secure)/app/administrator/api-keys/page.tsx),
+    cookie-session + permission-gated, backed by the
+    `/api/administrator/api-keys` routes — list across all users/orgs
+    (joined to owner email), issue **on behalf of** a user, rotate, and
+    revoke. Lives under a new **APIs** nav group; see
+    [admin-manager.md §8.12](admin-manager.md).
+  - **Account** self-service page at
+    [`/app/account/api-keys`](../src/app/[locale]/(secure)/app/account/api-keys/page.tsx),
+    backed by `/api/v1/me/api-keys` — a user lists, creates (with a
+    scope picker limited to what they may grant), rotates, and revokes
+    **their own** keys.
+
+  Both surfaces reveal the plaintext **exactly once** on create/rotate
+  and never display the hash. OAuth-client management remains REST-only
+  (no UI yet — see *Deferred*).
 
 **Deviations from the original proposal (all deliberate):**
 
@@ -49,9 +67,9 @@
 
 **Deferred (not yet built):**
 
-- The in-app React **"Credentials" admin UI** grid (§9.2) — the REST
-  management endpoints fully deliver the capability; the grid is cosmetic
-  on top.
+- The in-app **OAuth-clients** management UI (§9.2). The **API-keys**
+  management UI shipped for both the administrator and self-service
+  surfaces (Phase 6 above); OAuth clients remain REST-only for now.
 - **Full 1:1 REST parity** for every admin resource — the `/api/v1`
   adapter pattern + a representative resource set are in place; extending
   to the remaining resources is mechanical (each is a thin adapter over an
@@ -490,6 +508,15 @@ scopes they currently hold.
 > `GET /api/v1/me/api-keys` require `account.read`. The create/rotate/
 > delete operations require `account.apikeys.manage`.
 
+**UI.** The self-service page **Account → API keys**
+([`/app/account/api-keys`](../src/app/[locale]/(secure)/app/account/api-keys/page.tsx))
+wraps these endpoints: a user lists their keys, creates one (the scope
+picker is limited to scopes they may grant — the server re-validates via
+`ungrantableScopesForCaller`), rotates, and revokes, with the plaintext
+revealed exactly once. The page is user-level (gated on `shell.view`
+only) and self-scoped; a cookie session satisfies the
+`account.apikeys.manage` requirement.
+
 ### 9.2 Administrator surface
 
 Org-wide credential governance, gated by **new permission keys**:
@@ -509,13 +536,29 @@ admin.clients.manage   # create/rotate/revoke oauth clients
 | `/api/v1/admin/oauth-clients/{id}` | GET / PATCH / DELETE | `admin.clients.*` |
 | `/api/v1/admin/oauth-clients/{id}:rotateSecret` | POST | `admin.clients.manage` |
 
-These keys join the seeded catalog and the `admin.platform` role
-(extending the seed in
+These keys join the seeded catalog and the `admin.platform` / `superuser`
+roles (extending the seed in
 [`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
-/ the admin-permissions seed). The Administrator workspace
-([`docs/admin-manager.md`](admin-manager.md)) gains a **"Credentials"**
-section under *Identity* with grids for keys and clients, reusing the
-existing `DataGrid`.
+/ the admin-permissions seed).
+
+**Two admin surfaces share these permission keys:**
+
+- the **machine** REST endpoints in the table above (`/api/v1/admin/*`,
+  bearer or cookie), and
+- the cookie-session **Administrator API-keys console** at
+  [`/app/administrator/api-keys`](../src/app/[locale]/(secure)/app/administrator/api-keys/page.tsx),
+  backed by its own route group:
+
+  | Path | Verb | Permission |
+  | --- | --- | --- |
+  | `/api/administrator/api-keys` | GET | `admin.apikeys.read` (list joined to owner email; filter `status`/`app_user_id`/`organization_id`; `q`) |
+  | `/api/administrator/api-keys` | POST | `admin.apikeys.manage` (issue **on behalf of** a user; scopes capped to the *owner's* authority) |
+  | `/api/administrator/api-keys/{id}` | GET / DELETE | `admin.apikeys.read` / `manage` (DELETE = revoke, soft-delete, idempotent) |
+  | `/api/administrator/api-keys/{id}/rotate` | POST | `admin.apikeys.manage` (atomic re-issue + revoke) |
+
+  It sits under the **APIs** nav group and is documented in
+  [admin-manager.md §8.12](admin-manager.md). **OAuth-client** management
+  remains REST-only (no UI yet).
 
 ---
 

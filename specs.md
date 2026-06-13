@@ -2822,14 +2822,19 @@ Seed admin may be auto-approved. All other self-registered users start pending a
 
 ### 28.1 Root layout
 
-`src/app/layout.tsx` must remain minimal.
+`src/app/[locale]/layout.tsx` is the root layout for every localized
+route and must remain minimal. The bare `/` index (a redirect to the
+default locale) has its own minimal root layout in `src/app/(root)/`.
 
 Rules:
 
-1. Sets HTML shell and fonts.
+1. Sets HTML shell and fonts, including `<html lang>` from the locale
+   segment (WCAG 3.1.1). The locale comes from `params` — never from a
+   dynamic request API, which would force static public pages into
+   dynamic rendering.
 2. Does not load secure menus.
 3. Does not fetch user-specific data.
-4. Wraps the app with common providers only.
+4. Wraps the app with common providers only (theme + locale messages).
 
 ### 28.2 Localized public routes
 
@@ -3442,9 +3447,11 @@ documented at https://ui.shadcn.com/docs/theming (see
    `src/components/theme/theme-provider.tsx`); `ThemeToggle` in the
    secure top bar switches light/dark.
 4. Custom tokens follow the documented extension pattern:
-   `success`/`success-foreground`, `warning`/`warning-foreground`, and
+   `success`/`success-foreground`, `warning`/`warning-foreground`,
    `destructive-foreground` (used by button/badge variants; not part of
-   the v4 default list).
+   the v4 default list), and `destructive-emphasis` — destructive TEXT
+   on tinted/light surfaces, darker than `destructive` in light mode
+   because the default red is below WCAG AA 4.5:1 at body sizes.
 5. The legacy `shell-*` tokens are ALIASES of the semantic tokens
    (`shell-bg`=`background`, `shell-border`=`border`,
    `shell-muted`=`muted`, `shell-accent`=`primary`) consumed only by

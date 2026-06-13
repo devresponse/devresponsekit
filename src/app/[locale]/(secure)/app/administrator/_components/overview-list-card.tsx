@@ -64,7 +64,7 @@ export function OverviewListCard({
         {rows.length === 0 ? (
           <p className="text-muted-foreground text-sm">{emptyLabel}</p>
         ) : (
-          <Table>
+          <Table containerLabel={title}>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 {headers.map((header) => (

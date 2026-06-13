@@ -84,6 +84,7 @@ tests/                                # unit / component / integration / securit
 
 - [docs/get-started.md](docs/get-started.md) — full local setup walkthrough
 - [docs/setup-better-auth.md](docs/setup-better-auth.md) — auth + schema + migrations
+- [docs/setup-sso-multi-app.md](docs/setup-sso-multi-app.md) — cross-subdomain SSO across two or more apps
 - [docs/setup-email.md](docs/setup-email.md) — email subsystem + provider integration
 - [docs/admin-manager.md](docs/admin-manager.md) — administrator console spec
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account)

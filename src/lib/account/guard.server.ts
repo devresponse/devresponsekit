@@ -1,12 +1,14 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import { getCurrentSession } from "@/lib/auth-guard";
+import { type UserAccessContext } from "@/lib/auth-status";
+import { decideSecureAccess } from "@/lib/auth-status";
 import {
-  decideSecureAccess,
-  getUserAccessContext,
-  type UserAccessContext,
-} from "@/lib/auth-status";
+  hasBearerCredential,
+  resolveCaller,
+  type CallerKind,
+} from "@/lib/api-auth/resolve-caller.server";
+import { scopesAuthorize } from "@/lib/api-auth/scopes";
 
 /**
  * Shared authorization gate for the self-service Account API
@@ -28,30 +30,49 @@ export interface AccountActor {
   betterAuthUserId: string;
   appUserId: string;
   access: UserAccessContext;
+  callerKind: CallerKind;
+  credentialId: string | null;
+  /** The calling credential's scopes (null for cookies = full authority). */
+  grantedScopes: string[] | null;
 }
 
 export type AccountGuardResult =
   | { ok: true; actor: AccountActor }
   | { ok: false; response: NextResponse };
 
-export async function requireAccountUser(request: NextRequest): Promise<AccountGuardResult> {
-  const origin = checkTrustedOrigin(request);
-  if (!origin.ok) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: origin.reason ?? "untrusted_origin" }, { status: 403 }),
-    };
+/**
+ * @param requiredScope Account scope a BEARER credential must carry to be
+ *   admitted (e.g. `account.profile.write`). Cookie sessions carry full
+ *   user authority and ignore it. Omit for read-only entry points.
+ */
+export async function requireAccountUser(
+  request: NextRequest,
+  requiredScope?: string,
+): Promise<AccountGuardResult> {
+  // CSRF origin guard applies only to ambient (cookie) credentials; a
+  // bearer token cannot be attached cross-site (design §10.3).
+  if (!hasBearerCredential(request.headers)) {
+    const origin = checkTrustedOrigin(request);
+    if (!origin.ok) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: origin.reason ?? "untrusted_origin" },
+          { status: 403 },
+        ),
+      };
+    }
   }
 
-  const session = await getCurrentSession();
-  if (!session) {
+  const caller = await resolveCaller(request);
+  if (!caller) {
     return {
       ok: false,
       response: NextResponse.json({ error: "unauthenticated" }, { status: 401 }),
     };
   }
 
-  const access = await getUserAccessContext(session.user.id);
+  const { access } = caller;
   if (decideSecureAccess(access.status, access.membershipStatus) !== "allow") {
     return { ok: false, response: NextResponse.json({ error: "forbidden" }, { status: 403 }) };
   }
@@ -61,9 +82,24 @@ export async function requireAccountUser(request: NextRequest): Promise<AccountG
       response: NextResponse.json({ error: "not_provisioned" }, { status: 403 }),
     };
   }
+  // Bearer credentials must carry the required account scope. Cookie
+  // callers have `grantedScopes === null` and pass unconditionally.
+  if (requiredScope && !scopesAuthorize(caller.grantedScopes, requiredScope)) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "insufficient_scope" }, { status: 403 }),
+    };
+  }
 
   return {
     ok: true,
-    actor: { betterAuthUserId: session.user.id, appUserId: access.appUserId, access },
+    actor: {
+      betterAuthUserId: caller.betterAuthUserId,
+      appUserId: access.appUserId,
+      access,
+      callerKind: caller.kind,
+      credentialId: caller.credentialId,
+      grantedScopes: caller.grantedScopes,
+    },
   };
 }

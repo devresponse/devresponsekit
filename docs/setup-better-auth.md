@@ -525,7 +525,9 @@ Each PR gets a unique URL like
   on a subdomain (`app.devresponse.com`) and need sessions on
   `marketing.devresponse.com`, use the SSO handoff flow in
   [`src/lib/sso.server.ts`](../src/lib/sso.server.ts) — do **not**
-  widen the cookie domain.
+  widen the cookie domain. The full multi-application, cross-subdomain
+  setup is documented in
+  [setup-sso-multi-app.md](setup-sso-multi-app.md).
 
 ### 8.2 Docker / self-hosted
 

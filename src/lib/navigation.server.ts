@@ -173,7 +173,15 @@ export async function loadNestedAppsMenu(
 interface InternalMenuItem {
   id: string;
   /** `shell`-namespace message key resolved per request locale. */
-  labelKey: "dashboard" | "workspace" | "account" | "admin" | "users" | "audit" | "settings";
+  labelKey:
+    | "dashboard"
+    | "workspace"
+    | "account"
+    | "documentation"
+    | "admin"
+    | "users"
+    | "audit"
+    | "settings";
   href: string;
   /**
    * Icon NAME (not a component) — resolved client-side through the
@@ -207,6 +215,15 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
     icon: "circle-user",
     // User-level self-service; every active member can manage their own
     // account. No `admin.*` permission is involved.
+    requiredPermissions: ["shell.view"],
+  },
+  {
+    id: "documentation",
+    labelKey: "documentation",
+    href: "/app/docs",
+    icon: "book-open",
+    // User-level: every active member can read the documentation. Per-doc
+    // visibility tightens access inside the app, not at the launcher.
     requiredPermissions: ["shell.view"],
   },
   {

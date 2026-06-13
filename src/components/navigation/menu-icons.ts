@@ -1,9 +1,11 @@
 import {
   AppWindow,
+  BookOpen,
   Briefcase,
   Building2,
   Circle,
   CircleUser,
+  FileText,
   Home,
   IdCard,
   KeyRound,
@@ -47,6 +49,9 @@ export const MENU_ICONS: Record<string, LucideIcon> = {
   // Account (self-service) workspace.
   "circle-user": CircleUser,
   "id-card": IdCard,
+  // Documentation viewer.
+  "book-open": BookOpen,
+  "file-text": FileText,
 };
 
 /**

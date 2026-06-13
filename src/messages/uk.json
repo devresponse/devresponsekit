@@ -85,7 +85,8 @@
     "hideFooter": "Сховати футер",
     "skipToMain": "Перейти до основного вмісту",
     "skipToNavigation": "Перейти до навігації",
-    "account": "Обліковий запис"
+    "account": "Обліковий запис",
+    "documentation": "Документація"
   },
   "administrator": {
     "appTitle": "Адміністратор",
@@ -827,5 +828,17 @@
       "sessionsLoadFailed": "Не вдалося завантажити ваші сеанси.",
       "sessionsRevokeFailed": "Не вдалося відкликати сеанс."
     }
+  },
+  "docs": {
+    "appTitle": "Документація",
+    "index": {
+      "title": "Документація",
+      "description": "Перегляньте посібники та довідкові матеріали платформи."
+    },
+    "emptyCatalog": "Для вас поки немає доступних документів.",
+    "onThisPage": "На цій сторінці",
+    "lastUpdated": "Востаннє оновлено {date}",
+    "breadcrumbHome": "Документація",
+    "readDocument": "Читати"
   }
 }

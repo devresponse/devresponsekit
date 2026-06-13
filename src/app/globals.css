@@ -2,6 +2,9 @@
 @import "../styles/app-shell.css";
 @import "../styles/compact-mode.css";
 
+/* Tailwind Typography — `prose` styles for the documentation viewer. */
+@plugin "@tailwindcss/typography";
+
 /*
  * Design tokens for the enterprise shell.
  *
@@ -231,4 +234,42 @@
   color: var(--color-foreground);
   padding: 0.5rem 1rem;
   border: 2px solid var(--color-primary);
+}
+
+/*
+ * Shiki dual-theme highlighting (rehype-pretty-code) for the docs viewer.
+ *
+ * The pipeline emits two color values per token as `--shiki-light` /
+ * `--shiki-dark` custom properties; these rules pick the right one based
+ * on the `.dark` class `next-themes` toggles on <html>. Scoped under
+ * `.prose` so they outrank the Typography plugin's default `pre`/`code`
+ * styles without `!important`.
+ */
+.prose pre[data-theme],
+.prose code[data-theme] {
+  background-color: var(--shiki-light-bg);
+  color: var(--shiki-light);
+}
+.prose pre[data-theme] span,
+.prose code[data-theme] span {
+  color: var(--shiki-light);
+}
+.dark .prose pre[data-theme],
+.dark .prose code[data-theme] {
+  background-color: var(--shiki-dark-bg);
+  color: var(--shiki-dark);
+}
+.dark .prose pre[data-theme] span,
+.dark .prose code[data-theme] span {
+  color: var(--shiki-dark);
+}
+/* Code blocks: comfortable padding and horizontal scroll for long lines. */
+.prose pre[data-theme] {
+  padding: 1rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+/* Inline code keeps the prose styling; only fenced blocks use shiki bg. */
+.prose :where(code):not([data-theme]) {
+  word-break: break-word;
 }

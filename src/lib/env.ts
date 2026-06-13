@@ -94,6 +94,31 @@ const serverEnvSchema = z
     SEED_ADMIN_EMAIL: z.string().email().optional(),
     SEED_ADMIN_PASSWORD: z.string().optional(),
     SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),
+    /* ----------------------------------------------------------------- */
+    /*  Documentation viewer (src/app/[locale]/(secure)/app/docs)        */
+    /* ----------------------------------------------------------------- */
+    /** Source backend for documents. Phase 1 supports `filesystem` only. */
+    DOCS_SOURCE: z.enum(["filesystem"]).default("filesystem"),
+    /**
+     * Absolute or cwd-relative path to the document root. Defaults to the
+     * repo's `docs/` folder. The safe-path resolver canonicalizes this and
+     * confines every slug to stay inside it.
+     */
+    DOCS_ROOT: z.string().optional(),
+    /**
+     * Gates full MDX evaluation (executing author JS). OFF by default and
+     * only ever safe for the trusted filesystem source — never for an
+     * external/CMS source. Phase 1 ignores it (MDX renders as Markdown).
+     */
+    DOCS_ALLOW_MDX_EXECUTION: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
+    /** When false, documents marked `visibility: internal` never render. */
+    DOCS_INTERNAL_VISIBLE: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
   })
   .superRefine((env, ctx) => {
     // A configured provider without its credentials should fail at boot,

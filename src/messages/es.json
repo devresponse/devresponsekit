@@ -85,7 +85,8 @@
     "hideFooter": "Ocultar pie de página",
     "skipToMain": "Saltar al contenido principal",
     "skipToNavigation": "Saltar a la navegación",
-    "account": "Cuenta"
+    "account": "Cuenta",
+    "documentation": "Documentación"
   },
   "administrator": {
     "appTitle": "Administrador",
@@ -827,5 +828,17 @@
       "sessionsLoadFailed": "No se pudieron cargar tus sesiones.",
       "sessionsRevokeFailed": "No se pudo revocar la sesión."
     }
+  },
+  "docs": {
+    "appTitle": "Documentación",
+    "index": {
+      "title": "Documentación",
+      "description": "Explore las guías y el material de referencia de la plataforma."
+    },
+    "emptyCatalog": "Todavía no hay documentos disponibles para usted.",
+    "onThisPage": "En esta página",
+    "lastUpdated": "Última actualización {date}",
+    "breadcrumbHome": "Documentación",
+    "readDocument": "Leer"
   }
 }

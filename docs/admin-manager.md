@@ -196,9 +196,16 @@ Sidebar groups (every entry localized, every entry permission-gated):
 
 ## 3. Data model (existing tables only)
 
+> **Note:** the application schema is now consolidated into a single
+> file, `src/db/migrations/0001-initial-schema.sql`, which provisions
+> every `app_*` table, index, and baseline row (the historical
+> `0001`–`0006` migrations referenced throughout this document were
+> merged into it). A first-time setup needs only that one file — no
+> further application migrations.
+
 The plan reuses tables already defined in
 `src/db/schema/app-schema.ts` and the SQL in
-`src/db/migrations/0001-app-core.sql`:
+`src/db/migrations/0001-initial-schema.sql`:
 
 - `app_users` — application user; pivoted off `better_auth_user_id`.
 - `app_organizations` / `app_provider_organizations`
@@ -439,8 +446,8 @@ admin.email.read           # read the email outbox and templates
 admin.email.manage         # edit email templates, send test emails
 ```
 
-Migration `0006-email-outbox-and-templates.sql` adds the two
-`admin.email.*` keys and re-grants the full catalog to `superuser`.
+The consolidated initial schema `0001-initial-schema.sql` defines the two
+`admin.email.*` keys (and the full catalog) and grants them to `superuser`.
 
 A **seed** script (`src/db/seeds/seed-admin-permissions.ts`) inserts
 these rows idempotently and bundles them into a built-in role

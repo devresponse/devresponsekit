@@ -96,14 +96,25 @@ upgrading; new columns are introduced via the auth migration tooling
 
 ### 2.2 Application tables (managed by us)
 
-Defined in [`src/db/migrations/0001-app-core.sql`](../src/db/migrations/0001-app-core.sql):
+The **entire** application schema is defined in a single authoritative
+file,
+[`src/db/migrations/0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql).
+This one script provisions every `app_*` table, index, and baseline row
+for a first-time setup — there are no additional application migrations
+to apply.
 
 | Table                          | Purpose                                                                                                  |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | `app_organizations`            | Tenant/organization records (slug, name, status, is_default).                                            |
 | `app_provider_organizations`   | Maps an external IdP organization (e.g. an Entra tenant, a GitHub org) to an internal `app_organization`. |
-| `app_users`                    | Application-side user profile. Links to Better Auth via `better_auth_user_id` (unique).                  |
+| `app_users`                    | Application-side user profile. Links to Better Auth via `better_auth_user_id` (unique). Includes soft-delete bookkeeping. |
 | `app_organization_memberships` | Membership of an `app_user` in an `app_organization`, with status and source provider.                   |
+| `app_roles` / `app_permissions` / `app_role_permissions` / `app_user_roles` | RBAC: roles, the permission catalog, and their assignments. |
+| `app_enterprise_applications`  | Enterprise application catalog used by the app switcher and SSO.                                          |
+| `app_sso_handoff_nonces`       | One-time nonces for the cross-subdomain SSO handoff.                                                      |
+| `app_audit_events`             | Structured audit log (with `request_id` correlation).                                                    |
+| `app_user_locale_preferences`  | Per-user locale / formatting preferences.                                                                |
+| `app_email_templates` / `app_outbox` | Editable email templates and the outbox-first delivery log (see [setup-email.md](setup-email.md)). |
 | `app_schema_migrations`        | Migration ledger used by our SQL runner.                                                                 |
 
 Design rules:
@@ -140,14 +151,23 @@ order and are wired up as `pnpm` scripts in
 
 - **Runner:** [`src/db/migrations/run-migrations.ts`](../src/db/migrations/run-migrations.ts)
 - **Command:** `pnpm db:app:migrate`
+- **Single initial schema:** The complete application schema lives in one
+  authoritative file,
+  [`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql).
+  A first-time setup applies just this file — it creates **all** `app_*`
+  tables, indexes, and baseline rows. **No additional application
+  migrations are required.**
 - **Pattern:** Plain `.sql` files in `src/db/migrations/`, applied in
   lexical order, each wrapped in a transaction. Applied filenames are
-  recorded in `app_schema_migrations`.
-- **Naming:** `NNNN-short-name.sql` (e.g. `0001-app-core.sql`,
-  `0002-add-billing.sql`). Never edit a migration after it has been
-  applied to any shared environment — append a new file instead.
+  recorded in `app_schema_migrations` so each runs at most once. The
+  runner stays multi-file capable: if the schema ever needs to change,
+  append a new `NNNN-short-name.sql` file (the initial schema is never
+  edited after release).
 - **Filtering:** Files starting with `better-auth` are skipped (those
   are owned by the auth track).
+- **Idempotent:** Every statement uses `create … if not exists` /
+  `on conflict do nothing`, so applying the initial schema to an
+  already-provisioned database is a safe no-op.
 
 ### 3.2 Better Auth migrations (vendor)
 
@@ -173,10 +193,12 @@ pnpm db:up
 #    better_auth_user_id always resolve.
 pnpm db:auth:migrate
 
-# 3. Apply application migrations.
+# 3. Apply the application schema (single initial-schema file —
+#    creates every app_* table; no further app migrations needed).
 pnpm db:app:migrate
 
-# 4. (Local only) seed the default org + admin user.
+# 4. (Local only) seed the baseline roles, enterprise apps, and the
+#    Better Auth admin user.
 pnpm db:seed
 ```
 
@@ -702,7 +724,7 @@ Before promoting a Better Auth change to production:
 - This repo's auth setup: [`src/lib/auth.ts`](../src/lib/auth.ts)
 - Catch-all route: [`src/app/api/auth/[...all]/route.ts`](../src/app/api/auth/[...all]/route.ts)
 - Database: [`src/db/database.ts`](../src/db/database.ts)
-- App schema: [`src/db/migrations/0001-app-core.sql`](../src/db/migrations/0001-app-core.sql)
+- App schema (complete, single file): [`src/db/migrations/0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
 - Migration runners: [`src/db/migrations/run-migrations.ts`](../src/db/migrations/run-migrations.ts), [`run-better-auth-migrate.ts`](../src/db/migrations/run-better-auth-migrate.ts)
 - Local Postgres: [`docker-compose.yml`](../docker-compose.yml)
 - Env template: [`.env.example`](../.env.example)

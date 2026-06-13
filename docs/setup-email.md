@@ -64,9 +64,9 @@ templates + renderer in
 
 ## 2. Data model
 
-Migration
-[`0006-email-outbox-and-templates.sql`](../src/db/migrations/0006-email-outbox-and-templates.sql)
-adds two tables:
+The consolidated initial schema
+[`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
+includes the two email tables (along with every other application table):
 
 - **`app_email_templates`** — editable templates, unique on
   `(key, locale)`. Seeded with the built-in defaults. The runtime falls
@@ -75,10 +75,10 @@ adds two tables:
 - **`app_outbox`** — one row per outbound email. `status` is one of
   `pending`, `sent`, `failed`, `logged`.
 
-It also adds the `admin.email.read` / `admin.email.manage` permissions
-and re-grants the full catalog to the `superuser` role.
+It also defines the `admin.email.read` / `admin.email.manage` permissions
+and grants the full catalog to the `superuser` role.
 
-Apply it with:
+A first-time setup applies it with (no separate email migration needed):
 
 ```bash
 pnpm db:app:migrate
@@ -191,7 +191,8 @@ new locale for a template, insert a new `(key, locale)` row.
 
 Built-in template defaults and their declared variables live in
 [`templates.ts`](../src/lib/email/templates.ts) (`DEFAULT_EMAIL_TEMPLATES`).
-Keep them in sync with the seeds in migration 0006.
+Keep them in sync with the seeded defaults in
+[`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql).
 
 ---
 

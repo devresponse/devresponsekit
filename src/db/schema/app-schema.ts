@@ -5,7 +5,7 @@ import type { ColumnType, Generated, Insertable, Selectable, Updateable } from "
  *
  * Better Auth owns its own tables (user, account, session, verification, ...)
  * and is configured separately. These types describe the *application*
- * tables defined in `migrations/0001-app-core.sql`.
+ * tables defined in `migrations/0001-initial-schema.sql`.
  *
  * Roles, memberships, permissions, and account status MUST live here so
  * that authorization decisions are made against application data and not
@@ -131,8 +131,8 @@ export interface AppAuditEventsTable {
   reason: string | null;
   /**
    * Correlation id (UUID) shared with the originating request's
-   * `x-request-id` response header. NULL on legacy rows written before
-   * migration `0003-audit-request-id-and-membership-snapshot.sql`.
+   * `x-request-id` response header. May be NULL on legacy rows written
+   * before the column existed (it predates the schema consolidation).
    */
   request_id: ColumnType<string | null, string | null | undefined, string | null>;
   metadata: Json;

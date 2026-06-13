@@ -37,12 +37,14 @@ export function AdministratorTopHeader({ locale, permissions }: AdministratorTop
   const tRoles = useTranslations("administrator.roles");
   const tOrganizations = useTranslations("administrator.orgs");
   const tEnterpriseApps = useTranslations("administrator.enterpriseApps");
+  const tApiKeys = useTranslations("administrator.apiKeys");
 
   const actionLabels: Record<AdministratorNavigationActionId, string> = {
     "new-enterprise-app": tEnterpriseApps("newButton"),
     "new-organization": tOrganizations("newButton"),
     "new-role": tRoles("newButton"),
     "new-user": tUsers("newButton"),
+    "new-api-key": tApiKeys("newButton"),
   };
   const visibleGroups = getVisibleAdministratorNavigationGroups(permissions);
   const navigateTo = (href: `/${string}`) => router.push(href, { locale });

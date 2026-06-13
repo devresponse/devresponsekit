@@ -86,8 +86,8 @@ export function AccountSessionsPanel() {
   };
 
   return (
-    <div className="max-w-xl space-y-3">
-      <div className="flex items-center justify-between">
+    <div className="w-full space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground text-sm">{t("security.sessionsDescription")}</p>
         <Button
           size="sm"
@@ -118,17 +118,17 @@ export function AccountSessionsPanel() {
             const token = s.token ?? s.id;
             return (
               <li key={token ?? idx} className="flex items-start justify-between gap-3 p-3">
-                <div className="space-y-1">
+                <div className="min-w-0 flex-1 space-y-1">
                   <p className="text-muted-foreground">
                     {t("security.expiresAt", { value: formatExpires(s.expiresAt) })}
                   </p>
                   {s.ipAddress ? (
-                    <p className="text-muted-foreground text-xs">
+                    <p className="text-muted-foreground text-xs break-all">
                       {t("security.ipAddress")}: <code>{s.ipAddress}</code>
                     </p>
                   ) : null}
                   {s.userAgent ? (
-                    <p className="text-muted-foreground truncate text-xs" title={s.userAgent}>
+                    <p className="text-muted-foreground text-xs break-words" title={s.userAgent}>
                       {t("security.userAgent")}: {s.userAgent}
                     </p>
                   ) : null}
@@ -136,6 +136,7 @@ export function AccountSessionsPanel() {
                 <Button
                   size="sm"
                   variant="outline"
+                  className="shrink-0"
                   onClick={() => revokeOne(token)}
                   disabled={busy || !token}
                 >

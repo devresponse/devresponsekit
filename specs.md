@@ -697,10 +697,10 @@ pnpm add -D eslint eslint-config-next prettier prettier-plugin-tailwindcss
     "format:check": "prettier . --check",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
-    "db:auth:migrate": "pnpm dlx auth@latest migrate --config src/lib/auth.ts --yes",
-    "db:auth:generate": "pnpm dlx auth@latest generate --config src/lib/auth.ts --output src/db/migrations/better-auth-schema.sql --yes",
+    "db:auth:migrate": "tsx src/db/migrations/run-better-auth-migrate.ts",
+    "db:auth:generate": "tsx src/db/migrations/run-better-auth-generate.ts",
     "db:app:migrate": "tsx src/db/migrations/run-migrations.ts",
-    "db:seed": "tsx src/db/seeds/seed-local.ts",
+    "db:seed": "tsx --conditions=react-server src/db/seeds/seed-local.ts",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
@@ -708,8 +708,8 @@ pnpm add -D eslint eslint-config-next prettier prettier-plugin-tailwindcss
     "test:integration": "vitest run tests/integration",
     "test:security": "vitest run tests/security",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test tests/e2e",
-    "test:a11y": "playwright test tests/accessibility",
+    "test:e2e": "playwright test --config=playwright.config.ts tests/e2e",
+    "test:a11y": "playwright test --config=playwright.config.ts tests/accessibility",
     "test:all": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:coverage && pnpm test:e2e && pnpm test:a11y"
   }
 }
@@ -814,17 +814,52 @@ MICROSOFT_CLIENT_SECRET=""
 GITHUB_CLIENT_ID=""
 GITHUB_CLIENT_SECRET=""
 
-# Internal JWT handoff for subdomain SSO
+# Internal JWT handoff for subdomain SSO. ISSUER + AUDIENCE_PREFIX +
+# JWT_SECRET are REQUIRED; APPLICATION_ID is optional at boot but the
+# SSO consumer returns 500 without it, so set it per deployment.
 SSO_HANDOFF_ISSUER="https://app.devresponse.com"
 SSO_HANDOFF_AUDIENCE_PREFIX="devresponse-app"
+SSO_HANDOFF_APPLICATION_ID="portal"
 SSO_HANDOFF_JWT_SECRET="replace-with-separate-strong-secret"
+# Accepted up to 300; the signer clamps the effective token TTL to 60s.
 SSO_HANDOFF_TTL_SECONDS=60
+
+# Extra trusted origins for the admin mutation/origin guard (comma-sep).
+ADMIN_TRUSTED_ORIGINS="https://app.devresponse.com"
+
+# Outbound email (§35). Unset EMAIL_PROVIDER = no delivery (rows logged).
+# EMAIL_PROVIDER="resend"            # "resend" | "mailgun"
+EMAIL_FROM="DevResponse <no-reply@localhost>"
+# RESEND_API_KEY=""                  # required when EMAIL_PROVIDER=resend
+# MAILGUN_API_KEY=""                 # required when EMAIL_PROVIDER=mailgun
+# MAILGUN_DOMAIN=""                  # required when EMAIL_PROVIDER=mailgun
+# MAILGUN_BASE_URL="https://api.mailgun.net"
+
+# Machine API (§37). Both paths ship DARK (disabled) by default.
+# API_KEYS_ENABLED="1"
+# API_KEY_ENV_TAG="live"             # "live" | "test" (stamped into drk_<tag>_…)
+# API_KEY_DEFAULT_TTL_DAYS=""
+# API_JWT_ENABLED="1"                # requires API_JWT_PRIVATE_KEY at boot
+# API_JWT_ISSUER=""                  # defaults to BETTER_AUTH_URL
+# API_JWT_AUDIENCE="devresponse-api"
+# API_JWT_PRIVATE_KEY=""             # Ed25519 private JWK (JSON string)
+# API_JWT_KID=""                     # optional; defaults to JWK thumbprint
+# API_JWT_ACCESS_TTL_SECONDS="900"   # <= 3600
+
+# Test/CI only — disables Better Auth's rate limiter. Never in production.
+# AUTH_RATE_LIMIT_DISABLED="1"
 
 # Local seed user
 SEED_ADMIN_EMAIL="admin@devresponse.local"
 SEED_ADMIN_PASSWORD="ChangeMe-LocalOnly-123!"
 SEED_DEFAULT_ORGANIZATION_SLUG="default"
 ```
+
+`.env.example` is the authoritative list and `src/lib/env.ts` is the
+validator. Boot fails if a selected provider/feature is missing its
+companion secret — `EMAIL_PROVIDER=resend` needs `RESEND_API_KEY`,
+`EMAIL_PROVIDER=mailgun` needs `MAILGUN_API_KEY` + `MAILGUN_DOMAIN`, and
+`API_JWT_ENABLED` needs `API_JWT_PRIVATE_KEY`.
 
 Production values:
 
@@ -909,7 +944,18 @@ app_enterprise_applications
 app_sso_handoff_nonces
 app_audit_events
 app_user_locale_preferences
+app_email_templates           # §35 email — editable templates
+app_outbox                    # §35 email — outbox-first delivery log
+app_api_keys                  # §37 machine API — API keys (SHA-256 hash only)
+app_oauth_clients             # §37 machine API — OAuth client-credentials principals
+app_revoked_tokens            # §37 machine API — JWT (jti) revocation list
+app_schema_migrations         # migration ledger written by run-migrations.ts
 ```
+
+The first twelve tables are created by `0001-initial-schema.sql`; the
+three `app_api_keys` / `app_oauth_clients` / `app_revoked_tokens` tables
+are created by `0003-api-credentials.sql` (see §10.3 and §37);
+`app_schema_migrations` is created by the runner itself.
 
 Roles, permissions, organization memberships, app access, and account status are application concerns. Do not store them inside Better Auth core tables.
 
@@ -942,13 +988,23 @@ export const pgPool = pool;
 
 ### 10.3 Application core schema
 
-The complete application schema is consolidated into a single
-authoritative file, `src/db/migrations/0001-initial-schema.sql`, which
-provisions every `app_*` table, index, and baseline row for a first-time
-setup — no further application migrations are required. The core-table
-DDL below is the heart of that file (it also folds in the administrator
-indexes, audit `request_id`, soft-delete columns, the permission catalog
-+ superuser provisioning, and the email tables).
+The application schema **begins** with a consolidated initial migration,
+`src/db/migrations/0001-initial-schema.sql`, which provisions the core
+`app_*` tables, indexes, and baseline rows for a first-time setup (it
+folds in the administrator indexes, audit `request_id`, soft-delete
+columns, the permission catalog + superuser provisioning, and the email
+tables). The core-table DDL below is the heart of that file.
+
+Additive changes after the initial release ship as **further numbered
+migrations** — currently `0003-api-credentials.sql`, which adds the
+machine-API tables (`app_api_keys`, `app_oauth_clients`,
+`app_revoked_tokens`) and the four `admin.apikeys.*` / `admin.clients.*`
+permissions (see §37). The runner `src/db/migrations/run-migrations.ts`
+applies every `NNNN-*.sql` file in lexical order and records applied
+filenames in `app_schema_migrations`, so each runs at most once. (There
+is a numbering gap — no `0002` on disk — which the lexical-order runner
+tolerates.) The initial schema is never edited after release; new schema
+changes are appended as new files.
 
 ```sql
 create extension if not exists "pgcrypto";
@@ -2804,13 +2860,17 @@ Seed data:
 1. Organization: `default`, name `Default Organization`, `is_default = true`.
 2. Organization: `devresponse`, name `DevResponse`.
 3. Roles: `owner`, `admin`, `member`, `viewer`.
-4. Permissions:
-   - `shell.view`
-   - `navigation.view`
-   - `applications.switch`
-   - `admin.users.manage`
-   - `audit.view`
-   - `i18n.manage-preferences`
+4. Permissions: the baseline `shell.view` / `audit.view` keys plus the
+   full **administrator permission catalog**, which is the single source
+   of truth in `src/lib/admin/permissions.ts` (`ADMIN_PERMISSION_CATALOG`)
+   and is currently **30 keys**: the `admin.users.*`, `admin.roles.*`,
+   `admin.permissions.manage`, `admin.orgs.*`, `admin.apps.*`,
+   `admin.audit.read`, `admin.email.read` / `admin.email.manage`, and the
+   machine-credential keys `admin.apikeys.read` / `admin.apikeys.manage`
+   / `admin.clients.read` / `admin.clients.manage`. The first 26 are
+   seeded by `0001-initial-schema.sql`; the four credential keys are
+   seeded by `0003-api-credentials.sql`. Do not hard-code a count
+   elsewhere — derive it from `ADMIN_PERMISSION_CATALOG`.
 5. Enterprise applications:
    - `enterprise-core`, origin `https://app.devresponse.com`, audience `devresponse-app:enterprise-core`
    - `enterprise-admin`, origin `https://admin.devresponse.com`, audience `devresponse-app:enterprise-admin`
@@ -2897,6 +2957,11 @@ Rules:
 /en/app/administrator/email/templates
 ```
 
+The list above is **representative**, not exhaustive: the Administrator
+workspace also includes `organizations`, `memberships`, `roles`,
+`permissions`, and `enterprise-apps` sections (each with `new` / `[id]`
+variants).
+
 (The former `/en/app/admin/users` and `/en/app/admin/audit` placeholder
 pages were removed — they lacked admin permission checks. The
 Administrator workspace at `/app/administrator/*` is the only admin
@@ -2912,6 +2977,20 @@ Rules:
 4. Compact density.
 5. Bounded viewport layout.
 6. API routes validate independently.
+
+### 28.5 Machine API region (`/api/v1`)
+
+The versioned machine API (§37) is a **distinct route region**, separate
+from the browser-facing public / auth / secure regions:
+
+- **Not localized** — no `[locale]` prefix (`/api/v1/...`).
+- **Not session-cookie gated and NOT touched by `proxy.ts`.** It is
+  authenticated by bearer machine credentials — an API key
+  (`Authorization: Bearer drk_…`) or an Ed25519 JWT access token —
+  resolved by `src/lib/api-auth/resolve-caller.server.ts` and gated per
+  route by `src/lib/api-auth/v1-guard.server.ts`.
+- Disabled by default (`API_KEYS_ENABLED` / `API_JWT_ENABLED`).
+- Speaks `application/problem+json` (RFC 9457-style) for errors.
 
 ---
 
@@ -2934,8 +3013,9 @@ Testing is a first-class deliverable. A feature is incomplete until its tests ar
 **CI** (`.github/workflows/ci.yml`) runs two jobs against a Postgres
 service: a **quality** job (typecheck, lint, format check, vitest with
 the coverage ratchet) and a **browser** job that builds, migrates
-(the single initial schema), seeds, runs `next start`, then executes the
-`test:e2e` and `test:a11y` suites against the production server. The
+(all app migrations via `db:app:migrate`), seeds, runs `next start`,
+then executes the `test:e2e` and `test:a11y` suites against the
+production server. The
 browser job sets `AUTH_RATE_LIMIT_DISABLED=1` (a validated, test-only
 env escape hatch) because the suites sign in faster than Better Auth's
 production rate limit allows.
@@ -3646,7 +3726,67 @@ The defining property is that the app can only ever read or write the
 
 ---
 
-## 37. Source references for implementation alignment
+## 37. Machine API surface (`/api/v1`)
+
+A versioned, non-localized REST API for machine clients (CLIs, scripts,
+service integrations), authenticated by machine credentials instead of
+session cookies. It ships **disabled by default** — the two paths are
+gated by `API_KEYS_ENABLED` and `API_JWT_ENABLED` (§8) — and is fully
+documented in [docs/api-and-cli-guide.md](docs/api-and-cli-guide.md) and
+[docs/design-api-keys-and-tokens.md](docs/design-api-keys-and-tokens.md).
+
+### 37.1 Credentials & auth
+
+- **API keys**: `drk_<env>_<32 base62 chars>` (~190 bits entropy). Only a
+  SHA-256 hash is stored (`app_api_keys.key_hash`); the plaintext is
+  shown once at creation. A short display prefix (`drk_live_AbCd1234`,
+  8 random chars) is stored for the UI.
+- **JWT access tokens**: Ed25519 (EdDSA), minted at
+  `POST /api/v1/auth/token` (OAuth2 `client_credentials` for OAuth
+  clients, or an `api_key` grant). The public key is published at
+  `GET /api/v1/jwks.json`. Tokens are stateless; early revocation uses
+  the `app_revoked_tokens` (`jti`) list.
+- **OAuth clients**: machine principals with `client_id` (`drkc_…`) and a
+  hashed `client_secret` (`drkcsec_…`), in `app_oauth_clients`.
+- Resolution order (api key → JWT → session cookie) and gating live in
+  `src/lib/api-auth/resolve-caller.server.ts` and `v1-guard.server.ts`.
+
+### 37.2 Authorization (scopes ∩ permissions)
+
+A credential carries **scopes**, but its effective authority is the
+**intersection** of its scopes with its owner's permissions
+(`src/lib/api-auth/scopes.ts`) — a credential can never exceed its owner.
+Scope strings are the 30 `admin.*` catalog keys plus four account scopes
+(`account.read`, `account.profile.write`, `account.preferences.write`,
+`account.apikeys.manage`).
+
+### 37.3 Endpoints
+
+| Route | Methods | Notes |
+| --- | --- | --- |
+| `POST /api/v1/auth/token` | POST | Exchange a credential for a JWT (public) |
+| `GET /api/v1/jwks.json` | GET | Public JWKS (Ed25519) |
+| `GET /api/v1/openapi.json` | GET | OpenAPI 3.1 document |
+| `GET /api/v1/me` | GET | Caller identity + effective scopes |
+| `GET,POST /api/v1/me/api-keys` | GET, POST | List / create the caller's own keys |
+| `DELETE /api/v1/me/api-keys/{id}` | DELETE | Revoke own key |
+| `POST /api/v1/me/api-keys/{id}/rotate` | POST | Rotate own key |
+| `GET,POST /api/v1/users` | GET, POST | List / create users |
+| `GET /api/v1/users/{id}` | GET | Read user (emits ETag) |
+| `POST /api/v1/users/{id}/status` | POST | Status transition (`If-Match`/412) |
+| `GET /api/v1/audit-events` | GET | Read audit log |
+| `GET /api/v1/admin/api-keys` | GET | List all keys |
+| `DELETE /api/v1/admin/api-keys/{id}` | DELETE | Revoke any key |
+| `GET,POST /api/v1/admin/oauth-clients` | GET, POST | List / register clients |
+| `GET,PATCH,DELETE /api/v1/admin/oauth-clients/{id}` | GET, PATCH, DELETE | Read / edit / revoke a client |
+| `POST /api/v1/admin/oauth-clients/{id}/rotate-secret` | POST | Rotate a client secret |
+
+Errors use `application/problem+json` (`type`, `title`, `status`, `code`,
+optional `detail`, `requestId`) from `src/lib/api-auth/problem.ts`.
+
+---
+
+## 38. Source references for implementation alignment
 
 Implementation must verify exact API names against installed package versions.
 

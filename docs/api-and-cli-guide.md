@@ -19,7 +19,7 @@
 
 ## Table of contents
 
-1. [The most important fact: there are no API keys](#1-the-most-important-fact-there-are-no-api-keys)
+1. [The most important fact: two ways to authenticate](#1-the-most-important-fact-two-ways-to-authenticate)
 2. [Authentication & authorization model](#2-authentication--authorization-model)
 3. [Route surface overview](#3-route-surface-overview)
 4. [Better Auth endpoints (`/api/auth/*`)](#4-better-auth-endpoints-apiauth)
@@ -34,38 +34,42 @@
 
 ---
 
-## 1. The most important fact: there are no API keys
+## 1. The most important fact: two ways to authenticate
 
-**This application does not expose an API-key or bearer-token
-authentication mechanism.** The Better Auth instance in
-[`src/lib/auth.ts`](../src/lib/auth.ts) is configured with exactly three
-plugins:
+There are **two** distinct ways to call this application over HTTP, and
+which one you use determines almost everything else.
 
-```ts
-plugins: [admin(), ssoSession(), nextCookies()]
-```
+**1. Browser-style session cookies (the legacy/auth surface).** The
+Better Auth instance in [`src/lib/auth.ts`](../src/lib/auth.ts) uses the
+`admin()`, `ssoSession()`, and `nextCookies()` plugins — there is **no**
+Better Auth `apiKey()` / `bearer()` / JWT plugin. So the `/api/auth/*`,
+`/api/administrator/*`, `/api/account/*`, `/api/sso/*`, and
+`/api/navigation/*` routes covered in §4–§8 are authenticated **only** by
+a Better Auth **session cookie**, and a CLI hitting them must log in like
+a browser (POST credentials to the sign-in endpoint, capture the cookie,
+replay it, and satisfy the CSRF origin check on mutations — see §2.4).
 
-There is **no** `apiKey()` plugin, **no** `bearer()` plugin, and **no**
-JWT-access-token plugin. Consequently:
+**2. Machine credentials (the versioned `/api/v1` surface).** There
+**is** now a first-class machine-credential API — added after this guide
+was first written — under `/api/v1`. It accepts:
 
-- **Every authenticated request is authenticated by a Better Auth
-  *session cookie*.** A CLI cannot present a static secret in an
-  `Authorization` header and be admitted.
-- The only long-lived shared secret in the system
-  (`SSO_HANDOFF_JWT_SECRET`) is for **server-to-server subdomain SSO**,
-  not for client API access. It mints 60-second, single-use tokens that
-  are consumed by a redirect, never accepted as an API credential.
-- Therefore an external CLI must **log in like a browser would** — POST
-  credentials to the Better Auth sign-in endpoint, capture the returned
-  session cookie, and replay that cookie on subsequent calls. It must
-  also satisfy a **CSRF origin check** on every mutation (see
-  [§2.4](#24-origin--csrf-guard)).
+- **API keys**: `Authorization: Bearer drk_…` (stored only as a SHA-256
+  hash; created/rotated via `/api/v1/me/api-keys` and the admin routes),
+- **Ed25519 JWT access tokens**: minted at `POST /api/v1/auth/token`
+  (OAuth2 `client_credentials` or an `api_key` grant), verifiable against
+  the JWKS at `GET /api/v1/jwks.json`.
 
-This single design decision shapes everything else in this guide. If
-your organization wants first-class machine credentials (rotatable API
-keys scoped to permissions), that is a **feature to add** (enable Better
-Auth's `apiKey` plugin and gate it through `requireAdminPermission`), not
-a capability to discover. See [§12.6](#126-if-you-need-real-machine-credentials).
+It is implemented with `jose` and the helpers in
+[`src/lib/api-auth/`](../src/lib/api-auth) (not a Better Auth plugin), and
+it ships **disabled by default** — enable per environment with
+`API_KEYS_ENABLED` / `API_JWT_ENABLED`. A credential's effective
+authority is its **scopes ∩ its owner's permissions**, so it can never
+exceed its owner. **If you are building a machine integration, use this
+surface** — the full contract (endpoints, scopes, token format, error
+model) is documented in
+[`docs/design-api-keys-and-tokens.md`](design-api-keys-and-tokens.md) and
+exposed as an OpenAPI document at `GET /api/v1/openapi.json`. The rest of
+this guide (§4–§8) covers the cookie-authenticated surface.
 
 ---
 
@@ -344,9 +348,11 @@ tokens or redirect.
 
 ## 9. Permission catalog
 
-The 26-key catalog (seeded into `app_permissions`, granted to the
-`superuser`/`admin.platform` role). Permissions are **platform-wide** in
-v1: a holder manages **every** organization, not only their own.
+The 30-key catalog (`ADMIN_PERMISSION_CATALOG` in
+[`src/lib/admin/permissions.ts`](../src/lib/admin/permissions.ts), seeded
+into `app_permissions` and granted to the `superuser` / `admin.platform`
+role). Permissions are **platform-wide** in v1: a holder manages **every**
+organization, not only their own.
 
 ```
 admin.users.read         admin.roles.read         admin.orgs.read
@@ -356,10 +362,17 @@ admin.users.delete       admin.roles.delete       admin.orgs.delete
 admin.users.manage       admin.roles.assign       admin.orgs.manage
 admin.users.ban          admin.permissions.manage admin.apps.read
 admin.users.setRole      admin.audit.read         admin.apps.manage
-admin.users.setPassword  admin.email.read
-admin.users.sessions     admin.email.manage
-admin.users.impersonate
+admin.users.setPassword  admin.email.read         admin.apikeys.read
+admin.users.sessions     admin.email.manage       admin.apikeys.manage
+admin.users.impersonate                           admin.clients.read
+                                                  admin.clients.manage
 ```
+
+The last four (`admin.apikeys.*` / `admin.clients.*`) govern the
+machine-credential admin routes under `/api/v1/admin/*` and were added by
+`0003-api-credentials.sql`. These catalog keys are also the **scope**
+strings used by the `/api/v1` surface (plus four `account.*` scopes — see
+`docs/design-api-keys-and-tokens.md`).
 
 A caller's effective permissions are computed per request by joining
 `app_user_roles → app_role_permissions → app_permissions` for the user's
@@ -522,25 +535,29 @@ routes, put them behind the same `requireAdminPermission` wrapper. The
 legacy `/api/admin/users/*` console endpoints were **removed** for exactly
 this reason — they bypassed the hardened pipeline.
 
-### 12.6 If you need real machine credentials
+### 12.6 Machine credentials (the `/api/v1` surface)
 
-Replaying a human's session cookie is a pragmatic stopgap, not a
-durable integration pattern. For production automation, add proper
-machine credentials instead of distributing cookies:
+Replaying a human's session cookie is a pragmatic stopgap, not a durable
+integration pattern. For production automation, use the **machine
+credentials** that the `/api/v1` surface provides (see §1 and
+[`docs/design-api-keys-and-tokens.md`](design-api-keys-and-tokens.md)) —
+do not distribute cookies. That surface already embodies the principles
+that matter:
 
-1. **Enable Better Auth's `apiKey` plugin** (or `bearer` for short-lived
-   tokens) in [`src/lib/auth.ts`](../src/lib/auth.ts).
-2. **Gate it through the existing pipeline** — resolve the key to an
-   `app_users` row and run it through `requireAdminPermission` so API-key
-   callers are subject to the *same* permission catalog, rate limiting,
-   and audit logging as cookie callers.
-3. **Scope, rotate, and revoke.** Issue keys with the narrowest
-   permission set, store only a hash, support rotation and immediate
-   revocation, and audit key creation/use/revocation.
-4. **Never accept an unscoped, non-expiring key.** A leaked god-key with
-   no expiry is the single worst credential to operate.
+1. **First-class API keys + JWT** resolved by `src/lib/api-auth/`, gated
+   by `v1-guard.server.ts` — not a cookie.
+2. **Same authority model.** A credential's scopes are intersected with
+   its owner's permission catalog, so it is subject to the *same*
+   permissions, the same status checks, per-credential rate limiting, and
+   audit logging.
+3. **Scope, rotate, revoke.** Keys are issued with a narrow scope set,
+   stored only as a SHA-256 hash, and support rotation and immediate
+   revocation; JWT `jti`s can be revoked via `app_revoked_tokens`.
+4. **Bounded lifetime.** Keys can carry an expiry (`expiresInDays`), and
+   JWT access tokens are short-lived (≤ 1 hour).
 
-Until that exists, the session-cookie recipe in [§11](#11-building-a-cli-end-to-end-recipe)
+When the `/api/v1` feature flags are **off**, the session-cookie recipe
+in [§11](#11-building-a-cli-end-to-end-recipe)
 is the only supported path — and the cautions above are mandatory, not
 optional.
 

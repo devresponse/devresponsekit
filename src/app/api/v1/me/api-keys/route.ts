@@ -62,7 +62,11 @@ export async function POST(request: NextRequest) {
   }
 
   const scopes = normalizeScopes(parsed.data.scopes);
-  const ungrantable = ungrantableScopesForCaller(actor.access.permissions, actor.grantedScopes, scopes);
+  const ungrantable = ungrantableScopesForCaller(
+    actor.access.permissions,
+    actor.grantedScopes,
+    scopes,
+  );
   if (ungrantable.length > 0) {
     return problemResponse("invalid_scope", 403, request, {
       detail: "You cannot grant scopes you do not hold.",

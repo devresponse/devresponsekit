@@ -95,7 +95,7 @@ credentials **fails at boot**, not at first send.
 | Variable | Purpose |
 | --- | --- |
 | `EMAIL_PROVIDER` | `resend` \| `mailgun` \| unset (no delivery → `logged`) |
-| `EMAIL_FROM` | From header, e.g. `App <no-reply@example.com>` |
+| `EMAIL_FROM` | From header, e.g. `App <no-reply@example.com>`. Optional — defaults to `DevResponse <no-reply@localhost>`, which most providers reject, so set it whenever a provider is configured. |
 | `RESEND_API_KEY` | Required when `EMAIL_PROVIDER=resend` |
 | `MAILGUN_API_KEY` | Required when `EMAIL_PROVIDER=mailgun` |
 | `MAILGUN_DOMAIN` | Required when `EMAIL_PROVIDER=mailgun` |
@@ -237,6 +237,6 @@ Neither local dev nor CI configures a provider, so emails are recorded as
 | --- | --- |
 | App fails to boot: "Invalid server environment variables: RESEND_API_KEY" | `EMAIL_PROVIDER=resend` set without `RESEND_API_KEY` (the boot-time guard). |
 | Outbox rows are all `logged`, nothing delivered | No `EMAIL_PROVIDER` configured — expected in dev/CI. |
-| Outbox rows are `failed` | Delivery threw; the `error` column holds the provider response (truncated to 500 chars). Check the API key, domain verification, and region (`MAILGUN_BASE_URL`). |
+| Outbox rows are `failed` | Delivery threw; the `error` column holds the message. Provider HTTP error bodies are prefixed (`resend <status>:` / `mailgun <status>:`) and truncated to 500 chars; other thrown errors (network, etc.) are stored as-is. Check the API key, domain verification, and region (`MAILGUN_BASE_URL`). |
 | Reset email never arrives but the row is `sent` | Delivery succeeded at the provider — check the provider's own logs / spam folder. |
 | `{{variable}}` appears literally in a received email | The template references a variable the flow does not provide; check `DEFAULT_EMAIL_TEMPLATES[*].variables`. |

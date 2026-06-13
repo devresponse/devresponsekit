@@ -61,12 +61,10 @@ describe("grantability (least privilege)", () => {
     const ownerPerms = ["admin.users.read", "admin.users.manage", "admin.orgs.delete"];
     const callerScopes = ["admin.users.read"];
     // Trying to mint a broader key must fail for the scopes outside the caller's grant.
-    expect(
-      ungrantableScopesForCaller(ownerPerms, callerScopes, ["admin.users.read"]),
-    ).toEqual([]);
-    expect(
-      ungrantableScopesForCaller(ownerPerms, callerScopes, ["admin.orgs.delete"]),
-    ).toEqual(["admin.orgs.delete"]);
+    expect(ungrantableScopesForCaller(ownerPerms, callerScopes, ["admin.users.read"])).toEqual([]);
+    expect(ungrantableScopesForCaller(ownerPerms, callerScopes, ["admin.orgs.delete"])).toEqual([
+      "admin.orgs.delete",
+    ]);
   });
 
   it("a cookie caller (null scopes) delegates with full owner authority", () => {

@@ -220,8 +220,10 @@ Better Auth tables (`user`, `account`, `session`, `verification`) are
 **read** through `authClient.admin.*` / `auth.api.*` only; the
 Administrator app never writes to them through Kysely.
 
-A read-optimization migration `0002-administrator-indexes.sql` is delivered up-front (decision: add the indexes from the beginning,
-without waiting on profiling evidence) and adds:
+The read-optimization indexes are delivered up-front (decision: add the
+indexes from the beginning, without waiting on profiling evidence) —
+these are now folded into `0001-initial-schema.sql` (there is no separate
+`0002` file). They add:
 
 - `pg_trgm` extension (`CREATE EXTENSION IF NOT EXISTS pg_trgm`).
 - Partial / btree indexes:
@@ -293,9 +295,8 @@ two-step soft delete in a single Kysely transaction:
    — indefinite ban so the user cannot sign in.
 2. `update app_users set status = 'deactivated', deactivated_at = now(),
    deactivated_by = <actor>, deactivated_reason = <reason>` (status
-   value already supported by the existing schema; if a dedicated
-   `deactivated_*` column does not yet exist, the seed migration adds
-   it as part of `0002-administrator-indexes.sql`).
+   value already supported by the existing schema; the `deactivated_*`
+   columns are defined in `0001-initial-schema.sql`).
 
 A "Restore" action is the inverse (unban + clear status). Audit events
 use `event_type = "admin.user.soft_deleted"` /
@@ -410,7 +411,11 @@ removed — see §20.1 #1.)
 
 ### 6.1 Permission catalog (seeded into `app_permissions`)
 
-Decision: the 26-key catalog below is adopted in full as the v1 set.
+Decision: the 30-key catalog below is adopted in full as the v1 set.
+(The catalog grew over time: 24 keys originally, +2 for email, +4 for
+machine credentials — the single source of truth is
+`ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts`; do not
+hard-code a count elsewhere.)
 Permissions are **platform-wide** (decision: a single privileged user
 holding `admin.platform` — or any `admin.*.read/manage` permission —
 can see and manage **every** organization, not only orgs they are a
@@ -444,10 +449,18 @@ admin.apps.manage
 admin.audit.read
 admin.email.read           # read the email outbox and templates
 admin.email.manage         # edit email templates, send test emails
+admin.apikeys.read         # read API keys across users and organizations
+admin.apikeys.manage       # revoke and manage any user's API keys
+admin.clients.read         # read OAuth client registrations
+admin.clients.manage       # create, rotate, and revoke OAuth clients
 ```
 
-The consolidated initial schema `0001-initial-schema.sql` defines the two
-`admin.email.*` keys (and the full catalog) and grants them to `superuser`.
+The initial schema `0001-initial-schema.sql` defines the first 26 keys
+(through `admin.email.*`) and grants the full catalog to `superuser`. The
+four machine-credential keys (`admin.apikeys.*` / `admin.clients.*`) are
+added by `0003-api-credentials.sql`, which also grants them to both
+`superuser` and `admin.platform`. They govern the `/api/v1/admin/api-keys`
+and `/api/v1/admin/oauth-clients` endpoints (see specs.md §37).
 
 A **seed** script (`src/db/seeds/seed-admin-permissions.ts`) inserts
 these rows idempotently and bundles them into a built-in role
@@ -817,8 +830,8 @@ runtime dependency introduced by this plan is **`@tanstack/react-table`**
 3. Faceted filter option lists are loaded lazily on popover open.
 4. Audit explorer queries always include a date range (defaults to
    last 30 days).
-5. The `0002-administrator-indexes.sql` migration (delivered up-front,
-   per §3) installs the indexes for hot paths:
+5. The administrator indexes (folded into `0001-initial-schema.sql`,
+   per §3) cover the hot paths:
    - `app_users (status)`, `app_users (created_at desc)`.
    - `app_audit_events (created_at desc)`,
      `app_audit_events (event_type, created_at desc)`,
@@ -871,7 +884,8 @@ The application MUST pass the standard repo gates already in use:
 - `pnpm test:integration`
 - `pnpm test:security`
 - `pnpm build` (with `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
-  `SSO_HANDOFF_JWT_SECRET`, `SSO_HANDOFF_AUDIENCE_PREFIX` set)
+  `DATABASE_URL`, `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_JWT_SECRET`,
+  `SSO_HANDOFF_AUDIENCE_PREFIX` set)
 - `pnpm test:e2e` and `pnpm test:a11y` against a `pnpm db:up` +
   `pnpm db:app:migrate` + `pnpm db:auth:migrate` + `pnpm db:seed`
   environment.
@@ -906,8 +920,8 @@ next inside the working branch.
   `@tanstack/react-table` with shadcn primitives.
 - Build `list-query.server.ts` and `/api/administrator/users` GET.
 - Build users list page using the new grid.
-- Ship `0002-administrator-indexes.sql` (decision: indexes added
-  up-front, not deferred).
+- Ship the administrator indexes (decision: added up-front, not
+  deferred; now folded into `0001-initial-schema.sql`).
 - Tests: unit for query builder, component for grid, integration for
   GET endpoint.
 
@@ -1066,13 +1080,13 @@ in §18 across all phases combined.
 | # | Topic | Decision |
 |---|---|---|
 | 1 | Legacy `/admin/users` console + `/api/admin/users/*` endpoints | **Superseded — removed.** Originally kept alongside the new app, they were deleted in the security hardening pass: the pages lacked admin permission checks (any active user could read user statuses and the audit log) and the endpoints bypassed the origin-guard / rate-limit / request-id pipeline. The Administrator app is the only admin surface; status mutations live at `/api/administrator/users/[id]/status` + `/bulk` on the shared `performAdminStatusChange` core. |
-| 2 | Permission catalog | Adopt the 24 `admin.*` keys in §6.1 |
+| 2 | Permission catalog | Adopt the `admin.*` catalog in §6.1 (now 30 keys — 24 original + 2 email + 4 machine-credential) |
 | 3 | Better Auth role vs. app roles | Surface as two distinct concepts in the UI |
 | 4 | Workspace shell | Fully self-contained — its own left rail in **addition** to the root `SecureSidebar` |
 | 5 | Path | `/[locale]/app/administrator` |
 | 6 | Filtering | Per-grid filters only — **no** global org scope picker |
 | 7 | Cross-org visibility | Platform-admin model — privileged users see/manage **all** organizations |
-| 8 | Indexes | `0002-administrator-indexes.sql` (incl. `pg_trgm`) shipped up-front in Phase 2 |
+| 8 | Indexes | Administrator indexes (incl. `pg_trgm`) shipped up-front; folded into `0001-initial-schema.sql` |
 | 9 | Optimistic concurrency | **Skipped** for v1 (no `If-Match`) |
 | 10 | Impersonation | **Included** in v1, gated + double-confirm + audited |
 | 11 | User deletion | **Soft delete only** (§4.1) — never call `auth.api.removeUser` |

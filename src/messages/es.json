@@ -852,6 +852,10 @@
       "security": {
         "title": "Seguridad",
         "description": "Contraseña y sesiones activas."
+      },
+      "apiKeys": {
+        "title": "Claves API",
+        "description": "Crea y gestiona claves API personales para el acceso programático a tu cuenta."
       }
     },
     "fields": {
@@ -920,6 +924,57 @@
       "passwordChangeFailed": "No se pudo cambiar la contraseña. Verifica tu contraseña actual.",
       "sessionsLoadFailed": "No se pudieron cargar tus sesiones.",
       "sessionsRevokeFailed": "No se pudo revocar la sesión."
+    },
+    "apiKeys": {
+      "listTitle": "Tus claves API",
+      "empty": "Todavía no tienes claves API.",
+      "loadError": "No se pudieron cargar tus claves API.",
+      "never": "Nunca",
+      "noExpiry": "Sin caducidad",
+      "noScopes": "Sin alcances",
+      "status": {
+        "active": "Activa",
+        "revoked": "Revocada"
+      },
+      "created": "Creada el {value}",
+      "lastUsed": "Último uso {value}",
+      "expires": "Caduca el {value}",
+      "actions": {
+        "rotate": "Rotar",
+        "revoke": "Revocar"
+      },
+      "rotateError": "No se pudo rotar la clave.",
+      "revokeError": "No se pudo revocar la clave.",
+      "revokeConfirm": {
+        "title": "Revocar clave API",
+        "description": "Esto invalida la clave de forma permanente. Cualquier cliente que la use dejará de funcionar de inmediato. Esta acción no se puede deshacer."
+      },
+      "rotateConfirm": {
+        "title": "Rotar clave API",
+        "description": "Se emite un nuevo secreto con los mismos alcances y caducidad, y esta clave se revoca. Actualiza tu cliente con el nuevo secreto; el anterior deja de funcionar de inmediato."
+      },
+      "reveal": {
+        "title": "Copia tu clave ahora",
+        "description": "Esta es la única vez que se muestra el secreto completo. Guárdalo en un lugar seguro: no se puede recuperar de nuevo. Si lo pierdes, rota la clave.",
+        "copy": "Copiar",
+        "copied": "Copiado",
+        "done": "Listo"
+      },
+      "create": {
+        "title": "Crear una nueva clave",
+        "name": "Nombre",
+        "namePlaceholder": "p. ej. CLI de mi portátil",
+        "expiresInDays": "Caduca en (días)",
+        "expiresInDaysPlaceholder": "Déjalo vacío para que no caduque",
+        "expiresInDaysHelp": "Opcional. Tras estos días la clave deja de funcionar.",
+        "scopes": "Alcances",
+        "scopesHelp": "Selecciona lo que puede hacer esta clave. Una clave nunca puede exceder tus propios permisos.",
+        "noScopesAvailable": "No hay alcances disponibles para conceder.",
+        "submit": "Crear clave",
+        "nameRequired": "Introduce un nombre.",
+        "error": "No se pudo crear la clave.",
+        "invalidScope": "No puedes conceder estos alcances: {scopes}"
+      }
     }
   },
   "docs": {

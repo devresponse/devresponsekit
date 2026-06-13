@@ -64,6 +64,14 @@ export const ACCOUNT_SECTIONS: ReadonlyArray<AccountSection> = [
     icon: "shield",
     requires: ["shell.view"],
   },
+  {
+    id: "api-keys",
+    href: "/app/account/api-keys",
+    labelKey: "sections.apiKeys.title",
+    descriptionKey: "sections.apiKeys.description",
+    icon: "key-square",
+    requires: ["shell.view"],
+  },
 ];
 
 /** Sections the caller may see, given their permission set. */

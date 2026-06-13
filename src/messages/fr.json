@@ -852,6 +852,10 @@
       "security": {
         "title": "Sécurité",
         "description": "Mot de passe et sessions actives."
+      },
+      "apiKeys": {
+        "title": "Clés API",
+        "description": "Créez et gérez des clés API personnelles pour un accès programmatique à votre compte."
       }
     },
     "fields": {
@@ -920,6 +924,57 @@
       "passwordChangeFailed": "Impossible de changer le mot de passe. Vérifiez votre mot de passe actuel.",
       "sessionsLoadFailed": "Impossible de charger vos sessions.",
       "sessionsRevokeFailed": "Impossible de révoquer la session."
+    },
+    "apiKeys": {
+      "listTitle": "Vos clés API",
+      "empty": "Vous n’avez pas encore de clés API.",
+      "loadError": "Impossible de charger vos clés API.",
+      "never": "Jamais",
+      "noExpiry": "Sans expiration",
+      "noScopes": "Aucune portée",
+      "status": {
+        "active": "Active",
+        "revoked": "Révoquée"
+      },
+      "created": "Créée le {value}",
+      "lastUsed": "Dernière utilisation {value}",
+      "expires": "Expire le {value}",
+      "actions": {
+        "rotate": "Faire tourner",
+        "revoke": "Révoquer"
+      },
+      "rotateError": "Impossible de faire tourner la clé.",
+      "revokeError": "Impossible de révoquer la clé.",
+      "revokeConfirm": {
+        "title": "Révoquer la clé API",
+        "description": "Cela invalide la clé de façon permanente. Tout client qui l’utilise cesse de fonctionner immédiatement. Cette action est irréversible."
+      },
+      "rotateConfirm": {
+        "title": "Faire tourner la clé API",
+        "description": "Un nouveau secret est émis avec les mêmes portées et expiration, et cette clé est révoquée. Mettez à jour votre client avec le nouveau secret — l’ancien cesse de fonctionner immédiatement."
+      },
+      "reveal": {
+        "title": "Copiez votre clé maintenant",
+        "description": "C’est la seule fois où le secret complet est affiché. Conservez-le en lieu sûr — il ne pourra pas être récupéré. En cas de perte, faites tourner la clé.",
+        "copy": "Copier",
+        "copied": "Copié",
+        "done": "Terminé"
+      },
+      "create": {
+        "title": "Créer une nouvelle clé",
+        "name": "Nom",
+        "namePlaceholder": "ex. CLI de mon portable",
+        "expiresInDays": "Expire dans (jours)",
+        "expiresInDaysPlaceholder": "Laisser vide pour aucune expiration",
+        "expiresInDaysHelp": "Facultatif. Après ce nombre de jours, la clé cesse de fonctionner.",
+        "scopes": "Portées",
+        "scopesHelp": "Sélectionnez ce que cette clé peut faire. Une clé ne peut jamais dépasser vos propres permissions.",
+        "noScopesAvailable": "Aucune portée disponible à accorder.",
+        "submit": "Créer la clé",
+        "nameRequired": "Saisissez un nom.",
+        "error": "Impossible de créer la clé.",
+        "invalidScope": "Vous ne pouvez pas accorder ces portées : {scopes}"
+      }
     }
   },
   "docs": {

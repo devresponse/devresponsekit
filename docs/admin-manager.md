@@ -809,10 +809,14 @@ runtime dependency introduced by this plan is **`@tanstack/react-table`**
   `admin.api_key.revoked`, and `admin.api_key.rotated`. Metadata carries
   the key id, owner, scopes, and display prefix only — **never** the
   plaintext or hash.
-- A small client-side `<AdministratorErrorBoundary/>` reports unhandled
-  render errors via `console.error` and a toast; server errors include
+- A client-side error boundary
+  ([`(secure)/app/error.tsx`](../src/app/[locale]/(secure)/app/error.tsx))
+  catches unhandled render errors across every authenticated workspace,
+  shows a localized fallback with a quotable **Support ID**, and captures
+  the error to Sentry when observability is enabled. Server errors include
   a request id (`x-request-id` header echoed back in the JSON body) to
-  correlate with audit and server logs.
+  correlate with audit, server logs, and the Sentry issue. See
+  [observability.md](observability.md).
 
 ---
 

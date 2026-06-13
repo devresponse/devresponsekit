@@ -38,3 +38,7 @@ src/db/schema/generated.ts
 
 # TypeScript
 *.tsbuildinfo
+
+# Sentry (build plugin artifacts)
+.env.sentry-build-plugin
+.sentryclirc

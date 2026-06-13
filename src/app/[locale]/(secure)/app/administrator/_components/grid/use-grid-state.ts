@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { captureClientError, requestIdFromResponse } from "@/lib/observability/client";
 
 /**
  * URL-backed grid state for the Administrator data grids.
@@ -209,7 +210,19 @@ export function useGridFetch<TItem>(
     fetch(url, { signal: controller.signal, headers: { accept: "application/json" } })
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error(`http_${res.status}`);
+          const err = new Error(`http_${res.status}`);
+          // Only report genuine server failures (5xx). 401/403/404/409 and
+          // friends are normal auth/validation flow and would be pure
+          // noise. Correlate the report to the server via the response's
+          // request id (→ Sentry tag → app_audit_events.request_id).
+          if (res.status >= 500) {
+            captureClientError(err, {
+              endpoint,
+              status: res.status,
+              requestId: requestIdFromResponse(res),
+            });
+          }
+          throw err;
         }
         return (await res.json()) as { items: TItem[]; total: number };
       })
@@ -218,6 +231,11 @@ export function useGridFetch<TItem>(
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
+        // Network / parse failures carry no response; the `http_<n>` errors
+        // were already reported above, so capture only the rest here.
+        if (!(err instanceof Error) || !/^http_\d+$/.test(err.message)) {
+          captureClientError(err, { endpoint });
+        }
         setResult((prev) => ({
           forKey: fetchKey,
           items: prev.items,

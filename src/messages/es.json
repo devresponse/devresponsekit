@@ -995,5 +995,11 @@
       "zoomOut": "Alejar",
       "reset": "Restablecer el zoom"
     }
+  },
+  "errorBoundary": {
+    "title": "Algo salió mal",
+    "description": "Ocurrió un error inesperado al mostrar esta página. Puedes reintentar o recargar si el problema persiste.",
+    "retry": "Reintentar",
+    "supportId": "ID de soporte"
   }
 }

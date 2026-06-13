@@ -75,8 +75,8 @@ export default defineConfig({
         // Next.js runtime entry points (root layout, proxy edge handler,
         // i18n request adapter) are exercised through framework
         // integration paths, not directly testable in vitest.
-        "src/app/layout.tsx",
-        "src/app/page.tsx",
+        "src/app/(root)/layout.tsx",
+        "src/app/(root)/page.tsx",
         "src/proxy.ts",
         "src/i18n/request.ts",
         // Migration / seed scripts are operational tooling, not runtime.

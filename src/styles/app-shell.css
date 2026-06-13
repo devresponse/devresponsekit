@@ -132,7 +132,15 @@
 
 /* On mobile collapse left/right by default; parent can opt in via sheet. */
 @media (max-width: 768px) {
-  .sh-grid {
+  /*
+   * Both visibility attributes are always present (ShellGridContainer
+   * sets them unconditionally), so this selector carries (0,3,0)
+   * specificity — enough to beat the desktop visibility-flag overrides
+   * above. Without it, a grid with data-right-hidden="true" kept its
+   * 16rem left column on phones (a 256px dead gutter, since .sh-left
+   * is display:none here), squeezing the main area.
+   */
+  .sh-grid[data-left-hidden][data-right-hidden] {
     grid-template-columns: 0 minmax(0, 1fr) 0;
   }
   .sh-left,

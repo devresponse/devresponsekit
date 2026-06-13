@@ -74,3 +74,89 @@ jobs:
           path: coverage/
           retention-days: 7
           if-no-files-found: ignore
+
+  browser:
+    name: E2E + accessibility (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: devresponse
+          POSTGRES_PASSWORD: devresponse
+          POSTGRES_DB: devresponse_db
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U devresponse -d devresponse_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # CI-only values; the suites sign in with the seeded admin and
+      # exercise the real Better Auth + admin APIs against the service DB.
+      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
+      BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SSO_HANDOFF_ISSUER: http://localhost:3000
+      SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
+      SSO_HANDOFF_APPLICATION_ID: portal
+      SSO_HANDOFF_JWT_SECRET: ci-only-sso-handoff-secret-not-for-production
+      SEED_ADMIN_EMAIL: admin@devresponse.local
+      SEED_ADMIN_PASSWORD: ChangeMe-LocalOnly-123!
+      SEED_DEFAULT_ORGANIZATION_SLUG: default
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm playwright install --with-deps chromium
+
+      - name: Build
+        run: pnpm build
+
+      - name: Migrate and seed
+        run: |
+          pnpm db:auth:migrate
+          pnpm db:app:migrate
+          pnpm db:seed
+
+      - name: Start server
+        run: |
+          pnpm start &
+          timeout 60 bash -c 'until curl -fsS http://localhost:3000/en/sign-in > /dev/null; do sleep 1; done'
+
+      - name: E2E suite
+        run: pnpm test:e2e
+        env:
+          PLAYWRIGHT_NO_SERVER: "1"
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+
+      - name: Accessibility suite
+        run: pnpm test:a11y
+        env:
+          PLAYWRIGHT_NO_SERVER: "1"
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore

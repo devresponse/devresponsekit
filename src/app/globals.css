@@ -68,6 +68,11 @@
 
   /* Custom tokens (documented "custom colors" extension pattern). */
   --destructive-foreground: oklch(0.985 0 0);
+  /* Destructive TEXT on tinted/light surfaces. --destructive itself is
+     a fill color: at 16px regular it is only ~4.1:1 on bg-destructive/10
+     (< WCAG AA 4.5:1), so alerts and inline errors use this darker
+     shade (Tailwind red-700, ~5.1:1 on the tint). */
+  --destructive-emphasis: oklch(0.505 0.213 27.518);
   --success: #15803d;
   --success-foreground: #ffffff;
   --warning: #f59e0b;
@@ -112,6 +117,9 @@
 
   /* Custom tokens (documented "custom colors" extension pattern). */
   --destructive-foreground: oklch(0.985 0 0);
+  /* Dark surfaces already give the light destructive red enough
+     contrast, so emphasis matches --destructive. */
+  --destructive-emphasis: oklch(0.704 0.191 22.216);
   --success: #4ade80;
   --success-foreground: #052e16;
   --warning: #fbbf24;
@@ -141,6 +149,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-emphasis: var(--destructive-emphasis);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);

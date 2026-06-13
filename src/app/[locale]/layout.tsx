@@ -1,7 +1,10 @@
+import "@/app/globals.css";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
+import type { Metadata, Viewport } from "next";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
+import { ThemeProvider } from "@/components/theme/theme-provider";
 import type { ReactNode } from "react";
 
 /**
@@ -11,12 +14,36 @@ import type { ReactNode } from "react";
  */
 export const dynamicParams = false;
 
+export const metadata: Metadata = {
+  title: {
+    default: "DevResponse Enterprise Platform",
+    template: "%s · DevResponse",
+  },
+  description: "Enterprise application shell.",
+  icons: {
+    icon: "/favicon.png",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 /**
- * LocaleLayout
+ * LocaleLayout — the root layout for every localized route (§28.1).
  *
- * Validates the locale segment and provides translated messages to all
- * descendants (public, auth, and secure routes). Unknown locales 404
- * instead of falling back so URLs remain unambiguous.
+ * Owns the HTML shell so `<html lang>` can be set from the locale
+ * SEGMENT rather than a dynamic request API (WCAG 3.1.1 requires the
+ * lang attribute; `getLocale()` would read request headers and force
+ * static public pages into dynamic rendering). The bare `/` redirect
+ * has its own minimal root layout in `(root)/`.
+ *
+ * Minimal per §28.1: HTML scaffold, theme + locale providers only — no
+ * secure-menu fetches, no user-specific data. Validates the locale
+ * segment and provides translated messages to all descendants (public,
+ * auth, and secure routes). Unknown locales 404 instead of falling back
+ * so URLs remain unambiguous.
  */
 export default async function LocaleLayout({
   children,
@@ -38,9 +65,15 @@ export default async function LocaleLayout({
   const messages = await getMessages({ locale });
 
   return (
-    <NextIntlClientProvider locale={locale} messages={messages}>
-      <div data-locale={locale}>{children}</div>
-    </NextIntlClientProvider>
+    <html lang={locale} suppressHydrationWarning>
+      <body>
+        <ThemeProvider>
+          <NextIntlClientProvider locale={locale} messages={messages}>
+            <div data-locale={locale}>{children}</div>
+          </NextIntlClientProvider>
+        </ThemeProvider>
+      </body>
+    </html>
   );
 }
 

@@ -288,6 +288,9 @@ Role list filters: `organization` (UUID or `global`), `scope`
 | `/memberships` | GET | `admin.orgs.read` (cross-org search) |
 | `/enterprise-apps` | GET / POST | `admin.apps.read` / `manage` |
 | `/enterprise-apps/[id]` | GET / PATCH / DELETE | `admin.apps.manage` |
+| `/api-keys` | GET / POST | `admin.apikeys.read` / `manage` (governance list joined to owner email; POST issues a key on behalf of a user, scopes capped to the owner's authority) |
+| `/api-keys/[id]` | GET / DELETE | `admin.apikeys.read` / `manage` (DELETE = revoke, soft-delete, idempotent) |
+| `/api-keys/[id]/rotate` | POST | `admin.apikeys.manage` (atomic re-issue + revoke; new secret returned once) |
 | `/audit` | GET | `admin.audit.read` (filter on `event_type`,`outcome`,`actor`,`target`, date range) |
 | `/email/outbox` | GET | `admin.email.read` |
 | `/email/templates` | GET | `admin.email.read` |

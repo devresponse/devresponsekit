@@ -995,5 +995,11 @@
       "zoomOut": "Zoom out",
       "reset": "Reset zoom"
     }
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "An unexpected error occurred while rendering this page. You can try again, or reload if the problem persists.",
+    "retry": "Try again",
+    "supportId": "Support ID"
   }
 }

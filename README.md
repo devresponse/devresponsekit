@@ -97,6 +97,7 @@ tests/                                # unit / component / integration / securit
 - [docs/api-and-cli-guide.md](docs/api-and-cli-guide.md) — external API & CLI integration
 - [docs/design-api-keys-and-tokens.md](docs/design-api-keys-and-tokens.md) — machine credentials (API keys, JWT, OAuth clients) design
 - [docs/admin-manager.md](docs/admin-manager.md) — administrator console spec
+- [docs/observability.md](docs/observability.md) — optional Sentry errors + tracing + Web Vitals + masked replay
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)
 
 ## Security model (summary)

@@ -995,5 +995,11 @@
       "zoomOut": "Zoom arrière",
       "reset": "Réinitialiser le zoom"
     }
+  },
+  "errorBoundary": {
+    "title": "Une erreur est survenue",
+    "description": "Une erreur inattendue s’est produite lors de l’affichage de cette page. Réessayez, ou rechargez si le problème persiste.",
+    "retry": "Réessayer",
+    "supportId": "Identifiant de support"
   }
 }

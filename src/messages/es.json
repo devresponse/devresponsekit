@@ -84,7 +84,8 @@
     "showFooter": "Mostrar pie de página",
     "hideFooter": "Ocultar pie de página",
     "skipToMain": "Saltar al contenido principal",
-    "skipToNavigation": "Saltar a la navegación"
+    "skipToNavigation": "Saltar a la navegación",
+    "account": "Cuenta"
   },
   "administrator": {
     "appTitle": "Administrador",
@@ -736,5 +737,95 @@
     "unknown_resource": "Recurso desconocido.",
     "untrusted_origin": "El origen no es de confianza.",
     "user_not_found": "Usuario no encontrado."
+  },
+  "account": {
+    "appTitle": "Cuenta",
+    "save": "Guardar cambios",
+    "saved": "Tus cambios se han guardado.",
+    "sections": {
+      "overview": {
+        "title": "Resumen",
+        "description": "Un resumen de la información de tu cuenta."
+      },
+      "profile": {
+        "title": "Perfil",
+        "description": "Tu nombre y cómo apareces en la aplicación."
+      },
+      "preferences": {
+        "title": "Preferencias",
+        "description": "Idioma, zona horaria y formatos."
+      },
+      "security": {
+        "title": "Seguridad",
+        "description": "Contraseña y sesiones activas."
+      }
+    },
+    "fields": {
+      "name": "Nombre",
+      "displayName": "Nombre visible",
+      "displayNameHint": "Se muestra en la aplicación. Déjalo vacío para usar tu nombre.",
+      "email": "Correo electrónico",
+      "emailReadonlyHint": "Contacta a un administrador para cambiar tu correo.",
+      "locale": "Idioma",
+      "timeZone": "Zona horaria",
+      "system": "Predeterminado del sistema",
+      "dateFormat": "Formato de fecha",
+      "numberFormatLocale": "Formato de números"
+    },
+    "locales": {
+      "en": "Inglés",
+      "fr": "Francés",
+      "es": "Español",
+      "uk": "Ucraniano"
+    },
+    "dateFormats": {
+      "system": "Predeterminado del sistema",
+      "iso8601": "ISO 8601 (2026-06-13)",
+      "us": "EE. UU. (06/13/2026)",
+      "eu": "Europeo (13/06/2026)",
+      "long": "Largo (13 de junio de 2026)"
+    },
+    "status": {
+      "active": "Activo",
+      "pending_approval": "Pendiente de aprobación",
+      "blocked": "Bloqueado",
+      "suspended": "Suspendido",
+      "deactivated": "Desactivado"
+    },
+    "overview": {
+      "identity": "Identidad",
+      "status": "Estado",
+      "memberSince": "Miembro desde",
+      "memberships": "Organizaciones",
+      "noMemberships": "No eres miembro de ninguna organización.",
+      "roles": "Roles",
+      "noRoles": "Sin roles asignados."
+    },
+    "security": {
+      "passwordTitle": "Contraseña",
+      "sessionsTitle": "Sesiones activas",
+      "currentPassword": "Contraseña actual",
+      "newPassword": "Nueva contraseña",
+      "confirmPassword": "Confirmar nueva contraseña",
+      "changePassword": "Cambiar contraseña",
+      "passwordChanged": "Tu contraseña se ha cambiado. Las demás sesiones se cerraron.",
+      "sessionsDescription": "Dispositivos con sesión iniciada en tu cuenta.",
+      "revokeOthers": "Cerrar otras sesiones",
+      "noSessions": "No hay sesiones activas.",
+      "expiresAt": "Caduca el {value}",
+      "ipAddress": "IP",
+      "userAgent": "Dispositivo",
+      "revoke": "Revocar"
+    },
+    "errors": {
+      "nameRequired": "El nombre es obligatorio.",
+      "invalid": "Revisa el formulario e inténtalo de nuevo.",
+      "saveFailed": "No se pudieron guardar los cambios. Inténtalo de nuevo.",
+      "passwordTooShort": "La contraseña debe tener al menos 8 caracteres.",
+      "passwordMismatch": "Las contraseñas no coinciden.",
+      "passwordChangeFailed": "No se pudo cambiar la contraseña. Verifica tu contraseña actual.",
+      "sessionsLoadFailed": "No se pudieron cargar tus sesiones.",
+      "sessionsRevokeFailed": "No se pudo revocar la sesión."
+    }
   }
 }

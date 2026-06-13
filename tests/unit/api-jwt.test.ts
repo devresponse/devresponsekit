@@ -17,9 +17,8 @@ describe("api jwt issuer", () => {
   });
 
   it("mints and verifies an access token round-trip", async () => {
-    const { mintAccessToken, verifyAccessToken, __resetJwtKeyCacheForTests } = await import(
-      "@/lib/api-auth/jwt.server"
-    );
+    const { mintAccessToken, verifyAccessToken, __resetJwtKeyCacheForTests } =
+      await import("@/lib/api-auth/jwt.server");
     __resetJwtKeyCacheForTests();
 
     const minted = await mintAccessToken({
@@ -51,9 +50,8 @@ describe("api jwt issuer", () => {
   });
 
   it("rejects a tampered token", async () => {
-    const { mintAccessToken, verifyAccessToken, __resetJwtKeyCacheForTests } = await import(
-      "@/lib/api-auth/jwt.server"
-    );
+    const { mintAccessToken, verifyAccessToken, __resetJwtKeyCacheForTests } =
+      await import("@/lib/api-auth/jwt.server");
     __resetJwtKeyCacheForTests();
     const { token } = await mintAccessToken({ subject: "x", scopes: [], jti: "j2" });
     const tampered = token.slice(0, -2) + (token.endsWith("a") ? "bb" : "aa");

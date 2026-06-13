@@ -20,10 +20,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_request: NextRequest) {
   const env = getServerEnv();
   if (!env.API_JWT_ENABLED || !env.API_JWT_PRIVATE_KEY) {
-    return NextResponse.json(
-      { keys: [] },
-      { headers: { "Cache-Control": "public, max-age=300" } },
-    );
+    return NextResponse.json({ keys: [] }, { headers: { "Cache-Control": "public, max-age=300" } });
   }
 
   const jwks = await getJwks();

@@ -127,10 +127,7 @@ export interface OauthClientUpdate {
   scopes?: string[];
 }
 
-export async function updateOauthClient(
-  id: string,
-  patch: OauthClientUpdate,
-): Promise<boolean> {
+export async function updateOauthClient(id: string, patch: OauthClientUpdate): Promise<boolean> {
   const set: Record<string, unknown> = {};
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.scopes !== undefined) set.scopes = patch.scopes;
@@ -145,10 +142,7 @@ export async function updateOauthClient(
   return Number(result.numUpdatedRows ?? 0) > 0;
 }
 
-export async function revokeOauthClient(
-  id: string,
-  revokedByAppUserId: string,
-): Promise<boolean> {
+export async function revokeOauthClient(id: string, revokedByAppUserId: string): Promise<boolean> {
   const result = await db
     .updateTable("app_oauth_clients")
     .set({ status: "revoked", revoked_at: sql`now()`, revoked_by: revokedByAppUserId })

@@ -96,26 +96,29 @@ upgrading; new columns are introduced via the auth migration tooling
 
 ### 2.2 Application tables (managed by us)
 
-The **entire** application schema is defined in a single authoritative
-file,
-[`src/db/migrations/0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql).
-This one script provisions every `app_*` table, index, and baseline row
-for a first-time setup — there are no additional application migrations
-to apply.
+The application schema **starts** from a consolidated initial migration,
+[`src/db/migrations/0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
+(every core `app_*` table, index, and baseline row for a first-time
+setup), and is extended by **further numbered migrations** — currently
+[`0003-api-credentials.sql`](../src/db/migrations/0003-api-credentials.sql),
+which adds the machine-API tables. See §3 for how migrations are applied.
 
-| Table                          | Purpose                                                                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `app_organizations`            | Tenant/organization records (slug, name, status, is_default).                                            |
-| `app_provider_organizations`   | Maps an external IdP organization (e.g. an Entra tenant, a GitHub org) to an internal `app_organization`. |
-| `app_users`                    | Application-side user profile. Links to Better Auth via `better_auth_user_id` (unique). Includes soft-delete bookkeeping. |
-| `app_organization_memberships` | Membership of an `app_user` in an `app_organization`, with status and source provider.                   |
-| `app_roles` / `app_permissions` / `app_role_permissions` / `app_user_roles` | RBAC: roles, the permission catalog, and their assignments. |
-| `app_enterprise_applications`  | Enterprise application catalog used by the app switcher and SSO.                                          |
-| `app_sso_handoff_nonces`       | One-time nonces for the cross-subdomain SSO handoff.                                                      |
-| `app_audit_events`             | Structured audit log (with `request_id` correlation).                                                    |
-| `app_user_locale_preferences`  | Per-user locale / formatting preferences.                                                                |
-| `app_email_templates` / `app_outbox` | Editable email templates and the outbox-first delivery log (see [setup-email.md](setup-email.md)). |
-| `app_schema_migrations`        | Migration ledger used by our SQL runner.                                                                 |
+| Table                          | Migration | Purpose                                                                                                  |
+| ------------------------------ | --------- | -------------------------------------------------------------------------------------------------------- |
+| `app_organizations`            | 0001 | Tenant/organization records (slug, name, status, is_default).                                            |
+| `app_provider_organizations`   | 0001 | Maps an external IdP organization (e.g. an Entra tenant, a GitHub org) to an internal `app_organization`. |
+| `app_users`                    | 0001 | Application-side user profile. Links to Better Auth via `better_auth_user_id` (unique). Includes soft-delete bookkeeping. |
+| `app_organization_memberships` | 0001 | Membership of an `app_user` in an `app_organization`, with status and source provider.                   |
+| `app_roles` / `app_permissions` / `app_role_permissions` / `app_user_roles` | 0001 | RBAC: roles, the permission catalog, and their assignments. |
+| `app_enterprise_applications`  | 0001 | Enterprise application catalog used by the app switcher and SSO.                                          |
+| `app_sso_handoff_nonces`       | 0001 | One-time nonces for the cross-subdomain SSO handoff.                                                      |
+| `app_audit_events`             | 0001 | Structured audit log (with `request_id` correlation).                                                    |
+| `app_user_locale_preferences`  | 0001 | Per-user locale / formatting preferences.                                                                |
+| `app_email_templates` / `app_outbox` | 0001 | Editable email templates and the outbox-first delivery log (see [setup-email.md](setup-email.md)). |
+| `app_api_keys`                 | 0003 | Machine API keys — stores only a SHA-256 `key_hash` (never plaintext), plus scopes, status, expiry, and last-used info. Authority derives from the owner `app_user_id`. |
+| `app_oauth_clients`            | 0003 | OAuth2 client-credentials principals (machine identities) with a hashed `client_secret` and scopes. |
+| `app_revoked_tokens`           | 0003 | Revocation list (`jti`) for stateless JWT access tokens killed before their `exp`. |
+| `app_schema_migrations`        | runner | Migration ledger written by `run-migrations.ts`.                                                         |
 
 Design rules:
 
@@ -151,22 +154,23 @@ order and are wired up as `pnpm` scripts in
 
 - **Runner:** [`src/db/migrations/run-migrations.ts`](../src/db/migrations/run-migrations.ts)
 - **Command:** `pnpm db:app:migrate`
-- **Single initial schema:** The complete application schema lives in one
-  authoritative file,
-  [`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql).
-  A first-time setup applies just this file — it creates **all** `app_*`
-  tables, indexes, and baseline rows. **No additional application
-  migrations are required.**
+- **Consolidated baseline + appended migrations:** The schema starts from
+  [`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
+  (all core `app_*` tables, indexes, and baseline rows) and grows by
+  appending further numbered files — currently
+  [`0003-api-credentials.sql`](../src/db/migrations/0003-api-credentials.sql)
+  (machine-API tables + the four `admin.apikeys.*` / `admin.clients.*`
+  permissions). A first-time setup therefore applies **both** files. (There
+  is no `0002` on disk — a tolerated numbering gap.)
 - **Pattern:** Plain `.sql` files in `src/db/migrations/`, applied in
   lexical order, each wrapped in a transaction. Applied filenames are
   recorded in `app_schema_migrations` so each runs at most once. The
-  runner stays multi-file capable: if the schema ever needs to change,
-  append a new `NNNN-short-name.sql` file (the initial schema is never
-  edited after release).
+  initial schema is never edited after release; new schema changes are
+  appended as new `NNNN-short-name.sql` files.
 - **Filtering:** Files starting with `better-auth` are skipped (those
   are owned by the auth track).
 - **Idempotent:** Every statement uses `create … if not exists` /
-  `on conflict do nothing`, so applying the initial schema to an
+  `on conflict do nothing`, so re-applying a migration to an
   already-provisioned database is a safe no-op.
 
 ### 3.2 Better Auth migrations (vendor)
@@ -193,8 +197,8 @@ pnpm db:up
 #    better_auth_user_id always resolve.
 pnpm db:auth:migrate
 
-# 3. Apply the application schema (single initial-schema file —
-#    creates every app_* table; no further app migrations needed).
+# 3. Apply all application migrations (0001 initial + 0003 api-credentials,
+#    applied in order; the runner records each in app_schema_migrations).
 pnpm db:app:migrate
 
 # 4. (Local only) seed the baseline roles, enterprise apps, and the
@@ -314,19 +318,34 @@ are:
 | `GOOGLE_CLIENT_ID` / `_SECRET` | ⛔ opt   | Required only if Google sign-in is enabled.                                 |
 | `MICROSOFT_CLIENT_ID` / `_SECRET` | ⛔ opt | Required only if Microsoft sign-in is enabled.                              |
 | `GITHUB_CLIENT_ID` / `_SECRET` | ⛔ opt   | Required only if GitHub sign-in is enabled.                                 |
+| `SSO_HANDOFF_ISSUER`           | ✅       | JWT `iss` for the subdomain SSO handoff (required).                         |
 | `SSO_HANDOFF_JWT_SECRET`       | ✅       | Separate from `BETTER_AUTH_SECRET`. Used by the subdomain SSO handoff.      |
 | `SSO_HANDOFF_AUDIENCE_PREFIX`  | ✅       | Used to validate handoff JWT audience.                                      |
-| `SSO_HANDOFF_APPLICATION_ID`   | ✅       | Per-deployment audience suffix; prevents Host-header spoofing.              |
+| `SSO_HANDOFF_APPLICATION_ID`   | ⛔ opt*  | Per-deployment audience suffix; prevents Host-header spoofing. Optional at boot, but the SSO **consumer** returns `500 audience_not_configured` without it — set it per deployment. |
 | `AUTH_RATE_LIMIT_DISABLED`     | ⛔ test  | `"1"` disables Better Auth's built-in rate limiter. **Test/CI only** — the browser suites sign in faster than the production limit allows. Never set in production. |
+
+Machine-credential vars (the `/api/v1` surface — see
+[design-api-keys-and-tokens.md](design-api-keys-and-tokens.md)) ship
+**dark by default**: `API_KEYS_ENABLED`, `API_KEY_ENV_TAG` (default
+`live`), `API_KEY_DEFAULT_TTL_DAYS`, `API_JWT_ENABLED`, `API_JWT_ISSUER`
+(defaults to `BETTER_AUTH_URL`), `API_JWT_AUDIENCE` (default
+`devresponse-api`), `API_JWT_PRIVATE_KEY` (Ed25519 private JWK as JSON),
+`API_JWT_KID`, `API_JWT_ACCESS_TTL_SECONDS` (default 900, ≤ 3600). All
+optional, **except** `API_JWT_PRIVATE_KEY`, which is required at boot when
+`API_JWT_ENABLED` is set (validated by `env.ts`).
 
 Outbound email (password reset, admin/account flows) is configured
 through `EMAIL_PROVIDER` / `EMAIL_FROM` / `RESEND_*` / `MAILGUN_*` — see
 [setup-email.md](setup-email.md) for the full list. With no provider
 configured, emails are recorded in the outbox and never sent.
 
-> The build itself reads `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
-> `SSO_HANDOFF_JWT_SECRET`, and `SSO_HANDOFF_AUDIENCE_PREFIX` —
-> `pnpm build` will fail without them.
+> Server boot (and `next build` page-data collection) reads
+> `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `DATABASE_URL`,
+> `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, and
+> `SSO_HANDOFF_JWT_SECRET` — these are the required set validated by
+> `src/lib/env.ts`, and boot fails without them. (The build phase
+> substitutes placeholders, so the hard failure surfaces at real server
+> start.)
 
 Generate a strong secret on Linux/macOS:
 
@@ -496,8 +515,8 @@ Next.js app).
      `NEXT_PUBLIC_PRIMARY_HOST`, `NEXT_PUBLIC_PRODUCTION_HOST`.
    - `GOOGLE_*`, `MICROSOFT_*`, `GITHUB_*` if those providers are
      enabled.
-   - `SSO_HANDOFF_JWT_SECRET`, `SSO_HANDOFF_AUDIENCE_PREFIX`,
-     `SSO_HANDOFF_APPLICATION_ID`.
+   - `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_JWT_SECRET`,
+     `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`.
 4. Add `app.devresponse.com` as a Production domain. Configure DNS to
    Vercel.
 5. Run database migrations from CI **before** Vercel promotes the
@@ -542,8 +561,8 @@ A production-grade Dockerfile (not yet in the repo) should:
 1. Use `node:22-alpine` as a runtime base.
 2. Install dependencies with the pinned `pnpm@10.33.2` from
    [`package.json`](../package.json).
-3. Run `pnpm build` with all required build-time env vars
-   (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
+3. Run `pnpm build` with all required env vars (`BETTER_AUTH_SECRET`,
+   `BETTER_AUTH_URL`, `DATABASE_URL`, `SSO_HANDOFF_ISSUER`,
    `SSO_HANDOFF_JWT_SECRET`, `SSO_HANDOFF_AUDIENCE_PREFIX`).
 4. Use `output: "standalone"` from `next.config.mjs` to ship a
    minimal runtime.
@@ -622,6 +641,7 @@ jobs:
       DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
       BETTER_AUTH_SECRET: ci-only-not-a-real-secret
       BETTER_AUTH_URL: http://localhost:3000
+      SSO_HANDOFF_ISSUER: http://localhost:3000
       SSO_HANDOFF_JWT_SECRET: ci-only-not-a-real-secret
       SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
       SSO_HANDOFF_APPLICATION_ID: portal

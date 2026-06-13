@@ -46,9 +46,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     metadata: { clientRowId: id },
   });
 
-  return v1JsonResponse(
-    { id, clientId: client.client_id, clientSecret: secret },
-    request,
-    { requestId: grant.requestId },
-  );
+  return v1JsonResponse({ id, clientId: client.client_id, clientSecret: secret }, request, {
+    requestId: grant.requestId,
+  });
 }

@@ -59,7 +59,9 @@ export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "anon";
   const limiterId = body.client_id ?? `ip:${ip}`;
   if (!consumeToken(rateLimitKey("api.token", limiterId), TOKEN_LIMIT).ok) {
-    return problemResponse("rate_limited", 429, request, { headers: { ...NO_STORE, "Retry-After": "2" } });
+    return problemResponse("rate_limited", 429, request, {
+      headers: { ...NO_STORE, "Retry-After": "2" },
+    });
   }
 
   let principalBetterAuthUserId: string;

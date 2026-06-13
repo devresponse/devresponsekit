@@ -128,14 +128,18 @@ The implementing files:
 
 Five properties make this safe (all enforced in the code above):
 
-1. **Short-lived.** The token's TTL is clamped to **≤ 60 seconds**
-   (`SSO_HANDOFF_MAX_TTL_SECONDS` in
-   [`jwt-handoff.server.ts`](../src/lib/jwt-handoff.server.ts)).
+1. **Short-lived.** The signer clamps the effective token TTL to
+   **≤ 60 seconds** (`SSO_HANDOFF_MAX_TTL_SECONDS` in
+   [`jwt-handoff.server.ts`](../src/lib/jwt-handoff.server.ts)). Note the
+   `SSO_HANDOFF_TTL_SECONDS` **env var** is validated as `≤ 300` (boot
+   does *not* reject 61–300), so a value above 60 boots fine and is
+   silently capped to 60 at mint time; only values > 300 fail validation.
 2. **Single-use.** A `jti` nonce is persisted *before* signing and
-   **atomically burned** on consume
-   (`consumeSsoHandoffNonce` — a conditional `UPDATE … WHERE consumed_at
-   IS NULL`). A replayed token loses the race and is rejected, even
-   under concurrent requests.
+   **atomically burned** on consume (`consumeSsoHandoffNonce` — a
+   conditional `UPDATE … WHERE consumed_at IS NULL AND expires_at > now()`;
+   expiry is re-checked at the DB layer in addition to the JWT `exp`). A
+   replayed or expired token loses the race and is rejected, even under
+   concurrent requests.
 3. **Audience-bound.** The `aud` claim is the target app's
    `sso_audience`. The consumer recomputes its *expected* audience from
    its **own** `SSO_HANDOFF_APPLICATION_ID` env var — never from the
@@ -594,6 +598,18 @@ verifies + burns the token and `302`s to
 satellite's **own** session. You are now signed in on `app.` with the
 token gone from the URL.
 
+> **Landing locale.** The consumer derives the landing locale from the
+> consume request's own `?locale=` query param (defaulting to `en`) — the
+> launch redirect does **not** forward locale, and the JWT's `locale`
+> claim is currently unused by the consumer. So the dashboard lands on
+> `/en/...` unless a `locale` param is explicitly appended to the consume
+> URL.
+>
+> **`SSO_HANDOFF_APPLICATION_ID` is optional at boot but needed at
+> consume.** It is `.optional()` in the env schema, so a satellite missing
+> it boots fine — and then returns `500 audience_not_configured` on the
+> first consume. Always set it per deployment.
+
 **5. Prove replay is rejected.** Copy the
 `…/api/sso/consume?token=…` URL from step 3 and open it a second time.
 Expected: `401 token_already_used` and an
@@ -626,7 +642,9 @@ Before promoting a multi-app SSO change:
       participating subdomains.
 - [ ] Third-party providers are registered on the **hub** only, with the
       hub's callback URIs; account linking is verified-email-only.
-- [ ] `SSO_HANDOFF_TTL_SECONDS` ≤ 60 (and not raised "to be safe").
+- [ ] `SSO_HANDOFF_TTL_SECONDS` left at 60 (raising it is pointless — the
+      signer clamps the effective TTL to 60 regardless, and the env var
+      only rejects values above 300).
 - [ ] TLS is enforced on every subdomain.
 - [ ] `app_audit_events` is sinking durably; alerts exist for replay /
       invalid-token bursts.

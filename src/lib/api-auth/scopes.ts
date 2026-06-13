@@ -91,7 +91,9 @@ export function scopesAuthorize(
  * Normalizes a raw scope input (array or OAuth space-delimited string)
  * into a deduplicated array, dropping empties.
  */
-export function normalizeScopes(input: string | ReadonlyArray<string> | null | undefined): string[] {
+export function normalizeScopes(
+  input: string | ReadonlyArray<string> | null | undefined,
+): string[] {
   if (!input) return [];
   const list = Array.isArray(input) ? input : String(input).split(/\s+/);
   return [...new Set(list.map((s) => s.trim()).filter(Boolean))];

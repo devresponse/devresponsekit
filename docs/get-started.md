@@ -23,6 +23,7 @@ shells) so that you can land your first change with confidence.
    - 4.3 [Session lifecycle and provisioning](#43-session-lifecycle-and-provisioning)
    - 4.4 [Client-side auth helpers](#44-client-side-auth-helpers)
    - 4.5 [Outbound email](#45-outbound-email)
+   - 4.6 [Machine authentication (`/api/v1`)](#46-machine-authentication-apiv1)
 5. [Routing](#5-routing)
    - 5.1 [Localized App Router tree](#51-localized-app-router-tree)
    - 5.2 [Route regions: secure / auth / public](#52-route-regions-secure--auth--public)
@@ -47,8 +48,10 @@ nestable shell layout. The product surface lives behind
 `/[locale]/app/*` and is composed of top‑level applications — Dashboard,
 Account (self-service), Workspace, and Administrator — inside a single
 shell that you can extend with new sub‑applications. Supporting
-subsystems include outbound email (outbox-first, Resend/Mailgun) and
-cross-subdomain SSO handoff.
+subsystems include outbound email (outbox-first, Resend/Mailgun),
+cross-subdomain SSO handoff, and a versioned **machine API** (`/api/v1`)
+authenticated by API keys or JWT bearer tokens (see
+`docs/api-and-cli-guide.md`).
 
 The defining architectural choices are:
 
@@ -68,14 +71,15 @@ The defining architectural choices are:
 | -------------------- | -------------------------------------------------- |
 | Framework            | Next.js 16 (App Router, React 19)                  |
 | Language             | TypeScript 5.9 (strict)                            |
-| Auth                 | Better Auth 1.6 with the `nextCookies` plugin      |
+| Auth                 | Better Auth 1.6.9 with the `admin`, `ssoSession`, and `nextCookies` plugins |
+| Machine API          | API keys + Ed25519 JWT (`jose`), JWKS, OAuth clients (`src/lib/api-auth/`) |
 | Database             | PostgreSQL via Kysely (no ORM); `pg` Pool          |
 | i18n                 | `next-intl` (locale always in URL)                 |
 | Styling              | Tailwind CSS v4 + Radix UI primitives              |
 | Client state         | Zustand (`src/stores/app-shell-store.ts`)          |
 | Validation           | Zod                                                |
 | Tests                | Vitest (unit/component/integration/security), Playwright (e2e/a11y) |
-| Package manager      | `pnpm`                                             |
+| Package manager      | `pnpm` (`pnpm@10.33.2`)                            |
 
 See `package.json` for exact versions. Do **not** add Prisma, Drizzle,
 React Query, Redux, or another router — those choices are intentional.
@@ -88,7 +92,7 @@ React Query, Redux, or another router — those choices are intentional.
 src/
 ├── app/                          Next.js App Router tree
 │   ├── (root)/                   Bare "/" → default-locale redirect (own minimal root layout)
-│   ├── api/                      Route handlers (auth, account, administrator, navigation, sso, preferences)
+│   ├── api/                      Route handlers (auth, account, administrator, navigation, sso, preferences, v1)
 │   └── [locale]/
 │       ├── layout.tsx            Root layout: <html lang> + theme + NextIntlClientProvider
 │       ├── (public)/             Marketing / docs / logged-out pages
@@ -113,9 +117,13 @@ src/
 │   ├── i18n-config.ts            Supported locales, default locale
 │   └── route-regions.ts          classifyRoute() — single source of truth
 │
-├── db/                           Kysely schema, migrations, seeds
+├── db/                           Kysely schema, numbered migrations, seeds
 ├── i18n/                         next-intl routing & request config
-├── lib/                          auth, guards, env, audit, jwt-handoff, ...
+├── lib/                          auth, guards, env, audit, jwt-handoff, + subsystem folders:
+│   ├── admin/                    admin permission guard, list-query, status, roles helpers
+│   ├── account/                  self-service account guard + helpers
+│   ├── api-auth/                 machine-API auth: API keys, JWT/JWKS, scopes, OAuth clients
+│   └── email/                    outbox-first sender, Resend/Mailgun providers, templates
 ├── messages/                     Locale JSON message catalogs
 ├── stores/                       Zustand stores (client only)
 ├── styles/                       Tailwind layers, design tokens
@@ -152,8 +160,11 @@ to PostgreSQL through the `pg` Pool and configured for:
   handoff — never mounted on HTTP), and `nextCookies()` (must stay last).
 
 It exports both `auth` (the server API) and an `AuthSession` type alias.
-Anything server‑side that needs the session reads it through
-`auth.api.getSession({ headers })` — there is no other supported path.
+Anything server‑side that needs a **browser session** reads it through
+`auth.api.getSession({ headers })` — that is the only supported path for
+cookie auth. Machine clients are different: the `/api/v1` surface
+authenticates with API keys or JWT bearer tokens, resolved separately by
+`src/lib/api-auth/` (see §4.6 and §5.4).
 
 ### 4.2 The two-layer access boundary
 
@@ -209,12 +220,34 @@ block — `decideSecureAccess` already encodes that rule; do not bypass it.
 
 For cross‑application handoff (single sign‑on into satellite apps), the
 short‑lived JWT mint lives in `src/lib/jwt-handoff.server.ts` and is
-exposed under `/api/sso/*`. It requires `SSO_HANDOFF_JWT_SECRET` and
-`SSO_HANDOFF_AUDIENCE_PREFIX` env vars at build time. `/api/sso/consume`
-verifies the token, consumes its one‑time `jti` nonce, and then
-establishes a real Better Auth session for the verified subject through
-the server‑only `ssoSession` plugin, forwarding the signed session
-cookie on the dashboard redirect — so a launched user lands signed in.
+exposed under `/api/sso/*`. It requires `SSO_HANDOFF_ISSUER`,
+`SSO_HANDOFF_JWT_SECRET`, and `SSO_HANDOFF_AUDIENCE_PREFIX` env vars (all
+validated at boot). `/api/sso/consume` verifies the token, consumes its
+one‑time `jti` nonce, and then establishes a real Better Auth session for
+the verified subject through the server‑only `ssoSession` plugin,
+forwarding the signed session cookie on the dashboard redirect — so a
+launched user lands signed in. See
+[setup-sso-multi-app.md](setup-sso-multi-app.md) for the full flow.
+
+### 4.6 Machine authentication (`/api/v1`)
+
+Browser users authenticate with a session cookie; **machine clients**
+(CLIs, scripts, service integrations) authenticate against the versioned
+`/api/v1` surface with a bearer credential instead:
+
+- an **API key** — `Authorization: Bearer drk_…` (stored only as a
+  SHA-256 hash in `app_api_keys`), or
+- an **Ed25519 JWT access token** minted at `POST /api/v1/auth/token`
+  (public key published at `GET /api/v1/jwks.json`).
+
+The caller is resolved by `src/lib/api-auth/resolve-caller.server.ts`
+(order: API key → JWT → session cookie) and each route is gated by
+`src/lib/api-auth/v1-guard.server.ts`. A credential's effective authority
+is its **scopes ∩ its owner's permissions**, so it can never exceed the
+human/service that owns it. Both paths are **disabled by default**
+(`API_KEYS_ENABLED` / `API_JWT_ENABLED`). Full guide:
+[api-and-cli-guide.md](api-and-cli-guide.md) and
+[design-api-keys-and-tokens.md](design-api-keys-and-tokens.md).
 
 ### 4.4 Client-side auth helpers
 
@@ -272,8 +305,11 @@ classifying a pathname:
 | Region   | Match                                                                                     |
 | -------- | ----------------------------------------------------------------------------------------- |
 | `secure` | `/[locale]/app/*`                                                                         |
-| `auth`   | `/[locale]/{sign-in,sign-up,forgot-password,pending-approval,blocked}`                    |
+| `auth`   | `/[locale]/{sign-in,sign-up,forgot-password,reset-password,pending-approval,blocked}`     |
 | `public` | Everything else, including the locale root and any unknown locale (so it cannot be secure)|
+
+(The machine API `/api/v1/*` is **not** classified here — it is not
+localized and not session-gated; it has its own bearer-credential guard.)
 
 It exports `classifyRoute`, plus three convenience predicates
 (`isLocalizedSecurePath`, `isLocalizedAuthPath`, `isLocalizedPublicPath`).
@@ -318,11 +354,15 @@ Route handlers live under `src/app/api/`:
   guarded by `requireAccountUser` and **strictly self-scoped** to the
   session user (no id is accepted from the client).
 - `administrator/` — the guarded admin REST API (users, roles,
-  permissions, orgs, enterprise apps, audit, email).
+  permissions, orgs, enterprise apps, audit, email, CSV export).
 - `preferences/` — the user's locale preference.
+- `v1/` — the versioned **machine API** (see §4.6). A bearer-auth (API
+  key or JWT) REST surface: `me`, `users`, `audit-events`, `auth/token`,
+  `jwks.json`, `openapi.json`, and admin sub-routes for `api-keys` /
+  `oauth-clients`. Errors are `application/problem+json`.
 
 Each handler is responsible for its own auth check; the proxy does not
-gate them.
+gate them (its `config.matcher` excludes `/api/*`).
 
 ---
 
@@ -499,7 +539,7 @@ cp .env.example .env            # used by Next.js and the pnpm db:* scripts
 
 pnpm db:up                      # start pgvector/pgvector:pg17 on localhost:5444
 pnpm db:auth:migrate            # Better Auth (vendor) schema
-pnpm db:app:migrate             # complete application schema — single initial-schema file, all app_* tables
+pnpm db:app:migrate             # applies ALL app migrations in order (0001 initial + 0003 api-credentials)
 pnpm db:seed                    # local seed data (baseline roles, apps, admin user)
 
 pnpm dev                        # next dev on http://localhost:3000
@@ -532,9 +572,14 @@ pnpm test:e2e
 pnpm test:a11y
 ```
 
-`pnpm build` requires `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
-`SSO_HANDOFF_JWT_SECRET`, and `SSO_HANDOFF_AUDIENCE_PREFIX` to be set —
-the secure tree is `force-dynamic` and pulls those at module load time.
+`pnpm build` / server boot requires the env vars validated by
+`src/lib/env.ts`: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
+`DATABASE_URL`, `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_JWT_SECRET`, and
+`SSO_HANDOFF_AUDIENCE_PREFIX`. (The build phase substitutes placeholders,
+so a missing var surfaces as a terse Zod error at real server start.) If
+you enable a provider/feature, its companion secret becomes required too
+(`EMAIL_PROVIDER=resend` → `RESEND_API_KEY`; `API_JWT_ENABLED` →
+`API_JWT_PRIVATE_KEY`).
 
 ---
 
@@ -545,6 +590,11 @@ the secure tree is `force-dynamic` and pulls those at module load time.
   that are referenced by inline comments throughout the codebase.
 - `docs/setup-better-auth.md` — deep dive on schema, migrations,
   social provider configuration, and deployment.
+- `docs/setup-email.md` — outbound email + provider integration.
+- `docs/setup-sso-multi-app.md` — cross-subdomain SSO across two or
+  more apps.
+- `docs/api-and-cli-guide.md` and `docs/design-api-keys-and-tokens.md` —
+  the `/api/v1` machine API (API keys, JWT, OAuth clients).
 - `src/components/app-shell/index.ts` — the shell barrel; the fastest
   way to discover what is composable.
 - `src/config/route-regions.ts` and `src/proxy.ts` — start here when

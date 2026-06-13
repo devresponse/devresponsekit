@@ -31,9 +31,7 @@ export interface ApiGrant {
   requestId: string;
 }
 
-export type ApiGuardResult =
-  | { ok: true; grant: ApiGrant }
-  | { ok: false; response: NextResponse };
+export type ApiGuardResult = { ok: true; grant: ApiGrant } | { ok: false; response: NextResponse };
 
 /**
  * Requires an authenticated caller holding `requiredPermission` (a single
@@ -72,7 +70,8 @@ export async function requireApiPermission(
   }
 
   const granted = required.some(
-    (perm) => caller.access.permissions.includes(perm) && scopesAuthorize(caller.grantedScopes, perm),
+    (perm) =>
+      caller.access.permissions.includes(perm) && scopesAuthorize(caller.grantedScopes, perm),
   );
   if (!granted) {
     await auditEvent({

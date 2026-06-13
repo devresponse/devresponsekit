@@ -205,7 +205,7 @@ create table if not exists app_api_keys (
   app_user_id     uuid not null references app_users(id) on delete cascade,
   organization_id uuid references app_organizations(id),
   name            text not null,                 -- human label, e.g. "CI deploy bot"
-  key_prefix      text not null,                 -- shown in UI, e.g. "drk_live_AbCd"
+  key_prefix      text not null,                 -- shown in UI, e.g. "drk_live_AbCd1234" (8 random chars)
   key_hash        text not null unique,          -- sha256(plaintext)
   scopes          text[] not null default '{}',  -- subset of the permission catalog
   status          text not null default 'active',-- active | revoked
@@ -224,16 +224,20 @@ create index if not exists idx_app_api_keys_status  on app_api_keys(status);
 -- Named machine identities (OAuth2 client-credentials principals).
 create table if not exists app_oauth_clients (
   id               uuid primary key default gen_random_uuid(),
-  client_id        text not null unique,         -- public
-  client_secret_hash text not null,              -- sha256(secret)
-  app_user_id      uuid not null references app_users(id), -- service principal row
+  client_id        text not null unique,         -- public, format: drkc_<24 base62>
+  client_secret_hash text not null,              -- sha256(secret); secret format: drkcsec_<40 base62>, shown once
+  app_user_id      uuid not null references app_users(id) on delete cascade, -- service principal row
   organization_id  uuid references app_organizations(id),
   name             text not null,
   scopes           text[] not null default '{}',
   status           text not null default 'active',
   created_at       timestamptz not null default now(),
-  created_by       uuid references app_users(id)
+  created_by       uuid references app_users(id),
+  revoked_at       timestamptz,                  -- set when status → revoked
+  revoked_by       uuid references app_users(id)
 );
+-- (The shipped 0003-api-credentials.sql also adds indexes
+--  idx_app_oauth_clients_status and idx_app_api_keys_org.)
 
 -- Revocation list for stateless JWTs killed before natural expiry.
 -- Small + short-lived: rows are purged once `expires_at` passes.
@@ -263,14 +267,14 @@ Notes:
 
 ### 5.1 Issuance
 
-Plaintext format: `drk_<env>_<22-char base62 random>` where `<env>` ∈
+Plaintext format: `drk_<env>_<32-char base62 random>` where `<env>` ∈
 `live`/`test`. On create:
 
-1. Generate 160 bits of CSPRNG entropy → base62.
+1. Generate 32 base62 chars of CSPRNG entropy (~190 bits) → base62.
 2. `key_prefix` = the first 8 chars after the env tag (for display).
 3. `key_hash` = `sha256(plaintext)` (keys are high-entropy, so a fast
    hash with a unique index is appropriate — bcrypt/argon2 are for
-   low-entropy human passwords, not 160-bit tokens).
+   low-entropy human passwords, not high-entropy random tokens).
 4. Persist row; **return plaintext exactly once** in the create
    response. It is never recoverable afterward.
 
@@ -300,11 +304,11 @@ Client sends `Authorization: Bearer drk_live_…`. The resolver:
 
 ### 5.4 Audit
 
-Every issuance, rotation, revocation, and **authentication failure** is
-audited via the existing [`auditEvent`](../src/lib/audit.server.ts) with
-event types `api_key.created` / `.rotated` / `.revoked` / `.auth_failed`.
-The key **plaintext and hash are never** placed in `metadata` (the
-auditor's contract already forbids secrets).
+Every issuance, rotation, and revocation is audited via the existing
+[`auditEvent`](../src/lib/audit.server.ts) with event types
+`api_key.created` / `.rotated` / `.revoked` (refused machine calls emit
+`api.access.denied`; see §10.5). The key **plaintext and hash are never**
+placed in `metadata` (the auditor's contract already forbids secrets).
 
 ---
 
@@ -361,9 +365,10 @@ Response:
   the SSO handoff uses. Rationale: a public API benefits from resource
   servers and downstream services verifying tokens **without** holding a
   signing secret.
-- Publish the public key set at **`GET /api/v1/.well-known/jwks.json`**
-  (cacheable, no auth). Private key material lives only in the issuer
-  (env or KMS).
+- Publish the public key set at **`GET /api/v1/jwks.json`** (cacheable,
+  no auth). (The canonical `/.well-known/jwks.json` is **not** served
+  today — it could be added later via a rewrite.) Private key material
+  lives only in the issuer (`API_JWT_PRIVATE_KEY` env, or a KMS).
 - **Key rotation** via `kid` header: keep current + previous public keys
   in the JWKS during overlap so in-flight tokens stay valid.
 
@@ -387,10 +392,13 @@ principal so a demoted user loses authority before token expiry.
 ## 7. Scoping model: scopes ⊆ permissions
 
 The scope vocabulary **is** the [permission catalog](api-and-cli-guide.md#9-permission-catalog)
-— the same 26 `admin.*` keys, plus user-level scopes for the account
-surface (e.g. `account.profile.write`). This avoids inventing a parallel
-vocabulary and means an OpenAPI spec can declare `security` requirements
-directly in permission terms.
+— the 30 `admin.*` keys — plus four user-level **account scopes** for the
+account surface: `account.read`, `account.profile.write`,
+`account.preferences.write`, and `account.apikeys.manage` (see
+`src/lib/api-auth/scopes.ts`). This avoids inventing a parallel vocabulary
+and means an OpenAPI spec can declare `security` requirements directly in
+permission terms. A wildcard `admin.users.*` expands to every matching
+catalog key.
 
 Effective permission check at the guard:
 
@@ -427,7 +435,7 @@ is the machine-facing, bearer-first surface with standardized semantics.
 | Resource naming | Plural nouns: `/api/v1/users`, `/api/v1/roles`, `/api/v1/organizations`. |
 | Verbs | `GET` list/read, `POST` create, `PATCH` partial update, `PUT` full replace, `DELETE` remove. Actions that aren't CRUD → `POST /…/{id}:action` (e.g. `:approve`, `:ban`). |
 | Pagination | Reuse the existing [list-query contract](api-and-cli-guide.md#101-list-query-contract): `?page&pageSize&sort&q&filter[…]`; same `{ items, page, pageSize, total }` envelope. |
-| Errors | **RFC 7807 problem+json** (`type`, `title`, `status`, `detail`, `instance`, plus `code` + `requestId`). A thin adapter maps the existing `adminErrorResponse` codes into this shape. |
+| Errors | **`application/problem+json`** (RFC 9457, the successor to 7807). The body as implemented is `{ type, title, status, code, detail?, requestId }` — note there is **no `instance`** member, and `detail` is optional (absent on bare 401/404s). A thin adapter (`src/lib/api-auth/problem.ts`) maps the existing `adminErrorResponse` codes into this shape. |
 | Concurrency | `ETag` on GET + `If-Match` on PATCH/PUT/DELETE → `412 Precondition Failed`. (Closes the "no optimistic concurrency" gap noted in admin-manager §13.) |
 | Idempotency | `Idempotency-Key` header on POST; replays within a TTL return the original result. |
 | Content type | `application/json` only (plus form-encoded on the token endpoint per OAuth2). |
@@ -439,12 +447,18 @@ is the machine-facing, bearer-first surface with standardized semantics.
 | --- | --- | --- |
 | `GET /api/v1/users` | `GET /api/administrator/users` | `admin.users.read` |
 | `POST /api/v1/users` | `POST /api/administrator/users` | `admin.users.create` |
-| `POST /api/v1/users/{id}:approve` | `POST /api/administrator/users/{id}/status {action:"approve"}` | `admin.users.manage` |
-| `POST /api/v1/users:bulkApprove` | `POST /api/administrator/users/bulk` | per-action |
+| `POST /api/v1/users/{id}/status` `{action}` | `POST /api/administrator/users/{id}/status` | `admin.users.manage` |
 | `GET /api/v1/audit-events` | `GET /api/administrator/audit` | `admin.audit.read` |
-| `GET /api/v1/me` | self context (account guard) | session/user scope |
+| `GET /api/v1/me` | self context (account guard) | `account.read` |
 
-Implementation note: the `/api/v1` handlers should be **thin adapters**
+> **As built vs. as designed.** The `:action` / `:bulkApprove` verb sugar
+> in §8.1 is design intent. The implemented status transition is
+> `POST /api/v1/users/{id}/status` with an `{ action: "approve" | "block"
+> | "suspend" | "reactivate" }` body, and there is **no** `/api/v1/users`
+> bulk endpoint. `PUT` is likewise listed as a convention but no `/api/v1`
+> route implements it (OAuth-client edits use `PATCH`).
+
+Implementation note: the `/api/v1` handlers are **thin adapters**
 that translate REST conventions (problem+json, ETag, `:action` verbs)
 and then delegate to the shared server modules
 ([`admin-status.server.ts`](../src/lib/admin-status.server.ts),
@@ -464,10 +478,16 @@ scopes they currently hold.
 
 | Path | Verb | Returns / body |
 | --- | --- | --- |
-| `/api/v1/me/api-keys` | GET | list caller's keys (prefix, name, scopes, last_used; **never** the secret) |
-| `/api/v1/me/api-keys` | POST | `{ name, scopes[], expiresAt? }` → **plaintext once** |
-| `/api/v1/me/api-keys/{id}` | DELETE | revoke |
-| `/api/v1/me/api-keys/{id}:rotate` | POST | new plaintext + revoke old |
+| `/api/v1/me/api-keys` | GET | list caller's keys (prefix, name, scopes, last_used; **never** the secret). Requires scope `account.read`. |
+| `/api/v1/me/api-keys` | POST | `{ name, scopes[], expiresInDays? }` (positive int, ≤ 3650) → **plaintext once**. Requires scope `account.apikeys.manage`. |
+| `/api/v1/me/api-keys/{id}` | DELETE | revoke. Requires `account.apikeys.manage`. |
+| `/api/v1/me/api-keys/{id}/rotate` | POST | new plaintext + revoke old. Requires `account.apikeys.manage`. |
+
+> Note the field is **`expiresInDays`** (a positive integer), not
+> `expiresAt` — the schema is strict and rejects unknown keys with `400`.
+> An **unscoped** key authorizes *nothing*: even `GET /api/v1/me` and
+> `GET /api/v1/me/api-keys` require `account.read`. The create/rotate/
+> delete operations require `account.apikeys.manage`.
 
 ### 9.2 Administrator surface
 
@@ -545,10 +565,13 @@ sign-in limiter is untouched.
 
 ### 10.5 Audit
 
-New event types — `api_key.*`, `oauth_client.*`, `token.issued`,
-`token.revoked`, `api.auth_failed` — all through the existing
-`auditEvent`. Authenticated machine calls record `credentialId` in
-metadata so the audit explorer can answer "what did key X do?". Denied
+The event types actually emitted are `api_key.created` / `.rotated` /
+`.revoked`, `oauth_client.created` / `.updated` / `.revoked` /
+`.secret_rotated`, `token.issued`, and `api.access.denied` (for refused
+machine calls) — all through the existing `auditEvent`. (There is no
+`token.revoked` or `api.auth_failed` event.) Authenticated machine calls
+record `credentialId` in metadata so the audit explorer can answer "what
+did key X do?". Denied
 machine calls are audited exactly like denied cookie calls today.
 
 ### 10.6 Transport & hardening
@@ -559,7 +582,8 @@ machine calls are audited exactly like denied cookie calls today.
 - Constant-time comparison on any secret equality not covered by the
   unique-index hash lookup.
 - Default-deny: an unscoped key (`scopes = []`) can authenticate but
-  authorizes **nothing** — useful for `GET /api/v1/me` only.
+  authorizes **nothing** — not even `GET /api/v1/me`, which requires the
+  `account.read` scope.
 - Optional **IP allow-list** column per key (future) for high-value
   service keys.
 
@@ -571,8 +595,8 @@ New variables, validated in [`src/lib/env.ts`](../src/lib/env.ts)
 (following the existing fail-at-boot pattern):
 
 ```bash
-# JWT access tokens (asymmetric). Provide a private key (PEM/JWK) or a
-# KMS reference; the public half is served at /.well-known/jwks.json.
+# JWT access tokens (asymmetric). Provide an Ed25519 private key as a
+# JSON-encoded JWK; the public half is served at /api/v1/jwks.json.
 API_JWT_ISSUER="https://app.devresponse.com"
 API_JWT_AUDIENCE="devresponse-api"
 API_JWT_PRIVATE_KEY=""              # Ed25519 private JWK/PEM (or KMS ref)

@@ -10,7 +10,11 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
-import { hasBearerCredential, resolveCaller, type CallerKind } from "@/lib/api-auth/resolve-caller.server";
+import {
+  hasBearerCredential,
+  resolveCaller,
+  type CallerKind,
+} from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 
 /**
@@ -123,8 +127,7 @@ export async function requireAdminPermission(
   // can never out-scope its owner; design §7).
   const granted = required.some(
     (perm) =>
-      caller.access.permissions.includes(perm) &&
-      scopesAuthorize(caller.grantedScopes, perm),
+      caller.access.permissions.includes(perm) && scopesAuthorize(caller.grantedScopes, perm),
   );
   if (!granted) {
     await auditEvent({
@@ -159,9 +162,7 @@ export async function requireAdminPermission(
  */
 export async function checkAdminPermissionServer(
   requiredPermission: string | string[],
-): Promise<
-  { betterAuthUserId: string; access: UserAccessContext } | "denied" | "unauthenticated"
-> {
+): Promise<{ betterAuthUserId: string; access: UserAccessContext } | "denied" | "unauthenticated"> {
   const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
 
   const session = await getCurrentSession();

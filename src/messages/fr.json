@@ -84,7 +84,8 @@
     "showFooter": "Afficher le pied de page",
     "hideFooter": "Masquer le pied de page",
     "skipToMain": "Aller au contenu principal",
-    "skipToNavigation": "Aller à la navigation"
+    "skipToNavigation": "Aller à la navigation",
+    "account": "Compte"
   },
   "administrator": {
     "appTitle": "Administrateur",
@@ -736,5 +737,95 @@
     "unknown_resource": "Ressource inconnue.",
     "untrusted_origin": "L’origine de la requête n’est pas approuvée.",
     "user_not_found": "Utilisateur introuvable."
+  },
+  "account": {
+    "appTitle": "Compte",
+    "save": "Enregistrer",
+    "saved": "Vos modifications ont été enregistrées.",
+    "sections": {
+      "overview": {
+        "title": "Aperçu",
+        "description": "Un résumé des informations de votre compte."
+      },
+      "profile": {
+        "title": "Profil",
+        "description": "Votre nom et votre affichage dans l'application."
+      },
+      "preferences": {
+        "title": "Préférences",
+        "description": "Langue, fuseau horaire et formats."
+      },
+      "security": {
+        "title": "Sécurité",
+        "description": "Mot de passe et sessions actives."
+      }
+    },
+    "fields": {
+      "name": "Nom",
+      "displayName": "Nom d'affichage",
+      "displayNameHint": "Affiché dans l'application. Laissez vide pour utiliser votre nom.",
+      "email": "E-mail",
+      "emailReadonlyHint": "Contactez un administrateur pour changer votre e-mail.",
+      "locale": "Langue",
+      "timeZone": "Fuseau horaire",
+      "system": "Valeur par défaut du système",
+      "dateFormat": "Format de date",
+      "numberFormatLocale": "Format des nombres"
+    },
+    "locales": {
+      "en": "Anglais",
+      "fr": "Français",
+      "es": "Espagnol",
+      "uk": "Ukrainien"
+    },
+    "dateFormats": {
+      "system": "Valeur par défaut du système",
+      "iso8601": "ISO 8601 (2026-06-13)",
+      "us": "États-Unis (06/13/2026)",
+      "eu": "Européen (13/06/2026)",
+      "long": "Long (13 juin 2026)"
+    },
+    "status": {
+      "active": "Actif",
+      "pending_approval": "En attente d'approbation",
+      "blocked": "Bloqué",
+      "suspended": "Suspendu",
+      "deactivated": "Désactivé"
+    },
+    "overview": {
+      "identity": "Identité",
+      "status": "Statut",
+      "memberSince": "Membre depuis",
+      "memberships": "Organisations",
+      "noMemberships": "Vous n'êtes membre d'aucune organisation.",
+      "roles": "Rôles",
+      "noRoles": "Aucun rôle attribué."
+    },
+    "security": {
+      "passwordTitle": "Mot de passe",
+      "sessionsTitle": "Sessions actives",
+      "currentPassword": "Mot de passe actuel",
+      "newPassword": "Nouveau mot de passe",
+      "confirmPassword": "Confirmer le nouveau mot de passe",
+      "changePassword": "Changer le mot de passe",
+      "passwordChanged": "Votre mot de passe a été changé. Les autres sessions ont été déconnectées.",
+      "sessionsDescription": "Appareils actuellement connectés à votre compte.",
+      "revokeOthers": "Déconnecter les autres sessions",
+      "noSessions": "Aucune session active.",
+      "expiresAt": "Expire le {value}",
+      "ipAddress": "IP",
+      "userAgent": "Appareil",
+      "revoke": "Révoquer"
+    },
+    "errors": {
+      "nameRequired": "Le nom est obligatoire.",
+      "invalid": "Veuillez vérifier le formulaire et réessayer.",
+      "saveFailed": "L'enregistrement a échoué. Veuillez réessayer.",
+      "passwordTooShort": "Le mot de passe doit comporter au moins 8 caractères.",
+      "passwordMismatch": "Les mots de passe ne correspondent pas.",
+      "passwordChangeFailed": "Impossible de changer le mot de passe. Vérifiez votre mot de passe actuel.",
+      "sessionsLoadFailed": "Impossible de charger vos sessions.",
+      "sessionsRevokeFailed": "Impossible de révoquer la session."
+    }
   }
 }

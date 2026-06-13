@@ -47,3 +47,19 @@ test("email outbox has no axe violations", async ({ page }) => {
 test("email templates list has no axe violations", async ({ page }) => {
   await expectNoAxeViolations(page, "/en/app/administrator/email/templates");
 });
+
+test("account overview has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/en/app/account");
+});
+
+test("account profile form has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/en/app/account/profile");
+});
+
+test("account preferences form has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/en/app/account/preferences");
+});
+
+test("account security page has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/en/app/account/security");
+});

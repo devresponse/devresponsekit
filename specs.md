@@ -3572,7 +3572,54 @@ are rendered and recorded as `logged`. Adding a provider = implement
 
 ---
 
-## 36. Source references for implementation alignment
+## 36. Account (self-service) app
+
+A user-level workspace at `/[locale]/app/account` where a signed-in user
+views and edits **their own** personal information. It is the
+counterpart to the Administrator app: same nested-shell structure, but
+**user-level** — it gates only on an active secure session (`shell.view`,
+implied by an active membership) and never requires any `admin.*`
+permission.
+
+### 36.1 Security — strict self-scoping
+
+The defining property is that the app can only ever read or write the
+**caller's own** record:
+
+1. Every query and mutation is scoped to the identity resolved from the
+   session — `session.user.id` (Better Auth) and `access.appUserId`. No
+   route accepts a user id, app-user id, or membership id from the
+   client; there is no `[id]` segment and the request bodies use strict
+   Zod schemas that reject unknown keys (so a smuggled `appUserId` is a
+   400, not a target). This closes IDOR by construction.
+2. The shared gate `requireAccountUser` (`src/lib/account/guard.server.ts`)
+   enforces an active member, applies the trusted-origin CSRF check on
+   unsafe methods, and returns the caller's own ids only.
+3. Admin-controlled data — account `status`, roles, organization
+   memberships, member-since — is **display-only**. Editable: app-side
+   `display_name`, Better Auth `name`, locale + time-zone/date/number
+   formatting, password, and the user's own active sessions.
+
+### 36.2 Structure & extensibility
+
+- A section **registry** (`account/_sections.ts`) is the single source
+  for navigation; the sidebar and landing page render from it. Adding a
+  future area (notifications, connected accounts, API tokens, data
+  export, deactivate) is one descriptor + one route folder.
+- Sections (v1): Overview (read-only summary), Profile, Preferences,
+  Security (password via Better Auth's client + own-session
+  list/revoke). Data access lives in `account/_data.server.ts`; the
+  pages/components own display.
+- API: `PATCH /api/account/profile`, `PUT /api/account/preferences` —
+  self-scoped, audited (`account.profile.updated`,
+  `account.preferences.updated`). Password and session management go
+  through Better Auth's client (inherently self-scoped). The Account
+  entry is registered in `DEFAULT_SHELL_MENU` (`requiredPermissions:
+  ["shell.view"]`).
+
+---
+
+## 37. Source references for implementation alignment
 
 Implementation must verify exact API names against installed package versions.
 

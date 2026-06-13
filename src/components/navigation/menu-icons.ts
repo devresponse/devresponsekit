@@ -3,7 +3,9 @@ import {
   Briefcase,
   Building2,
   Circle,
+  CircleUser,
   Home,
+  IdCard,
   KeyRound,
   LayoutDashboard,
   Mail,
@@ -42,6 +44,9 @@ export const MENU_ICONS: Record<string, LucideIcon> = {
   "app-window": AppWindow,
   mail: Mail,
   "mail-open": MailOpen,
+  // Account (self-service) workspace.
+  "circle-user": CircleUser,
+  "id-card": IdCard,
 };
 
 /**

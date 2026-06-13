@@ -84,7 +84,8 @@
     "showFooter": "Show footer",
     "hideFooter": "Hide footer",
     "skipToMain": "Skip to main content",
-    "skipToNavigation": "Skip to navigation"
+    "skipToNavigation": "Skip to navigation",
+    "account": "Account"
   },
   "administrator": {
     "appTitle": "Administrator",
@@ -736,5 +737,95 @@
     "unknown_resource": "Unknown resource.",
     "untrusted_origin": "The request origin is not trusted.",
     "user_not_found": "User not found."
+  },
+  "account": {
+    "appTitle": "Account",
+    "save": "Save changes",
+    "saved": "Your changes have been saved.",
+    "sections": {
+      "overview": {
+        "title": "Overview",
+        "description": "A summary of your account information."
+      },
+      "profile": {
+        "title": "Profile",
+        "description": "Your name and how you appear in the app."
+      },
+      "preferences": {
+        "title": "Preferences",
+        "description": "Language, time zone, and formatting."
+      },
+      "security": {
+        "title": "Security",
+        "description": "Password and active sessions."
+      }
+    },
+    "fields": {
+      "name": "Name",
+      "displayName": "Display name",
+      "displayNameHint": "Shown across the app. Leave empty to use your name.",
+      "email": "Email",
+      "emailReadonlyHint": "Contact an administrator to change your email.",
+      "locale": "Language",
+      "timeZone": "Time zone",
+      "system": "System default",
+      "dateFormat": "Date format",
+      "numberFormatLocale": "Number format"
+    },
+    "locales": {
+      "en": "English",
+      "fr": "French",
+      "es": "Spanish",
+      "uk": "Ukrainian"
+    },
+    "dateFormats": {
+      "system": "System default",
+      "iso8601": "ISO 8601 (2026-06-13)",
+      "us": "US (06/13/2026)",
+      "eu": "European (13/06/2026)",
+      "long": "Long (June 13, 2026)"
+    },
+    "status": {
+      "active": "Active",
+      "pending_approval": "Pending approval",
+      "blocked": "Blocked",
+      "suspended": "Suspended",
+      "deactivated": "Deactivated"
+    },
+    "overview": {
+      "identity": "Identity",
+      "status": "Status",
+      "memberSince": "Member since",
+      "memberships": "Organizations",
+      "noMemberships": "You are not a member of any organization.",
+      "roles": "Roles",
+      "noRoles": "No roles assigned."
+    },
+    "security": {
+      "passwordTitle": "Password",
+      "sessionsTitle": "Active sessions",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "changePassword": "Change password",
+      "passwordChanged": "Your password has been changed. Other sessions were signed out.",
+      "sessionsDescription": "Devices currently signed in to your account.",
+      "revokeOthers": "Sign out other sessions",
+      "noSessions": "No active sessions.",
+      "expiresAt": "Expires {value}",
+      "ipAddress": "IP",
+      "userAgent": "Device",
+      "revoke": "Revoke"
+    },
+    "errors": {
+      "nameRequired": "Name is required.",
+      "invalid": "Please check the form and try again.",
+      "saveFailed": "Saving your changes failed. Please try again.",
+      "passwordTooShort": "Password must be at least 8 characters.",
+      "passwordMismatch": "Passwords do not match.",
+      "passwordChangeFailed": "Could not change your password. Check your current password.",
+      "sessionsLoadFailed": "Could not load your sessions.",
+      "sessionsRevokeFailed": "Could not revoke the session."
+    }
   }
 }

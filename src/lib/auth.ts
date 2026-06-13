@@ -54,6 +54,12 @@ export const auth = betterAuth({
   // NEXT_PUBLIC_APP_URL / BETTER_AUTH_URL / ADMIN_TRUSTED_ORIGINS.
   trustedOrigins: getTrustedOrigins(),
 
+  // Better Auth rate-limits sensitive endpoints in production mode
+  // (e.g. /sign-in/email at 3 req / 10 s per IP). Browser test suites
+  // run against `next start` and sign in far faster than that from one
+  // IP, so CI disables the limiter via this test-only env escape hatch.
+  ...(env.AUTH_RATE_LIMIT_DISABLED ? { rateLimit: { enabled: false } } : {}),
+
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,

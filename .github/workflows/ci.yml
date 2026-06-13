@@ -109,6 +109,9 @@ jobs:
       SEED_ADMIN_EMAIL: admin@devresponse.local
       SEED_ADMIN_PASSWORD: ChangeMe-LocalOnly-123!
       SEED_DEFAULT_ORGANIZATION_SLUG: default
+      # The suites sign in far faster than the production limiter's
+      # 3 req / 10 s budget for /sign-in/email — test-only escape hatch.
+      AUTH_RATE_LIMIT_DISABLED: "1"
 
     steps:
       - uses: actions/checkout@v4

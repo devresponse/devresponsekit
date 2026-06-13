@@ -39,6 +39,17 @@ const serverEnvSchema = z.object({
    * Auth's `trustedOrigins` and the administrator origin guard.
    */
   ADMIN_TRUSTED_ORIGINS: z.string().optional(),
+  /**
+   * Test-only escape hatch ("1"/"true"): disables Better Auth's built-in
+   * rate limiter, which production mode applies to sensitive endpoints
+   * (e.g. /sign-in/email at 3 req / 10 s per IP). Browser suites sign in
+   * far faster than that from one IP against `next start`, so the CI
+   * browser job sets it. Never set on a real deployment.
+   */
+  AUTH_RATE_LIMIT_DISABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "1" || value === "true"),
   SEED_ADMIN_EMAIL: z.string().email().optional(),
   SEED_ADMIN_PASSWORD: z.string().optional(),
   SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),

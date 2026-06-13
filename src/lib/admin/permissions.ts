@@ -45,6 +45,8 @@ export const ADMIN_PERMISSION_CATALOG: ReadonlyArray<AdminPermissionDescriptor> 
   { key: "admin.apps.read", description: "Read enterprise application catalog" },
   { key: "admin.apps.manage", description: "Create and edit enterprise applications" },
   { key: "admin.audit.read", description: "Read the audit event log" },
+  { key: "admin.email.read", description: "Read the email outbox and templates" },
+  { key: "admin.email.manage", description: "Edit email templates and send test emails" },
 ] as const;
 
 /**

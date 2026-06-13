@@ -147,6 +147,27 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
     ],
   },
   {
+    id: "communication",
+    labelKey: "communication",
+    items: [
+      {
+        id: "email-outbox",
+        href: "/app/administrator/email",
+        labelKey: "emailOutbox",
+        icon: "mail",
+        requires: ["admin.email.read"],
+      },
+      {
+        id: "email-templates",
+        href: "/app/administrator/email/templates",
+        labelKey: "emailTemplates",
+        icon: "mail-open",
+        requires: ["admin.email.read"],
+      },
+    ],
+    actions: [],
+  },
+  {
     id: "activity",
     labelKey: "activity",
     items: [

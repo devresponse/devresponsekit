@@ -139,6 +139,42 @@ export interface AppAuditEventsTable {
   created_at: Generated<Timestamp>;
 }
 
+export interface AppEmailTemplatesTable {
+  id: Generated<string>;
+  key: string;
+  locale: ColumnType<string, string | undefined, string>;
+  subject: string;
+  body_html: string;
+  body_text: string | null;
+  description: string | null;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
+/**
+ * Outbox-first email log (specs.md §35): every outbound email is
+ * inserted here before any delivery attempt. `status` lifecycle:
+ * `pending` → `sent` | `failed` (provider configured) or `logged`
+ * (no provider configured — recorded only).
+ */
+export interface AppOutboxTable {
+  id: Generated<string>;
+  template_key: string | null;
+  to_email: string;
+  from_email: string;
+  subject: string;
+  body_html: string;
+  body_text: string | null;
+  variables: Json;
+  status: ColumnType<string, string | undefined, string>;
+  provider: string | null;
+  provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;
+  error: ColumnType<string | null, string | null | undefined, string | null>;
+  related_better_auth_user_id: string | null;
+  created_at: Generated<Timestamp>;
+  sent_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+}
+
 export interface AppUserLocalePreferencesTable {
   app_user_id: string;
   locale: ColumnType<string, string | undefined, string>;
@@ -161,6 +197,8 @@ export interface AppDatabase {
   app_enterprise_applications: AppEnterpriseApplicationsTable;
   app_sso_handoff_nonces: AppSsoHandoffNoncesTable;
   app_audit_events: AppAuditEventsTable;
+  app_email_templates: AppEmailTemplatesTable;
+  app_outbox: AppOutboxTable;
   app_user_locale_preferences: AppUserLocalePreferencesTable;
   session: BetterAuthSessionTable;
   user: BetterAuthUserTable;
@@ -201,3 +239,7 @@ export type NewAppUser = Insertable<AppUsersTable>;
 export type AppUserUpdate = Updateable<AppUsersTable>;
 
 export type AppEnterpriseApplication = Selectable<AppEnterpriseApplicationsTable>;
+
+export type AppEmailTemplate = Selectable<AppEmailTemplatesTable>;
+export type AppOutboxEntry = Selectable<AppOutboxTable>;
+export type NewAppOutboxEntry = Insertable<AppOutboxTable>;

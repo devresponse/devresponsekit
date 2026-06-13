@@ -16,44 +16,71 @@ import { z } from "zod";
 if (typeof window !== "undefined") {
   throw new Error("env.ts must never be imported from client-side code");
 }
-const serverEnvSchema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  BETTER_AUTH_SECRET: z.string().min(16, "BETTER_AUTH_SECRET must be at least 16 chars"),
-  BETTER_AUTH_URL: z.url(),
-  DATABASE_URL: z.string().min(1),
-  DATABASE_TEST_URL: z.string().optional(),
-  GOOGLE_CLIENT_ID: z.string().optional().default(""),
-  GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
-  MICROSOFT_CLIENT_ID: z.string().optional().default(""),
-  MICROSOFT_CLIENT_SECRET: z.string().optional().default(""),
-  GITHUB_CLIENT_ID: z.string().optional().default(""),
-  GITHUB_CLIENT_SECRET: z.string().optional().default(""),
-  SSO_HANDOFF_ISSUER: z.string().min(1),
-  SSO_HANDOFF_AUDIENCE_PREFIX: z.string().min(1),
-  SSO_HANDOFF_JWT_SECRET: z.string().min(16, "SSO_HANDOFF_JWT_SECRET must be at least 16 chars"),
-  SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
-  /** Identifier of THIS deployment when consuming SSO handoffs. */
-  SSO_HANDOFF_APPLICATION_ID: z.string().min(1).optional(),
-  /**
-   * Comma-separated list of additional trusted origins shared by Better
-   * Auth's `trustedOrigins` and the administrator origin guard.
-   */
-  ADMIN_TRUSTED_ORIGINS: z.string().optional(),
-  /**
-   * Test-only escape hatch ("1"/"true"): disables Better Auth's built-in
-   * rate limiter, which production mode applies to sensitive endpoints
-   * (e.g. /sign-in/email at 3 req / 10 s per IP). Browser suites sign in
-   * far faster than that from one IP against `next start`, so the CI
-   * browser job sets it. Never set on a real deployment.
-   */
-  AUTH_RATE_LIMIT_DISABLED: z
-    .string()
-    .optional()
-    .transform((value) => value === "1" || value === "true"),
-  SEED_ADMIN_EMAIL: z.string().email().optional(),
-  SEED_ADMIN_PASSWORD: z.string().optional(),
-  SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),
-});
+const serverEnvSchema = z
+  .object({
+    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    BETTER_AUTH_SECRET: z.string().min(16, "BETTER_AUTH_SECRET must be at least 16 chars"),
+    BETTER_AUTH_URL: z.url(),
+    DATABASE_URL: z.string().min(1),
+    DATABASE_TEST_URL: z.string().optional(),
+    GOOGLE_CLIENT_ID: z.string().optional().default(""),
+    GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
+    MICROSOFT_CLIENT_ID: z.string().optional().default(""),
+    MICROSOFT_CLIENT_SECRET: z.string().optional().default(""),
+    GITHUB_CLIENT_ID: z.string().optional().default(""),
+    GITHUB_CLIENT_SECRET: z.string().optional().default(""),
+    SSO_HANDOFF_ISSUER: z.string().min(1),
+    SSO_HANDOFF_AUDIENCE_PREFIX: z.string().min(1),
+    SSO_HANDOFF_JWT_SECRET: z.string().min(16, "SSO_HANDOFF_JWT_SECRET must be at least 16 chars"),
+    SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
+    /** Identifier of THIS deployment when consuming SSO handoffs. */
+    SSO_HANDOFF_APPLICATION_ID: z.string().min(1).optional(),
+    /**
+     * Comma-separated list of additional trusted origins shared by Better
+     * Auth's `trustedOrigins` and the administrator origin guard.
+     */
+    ADMIN_TRUSTED_ORIGINS: z.string().optional(),
+    /**
+     * Outbound email delivery provider. Unset = no delivery: every email
+     * is still rendered and recorded in `app_outbox` with status `logged`
+     * (specs.md §35), which is the right mode for local dev and CI.
+     */
+    EMAIL_PROVIDER: z.enum(["resend", "mailgun"]).optional(),
+    /** From header for outbound email, e.g. `App <no-reply@example.com>`. */
+    EMAIL_FROM: z.string().default("DevResponse <no-reply@localhost>"),
+    RESEND_API_KEY: z.string().optional(),
+    MAILGUN_API_KEY: z.string().optional(),
+    MAILGUN_DOMAIN: z.string().optional(),
+    /** Override for the EU region: https://api.eu.mailgun.net */
+    MAILGUN_BASE_URL: z.url().default("https://api.mailgun.net"),
+    /**
+     * Test-only escape hatch ("1"/"true"): disables Better Auth's built-in
+     * rate limiter, which production mode applies to sensitive endpoints
+     * (e.g. /sign-in/email at 3 req / 10 s per IP). Browser suites sign in
+     * far faster than that from one IP against `next start`, so the CI
+     * browser job sets it. Never set on a real deployment.
+     */
+    AUTH_RATE_LIMIT_DISABLED: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
+    SEED_ADMIN_EMAIL: z.string().email().optional(),
+    SEED_ADMIN_PASSWORD: z.string().optional(),
+    SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),
+  })
+  .superRefine((env, ctx) => {
+    // A configured provider without its credentials should fail at boot,
+    // not at first send.
+    if (env.EMAIL_PROVIDER === "resend" && !env.RESEND_API_KEY) {
+      ctx.addIssue({ code: "custom", path: ["RESEND_API_KEY"], message: "required for resend" });
+    }
+    if (env.EMAIL_PROVIDER === "mailgun" && !env.MAILGUN_API_KEY) {
+      ctx.addIssue({ code: "custom", path: ["MAILGUN_API_KEY"], message: "required for mailgun" });
+    }
+    if (env.EMAIL_PROVIDER === "mailgun" && !env.MAILGUN_DOMAIN) {
+      ctx.addIssue({ code: "custom", path: ["MAILGUN_DOMAIN"], message: "required for mailgun" });
+    }
+  });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
 

@@ -43,7 +43,19 @@
     "blockedTitle": "L'accès au compte est restreint",
     "blockedDescription": "Votre compte est actuellement bloqué, suspendu ou désactivé. Contactez votre administrateur.",
     "invalidCredentials": "E-mail ou mot de passe invalide.",
-    "unexpectedError": "Une erreur inattendue est survenue. Veuillez réessayer."
+    "unexpectedError": "Une erreur inattendue est survenue. Veuillez réessayer.",
+    "forgotPasswordDescription": "Saisissez l'adresse e-mail de votre compte et nous vous enverrons un lien pour réinitialiser votre mot de passe.",
+    "sendResetLink": "Envoyer le lien de réinitialisation",
+    "resetEmailSent": "Si un compte existe pour cette adresse, un lien de réinitialisation est en route.",
+    "resetPasswordTitle": "Choisir un nouveau mot de passe",
+    "newPassword": "Nouveau mot de passe",
+    "confirmPassword": "Confirmer le mot de passe",
+    "setNewPassword": "Définir le nouveau mot de passe",
+    "passwordTooShort": "Le mot de passe doit comporter au moins 8 caractères.",
+    "passwordMismatch": "Les mots de passe ne correspondent pas.",
+    "resetTokenInvalid": "Ce lien de réinitialisation est invalide ou a expiré.",
+    "requestNewResetLink": "Demander un nouveau lien",
+    "resetPasswordDone": "Votre mot de passe a été mis à jour."
   },
   "public": {
     "heroEyebrow": "Ouvert. Localisé. Sécurisé.",
@@ -91,7 +103,10 @@
       "apps": "Applications",
       "enterpriseApps": "Applications d'entreprise",
       "activity": "Activité",
-      "auditLog": "Journal d'audit"
+      "auditLog": "Journal d'audit",
+      "communication": "Communication",
+      "emailOutbox": "Boîte d'envoi",
+      "emailTemplates": "Modèles d'e-mail"
     },
     "overview": {
       "title": "Aperçu de l'administrateur",
@@ -605,6 +620,76 @@
         "userAgent": "Agent utilisateur",
         "reason": "Motif",
         "metadata": "Métadonnées"
+      }
+    },
+    "email": {
+      "title": "Boîte d'envoi",
+      "description": "Chaque e-mail sortant est enregistré ici avant toute tentative d'envoi — y compris dans les environnements sans fournisseur configuré.",
+      "viewDetail": "Voir",
+      "columns": {
+        "createdAt": "Créé",
+        "to": "Destinataire",
+        "subject": "Objet",
+        "template": "Modèle",
+        "status": "Statut"
+      },
+      "status": {
+        "pending": "En attente",
+        "sent": "Envoyé",
+        "failed": "Échec",
+        "logged": "Journalisé"
+      },
+      "filters": {
+        "status": "Statut",
+        "template": "Clé du modèle",
+        "any": "Tous"
+      },
+      "test": {
+        "placeholder": "destinataire@exemple.com",
+        "send": "Envoyer un e-mail de test",
+        "error": "L'envoi de l'e-mail de test a échoué.",
+        "result": {
+          "sent": "E-mail de test envoyé.",
+          "failed": "Échec de l'envoi — voir la ligne de la boîte d'envoi.",
+          "logged": "Enregistré dans la boîte d'envoi (aucun fournisseur configuré)."
+        }
+      },
+      "detail": {
+        "from": "Expéditeur",
+        "to": "Destinataire",
+        "template": "Modèle",
+        "provider": "Fournisseur",
+        "providerMessageId": "Id du message fournisseur",
+        "createdAt": "Créé",
+        "sentAt": "Envoyé",
+        "relatedUser": "Utilisateur concerné",
+        "error": "Erreur",
+        "bodyText": "Corps texte",
+        "bodyHtml": "Corps HTML"
+      },
+      "templates": {
+        "title": "Modèles d'e-mail",
+        "description": "Modèles modifiables utilisés pour les e-mails sortants. Supprimer ou casser un modèle ne bloque jamais un flux — les valeurs par défaut intégrées s'appliquent.",
+        "empty": "Aucun modèle trouvé. Exécutez les migrations pour insérer les valeurs par défaut.",
+        "edit": "Modifier",
+        "editTitle": "Modifier le modèle d'e-mail",
+        "columns": {
+          "key": "Clé",
+          "locale": "Langue",
+          "subject": "Objet",
+          "updatedAt": "Mis à jour"
+        },
+        "fields": {
+          "subject": "Objet",
+          "bodyHtml": "Corps HTML",
+          "bodyText": "Corps texte",
+          "bodyTextHint": "Alternative texte facultative. Laisser vide pour n'envoyer que du HTML.",
+          "description": "Description"
+        },
+        "variablesHint": "Variables disponibles :",
+        "save": "Enregistrer le modèle",
+        "cancel": "Annuler",
+        "saveError": "L'enregistrement du modèle a échoué."
       }
     }
   },

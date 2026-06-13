@@ -1,15 +1,17 @@
 import { useTranslations } from "next-intl";
+import { use } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
 
 /**
- * Forgot password placeholder.
+ * Forgot password page.
  *
- * Better Auth manages the actual reset flow at `/api/auth/*`. This page
- * exposes a localized entry point and will be expanded with a request
- * form in a follow-up — kept minimal here to satisfy the route-region
- * inventory in §28.3 without coupling to internal Better Auth endpoints.
+ * Hosts the reset-request form. The emailed link (rendered and recorded
+ * through the outbox pipeline, specs.md §35) lands on the localized
+ * `/reset-password` page with the one-time token.
  */
-export default function ForgotPasswordPage() {
+export default function ForgotPasswordPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = use(params);
   const t = useTranslations("auth");
   return (
     <main className="mx-auto flex min-h-[60vh] max-w-md items-center p-8">
@@ -18,9 +20,7 @@ export default function ForgotPasswordPage() {
           <CardTitle>{t("forgotPassword")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground text-sm">
-            Password reset request flow is intentionally minimal in this scaffold.
-          </p>
+          <ForgotPasswordForm redirectTo={`/${locale}/reset-password`} />
         </CardContent>
       </Card>
     </main>

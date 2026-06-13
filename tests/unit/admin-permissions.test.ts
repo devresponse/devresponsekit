@@ -145,18 +145,20 @@ describe("requireAdminPermission", () => {
 });
 
 describe("ADMIN_PERMISSION_CATALOG", () => {
-  it("has 24 entries with unique keys (plan §6.1)", async () => {
+  it("has 26 entries with unique keys (plan §6.1 + email subsystem)", async () => {
     // Import from the canonical, non-server-only source so the test
     // asserts the source of truth rather than the re-export surface.
     const { ADMIN_PERMISSION_CATALOG } = await import("@/lib/admin/permissions");
-    expect(ADMIN_PERMISSION_CATALOG).toHaveLength(24);
+    expect(ADMIN_PERMISSION_CATALOG).toHaveLength(26);
     const keys = new Set(ADMIN_PERMISSION_CATALOG.map((p) => p.key));
-    expect(keys.size).toBe(24);
+    expect(keys.size).toBe(26);
     // Spot-check a representative sample.
     expect(keys.has("admin.users.read")).toBe(true);
     expect(keys.has("admin.users.impersonate")).toBe(true);
     expect(keys.has("admin.audit.read")).toBe(true);
     expect(keys.has("admin.permissions.manage")).toBe(true);
+    expect(keys.has("admin.email.read")).toBe(true);
+    expect(keys.has("admin.email.manage")).toBe(true);
   });
 
   it("is re-exported by permissions.server for callers that need it via the helper module", async () => {

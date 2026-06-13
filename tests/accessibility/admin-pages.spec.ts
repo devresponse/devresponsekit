@@ -39,3 +39,11 @@ test("administrator users grid has no axe violations", async ({ page }) => {
 test("create-permission form has no axe violations", async ({ page }) => {
   await expectNoAxeViolations(page, "/en/app/administrator/permissions/new");
 });
+
+test("email outbox has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/en/app/administrator/email");
+});
+
+test("email templates list has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/en/app/administrator/email/templates");
+});

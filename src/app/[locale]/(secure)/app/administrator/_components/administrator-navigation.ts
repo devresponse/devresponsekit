@@ -15,7 +15,8 @@ export type AdministratorNavigationActionId =
   | "new-user"
   | "new-role"
   | "new-organization"
-  | "new-enterprise-app";
+  | "new-enterprise-app"
+  | "new-api-key";
 
 export interface AdministratorNavigationAction {
   id: AdministratorNavigationActionId;
@@ -154,11 +155,17 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "api-keys",
         href: "/app/administrator/api-keys",
         labelKey: "apiKeys",
-        icon: "key-round",
+        icon: "key-square",
         requires: ["admin.apikeys.read"],
       },
     ],
-    actions: [],
+    actions: [
+      {
+        id: "new-api-key",
+        href: "/app/administrator/api-keys/new",
+        requires: ["admin.apikeys.manage"],
+      },
+    ],
   },
   {
     id: "communication",

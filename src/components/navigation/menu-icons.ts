@@ -9,6 +9,7 @@ import {
   Home,
   IdCard,
   KeyRound,
+  KeySquare,
   LayoutDashboard,
   Mail,
   MailOpen,
@@ -41,6 +42,7 @@ export const MENU_ICONS: Record<string, LucideIcon> = {
   // Administrator workspace navigation.
   home: Home,
   "key-round": KeyRound,
+  "key-square": KeySquare,
   "building-2": Building2,
   "users-round": UsersRound,
   "app-window": AppWindow,

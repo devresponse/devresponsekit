@@ -104,6 +104,8 @@
       "memberships": "Memberships",
       "apps": "Apps",
       "enterpriseApps": "Enterprise applications",
+      "apis": "APIs",
+      "apiKeys": "API keys",
       "activity": "Activity",
       "auditLog": "Audit log",
       "communication": "Communication",
@@ -586,6 +588,97 @@
         "description": "Deleting removes the application from the catalog. The application must not be referenced by any SSO handoff."
       },
       "deleteError": "Could not delete the application."
+    },
+    "apiKeys": {
+      "title": "API keys",
+      "description": "Inventory of every API key across users and organizations. Inspect scopes and usage, rotate or revoke a key, or issue one on behalf of a user. Secrets are never shown here — only when a key is created or rotated.",
+      "newButton": "Issue API key",
+      "never": "Never",
+      "noExpiry": "No expiry",
+      "scopeCount": "{count, plural, one {# scope} other {# scopes}}",
+      "columns": {
+        "name": "Name",
+        "prefix": "Prefix",
+        "owner": "Owner",
+        "scopes": "Scopes",
+        "status": "Status",
+        "lastUsed": "Last used",
+        "expires": "Expires",
+        "created": "Created"
+      },
+      "filters": {
+        "search": "Search",
+        "searchPlaceholder": "Name, prefix, or owner email",
+        "status": "Status",
+        "any": "Any"
+      },
+      "status": {
+        "active": "Active",
+        "revoked": "Revoked"
+      },
+      "actions": {
+        "view": "View",
+        "rotate": "Rotate",
+        "revoke": "Revoke"
+      },
+      "revokeError": "Could not revoke the key.",
+      "rotateError": "Could not rotate the key.",
+      "dialogs": {
+        "revoke": {
+          "title": "Revoke API key",
+          "description": "This immediately and permanently invalidates the key. Any client using it will start receiving 401 responses. This cannot be undone."
+        },
+        "rotate": {
+          "title": "Rotate API key",
+          "description": "A new secret is issued with the same owner, scopes, and expiry, and the current key is revoked. Update the client with the new secret — the old one stops working immediately."
+        }
+      },
+      "reveal": {
+        "title": "Copy the key now",
+        "description": "This is the only time the full secret is shown. Store it somewhere safe — it cannot be retrieved again. If you lose it, rotate the key.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "done": "Done"
+      },
+      "detail": {
+        "loading": "Loading…",
+        "loadError": "Could not load the key.",
+        "status": "Status",
+        "owner": "Owner",
+        "organization": "Organization",
+        "created": "Created",
+        "createdBy": "Created by",
+        "lastUsed": "Last used",
+        "lastUsedIp": "Last used IP",
+        "expires": "Expires",
+        "revoked": "Revoked",
+        "revokedBy": "Revoked by",
+        "revokedReason": "Revoke reason",
+        "scopes": "Scopes",
+        "noScopes": "No scopes — this key cannot call any scoped endpoint."
+      },
+      "fields": {
+        "name": "Name",
+        "namePlaceholder": "e.g. CI deploy bot",
+        "owner": "Owner (application user ID)",
+        "ownerHelp": "The application user the key acts as. Copy the ID from the Users console. The key can never exceed that user's own permissions.",
+        "expiresInDays": "Expires in (days)",
+        "expiresInDaysPlaceholder": "Leave empty for no expiry",
+        "expiresInDaysHelp": "Optional. After this many days the key stops working. Leave empty to never expire.",
+        "scopes": "Scopes",
+        "scopesHelp": "Select the permissions this key may use. You can only grant scopes the owner holds; the rest are rejected."
+      },
+      "new": {
+        "title": "Issue API key",
+        "description": "Create an API key on behalf of a user. The secret is shown exactly once after creation.",
+        "submit": "Issue key",
+        "cancel": "Cancel",
+        "errorToast": "Could not issue the key.",
+        "invalidOwnerId": "Enter a valid application user ID (UUID).",
+        "ownerNotFound": "No user found with that application user ID.",
+        "ownerInactive": "That user is not active and cannot be issued a key.",
+        "invalidScope": "The owner does not hold these scopes: {scopes}"
+      }
     },
     "audit": {
       "title": "Audit log",

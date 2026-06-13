@@ -147,6 +147,20 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
     ],
   },
   {
+    id: "apis",
+    labelKey: "apis",
+    items: [
+      {
+        id: "api-keys",
+        href: "/app/administrator/api-keys",
+        labelKey: "apiKeys",
+        icon: "key-round",
+        requires: ["admin.apikeys.read"],
+      },
+    ],
+    actions: [],
+  },
+  {
     id: "communication",
     labelKey: "communication",
     items: [

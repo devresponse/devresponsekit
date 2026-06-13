@@ -104,6 +104,8 @@
       "memberships": "Adhésions",
       "apps": "Applications",
       "enterpriseApps": "Applications d'entreprise",
+      "apis": "API",
+      "apiKeys": "Clés API",
       "activity": "Activité",
       "auditLog": "Journal d'audit",
       "communication": "Communication",
@@ -586,6 +588,97 @@
         "description": "La suppression retire l'application du catalogue. Elle ne doit être référencée par aucun SSO."
       },
       "deleteError": "Impossible de supprimer l'application."
+    },
+    "apiKeys": {
+      "title": "Clés API",
+      "description": "Inventaire de toutes les clés API, tous utilisateurs et organisations confondus. Inspectez les portées et l'utilisation, faites tourner ou révoquez une clé, ou émettez-en une au nom d'un utilisateur. Les secrets ne sont jamais affichés ici — uniquement à la création ou à la rotation d'une clé.",
+      "newButton": "Émettre une clé API",
+      "never": "Jamais",
+      "noExpiry": "Sans expiration",
+      "scopeCount": "{count, plural, one {# portée} other {# portées}}",
+      "columns": {
+        "name": "Nom",
+        "prefix": "Préfixe",
+        "owner": "Propriétaire",
+        "scopes": "Portées",
+        "status": "Statut",
+        "lastUsed": "Dernière utilisation",
+        "expires": "Expire",
+        "created": "Créée"
+      },
+      "filters": {
+        "search": "Rechercher",
+        "searchPlaceholder": "Nom, préfixe ou e-mail du propriétaire",
+        "status": "Statut",
+        "any": "Tous"
+      },
+      "status": {
+        "active": "Active",
+        "revoked": "Révoquée"
+      },
+      "actions": {
+        "view": "Voir",
+        "rotate": "Faire tourner",
+        "revoke": "Révoquer"
+      },
+      "revokeError": "Impossible de révoquer la clé.",
+      "rotateError": "Impossible de faire tourner la clé.",
+      "dialogs": {
+        "revoke": {
+          "title": "Révoquer la clé API",
+          "description": "Cela invalide la clé immédiatement et définitivement. Tout client qui l'utilise recevra des réponses 401. Cette action est irréversible."
+        },
+        "rotate": {
+          "title": "Faire tourner la clé API",
+          "description": "Un nouveau secret est émis avec le même propriétaire, les mêmes portées et la même expiration, et la clé actuelle est révoquée. Mettez à jour le client avec le nouveau secret — l'ancien cesse de fonctionner immédiatement."
+        }
+      },
+      "reveal": {
+        "title": "Copiez la clé maintenant",
+        "description": "C'est la seule fois où le secret complet est affiché. Conservez-le en lieu sûr — il ne pourra pas être récupéré. En cas de perte, faites tourner la clé.",
+        "copy": "Copier",
+        "copied": "Copié",
+        "done": "Terminé"
+      },
+      "detail": {
+        "loading": "Chargement…",
+        "loadError": "Impossible de charger la clé.",
+        "status": "Statut",
+        "owner": "Propriétaire",
+        "organization": "Organisation",
+        "created": "Créée",
+        "createdBy": "Créée par",
+        "lastUsed": "Dernière utilisation",
+        "lastUsedIp": "IP de dernière utilisation",
+        "expires": "Expire",
+        "revoked": "Révoquée",
+        "revokedBy": "Révoquée par",
+        "revokedReason": "Motif de révocation",
+        "scopes": "Portées",
+        "noScopes": "Aucune portée — cette clé ne peut appeler aucun point d'accès avec portée."
+      },
+      "fields": {
+        "name": "Nom",
+        "namePlaceholder": "ex. bot de déploiement CI",
+        "owner": "Propriétaire (ID utilisateur applicatif)",
+        "ownerHelp": "L'utilisateur applicatif au nom duquel la clé agit. Copiez l'ID depuis la console Utilisateurs. La clé ne peut jamais dépasser les permissions de cet utilisateur.",
+        "expiresInDays": "Expire dans (jours)",
+        "expiresInDaysPlaceholder": "Laisser vide pour aucune expiration",
+        "expiresInDaysHelp": "Facultatif. Après ce nombre de jours, la clé cesse de fonctionner. Laisser vide pour ne jamais expirer.",
+        "scopes": "Portées",
+        "scopesHelp": "Sélectionnez les permissions que cette clé peut utiliser. Vous ne pouvez accorder que les portées détenues par le propriétaire ; les autres sont rejetées."
+      },
+      "new": {
+        "title": "Émettre une clé API",
+        "description": "Créez une clé API au nom d'un utilisateur. Le secret est affiché une seule fois après la création.",
+        "submit": "Émettre la clé",
+        "cancel": "Annuler",
+        "errorToast": "Impossible d'émettre la clé.",
+        "invalidOwnerId": "Saisissez un ID utilisateur applicatif valide (UUID).",
+        "ownerNotFound": "Aucun utilisateur trouvé avec cet ID utilisateur applicatif.",
+        "ownerInactive": "Cet utilisateur n'est pas actif et ne peut pas recevoir de clé.",
+        "invalidScope": "Le propriétaire ne détient pas ces portées : {scopes}"
+      }
     },
     "audit": {
       "title": "Journal d'audit",

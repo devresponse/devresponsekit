@@ -104,6 +104,8 @@
       "memberships": "Miembros",
       "apps": "Aplicaciones",
       "enterpriseApps": "Aplicaciones empresariales",
+      "apis": "API",
+      "apiKeys": "Claves API",
       "activity": "Actividad",
       "auditLog": "Registro de auditoría",
       "communication": "Comunicación",
@@ -586,6 +588,97 @@
         "description": "Eliminar quita la aplicación del catálogo. La aplicación no debe ser referenciada por ningún SSO."
       },
       "deleteError": "No se pudo eliminar la aplicación."
+    },
+    "apiKeys": {
+      "title": "Claves API",
+      "description": "Inventario de todas las claves API de usuarios y organizaciones. Inspecciona los alcances y el uso, rota o revoca una clave, o emite una en nombre de un usuario. Los secretos nunca se muestran aquí, solo al crear o rotar una clave.",
+      "newButton": "Emitir clave API",
+      "never": "Nunca",
+      "noExpiry": "Sin caducidad",
+      "scopeCount": "{count, plural, one {# alcance} other {# alcances}}",
+      "columns": {
+        "name": "Nombre",
+        "prefix": "Prefijo",
+        "owner": "Propietario",
+        "scopes": "Alcances",
+        "status": "Estado",
+        "lastUsed": "Último uso",
+        "expires": "Caduca",
+        "created": "Creada"
+      },
+      "filters": {
+        "search": "Buscar",
+        "searchPlaceholder": "Nombre, prefijo o correo del propietario",
+        "status": "Estado",
+        "any": "Cualquiera"
+      },
+      "status": {
+        "active": "Activa",
+        "revoked": "Revocada"
+      },
+      "actions": {
+        "view": "Ver",
+        "rotate": "Rotar",
+        "revoke": "Revocar"
+      },
+      "revokeError": "No se pudo revocar la clave.",
+      "rotateError": "No se pudo rotar la clave.",
+      "dialogs": {
+        "revoke": {
+          "title": "Revocar clave API",
+          "description": "Esto invalida la clave de forma inmediata y permanente. Cualquier cliente que la use empezará a recibir respuestas 401. Esta acción no se puede deshacer."
+        },
+        "rotate": {
+          "title": "Rotar clave API",
+          "description": "Se emite un nuevo secreto con el mismo propietario, alcances y caducidad, y se revoca la clave actual. Actualiza el cliente con el nuevo secreto; el anterior deja de funcionar de inmediato."
+        }
+      },
+      "reveal": {
+        "title": "Copia la clave ahora",
+        "description": "Esta es la única vez que se muestra el secreto completo. Guárdalo en un lugar seguro: no se puede recuperar de nuevo. Si lo pierdes, rota la clave.",
+        "copy": "Copiar",
+        "copied": "Copiado",
+        "done": "Listo"
+      },
+      "detail": {
+        "loading": "Cargando…",
+        "loadError": "No se pudo cargar la clave.",
+        "status": "Estado",
+        "owner": "Propietario",
+        "organization": "Organización",
+        "created": "Creada",
+        "createdBy": "Creada por",
+        "lastUsed": "Último uso",
+        "lastUsedIp": "IP del último uso",
+        "expires": "Caduca",
+        "revoked": "Revocada",
+        "revokedBy": "Revocada por",
+        "revokedReason": "Motivo de revocación",
+        "scopes": "Alcances",
+        "noScopes": "Sin alcances: esta clave no puede llamar a ningún endpoint con alcance."
+      },
+      "fields": {
+        "name": "Nombre",
+        "namePlaceholder": "p. ej. bot de despliegue de CI",
+        "owner": "Propietario (ID de usuario de la aplicación)",
+        "ownerHelp": "El usuario de la aplicación en cuyo nombre actúa la clave. Copia el ID desde la consola de Usuarios. La clave nunca puede exceder los permisos de ese usuario.",
+        "expiresInDays": "Caduca en (días)",
+        "expiresInDaysPlaceholder": "Déjalo vacío para que no caduque",
+        "expiresInDaysHelp": "Opcional. Tras estos días la clave deja de funcionar. Déjalo vacío para que no caduque nunca.",
+        "scopes": "Alcances",
+        "scopesHelp": "Selecciona los permisos que puede usar esta clave. Solo puedes conceder alcances que tenga el propietario; el resto se rechaza."
+      },
+      "new": {
+        "title": "Emitir clave API",
+        "description": "Crea una clave API en nombre de un usuario. El secreto se muestra una sola vez tras la creación.",
+        "submit": "Emitir clave",
+        "cancel": "Cancelar",
+        "errorToast": "No se pudo emitir la clave.",
+        "invalidOwnerId": "Introduce un ID de usuario de la aplicación válido (UUID).",
+        "ownerNotFound": "No se encontró ningún usuario con ese ID de usuario de la aplicación.",
+        "ownerInactive": "Ese usuario no está activo y no se le puede emitir una clave.",
+        "invalidScope": "El propietario no tiene estos alcances: {scopes}"
+      }
     },
     "audit": {
       "title": "Registro de auditoría",

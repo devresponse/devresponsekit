@@ -53,6 +53,11 @@ In scope:
 6. Audit log explorer.
 7. i18n via `next-intl`; locale switcher inherited from root shell.
 8. Strict permission gating per page and per action.
+9. API-key governance: a cross-user / cross-org inventory of
+   `app_api_keys` with full CRUD for administrators — issue a key on
+   behalf of a user, inspect scopes and usage, rotate, and revoke
+   (soft-delete). Secrets are surfaced exactly once at create/rotate and
+   never stored in clear (see §8.12).
 
 Out of scope (explicitly):
 
@@ -382,6 +387,10 @@ removed — see §20.1 #1.)
 | `/api/administrator/memberships` | GET | `admin.orgs.read` | Cross-org search. |
 | `/api/administrator/enterprise-apps` | GET, POST | `admin.apps.read/manage` | Manages `app_enterprise_applications`. |
 | `/api/administrator/enterprise-apps/[id]` | GET, PATCH, DELETE | `admin.apps.manage` | |
+| `/api/administrator/api-keys` | GET | `admin.apikeys.read` | Paginated read of `app_api_keys` joined to owner email. Filter on `status`, `app_user_id`, `organization_id`; `q` matches name/prefix/owner email. Never returns the secret or hash. |
+| `/api/administrator/api-keys` | POST | `admin.apikeys.manage` | Issues a key **on behalf of** a user. Requested scopes are validated against the **owner's** authority (`ungrantableScopes`), never the admin's. Returns the plaintext once. |
+| `/api/administrator/api-keys/[id]` | GET, DELETE | `admin.apikeys.read` / `admin.apikeys.manage` | GET resolves owner/creator/revoker emails. DELETE **revokes** (soft-delete: `status='revoked'` + actor/reason); idempotent, never hard-deletes (the row is the usage/audit trail). |
+| `/api/administrator/api-keys/[id]/rotate` | POST | `admin.apikeys.manage` | Atomically issues a new secret (same owner/scopes/expiry) and revokes the old key. Returns the new plaintext once. |
 | `/api/administrator/audit` | GET | `admin.audit.read` | Paginated read of `app_audit_events`. Supports range and filter on `event_type`, `outcome`, `actor`, `target`. |
 | `/api/administrator/email/outbox` | GET | `admin.email.read` | Paginated read of `app_outbox`. Filter on `status`, `template_key`. |
 | `/api/administrator/email/templates` | GET | `admin.email.read` | Full editable-template list (`app_email_templates`). |
@@ -683,6 +692,39 @@ Paginated grid over `app_audit_events`. Filters: event_type
 organization_id, target_application_id, date range. Each row opens a
 `Sheet` with the full JSON `metadata`, IP, user agent, reason. Read-only.
 
+### 8.12 API keys (`administrator/api-keys/page.tsx`)
+
+Governance console for `app_api_keys` across every user and
+organization. Complements the self-service `/api/v1/me/api-keys`
+surface (where a user manages their own keys) and the machine
+`/api/v1/admin/api-keys` read endpoint with a cookie-session,
+permission-gated **CRUD** UI.
+
+- **Read** — paginated `DataGrid` (columns: name, prefix, owner,
+  scope count, status, last-used, expires, created) with a status +
+  owner/search filter toolbar. Every row opens a `Sheet` showing the
+  resolved owner / creator / revoker, the full scope list, usage (last
+  used at / IP), and revoke metadata. The secret and hash are **never**
+  in list or detail payloads.
+- **Create** — `api-keys/new` issues a key on behalf of a user
+  (`admin.apikeys.manage`). The owner is identified by application user
+  id; scopes are picked from the catalog the server passes down and are
+  re-validated server-side against the **owner's** authority so an
+  admin-minted key can never out-scope the user who wields it. The
+  plaintext is revealed exactly once via a copy dialog.
+- **Update (rotate)** — re-issues the secret with the same owner,
+  scopes, and expiry and revokes the old key atomically. New plaintext
+  shown once.
+- **Delete (revoke)** — soft-delete: flips `status` to `revoked` and
+  stamps actor/reason. Idempotent; never hard-deletes, because the row
+  is the audit/usage trail and verification rejects revoked keys
+  immediately.
+
+Manage actions (create / rotate / revoke) are hidden for read-only
+admins (`admin.apikeys.read` without `admin.apikeys.manage`) and
+re-checked on every route. See [api-and-cli-guide.md](api-and-cli-guide.md)
+for the credential model these keys authenticate against.
+
 ---
 
 ## 9. shadcn/ui component mapping
@@ -763,6 +805,10 @@ runtime dependency introduced by this plan is **`@tanstack/react-table`**
   `outcome: "denied"`.
 - Impersonation start/stop and ban/unban produce additional events
   with elevated severity and are highlighted in the audit grid.
+- API-key governance emits `admin.api_key.created`,
+  `admin.api_key.revoked`, and `admin.api_key.rotated`. Metadata carries
+  the key id, owner, scopes, and display prefix only — **never** the
+  plaintext or hash.
 - A small client-side `<AdministratorErrorBoundary/>` reports unhandled
   render errors via `console.error` and a toast; server errors include
   a request id (`x-request-id` header echoed back in the JSON body) to

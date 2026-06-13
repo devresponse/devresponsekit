@@ -47,6 +47,10 @@ export const ADMIN_PERMISSION_CATALOG: ReadonlyArray<AdminPermissionDescriptor> 
   { key: "admin.audit.read", description: "Read the audit event log" },
   { key: "admin.email.read", description: "Read the email outbox and templates" },
   { key: "admin.email.manage", description: "Edit email templates and send test emails" },
+  { key: "admin.apikeys.read", description: "Read API keys across users and organizations" },
+  { key: "admin.apikeys.manage", description: "Revoke and manage any user's API keys" },
+  { key: "admin.clients.read", description: "Read OAuth client registrations" },
+  { key: "admin.clients.manage", description: "Create, rotate, and revoke OAuth clients" },
 ] as const;
 
 /**

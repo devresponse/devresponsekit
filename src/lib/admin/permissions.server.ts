@@ -10,6 +10,8 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { hasBearerCredential, resolveCaller, type CallerKind } from "@/lib/api-auth/resolve-caller.server";
+import { scopesAuthorize } from "@/lib/api-auth/scopes";
 
 /**
  * Result of a successful permission check. Callers receive the resolved
@@ -25,6 +27,12 @@ export interface AdminPermissionGrant {
   betterAuthUserId: string;
   access: UserAccessContext;
   requestId: string;
+  /** How the caller authenticated — cookie, API key, or JWT. */
+  callerKind: CallerKind;
+  /** api_key id / jwt jti when bearer-authenticated; null for cookies. */
+  credentialId: string | null;
+  /** Credential scopes (null for cookies = full user authority). */
+  grantedScopes: string[] | null;
 }
 
 /**
@@ -73,56 +81,74 @@ export async function requireAdminPermission(
   const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
   const requestId = getOrCreateRequestId(request);
 
-  // §14 — Origin/Referer defence-in-depth on unsafe methods. Performed
-  // BEFORE session resolution so an unauthenticated cross-origin probe
-  // cannot trigger a database round-trip.
-  const origin = checkTrustedOrigin(request as { method?: string; headers: Headers });
-  if (!origin.ok) {
-    await auditEvent({
-      eventType: "administrator.access.denied",
-      outcome: "denied",
-      reason: origin.reason ?? "untrusted_origin",
-      request,
-      requestId,
-      metadata: { required },
-    });
-    return {
-      response: adminErrorResponse("untrusted_origin", 403, request, { requestId }),
-    };
+  // §14 — Origin/Referer defence-in-depth on unsafe methods. CSRF only
+  // applies to AMBIENT credentials (cookies); a bearer token cannot be
+  // attached by an attacker's page, so the origin guard is skipped for
+  // bearer callers (design §10.3). Performed BEFORE caller resolution so
+  // an unauthenticated cross-origin cookie probe cannot trigger a DB
+  // round-trip.
+  if (!hasBearerCredential(request.headers)) {
+    const origin = checkTrustedOrigin(request as { method?: string; headers: Headers });
+    if (!origin.ok) {
+      await auditEvent({
+        eventType: "administrator.access.denied",
+        outcome: "denied",
+        reason: origin.reason ?? "untrusted_origin",
+        request,
+        requestId,
+        metadata: { required },
+      });
+      return {
+        response: adminErrorResponse("untrusted_origin", 403, request, { requestId }),
+      };
+    }
   }
 
-  const session = await getCurrentSession();
-  if (!session) {
+  const caller = await resolveCaller(request);
+  if (!caller) {
     return {
       response: adminErrorResponse("unauthenticated", 401, request, { requestId }),
     };
   }
 
-  const access = await getUserAccessContext(session.user.id);
-  const decision = decideSecureAccess(access.status, access.membershipStatus);
+  const decision = decideSecureAccess(caller.access.status, caller.access.membershipStatus);
   if (decision !== "allow") {
     return {
       response: adminErrorResponse("forbidden", 403, request, { requestId }),
     };
   }
 
-  const granted = required.some((perm) => access.permissions.includes(perm));
+  // The caller must hold the permission AND, for bearer credentials, the
+  // credential's scopes must authorize it (scopes ⊆ permissions — a key
+  // can never out-scope its owner; design §7).
+  const granted = required.some(
+    (perm) =>
+      caller.access.permissions.includes(perm) &&
+      scopesAuthorize(caller.grantedScopes, perm),
+  );
   if (!granted) {
     await auditEvent({
       eventType: "administrator.access.denied",
       outcome: "denied",
-      actorBetterAuthUserId: session.user.id,
+      actorBetterAuthUserId: caller.betterAuthUserId,
       reason: "missing_admin_permission",
       request,
       requestId,
-      metadata: { required },
+      metadata: { required, callerKind: caller.kind, credentialId: caller.credentialId },
     });
     return {
       response: adminErrorResponse("forbidden", 403, request, { requestId }),
     };
   }
 
-  return { betterAuthUserId: session.user.id, access, requestId };
+  return {
+    betterAuthUserId: caller.betterAuthUserId,
+    access: caller.access,
+    requestId,
+    callerKind: caller.kind,
+    credentialId: caller.credentialId,
+    grantedScopes: caller.grantedScopes,
+  };
 }
 
 /**
@@ -133,7 +159,9 @@ export async function requireAdminPermission(
  */
 export async function checkAdminPermissionServer(
   requiredPermission: string | string[],
-): Promise<Omit<AdminPermissionGrant, "requestId"> | "denied" | "unauthenticated"> {
+): Promise<
+  { betterAuthUserId: string; access: UserAccessContext } | "denied" | "unauthenticated"
+> {
   const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
 
   const session = await getCurrentSession();

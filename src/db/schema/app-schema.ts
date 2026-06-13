@@ -185,6 +185,54 @@ export interface AppUserLocalePreferencesTable {
   updated_at: Generated<Timestamp>;
 }
 
+/**
+ * Machine API keys (design docs/design-api-keys-and-tokens.md §4). Only a
+ * SHA-256 hash of the plaintext is stored; the key borrows its owner's
+ * authority intersected with `scopes`.
+ */
+export interface AppApiKeysTable {
+  id: Generated<string>;
+  app_user_id: string;
+  organization_id: string | null;
+  name: string;
+  key_prefix: string;
+  key_hash: string;
+  scopes: ColumnType<string[], string[] | undefined, string[]>;
+  status: ColumnType<string, string | undefined, string>;
+  expires_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  last_used_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  last_used_ip: ColumnType<string | null, string | null | undefined, string | null>;
+  created_by: string | null;
+  created_at: Generated<Timestamp>;
+  revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
+  revoked_reason: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/** OAuth2 client-credentials principals (named machine identities). */
+export interface AppOauthClientsTable {
+  id: Generated<string>;
+  client_id: string;
+  client_secret_hash: string;
+  app_user_id: string;
+  organization_id: string | null;
+  name: string;
+  scopes: ColumnType<string[], string[] | undefined, string[]>;
+  status: ColumnType<string, string | undefined, string>;
+  created_at: Generated<Timestamp>;
+  created_by: string | null;
+  revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/** Revocation list for stateless JWT access tokens killed before `exp`. */
+export interface AppRevokedTokensTable {
+  jti: string;
+  expires_at: Timestamp;
+  revoked_at: Generated<Timestamp>;
+  reason: string | null;
+}
+
 export interface AppDatabase {
   app_organizations: AppOrganizationsTable;
   app_provider_organizations: AppProviderOrganizationsTable;
@@ -200,6 +248,9 @@ export interface AppDatabase {
   app_email_templates: AppEmailTemplatesTable;
   app_outbox: AppOutboxTable;
   app_user_locale_preferences: AppUserLocalePreferencesTable;
+  app_api_keys: AppApiKeysTable;
+  app_oauth_clients: AppOauthClientsTable;
+  app_revoked_tokens: AppRevokedTokensTable;
   session: BetterAuthSessionTable;
   user: BetterAuthUserTable;
 }

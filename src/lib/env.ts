@@ -64,6 +64,33 @@ const serverEnvSchema = z
       .string()
       .optional()
       .transform((value) => value === "1" || value === "true"),
+    /* ----------------------------------------------------------------- */
+    /*  Machine credentials (design docs/design-api-keys-and-tokens.md)  */
+    /* ----------------------------------------------------------------- */
+    /** Master switch for the API-key credential path. */
+    API_KEYS_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
+    /** Stamped into the key prefix: `drk_<tag>_…`. */
+    API_KEY_ENV_TAG: z.enum(["live", "test"]).default("live"),
+    /** Default key lifetime in days; unset = no default expiry (UI warns). */
+    API_KEY_DEFAULT_TTL_DAYS: z.coerce.number().int().positive().optional(),
+    /** Master switch for JWT access tokens + JWKS. */
+    API_JWT_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
+    /** JWT `iss`; defaults to BETTER_AUTH_URL when unset. */
+    API_JWT_ISSUER: z.string().optional(),
+    /** JWT `aud`. */
+    API_JWT_AUDIENCE: z.string().default("devresponse-api"),
+    /** Ed25519 private key as a JSON-encoded JWK (contains `d`). */
+    API_JWT_PRIVATE_KEY: z.string().optional(),
+    /** Optional explicit key id; defaults to the JWK thumbprint. */
+    API_JWT_KID: z.string().optional(),
+    /** Access-token lifetime in seconds (≤ 1 hour). */
+    API_JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(900),
     SEED_ADMIN_EMAIL: z.string().email().optional(),
     SEED_ADMIN_PASSWORD: z.string().optional(),
     SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),
@@ -79,6 +106,15 @@ const serverEnvSchema = z
     }
     if (env.EMAIL_PROVIDER === "mailgun" && !env.MAILGUN_DOMAIN) {
       ctx.addIssue({ code: "custom", path: ["MAILGUN_DOMAIN"], message: "required for mailgun" });
+    }
+    // JWT access tokens require a signing key (and issuer) to be present
+    // at boot rather than failing on the first token mint.
+    if (env.API_JWT_ENABLED && !env.API_JWT_PRIVATE_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_JWT_PRIVATE_KEY"],
+        message: "required when API_JWT_ENABLED",
+      });
     }
   });
 

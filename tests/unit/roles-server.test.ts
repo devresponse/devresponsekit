@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as RolesServerModule from "@/lib/admin/roles.server";
 
 /**
  * Residual coverage for roles.server — the DELETE/edit guards that protect
@@ -32,7 +33,8 @@ vi.mock("@/db/database", () => ({
                     : table === "app_role_permissions"
                       ? state.permUseCount
                       : undefined;
-            if (prop === "execute") return async () => (table === "app_role_permissions" ? state.permRows : []);
+            if (prop === "execute")
+              return async () => (table === "app_role_permissions" ? state.permRows : []);
             // Chain methods return the SAME proxy so the terminal call routes here.
             return () => proxy;
           },
@@ -43,10 +45,17 @@ vi.mock("@/db/database", () => ({
   },
 }));
 
-let M: typeof import("@/lib/admin/roles.server");
+let M: typeof RolesServerModule;
 
 beforeEach(async () => {
-  state.role = { id: "r1", organization_id: "o1", key: "editor", name: "Editor", description: null, created_at: "2026-01-01" };
+  state.role = {
+    id: "r1",
+    organization_id: "o1",
+    key: "editor",
+    name: "Editor",
+    description: null,
+    created_at: "2026-01-01",
+  };
   state.userRolesCount = { count: "0" };
   state.permUseCount = { count: "0" };
   state.permRows = [{ key: "admin.users.read" }];
@@ -70,7 +79,9 @@ describe("assertPermissionNotInUse", () => {
   });
   it("throws permission_in_use when a role still references it", async () => {
     state.permUseCount = { count: "2" };
-    await expect(M.assertPermissionNotInUse("p1")).rejects.toMatchObject({ code: "permission_in_use" });
+    await expect(M.assertPermissionNotInUse("p1")).rejects.toMatchObject({
+      code: "permission_in_use",
+    });
   });
 });
 
@@ -82,6 +93,11 @@ describe("loadRoleOrThrow", () => {
   it("returns the role with its permission keys and member count", async () => {
     state.userRolesCount = { count: "5" };
     const role = await M.loadRoleOrThrow("r1");
-    expect(role).toMatchObject({ id: "r1", key: "editor", permissionKeys: ["admin.users.read"], memberCount: 5 });
+    expect(role).toMatchObject({
+      id: "r1",
+      key: "editor",
+      permissionKeys: ["admin.users.read"],
+      memberCount: 5,
+    });
   });
 });

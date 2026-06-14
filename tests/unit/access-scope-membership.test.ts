@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 
 /**
  * Closes the residual branch coverage on access-scope.server: the async,
@@ -26,7 +27,7 @@ vi.mock("@/db/database", () => ({
   },
 }));
 
-let M: typeof import("@/lib/admin/access-scope.server");
+let M: typeof AccessScopeModule;
 
 beforeEach(async () => {
   takeFirst.mockReset();

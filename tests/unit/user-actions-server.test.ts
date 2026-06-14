@@ -46,7 +46,12 @@ vi.mock("@/db/database", () => {
 
 let executeBulkUserAction: typeof Mod.executeBulkUserAction;
 
-const target = { appUserId: "u1", betterAuthUserId: "ba1", primaryEmail: "u@x.com", status: "active" };
+const target = {
+  appUserId: "u1",
+  betterAuthUserId: "ba1",
+  primaryEmail: "u@x.com",
+  status: "active",
+};
 const actor = { betterAuthUserId: "admin", request: { headers: new Headers() } };
 
 beforeEach(async () => {
@@ -65,13 +70,16 @@ describe("status actions", () => {
     ["block", "blocked", "admin.user.blocked"],
     ["suspend", "suspended", "admin.user.suspended"],
     ["reactivate", "active", "admin.user.reactivated"],
-  ] as const)("%s routes to performAdminStatusChange with the right status", async (action, newStatus, eventType) => {
-    const out = await executeBulkUserAction(action, target, actor);
-    expect(out).toEqual({ ok: true, appUserId: "u1" });
-    expect(performStatusChange).toHaveBeenCalledWith(
-      expect.objectContaining({ newStatus, eventType, targetAppUserId: "u1" }),
-    );
-  });
+  ] as const)(
+    "%s routes to performAdminStatusChange with the right status",
+    async (action, newStatus, eventType) => {
+      const out = await executeBulkUserAction(action, target, actor);
+      expect(out).toEqual({ ok: true, appUserId: "u1" });
+      expect(performStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({ newStatus, eventType, targetAppUserId: "u1" }),
+      );
+    },
+  );
 
   it("propagates a status-change failure as a structured outcome", async () => {
     performStatusChange.mockResolvedValue({ ok: false, error: "user_not_found" });
@@ -88,7 +96,10 @@ describe("ban / unban", () => {
   });
 
   it("ban forwards the reason + expiry to Better Auth and audits success", async () => {
-    const out = await executeBulkUserAction("ban", target, actor, { reason: "abuse", expiresInSeconds: 3600 });
+    const out = await executeBulkUserAction("ban", target, actor, {
+      reason: "abuse",
+      expiresInSeconds: 3600,
+    });
     expect(out).toEqual({ ok: true, appUserId: "u1" });
     expect(banMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "ba1", banReason: "abuse", banExpiresIn: 3600 }),

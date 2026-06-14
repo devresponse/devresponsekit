@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import type * as Route from "@/app/api/v1/users/[id]/status/route";
 
 /**
  * POST /api/v1/users/[id]/status — REST status adapter (was 0%).
@@ -36,7 +37,11 @@ vi.mock("@/db/database", () => {
         get(_t, prop) {
           if (prop === "executeTakeFirst")
             return async () =>
-              table === "app_users" ? state.current : table === "app_organization_memberships" ? state.membership : undefined;
+              table === "app_users"
+                ? state.current
+                : table === "app_organization_memberships"
+                  ? state.membership
+                  : undefined;
           if (prop === "execute") return async () => [];
           return () => chain(table);
         },
@@ -69,19 +74,25 @@ function grant(opts: { permissions: string[]; organizationId: string | null }) {
     grant: {
       caller: {
         betterAuthUserId: "ba1",
-        access: { permissions: opts.permissions, organizationId: opts.organizationId, appUserId: "admin-1" },
+        access: {
+          permissions: opts.permissions,
+          organizationId: opts.organizationId,
+          appUserId: "admin-1",
+        },
       },
       requestId: "r1",
     },
   };
 }
 const orgAdmin = () => grant({ permissions: ["admin.users.manage"], organizationId: "o1" });
-const superadmin = () => grant({ permissions: ["admin.users.manage", "superuser"], organizationId: null });
+const superadmin = () =>
+  grant({ permissions: ["admin.users.manage", "superuser"], organizationId: null });
 
-let POST: typeof import("@/app/api/v1/users/[id]/status/route").POST;
+let POST: typeof Route.POST;
 
 beforeEach(async () => {
-  for (const m of [requireApiPermission, enforceApiRateLimit, performAdminStatusChange]) m.mockReset();
+  for (const m of [requireApiPermission, enforceApiRateLimit, performAdminStatusChange])
+    m.mockReset();
   enforceApiRateLimit.mockReturnValue(null);
   performAdminStatusChange.mockResolvedValue({ ok: true, status: "suspended" });
   state.current = { id: USER, updated_at: UPDATED };
@@ -93,7 +104,10 @@ afterEach(() => vi.resetModules());
 describe("POST /api/v1/users/[id]/status", () => {
   it("returns the guard response when denied", async () => {
     const { NextResponse } = await import("next/server");
-    requireApiPermission.mockResolvedValue({ ok: false, response: NextResponse.json({}, { status: 401 }) });
+    requireApiPermission.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({}, { status: 401 }),
+    });
     expect((await POST(req(USER), ctx(USER))).status).toBe(401);
   });
 

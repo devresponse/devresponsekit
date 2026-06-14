@@ -42,18 +42,24 @@ describe("body + method routing", () => {
   it("createBetterAuthUser → createUser (name defaults to email)", async () => {
     await M.createBetterAuthUser({ email: "a@x.com", password: "pw", role: "admin" }, actor);
     expect(api.createUser).toHaveBeenCalledWith(
-      expect.objectContaining({ body: expect.objectContaining({ email: "a@x.com", name: "a@x.com", role: "admin" }) }),
+      expect.objectContaining({
+        body: expect.objectContaining({ email: "a@x.com", name: "a@x.com", role: "admin" }),
+      }),
     );
   });
 
   it("updateBetterAuthUser → updateUser", async () => {
     await M.updateBetterAuthUser({ userId: "u1", data: { name: "N" } }, actor);
-    expect(api.updateUser).toHaveBeenCalledWith(expect.objectContaining({ body: { userId: "u1", data: { name: "N" } } }));
+    expect(api.updateUser).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { userId: "u1", data: { name: "N" } } }),
+    );
   });
 
   it("setBetterAuthUserRole → setRole", async () => {
     await M.setBetterAuthUserRole({ userId: "u1", role: "user" }, actor);
-    expect(api.setRole).toHaveBeenCalledWith(expect.objectContaining({ body: { userId: "u1", role: "user" } }));
+    expect(api.setRole).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { userId: "u1", role: "user" } }),
+    );
   });
 
   it("setBetterAuthUserPassword → setUserPassword", async () => {
@@ -79,15 +85,23 @@ describe("body + method routing", () => {
     await M.listBetterAuthUserSessions("u1", actor);
     await M.revokeBetterAuthUserSession("tok", actor);
     await M.revokeAllBetterAuthUserSessions("u1", actor);
-    expect(api.listUserSessions).toHaveBeenCalledWith(expect.objectContaining({ body: { userId: "u1" } }));
-    expect(api.revokeUserSession).toHaveBeenCalledWith(expect.objectContaining({ body: { sessionToken: "tok" } }));
-    expect(api.revokeUserSessions).toHaveBeenCalledWith(expect.objectContaining({ body: { userId: "u1" } }));
+    expect(api.listUserSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { userId: "u1" } }),
+    );
+    expect(api.revokeUserSession).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { sessionToken: "tok" } }),
+    );
+    expect(api.revokeUserSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { userId: "u1" } }),
+    );
   });
 
   it("impersonation wrappers route to impersonateUser / stopImpersonating", async () => {
     await M.impersonateBetterAuthUser("u1", actor);
     await M.stopBetterAuthImpersonating(actor);
-    expect(api.impersonateUser).toHaveBeenCalledWith(expect.objectContaining({ body: { userId: "u1" } }));
+    expect(api.impersonateUser).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { userId: "u1" } }),
+    );
     expect(api.stopImpersonating).toHaveBeenCalled();
   });
 

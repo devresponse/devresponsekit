@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import type * as Route from "@/app/api/v1/me/api-keys/route";
 
 /**
  * /api/v1/me/api-keys — self-service key issuance (was 0% covered).
@@ -47,8 +48,8 @@ function actor(opts: { permissions: string[]; grantedScopes: string[] | null }) 
   };
 }
 
-let GET: typeof import("@/app/api/v1/me/api-keys/route").GET;
-let POST: typeof import("@/app/api/v1/me/api-keys/route").POST;
+let GET: typeof Route.GET;
+let POST: typeof Route.POST;
 
 beforeEach(async () => {
   for (const m of [requireAccountUser, listApiKeysForUser, createApiKey, auditEvent]) m.mockReset();
@@ -68,12 +69,17 @@ afterEach(() => vi.resetModules());
 describe("GET /api/v1/me/api-keys", () => {
   it("returns the guard's response when denied", async () => {
     const { NextResponse } = await import("next/server");
-    requireAccountUser.mockResolvedValue({ ok: false, response: NextResponse.json({}, { status: 401 }) });
+    requireAccountUser.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({}, { status: 401 }),
+    });
     expect((await GET(req())).status).toBe(401);
   });
 
   it("lists only the CALLER'S OWN keys (self-scoped by appUserId)", async () => {
-    requireAccountUser.mockResolvedValue(actor({ permissions: ["account.read"], grantedScopes: null }));
+    requireAccountUser.mockResolvedValue(
+      actor({ permissions: ["account.read"], grantedScopes: null }),
+    );
     const res = await GET(req());
     expect(res.status).toBe(200);
     expect(listApiKeysForUser).toHaveBeenCalledWith("u1");
@@ -82,14 +88,20 @@ describe("GET /api/v1/me/api-keys", () => {
 
 describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
   it("400 on an invalid body (strict schema)", async () => {
-    requireAccountUser.mockResolvedValue(actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }));
+    requireAccountUser.mockResolvedValue(
+      actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
+    );
     const res = await POST(req({ method: "POST", body: { name: "", scopes: [] } }));
     expect(res.status).toBe(400);
   });
 
   it("403 invalid_scope when a cookie caller requests an admin scope it does NOT hold", async () => {
-    requireAccountUser.mockResolvedValue(actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }));
-    const res = await POST(req({ method: "POST", body: { name: "k", scopes: ["admin.users.read"] } }));
+    requireAccountUser.mockResolvedValue(
+      actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
+    );
+    const res = await POST(
+      req({ method: "POST", body: { name: "k", scopes: ["admin.users.read"] } }),
+    );
     expect(res.status).toBe(403);
     expect(createApiKey).not.toHaveBeenCalled();
   });
@@ -98,15 +110,22 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
     // The calling credential only holds account.read; it cannot mint a key
     // that can manage api keys.
     requireAccountUser.mockResolvedValue(
-      actor({ permissions: ["account.apikeys.manage", "account.read"], grantedScopes: ["account.read"] }),
+      actor({
+        permissions: ["account.apikeys.manage", "account.read"],
+        grantedScopes: ["account.read"],
+      }),
     );
-    const res = await POST(req({ method: "POST", body: { name: "k", scopes: ["account.apikeys.manage"] } }));
+    const res = await POST(
+      req({ method: "POST", body: { name: "k", scopes: ["account.apikeys.manage"] } }),
+    );
     expect(res.status).toBe(403);
     expect(createApiKey).not.toHaveBeenCalled();
   });
 
   it("201 and returns the plaintext ONCE for a self-grantable account scope", async () => {
-    requireAccountUser.mockResolvedValue(actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }));
+    requireAccountUser.mockResolvedValue(
+      actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
+    );
     const res = await POST(req({ method: "POST", body: { name: "k", scopes: ["account.read"] } }));
     expect(res.status).toBe(201);
     const body = (await res.json()) as { key: string; id: string };

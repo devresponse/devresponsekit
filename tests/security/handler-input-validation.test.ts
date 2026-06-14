@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as UserTargetModule from "@/lib/admin/user-target.server";
 
 /**
  * Schema / input-validation hardening — the zod contracts that stand
@@ -30,9 +31,7 @@ vi.mock("@/lib/admin/audit-helpers.server", () => ({
   auditRoleAction: noop,
 }));
 vi.mock("@/lib/admin/user-target.server", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/admin/user-target.server")>(
-    "@/lib/admin/user-target.server",
-  );
+  const actual = await vi.importActual<typeof UserTargetModule>("@/lib/admin/user-target.server");
   return {
     ...actual, // keep the real isUuid
     resolveTargetUser: async () => ({
@@ -104,9 +103,12 @@ function jsonReq(url: string, body: unknown): NextRequest {
 const BASE = "http://test.local/api/administrator";
 const big = (n: number) => "a".repeat(n);
 
+// Route handlers have varying ctx types ((req) vs (req, { params })); a
+// permissive callable lets one table hold them all.
+type AnyHandler = (req: NextRequest, ctx?: unknown) => Promise<Response>;
 interface Handler {
   name: string;
-  load: () => Promise<(req: NextRequest, ctx?: unknown) => Promise<Response>>;
+  load: () => Promise<unknown>;
   url: string;
   ctx?: unknown;
   cases: Array<[string, unknown]>;
@@ -145,7 +147,8 @@ const HANDLERS: Handler[] = [
   },
   {
     name: "org members POST",
-    load: async () => (await import("@/app/api/administrator/organizations/[id]/members/route")).POST,
+    load: async () =>
+      (await import("@/app/api/administrator/organizations/[id]/members/route")).POST,
     url: `${BASE}/organizations/${ORG}/members`,
     ctx: { params: Promise.resolve({ id: ORG }) },
     cases: [
@@ -167,8 +170,7 @@ const HANDLERS: Handler[] = [
   },
   {
     name: "roles/[id]/permissions POST",
-    load: async () =>
-      (await import("@/app/api/administrator/roles/[id]/permissions/route")).POST,
+    load: async () => (await import("@/app/api/administrator/roles/[id]/permissions/route")).POST,
     url: `${BASE}/roles/${ROLE}/permissions`,
     ctx: { params: Promise.resolve({ id: ROLE }) },
     cases: [
@@ -192,7 +194,7 @@ describe("admin handler input validation (400 on malformed bodies)", () => {
     describe(h.name, () => {
       for (const [desc, body] of h.cases) {
         it(`rejects: ${desc}`, async () => {
-          const POST = await h.load();
+          const POST = (await h.load()) as AnyHandler;
           const res = await POST(jsonReq(h.url, body), h.ctx);
           expect(res.status).toBe(400);
         });

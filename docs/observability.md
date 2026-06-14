@@ -130,7 +130,14 @@ default:
   ([`sentry-shared.ts`](../src/lib/observability/sentry-shared.ts))
   strips request cookies, `Authorization`/`Cookie`/`x-api-key` headers,
   the query string (may carry tokens, emails, SSO handoff JWTs), and any
-  `user.email` / `ip_address` / `username`.
+  `user.email` / `ip_address` / `username`. It also **redacts emails and
+  token-like strings** (`drk_…` API keys, `drkc…` client secrets, JWTs)
+  from the event `message` and every `exception.value`, and scrubs
+  breadcrumb URLs/messages.
+- A `beforeBreadcrumb` hook applies the same scrub to every breadcrumb as
+  it is recorded — breadcrumbs are on by default and capture fetch URLs
+  (which can carry `returnTo`/emails), so this closes the largest leak
+  channel.
 - Session replay masks **all** text and inputs and blocks media, and
   records clean sessions at `0%` by default.
 - This mirrors the existing rule that secrets never reach logs

@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { parseSampleRate, scrubEvent } from "@/lib/observability/sentry-shared";
+import { parseSampleRate, scrubBreadcrumb, scrubEvent } from "@/lib/observability/sentry-shared";
 
 /**
  * Browser-side Sentry initialization (Next.js loads this file in the
@@ -44,6 +44,7 @@ Sentry.init({
   ],
   sendDefaultPii: false,
   beforeSend: scrubEvent,
+  beforeBreadcrumb: scrubBreadcrumb,
 });
 
 // Instruments App Router client-side navigations (Next.js calls this).

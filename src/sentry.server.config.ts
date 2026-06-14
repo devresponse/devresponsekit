@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { parseSampleRate, scrubEvent } from "@/lib/observability/sentry-shared";
+import { parseSampleRate, scrubBreadcrumb, scrubEvent } from "@/lib/observability/sentry-shared";
 
 /**
  * Sentry initialization for the Node.js server runtime. Imported lazily
@@ -25,4 +25,5 @@ Sentry.init({
   // Never attach cookies / IPs by default; the scrubber is the backstop.
   sendDefaultPii: false,
   beforeSend: scrubEvent,
+  beforeBreadcrumb: scrubBreadcrumb,
 });

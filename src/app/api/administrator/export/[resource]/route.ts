@@ -6,6 +6,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { parseListQuery, type FilterValue, type ListQuery } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { resolveOrgScope, type OrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 
 export const dynamic = "force-dynamic";
@@ -113,8 +114,11 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     fetchPage: (limit: number, offset: number) => Promise<unknown[][]>;
   };
   let firstPage: unknown[][];
+  // ADR-0001: confine the export to the caller's org. SUPERADMIN → all
+  // orgs; ORG ADMIN → their org only; no resolvable org → empty export.
+  const scope = resolveOrgScope(guard.access);
   try {
-    exporter = buildExporter(resource, query);
+    exporter = buildExporter(resource, query, scope);
     firstPage = await exporter.fetchPage(Math.min(PAGE_SIZE, MAX_EXPORT_ROWS), 0);
   } catch (err) {
     await auditEvent({
@@ -292,22 +296,22 @@ interface Exporter {
   fetchPage: (limit: number, offset: number) => Promise<unknown[][]>;
 }
 
-function buildExporter(resource: Resource, query: ListQuery): Exporter {
+function buildExporter(resource: Resource, query: ListQuery, scope: OrgScope | null): Exporter {
   switch (resource) {
     case "users":
-      return buildUsersExporter(query);
+      return buildUsersExporter(query, scope);
     case "audit":
-      return buildAuditExporter(query);
+      return buildAuditExporter(query, scope);
     case "organizations":
-      return buildOrganizationsExporter(query);
+      return buildOrganizationsExporter(query, scope);
     case "roles":
-      return buildRolesExporter(query);
+      return buildRolesExporter(query, scope);
     case "permissions":
-      return buildPermissionsExporter(query);
+      return buildPermissionsExporter(query, scope);
     case "memberships":
-      return buildMembershipsExporter(query);
+      return buildMembershipsExporter(query, scope);
     case "enterprise-apps":
-      return buildEnterpriseAppsExporter(query);
+      return buildEnterpriseAppsExporter(query, scope);
     default: {
       const exhaustive: never = resource;
       throw new Error(`unknown resource: ${String(exhaustive)}`);
@@ -323,7 +327,7 @@ const ALLOWED_USER_STATUSES = new Set([
   "deactivated",
 ]);
 
-function buildUsersExporter(query: ListQuery): Exporter {
+function buildUsersExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: [
       "id",
@@ -336,7 +340,20 @@ function buildUsersExporter(query: ListQuery): Exporter {
       "updated_at",
     ],
     fetchPage: async (limit, offset) => {
+      if (!scope) return [];
       let q = db.selectFrom("app_users");
+      if (scope.kind === "org") {
+        const orgId = scope.organizationId;
+        q = q.where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom("app_organization_memberships as m")
+              .select("m.id")
+              .whereRef("m.app_user_id", "=", "app_users.id")
+              .where("m.organization_id", "=", orgId),
+          ),
+        );
+      }
       const status = query.filters.status;
       if (typeof status === "string" && ALLOWED_USER_STATUSES.has(status)) {
         q = q.where("status", "=", status);
@@ -381,7 +398,7 @@ function buildUsersExporter(query: ListQuery): Exporter {
   };
 }
 
-function buildAuditExporter(query: ListQuery): Exporter {
+function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: [
       "id",
@@ -399,7 +416,9 @@ function buildAuditExporter(query: ListQuery): Exporter {
       "created_at",
     ],
     fetchPage: async (limit, offset) => {
+      if (!scope) return [];
       let q = db.selectFrom("app_audit_events as e");
+      if (scope.kind === "org") q = q.where("e.organization_id", "=", scope.organizationId);
       const eventType = query.filters.event_type;
       if (typeof eventType === "string") q = q.where("e.event_type", "=", eventType);
       const outcome = query.filters.outcome;
@@ -470,11 +489,13 @@ function buildAuditExporter(query: ListQuery): Exporter {
   };
 }
 
-function buildOrganizationsExporter(query: ListQuery): Exporter {
+function buildOrganizationsExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "slug", "name", "status", "is_default", "created_at", "updated_at"],
     fetchPage: async (limit, offset) => {
+      if (!scope) return [];
       let q = db.selectFrom("app_organizations");
+      if (scope.kind === "org") q = q.where("id", "=", scope.organizationId);
       const status = query.filters.status;
       if (typeof status === "string") q = q.where("status", "=", status);
       const isDefault = query.filters.is_default;
@@ -503,16 +524,20 @@ function buildOrganizationsExporter(query: ListQuery): Exporter {
   };
 }
 
-function buildRolesExporter(query: ListQuery): Exporter {
+function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "key", "name", "description", "organization_id", "created_at"],
     fetchPage: async (limit, offset) => {
+      if (!scope) return [];
       let q = db.selectFrom("app_roles");
+      // ADR-0001: an org admin exports only their org's roles (global
+      // roles are platform config, superadmin-only).
+      if (scope.kind === "org") q = q.where("organization_id", "=", scope.organizationId);
       const org = query.filters.organization;
       if (typeof org === "string") q = q.where("organization_id", "=", org);
-      const scope = query.filters.scope;
-      if (scope === "global") q = q.where("organization_id", "is", null);
-      else if (scope === "org") q = q.where("organization_id", "is not", null);
+      const scopeFilter = query.filters.scope;
+      if (scopeFilter === "global") q = q.where("organization_id", "is", null);
+      else if (scopeFilter === "org") q = q.where("organization_id", "is not", null);
       if (query.q) {
         const like = `%${query.q}%`;
         q = q.where((eb) => eb.or([eb("key", "ilike", like), eb("name", "ilike", like)]));
@@ -535,10 +560,14 @@ function buildRolesExporter(query: ListQuery): Exporter {
   };
 }
 
-function buildPermissionsExporter(query: ListQuery): Exporter {
+function buildPermissionsExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "key", "description"],
     fetchPage: async (limit, offset) => {
+      // The permission catalog is GLOBAL config (identical for every
+      // tenant), not tenant data — any admin may read it. Only the
+      // no-org edge case yields nothing.
+      if (!scope) return [];
       let q = db.selectFrom("app_permissions");
       if (query.q) {
         const like = `%${query.q}%`;
@@ -555,11 +584,13 @@ function buildPermissionsExporter(query: ListQuery): Exporter {
   };
 }
 
-function buildMembershipsExporter(query: ListQuery): Exporter {
+function buildMembershipsExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "app_user_id", "organization_id", "status", "source_provider", "created_at"],
     fetchPage: async (limit, offset) => {
+      if (!scope) return [];
       let q = db.selectFrom("app_organization_memberships as m");
+      if (scope.kind === "org") q = q.where("m.organization_id", "=", scope.organizationId);
       const status = query.filters.status;
       if (typeof status === "string") q = q.where("m.status", "=", status);
       const orgId = query.filters.organization_id;
@@ -591,7 +622,7 @@ function buildMembershipsExporter(query: ListQuery): Exporter {
   };
 }
 
-function buildEnterpriseAppsExporter(query: ListQuery): Exporter {
+function buildEnterpriseAppsExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: [
       "id",
@@ -605,7 +636,9 @@ function buildEnterpriseAppsExporter(query: ListQuery): Exporter {
       "created_at",
     ],
     fetchPage: async (limit, offset) => {
+      if (!scope) return [];
       let q = db.selectFrom("app_enterprise_applications as a");
+      if (scope.kind === "org") q = q.where("a.organization_id", "=", scope.organizationId);
       const status = query.filters.status;
       if (typeof status === "string") q = q.where("a.status", "=", status);
       const orgId = query.filters.organization_id;

@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { AdminError, assertPermissionNotInUse } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
@@ -29,6 +30,11 @@ const patchSchema = z
 export async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+  // ADR-0001: the permission catalog is platform-global; confine writes to
+  // SUPERADMIN even if an org admin holds `admin.permissions.manage`.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {
@@ -80,6 +86,11 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+  // ADR-0001: the permission catalog is platform-global; confine writes to
+  // SUPERADMIN even if an org admin holds `admin.permissions.manage`.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {

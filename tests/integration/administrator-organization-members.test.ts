@@ -124,6 +124,11 @@ let POST: typeof MembersRouteModule.POST;
 let PATCH: typeof MembersRouteModule.PATCH;
 let DELETE: typeof MembersRouteModule.DELETE;
 
+// These suites pin the handler CONTRACT (envelopes, machine codes), not
+// ADR-0001 tenant scoping (covered by the org-scoped-* suites). The actor
+// therefore holds the `superuser` marker so org scoping is bypassed and the
+// success paths are reachable. "Lacks permission" 403 tests stay valid:
+// `superuser` is never the specific permission a handler gates on.
 const OK_ACCESS = (perms: string[]) => ({
   appUserId: "u-1",
   primaryEmail: "admin@x.com",
@@ -131,7 +136,7 @@ const OK_ACCESS = (perms: string[]) => ({
   organizationId: null,
   membershipStatus: "active",
   preferredLocale: "en",
-  permissions: perms,
+  permissions: [...perms, "superuser"],
 });
 
 beforeEach(async () => {

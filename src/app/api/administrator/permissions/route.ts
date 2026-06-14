@@ -11,6 +11,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,12 @@ const createSchema = z
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+  // ADR-0001: the permission catalog is platform-global; mutating it
+  // affects every tenant. Confine writes to SUPERADMIN even if an org admin
+  // somehow holds `admin.permissions.manage`.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   let json: unknown;
   try {

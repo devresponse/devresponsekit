@@ -4,6 +4,7 @@ import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { sendAppEmail } from "@/lib/email/send.server";
 
@@ -29,6 +30,11 @@ const testSchema = z
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+  // ADR-0001: sending platform email is a platform-global action —
+  // SUPERADMIN-only.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   const limited = enforceRateLimit(
     "admin.email.test",

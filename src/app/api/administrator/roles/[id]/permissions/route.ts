@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, isSuperadmin, SUPERADMIN_PERMISSION } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -28,12 +29,12 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("invalid_id", 400, request);
   }
 
-  const roleExists = await db
+  const roleRow = await db
     .selectFrom("app_roles")
-    .select(["id"])
+    .select(["id", "organization_id"])
     .where("id", "=", id)
     .executeTakeFirst();
-  if (!roleExists) {
+  if (!roleRow || !canAccessOrg(guard.access, roleRow.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
   }
 
@@ -111,6 +112,16 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 
   const role = await loadRoleHeader(id);
   if (!role) return adminErrorResponse("not_found", 404, request);
+  // ADR-0001: confine an org admin to their org's roles (404 to avoid
+  // confirming a foreign/global role exists).
+  if (!canAccessOrg(guard.access, role.organization_id)) {
+    return adminErrorResponse("not_found", 404, request);
+  }
+  // Privilege-escalation guard: only a SUPERADMIN may attach the
+  // `superuser` marker (which would let the role mint superadmins).
+  if (!isSuperadmin(guard.access) && parsed.data.ids.includes(SUPERADMIN_PERMISSION)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   // Resolve key -> permission_id. Keys not in the catalog are dropped.
   const permRows = await db
@@ -178,6 +189,11 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
 
   const role = await loadRoleHeader(id);
   if (!role) return adminErrorResponse("not_found", 404, request);
+  // ADR-0001: confine an org admin to their org's roles (404 to avoid
+  // confirming a foreign/global role exists).
+  if (!canAccessOrg(guard.access, role.organization_id)) {
+    return adminErrorResponse("not_found", 404, request);
+  }
 
   const permRows = await db
     .selectFrom("app_permissions")

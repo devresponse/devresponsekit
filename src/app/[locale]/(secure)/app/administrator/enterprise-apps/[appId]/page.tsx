@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/db/database";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps.server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { EnterpriseAppSettingsForm } from "./_enterprise-app-settings-form";
 
@@ -51,6 +52,12 @@ export default async function AdministratorEnterpriseAppDetailPage({
     .where("a.id", "=", appId)
     .executeTakeFirst();
   if (!row) {
+    notFound();
+  }
+  // ADR-0001: an org admin may only view apps owned by their org; a global
+  // app (organization_id null) is SUPERADMIN-only. notFound() to preserve
+  // existence indistinguishability.
+  if (!canAccessOrg(guard.access, row.organization_id)) {
     notFound();
   }
 

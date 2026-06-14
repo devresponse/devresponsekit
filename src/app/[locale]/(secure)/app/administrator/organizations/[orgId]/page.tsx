@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { AdminError, loadOrgOrThrow } from "@/lib/admin/orgs.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { Badge } from "@/components/ui/badge";
@@ -46,6 +47,12 @@ export default async function AdministratorOrganizationDetailPage({
       notFound();
     }
     throw err;
+  }
+
+  // ADR-0001: an org admin may only view their own org. notFound() (not
+  // 403) preserves existence indistinguishability for foreign orgs.
+  if (!canAccessOrg(guard.access, org.id)) {
+    notFound();
   }
 
   const t = await getTranslations({ locale, namespace: "administrator.orgs" });

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { canAccessUser } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ImpersonateUserButton } from "./_impersonate-button";
@@ -60,6 +61,12 @@ export default async function AdministratorUserDetailPage({
     .executeTakeFirst();
 
   if (!user) {
+    notFound();
+  }
+
+  // ADR-0001: an org admin may only view a user who holds a membership in
+  // their org. notFound() (not 403) preserves existence indistinguishability.
+  if (!(await canAccessUser(guard.access, user.id))) {
     notFound();
   }
 

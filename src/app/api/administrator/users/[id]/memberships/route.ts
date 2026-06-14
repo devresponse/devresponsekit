@@ -11,6 +11,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
     .selectFrom("app_organization_memberships as m")
     .innerJoin("app_organizations as o", "o.id", "m.organization_id")
     .where("m.app_user_id", "=", target.appUserId);
+
+  // ADR-0001: an org admin sees only this user's memberships in their own
+  // org, never the user's footprint in other tenants. SUPERADMIN: all.
+  const scope = resolveOrgScope(guard.access);
+  if (scope?.kind === "org") {
+    base = base.where("m.organization_id", "=", scope.organizationId);
+  }
 
   const statusFilter = query.filters.status;
   if (typeof statusFilter === "string" && statusFilter.length > 0) {
@@ -132,6 +140,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .where("id", "=", input.organizationId)
     .executeTakeFirst();
   if (!org) {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
+  // ADR-0001: an org admin may only enroll a user into their OWN org.
+  if (!canAccessOrg(guard.access, input.organizationId)) {
     return adminErrorResponse("organization_not_found", 404, request);
   }
 
@@ -220,22 +232,30 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   const input = parsed.data;
 
-  const memberships = await db
+  let membershipQuery = db
     .selectFrom("app_organization_memberships as m")
     .innerJoin("app_organizations as o", "o.id", "m.organization_id")
     .select(["m.id", "m.organization_id", "o.slug"])
     .where("m.app_user_id", "=", target.appUserId)
-    .where("m.id", "in", input.membershipIds)
-    .execute();
+    .where("m.id", "in", input.membershipIds);
+  // ADR-0001: confine the mutation to memberships in the actor's org. A
+  // foreign-org membership id is simply not found (404), and only the
+  // resolved ids are mutated below — never the raw request list.
+  const mScope = resolveOrgScope(guard.access);
+  if (mScope?.kind === "org") {
+    membershipQuery = membershipQuery.where("m.organization_id", "=", mScope.organizationId);
+  }
+  const memberships = await membershipQuery.execute();
   if (memberships.length === 0) {
     return adminErrorResponse("membership_not_found", 404, request);
   }
+  const allowedMembershipIds = memberships.map((m) => m.id);
 
   await db
     .updateTable("app_organization_memberships")
     .set({ status: input.status })
     .where("app_user_id", "=", target.appUserId)
-    .where("id", "in", input.membershipIds)
+    .where("id", "in", allowedMembershipIds)
     .execute();
 
   const auditPromises = [
@@ -301,21 +321,29 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
   const input = parsed.data;
 
-  const memberships = await db
+  let membershipQuery = db
     .selectFrom("app_organization_memberships as m")
     .innerJoin("app_organizations as o", "o.id", "m.organization_id")
     .select(["m.id", "m.organization_id", "o.slug"])
     .where("m.app_user_id", "=", target.appUserId)
-    .where("m.id", "in", input.membershipIds)
-    .execute();
+    .where("m.id", "in", input.membershipIds);
+  // ADR-0001: confine the mutation to memberships in the actor's org. A
+  // foreign-org membership id is simply not found (404), and only the
+  // resolved ids are mutated below — never the raw request list.
+  const mScope = resolveOrgScope(guard.access);
+  if (mScope?.kind === "org") {
+    membershipQuery = membershipQuery.where("m.organization_id", "=", mScope.organizationId);
+  }
+  const memberships = await membershipQuery.execute();
   if (memberships.length === 0) {
     return adminErrorResponse("membership_not_found", 404, request);
   }
+  const allowedMembershipIds = memberships.map((m) => m.id);
 
   await db
     .deleteFrom("app_organization_memberships")
     .where("app_user_id", "=", target.appUserId)
-    .where("id", "in", input.membershipIds)
+    .where("id", "in", allowedMembershipIds)
     .execute();
 
   const auditPromises = [

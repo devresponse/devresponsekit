@@ -123,6 +123,10 @@ let GET_BY_ID: typeof AppByIdRouteModule.GET;
 let PATCH: typeof AppByIdRouteModule.PATCH;
 let DELETE: typeof AppByIdRouteModule.DELETE;
 
+// Contract suite: the actor holds the `superuser` marker so ADR-0001 org
+// scoping (covered separately) is bypassed and success paths are reachable.
+// "Lacks permission" 403 tests stay valid — `superuser` is never the gated
+// permission, and a global app (organization_id null) is SUPERADMIN-only.
 const OK_ACCESS = (perms: string[]) => ({
   appUserId: "u-1",
   primaryEmail: "admin@x.com",
@@ -130,7 +134,7 @@ const OK_ACCESS = (perms: string[]) => ({
   organizationId: null,
   membershipStatus: "active",
   preferredLocale: "en",
-  permissions: perms,
+  permissions: [...perms, "superuser"],
 });
 
 beforeEach(async () => {

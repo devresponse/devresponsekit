@@ -7,6 +7,8 @@ import {
   stopBetterAuthImpersonating,
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { getUserAccessContext } from "@/lib/auth-status";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
@@ -53,6 +55,28 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 
   if (target.betterAuthUserId === guard.betterAuthUserId) {
     return adminErrorResponse("cannot_impersonate_self", 400, request);
+  }
+
+  // Privilege-escalation guard: impersonation grants the actor the target's
+  // session. A non-superadmin actor must NOT borrow a session that carries
+  // any permission they don't already hold (e.g. an org admin assuming a
+  // SUPERADMIN, or a more-privileged peer). SUPERADMIN already holds every
+  // power, so the subset check is moot for them and is skipped.
+  if (!isSuperadmin(guard.access)) {
+    const targetAccess = await getUserAccessContext(target.betterAuthUserId);
+    const actorPermissions = new Set(guard.access.permissions);
+    const escalates = targetAccess.permissions.some((perm) => !actorPermissions.has(perm));
+    if (escalates) {
+      await auditUserAction("admin.user.impersonation_failed", "failure", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        reason: "privilege_escalation",
+        metadata: { targetBetterAuthUserId: target.betterAuthUserId },
+      });
+      return adminErrorResponse("forbidden", 403, request);
+    }
   }
 
   let result: unknown;

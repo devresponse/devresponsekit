@@ -192,6 +192,11 @@ create table if not exists app_email_templates (
 -- any delivery attempt. With no provider configured, rows stay `logged`.
 create table if not exists app_outbox (
   id uuid primary key default gen_random_uuid(),
+  -- Owning tenant (ADR-0001). Nullable: platform/system emails and
+  -- multi-org-ambiguous emails stay org-less and are SUPERADMIN-only to
+  -- read; an org-attributed row is readable by that org's admins. `on
+  -- delete set null` keeps the historical row if the org is removed.
+  organization_id uuid references app_organizations(id) on delete set null,
   template_key text,
   to_email text not null,
   from_email text not null,
@@ -256,6 +261,9 @@ create index if not exists idx_app_outbox_created_at_desc
   on app_outbox (created_at desc);
 create index if not exists idx_app_outbox_status
   on app_outbox (status);
+-- Org-scoped outbox reads (ADR-0001): an org admin filters to their org.
+create index if not exists idx_app_outbox_organization_id
+  on app_outbox (organization_id);
 
 -- ---------------------------------------------------------------------------
 -- Machine API credentials (design docs/design-api-keys-and-tokens.md §4):

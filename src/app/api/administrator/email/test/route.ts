@@ -4,7 +4,7 @@ import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { sendAppEmail } from "@/lib/email/send.server";
 
@@ -30,11 +30,14 @@ const testSchema = z
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
-  // ADR-0001: sending platform email is a platform-global action —
-  // SUPERADMIN-only.
-  if (!isSuperadmin(guard.access)) {
+  // ADR-0001: attribute the test email to the sender's tenant so it lands in
+  // their own org-scoped outbox view. An ORG ADMIN → their org; a SUPERADMIN
+  // → null (a platform/system test). A null scope cannot send.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
     return adminErrorResponse("forbidden", 403, request);
   }
+  const organizationId = scope.kind === "org" ? scope.organizationId : null;
 
   const limited = enforceRateLimit(
     "admin.email.test",
@@ -57,6 +60,7 @@ export async function POST(request: NextRequest) {
   const result = await sendAppEmail({
     to: parsed.data.to,
     templateKey: "test_email",
+    organizationId,
     variables: {
       appName: process.env.NEXT_PUBLIC_APP_NAME ?? "DevResponse",
       sentBy: guard.betterAuthUserId,

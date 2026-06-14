@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
     body_text: string | null;
   }>,
   userRow: undefined as { preferred_locale: string } | undefined,
+  membershipRows: [] as Array<{ organization_id: string }>,
   insertedValues: [] as Array<Record<string, unknown>>,
   updateSets: [] as Array<Record<string, unknown>>,
   provider: null as null | {
@@ -32,7 +33,11 @@ vi.mock("@/db/database", () => ({
       const chain = {
         select: () => chain,
         where: () => chain,
-        execute: async () => (table === "app_email_templates" ? state.templateRows : []),
+        execute: async () => {
+          if (table === "app_email_templates") return state.templateRows;
+          if (table === "app_organization_memberships") return state.membershipRows;
+          return [];
+        },
         executeTakeFirst: async () => (table === "app_users" ? state.userRow : undefined),
       };
       return chain;
@@ -69,6 +74,7 @@ let sendAppEmail: typeof SendModule.sendAppEmail;
 beforeEach(async () => {
   state.templateRows = [];
   state.userRow = undefined;
+  state.membershipRows = [];
   state.insertedValues = [];
   state.updateSets = [];
   state.provider = null;
@@ -190,5 +196,68 @@ describe("sendAppEmail", () => {
     await expect(
       sendAppEmail({ to: "user@example.com", templateKey: "nope", variables: {} }),
     ).rejects.toThrow(/Unknown email template key/);
+  });
+});
+
+/**
+ * ADR-0001 outbox tenant attribution. The org stamped on the outbox row is
+ * what later lets an ORG ADMIN read their own org's mail — so getting this
+ * resolution right is the whole point of the tenant column.
+ */
+describe("sendAppEmail — organization attribution", () => {
+  it("attributes the row to the related user's org when membership is unambiguous", async () => {
+    state.membershipRows = [{ organization_id: "org-a" }];
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: "Ada", resetUrl: "http://x" },
+      relatedBetterAuthUserId: "ba-1",
+    });
+    expect(state.insertedValues[0]).toMatchObject({ organization_id: "org-a" });
+  });
+
+  it("leaves the row org-less (SUPERADMIN-only) when the user belongs to multiple orgs", async () => {
+    state.membershipRows = [{ organization_id: "org-a" }, { organization_id: "org-b" }];
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: "Ada", resetUrl: "http://x" },
+      relatedBetterAuthUserId: "ba-1",
+    });
+    expect(state.insertedValues[0]!.organization_id).toBeNull();
+  });
+
+  it("leaves the row org-less when there is no related user to attribute it to", async () => {
+    state.membershipRows = [{ organization_id: "org-a" }]; // present, but unused
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "test_email",
+      variables: { appName: "App", sentBy: "ba-1" },
+    });
+    expect(state.insertedValues[0]!.organization_id).toBeNull();
+  });
+
+  it("honors an explicit organizationId over the related user's membership", async () => {
+    state.membershipRows = [{ organization_id: "org-a" }];
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "test_email",
+      variables: { appName: "App", sentBy: "ba-1" },
+      relatedBetterAuthUserId: "ba-1",
+      organizationId: "org-x",
+    });
+    expect(state.insertedValues[0]).toMatchObject({ organization_id: "org-x" });
+  });
+
+  it("honors an explicit null organizationId (forces a platform/system row)", async () => {
+    state.membershipRows = [{ organization_id: "org-a" }];
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "test_email",
+      variables: { appName: "App", sentBy: "ba-1" },
+      relatedBetterAuthUserId: "ba-1",
+      organizationId: null,
+    });
+    expect(state.insertedValues[0]!.organization_id).toBeNull();
   });
 });

@@ -94,9 +94,11 @@ function makeReq(path: string, init?: { method?: string; body?: unknown }): Next
   } as unknown as NextRequest;
 }
 
-// Email is a platform-global surface (templates + outbox have no tenant
-// column), so under ADR-0001 these routes are SUPERADMIN-only. The success
-// path actor therefore holds the `superuser` marker. "Lacks permission" 403
+// This is a CONTRACT suite (permission gates, envelopes, validation), not
+// the org-scoping suite — outbox tenant isolation lives in
+// `org-scoped-admin-routes.test.ts` and `email-send.test.ts`. The actor
+// holds `superuser` so a single access shape reaches every success path,
+// including the SUPERADMIN-only template WRITE (PUT). "Lacks permission" 403
 // tests stay valid — `superuser` is never the specific gated permission.
 const OK_ACCESS = (perms: string[]) => ({
   appUserId: "u-1",

@@ -760,6 +760,7 @@
         "createdAt": "Created",
         "sentAt": "Sent",
         "relatedUser": "Related user",
+        "organization": "Organization",
         "error": "Error",
         "bodyText": "Text body",
         "bodyHtml": "HTML body"

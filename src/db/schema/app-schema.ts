@@ -159,6 +159,13 @@ export interface AppEmailTemplatesTable {
  */
 export interface AppOutboxTable {
   id: Generated<string>;
+  /**
+   * Owning tenant (ADR-0001). Null when the email is platform/system-level
+   * or cannot be attributed to a single org (e.g. a user with memberships in
+   * more than one org) — such rows are visible to SUPERADMIN only. When set,
+   * an org admin of that org may read the row.
+   */
+  organization_id: ColumnType<string | null, string | null | undefined, string | null>;
   template_key: string | null;
   to_email: string;
   from_email: string;

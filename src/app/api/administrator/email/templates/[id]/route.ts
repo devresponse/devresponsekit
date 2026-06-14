@@ -23,10 +23,9 @@ const idSchema = z.uuid();
 export async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
-  // ADR-0001: email templates are platform-global config — SUPERADMIN-only.
-  if (!isSuperadmin(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
-  }
+  // The template catalog is platform-global config (no tenant column), so
+  // reading a single template is not a cross-tenant leak — any admin reader
+  // may load it into the editor. Saving (PUT) is SUPERADMIN-only.
 
   const { id } = await ctx.params;
   if (!idSchema.safeParse(id).success) {

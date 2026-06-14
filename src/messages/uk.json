@@ -760,6 +760,7 @@
         "createdAt": "Створено",
         "sentAt": "Надіслано",
         "relatedUser": "Пов'язаний користувач",
+        "organization": "Організація",
         "error": "Помилка",
         "bodyText": "Текстове тіло",
         "bodyHtml": "HTML-тіло"

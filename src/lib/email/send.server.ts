@@ -32,6 +32,14 @@ export interface SendAppEmailInput {
   locale?: string;
   /** Better Auth user id the email concerns, recorded on the outbox row. */
   relatedBetterAuthUserId?: string;
+  /**
+   * Owning tenant for outbox visibility (ADR-0001). When omitted, it is
+   * resolved from `relatedBetterAuthUserId`'s membership — a single
+   * membership org is used; none or multiple memberships → null (the row is
+   * then SUPERADMIN-only). Pass `null` explicitly to force a
+   * platform/system (org-less) row regardless of the related user.
+   */
+  organizationId?: string | null;
 }
 
 export interface SendAppEmailResult {
@@ -66,6 +74,33 @@ async function resolveTemplate(templateKey: string, locale: string): Promise<Res
   return { subject: fallback.subject, bodyHtml: fallback.bodyHtml, bodyText: fallback.bodyText };
 }
 
+/**
+ * Resolve the owning tenant for an outbound email (ADR-0001). An explicit
+ * `organizationId` (including `null`) always wins. Otherwise we attribute
+ * the mail to the related user's org IFF it is unambiguous: exactly one
+ * distinct membership org. Zero memberships, multiple orgs, or no related
+ * user all yield `null` — an org-less row that only SUPERADMIN can read,
+ * which fails safe (we never widen visibility on a guess).
+ */
+async function resolveOrganizationId(input: SendAppEmailInput): Promise<string | null> {
+  if (input.organizationId !== undefined) return input.organizationId;
+  if (!input.relatedBetterAuthUserId) return null;
+
+  const rows = await db
+    .selectFrom("app_organization_memberships")
+    .select("organization_id")
+    .where("app_user_id", "in", (eb) =>
+      eb
+        .selectFrom("app_users")
+        .select("id")
+        .where("better_auth_user_id", "=", input.relatedBetterAuthUserId!),
+    )
+    .execute();
+
+  const orgIds = [...new Set(rows.map((r) => r.organization_id))];
+  return orgIds.length === 1 ? orgIds[0]! : null;
+}
+
 async function resolveRecipientLocale(input: SendAppEmailInput): Promise<string> {
   if (input.locale && isSupportedLocale(input.locale)) return input.locale;
   if (input.relatedBetterAuthUserId) {
@@ -82,6 +117,7 @@ async function resolveRecipientLocale(input: SendAppEmailInput): Promise<string>
 export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEmailResult> {
   const env = getServerEnv();
   const locale = await resolveRecipientLocale(input);
+  const organizationId = await resolveOrganizationId(input);
   const template = await resolveTemplate(input.templateKey, locale);
 
   const subject = renderEmailTemplate(template.subject, input.variables, "text");
@@ -95,6 +131,7 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
   const inserted = await db
     .insertInto("app_outbox")
     .values({
+      organization_id: organizationId,
       template_key: input.templateKey,
       to_email: input.to,
       from_email: env.EMAIL_FROM,

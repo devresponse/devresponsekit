@@ -245,20 +245,37 @@ describe("P0-1 GET /export/[resource] — org-scoped exfil guard", () => {
   });
 });
 
-describe("GET /email/outbox — platform-global log is SUPERADMIN-only", () => {
+describe("GET /email/outbox — org-scoped after the tenant column was added", () => {
   const url = "http://test.local/api/administrator/email/outbox";
 
-  it("an org-admin-tier holder of admin.email.read gets 403 (no cross-tenant recipient leak)", async () => {
+  it("an ORG ADMIN now reads their own org's outbox (200, scoped to their org)", async () => {
     // The seeded `admin.platform` role holds admin.email.read WITHOUT the
-    // superuser marker — exactly this actor.
+    // superuser marker — exactly this actor. They are confined to ORG_A's
+    // rows by the WHERE clause; they no longer get a blanket 403.
     accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.email.read"]));
-    expect((await outboxGet(req(url))).status).toBe(403);
+    dbExecuteResult = [{ id: "o-1", organization_id: ORG_A, to_email: "u@org-a.com" }];
+    dbFirst.mockResolvedValue({ total: "1" });
+    const res = await outboxGet(req(url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items).toHaveLength(1);
   });
 
-  it("SUPERADMIN may read the outbox", async () => {
+  it("an admin with no resolvable org sees an EMPTY outbox, never 'all'", async () => {
+    accessGetter.mockResolvedValue(nullScopeAdmin(["admin.email.read"]));
+    dbExecuteResult = [{ id: "o-leak", organization_id: ORG_B, to_email: "u@org-b.com" }];
+    dbFirst.mockResolvedValue({ total: "1" });
+    const res = await outboxGet(req(url));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; total: number };
+    expect(body.items).toHaveLength(0);
+    expect(body.total).toBe(0);
+  });
+
+  it("SUPERADMIN reads every org's outbox (including org-less platform mail)", async () => {
     accessGetter.mockResolvedValue(superadmin(["admin.email.read"]));
-    dbExecuteResult = [];
-    dbFirst.mockResolvedValue({ total: "0" });
+    dbExecuteResult = [{ id: "o-1", organization_id: null, to_email: "sys@x.com" }];
+    dbFirst.mockResolvedValue({ total: "1" });
     expect((await outboxGet(req(url))).status).toBe(200);
   });
 });

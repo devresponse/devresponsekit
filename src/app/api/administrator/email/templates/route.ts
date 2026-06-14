@@ -2,8 +2,6 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
 
 export const dynamic = "force-dynamic";
 
@@ -15,16 +13,14 @@ export const dynamic = "force-dynamic";
  * returns the full set without pagination. Bodies are included so the
  * editor can load from the list response.
  *
- * Caller MUST hold `admin.email.read`.
+ * Caller MUST hold `admin.email.read`. The template catalog is platform-
+ * global config (identical for every tenant and has no organization column),
+ * so reading it is not a cross-tenant leak — any admin reader may view it.
+ * Editing a template (PUT [id]) affects every tenant and is SUPERADMIN-only.
  */
 export async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
-  // ADR-0001: email templates are platform-global config (no tenant column)
-  // — SUPERADMIN-only, like the permission catalog.
-  if (!isSuperadmin(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
-  }
 
   const items = await db
     .selectFrom("app_email_templates")

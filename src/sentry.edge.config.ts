@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { parseSampleRate, scrubEvent } from "@/lib/observability/sentry-shared";
+import { parseSampleRate, scrubBreadcrumb, scrubEvent } from "@/lib/observability/sentry-shared";
 
 /**
  * Sentry initialization for the Edge runtime (middleware/`proxy.ts` and
@@ -22,4 +22,5 @@ Sentry.init({
   tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, 0.1),
   sendDefaultPii: false,
   beforeSend: scrubEvent,
+  beforeBreadcrumb: scrubBreadcrumb,
 });

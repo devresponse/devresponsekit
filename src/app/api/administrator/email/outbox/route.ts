@@ -8,8 +8,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
-import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -27,21 +26,16 @@ export const dynamic = "force-dynamic";
  * `q` matches case-insensitively against `to_email`, `subject`, and
  * `template_key`.
  *
- * Caller MUST hold `admin.email.read`. Bodies are returned for the
- * detail view — they may embed one-time reset links, which is the same
- * exposure as any provider dashboard; access is admin-gated and the
- * links are single-use and short-lived.
+ * Caller MUST hold `admin.email.read`. ADR-0001: the result is org-scoped —
+ * a SUPERADMIN sees every org's mail (and platform/system org-less rows),
+ * an ORG ADMIN sees only their own org's rows, and an admin with no
+ * resolvable org sees nothing. Bodies are returned for the detail view —
+ * they may embed one-time reset links, the same exposure as any provider
+ * dashboard; the links are single-use and short-lived.
  */
 export async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
-  // ADR-0001: the outbox is a platform-wide email log with no tenant column
-  // — it exposes every org's recipient addresses and bodies. Confine it to
-  // SUPERADMIN even though the org-admin-tier `admin.platform` role holds
-  // `admin.email.read`.
-  if (!isSuperadmin(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
-  }
 
   const query = parseListQuery(request.nextUrl.searchParams, {
     allowedSortFields: ["created_at", "status", "to_email", "template_key"],
@@ -51,7 +45,20 @@ export async function GET(request: NextRequest) {
     maxPageSize: 200,
   });
 
-  let base = db.selectFrom("app_outbox as o");
+  let base = db
+    .selectFrom("app_outbox as o")
+    .leftJoin("app_organizations as org", "org.id", "o.organization_id");
+
+  // ADR-0001: confine the log to the caller's org. A SUPERADMIN reads all
+  // rows (including org-less platform mail); an ORG ADMIN reads only rows
+  // owned by their org; a null scope reads nothing, never "all".
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
+    return NextResponse.json(buildListResponse([], 0, query));
+  }
+  if (scope.kind === "org") {
+    base = base.where("o.organization_id", "=", scope.organizationId);
+  }
 
   const statusFilter = query.filters.status;
   if (typeof statusFilter === "string" && statusFilter.length > 0) {
@@ -77,6 +84,9 @@ export async function GET(request: NextRequest) {
   const itemsQuery = applySortAndPagination(
     base.select([
       "o.id",
+      "o.organization_id",
+      "org.slug as organization_slug",
+      "org.name as organization_name",
       "o.template_key",
       "o.to_email",
       "o.from_email",

@@ -27,6 +27,9 @@ import { useGridState } from "../_components/grid/use-grid-state";
  */
 interface OutboxRow {
   id: string;
+  organization_id: string | null;
+  organization_slug: string | null;
+  organization_name: string | null;
   template_key: string | null;
   to_email: string;
   from_email: string;
@@ -283,6 +286,9 @@ function OutboxDetail({
         <Field label={t("detail.createdAt")}>{row.created_at}</Field>
         <Field label={t("detail.sentAt")}>{row.sent_at ?? "—"}</Field>
         <Field label={t("detail.relatedUser")}>{row.related_better_auth_user_id ?? "—"}</Field>
+        <Field label={t("detail.organization")}>
+          {row.organization_name ?? row.organization_slug ?? "—"}
+        </Field>
         {row.error ? <Field label={t("detail.error")}>{row.error}</Field> : null}
       </dl>
       <div className="space-y-1">

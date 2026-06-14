@@ -760,6 +760,7 @@
         "createdAt": "Creado",
         "sentAt": "Enviado",
         "relatedUser": "Usuario relacionado",
+        "organization": "Organización",
         "error": "Error",
         "bodyText": "Cuerpo de texto",
         "bodyHtml": "Cuerpo HTML"

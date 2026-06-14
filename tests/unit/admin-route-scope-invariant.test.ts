@@ -39,7 +39,13 @@ const SCOPE_MARKERS = [
  * are independently confined to SUPERADMIN. Keep this list short.
  */
 const EXEMPT: Record<string, string> = {
-  // (currently empty — every administrator route references a scope marker)
+  // The email TEMPLATE catalog is platform-global config — identical for
+  // every tenant, with no organization column — so reading the list is not a
+  // cross-tenant leak. Editing a template (PUT under templates/[id]) affects
+  // all tenants and IS SUPERADMIN-gated there, so templates/[id] is NOT
+  // exempt; only this read-only list route is.
+  "administrator/email/templates/route.ts":
+    "platform-global template catalog (no tenant column); read-only list, edits are SUPERADMIN-gated in templates/[id]",
 };
 
 function walk(dir: string): string[] {

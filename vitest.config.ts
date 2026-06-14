@@ -108,21 +108,22 @@ export default defineConfig({
         "next-env.d.ts",
       ],
       // Coverage RATCHET. The §29.2 spec target (90/90/90/82) was never
-      // enforced — there was no CI — and the suite currently measures
-      // ~39% lines globally (the administrator client components and
-      // several route handlers dominate the uncovered set). A born-red
-      // gate enforces nothing, so the thresholds are pinned just below
-      // today's measured values: any regression fails CI, and the
-      // numbers MUST only ever be raised as coverage improves, until
-      // they reach the spec minimums. Per-file depth for the
-      // security-critical helpers (auth, account status, SSO, safe
-      // returnTo, provider org, menu authorization) comes from their
-      // dedicated suites.
+      // enforced — there was no CI — so the thresholds are pinned just
+      // below today's measured values: any regression fails CI, and the
+      // numbers MUST only ever be raised as coverage improves, until they
+      // reach the spec minimums. See docs/security-test-coverage-plan.md.
+      //
+      // Phase 1 of that plan (the cross-tenant isolation matrix across the
+      // tenancy/RBAC route handlers — export, app-roles, memberships,
+      // roles sub-resources, provider-bindings, permissions, bulk) lifted
+      // the global floor from 38/36 to the values below. Remaining phases
+      // (0%-coverage server helpers, the v1 machine-API surface, schema
+      // hardening) will raise it further.
       thresholds: {
-        lines: 38,
-        statements: 38,
-        functions: 34,
-        branches: 36,
+        lines: 49,
+        statements: 49,
+        functions: 44,
+        branches: 46,
       },
     },
   },

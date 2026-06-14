@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const { id } = await ctx.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   const row = await db
@@ -87,7 +87,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   if (limited) return limited;
 
   const { id } = await ctx.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   let json: unknown;
@@ -174,7 +174,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   if (limited) return limited;
 
   const { id } = await ctx.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   // Body is optional for DELETE — treat missing/empty as no reason.

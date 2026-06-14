@@ -9,6 +9,7 @@ import {
   type FilterValue,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,16 @@ export async function GET(request: NextRequest) {
     maxPageSize: 200,
   });
 
+  // Org boundary (ADR-0001): an org admin sees only their org's audit
+  // events (platform events with a null org are SUPERADMIN-only).
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return NextResponse.json(buildListResponse([], 0, query));
+
   let base = db.selectFrom("app_audit_events as e");
+
+  if (scope.kind === "org") {
+    base = base.where("e.organization_id", "=", scope.organizationId);
+  }
 
   const eventTypeFilter = query.filters.event_type;
   if (typeof eventTypeFilter === "string" && eventTypeFilter.length > 0) {

@@ -8,6 +8,7 @@ import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { buildListResponse, offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { createApiKey } from "@/lib/api-auth/api-keys.server";
 import { normalizeScopes, ungrantableScopes } from "@/lib/api-auth/scopes";
 import { getServerEnv } from "@/lib/env";
@@ -61,7 +62,17 @@ export async function GET(request: NextRequest) {
     maxPageSize: 200,
   });
 
+  // Org boundary (ADR-0001): SUPERADMIN sees every org; an ORG ADMIN is
+  // confined to their own org. A null scope (org admin with no org) lists
+  // nothing.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return NextResponse.json(buildListResponse([], 0, query));
+
   let base = db.selectFrom("app_api_keys as k").leftJoin("app_users as u", "u.id", "k.app_user_id");
+
+  if (scope.kind === "org") {
+    base = base.where("k.organization_id", "=", scope.organizationId);
+  }
 
   const statusFilter = query.filters.status;
   if (statusFilter === "active" || statusFilter === "revoked") {
@@ -176,6 +187,12 @@ export async function POST(request: NextRequest) {
   const ownerAccess = await getUserAccessContext(owner.better_auth_user_id);
   if (decideSecureAccess(ownerAccess.status, ownerAccess.membershipStatus) !== "allow") {
     return adminErrorResponse("owner_inactive", 409, request, { requestId: guard.requestId });
+  }
+
+  // ADR-0001: an org admin may only issue keys for a user in their own
+  // org. 404 (as "owner_not_found") avoids confirming the user exists.
+  if (!canAccessOrg(guard.access, ownerAccess.organizationId)) {
+    return adminErrorResponse("owner_not_found", 404, request, { requestId: guard.requestId });
   }
 
   const scopes = normalizeScopes(input.scopes);

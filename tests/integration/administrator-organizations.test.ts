@@ -130,6 +130,10 @@ let GET_BY_ID: typeof OrgByIdRouteModule.GET;
 let PATCH: typeof OrgByIdRouteModule.PATCH;
 let DELETE: typeof OrgByIdRouteModule.DELETE;
 
+// Predate the three-tier model; assert GLOBAL admin behavior == SUPERADMIN
+// now. Org-entity create/update/delete is superadmin-only (ADR-0001), so
+// the marker is required for the 201/200 paths. Denial tests still fail on
+// the missing specific permission.
 const OK_ACCESS = (perms: string[]) => ({
   appUserId: "u-1",
   primaryEmail: "admin@x.com",
@@ -137,7 +141,7 @@ const OK_ACCESS = (perms: string[]) => ({
   organizationId: null,
   membershipStatus: "active",
   preferredLocale: "en",
-  permissions: perms,
+  permissions: [...perms, "superuser"],
 });
 
 beforeEach(async () => {

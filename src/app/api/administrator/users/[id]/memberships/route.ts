@@ -32,7 +32,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const { id } = await context.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   const query = parseListQuery(request.nextUrl.searchParams, {
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const { id } = await context.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   let json: unknown;
@@ -205,7 +205,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const { id } = await context.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   let json: unknown;
@@ -286,7 +286,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const { id } = await context.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   let json: unknown;

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import { getApiKeyById, revokeApiKey } from "@/lib/api-auth/api-keys.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
@@ -28,7 +29,11 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   if (!isUuid(id)) return problemResponse("invalid_request", 400, request);
 
   const key = await getApiKeyById(id);
-  if (!key) return problemResponse("not_found", 404, request);
+  // ADR-0001: an org admin may only revoke keys in their own org. A 404
+  // (not 403) on another org's key avoids leaking its existence.
+  if (!key || !canAccessOrg(grant.caller.access, key.organization_id)) {
+    return problemResponse("not_found", 404, request);
+  }
 
   const revokerAppUserId = grant.caller.access.appUserId ?? key.app_user_id;
   const revoked = await revokeApiKey(id, revokerAppUserId, "admin_revoked");

@@ -7,6 +7,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { requireApiPermission } from "@/lib/api-auth/v1-guard.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,16 @@ export async function GET(request: NextRequest) {
     maxPageSize: 200,
   });
 
+  // Org boundary (ADR-0001): an org admin sees only their org's audit
+  // events (platform events with a null org are SUPERADMIN-only). A null
+  // scope (org admin with no org) sees nothing.
+  const scope = resolveOrgScope(guard.grant.caller.access);
+  if (!scope) {
+    return v1JsonResponse(buildListResponse([], 0, query), request);
+  }
+
   let base = db.selectFrom("app_audit_events");
+  if (scope.kind === "org") base = base.where("organization_id", "=", scope.organizationId);
   const eventType = query.filters.event_type;
   if (typeof eventType === "string") base = base.where("event_type", "=", eventType);
   const outcome = query.filters.outcome;

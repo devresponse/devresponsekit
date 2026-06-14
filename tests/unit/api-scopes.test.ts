@@ -72,4 +72,21 @@ describe("grantability (least privilege)", () => {
       ungrantableScopesForCaller(["admin.users.read"], null, ["admin.users.read", "account.read"]),
     ).toEqual([]);
   });
+
+  it("a wildcard is grantable only when the creator holds EVERY key under the prefix", () => {
+    const allAccount = [
+      "account.read",
+      "account.profile.write",
+      "account.preferences.write",
+      "account.apikeys.manage",
+    ];
+    // Holds all four account.* keys → may grant the account.* wildcard.
+    expect(ungrantableScopes(allAccount, ["account.*"])).toEqual([]);
+    // Missing some of the covered keys → the wildcard is NOT grantable.
+    expect(ungrantableScopes(["account.read"], ["account.*"])).toEqual(["account.*"]);
+  });
+
+  it("rejects a wildcard whose prefix covers no known scope", () => {
+    expect(ungrantableScopes(["admin.users.read"], ["zzz.nothing.*"])).toEqual(["zzz.nothing.*"]);
+  });
 });

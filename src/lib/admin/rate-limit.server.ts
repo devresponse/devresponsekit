@@ -1,6 +1,7 @@
 import "server-only";
 import type { NextRequest, NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { clientIpKey } from "@/lib/client-ip";
 
 /**
  * In-memory token-bucket rate limiter for Administrator mutation
@@ -196,11 +197,11 @@ export function enforceRateLimit(
 /**
  * Convenience: derive a stable actor identifier for the limiter when
  * a `requireAdminPermission` grant isn't yet available — falls back to
- * the request's first `x-forwarded-for` IP, then to a constant. Only
- * used by callers that need to throttle pre-auth (e.g. open list
- * endpoints); admin mutations should always rate-limit by actor id.
+ * the trusted client IP (P2-4: a proxy hop, not the spoofable leftmost
+ * `x-forwarded-for`), then to a constant. Only used by callers that need
+ * to throttle pre-auth (e.g. open list endpoints); admin mutations should
+ * always rate-limit by actor id.
  */
 export function actorIdFromRequest(request: NextRequest | { headers: Headers }): string {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return ip && ip.length > 0 ? `ip:${ip}` : "anon";
+  return clientIpKey(request.headers);
 }

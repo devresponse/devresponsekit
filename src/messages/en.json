@@ -241,7 +241,8 @@
         "stopToast": "Returned to your own session.",
         "errorToast": "Could not start impersonation.",
         "selfError": "You cannot impersonate yourself.",
-        "bannerLabel": "You are impersonating {email}."
+        "bannerLabel": "You are impersonating {email}.",
+        "stopErrorToast": "Could not stop impersonating. Try again."
       },
       "dialogs": {
         "ban": {
@@ -327,7 +328,8 @@
       "invalidOrigin": "Origin must be an HTTPS URL with no path.",
       "applicationInUse": "This application is still referenced and cannot be deleted.",
       "rateLimited": "Too many requests. Try again in a moment.",
-      "exportTruncated": "Export hit the maximum row cap. Refine the filters and re-export to get the rest."
+      "exportTruncated": "Export hit the maximum row cap. Refine the filters and re-export to get the rest.",
+      "originNotAllowed": "Origin host is not in the allowed list for SSO redirects."
     },
     "roles": {
       "title": "Roles",

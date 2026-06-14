@@ -24,32 +24,52 @@ const FALLBACK_ID = "00000000-0000-0000-0000-000000000000";
 export function StopImpersonationButton({
   targetAppUserId,
   label,
+  errorLabel,
 }: {
   targetAppUserId: string | null;
   label: string;
+  errorLabel: string;
 }) {
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const onClick = async () => {
     if (busy) return;
     setBusy(true);
+    setFailed(false);
     try {
       const id = targetAppUserId ?? FALLBACK_ID;
-      await fetch(`/api/administrator/users/${encodeURIComponent(id)}/impersonate`, {
+      const res = await fetch(`/api/administrator/users/${encodeURIComponent(id)}/impersonate`, {
         method: "DELETE",
         credentials: "same-origin",
       });
-    } finally {
-      // Reload regardless of the response — even on a partial failure
-      // the safer UX is to drop back to the original session view and
-      // surface any error there.
-      window.location.assign("/");
+      // P2-1: only treat a 2xx as success. The route returns its error
+      // status BEFORE clearing the impersonation cookie, so on failure the
+      // session is STILL impersonated — navigating home would silently
+      // strand the admin in the impersonated view. Surface the error and
+      // let them retry instead.
+      if (res.ok) {
+        window.location.assign("/");
+        return;
+      }
+      setFailed(true);
+      setBusy(false);
+    } catch {
+      setFailed(true);
+      setBusy(false);
     }
   };
 
   return (
-    <Button type="button" size="sm" variant="outline" onClick={onClick} disabled={busy}>
-      {label}
-    </Button>
+    <span className="flex items-center gap-2">
+      {failed ? (
+        <span className="text-destructive text-xs" role="alert">
+          {errorLabel}
+        </span>
+      ) : null}
+      <Button type="button" size="sm" variant="outline" onClick={onClick} disabled={busy}>
+        {label}
+      </Button>
+    </span>
   );
 }

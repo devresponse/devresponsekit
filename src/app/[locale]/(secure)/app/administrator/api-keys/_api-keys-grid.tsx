@@ -19,7 +19,7 @@ import {
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
 import { useGridState } from "../_components/grid/use-grid-state";
-import { ApiKeyRevealDialog } from "./_api-key-reveal";
+import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
 
 /**
  * Client-side API-key governance grid (docs/admin-manager.md §8.12).
@@ -111,9 +111,10 @@ export function AdministratorApiKeysGrid({
         setRowError(t("rotateError"));
         return;
       }
-      const body = (await res.json()) as { key: string };
+      const body = (await res.json().catch(() => null)) as { key?: string } | null;
       setReloadKey((k) => k + 1);
-      setRevealed(body.key);
+      if (body?.key) setRevealed(body.key);
+      else setRowError(t("rotateError"));
     },
     [dialogs, t],
   );
@@ -259,7 +260,11 @@ export function AdministratorApiKeysGrid({
           ) : null}
         </SheetContent>
       </Sheet>
-      <ApiKeyRevealDialog secret={revealed} onClose={() => setRevealed(null)} />
+      <ApiKeyRevealDialog
+        secret={revealed}
+        onClose={() => setRevealed(null)}
+        namespace="administrator.apiKeys.reveal"
+      />
     </div>
   );
 }

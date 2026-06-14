@@ -26,6 +26,9 @@ process.env.SSO_HANDOFF_ISSUER ??= "https://test.devresponse.local";
 process.env.SSO_HANDOFF_AUDIENCE_PREFIX ??= "devresponse-app";
 process.env.SSO_HANDOFF_JWT_SECRET ??= "test-sso-secret-test-sso-secret";
 process.env.SSO_HANDOFF_TTL_SECONDS ??= "60";
+// P2-5: enterprise-app origin allow-list. The integration tests register
+// apps under example.com / devresponse.* origins.
+process.env.SSO_ALLOWED_ORIGIN_SUFFIXES ??= "example.com,devresponse.com,devresponse.local";
 
 // jsdom does not implement `window.matchMedia`, which `useIsMobile`
 // (and therefore the sidebar components) call during render. Stub a

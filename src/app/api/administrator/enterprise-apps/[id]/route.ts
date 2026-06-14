@@ -9,6 +9,7 @@ import {
   APP_STATUS_VALUES,
   SSO_AUDIENCE_RE,
   SUBDOMAIN_RE,
+  isAllowedEnterpriseOrigin,
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -103,6 +104,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   if (input.origin !== undefined && !isHttpsOrigin(input.origin)) {
     return adminErrorResponse("invalid_origin", 400, request);
+  }
+  // P2-5: confine the SSO redirect target to the trusted host allow-list.
+  if (input.origin !== undefined && !isAllowedEnterpriseOrigin(input.origin)) {
+    return adminErrorResponse("origin_not_allowed", 400, request);
   }
 
   const existing = await db

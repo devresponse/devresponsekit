@@ -47,7 +47,11 @@ export async function ImpersonationBanner() {
       className="border-warning/40 bg-warning/10 text-warning-foreground flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2 text-sm"
     >
       <span>{t("bannerLabel", { email: targetRow?.primary_email ?? targetBetterAuthId })}</span>
-      <StopImpersonationButton targetAppUserId={targetRow?.id ?? null} label={t("stopButton")} />
+      <StopImpersonationButton
+        targetAppUserId={targetRow?.id ?? null}
+        label={t("stopButton")}
+        errorLabel={t("stopErrorToast")}
+      />
     </div>
   );
 }

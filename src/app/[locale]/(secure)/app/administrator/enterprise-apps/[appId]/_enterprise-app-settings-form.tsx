@@ -113,6 +113,8 @@ export function EnterpriseAppSettingsForm({
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         if (body.error === "invalid_origin") {
           setError(tErr("invalidOrigin"));
+        } else if (body.error === "origin_not_allowed") {
+          setError(tErr("originNotAllowed"));
         } else {
           setError(tErr("invalidBody"));
         }

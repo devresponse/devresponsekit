@@ -3,6 +3,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { getServerEnv } from "@/lib/env";
 import { consumeToken, rateLimitKey } from "@/lib/admin/rate-limit.server";
+import { clientIpKey } from "@/lib/client-ip";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
 import { verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { mintAccessToken } from "@/lib/api-auth/jwt.server";
@@ -27,6 +28,10 @@ export const dynamic = "force-dynamic";
  * auth) and rate-limited per client/IP. Sets `Cache-Control: no-store`.
  */
 const TOKEN_LIMIT = { capacity: 10, refillPerSec: 0.5 };
+// P2-4: a coarse GLOBAL floor independent of any client-supplied value, so
+// a distributed credential-stuffing run rotating client_ids / spoofing XFF
+// still hits a deployment-wide ceiling (~5 req/s sustained, 300 burst).
+const TOKEN_GLOBAL_LIMIT = { capacity: 300, refillPerSec: 5 };
 const NO_STORE = { "Cache-Control": "no-store" };
 
 async function parseBody(request: NextRequest): Promise<Record<string, string>> {
@@ -55,9 +60,15 @@ export async function POST(request: NextRequest) {
   const body = await parseBody(request);
   const grantType = body.grant_type;
 
-  // Rate-limit per presented client/IP before any crypto / DB work.
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "anon";
-  const limiterId = body.client_id ?? `ip:${ip}`;
+  // Rate-limit before any crypto / DB work. Two layers: a per-credential/IP
+  // bucket (keyed on the trusted client IP, P2-4) AND a global floor that a
+  // spoofed XFF / rotating client_id cannot escape.
+  if (!consumeToken(rateLimitKey("api.token", "__global__"), TOKEN_GLOBAL_LIMIT).ok) {
+    return problemResponse("rate_limited", 429, request, {
+      headers: { ...NO_STORE, "Retry-After": "2" },
+    });
+  }
+  const limiterId = body.client_id ?? clientIpKey(request.headers);
   if (!consumeToken(rateLimitKey("api.token", limiterId), TOKEN_LIMIT).ok) {
     return problemResponse("rate_limited", 429, request, {
       headers: { ...NO_STORE, "Retry-After": "2" },

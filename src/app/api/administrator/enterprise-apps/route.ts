@@ -10,6 +10,7 @@ import {
   APP_STATUS_VALUES,
   SSO_AUDIENCE_RE,
   SUBDOMAIN_RE,
+  isAllowedEnterpriseOrigin,
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
 import {
@@ -162,6 +163,11 @@ export async function POST(request: NextRequest) {
 
   if (!isHttpsOrigin(input.origin)) {
     return adminErrorResponse("invalid_origin", 400, request);
+  }
+  // P2-5: the origin drives the SSO handoff redirect target — confine it to
+  // the trusted host allow-list, not any HTTPS URL.
+  if (!isAllowedEnterpriseOrigin(input.origin)) {
+    return adminErrorResponse("origin_not_allowed", 400, request);
   }
 
   try {

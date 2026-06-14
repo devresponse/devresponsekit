@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import { getOauthClientById, rotateOauthClientSecret } from "@/lib/api-auth/oauth-clients.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
@@ -26,7 +27,9 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   if (!isUuid(id)) return problemResponse("invalid_request", 400, request);
   const client = await getOauthClientById(id);
-  if (!client) return problemResponse("not_found", 404, request);
+  if (!client || !canAccessOrg(grant.caller.access, client.organization_id)) {
+    return problemResponse("not_found", 404, request);
+  }
 
   const secret = await rotateOauthClientSecret(id);
   if (!secret) {

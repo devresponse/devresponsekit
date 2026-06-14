@@ -10,6 +10,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
@@ -61,7 +62,25 @@ export async function GET(request: NextRequest) {
   // Build the base query with all WHERE clauses applied. We then derive
   // both the count and the page from the same builder so a future filter
   // automatically applies to both.
+  // Org boundary (ADR-0001): an org admin sees only users with a
+  // membership in their org; superadmin sees all. Null scope → none.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return NextResponse.json(buildListResponse([], 0, query));
+
   let base = db.selectFrom("app_users");
+
+  if (scope.kind === "org") {
+    const orgId = scope.organizationId;
+    base = base.where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom("app_organization_memberships as m")
+          .select("m.id")
+          .whereRef("m.app_user_id", "=", "app_users.id")
+          .where("m.organization_id", "=", orgId),
+      ),
+    );
+  }
 
   const statusFilter = query.filters.status;
   if (typeof statusFilter === "string" && ALLOWED_STATUS.has(statusFilter)) {

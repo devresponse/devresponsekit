@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
+import { canAccessUser } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
@@ -63,7 +64,10 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     .select(["id", "updated_at"])
     .where("id", "=", id)
     .executeTakeFirst();
-  if (!current) return problemResponse("not_found", 404, request);
+  // ADR-0001: org admins may only change status for users in their org.
+  if (!current || !(await canAccessUser(grant.caller.access, current.id))) {
+    return problemResponse("not_found", 404, request);
+  }
 
   // Optimistic concurrency: reject a write made against a stale read.
   const ifMatch = request.headers.get("if-match");

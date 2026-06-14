@@ -12,6 +12,7 @@ import {
   SLUG_RE,
 } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   if (!isUuid(id)) {
     return adminErrorResponse("invalid_id", 400, request);
+  }
+  // ADR-0001: an org admin may read only their own org.
+  if (!canAccessOrg(guard.access, id)) {
+    return adminErrorResponse("organization_not_found", 404, request);
   }
 
   try {
@@ -69,6 +74,12 @@ const patchSchema = z
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  // ADR-0001: mutating the org entity (rename/status/default) is a
+  // platform-level, SUPERADMIN-only action.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+  }
 
   const { id } = await context.params;
   if (!isUuid(id)) {
@@ -143,6 +154,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  // ADR-0001: deleting a tenant is a SUPERADMIN-only action.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+  }
 
   const { id } = await context.params;
   if (!isUuid(id)) {

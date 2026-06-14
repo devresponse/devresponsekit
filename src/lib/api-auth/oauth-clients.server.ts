@@ -93,6 +93,9 @@ export interface AdminClientListQuery {
   limit: number;
   offset: number;
   status?: string;
+  /** Org boundary (ADR-0001): confine to one org for an org admin; omit
+   *  for SUPERADMIN (all orgs). */
+  organizationId?: string;
 }
 
 export async function listOauthClients(
@@ -100,6 +103,7 @@ export async function listOauthClients(
 ): Promise<{ items: OauthClientSummary[]; total: number }> {
   let base = db.selectFrom("app_oauth_clients");
   if (query.status) base = base.where("status", "=", query.status);
+  if (query.organizationId) base = base.where("organization_id", "=", query.organizationId);
 
   const [items, totalRow] = await Promise.all([
     base

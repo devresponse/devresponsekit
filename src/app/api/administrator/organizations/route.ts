@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { SLUG_RE } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,16 @@ export async function GET(request: NextRequest) {
     maxPageSize: 200,
   });
 
+  // Org boundary (ADR-0001): an org admin sees only their own org row;
+  // superadmin sees every org. Null scope → none.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return NextResponse.json(buildListResponse([], 0, query));
+
   let base = db.selectFrom("app_organizations as o");
+
+  if (scope.kind === "org") {
+    base = base.where("o.id", "=", scope.organizationId);
+  }
 
   const statusFilter = query.filters.status;
   if (typeof statusFilter === "string" && statusFilter.length > 0) {
@@ -115,6 +125,12 @@ const createSchema = z
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  // ADR-0001: creating a new tenant is a SUPERADMIN-only action; an org
+  // admin manages only their existing org.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+  }
 
   let json: unknown;
   try {

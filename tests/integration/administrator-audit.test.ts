@@ -70,6 +70,10 @@ function listReq(query: string = ""): NextRequest {
 
 let GET: typeof AuditRouteModule.GET;
 
+// These predate the three-tier model and assert GLOBAL admin behavior,
+// which is now SUPERADMIN — so the helper carries the `superuser` marker.
+// Denial tests still fail on the missing specific permission (the marker
+// alone never grants `admin.audit.read`).
 const OK_ACCESS = (perms: string[]) => ({
   appUserId: "u-1",
   primaryEmail: "admin@x.com",
@@ -77,7 +81,7 @@ const OK_ACCESS = (perms: string[]) => ({
   organizationId: null,
   membershipStatus: "active",
   preferredLocale: "en",
-  permissions: perms,
+  permissions: [...perms, "superuser"],
 });
 
 beforeEach(async () => {

@@ -99,6 +99,12 @@ export interface AdminApiKeyListQuery {
   offset: number;
   status?: string;
   appUserId?: string;
+  /**
+   * Org boundary (ADR-0001). When set, the listing is confined to keys in
+   * this organization — an org admin's single org. Omitted for SUPERADMIN
+   * (all orgs).
+   */
+  organizationId?: string;
 }
 
 /** Admin-wide key listing with a total count. */
@@ -108,6 +114,7 @@ export async function listApiKeysAdmin(
   let base = db.selectFrom("app_api_keys");
   if (query.status) base = base.where("status", "=", query.status);
   if (query.appUserId) base = base.where("app_user_id", "=", query.appUserId);
+  if (query.organizationId) base = base.where("organization_id", "=", query.organizationId);
 
   const [items, totalRow] = await Promise.all([
     base

@@ -5,6 +5,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import { createOauthClient, listOauthClients } from "@/lib/api-auth/oauth-clients.server";
 import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
+import { resolveOrgScope, userHasMembershipInOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
@@ -22,10 +23,15 @@ export async function GET(request: NextRequest) {
   const pageSize = Math.min(200, Math.max(1, Number(sp.get("pageSize") ?? 25) || 25));
   const status = sp.get("status");
 
+  // Org boundary (ADR-0001): org admin → their org only; superadmin → all.
+  const scope = resolveOrgScope(guard.grant.caller.access);
+  if (!scope) return v1JsonResponse({ items: [], page, pageSize, total: 0 }, request);
+
   const { items, total } = await listOauthClients({
     limit: pageSize,
     offset: (page - 1) * pageSize,
     status: status === "active" || status === "revoked" ? status : undefined,
+    organizationId: scope.kind === "org" ? scope.organizationId : undefined,
   });
 
   return v1JsonResponse({ items, page, pageSize, total }, request);
@@ -81,6 +87,30 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // Org boundary (ADR-0001). Org admin: the client is created in THEIR org
+  // and the service principal must belong to it; the client-supplied
+  // organizationId is ignored. Superadmin: may target any org.
+  const scope = resolveOrgScope(grant.caller.access);
+  if (!scope) {
+    return problemResponse("forbidden", 403, request, { requestId: grant.requestId });
+  }
+  let organizationId: string | null;
+  if (scope.kind === "org") {
+    organizationId = scope.organizationId;
+    const serviceInOrg = await userHasMembershipInOrg(
+      parsed.data.serviceAppUserId,
+      scope.organizationId,
+    );
+    if (!serviceInOrg) {
+      return problemResponse("invalid_request", 400, request, {
+        detail: "serviceAppUserId does not reference an existing user.",
+        requestId: grant.requestId,
+      });
+    }
+  } else {
+    organizationId = parsed.data.organizationId ?? null;
+  }
+
   const scopes = normalizeScopes(parsed.data.scopes);
   const ungrantable = ungrantableScopesForCaller(
     grant.caller.access.permissions,
@@ -98,7 +128,7 @@ export async function POST(request: NextRequest) {
   const created = await createOauthClient({
     name: parsed.data.name,
     scopes,
-    organizationId: parsed.data.organizationId ?? null,
+    organizationId,
     serviceAppUserId: parsed.data.serviceAppUserId,
     createdByAppUserId: grant.caller.access.appUserId ?? parsed.data.serviceAppUserId,
   });

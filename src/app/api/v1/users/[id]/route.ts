@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
 import { requireApiPermission } from "@/lib/api-auth/v1-guard.server";
+import { canAccessUser } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 import { userEtag } from "@/lib/api-auth/etag";
@@ -39,7 +40,10 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
 
-  if (!user) return problemResponse("not_found", 404, request);
+  // ADR-0001: org admins only see users in their own org; 404 otherwise.
+  if (!user || !(await canAccessUser(guard.grant.caller.access, user.id))) {
+    return problemResponse("not_found", 404, request);
+  }
 
   return v1JsonResponse({ user }, request, {
     headers: { ETag: userEtag(user.updated_at as unknown as Date) },

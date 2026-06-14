@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { revokeApiKey } from "@/lib/api-auth/api-keys.server";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +58,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     ])
     .where("k.id", "=", id)
     .executeTakeFirst();
-  if (!row) {
+  // ADR-0001: org admins only see their own org's keys; 404 otherwise.
+  if (!row || !canAccessOrg(guard.access, row.organization_id)) {
     return adminErrorResponse("api_key_not_found", 404, request, { requestId: guard.requestId });
   }
 
@@ -107,10 +109,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   const existing = await db
     .selectFrom("app_api_keys")
-    .select(["id", "app_user_id", "status", "key_prefix"])
+    .select(["id", "app_user_id", "status", "key_prefix", "organization_id"])
     .where("id", "=", id)
     .executeTakeFirst();
-  if (!existing) {
+  if (!existing || !canAccessOrg(guard.access, existing.organization_id)) {
     return adminErrorResponse("api_key_not_found", 404, request, { requestId: guard.requestId });
   }
   if (existing.status !== "active") {

@@ -8,6 +8,7 @@ import {
   updateOauthClient,
 } from "@/lib/api-auth/oauth-clients.server";
 import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
@@ -23,7 +24,10 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   if (!isUuid(id)) return problemResponse("invalid_request", 400, request);
   const client = await getOauthClientById(id);
-  if (!client) return problemResponse("not_found", 404, request);
+  // ADR-0001: org admins only see their own org's clients; 404 otherwise.
+  if (!client || !canAccessOrg(guard.grant.caller.access, client.organization_id)) {
+    return problemResponse("not_found", 404, request);
+  }
   return v1JsonResponse({ client }, request);
 }
 
@@ -46,7 +50,9 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   if (!isUuid(id)) return problemResponse("invalid_request", 400, request);
   const client = await getOauthClientById(id);
-  if (!client) return problemResponse("not_found", 404, request);
+  if (!client || !canAccessOrg(grant.caller.access, client.organization_id)) {
+    return problemResponse("not_found", 404, request);
+  }
 
   let json: unknown;
   try {
@@ -107,7 +113,9 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   if (!isUuid(id)) return problemResponse("invalid_request", 400, request);
   const client = await getOauthClientById(id);
-  if (!client) return problemResponse("not_found", 404, request);
+  if (!client || !canAccessOrg(grant.caller.access, client.organization_id)) {
+    return problemResponse("not_found", 404, request);
+  }
 
   const revokerAppUserId = grant.caller.access.appUserId ?? client.app_user_id;
   const revoked = await revokeOauthClient(id, revokerAppUserId);

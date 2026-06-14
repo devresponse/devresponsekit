@@ -8,6 +8,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,18 @@ export async function GET(request: NextRequest) {
     maxPageSize: 200,
   });
 
+  // Org boundary (ADR-0001): org admin → only their org's memberships.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return NextResponse.json(buildListResponse([], 0, query));
+
   let base = db
     .selectFrom("app_organization_memberships as m")
     .innerJoin("app_users as u", "u.id", "m.app_user_id")
     .innerJoin("app_organizations as o", "o.id", "m.organization_id");
+
+  if (scope.kind === "org") {
+    base = base.where("m.organization_id", "=", scope.organizationId);
+  }
 
   const statusFilter = query.filters.status;
   if (typeof statusFilter === "string" && statusFilter.length > 0) {

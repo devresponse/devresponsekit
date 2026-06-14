@@ -30,7 +30,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   if (!sessionId || sessionId.length < 1 || sessionId.length > 256) {
     return adminErrorResponse("invalid_session_id", 400, request);
   }
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   try {

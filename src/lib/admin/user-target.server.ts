@@ -2,6 +2,8 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { canAccessUser } from "@/lib/admin/access-scope.server";
+import type { UserAccessContext } from "@/lib/auth-status";
 
 /**
  * Shared helpers for the `/api/administrator/users/[id]/*` routes.
@@ -45,6 +47,7 @@ export function isUuid(value: string): boolean {
  */
 export async function resolveTargetUser(
   id: string,
+  access: Pick<UserAccessContext, "permissions" | "organizationId">,
   request?: { headers: Headers },
 ): Promise<ResolvedTargetUser | NextResponse> {
   if (!isUuid(id)) {
@@ -55,7 +58,10 @@ export async function resolveTargetUser(
     .select(["id", "better_auth_user_id", "primary_email", "display_name", "status"])
     .where("id", "=", id)
     .executeTakeFirst();
-  if (!row) {
+  // ADR-0001: an org admin may only target users in their own org. A 404
+  // (not 403) on an out-of-scope user avoids leaking its existence — the
+  // `access` argument is REQUIRED so no caller can forget to scope.
+  if (!row || !(await canAccessUser(access, row.id))) {
     return adminErrorResponse("not_found", 404, request);
   }
   return {

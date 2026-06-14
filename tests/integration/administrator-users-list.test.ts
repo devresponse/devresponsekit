@@ -142,7 +142,7 @@ describe("GET /api/administrator/users", () => {
       organizationId: "o-1",
       membershipStatus: "active",
       preferredLocale: "en",
-      permissions: ["admin.users.read"],
+      permissions: ["admin.users.read", "superuser"],
     });
     itemsExecute.mockResolvedValue([
       {
@@ -184,7 +184,7 @@ describe("GET /api/administrator/users", () => {
       organizationId: "o-1",
       membershipStatus: "active",
       preferredLocale: "en",
-      permissions: ["admin.users.read"],
+      permissions: ["admin.users.read", "superuser"],
     });
     itemsExecute.mockResolvedValue([]);
     totalExecute.mockResolvedValue({ total: "0" });
@@ -202,7 +202,7 @@ describe("GET /api/administrator/users", () => {
       organizationId: "o-1",
       membershipStatus: "active",
       preferredLocale: "en",
-      permissions: ["admin.users.read"],
+      permissions: ["admin.users.read", "superuser"],
     });
     itemsExecute.mockResolvedValue([]);
     totalExecute.mockResolvedValue({ total: "0" });

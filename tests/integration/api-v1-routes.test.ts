@@ -289,7 +289,18 @@ describe("GET /api/v1/me", () => {
 });
 
 describe("/api/v1/users", () => {
-  const grant = { ok: true, grant: { caller: { betterAuthUserId: "ba1" }, requestId: "r1" } };
+  // `access` carries the `superuser` marker so the list is unscoped
+  // (global behavior) — the org-scoping path is covered by its own test.
+  const grant = {
+    ok: true,
+    grant: {
+      caller: {
+        betterAuthUserId: "ba1",
+        access: { permissions: ["superuser"], organizationId: "o1" },
+      },
+      requestId: "r1",
+    },
+  };
 
   it("GET returns the standard list envelope", async () => {
     requireApiPermission.mockResolvedValue(grant);

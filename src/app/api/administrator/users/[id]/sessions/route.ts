@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const { id } = await ctx.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   let sessions: unknown;
@@ -74,7 +74,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   if (limited) return limited;
 
   const { id } = await ctx.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   try {

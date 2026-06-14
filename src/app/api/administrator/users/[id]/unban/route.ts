@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (limited) return limited;
 
   const { id } = await ctx.params;
-  const target = await resolveTargetUser(id);
+  const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
   try {

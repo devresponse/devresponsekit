@@ -10,6 +10,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,27 @@ export async function GET(request: NextRequest) {
     maxPageSize: 200,
   });
 
+  // Org boundary (ADR-0001): a user's tenant is its membership, so an org
+  // admin sees only users who hold a membership in their org. SUPERADMIN
+  // sees all. A null scope (org admin with no org) sees nothing.
+  const scope = resolveOrgScope(guard.grant.caller.access);
+  if (!scope) {
+    return v1JsonResponse(buildListResponse([], 0, query), request);
+  }
+
   let base = db.selectFrom("app_users");
+  if (scope.kind === "org") {
+    const orgId = scope.organizationId;
+    base = base.where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom("app_organization_memberships as m")
+          .select("m.id")
+          .whereRef("m.app_user_id", "=", "app_users.id")
+          .where("m.organization_id", "=", orgId),
+      ),
+    );
+  }
   const statusFilter = query.filters.status;
   if (typeof statusFilter === "string" && ALLOWED_STATUS.has(statusFilter)) {
     base = base.where("status", "=", statusFilter);

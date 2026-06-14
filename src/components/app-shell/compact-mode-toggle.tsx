@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useAppShellStore } from "@/stores/app-shell-store";
+import { useHydrated } from "@/hooks/use-hydrated";
 
 /**
  * CompactModeToggle
@@ -16,7 +17,10 @@ export function CompactModeToggle({ className }: { className?: string }) {
   const t = useTranslations("common");
   const density = useAppShellStore((s) => s.density);
   const setDensity = useAppShellStore((s) => s.setDensity);
-  const isCompact = density === "compact";
+  const hydrated = useHydrated();
+  // Until hydrated, render the SSR default ("compact") so aria-pressed
+  // matches the server markup; the action always uses the live value.
+  const isCompact = hydrated ? density === "compact" : true;
 
   return (
     <Button
@@ -26,7 +30,7 @@ export function CompactModeToggle({ className }: { className?: string }) {
       aria-pressed={isCompact}
       aria-label={t("compactMode")}
       className={className}
-      onClick={() => setDensity(isCompact ? "comfortable" : "compact")}
+      onClick={() => setDensity(density === "compact" ? "comfortable" : "compact")}
     >
       {t("compactMode")}
     </Button>

@@ -4,6 +4,7 @@ import { Menu } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useAppShellStore } from "@/stores/app-shell-store";
+import { useHydrated } from "@/hooks/use-hydrated";
 import type { ShellVisibilityScope } from "./shell-types";
 
 export interface MobileSidebarTriggerProps {
@@ -34,8 +35,12 @@ export interface MobileSidebarTriggerProps {
  */
 export function MobileSidebarTrigger({ scope = "root", className }: MobileSidebarTriggerProps) {
   const t = useTranslations("common");
-  const isVisible = useAppShellStore((s) => s.visibility[scope].leftVisible);
+  const storeVisible = useAppShellStore((s) => s.visibility[scope].leftVisible);
   const toggle = useAppShellStore((s) => s.toggleRegion);
+  const hydrated = useHydrated();
+  // SSR default is visible; defer the persisted value until hydrated so
+  // aria-expanded/label match the server markup (P2-2).
+  const isVisible = hydrated ? storeVisible : true;
 
   const label = isVisible ? t("closeMenu") : t("openMenu");
 

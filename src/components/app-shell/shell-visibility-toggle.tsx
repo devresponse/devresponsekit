@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useAppShellStore } from "@/stores/app-shell-store";
+import { useHydrated } from "@/hooks/use-hydrated";
 import type { ShellRegion, ShellVisibilityScope } from "./shell-types";
 
 /**
@@ -39,9 +40,12 @@ export function ShellVisibilityToggle({ scope, region, className }: ShellVisibil
   const t = useTranslations("shell");
   const visibility = useAppShellStore((s) => s.visibility[scope]);
   const toggle = useAppShellStore((s) => s.toggleRegion);
+  const hydrated = useHydrated();
 
   const visibleKey = REGION_KEY[region];
-  const isVisible = visibility[visibleKey];
+  // Default to visible (the SSR default) until hydrated, so the label and
+  // aria-pressed match the server markup.
+  const isVisible = hydrated ? visibility[visibleKey] : true;
   const suffix = REGION_TRANSLATION_SUFFIX[region];
   const label = isVisible ? t(`hide${suffix}`) : t(`show${suffix}`);
 

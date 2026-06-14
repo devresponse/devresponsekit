@@ -67,7 +67,11 @@ export function AccountSessionsPanel() {
     setBusy(true);
     setError(null);
     try {
-      await authClient.revokeSession({ token });
+      // Better Auth's client resolves with `{ data, error }` rather than
+      // throwing on an API error, so a rejected revoke must be read off
+      // `result.error` — not assumed successful (P2-1).
+      const result = await authClient.revokeSession({ token });
+      if (result?.error) setError(t("errors.sessionsRevokeFailed"));
     } catch {
       setError(t("errors.sessionsRevokeFailed"));
     }
@@ -78,7 +82,8 @@ export function AccountSessionsPanel() {
     setBusy(true);
     setError(null);
     try {
-      await authClient.revokeOtherSessions();
+      const result = await authClient.revokeOtherSessions();
+      if (result?.error) setError(t("errors.sessionsRevokeFailed"));
     } catch {
       setError(t("errors.sessionsRevokeFailed"));
     }

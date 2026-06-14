@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ApiKeyRevealDialog } from "../_api-key-reveal";
+import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -196,6 +196,7 @@ export function NewApiKeyForm({
       </form>
       <ApiKeyRevealDialog
         secret={revealed}
+        namespace="administrator.apiKeys.reveal"
         onClose={() => {
           setRevealed(null);
           backToList();

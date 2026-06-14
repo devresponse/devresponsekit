@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { AccountApiKeyRevealDialog } from "./_api-key-reveal";
+import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
 
 /**
  * Self-service API-key manager (Account app).
@@ -19,7 +19,7 @@ import { AccountApiKeyRevealDialog } from "./_api-key-reveal";
  * / rotates / revokes through the same self-scoped surface. Every call is
  * bound to the session principal server-side — there is no user id and no
  * way to reach another account's keys. Secrets are surfaced exactly once
- * (on create / rotate) through {@link AccountApiKeyRevealDialog}.
+ * (on create / rotate) through {@link ApiKeyRevealDialog}.
  *
  * Follows the sessions-panel pattern: a `reloadToken` re-fetches after
  * every mutation; a skeleton covers the first load.
@@ -133,9 +133,10 @@ export function AccountApiKeysPanel({ grantableScopes }: { grantableScopes: stri
           setError(t("rotateError"));
           return;
         }
-        const body = (await res.json()) as { key: string };
+        const body = (await res.json().catch(() => null)) as { key?: string } | null;
         reload();
-        setRevealed(body.key);
+        if (body?.key) setRevealed(body.key);
+        else setError(t("rotateError"));
       } finally {
         setBusy(false);
       }
@@ -227,7 +228,11 @@ export function AccountApiKeysPanel({ grantableScopes }: { grantableScopes: stri
         )}
       </div>
 
-      <AccountApiKeyRevealDialog secret={revealed} onClose={() => setRevealed(null)} />
+      <ApiKeyRevealDialog
+        secret={revealed}
+        onClose={() => setRevealed(null)}
+        namespace="account.apiKeys.reveal"
+      />
     </div>
   );
 }

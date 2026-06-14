@@ -282,7 +282,8 @@
         "stopToast": "Volvió a su propia sesión.",
         "errorToast": "No se pudo iniciar la suplantación.",
         "selfError": "No puede suplantarse a sí mismo.",
-        "bannerLabel": "Está suplantando a {email}."
+        "bannerLabel": "Está suplantando a {email}.",
+        "stopErrorToast": "No se pudo detener la suplantación. Inténtalo de nuevo."
       }
     },
     "grid": {
@@ -327,7 +328,8 @@
       "invalidOrigin": "El origen debe ser una URL HTTPS sin ruta.",
       "applicationInUse": "Esta aplicación todavía está referenciada y no se puede eliminar.",
       "rateLimited": "Demasiadas solicitudes. Inténtelo de nuevo en un momento.",
-      "exportTruncated": "La exportación alcanzó el límite máximo de filas. Refine los filtros y vuelva a exportar para obtener el resto."
+      "exportTruncated": "La exportación alcanzó el límite máximo de filas. Refine los filtros y vuelva a exportar para obtener el resto.",
+      "originNotAllowed": "El host de origen no está en la lista permitida para redirecciones SSO."
     },
     "roles": {
       "title": "Roles",

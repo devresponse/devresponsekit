@@ -282,7 +282,8 @@
         "stopToast": "Vous êtes revenu à votre propre session.",
         "errorToast": "Impossible de démarrer l’usurpation.",
         "selfError": "Vous ne pouvez pas usurper votre propre identité.",
-        "bannerLabel": "Vous usurpez l’identité de {email}."
+        "bannerLabel": "Vous usurpez l’identité de {email}.",
+        "stopErrorToast": "Impossible d’arrêter l’usurpation. Réessayez."
       }
     },
     "grid": {
@@ -327,7 +328,8 @@
       "invalidOrigin": "L'origine doit être une URL HTTPS sans chemin.",
       "applicationInUse": "Cette application est encore référencée et ne peut pas être supprimée.",
       "rateLimited": "Trop de requêtes. Réessayez dans un instant.",
-      "exportTruncated": "L’export a atteint la limite maximale de lignes. Affinez les filtres et relancez l’export pour obtenir le reste."
+      "exportTruncated": "L’export a atteint la limite maximale de lignes. Affinez les filtres et relancez l’export pour obtenir le reste.",
+      "originNotAllowed": "L’hôte d’origine ne figure pas dans la liste autorisée pour les redirections SSO."
     },
     "roles": {
       "title": "Rôles",

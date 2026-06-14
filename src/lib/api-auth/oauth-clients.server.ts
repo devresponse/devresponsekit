@@ -1,8 +1,21 @@
 import "server-only";
+import { timingSafeEqual } from "node:crypto";
 import { sql, type Selectable } from "kysely";
 import { db } from "@/db/database";
 import type { AppOauthClientsTable } from "@/db/schema/app-schema";
 import { hashSecret } from "@/lib/api-auth/api-key";
+
+/**
+ * Constant-time comparison of two hex digests (P2-3). A plain `!==` on a
+ * JS string short-circuits at the first differing character, leaking digest
+ * bytes through response timing. Both inputs are SHA-256 hex (64 chars).
+ */
+function timingSafeHexEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const ba = Buffer.from(a, "hex");
+  const bb = Buffer.from(b, "hex");
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
 
 /**
  * OAuth2 client-credentials principals (design
@@ -202,9 +215,7 @@ export async function verifyClientCredentials(
 
   if (!row || row.status !== "active") return null;
   const presentedHash = await hashSecret(clientSecret);
-  // Hash equality over the unique client_id row; both sides are 32-byte
-  // hex digests so a length-equal compare is constant-time enough.
-  if (presentedHash !== row.client_secret_hash) return null;
+  if (!timingSafeHexEqual(presentedHash, row.client_secret_hash)) return null;
 
   return {
     clientRowId: row.id,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,29 +13,46 @@ import {
 } from "@/components/ui/dialog";
 
 /**
- * One-time secret reveal for the self-service Account app.
+ * One-time secret reveal, shared by the administrator and account API-key
+ * surfaces (P2-6 — previously two byte-identical copies). The plaintext is
+ * returned by create / rotate exactly once and never recoverable: this
+ * modal is the only place it is shown — a read-only field plus copy, with
+ * an explicit warning. `secret === null` keeps it closed.
  *
- * The plaintext key is returned by create / rotate exactly once and is
- * never recoverable. This modal is the only place it is shown: a
- * read-only field plus a copy affordance and an explicit warning.
- * `secret === null` keeps it closed.
+ * The two surfaces differ only by their translation namespace, which the
+ * caller passes; both namespaces expose the same `reveal.*` keys.
  */
-export function AccountApiKeyRevealDialog({
+type RevealNamespace = "administrator.apiKeys.reveal" | "account.apiKeys.reveal";
+
+export function ApiKeyRevealDialog({
   secret,
   onClose,
+  namespace,
 }: {
   secret: string | null;
   onClose: () => void;
+  namespace: RevealNamespace;
 }) {
-  const t = useTranslations("account.apiKeys.reveal");
+  const t = useTranslations(namespace);
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the pending "copied" reset on unmount so it never fires on an
+  // unmounted component (P2-6).
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
 
   const copy = useCallback(async () => {
     if (!secret) return;
     try {
       await navigator.clipboard.writeText(secret);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard unavailable (insecure context / denied) — the value
       // stays selectable in the field for a manual copy.

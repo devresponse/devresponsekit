@@ -2,6 +2,7 @@ import "server-only";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { getUserAccessContext, type UserAccessContext } from "@/lib/auth-status";
 import { getServerEnv } from "@/lib/env";
+import { getClientIp } from "@/lib/client-ip";
 import { looksLikeApiKey } from "@/lib/api-auth/api-key";
 import { touchApiKeyUsage, verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { verifyAccessToken } from "@/lib/api-auth/jwt.server";
@@ -54,7 +55,8 @@ export function hasBearerCredential(headers: Headers): boolean {
 }
 
 function clientIp(headers: Headers): string | null {
-  return headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+  // P2-4: derive from a trusted proxy hop, not the spoofable leftmost XFF.
+  return getClientIp(headers);
 }
 
 /**

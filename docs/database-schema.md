@@ -63,6 +63,7 @@ erDiagram
   app_users         ||--o| app_user_locale_preferences : "has prefs"
   app_users         |o--o{ app_audit_events            : "actor (nullable)"
   app_organizations |o--o{ app_audit_events            : "in org (nullable)"
+  app_organizations |o--o{ app_outbox                  : "owns mail (nullable)"
 
   %% ---- Better Auth (vendor-owned, logical link) ----
   better_auth_user ||--|| app_users : "better_auth_user_id (logical)"
@@ -245,6 +246,7 @@ erDiagram
 
   app_outbox {
     uuid id PK
+    uuid organization_id FK "nullable = platform/system mail"
     text template_key
     text to_email
     text from_email
@@ -315,7 +317,7 @@ tables exist regardless. See
 | `app_audit_events` | Structured audit log; `request_id` correlates to the `x-request-id` response header. Actor/org FKs are nullable so system events can be recorded. | → `app_users` (nullable), → `app_organizations` (nullable). |
 | `app_user_locale_preferences` | Per-user locale/formatting preferences. `app_user_id` is both PK and FK (1:1 with `app_users`). | → `app_users`. |
 | `app_email_templates` | Editable email templates keyed by `(key, locale)` (unique). Falls back to code defaults when a row is missing. No foreign keys. | — |
-| `app_outbox` | Outbox-first email log; every send is recorded before any delivery attempt. With no provider configured rows stay `logged`. No foreign keys. | — |
+| `app_outbox` | Outbox-first email log; every send is recorded before any delivery attempt. With no provider configured rows stay `logged`. `organization_id` (nullable, `on delete set null`) is the owning tenant: org admins read their org's rows, while `null` (platform/system or multi-org-ambiguous mail) is SUPERADMIN-only. | → `app_organizations` (nullable). |
 
 ## Notes
 

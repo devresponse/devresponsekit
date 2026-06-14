@@ -41,12 +41,30 @@ export default defineConfig({
     setupFiles: ["tests/setup/vitest.setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["tests/e2e/**", "tests/accessibility/**", "node_modules/**"],
-    // Parallel workers intermittently corrupt module initialization
-    // under load ("(0, import.fn) is not a function" in random files;
-    // suites pass standalone). A CI gate must be deterministic, so CI
-    // runs single-worker (~70s wall); local runs stay parallel for DX
-    // and can be pinned with --maxWorkers=1 when the flake bites.
-    ...(process.env.CI ? { maxWorkers: 1, minWorkers: 1 } : {}),
+    // Process-isolated forks (Vitest 4 default; pinned for clarity).
+    pool: "forks",
+    // --- Flaky-runner fix ---
+    //
+    // Root cause: within a SINGLE Vitest process, the SSR module runner
+    // instantiates our heavy graph (Better Auth + Kysely + pg + next-intl)
+    // per isolated file, and the shared Vite transform server races under
+    // ANY concurrency — a module's named export reads back as `undefined`
+    // ("(0, __vite_ssr_import__.getServerEnv) is not a function"), failing a
+    // whole file. It is not a code cycle (`@/lib/env` only imports zod), the
+    // corrupted transform is cached so `retry` can't recover it, and even 2
+    // workers reproduce it. The only reliable cure is to remove concurrency
+    // *inside a process*.
+    //
+    // So every Vitest process here runs SINGLE-WORKER (deterministic), and
+    // parallelism comes from running independent SHARD PROCESSES — each with
+    // its own transform server, so there is no shared race. `pnpm test`
+    // drives the shards (scripts/test-shards.mjs): deterministic AND fast.
+    // `pnpm test:serial` is the plain single-process fallback.
+    maxWorkers: 1,
+    minWorkers: 1,
+    // Headroom for the slowest module-init when several shards share a box.
+    testTimeout: 20_000,
+    hookTimeout: 30_000,
     server: {
       deps: {
         // Force next-intl through Vite's transformer so that aliases like

@@ -63,6 +63,15 @@ jobs:
       - name: Format check
         run: pnpm format:check
 
+      # Build BEFORE the (~100s) test run so config / Next build errors —
+      # e.g. an invalid vitest.config option that only `next build`
+      # type-checks — fail this fast job in ~1-2 min instead of slipping to
+      # the slow Playwright job or to Vercel. `next build` sets
+      # NEXT_PHASE=phase-production-build, so env.ts uses placeholders and
+      # no secrets are needed here.
+      - name: Build
+        run: pnpm build
+
       - name: Tests with coverage gate
         run: pnpm test:coverage
 

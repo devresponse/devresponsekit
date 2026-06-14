@@ -61,7 +61,6 @@ export default defineConfig({
     // drives the shards (scripts/test-shards.mjs): deterministic AND fast.
     // `pnpm test:serial` is the plain single-process fallback.
     maxWorkers: 1,
-    minWorkers: 1,
     // Headroom for the slowest module-init when several shards share a box.
     testTimeout: 20_000,
     hookTimeout: 30_000,

@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -106,6 +107,30 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     .executeTakeFirst();
   if (!org) return adminErrorResponse("organization_not_found", 404, request);
 
+  // ADR-0001: an org admin may only assign WITHIN their org and may only
+  // use a role belonging to their org (404, not 403, to avoid confirming a
+  // foreign org/role exists). SUPERADMIN bypasses both.
+  if (!canAccessOrg(guard.access, parsed.data.organizationId)) {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
+  if (!canAccessOrg(guard.access, role.organization_id)) {
+    return adminErrorResponse("role_not_found", 404, request);
+  }
+  // Privilege-escalation guard: only a SUPERADMIN may grant a role that
+  // carries the `superuser` marker (which would mint another superadmin).
+  if (!isSuperadmin(guard.access)) {
+    const grantsSuperuser = await db
+      .selectFrom("app_role_permissions as rp")
+      .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+      .select("p.id")
+      .where("rp.role_id", "=", role.id)
+      .where("p.key", "=", "superuser")
+      .executeTakeFirst();
+    if (grantsSuperuser) {
+      return adminErrorResponse("forbidden", 403, request);
+    }
+  }
+
   await db.transaction().execute(async (trx) => {
     await trx
       .insertInto("app_user_roles")
@@ -161,12 +186,22 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("invalid_body", 400, request);
   }
 
+  // An org admin may only mutate assignments within their own org (404,
+  // not 403, to avoid confirming a foreign org exists). SUPERADMIN bypasses.
+  if (!canAccessOrg(guard.access, parsed.data.organizationId)) {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
+
   // Pull the role's key for the audit row before deleting.
   const role = await db
     .selectFrom("app_roles")
-    .select(["id", "key"])
+    .select(["id", "key", "organization_id"])
     .where("id", "=", parsed.data.roleId)
     .executeTakeFirst();
+
+  if (role && !canAccessOrg(guard.access, role.organization_id)) {
+    return adminErrorResponse("role_not_found", 404, request);
+  }
 
   await db.transaction().execute(async (trx) => {
     await trx

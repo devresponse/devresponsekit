@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { AdminError, loadRoleOrThrow } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +46,12 @@ export default async function AdministratorRoleDetailPage({
       notFound();
     }
     throw err;
+  }
+
+  // ADR-0001: confine an org admin to their org's roles; a global role is
+  // SUPERADMIN-only. notFound() preserves existence indistinguishability.
+  if (!canAccessOrg(guard.access, role.organization_id)) {
+    notFound();
   }
 
   const t = await getTranslations({ locale, namespace: "administrator.roles" });

@@ -11,6 +11,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +81,17 @@ export async function GET(request: NextRequest) {
   if (query.q) {
     const like = `%${query.q}%`;
     base = base.where((eb) => eb.or([eb("r.key", "ilike", like), eb("r.name", "ilike", like)]));
+  }
+
+  // ADR-0001: an org admin sees only roles owned by their org; global
+  // roles (organization_id IS NULL) are SUPERADMIN-only. A null scope (org
+  // admin with no resolvable org) yields an empty list, never "all".
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
+    return NextResponse.json(buildListResponse([], 0, query));
+  }
+  if (scope.kind === "org") {
+    base = base.where("r.organization_id", "=", scope.organizationId);
   }
 
   const itemsQuery = applySortAndPagination(
@@ -162,6 +174,12 @@ export async function POST(request: NextRequest) {
   }
   const input = parsed.data;
   const orgId = input.organizationId ?? null;
+
+  // ADR-0001: an org admin may create roles ONLY within their own org —
+  // never a global role and never another org's. SUPERADMIN bypasses.
+  if (!isSuperadmin(guard.access) && (orgId === null || !canAccessOrg(guard.access, orgId))) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   // Manual uniqueness check for global keys (NULLs are distinct in
   // postgres unique indexes).

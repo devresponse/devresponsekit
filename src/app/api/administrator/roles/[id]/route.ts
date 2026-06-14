@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { AdminError, assertRoleNotInUse, loadRoleOrThrow } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
@@ -29,6 +30,11 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 
   try {
     const role = await loadRoleOrThrow(id);
+    // ADR-0001: confine an org admin to their org's roles; a global role is
+    // SUPERADMIN-only. 404 (not 403) so a foreign role is not confirmed.
+    if (!canAccessOrg(guard.access, role.organization_id)) {
+      return adminErrorResponse("not_found", 404, request);
+    }
     return NextResponse.json({ role });
   } catch (err) {
     if (err instanceof AdminError && err.code === "role_not_found") {
@@ -87,6 +93,11 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   if (!existing) {
     return adminErrorResponse("not_found", 404, request);
   }
+  // ADR-0001: confine an org admin to their org's roles; a global role is
+  // SUPERADMIN-only. 404 (not 403) so a foreign role is not confirmed.
+  if (!canAccessOrg(guard.access, existing.organization_id)) {
+    return adminErrorResponse("not_found", 404, request);
+  }
 
   await db.updateTable("app_roles").set(updates).where("id", "=", id).execute();
 
@@ -123,6 +134,11 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
+    return adminErrorResponse("not_found", 404, request);
+  }
+  // ADR-0001: confine an org admin to their org's roles; a global role is
+  // SUPERADMIN-only. 404 (not 403) so a foreign role is not confirmed.
+  if (!canAccessOrg(guard.access, existing.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
   }
 

@@ -9,6 +9,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -35,12 +36,14 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("invalid_id", 400, request);
   }
 
-  const roleExists = await db
+  const roleRow = await db
     .selectFrom("app_roles")
-    .select(["id"])
+    .select(["id", "organization_id"])
     .where("id", "=", id)
     .executeTakeFirst();
-  if (!roleExists) {
+  // ADR-0001: confine an org admin to their org's roles; a global role is
+  // SUPERADMIN-only. 404 (not 403) so a foreign role is not confirmed.
+  if (!roleRow || !canAccessOrg(guard.access, roleRow.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
   }
 

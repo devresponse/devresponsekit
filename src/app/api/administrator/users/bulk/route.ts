@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_BULK_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import {
@@ -128,6 +129,25 @@ export async function POST(request: NextRequest) {
   );
   if (limited) return limited;
 
+  // ADR-0001: confine the batch to users the actor may act on. An ORG ADMIN
+  // can only touch users holding a membership in their org; a null scope can
+  // touch no one. SUPERADMIN bypasses (scope.kind === "all"). The org filter
+  // is applied to BOTH the "select all matching" query AND the explicit-id
+  // metadata fetch, so a foreign-org id simply resolves to "not_found" and
+  // is never mutated.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
+    return NextResponse.json({
+      ok: true,
+      action,
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+      results: [] as BulkUserOutcome[],
+    });
+  }
+  const orgId = scope.kind === "org" ? scope.organizationId : null;
+
   // Resolve the target id list. Two paths:
   //   1. Explicit ids — trust the parser's UUID format check, then
   //      look them up in one round-trip.
@@ -153,6 +173,17 @@ export async function POST(request: NextRequest) {
         eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
       );
     }
+    if (orgId !== null) {
+      q = q.where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom("app_organization_memberships as m")
+            .select("m.id")
+            .whereRef("m.app_user_id", "=", "app_users.id")
+            .where("m.organization_id", "=", orgId),
+        ),
+      );
+    }
     const rows = await q.limit(MAX_BULK_IDS).execute();
     targetIds = rows.map((r) => r.id);
   } else {
@@ -176,11 +207,22 @@ export async function POST(request: NextRequest) {
   // (better_auth_user_id, primary_email, status). Doing this in one
   // round-trip keeps the bulk path O(1) DB reads regardless of batch
   // size.
-  const targets = (await db
+  let targetsQuery = db
     .selectFrom("app_users")
     .select(["id", "better_auth_user_id", "primary_email", "status"])
-    .where("id", "in", targetIds)
-    .execute()) satisfies { id: string }[];
+    .where("id", "in", targetIds);
+  if (orgId !== null) {
+    targetsQuery = targetsQuery.where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom("app_organization_memberships as m")
+          .select("m.id")
+          .whereRef("m.app_user_id", "=", "app_users.id")
+          .where("m.organization_id", "=", orgId),
+      ),
+    );
+  }
+  const targets = (await targetsQuery.execute()) satisfies { id: string }[];
 
   const targetMap = new Map<string, BulkUserTarget>(
     targets.map((row) => [

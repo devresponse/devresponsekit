@@ -2,6 +2,8 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +20,11 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
+  // ADR-0001: email templates are platform-global config (no tenant column)
+  // — SUPERADMIN-only, like the permission catalog.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   const items = await db
     .selectFrom("app_email_templates")

@@ -6,6 +6,7 @@ import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,10 @@ const idSchema = z.uuid();
 export async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
+  // ADR-0001: email templates are platform-global config — SUPERADMIN-only.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   const { id } = await ctx.params;
   if (!idSchema.safeParse(id).success) {
@@ -73,6 +78,10 @@ const updateSchema = z
 export async function PUT(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+  // ADR-0001: editing a platform-global template is SUPERADMIN-only.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   const limited = enforceRateLimit(
     "admin.email.templates",

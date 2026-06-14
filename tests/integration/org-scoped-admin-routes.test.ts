@@ -1,0 +1,264 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { NextRequest } from "next/server";
+import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as EnterpriseAppRoute from "@/app/api/administrator/enterprise-apps/[id]/route";
+import type * as RoleByIdRoute from "@/app/api/administrator/roles/[id]/route";
+import type * as RolesListRoute from "@/app/api/administrator/roles/route";
+import type * as MembersRoute from "@/app/api/administrator/organizations/[id]/members/route";
+import type * as BindingsRoute from "@/app/api/administrator/organizations/[id]/provider-bindings/route";
+import type * as PermissionsRoute from "@/app/api/administrator/permissions/route";
+import type * as ExportRoute from "@/app/api/administrator/export/[resource]/route";
+import type * as OutboxRoute from "@/app/api/administrator/email/outbox/route";
+
+/**
+ * ADR-0001 cross-tenant isolation suite (docs/adr/0001-three-tier-access-control.md).
+ *
+ * Each test proves that an ORG ADMIN confined to org-a CANNOT reach a
+ * resource owned by org-b (or a platform-global resource), and that a
+ * SUPERADMIN can. The handlers must return 404 (not 403) on a foreign
+ * `[id]` so a resource's existence in another tenant is never confirmed,
+ * and an org admin with no resolvable org must get an EMPTY result — never
+ * "all". This is the regression guard for the P0 gaps the enterprise
+ * re-review flagged: every fixed surface gets a direct deny proof here.
+ */
+const sessionGetter = vi.fn();
+const accessGetter = vi.fn();
+const auditMock = vi.fn();
+const dbFirst = vi.fn();
+let dbExecuteResult: unknown[] = [];
+
+vi.mock("@/lib/auth-guard", () => ({
+  getCurrentSession: () => sessionGetter(),
+}));
+vi.mock("@/lib/auth-status", async () => {
+  const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
+  return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
+});
+vi.mock("@/lib/audit.server", () => ({ auditEvent: (...args: unknown[]) => auditMock(...args) }));
+
+function makeChain(): unknown {
+  const handler: ProxyHandler<object> = {
+    get(_t, prop) {
+      if (prop === "executeTakeFirst") return dbFirst;
+      if (prop === "executeTakeFirstOrThrow") return dbFirst;
+      if (prop === "execute") return () => Promise.resolve(dbExecuteResult);
+      return (..._args: unknown[]) => makeChain();
+    },
+  };
+  return new Proxy({}, handler);
+}
+
+vi.mock("@/db/database", () => ({
+  db: {
+    selectFrom: () => makeChain(),
+    insertInto: () => makeChain(),
+    updateTable: () => makeChain(),
+    deleteFrom: () => makeChain(),
+  },
+}));
+
+const ORG_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ORG_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const ROLE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const APP_ID = "analytics";
+
+/** ORG ADMIN — confined to `org`, holds `perms`, NOT a superadmin. */
+function orgAdmin(org: string, perms: string[]): AuthStatusModule.UserAccessContext {
+  return {
+    appUserId: "admin-1",
+    primaryEmail: "admin@org-a.com",
+    status: "active",
+    organizationId: org,
+    membershipStatus: "active",
+    preferredLocale: "en",
+    permissions: perms,
+  };
+}
+
+/** SUPERADMIN — holds the `superuser` marker; org scoping is bypassed. */
+function superadmin(perms: string[]): AuthStatusModule.UserAccessContext {
+  return { ...orgAdmin(ORG_A, perms), organizationId: null, permissions: [...perms, "superuser"] };
+}
+
+/** An admin with NO resolvable org and no superuser — a null scope. */
+function nullScopeAdmin(perms: string[]): AuthStatusModule.UserAccessContext {
+  return { ...orgAdmin(ORG_A, perms), organizationId: null };
+}
+
+function req(url: string, init: RequestInit = {}): NextRequest {
+  return {
+    nextUrl: new URL(url),
+    url,
+    headers: new Headers(init.headers ?? {}),
+    json: async () => (init.body ? JSON.parse(init.body as string) : {}),
+    method: init.method ?? "GET",
+  } as unknown as NextRequest;
+}
+
+let appGet: typeof EnterpriseAppRoute.GET;
+let roleGet: typeof RoleByIdRoute.GET;
+let rolesList: typeof RolesListRoute.GET;
+let membersGet: typeof MembersRoute.GET;
+let bindingsGet: typeof BindingsRoute.GET;
+let permissionsPost: typeof PermissionsRoute.POST;
+let exportGet: typeof ExportRoute.GET;
+let outboxGet: typeof OutboxRoute.GET;
+
+beforeEach(async () => {
+  for (const m of [sessionGetter, accessGetter, auditMock, dbFirst]) m.mockReset();
+  dbExecuteResult = [];
+  sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
+  ({ GET: appGet } = await import("@/app/api/administrator/enterprise-apps/[id]/route"));
+  ({ GET: roleGet } = await import("@/app/api/administrator/roles/[id]/route"));
+  ({ GET: rolesList } = await import("@/app/api/administrator/roles/route"));
+  ({ GET: membersGet } = await import("@/app/api/administrator/organizations/[id]/members/route"));
+  ({ GET: bindingsGet } =
+    await import("@/app/api/administrator/organizations/[id]/provider-bindings/route"));
+  ({ POST: permissionsPost } = await import("@/app/api/administrator/permissions/route"));
+  ({ GET: exportGet } = await import("@/app/api/administrator/export/[resource]/route"));
+  ({ GET: outboxGet } = await import("@/app/api/administrator/email/outbox/route"));
+});
+afterEach(() => vi.resetModules());
+
+describe("P0-6 GET /enterprise-apps/[id] — app owned by org-b", () => {
+  const ctx = { params: Promise.resolve({ id: APP_ID }) };
+  const url = `http://test.local/api/administrator/enterprise-apps/${APP_ID}`;
+  beforeEach(() => {
+    dbFirst.mockResolvedValue({
+      id: APP_ID,
+      label: "Analytics",
+      description: null,
+      origin: "https://analytics.org-b.com",
+      subdomain: "analytics",
+      sso_audience: "aud",
+      status: "active",
+      sort_order: 0,
+      organization_id: ORG_B,
+      organization_slug: "org-b",
+      organization_name: "Org B",
+      created_at: "2025-01-01T00:00:00Z",
+    });
+  });
+
+  it("ORG ADMIN of org-a gets 404 (no cross-tenant read, no existence leak)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.apps.read"]));
+    expect((await appGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("SUPERADMIN reaches the app in org-b", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.apps.read"]));
+    expect((await appGet(req(url), ctx)).status).toBe(200);
+  });
+});
+
+describe("P0-7 GET /roles/[id] — role owned by org-b", () => {
+  const ctx = { params: Promise.resolve({ id: ROLE_ID }) };
+  const url = `http://test.local/api/administrator/roles/${ROLE_ID}`;
+  beforeEach(() => {
+    dbFirst.mockResolvedValue({
+      id: ROLE_ID,
+      organization_id: ORG_B,
+      key: "org-b.editor",
+      name: "Editor",
+      description: null,
+      created_at: "2025-01-01T00:00:00Z",
+    });
+  });
+
+  it("ORG ADMIN of org-a gets 404 for another org's role", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.roles.read"]));
+    expect((await roleGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("SUPERADMIN reaches the role in org-b", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.read"]));
+    expect((await roleGet(req(url), ctx)).status).toBe(200);
+  });
+});
+
+describe("P0-7 GET /roles (list) — null-scope admin", () => {
+  it("an admin with no resolvable org gets an EMPTY list, never 'all'", async () => {
+    accessGetter.mockResolvedValue(nullScopeAdmin(["admin.roles.read"]));
+    // The DB would return rows, but the handler must short-circuit to empty.
+    dbExecuteResult = [{ id: ROLE_ID, organization_id: ORG_B, key: "leak", name: "Leak" }];
+    const res = await rolesList(req("http://test.local/api/administrator/roles"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[]; total: number };
+    expect(body.items).toHaveLength(0);
+    expect(body.total).toBe(0);
+  });
+});
+
+describe("P0-3 GET /organizations/[id]/members — org-b", () => {
+  const ctx = { params: Promise.resolve({ id: ORG_B }) };
+  const url = `http://test.local/api/administrator/organizations/${ORG_B}/members`;
+  beforeEach(() => dbFirst.mockResolvedValue({ id: ORG_B, slug: "org-b" }));
+
+  it("ORG ADMIN of org-a gets 404 for org-b's member list", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.orgs.read"]));
+    expect((await membersGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("SUPERADMIN reaches org-b's member list", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.read"]));
+    expect((await membersGet(req(url), ctx)).status).toBe(200);
+  });
+});
+
+describe("P0-5 GET /organizations/[id]/provider-bindings — org-b", () => {
+  const ctx = { params: Promise.resolve({ id: ORG_B }) };
+  const url = `http://test.local/api/administrator/organizations/${ORG_B}/provider-bindings`;
+  beforeEach(() => dbFirst.mockResolvedValue({ id: ORG_B, slug: "org-b" }));
+
+  it("ORG ADMIN of org-a gets 404 for org-b's provider bindings", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.orgs.read"]));
+    expect((await bindingsGet(req(url), ctx)).status).toBe(404);
+  });
+});
+
+describe("P0-10 POST /permissions — global catalog is SUPERADMIN-only", () => {
+  const url = "http://test.local/api/administrator/permissions";
+  const body = JSON.stringify({ key: "custom.perm", description: "x" });
+
+  it("an ORG ADMIN holding admin.permissions.manage still gets 403", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.permissions.manage"]));
+    const res = await permissionsPost(
+      req(url, { method: "POST", body, headers: { "content-type": "application/json" } }),
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("P0-1 GET /export/[resource] — org-scoped exfil guard", () => {
+  const ctx = { params: Promise.resolve({ resource: "users" }) };
+  const url = "http://test.local/api/administrator/export/users";
+
+  it("a null-scope admin exports ZERO data rows (header only)", async () => {
+    accessGetter.mockResolvedValue(nullScopeAdmin(["admin.users.read"]));
+    // The DB would yield a row, but a null scope must export nothing.
+    dbExecuteResult = [{ id: "u-leak", primary_email: "leak@org-b.com" }];
+    const res = await exportGet(req(url), ctx);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    // Exactly one line: the CSV header. No tenant rows leaked.
+    expect(text.trim().split("\n")).toHaveLength(1);
+  });
+});
+
+describe("GET /email/outbox — platform-global log is SUPERADMIN-only", () => {
+  const url = "http://test.local/api/administrator/email/outbox";
+
+  it("an org-admin-tier holder of admin.email.read gets 403 (no cross-tenant recipient leak)", async () => {
+    // The seeded `admin.platform` role holds admin.email.read WITHOUT the
+    // superuser marker — exactly this actor.
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.email.read"]));
+    expect((await outboxGet(req(url))).status).toBe(403);
+  });
+
+  it("SUPERADMIN may read the outbox", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.email.read"]));
+    dbExecuteResult = [];
+    dbFirst.mockResolvedValue({ total: "0" });
+    expect((await outboxGet(req(url))).status).toBe(200);
+  });
+});

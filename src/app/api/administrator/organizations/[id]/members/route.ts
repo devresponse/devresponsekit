@@ -11,6 +11,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +44,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!orgExists) {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
+  // ADR-0001: org admins are confined to their own org; 404 (not 403) so a
+  // foreign org's existence is not confirmed. SUPERADMIN bypasses.
+  if (!canAccessOrg(guard.access, id)) {
     return adminErrorResponse("organization_not_found", 404, request);
   }
 
@@ -125,6 +131,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!org) {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
+  if (!canAccessOrg(guard.access, id)) {
     return adminErrorResponse("organization_not_found", 404, request);
   }
 
@@ -231,6 +240,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (!org) {
     return adminErrorResponse("organization_not_found", 404, request);
   }
+  if (!canAccessOrg(guard.access, id)) {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
 
   let json: unknown;
   try {
@@ -318,6 +330,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!org) {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
+  if (!canAccessOrg(guard.access, id)) {
     return adminErrorResponse("organization_not_found", 404, request);
   }
 

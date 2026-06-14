@@ -19,6 +19,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,17 @@ export async function GET(request: NextRequest) {
   let base = db
     .selectFrom("app_enterprise_applications as a")
     .leftJoin("app_organizations as o", "o.id", "a.organization_id");
+
+  // ADR-0001: an org admin lists only apps owned by their org; global apps
+  // (organization_id IS NULL) are SUPERADMIN-only. A null scope yields an
+  // empty page, never "all".
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
+    return NextResponse.json(buildListResponse([], 0, query));
+  }
+  if (scope.kind === "org") {
+    base = base.where("a.organization_id", "=", scope.organizationId);
+  }
 
   const statusFilter = query.filters.status;
   if (typeof statusFilter === "string" && statusFilter.length > 0) {
@@ -160,6 +172,16 @@ export async function POST(request: NextRequest) {
     return adminErrorResponse("invalid_body", 400, request);
   }
   const input = parsed.data;
+
+  // ADR-0001: an org admin may create an app ONLY in their own org — never
+  // a global app and never another org's. SUPERADMIN bypasses.
+  const targetOrg = input.organization_id ?? null;
+  if (
+    !isSuperadmin(guard.access) &&
+    (targetOrg === null || !canAccessOrg(guard.access, targetOrg))
+  ) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   if (!isHttpsOrigin(input.origin)) {
     return adminErrorResponse("invalid_origin", 400, request);

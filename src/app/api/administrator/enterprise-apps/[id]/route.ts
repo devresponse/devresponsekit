@@ -13,6 +13,7 @@ import {
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     .where("a.id", "=", id)
     .executeTakeFirst();
   if (!row) {
+    return adminErrorResponse("application_not_found", 404, request);
+  }
+  // ADR-0001: an org admin sees only apps owned by their org; a global app
+  // (organization_id null) is SUPERADMIN-only. 404, not 403, to avoid leak.
+  if (!canAccessOrg(guard.access, row.organization_id)) {
     return adminErrorResponse("application_not_found", 404, request);
   }
 
@@ -112,11 +118,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   const existing = await db
     .selectFrom("app_enterprise_applications")
-    .select(["id"])
+    .select(["id", "organization_id"])
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
     return adminErrorResponse("application_not_found", 404, request);
+  }
+  // ADR-0001: an org admin may only manage apps owned by their org. 404 to
+  // avoid confirming a foreign/global app exists.
+  if (!canAccessOrg(guard.access, existing.organization_id)) {
+    return adminErrorResponse("application_not_found", 404, request);
+  }
+  // Re-homing an app to another org (or to global) is a tenancy boundary
+  // change — SUPERADMIN only. An org admin cannot move apps in or out.
+  if (input.organization_id !== undefined && !isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
   }
 
   const updates: Record<string, unknown> = {};
@@ -177,10 +193,15 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   const existing = await db
     .selectFrom("app_enterprise_applications")
-    .select(["id", "label"])
+    .select(["id", "label", "organization_id"])
     .where("id", "=", id)
     .executeTakeFirst();
   if (!existing) {
+    return adminErrorResponse("application_not_found", 404, request);
+  }
+  // ADR-0001: an org admin may only delete apps owned by their org; a
+  // global app is SUPERADMIN-only. 404 to avoid leaking existence.
+  if (!canAccessOrg(guard.access, existing.organization_id)) {
     return adminErrorResponse("application_not_found", 404, request);
   }
 

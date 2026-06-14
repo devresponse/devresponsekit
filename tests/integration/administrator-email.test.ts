@@ -94,6 +94,10 @@ function makeReq(path: string, init?: { method?: string; body?: unknown }): Next
   } as unknown as NextRequest;
 }
 
+// Email is a platform-global surface (templates + outbox have no tenant
+// column), so under ADR-0001 these routes are SUPERADMIN-only. The success
+// path actor therefore holds the `superuser` marker. "Lacks permission" 403
+// tests stay valid — `superuser` is never the specific gated permission.
 const OK_ACCESS = (perms: string[]) => ({
   appUserId: "u-1",
   primaryEmail: "admin@x.com",
@@ -101,7 +105,7 @@ const OK_ACCESS = (perms: string[]) => ({
   organizationId: null,
   membershipStatus: "active",
   preferredLocale: "en",
-  permissions: perms,
+  permissions: [...perms, "superuser"],
 });
 
 let outboxGET: typeof OutboxRouteModule.GET;

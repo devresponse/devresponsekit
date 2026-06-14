@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     .where("id", "=", id)
     .executeTakeFirst();
   if (!source) {
+    return adminErrorResponse("not_found", 404, request);
+  }
+  // ADR-0001: an org admin may only duplicate a role owned by their org —
+  // never a global role (which would clone a SUPERADMIN-scoped role into a
+  // tenant). 404 to avoid confirming a foreign/global role exists.
+  if (!canAccessOrg(guard.access, source.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
   }
 

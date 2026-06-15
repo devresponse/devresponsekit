@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
+import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
+
+/** Role scopes — the allow-listed `scope` filter values. */
+const ROLE_SCOPES = ["global", "org"] as const;
 
 /**
  * Client-side roles grid (docs/admin-manager.md §8.5).
@@ -42,6 +46,7 @@ export function AdministratorRolesGrid({
 }) {
   const t = useTranslations("administrator.roles");
   const tErr = useTranslations("administrator.errors");
+  const tGrid = useTranslations("administrator.grid");
   const intlLocale = useLocale();
   const router = useRouter();
   const dialogs = useDialogs();
@@ -199,6 +204,13 @@ export function AdministratorRolesGrid({
     [t, locale, dateFormatter, canDelete, canDuplicate, onDelete, onDuplicate],
   );
 
+  const filters = useMemo<GridFilterDescriptor[]>(
+    () => [
+      { name: "scope", label: t("columns.scope"), options: toFilterOptions(tGrid, ROLE_SCOPES) },
+    ],
+    [t, tGrid],
+  );
+
   return (
     <div className="space-y-2">
       {rowError ? (
@@ -215,6 +227,8 @@ export function AdministratorRolesGrid({
           defaultPageSize: 25,
           defaultSort: [{ field: "key", direction: "asc" }],
         }}
+        searchable
+        filters={filters}
       />
     </div>
   );

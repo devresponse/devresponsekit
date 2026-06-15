@@ -8,6 +8,10 @@ import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
+import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
+
+/** Enterprise-app statuses — the allow-listed `status` filter values. */
+const APP_STATUSES = ["available", "disabled"] as const;
 
 /**
  * Client-side enterprise applications grid (docs/admin-manager.md §8.10,
@@ -43,6 +47,7 @@ export function AdministratorEnterpriseAppsGrid({
 }) {
   const t = useTranslations("administrator.enterpriseApps");
   const tErr = useTranslations("administrator.errors");
+  const tGrid = useTranslations("administrator.grid");
   const intlLocale = useLocale();
   const dialogs = useDialogs();
 
@@ -169,6 +174,13 @@ export function AdministratorEnterpriseAppsGrid({
     [t, locale, dateFormatter, canManage, onDelete],
   );
 
+  const filters = useMemo<GridFilterDescriptor[]>(
+    () => [
+      { name: "status", label: t("columns.status"), options: toFilterOptions(tGrid, APP_STATUSES) },
+    ],
+    [t, tGrid],
+  );
+
   return (
     <div className="space-y-2">
       {rowError ? (
@@ -185,6 +197,8 @@ export function AdministratorEnterpriseAppsGrid({
           defaultPageSize: 25,
           defaultSort: [{ field: "sort_order", direction: "asc" }],
         }}
+        searchable
+        filters={filters}
       />
     </div>
   );

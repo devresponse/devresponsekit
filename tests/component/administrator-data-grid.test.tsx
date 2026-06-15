@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -106,5 +106,64 @@ describe("DataGrid", () => {
     await screen.findByText("Ada");
     const prev = screen.getByRole("button", { name: "Previous page" });
     expect(prev).toBeDisabled();
+  });
+});
+
+describe("DataGrid search & filters", () => {
+  const STATUS_FILTER = [
+    {
+      name: "status",
+      label: "Status",
+      options: [
+        { value: "active", label: "Active" },
+        { value: "blocked", label: "Blocked" },
+      ],
+    },
+  ];
+
+  it("does not render the filter bar when neither searchable nor filters are set", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: [], total: 0 }) });
+    renderWithIntl(<DataGrid<Row> name="t" endpoint="/api/test" columns={COLUMNS} />);
+    await screen.findByText("No results match the current filters.");
+    expect(screen.queryByTestId("datagrid-filterbar")).not.toBeInTheDocument();
+  });
+
+  it("commits a debounced search term to the URL", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: [], total: 0 }) });
+    const user = userEvent.setup();
+    renderWithIntl(<DataGrid<Row> name="t" endpoint="/api/test" columns={COLUMNS} searchable />);
+
+    const box = screen.getByRole("searchbox", { name: "Search" });
+    await user.type(box, "ada");
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith(expect.stringContaining("q=ada")));
+  });
+
+  it("renders an allow-listed filter select and commits the chosen value", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: [], total: 0 }) });
+    const user = userEvent.setup();
+    renderWithIntl(
+      <DataGrid<Row> name="t" endpoint="/api/test" columns={COLUMNS} filters={STATUS_FILTER} />,
+    );
+
+    const select = screen.getByRole("combobox", { name: "Filter by Status" });
+    expect(select).toBeInTheDocument();
+    await user.selectOptions(select, "active");
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
+    const lastUrl = String(replaceMock.mock.calls.at(-1)?.[0] ?? "");
+    expect(decodeURIComponent(lastUrl)).toContain("filter[status]=active");
+  });
+
+  it("offers an 'All' option that clears the filter", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: [], total: 0 }) });
+    renderWithIntl(
+      <DataGrid<Row> name="t" endpoint="/api/test" columns={COLUMNS} filters={STATUS_FILTER} />,
+    );
+    const select = screen.getByRole("combobox", { name: "Filter by Status" });
+    // The leading option is the "All" sentinel; selecting it removes the filter.
+    expect(within(select).getByRole("option", { name: "All" })).toBeInTheDocument();
+    // Flush the in-flight fetch so its state update is wrapped in act().
+    await screen.findByText("No results match the current filters.");
   });
 });

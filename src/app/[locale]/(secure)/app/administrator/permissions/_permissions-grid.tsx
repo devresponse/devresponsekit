@@ -157,6 +157,7 @@ export function AdministratorPermissionsGrid({
           defaultPageSize: 50,
           defaultSort: [{ field: "key", direction: "asc" }],
         }}
+        searchable
       />
 
       <Sheet open={sheet.kind !== "closed"} onOpenChange={(open) => !open && closeSheet()}>

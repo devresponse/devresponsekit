@@ -6,6 +6,10 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
+import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
+
+/** Membership statuses — the allow-listed `status` filter values. */
+const MEMBERSHIP_STATUSES = ["active", "pending_approval", "blocked", "suspended"] as const;
 
 /**
  * Client-side memberships grid (docs/admin-manager.md §19).
@@ -26,6 +30,7 @@ interface MembershipRow {
 
 export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
   const t = useTranslations("administrator.memberships");
+  const tGrid = useTranslations("administrator.grid");
   const intlLocale = useLocale();
 
   const dateFormatter = useMemo(
@@ -88,6 +93,17 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
     [t, locale, dateFormatter],
   );
 
+  const filters = useMemo<GridFilterDescriptor[]>(
+    () => [
+      {
+        name: "status",
+        label: t("columns.status"),
+        options: toFilterOptions(tGrid, MEMBERSHIP_STATUSES),
+      },
+    ],
+    [t, tGrid],
+  );
+
   return (
     <DataGrid<MembershipRow>
       name="administrator.memberships"
@@ -97,6 +113,8 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
         defaultPageSize: 25,
         defaultSort: [{ field: "created_at", direction: "desc" }],
       }}
+      searchable
+      filters={filters}
     />
   );
 }

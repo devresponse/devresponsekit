@@ -307,7 +307,27 @@
       "selectAllMatching": "Вибрати всі {total, number} рядків, що відповідають критеріям",
       "clearSelection": "Очистити вибір",
       "bulkActions": "Масові дії",
-      "exportCsv": "Експорт у CSV"
+      "exportCsv": "Експорт у CSV",
+      "searchPlaceholder": "Пошук…",
+      "filterAll": "Усі",
+      "filterBy": "Фільтрувати за: {label}",
+      "clearFilters": "Очистити фільтри",
+      "optionLabels": {
+        "active": "Активний",
+        "pending_approval": "Очікує підтвердження",
+        "pending": "Очікує",
+        "blocked": "Заблоковано",
+        "suspended": "Призупинено",
+        "deactivated": "Деактивовано",
+        "archived": "Заархівовано",
+        "available": "Доступний",
+        "disabled": "Вимкнено",
+        "revoked": "Відкликано",
+        "global": "Глобальна",
+        "org": "Організація",
+        "true": "Так",
+        "false": "Ні"
+      }
     },
     "errors": {
       "forbidden": "У вас немає дозволу для перегляду цієї сторінки.",

@@ -58,11 +58,107 @@
     "resetPasswordDone": "Tu contraseña se ha actualizado."
   },
   "public": {
-    "heroEyebrow": "Abierto. Localizado. Seguro.",
-    "heroTitle": "Construye la respuesta a incidentes en una plataforma que todo tu equipo puede explorar.",
-    "heroSubtitle": "La Plataforma Empresarial DevResponse ofrece a cada visitante una página de inicio pública y rápida por defecto. Explora el producto, lee la documentación e inicia sesión solo cuando lo necesites.",
-    "heroPrimaryCta": "Empezar",
-    "heroSecondaryCta": "Más información"
+    "hero": {
+      "eyebrow": "Código abierto · MIT · Autoalojado",
+      "title": "El shell SaaS empresarial que es totalmente tuyo.",
+      "subtitle": "Seguro por diseño. De código abierto por elección. Totalmente tuyo.",
+      "screenshotAlt": "La consola de administración de DevResponseKit.",
+      "primaryCta": "Conseguirlo gratis en GitHub",
+      "secondaryCta": "Empezar",
+      "signInCta": "Iniciar sesión"
+    },
+    "stats": {
+      "items": [
+        { "value": "744", "label": "pruebas automatizadas" },
+        { "value": "$0", "label": "coste marginal de autenticación" },
+        { "value": "80+", "label": "páginas de consola de administración" },
+        { "value": "3 niveles", "label": "control de acceso" },
+        { "value": "4", "label": "idiomas" }
+      ]
+    },
+    "features": {
+      "eyebrow": "Todo lo que necesita una plataforma B2B",
+      "title": "La capa de producción que los kits independientes nunca construyen.",
+      "subtitle": "Bifúrcalo, hazlo tuyo, publícalo. DevResponseKit reúne la base multiinquilino que la mayoría de los equipos tardan semanas en construir, ya probada y documentada.",
+      "items": [
+        {
+          "title": "Consola de administración",
+          "description": "Más de 80 páginas para usuarios, roles, un catálogo de 30 permisos, organizaciones, membresías, aplicaciones empresariales, correo y auditoría, con búsqueda, filtrado, acciones masivas y exportación a CSV del lado del servidor."
+        },
+        {
+          "title": "Control de acceso de tres niveles",
+          "description": "Niveles de superadministrador, administrador de organización y usuario, construidos sobre primitivas de alcance con una única fuente de verdad. Las búsquedas fuera de alcance devuelven 404, por lo que un inquilino nunca puede saber que existe otro."
+        },
+        {
+          "title": "API de máquina con alcances",
+          "description": "Una /api/v1 versionada con claves de API con hash SHA-256 y JWT Ed25519 verificados contra un JWKS publicado. Una credencial nunca puede exceder los permisos de su propietario."
+        },
+        {
+          "title": "SSO entre subdominios",
+          "description": "Los JWT de un solo uso con nonce de 60 segundos permiten a los usuarios moverse entre tus aplicaciones sin volver a iniciar sesión, respaldados por una lista blanca de orígenes registrables."
+        },
+        {
+          "title": "Correo con bandeja de salida",
+          "description": "Cada mensaje se registra en una bandeja de salida inspeccionable y con alcance por organización antes de su entrega, con proveedores intercambiables Resend y Mailgun y plantillas editables por idioma."
+        },
+        {
+          "title": "Localizado por defecto",
+          "description": "next-intl con cuatro idiomas y una preferencia persistente por usuario: cada ruta, mensaje y plantilla de correo respeta el idioma del visitante."
+        },
+        {
+          "title": "Visor de documentación integrado",
+          "description": "Markdown, Mermaid y Shiki renderizados a través de una canalización reforzada contra XSS que sanea primero: tu documentación se incluye dentro de la aplicación."
+        },
+        {
+          "title": "Seguridad entregada, no solo descrita",
+          "description": "Cabeceras de seguridad HTTP, observabilidad con datos personales depurados, comparación de secretos en tiempo constante y una prueba de CI que falla la compilación si alguna ruta omite el alcance por inquilino."
+        }
+      ]
+    },
+    "why": {
+      "eyebrow": "Por qué DevResponseKit",
+      "title": "Identidad de la clase de Clerk y WorkOS, autoalojada con coste marginal cero.",
+      "subtitle": "Las organizaciones, el RBAC de tres niveles, el SSO, las claves de API y la auditoría se construyen sobre Better Auth de código abierto, sin facturas por usuario, por organización o por conexión SSO que se acumulen a medida que creces.",
+      "items": [
+        {
+          "title": "Aislamiento multiinquilino verificable",
+          "description": "La inquilinidad se impone en la puerta de compilación: una prueba de CI analiza cada ruta de administración y falla si alguna toca datos sin una primitiva de alcance. El aislamiento se convierte en una garantía que puedes leer y ejecutar, no en algo que aceptar por fe."
+        },
+        {
+          "title": "Posee el código, posee los datos",
+          "description": "Código fuente para copiar y avanzar que bifurcas y publicas: sin dependencia del framework ni tarifas de tiempo de ejecución por puesto. Autoalojado en una base de datos PostgreSQL que tú controlas."
+        },
+        {
+          "title": "Probado y documentado",
+          "description": "744 pruebas en suites unitarias, de componentes, de integración, de seguridad, de extremo a extremo y de accesibilidad, además de registros de decisiones de arquitectura y un sitio de documentación integrado."
+        }
+      ]
+    },
+    "stack": {
+      "eyebrow": "Construido sobre un stack que tu equipo ya usa",
+      "title": "Moderno, con tipos seguros y sin sobrecarga de abstracción.",
+      "items": [
+        "Next.js 16",
+        "React 19",
+        "TypeScript 5.9",
+        "PostgreSQL + Kysely",
+        "Better Auth",
+        "next-intl",
+        "Tailwind CSS 4",
+        "Vitest · Playwright · axe"
+      ]
+    },
+    "cta": {
+      "title": "Bifúrcalo. Hazlo tuyo. Publícalo.",
+      "subtitle": "DevResponseKit es gratuito y de código abierto. Clona el repositorio y ten una plataforma B2B segura, multiinquilino y localizada funcionando en minutos.",
+      "primary": "Conseguirlo gratis en GitHub",
+      "secondary": "Crear una cuenta",
+      "repoLabel": "github.com/devresponse/devresponsekit"
+    },
+    "footer": {
+      "githubLink": "GitHub",
+      "rights": "Gratuito y de código abierto bajo la licencia MIT."
+    }
   },
   "shell": {
     "applications": "Aplicaciones",

@@ -58,11 +58,107 @@
     "resetPasswordDone": "Votre mot de passe a été mis à jour."
   },
   "public": {
-    "heroEyebrow": "Ouvert. Localisé. Sécurisé.",
-    "heroTitle": "Construisez la réponse aux incidents sur une plateforme que toute votre équipe peut consulter.",
-    "heroSubtitle": "La Plateforme Entreprise DevResponse offre à chaque visiteur une page d’accueil publique et rapide par défaut. Découvrez le produit, lisez la documentation et connectez-vous uniquement lorsque c’est nécessaire.",
-    "heroPrimaryCta": "Commencer",
-    "heroSecondaryCta": "En savoir plus"
+    "hero": {
+      "eyebrow": "Open source · MIT · Auto-hébergé",
+      "title": "Le shell SaaS d’entreprise qui vous appartient entièrement.",
+      "subtitle": "Sécurisé par conception. Open source par choix. Entièrement à vous.",
+      "screenshotAlt": "La console d’administration de DevResponseKit.",
+      "primaryCta": "Obtenez-le gratuitement sur GitHub",
+      "secondaryCta": "Commencer",
+      "signInCta": "Se connecter"
+    },
+    "stats": {
+      "items": [
+        { "value": "744", "label": "tests automatisés" },
+        { "value": "$0", "label": "coût marginal d’authentification" },
+        { "value": "80+", "label": "pages de console d’administration" },
+        { "value": "3 niveaux", "label": "contrôle d’accès" },
+        { "value": "4", "label": "langues" }
+      ]
+    },
+    "features": {
+      "eyebrow": "Tout ce dont une plateforme B2B a besoin",
+      "title": "La couche de production que les kits indépendants ne construisent jamais.",
+      "subtitle": "Forkez-le, possédez-le, livrez-le. DevResponseKit assemble la base multi-locataire que la plupart des équipes mettent des semaines à construire — déjà testée et documentée.",
+      "items": [
+        {
+          "title": "Console d’administration",
+          "description": "Plus de 80 pages pour les utilisateurs, les rôles, un catalogue de 30 permissions, les organisations, les adhésions, les applications d’entreprise, la messagerie et l’audit — avec recherche, filtrage, actions groupées et export CSV côté serveur."
+        },
+        {
+          "title": "Contrôle d’accès à trois niveaux",
+          "description": "Des niveaux superadmin, admin d’organisation et utilisateur bâtis sur des primitives de portée à source unique de vérité. Les recherches hors portée renvoient 404, de sorte qu’un locataire ne peut jamais savoir qu’un autre existe."
+        },
+        {
+          "title": "API machine à portées",
+          "description": "Une /api/v1 versionnée avec des clés d’API hachées en SHA-256 et des JWT Ed25519 vérifiés face à un JWKS publié. Un identifiant ne peut jamais dépasser les permissions de son propriétaire."
+        },
+        {
+          "title": "SSO inter-sous-domaines",
+          "description": "Des JWT à usage unique et nonce de 60 secondes permettent aux utilisateurs de passer d’une de vos applications à l’autre sans se reconnecter — appuyés par une liste blanche d’origines enregistrables."
+        },
+        {
+          "title": "Messagerie à file d’attente",
+          "description": "Chaque message est enregistré dans une file d’attente inspectable et délimitée par organisation avant l’envoi, avec des fournisseurs interchangeables Resend et Mailgun et des modèles modifiables par langue."
+        },
+        {
+          "title": "Localisé par défaut",
+          "description": "next-intl avec quatre langues et une préférence persistante par utilisateur — chaque route, message et modèle d’e-mail respecte la langue du visiteur."
+        },
+        {
+          "title": "Visionneuse de documentation intégrée",
+          "description": "Markdown, Mermaid et Shiki rendus via un pipeline durci contre le XSS qui assainit d’abord — votre documentation est livrée à l’intérieur de l’application."
+        },
+        {
+          "title": "Sécurité livrée, pas seulement décrite",
+          "description": "En-têtes de sécurité HTTP, observabilité expurgée des données personnelles, comparaison de secrets à temps constant et un test CI qui fait échouer la compilation si une route ignore la délimitation par locataire."
+        }
+      ]
+    },
+    "why": {
+      "eyebrow": "Pourquoi DevResponseKit",
+      "title": "Une identité de la classe de Clerk et WorkOS, auto-hébergée à coût marginal nul.",
+      "subtitle": "Les organisations, le RBAC à trois niveaux, le SSO, les clés d’API et l’audit reposent tous sur Better Auth open source — sans facture par utilisateur, par organisation ou par connexion SSO qui s’accumule à mesure que vous grandissez.",
+      "items": [
+        {
+          "title": "Isolation multi-locataire vérifiable",
+          "description": "La séparation des locataires est imposée au moment de la compilation : un test CI analyse chaque route d’administration et échoue si l’une touche des données sans primitive de portée. L’isolation devient une garantie que vous pouvez lire et exécuter, et non accepter sur parole."
+        },
+        {
+          "title": "Possédez le code, possédez les données",
+          "description": "Un code source à reprendre que vous forkez et livrez — sans dépendance au framework ni frais d’exécution par siège. Auto-hébergé sur une base de données PostgreSQL que vous contrôlez."
+        },
+        {
+          "title": "Testé et documenté",
+          "description": "744 tests à travers des suites unitaires, de composants, d’intégration, de sécurité, de bout en bout et d’accessibilité, ainsi que des registres de décisions d’architecture et un site de documentation intégré."
+        }
+      ]
+    },
+    "stack": {
+      "eyebrow": "Bâti sur une stack que votre équipe utilise déjà",
+      "title": "Moderne, typé en toute sûreté, sans surcharge d’abstraction.",
+      "items": [
+        "Next.js 16",
+        "React 19",
+        "TypeScript 5.9",
+        "PostgreSQL + Kysely",
+        "Better Auth",
+        "next-intl",
+        "Tailwind CSS 4",
+        "Vitest · Playwright · axe"
+      ]
+    },
+    "cta": {
+      "title": "Forkez-le. Possédez-le. Livrez-le.",
+      "subtitle": "DevResponseKit est gratuit et open source. Clonez le dépôt et obtenez une plateforme B2B sécurisée, multi-locataire et localisée en quelques minutes.",
+      "primary": "Obtenez-le gratuitement sur GitHub",
+      "secondary": "Créer un compte",
+      "repoLabel": "github.com/devresponse/devresponsekit"
+    },
+    "footer": {
+      "githubLink": "GitHub",
+      "rights": "Gratuit et open source sous licence MIT."
+    }
   },
   "shell": {
     "applications": "Applications",

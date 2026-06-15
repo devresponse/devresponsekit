@@ -58,11 +58,107 @@
     "resetPasswordDone": "Your password has been updated."
   },
   "public": {
-    "heroEyebrow": "Open. Localized. Secure.",
-    "heroTitle": "Build incident response on a platform your whole team can browse.",
-    "heroSubtitle": "DevResponse Enterprise Platform gives every visitor a fast, public-by-default home. Explore the product, read the docs, and sign in only when you need to.",
-    "heroPrimaryCta": "Get started",
-    "heroSecondaryCta": "Learn more"
+    "hero": {
+      "eyebrow": "Open source · MIT · Self-hosted",
+      "title": "The Enterprise SaaS Shell You Own Outright.",
+      "subtitle": "Secure by design. Open source by choice. Yours outright.",
+      "screenshotAlt": "The DevResponseKit administrator console.",
+      "primaryCta": "Get it free on GitHub",
+      "secondaryCta": "Get started",
+      "signInCta": "Sign in"
+    },
+    "stats": {
+      "items": [
+        { "value": "744", "label": "automated tests" },
+        { "value": "$0", "label": "marginal auth cost" },
+        { "value": "80+", "label": "admin console pages" },
+        { "value": "3-tier", "label": "access control" },
+        { "value": "4", "label": "languages" }
+      ]
+    },
+    "features": {
+      "eyebrow": "Everything a B2B platform needs",
+      "title": "The production layer indie kits never build.",
+      "subtitle": "Fork it, own it, ship it. DevResponseKit assembles the multi-tenant foundation most teams spend weeks building — already tested and documented.",
+      "items": [
+        {
+          "title": "Administrator console",
+          "description": "More than 80 pages for users, roles, a 30-key permission catalog, organizations, memberships, enterprise apps, email, and audit — with server-side search, filtering, bulk actions, and CSV export."
+        },
+        {
+          "title": "Three-tier access control",
+          "description": "Superadmin, org-admin, and user tiers built on single source-of-truth scope primitives. Out-of-scope lookups return 404, so one tenant can never learn another exists."
+        },
+        {
+          "title": "Scoped machine API",
+          "description": "A versioned /api/v1 with SHA-256-hashed API keys and Ed25519 JWTs verified against a published JWKS. A credential can never exceed its owner's permissions."
+        },
+        {
+          "title": "Cross-subdomain SSO",
+          "description": "Single-use, 60-second nonce JWTs let users move between your apps without signing in again — backed by a registrable-origin allow-list."
+        },
+        {
+          "title": "Outbox-first email",
+          "description": "Every message is recorded in an inspectable, org-scoped outbox before delivery, with pluggable Resend and Mailgun providers and editable per-locale templates."
+        },
+        {
+          "title": "Localized by default",
+          "description": "next-intl with four locales and a persisted per-user preference — every route, message, and email template respects the visitor's language."
+        },
+        {
+          "title": "Embedded docs viewer",
+          "description": "Markdown, Mermaid, and Shiki rendered through an XSS-hardened, sanitize-first pipeline — your documentation ships inside the app."
+        },
+        {
+          "title": "Security, shipped not described",
+          "description": "HTTP security headers, PII-scrubbed observability, timing-safe secret comparison, and a CI test that fails the build if any route skips tenant scoping."
+        }
+      ]
+    },
+    "why": {
+      "eyebrow": "Why DevResponseKit",
+      "title": "Clerk- and WorkOS-class identity, self-hosted at zero marginal cost.",
+      "subtitle": "Organizations, three-tier RBAC, SSO, API keys, and audit are all built on open-source Better Auth — with no per-user, per-organization, or per-SSO-connection bill to compound as you grow.",
+      "items": [
+        {
+          "title": "Verifiable multi-tenant isolation",
+          "description": "Tenancy is enforced at the build gate: a CI test scans every admin route and fails if one touches data without a scope primitive. Isolation becomes a guarantee you can read and run, not take on faith."
+        },
+        {
+          "title": "Own the code, own the data",
+          "description": "Copy-forward source you fork and ship — no framework lock-in and no per-seat runtime fees. Self-hosted on a PostgreSQL database you control."
+        },
+        {
+          "title": "Tested and documented",
+          "description": "744 tests across unit, component, integration, security, end-to-end, and accessibility suites, plus architecture decision records and an embedded documentation site."
+        }
+      ]
+    },
+    "stack": {
+      "eyebrow": "Built on a stack your team already runs",
+      "title": "Modern, type-safe, no abstraction overhead.",
+      "items": [
+        "Next.js 16",
+        "React 19",
+        "TypeScript 5.9",
+        "PostgreSQL + Kysely",
+        "Better Auth",
+        "next-intl",
+        "Tailwind CSS 4",
+        "Vitest · Playwright · axe"
+      ]
+    },
+    "cta": {
+      "title": "Fork it. Own it. Ship it.",
+      "subtitle": "DevResponseKit is free and open source. Clone the repository and have a secure, multi-tenant, localized B2B platform running in minutes.",
+      "primary": "Get it free on GitHub",
+      "secondary": "Create an account",
+      "repoLabel": "github.com/devresponse/devresponsekit"
+    },
+    "footer": {
+      "githubLink": "GitHub",
+      "rights": "Free and open source under the MIT license."
+    }
   },
   "shell": {
     "applications": "Applications",

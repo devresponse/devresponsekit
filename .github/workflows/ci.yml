@@ -172,3 +172,45 @@ jobs:
           path: test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  audit:
+    name: Dependency audit (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # NON-BLOCKING for now (dep-2). A backlog of known advisories exists and
+    # is being worked down, so a hard failure would red-wall every merge
+    # under the auto-merge-on-green policy.
+    #
+    # The NON-BLOCKING behaviour lives on the audit STEP (`continue-on-error`
+    # below), NOT on this job. That distinction matters: a step-level
+    # `continue-on-error` lets the step be marked "failed but allowed" while
+    # the JOB still concludes green, so this check passes and never stalls
+    # auto-merge. Job-level `continue-on-error` would instead keep the
+    # workflow green but report THIS job's check as FAILED — a red ❌ that
+    # red-walls the PR and blocks auto-merge-on-green. (That was the original
+    # bug.)
+    #
+    # Tighten to a hard gate later — drop the step's `continue-on-error`
+    # (and ideally add this to required checks + pin a reviewed allowlist) —
+    # once the high+ backlog is cleared.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Exits non-zero when a high or critical advisory is present. The
+      # `continue-on-error` keeps that finding VISIBLE (the step renders as
+      # failed-but-allowed in the run) without failing the job's check, so a
+      # high+ advisory surfaces but does not gate merges. Lower the threshold
+      # to `moderate` once the high+ backlog is clear.
+      - name: Audit dependencies (high and above)
+        continue-on-error: true
+        run: pnpm audit --audit-level high

@@ -704,15 +704,30 @@ function toIso(value: unknown): string {
 }
 
 /**
- * Quote a CSV cell per RFC 4180:
- *   - Wrap in `"` if the value contains `"`, `,`, `\n`, or `\r`.
- *   - Double any internal `"`.
+ * Quote a CSV cell per RFC 4180, with spreadsheet formula-injection
+ * neutralization (CWE-1236 / OWASP "CSV Injection"):
+ *   - If the value begins with a formula trigger (`=`, `+`, `-`, `@`) or a
+ *     leading control char (`TAB`, `CR`) that a spreadsheet can coerce into
+ *     one, prefix a single quote so the cell is imported as literal text.
+ *     Untrusted data reaches the export — e.g. a user-controlled
+ *     `display_name` (set via the self-service profile form) and the
+ *     request `User-Agent` recorded in audit rows — so a cell like
+ *     `=HYPERLINK(...)` or `=cmd|'/c calc'!A1` would otherwise execute when
+ *     an admin opens the CSV in Excel / Sheets.
+ *   - Then wrap in `"` if the value contains `"`, `,`, `\n`, or `\r`, and
+ *     double any internal `"`.
  *   - Coerce non-strings via `String(...)` so callers don't have to
  *     pre-format every column.
+ *
+ * The formula guard is applied BEFORE RFC-4180 quoting so the prefixed `'`
+ * lives inside the quoted field when quoting is also required.
  */
 export function csvEscape(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const s = typeof value === "string" ? value : String(value);
+  let s = typeof value === "string" ? value : String(value);
+  if (s.length > 0 && /^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
   if (/[",\r\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }

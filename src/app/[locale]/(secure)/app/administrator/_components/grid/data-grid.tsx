@@ -156,11 +156,13 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
 
   return (
     <div data-grid={props.name} className="flex flex-col gap-3">
-      {/* Search + filters (left) and selection/actions (right) share one
-          row; the action cluster is pushed right with `ml-auto` and wraps
-          below only when the viewport is too narrow to hold both. */}
+      {/* All controls — search, filters, selection summary, and the action
+          buttons — live in one flex row and flow left-to-right, wrapping
+          naturally. The sub-components render with `display: contents` so
+          their elements are direct flex items of this row, not separately
+          aligned groups. */}
       {showFilterBar || showToolbar ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex flex-wrap items-center gap-2">
           {showFilterBar ? (
             <DataGridFilterBar
               searchable={props.searchable}
@@ -175,7 +177,6 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
 
           {showToolbar ? (
             <DataGridToolbar
-              className="ml-auto"
               totalRows={total}
               pageRowCount={items.length}
               selection={

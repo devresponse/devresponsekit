@@ -112,11 +112,12 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
         ? t("selectionCount", { count: selection.count })
         : "";
 
+  // `display: contents` so the selection summary and every action button
+  // become direct flex items of the grid's single controls row, flowing
+  // inline (left-aligned) with the search + filter controls rather than
+  // forming a separately-aligned cluster.
   return (
-    <div
-      data-testid="datagrid-toolbar"
-      className={cn("flex flex-wrap items-center gap-x-3 gap-y-2 text-sm", className)}
-    >
+    <div data-testid="datagrid-toolbar" className={cn("contents text-sm", className)}>
       {summary ? (
         <div className="text-muted-foreground flex flex-wrap items-center gap-2">
           <span aria-live="polite">{summary}</span>
@@ -143,7 +144,7 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="contents">
         {bulkActions && bulkActions.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

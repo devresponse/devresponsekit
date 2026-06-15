@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { useTranslations } from "next-intl";
 import {
   ArrowRight,
@@ -81,7 +82,7 @@ function Landing({ locale }: { locale: SupportedLocale }) {
           aria-hidden
           className="from-muted/60 to-background pointer-events-none absolute inset-0 bg-gradient-to-b"
         />
-        <div className="relative mx-auto flex max-w-5xl flex-col items-center gap-6 px-6 py-20 text-center sm:py-28">
+        <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-6 px-6 py-20 text-center sm:py-28">
           <span className="border-border bg-background/70 text-muted-foreground inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium">
             <span className="bg-primary h-1.5 w-1.5 rounded-full" aria-hidden />
             {t("hero.eyebrow")}
@@ -114,7 +115,26 @@ function Landing({ locale }: { locale: SupportedLocale }) {
             </Button>
           </div>
 
-          <dl className="border-border bg-border mt-10 grid w-full grid-cols-2 gap-px overflow-hidden rounded-xl border sm:grid-cols-3 md:grid-cols-5">
+          {/* Product screenshot — the prominent hero visual. */}
+          <div className="relative mt-10 w-full max-w-5xl">
+            <div
+              aria-hidden
+              className="from-primary/25 absolute -inset-x-6 top-8 -bottom-6 -z-10 rounded-[2rem] bg-gradient-to-tr to-transparent opacity-60 blur-3xl"
+            />
+            <div className="border-border bg-card overflow-hidden rounded-xl border shadow-2xl">
+              <Image
+                src="/screen1.png"
+                alt={t("hero.screenshotAlt")}
+                width={1446}
+                height={981}
+                priority
+                sizes="(min-width: 1024px) 1024px, 100vw"
+                className="h-auto w-full"
+              />
+            </div>
+          </div>
+
+          <dl className="border-border bg-border mt-12 grid w-full grid-cols-2 gap-px overflow-hidden rounded-xl border sm:grid-cols-3 md:grid-cols-5">
             {stats.map((s) => (
               <div key={s.label} className="bg-card px-4 py-5 text-center">
                 <dt className="text-2xl font-semibold tracking-tight">{s.value}</dt>

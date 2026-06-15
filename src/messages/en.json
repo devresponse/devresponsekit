@@ -60,8 +60,9 @@
   "public": {
     "hero": {
       "eyebrow": "Open source · MIT · Self-hosted",
-      "title": "The enterprise SaaS application shell you own outright.",
-      "subtitle": "DevResponseKit is a production-grade, security-first multi-tenant foundation for the modern TypeScript stack — a full admin console, three-tier RBAC, a scoped machine API, cross-subdomain SSO, and outbox-first email, all self-hosted at zero marginal auth cost.",
+      "title": "The Enterprise SaaS Shell You Own Outright.",
+      "subtitle": "Secure by design. Open source by choice. Yours outright.",
+      "screenshotAlt": "The DevResponseKit administrator console.",
       "primaryCta": "Get it free on GitHub",
       "secondaryCta": "Get started",
       "signInCta": "Sign in"

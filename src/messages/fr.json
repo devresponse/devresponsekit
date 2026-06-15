@@ -60,8 +60,9 @@
   "public": {
     "hero": {
       "eyebrow": "Open source · MIT · Auto-hébergé",
-      "title": "Le shell d’application SaaS d’entreprise qui vous appartient entièrement.",
-      "subtitle": "DevResponseKit est une base multi-locataire prête pour la production et axée sur la sécurité pour la stack TypeScript moderne — une console d’administration complète, un RBAC à trois niveaux, une API machine à portées, le SSO inter-sous-domaines et la messagerie à file d’attente, le tout auto-hébergé à coût marginal d’authentification nul.",
+      "title": "Le shell SaaS d’entreprise qui vous appartient entièrement.",
+      "subtitle": "Sécurisé par conception. Open source par choix. Entièrement à vous.",
+      "screenshotAlt": "La console d’administration de DevResponseKit.",
       "primaryCta": "Obtenez-le gratuitement sur GitHub",
       "secondaryCta": "Commencer",
       "signInCta": "Se connecter"

@@ -60,8 +60,9 @@
   "public": {
     "hero": {
       "eyebrow": "Código abierto · MIT · Autoalojado",
-      "title": "El shell de aplicación SaaS empresarial que es totalmente tuyo.",
-      "subtitle": "DevResponseKit es una base multiinquilino de nivel de producción y centrada en la seguridad para el stack moderno de TypeScript: una consola de administración completa, RBAC de tres niveles, una API de máquina con alcances, SSO entre subdominios y correo con bandeja de salida, todo autoalojado con coste marginal de autenticación cero.",
+      "title": "El shell SaaS empresarial que es totalmente tuyo.",
+      "subtitle": "Seguro por diseño. De código abierto por elección. Totalmente tuyo.",
+      "screenshotAlt": "La consola de administración de DevResponseKit.",
       "primaryCta": "Conseguirlo gratis en GitHub",
       "secondaryCta": "Empezar",
       "signInCta": "Iniciar sesión"

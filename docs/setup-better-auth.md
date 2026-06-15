@@ -562,8 +562,10 @@ A production-grade Dockerfile (not yet in the repo) should:
 3. Run `pnpm build` with all required env vars (`BETTER_AUTH_SECRET`,
    `BETTER_AUTH_URL`, `DATABASE_URL`, `SSO_HANDOFF_ISSUER`,
    `SSO_HANDOFF_JWT_SECRET`, `SSO_HANDOFF_AUDIENCE_PREFIX`).
-4. Use `output: "standalone"` from `next.config.mjs` to ship a
-   minimal runtime.
+4. Add `output: "standalone"` to `next.config.mjs` (it is **not** set by
+   default) so `next build` emits a self-contained server under
+   `.next/standalone`. Copy `.next/static` and `public/` alongside it —
+   standalone does not bundle them — and start it with `node server.js`.
 
 **Runtime**
 

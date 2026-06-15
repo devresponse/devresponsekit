@@ -250,6 +250,31 @@ create index if not exists idx_app_users_primary_email_trgm
   on app_users using gin (primary_email gin_trgm_ops);
 create index if not exists idx_app_users_display_name_trgm
   on app_users using gin (display_name gin_trgm_ops);
+-- The same `ilike '%q%'` substring search backs every admin grid's search
+-- box (and the matching CSV export), so give each high-cardinality searched
+-- column its own trigram index — otherwise the list/export queries seq-scan
+-- the whole table on every keystroke. Low-cardinality searched columns
+-- (event_type, template_key, subdomain) and tiny tables (the ~30-row
+-- permission catalog, api keys) are intentionally left to seq-scan: a
+-- trigram index there only adds write cost without selective benefit.
+create index if not exists idx_app_organizations_slug_trgm
+  on app_organizations using gin (slug gin_trgm_ops);
+create index if not exists idx_app_organizations_name_trgm
+  on app_organizations using gin (name gin_trgm_ops);
+create index if not exists idx_app_roles_key_trgm
+  on app_roles using gin (key gin_trgm_ops);
+create index if not exists idx_app_roles_name_trgm
+  on app_roles using gin (name gin_trgm_ops);
+create index if not exists idx_app_enterprise_applications_label_trgm
+  on app_enterprise_applications using gin (label gin_trgm_ops);
+create index if not exists idx_app_outbox_to_email_trgm
+  on app_outbox using gin (to_email gin_trgm_ops);
+create index if not exists idx_app_outbox_subject_trgm
+  on app_outbox using gin (subject gin_trgm_ops);
+create index if not exists idx_app_audit_events_email_trgm
+  on app_audit_events using gin (email gin_trgm_ops);
+create index if not exists idx_app_audit_events_reason_trgm
+  on app_audit_events using gin (reason gin_trgm_ops);
 
 -- Audit-explorer indexes.
 create index if not exists idx_app_audit_events_type_created_at

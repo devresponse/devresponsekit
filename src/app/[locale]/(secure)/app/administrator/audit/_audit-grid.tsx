@@ -28,7 +28,7 @@ import { useGridState } from "../_components/grid/use-grid-state";
  *
  * Performance:
  *   - Default sort `created_at desc` matches the
- *     `idx_app_audit_events_created_at_desc` index from migration 0002.
+ *     `idx_app_audit_events_created_at_desc` index from `0001-initial-schema.sql`.
  *   - Default page size 50 (vs. the 25 used elsewhere) — admins typically
  *     scan audit history in larger windows.
  *

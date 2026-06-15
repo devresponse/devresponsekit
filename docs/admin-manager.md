@@ -362,7 +362,7 @@ removed — see §20.1 #1.)
 |---|---|---|---|
 | `/api/administrator/users` | GET | `admin.users.read` | Paginated; joins `app_users` with Better Auth list (page-by-page join, never full table). |
 | `/api/administrator/users` | POST | `admin.users.create` | Server-side wrapper around `auth.api.createUser`. |
-| `/api/administrator/users/[id]` | GET, PATCH, DELETE | `admin.users.read/update/delete` | PATCH supports name/email/locale; DELETE performs **soft delete only** (indefinite Better Auth ban + `app_users.status = 'deactivated'`); see §4.1. |
+| `/api/administrator/users/[id]` | GET, PATCH, DELETE | `admin.users.read/update/delete` | PATCH body `{ displayName?, preferredLocale? }` (`displayName` mirrors Better Auth `name`; `primary_email` is **not** editable — needs a verification flow). DELETE performs **soft delete only** (indefinite Better Auth ban + `app_users.status = 'deactivated'`); see §4.1. |
 | `/api/administrator/users/[id]/restore` | POST | `admin.users.delete` | Inverse of soft delete: unban + clear `deactivated_*`. |
 | `/api/administrator/users/[id]/status` | POST | `admin.users.manage` | Shares the `performAdminStatusChange` core with the bulk endpoint. |
 | `/api/administrator/users/[id]/ban` | POST | `admin.users.ban` | Wraps `auth.api.banUser`; persists reason in `app_audit_events.reason`. |
@@ -373,20 +373,21 @@ removed — see §20.1 #1.)
 | `/api/administrator/users/[id]/sessions/[sessionId]` | DELETE | `admin.users.sessions` | Revoke one. |
 | `/api/administrator/users/[id]/impersonate` | POST, DELETE | `admin.users.impersonate` | Start / stop. |
 | `/api/administrator/users/[id]/app-roles` | GET, POST, DELETE | `admin.roles.assign` | Manages `app_user_roles`. |
-| `/api/administrator/users/[id]/memberships` | GET, POST, PATCH, DELETE | `admin.orgs.manage` | Manages `app_organization_memberships`. |
+| `/api/administrator/users/[id]/memberships` | GET, POST, PATCH, DELETE | `admin.users.read` (GET) / `admin.users.update` (writes) | Manages `app_organization_memberships` for one user. |
 | `/api/administrator/roles` | GET, POST | `admin.roles.read/create` | |
 | `/api/administrator/roles/[id]` | GET, PATCH, DELETE | `admin.roles.read/update/delete` | DELETE blocked when role still assigned. |
 | `/api/administrator/roles/[id]/permissions` | GET, POST, DELETE | `admin.roles.update` | Manages `app_role_permissions`. |
 | `/api/administrator/roles/[id]/members` | GET | `admin.roles.read` | Paginated. |
 | `/api/administrator/permissions` | GET | `admin.roles.read` | Read-mostly catalog. |
-| `/api/administrator/permissions` | POST, PATCH, DELETE | `admin.permissions.manage` | Optional; deletion blocked when used. |
+| `/api/administrator/permissions` | POST | `admin.permissions.manage` | Create a catalog key. |
+| `/api/administrator/permissions/[id]` | GET, PATCH, DELETE | `admin.permissions.manage` | Edit/delete a key; deletion blocked (`409 permission_in_use`) when assigned. |
 | `/api/administrator/organizations` | GET, POST | `admin.orgs.read/create` | |
 | `/api/administrator/organizations/[id]` | GET, PATCH, DELETE | `admin.orgs.*` | DELETE blocks if non-empty or `is_default`. |
-| `/api/administrator/organizations/[id]/members` | GET, POST, PATCH, DELETE | `admin.orgs.manage` | Wraps membership table; bulk supported. |
-| `/api/administrator/organizations/[id]/provider-bindings` | GET, POST, DELETE | `admin.orgs.manage` | Manages `app_provider_organizations`. |
+| `/api/administrator/organizations/[id]/members` | GET, POST, PATCH, DELETE | `admin.orgs.read` (GET) / `admin.orgs.update` (writes) | Wraps membership table; bulk supported. |
+| `/api/administrator/organizations/[id]/provider-bindings` | GET, POST, DELETE | `admin.orgs.read` (GET) / `admin.orgs.update` (writes) | Manages `app_provider_organizations`. |
 | `/api/administrator/memberships` | GET | `admin.orgs.read` | Cross-org search. |
 | `/api/administrator/enterprise-apps` | GET, POST | `admin.apps.read/manage` | Manages `app_enterprise_applications`. |
-| `/api/administrator/enterprise-apps/[id]` | GET, PATCH, DELETE | `admin.apps.manage` | |
+| `/api/administrator/enterprise-apps/[id]` | GET, PATCH, DELETE | `admin.apps.read` (GET) / `admin.apps.manage` (writes) | |
 | `/api/administrator/api-keys` | GET | `admin.apikeys.read` | Paginated read of `app_api_keys` joined to owner email. Filter on `status`, `app_user_id`, `organization_id`; `q` matches name/prefix/owner email. Never returns the secret or hash. |
 | `/api/administrator/api-keys` | POST | `admin.apikeys.manage` | Issues a key **on behalf of** a user. Requested scopes are validated against the **owner's** authority (`ungrantableScopes`), never the admin's. Returns the plaintext once. |
 | `/api/administrator/api-keys/[id]` | GET, DELETE | `admin.apikeys.read` / `admin.apikeys.manage` | GET resolves owner/creator/revoker emails. DELETE **revokes** (soft-delete: `status='revoked'` + actor/reason); idempotent, never hard-deletes (the row is the usage/audit trail). |
@@ -452,7 +453,7 @@ admin.orgs.read
 admin.orgs.create
 admin.orgs.update
 admin.orgs.delete
-admin.orgs.manage
+admin.orgs.manage         # defined; member/binding writes currently gate on admin.orgs.update
 admin.apps.read
 admin.apps.manage
 admin.audit.read
@@ -470,9 +471,12 @@ grants the full catalog to `superuser`; the seed re-grants the catalog to
 `admin.platform`. The credential keys govern the `/api/v1/admin/api-keys`
 and `/api/v1/admin/oauth-clients` endpoints (see specs.md §37).
 
-A **seed** script (`src/db/seeds/seed-admin-permissions.ts`) inserts
-these rows idempotently and bundles them into a built-in role
-`admin.platform` that is granted to seeded local admin accounts.
+The catalog rows are seeded by `0001-initial-schema.sql` and bundled into
+the `superuser` role. The local seed script
+(`src/db/seeds/seed-local.ts`) then re-grants the full catalog to the
+built-in `admin.platform` role (and adds the two user-level keys
+`shell.view` / `audit.view`) before granting `admin.platform` to seeded
+local admin accounts.
 
 ### 6.2 Enforcement layers
 

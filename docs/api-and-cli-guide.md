@@ -252,7 +252,7 @@ required permissions below are taken from the route implementations in
 | `/users/[id]/sessions/[sessionId]` | DELETE | `admin.users.sessions` | Revoke one. |
 | `/users/[id]/impersonate` | POST / DELETE | `admin.users.impersonate` | Start / stop; double-confirm + audited. |
 | `/users/[id]/app-roles` | GET / POST / DELETE | `admin.roles.assign` | Manage `app_user_roles`. |
-| `/users/[id]/memberships` | GET / POST / PATCH / DELETE | `admin.orgs.manage` | Manage `app_organization_memberships`. |
+| `/users/[id]/memberships` | GET / POST / PATCH / DELETE | `admin.users.read` (GET) / `admin.users.update` (writes) | Manage `app_organization_memberships`. |
 | `/users/bulk` | POST | per-action (see below) | `{ action, ids: string[]\|"*", reason?, expiresInSeconds?, filters? }`. Cap **500 ids**; `"*"` requires `filters`. |
 
 Bulk actions: `approve`,`block`,`suspend`,`reactivate`,`ban`,`unban`,
@@ -283,11 +283,11 @@ Role list filters: `organization` (UUID or `global`), `scope`
 | --- | --- | --- |
 | `/organizations` | GET / POST | `admin.orgs.read` / `create` |
 | `/organizations/[id]` | GET / PATCH / DELETE | `admin.orgs.*` (DELETE blocked if non-empty or default) |
-| `/organizations/[id]/members` | GET / POST / PATCH / DELETE | `admin.orgs.manage` |
-| `/organizations/[id]/provider-bindings` | GET / POST / DELETE | `admin.orgs.manage` |
+| `/organizations/[id]/members` | GET / POST / PATCH / DELETE | `admin.orgs.read` (GET) / `admin.orgs.update` (writes) |
+| `/organizations/[id]/provider-bindings` | GET / POST / DELETE | `admin.orgs.read` (GET) / `admin.orgs.update` (writes) |
 | `/memberships` | GET | `admin.orgs.read` (cross-org search) |
 | `/enterprise-apps` | GET / POST | `admin.apps.read` / `manage` |
-| `/enterprise-apps/[id]` | GET / PATCH / DELETE | `admin.apps.manage` |
+| `/enterprise-apps/[id]` | GET / PATCH / DELETE | `admin.apps.read` (GET) / `admin.apps.manage` (writes) |
 | `/api-keys` | GET / POST | `admin.apikeys.read` / `manage` (governance list joined to owner email; POST issues a key on behalf of a user, scopes capped to the owner's authority) |
 | `/api-keys/[id]` | GET / DELETE | `admin.apikeys.read` / `manage` (DELETE = revoke, soft-delete, idempotent) |
 | `/api-keys/[id]/rotate` | POST | `admin.apikeys.manage` (atomic re-issue + revoke; new secret returned once) |

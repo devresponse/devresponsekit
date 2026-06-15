@@ -534,12 +534,13 @@ admin.clients.manage   # create/rotate/revoke oauth clients
 | `/api/v1/admin/api-keys/{id}` | DELETE | `admin.apikeys.manage` |
 | `/api/v1/admin/oauth-clients` | GET / POST | `admin.clients.read` / `manage` |
 | `/api/v1/admin/oauth-clients/{id}` | GET / PATCH / DELETE | `admin.clients.*` |
-| `/api/v1/admin/oauth-clients/{id}:rotateSecret` | POST | `admin.clients.manage` |
+| `/api/v1/admin/oauth-clients/{id}/rotate-secret` | POST | `admin.clients.manage` |
 
 These keys join the seeded catalog and the `admin.platform` / `superuser`
-roles (extending the seed in
+roles (seeded by
 [`0001-initial-schema.sql`](../src/db/migrations/0001-initial-schema.sql)
-/ the admin-permissions seed).
+and re-granted to `admin.platform` by
+[`src/db/seeds/seed-local.ts`](../src/db/seeds/seed-local.ts)).
 
 **Two admin surfaces share these permission keys:**
 

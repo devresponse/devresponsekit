@@ -15,7 +15,8 @@ handoff.
 - **PostgreSQL + Kysely** — typed SQL for app tables; Better Auth shares
   the same `pg` pool. The **entire** application schema is a single
   consolidated setup script (`0001-initial-schema.sql`) — one file, one
-  setup process, no further application migrations
+  setup process, no further application migrations. The runner applies it
+  in a transaction and records it in `app_schema_migrations`
 - **Machine API** — a versioned `/api/v1` REST surface authenticated by
   API keys (`drk_…`) or Ed25519 JWT access tokens, with a published
   JWKS document, OAuth client-credentials, and an OpenAPI spec. Ships
@@ -73,17 +74,22 @@ src/
   app/[locale]/(auth)                 # sign-in, sign-up, forgot/reset password, status pages
   app/[locale]/(secure)               # session-gated shell + workspaces
   app/[locale]/(secure)/app/dashboard       # landing workspace
-  app/[locale]/(secure)/app/account         # self-service account (user-level)
-  app/[locale]/(secure)/app/administrator   # admin console (permission-gated; incl. email)
+  app/[locale]/(secure)/app/workspace       # nested ApplicationShell example
+  app/[locale]/(secure)/app/docs            # in-app Markdown docs viewer (+ /[...slug])
+  app/[locale]/(secure)/app/account         # self-service account (profile, preferences, security, api-keys)
+  app/[locale]/(secure)/app/administrator   # admin console (users, roles, permissions, orgs, memberships, apps, api-keys, audit, email)
   app/api/account                     # self-scoped account REST API
   app/api/administrator               # admin REST API (guarded pipeline)
   app/api/v1                          # versioned machine API (API keys, JWT, OAuth clients, JWKS, OpenAPI)
   app/api/sso                         # JWT handoff launch/consume
+  app/api/navigation                  # server-filtered shell menus
+  app/api/docs                        # auth-gated docs image assets
   app/api/preferences                 # locale preference
-  components/                         # app-shell, auth, navigation, shadcn ui
-  lib/                                # auth, guards, audit, SSO, admin, account, email helpers
+  components/                         # admin, api-keys, app-shell, auth, i18n, navigation, observability, theme, shadcn ui
+  lib/                                # auth, guards, audit, SSO, admin, account, email, docs, observability helpers
   lib/api-auth/                       # machine-API auth: API keys, JWT/JWKS, scopes, OAuth clients
   lib/email/                          # outbox-first sender + Resend/Mailgun providers + templates
+  lib/docs/                           # in-app docs reader: source, frontmatter, sanitize-first render pipeline
   db/                                 # Kysely instance, numbered migrations, seeds
 tests/                                # unit / component / integration / security / e2e / accessibility
 ```
@@ -97,6 +103,8 @@ tests/                                # unit / component / integration / securit
 - [docs/api-and-cli-guide.md](docs/api-and-cli-guide.md) — external API & CLI integration
 - [docs/design-api-keys-and-tokens.md](docs/design-api-keys-and-tokens.md) — machine credentials (API keys, JWT, OAuth clients) design
 - [docs/admin-manager.md](docs/admin-manager.md) — administrator console spec
+- [docs/database-schema.md](docs/database-schema.md) — entity-relationship reference for the `app_*` tables
+- [docs/docs-viewer.md](docs/docs-viewer.md) — in-app Markdown documentation reader (routes, frontmatter, rendering, env)
 - [docs/observability.md](docs/observability.md) — optional Sentry errors + tracing + Web Vitals + masked replay
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)
 

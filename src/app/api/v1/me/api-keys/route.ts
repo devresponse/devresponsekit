@@ -2,6 +2,11 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
 import { requireAccountUser } from "@/lib/account/guard.server";
+import {
+  consumeToken,
+  rateLimitKey,
+  DEFAULT_ADMIN_MUTATION_LIMIT,
+} from "@/lib/admin/rate-limit.server";
 import { getServerEnv } from "@/lib/env";
 import { createApiKey, listApiKeysForUser } from "@/lib/api-auth/api-keys.server";
 import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
@@ -49,6 +54,16 @@ export async function POST(request: NextRequest) {
   const guard = await requireAccountUser(request, "account.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
+
+  // Throttle credential minting per principal (sec-2): this is a sensitive
+  // credential-issuing operation. Reuses the per-actor mutation token bucket.
+  const limit = consumeToken(
+    rateLimitKey("api.me.apikeys", actor.betterAuthUserId),
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (!limit.ok) {
+    return problemResponse("rate_limited", 429, request, { headers: { "Retry-After": "2" } });
+  }
 
   let json: unknown;
   try {

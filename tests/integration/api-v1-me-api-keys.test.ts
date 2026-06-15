@@ -132,4 +132,22 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
     expect(body.key).toBe("drk_live_y.SECRET");
     expect(createApiKey).toHaveBeenCalledWith(expect.objectContaining({ ownerAppUserId: "u1" }));
   });
+
+  // sec-2: credential minting is throttled per principal. Drain the burst
+  // (capacity 30) then prove the next call is rejected 429 before any key is
+  // minted. The bucket is reset first so prior cases don't skew the count.
+  it("429 rate-limits minting once the per-actor burst is exhausted", async () => {
+    const rl = await import("@/lib/admin/rate-limit.server");
+    rl.__resetRateLimitForTests();
+    requireAccountUser.mockResolvedValue(
+      actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
+    );
+    let last: Response | undefined;
+    for (let i = 0; i < 31; i++) {
+      last = await POST(req({ method: "POST", body: { name: "k", scopes: ["account.read"] } }));
+    }
+    expect(last?.status).toBe(429);
+    // The throttled 31st request never reached the key repository.
+    expect(createApiKey).toHaveBeenCalledTimes(30);
+  });
 });

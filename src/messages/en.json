@@ -307,7 +307,27 @@
       "selectAllMatching": "Select all {total, number} matching rows",
       "clearSelection": "Clear selection",
       "bulkActions": "Bulk actions",
-      "exportCsv": "Export CSV"
+      "exportCsv": "Export CSV",
+      "searchPlaceholder": "Search…",
+      "filterAll": "All",
+      "filterBy": "Filter by {label}",
+      "clearFilters": "Clear filters",
+      "optionLabels": {
+        "active": "Active",
+        "pending_approval": "Pending approval",
+        "pending": "Pending",
+        "blocked": "Blocked",
+        "suspended": "Suspended",
+        "deactivated": "Deactivated",
+        "archived": "Archived",
+        "available": "Available",
+        "disabled": "Disabled",
+        "revoked": "Revoked",
+        "global": "Global",
+        "org": "Organization",
+        "true": "Yes",
+        "false": "No"
+      }
     },
     "errors": {
       "forbidden": "You don't have permission to view this page.",

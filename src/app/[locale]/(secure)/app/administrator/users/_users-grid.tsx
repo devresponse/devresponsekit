@@ -7,8 +7,18 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
+import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import type { BulkActionDescriptor } from "../_components/grid/data-grid-toolbar";
 import { useGridSelection } from "../_components/grid/use-grid-selection";
+
+/** Application user statuses — the only allow-listed `status` filter values. */
+const USER_STATUSES = [
+  "active",
+  "pending_approval",
+  "blocked",
+  "suspended",
+  "deactivated",
+] as const;
 
 /**
  * Client-side users grid for the Administrator workspace
@@ -49,6 +59,7 @@ export function AdministratorUsersGrid({
 }) {
   const t = useTranslations("administrator.users.columns");
   const tBulk = useTranslations("administrator.users.bulk");
+  const tGrid = useTranslations("administrator.grid");
   const intlLocale = useLocale();
   const selection = useGridSelection();
   const dialogs = useDialogs();
@@ -218,6 +229,11 @@ export function AdministratorUsersGrid({
     [tBulk, runBulkAction, dialogs],
   );
 
+  const filters = useMemo<GridFilterDescriptor[]>(
+    () => [{ name: "status", label: t("status"), options: toFilterOptions(tGrid, USER_STATUSES) }],
+    [t, tGrid],
+  );
+
   return (
     <DataGrid<UserRow>
       key={reloadKey}
@@ -228,6 +244,8 @@ export function AdministratorUsersGrid({
         defaultPageSize: 25,
         defaultSort: [{ field: "created_at", direction: "desc" }],
       }}
+      searchable
+      filters={filters}
       selection={{ state: selection, getRowId: (row) => row.id }}
       bulkActions={bulkActions}
       exportResource="users"

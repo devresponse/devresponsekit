@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { DataGridColumnHeader, type ColumnSortDirection } from "./data-grid-column-header";
+import { DataGridFilterBar, type GridFilterDescriptor } from "./data-grid-filters";
 import { DataGridToolbar, type BulkActionDescriptor } from "./data-grid-toolbar";
 import type { UseGridSelectionResult } from "./use-grid-selection";
 import {
@@ -82,6 +83,20 @@ export interface DataGridProps<TItem> {
    * page-level CTAs (e.g. "New user") that should share the same row.
    */
   headerActions?: ReactNode;
+  /**
+   * When true, render a debounced free-text search box that drives the
+   * endpoint's `q` global-search parameter.
+   */
+  searchable?: boolean;
+  /** Optional placeholder for the search box (e.g. "Search by email"). */
+  searchPlaceholder?: string;
+  /**
+   * Optional per-field filter controls. Each `name` MUST be allow-listed
+   * by the endpoint (`parseListQuery({ allowedFilters })`); the server
+   * drops anything else, so the controls can only narrow — never widen —
+   * what the caller may already see.
+   */
+  filters?: GridFilterDescriptor[];
 }
 
 const EMPTY_OPTIONS: UseGridStateOptions = {};
@@ -89,7 +104,7 @@ const EMPTY_OPTIONS: UseGridStateOptions = {};
 export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const t = useTranslations("administrator.grid");
   const options = props.options ?? EMPTY_OPTIONS;
-  const { state, setPage, setPageSize, setSort } = useGridState(options);
+  const { state, setPage, setPageSize, setSort, setSearch, setFilter } = useGridState(options);
   const fetched = useGridFetch<TItem>(props.endpoint, state, options);
 
   const initialItems = props.initialData?.items;
@@ -136,8 +151,23 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
     !!props.exportResource ||
     !!props.headerActions;
 
+  const filters = props.filters;
+  const showFilterBar = !!props.searchable || (filters && filters.length > 0);
+
   return (
     <div data-grid={props.name} className="flex flex-col gap-3">
+      {showFilterBar ? (
+        <DataGridFilterBar
+          searchable={props.searchable}
+          searchPlaceholder={props.searchPlaceholder}
+          q={state.q}
+          onSearch={setSearch}
+          filters={filters ?? []}
+          filterValues={state.filters}
+          onFilterChange={setFilter}
+        />
+      ) : null}
+
       {showToolbar ? (
         <DataGridToolbar
           totalRows={total}

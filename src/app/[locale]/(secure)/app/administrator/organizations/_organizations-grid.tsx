@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
+import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
+
+/** Organization statuses — the allow-listed `status` filter values. */
+const ORG_STATUSES = ["active", "pending", "suspended", "archived"] as const;
 
 /**
  * Client-side organizations grid (docs/admin-manager.md §19).
@@ -39,6 +43,7 @@ export function AdministratorOrganizationsGrid({
 }) {
   const t = useTranslations("administrator.orgs");
   const tErr = useTranslations("administrator.errors");
+  const tGrid = useTranslations("administrator.grid");
   const intlLocale = useLocale();
   const dialogs = useDialogs();
 
@@ -157,6 +162,18 @@ export function AdministratorOrganizationsGrid({
     [t, locale, dateFormatter, canDelete, onDelete],
   );
 
+  const filters = useMemo<GridFilterDescriptor[]>(
+    () => [
+      { name: "status", label: t("columns.status"), options: toFilterOptions(tGrid, ORG_STATUSES) },
+      {
+        name: "is_default",
+        label: t("columns.isDefault"),
+        options: toFilterOptions(tGrid, ["true", "false"]),
+      },
+    ],
+    [t, tGrid],
+  );
+
   return (
     <div className="space-y-2">
       {rowError ? (
@@ -173,6 +190,8 @@ export function AdministratorOrganizationsGrid({
           defaultPageSize: 25,
           defaultSort: [{ field: "slug", direction: "asc" }],
         }}
+        searchable
+        filters={filters}
       />
     </div>
   );

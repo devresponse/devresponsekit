@@ -307,7 +307,27 @@
       "selectAllMatching": "Sélectionner les {total, number} lignes correspondantes",
       "clearSelection": "Effacer la sélection",
       "bulkActions": "Actions en masse",
-      "exportCsv": "Exporter en CSV"
+      "exportCsv": "Exporter en CSV",
+      "searchPlaceholder": "Rechercher…",
+      "filterAll": "Tous",
+      "filterBy": "Filtrer par {label}",
+      "clearFilters": "Effacer les filtres",
+      "optionLabels": {
+        "active": "Actif",
+        "pending_approval": "En attente d’approbation",
+        "pending": "En attente",
+        "blocked": "Bloqué",
+        "suspended": "Suspendu",
+        "deactivated": "Désactivé",
+        "archived": "Archivé",
+        "available": "Disponible",
+        "disabled": "Désactivé",
+        "revoked": "Révoqué",
+        "global": "Global",
+        "org": "Organisation",
+        "true": "Oui",
+        "false": "Non"
+      }
     },
     "errors": {
       "forbidden": "Vous n'avez pas l'autorisation de voir cette page.",

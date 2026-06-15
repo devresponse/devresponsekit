@@ -8,6 +8,7 @@ import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { buildListResponse, offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { createApiKey } from "@/lib/api-auth/api-keys.server";
 import { normalizeScopes, ungrantableScopes } from "@/lib/api-auth/scopes";
@@ -157,6 +158,13 @@ const createSchema = z
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apikeys.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.apikeys.create",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const actorAppUserId = guard.access.appUserId;
   if (!actorAppUserId) {

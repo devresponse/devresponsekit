@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { AdminError, assertPermissionNotInUse } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -30,6 +31,13 @@ const patchSchema = z
 export async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.permissions.write",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
   // ADR-0001: the permission catalog is platform-global; confine writes to
   // SUPERADMIN even if an org admin holds `admin.permissions.manage`.
   if (!isSuperadmin(guard.access)) {
@@ -86,6 +94,13 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.permissions.write",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
   // ADR-0001: the permission catalog is platform-global; confine writes to
   // SUPERADMIN even if an org admin holds `admin.permissions.manage`.
   if (!isSuperadmin(guard.access)) {

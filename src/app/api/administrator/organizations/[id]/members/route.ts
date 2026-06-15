@@ -11,6 +11,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
@@ -120,6 +121,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
+  const limited = enforceRateLimit(
+    "admin.orgs.members",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
+
   const { id } = await context.params;
   if (!isUuid(id)) {
     return adminErrorResponse("invalid_id", 400, request);
@@ -227,6 +235,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
+  const limited = enforceRateLimit(
+    "admin.orgs.members",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
+
   const { id } = await context.params;
   if (!isUuid(id)) {
     return adminErrorResponse("invalid_id", 400, request);
@@ -318,6 +333,13 @@ const deleteMembersSchema = z
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.orgs.members",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await context.params;
   if (!isUuid(id)) {

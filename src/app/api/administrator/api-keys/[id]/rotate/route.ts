@@ -4,6 +4,7 @@ import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { rotateApiKey } from "@/lib/api-auth/api-keys.server";
 
@@ -28,6 +29,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.apikeys.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.apikeys.rotate",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const actorAppUserId = guard.access.appUserId;
   if (!actorAppUserId) {

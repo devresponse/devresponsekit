@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, isSuperadmin, SUPERADMIN_PERMISSION } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
@@ -94,6 +95,13 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
+  const limited = enforceRateLimit(
+    "admin.roles.permissions",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
+
   const { id } = await ctx.params;
   if (!isUuid(id)) {
     return adminErrorResponse("invalid_id", 400, request);
@@ -170,6 +178,13 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.roles.permissions",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await ctx.params;
   if (!isUuid(id)) {

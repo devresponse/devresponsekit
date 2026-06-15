@@ -70,7 +70,7 @@ until an administrator approves them.
 ```
 src/
   app/(root)                          # bare "/" → default-locale redirect
-  app/[locale]/(public)               # marketing/docs pages
+  app/[locale]/(public)               # localized marketing landing page (/[locale]) + about, public docs, logged-out
   app/[locale]/(auth)                 # sign-in, sign-up, forgot/reset password, status pages
   app/[locale]/(secure)               # session-gated shell + workspaces
   app/[locale]/(secure)/app/dashboard       # landing workspace

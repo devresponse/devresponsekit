@@ -69,7 +69,7 @@
     },
     "stats": {
       "items": [
-        { "value": "744", "label": "automated tests" },
+        { "value": "958", "label": "automated tests" },
         { "value": "$0", "label": "marginal auth cost" },
         { "value": "80+", "label": "admin console pages" },
         { "value": "3-tier", "label": "access control" },

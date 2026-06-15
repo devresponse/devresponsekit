@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   applySortAndPagination,
   buildListResponse,
+  executeListWithTotal,
   offsetFor,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
@@ -112,6 +113,59 @@ describe("buildListResponse", () => {
       total: 99,
       sort: [],
     });
+  });
+});
+
+describe("executeListWithTotal", () => {
+  // `count(*) over()` is folded into the items SELECT under the `__total`
+  // alias, so the page total rides back on each row. The separate count
+  // query is only a fallback for an empty page PAST the end.
+  const items = (rows: Array<Record<string, unknown>>) => ({
+    execute: () => Promise.resolve(rows),
+  });
+  const counter = (total: unknown) => {
+    const executeTakeFirst = vi.fn(() => Promise.resolve({ total }));
+    return { query: { executeTakeFirst }, executeTakeFirst };
+  };
+  const q = (qs: string) => parseListQuery(p(qs), { allowedSortFields: [] });
+
+  it("reads the window total from the first row and strips __total from every item", async () => {
+    const count = counter("999"); // must NOT be consulted on a full page
+    const { items: out, total } = await executeListWithTotal(
+      items([
+        { id: "a", __total: "42" },
+        { id: "b", __total: "42" },
+      ]),
+      count.query,
+      q("page=1&pageSize=25"),
+    );
+    expect(total).toBe(42);
+    expect(out).toEqual([{ id: "a" }, { id: "b" }]);
+    expect(out[0]).not.toHaveProperty("__total");
+    expect(count.executeTakeFirst).not.toHaveBeenCalled();
+  });
+
+  it("returns 0 for an empty FIRST page without running the fallback count", async () => {
+    const count = counter("123");
+    const { items: out, total } = await executeListWithTotal(
+      items([]),
+      count.query,
+      q("page=1&pageSize=25"),
+    );
+    expect(out).toEqual([]);
+    expect(total).toBe(0);
+    expect(count.executeTakeFirst).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the count query for an empty page PAST the end (offset > 0)", async () => {
+    const count = counter("57");
+    const { total } = await executeListWithTotal(
+      items([]),
+      count.query,
+      q("page=9&pageSize=25"), // offset 200 — past the end of a 57-row set
+    );
+    expect(total).toBe(57);
+    expect(count.executeTakeFirst).toHaveBeenCalledTimes(1);
   });
 });
 

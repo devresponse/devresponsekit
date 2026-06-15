@@ -144,6 +144,10 @@ describe("GET /api/administrator/users", () => {
       preferredLocale: "en",
       permissions: ["admin.users.read", "superuser"],
     });
+    // The total now rides on each row via the folded `count(*) over()`
+    // window column (`__total`). The separate count query is only a
+    // fallback for empty out-of-range pages — mock it to a DIFFERENT value
+    // to prove a full page reads the window total, never the fallback.
     itemsExecute.mockResolvedValue([
       {
         id: "11111111-1111-4111-8111-111111111101",
@@ -154,9 +158,10 @@ describe("GET /api/administrator/users", () => {
         preferred_locale: "en",
         created_at: "2025-01-01T00:00:00.000Z",
         updated_at: "2025-01-01T00:00:00.000Z",
+        __total: "42",
       },
     ]);
-    totalExecute.mockResolvedValue({ total: "42" });
+    totalExecute.mockResolvedValue({ total: "999" });
 
     const res = await GET(makeRequest(""));
     expect(res.status).toBe(200);

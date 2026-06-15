@@ -6,7 +6,13 @@ import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { buildListResponse, offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
+import {
+  buildListResponse,
+  executeListWithTotal,
+  offsetFor,
+  parseListQuery,
+  windowTotalColumn,
+} from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { createApiKey } from "@/lib/api-auth/api-keys.server";
@@ -123,12 +129,12 @@ export async function GET(request: NextRequest) {
   }
   itemsQuery = itemsQuery.limit(query.pageSize).offset(offsetFor(query));
 
-  const [items, totalRow] = await Promise.all([
-    itemsQuery.execute(),
-    base.select(sql<string>`count(*)`.as("total")).executeTakeFirst(),
-  ]);
+  const { items, total } = await executeListWithTotal(
+    itemsQuery.select(windowTotalColumn()),
+    base.select(sql<string>`count(*)`.as("total")),
+    query,
+  );
 
-  const total = Number(totalRow?.total ?? 0);
   return NextResponse.json(buildListResponse(items, total, query));
 }
 

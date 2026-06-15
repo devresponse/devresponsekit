@@ -134,9 +134,14 @@ describe("GET /api/administrator/api-keys", () => {
         created_at: "2025-01-01T00:00:00.000Z",
         revoked_at: null,
         revoked_reason: null,
+        // Folded `count(*) over()` window total rides on the row; the
+        // separate count query (below) is now only a fallback for empty
+        // out-of-range pages, so mock it to a different value to prove the
+        // full page reads the window total.
+        __total: "7",
       },
     ]);
-    totalExecute.mockResolvedValue({ total: "7" });
+    totalExecute.mockResolvedValue({ total: "999" });
 
     const res = await GET(makeRequest(""));
     expect(res.status).toBe(200);

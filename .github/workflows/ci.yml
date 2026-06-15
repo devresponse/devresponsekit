@@ -172,3 +172,36 @@ jobs:
           path: test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  audit:
+    name: Dependency audit (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # NON-BLOCKING for now (dep-2). A backlog of known advisories exists and
+    # is being worked down, so a hard failure would red-wall every merge
+    # under the auto-merge-on-green policy. `continue-on-error` surfaces
+    # new / changed high+ advisories in the checks UI without gating, and
+    # this is a NEW (non-required) check so it cannot block merges either
+    # way. Tighten to a hard gate — drop `continue-on-error` (and ideally
+    # add it to required checks + pin a reviewed allowlist) — once the
+    # backlog is cleared.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Exits non-zero when a high or critical advisory is present, which
+      # marks this (non-blocking) job's check accordingly so the finding is
+      # visible. Lower the threshold to `moderate` when the high+ backlog is
+      # clear.
+      - name: Audit dependencies (high and above)
+        run: pnpm audit --audit-level high

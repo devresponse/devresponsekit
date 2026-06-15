@@ -428,14 +428,18 @@ from app_organizations o
 where o.slug = 'default'
 on conflict (organization_id, key) do nothing;
 
--- Grant the superuser role EVERY registered permission. Because all
--- permission rows above are inserted before this grant, the superuser is
--- born holding the complete catalog.
+-- Grant the superuser role only the `superuser` MARKER. Post-hardening
+-- (PR #97) a superuser's authority derives from the marker: the runtime
+-- (getUserAccessContext) synthesizes the full permission set for any holder
+-- and the admin permission gate short-circuits on isSuperadmin — so
+-- enumerating the whole catalog onto the role is redundant. (shell.view is
+-- not part of this schema's catalog; the seed grants it and the runtime
+-- synthesis supplies it.)
 insert into app_role_permissions (role_id, permission_id)
 select r.id, p.id
 from app_roles r
 join app_organizations o on o.id = r.organization_id
-cross join app_permissions p
+join app_permissions p on p.key = 'superuser'
 where o.slug = 'default'
   and r.key = 'superuser'
 on conflict do nothing;

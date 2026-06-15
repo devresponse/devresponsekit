@@ -80,11 +80,13 @@ async function main() {
       [
         "superuser",
         "Superuser",
-        // Superuser is the default top-level access level. It holds
-        // every permission known to the system — including all admin.*
-        // capabilities and the `superuser` marker — so it acts as a
-        // true superuser, covering and exceeding `administrator`.
-        ["shell.view", "audit.view", "superuser", ...ADMIN_PERMISSION_CATALOG.map((p) => p.key)],
+        // Superuser is the default top-level access level. Its authority
+        // comes from the `superuser` MARKER, not enumerated grants: the
+        // runtime (getUserAccessContext) synthesizes the full permission set
+        // for any holder and the admin gate short-circuits on isSuperadmin
+        // (PR #97), so the role needs only the marker (+ shell.view to enter
+        // the shell before synthesis).
+        ["shell.view", "superuser"],
       ],
     ];
     for (const [key, name, permKeys] of roles) {

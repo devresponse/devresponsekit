@@ -158,7 +158,8 @@ accounts** — one superuser, one organization admin, and five regular users
 
 All accounts share one password — **`DevPassword123!`** by default (override
 with `DEV_SEED_PASSWORD`). Sign in at `/<locale>/sign-in`, e.g. as
-`superuser@orga.local`.
+`superuser@orga.local`. Every account is **pre-approved** (`active`) in its
+assigned organization, so none sit in the `pending_approval` queue.
 
 The script is **idempotent** (safe to run repeatedly — it reconciles existing
 accounts rather than duplicating them) and **refuses to run under

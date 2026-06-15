@@ -15,6 +15,11 @@ import { ADMIN_PERMISSION_CATALOG, ANY_ADMIN_PERMISSION } from "@/lib/admin/perm
  * repeatedly. It assumes the schema already exists (`pnpm db:auth:migrate` +
  * `pnpm db:app:migrate`); it does not create tables.
  *
+ * Every account is created **pre-approved** (`active`) and pinned to its
+ * assigned organization, so the accounts never sit in `pending_approval` —
+ * see step 6 in `ensureUser`, which removes the stray `default`-org
+ * membership that sign-up auto-provisioning would otherwise leave behind.
+ *
  * Run with:  `pnpm db:seed:dev`
  *
  * Every account shares one password (`DEV_SEED_PASSWORD`, default
@@ -277,6 +282,23 @@ async function ensureUser(
     `insert into app_user_roles (app_user_id, organization_id, role_id) values ($1, $2, $3)
      on conflict do nothing`,
     [appUserId, organizationId, roleId],
+  );
+
+  // 6. Drop the stray membership the sign-up flow auto-provisions in the
+  // fallback (`default`) org. Better Auth's `session.create.after` hook
+  // (src/lib/auth.ts) runs provisionUserFromAuth during sign-up's auto
+  // sign-in — BEFORE step 4 above — creating a `pending_approval` membership
+  // in `default`. getUserAccessContext resolves the EARLIEST membership, so
+  // that stray, earlier row would otherwise pin the account to
+  // `pending_approval` and strip its assigned-org roles. These synthetic
+  // users belong only to their assigned org, so remove any membership
+  // elsewhere. (A later real sign-in may re-create the `default` row, but it
+  // now post-dates the assigned one and never wins the earliest-membership
+  // tiebreak — so the account stays active in its assigned org.)
+  await pool.query(
+    `delete from app_organization_memberships
+     where app_user_id = $1 and organization_id <> $2`,
+    [appUserId, organizationId],
   );
 }
 

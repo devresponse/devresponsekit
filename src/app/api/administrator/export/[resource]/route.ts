@@ -25,9 +25,12 @@ export const dynamic = "force-dynamic";
  *     audit on missing permission.
  *   - The export is hard-capped at {@link MAX_EXPORT_ROWS} (100k) per
  *     §20.1 #14 to bound memory and prevent a single export from
- *     pinning the DB. When the cap is hit we still return the rows
- *     read so far; the response headers include `X-Export-Truncated:
- *     true` and `X-Export-Limit` so the UI can surface a banner.
+ *     pinning the DB. When the cap is hit we still return the rows read so
+ *     far and append a `# export_truncated: <limit>` sentinel line to the
+ *     CSV body. Truncation can't be a header — it is only known mid-stream,
+ *     after the 200 + headers are sent — so the client (which fetches the
+ *     body) strips the sentinel and surfaces a banner. `X-Export-Limit`
+ *     carries the cap.
  *   - The endpoint is rate-limited via the shared in-memory token
  *     bucket per actor (see {@link DEFAULT_ADMIN_EXPORT_LIMIT}).
  *   - We stream rows in pages of {@link PAGE_SIZE} so memory stays
@@ -39,7 +42,9 @@ export const dynamic = "force-dynamic";
  *   - A `admin.export.completed` (or `_failed`) audit row is written
  *     so platform ops can answer "who exported the user list at 11:42".
  */
-const MAX_EXPORT_ROWS = 100_000;
+// Hard row cap for a single export (§20.1 #14). Operator-tunable via
+// ADMIN_EXPORT_MAX_ROWS; defaults to 100k. Read at module load.
+const MAX_EXPORT_ROWS = Number(process.env.ADMIN_EXPORT_MAX_ROWS) || 100_000;
 const PAGE_SIZE = 1_000;
 
 type Resource =
@@ -176,6 +181,15 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
             if (rows.length < limit) break;
             offset += rows.length;
           }
+        }
+
+        if (truncated) {
+          // Detectable truncation marker (mirrors the `# export_failed:`
+          // sentinel below). The client strips this line and surfaces a
+          // banner so the admin knows the file is incomplete. This CANNOT
+          // be a response header: truncation is only known mid-stream, by
+          // which point the 200 + headers have already been sent.
+          writeLine(`# export_truncated: ${MAX_EXPORT_ROWS}`);
         }
       } catch (err) {
         // We've already started streaming, so we can't change the

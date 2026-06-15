@@ -191,3 +191,44 @@ describe("GET /export/[resource] — ADR-0001 org-scoped CSV", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("GET /export/[resource] — truncation signal (bug-3)", () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `r${i}`,
+      created_at: "2026-01-01T00:00:00Z",
+      primary_email: `u${i}@x.com`,
+      display_name: `User ${i}`,
+      status: "active",
+    }));
+
+  afterEach(() => {
+    delete process.env.ADMIN_EXPORT_MAX_ROWS;
+  });
+
+  it("appends a `# export_truncated:` sentinel when the row cap is hit", async () => {
+    // Lower the cap (read at module load) so a tiny dataset overflows it —
+    // the cap is operator-tunable via ADMIN_EXPORT_MAX_ROWS. The mock returns
+    // the same page on every fetch, so the source looks infinite; the route
+    // must mark the body (a header can't — truncation is only known
+    // mid-stream, after the 200 + headers are sent).
+    vi.resetModules();
+    process.env.ADMIN_EXPORT_MAX_ROWS = "5";
+    const { GET: cappedGET } = await import("@/app/api/administrator/export/[resource]/route");
+    state.dataRows = rows(10);
+    accessGetter.mockResolvedValue(superadmin(["admin.users.read"]));
+    const res = await cappedGET(req("users"), ctx("users"));
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("# export_truncated:");
+  });
+
+  it("does NOT add the sentinel when the export fits under the cap", async () => {
+    // A single short page (< PAGE_SIZE) exhausts the source immediately.
+    state.dataRows = rows(1);
+    accessGetter.mockResolvedValue(superadmin(["admin.users.read"]));
+    const res = await GET(req("users"), ctx("users"));
+    const body = await res.text();
+    expect(body).not.toContain("# export_truncated:");
+  });
+});

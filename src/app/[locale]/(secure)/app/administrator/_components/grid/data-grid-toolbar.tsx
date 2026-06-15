@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,24 +81,58 @@ export interface DataGridToolbarProps {
 
 export function DataGridToolbar(props: DataGridToolbarProps) {
   const t = useTranslations("administrator.grid");
+  const dialogs = useDialogs();
   const { selection, bulkActions, exportResource, exportState, headerActions, className } = props;
 
-  const onExport = () => {
+  const onExport = async () => {
     if (!exportResource) return;
     const qs = exportState ? gridStateToSearchParams(exportState).toString() : "";
     const url = `/api/administrator/export/${encodeURIComponent(exportResource)}${
       qs ? `?${qs}` : ""
     }`;
-    // Use a transient anchor click so the browser handles the
-    // download (and the Content-Disposition filename) natively. We
-    // do NOT navigate — the page state should not be discarded just
-    // because the admin clicked Export.
+
+    // Fetch the CSV (rather than a plain anchor click) so we can detect the
+    // server's `# export_truncated:` sentinel and tell the admin the file is
+    // incomplete. Trades streaming for a one-shot blob — bounded by the
+    // server's hard row cap. The page state is never navigated away from.
+    let res: Response;
+    try {
+      res = await fetch(url, { credentials: "same-origin", headers: { accept: "text/csv" } });
+    } catch {
+      await dialogs.notify({ description: t("error"), variant: "destructive" });
+      return;
+    }
+    if (!res.ok) {
+      await dialogs.notify({ description: t("error"), variant: "destructive" });
+      return;
+    }
+
+    const text = await res.text();
+    const truncated = text.includes("# export_truncated:");
+    const csv = truncated
+      ? text
+          .split("\n")
+          .filter((line) => !line.startsWith("# export_truncated:"))
+          .join("\n")
+      : text;
+
+    // Preserve the server's Content-Disposition filename.
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const filename =
+      /filename="?([^"]+)"?/.exec(disposition)?.[1] ?? `administrator-${exportResource}.csv`;
+
+    const blobUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
-    a.href = url;
-    a.rel = "noopener";
+    a.href = blobUrl;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
+    URL.revokeObjectURL(blobUrl);
+
+    if (truncated) {
+      await dialogs.notify({ description: t("exportTruncated") });
+    }
   };
 
   const hasSelection = selection.mode === "all" || selection.count > 0;
@@ -166,7 +201,7 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
           </DropdownMenu>
         ) : null}
         {exportResource ? (
-          <Button type="button" size="sm" variant="outline" onClick={onExport}>
+          <Button type="button" size="sm" variant="outline" onClick={() => void onExport()}>
             {t("exportCsv")}
           </Button>
         ) : null}

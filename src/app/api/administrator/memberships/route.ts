@@ -5,7 +5,9 @@ import { db } from "@/db/database";
 import {
   applySortAndPagination,
   buildListResponse,
+  executeListWithTotal,
   parseListQuery,
+  windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
@@ -100,11 +102,11 @@ export async function GET(request: NextRequest) {
     query,
   );
 
-  const [items, totalRow] = await Promise.all([
-    itemsQuery.execute(),
-    base.select(sql<string>`count(*)`.as("total")).executeTakeFirst(),
-  ]);
+  const { items, total } = await executeListWithTotal(
+    itemsQuery.select(windowTotalColumn()),
+    base.select(sql<string>`count(*)`.as("total")),
+    query,
+  );
 
-  const total = Number(totalRow?.total ?? 0);
   return NextResponse.json(buildListResponse(items, total, query));
 }

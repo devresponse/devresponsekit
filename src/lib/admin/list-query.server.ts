@@ -179,3 +179,47 @@ export function applySortAndPagination<DB, TB extends keyof DB, O>(
   }
   return next.limit(query.pageSize).offset(offsetFor(query));
 }
+
+/** Alias the folded window count rides on. Stripped before the response. */
+const TOTAL_ALIAS = "__total" as const;
+
+/**
+ * A `count(*) over() as __total` selection to fold into a list query's
+ * SELECT. Window functions are evaluated over the full filtered set BEFORE
+ * `LIMIT`/`OFFSET`, so the total rides back on the same scan as the page
+ * rows — pair with {@link executeListWithTotal}, which reads and strips it.
+ */
+export function windowTotalColumn() {
+  return sql<string>`count(*) over()`.as(TOTAL_ALIAS);
+}
+
+/**
+ * Runs a list query whose SELECT carries {@link windowTotalColumn} and
+ * returns `{ items, total }`, with the window-count column stripped from
+ * every item. Replaces the previous two round-trips (a `SELECT … LIMIT`
+ * plus a separate `SELECT count(*)`) with one.
+ *
+ * The count rides on each returned row, so an EMPTY page carries no count.
+ * That happens only when (a) nothing matches — total is 0 — or (b) the
+ * requested page is past the end (`offset > 0`). For (b) alone we fall back
+ * to a single `count(*)` (via `countQuery`) so the pager still shows the
+ * true total. The fallback query is built by the caller but executed ONLY
+ * in that rare case, so the common path stays a single query.
+ */
+export async function executeListWithTotal<TRow>(
+  itemsQuery: { execute(): Promise<TRow[]> },
+  countQuery: { executeTakeFirst(): Promise<{ total: unknown } | undefined> },
+  query: ListQuery,
+): Promise<{ items: Array<Omit<TRow, typeof TOTAL_ALIAS>>; total: number }> {
+  const rows = await itemsQuery.execute();
+  if (rows.length > 0) {
+    const total = Number((rows[0] as Record<string, unknown>)[TOTAL_ALIAS] ?? rows.length);
+    for (const row of rows) delete (row as Record<string, unknown>)[TOTAL_ALIAS];
+    return { items: rows as Array<Omit<TRow, typeof TOTAL_ALIAS>>, total };
+  }
+  // Empty page: first page → genuinely empty (0); a later page → past the
+  // end, so spend the one round-trip we just saved to learn the real total.
+  const total =
+    offsetFor(query) === 0 ? 0 : Number((await countQuery.executeTakeFirst())?.total ?? 0);
+  return { items: [], total };
+}

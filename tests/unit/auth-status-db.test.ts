@@ -3,15 +3,23 @@ import type * as AuthStatusModule from "@/lib/auth-status";
 
 /**
  * Unit tests for `auth-status.ts > getUserAccessContext` with a mocked
- * Kysely database. Covers the three documented branches:
+ * Kysely database. Covers:
  *   - user not provisioned → synthetic pending_approval context
  *   - provisioned with no membership → permissions empty, status preserved
  *   - provisioned with membership + roles → permissions populated
+ *   - multi-org: the `active_org` cookie selects the membership, and a stale
+ *     cookie falls back to the earliest membership.
  */
 
 const userTakeFirst = vi.fn();
-const membershipTakeFirst = vi.fn();
+const membershipTakeFirst = vi.fn(); // fallback: .where().orderBy().executeTakeFirst()
+const membershipByOrgTakeFirst = vi.fn(); // active-org: .where().where().executeTakeFirst()
 const rolesExecute = vi.fn();
+const readActiveOrgId = vi.fn();
+
+vi.mock("@/lib/active-org.server", () => ({
+  readActiveOrgId: () => readActiveOrgId(),
+}));
 
 vi.mock("@/db/database", () => ({
   db: {
@@ -27,6 +35,9 @@ vi.mock("@/db/database", () => ({
         return {
           select: () => ({
             where: () => ({
+              // cookie-scoped: .where("organization_id","=",activeOrgId).executeTakeFirst()
+              where: () => ({ executeTakeFirst: membershipByOrgTakeFirst }),
+              // fallback: .orderBy("created_at","asc").executeTakeFirst()
               orderBy: () => ({ executeTakeFirst: membershipTakeFirst }),
             }),
           }),
@@ -51,7 +62,10 @@ let getUserAccessContext: typeof AuthStatusModule.getUserAccessContext;
 beforeEach(async () => {
   userTakeFirst.mockReset();
   membershipTakeFirst.mockReset();
+  membershipByOrgTakeFirst.mockReset();
   rolesExecute.mockReset();
+  readActiveOrgId.mockReset();
+  readActiveOrgId.mockResolvedValue(null); // no active-org cookie by default
   ({ getUserAccessContext } = await import("@/lib/auth-status"));
 });
 afterEach(() => vi.resetModules());
@@ -108,5 +122,40 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(ctx.organizationId).toBe("o-1");
     expect(ctx.membershipStatus).toBe("active");
     expect(ctx.permissions).toEqual(["shell.view", "audit.view"]);
+  });
+
+  it("selects the org named by the active_org cookie (not the earliest)", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    readActiveOrgId.mockResolvedValue("o-cookie");
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-cookie", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
+
+    const ctx = await getUserAccessContext("ba-1");
+    expect(ctx.organizationId).toBe("o-cookie");
+    expect(ctx.permissions).toEqual(["admin.users.read"]);
+    // The fallback (earliest-membership) query must NOT run when the cookie hits.
+    expect(membershipTakeFirst).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the earliest membership when the cookie names an org the user is not in", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    readActiveOrgId.mockResolvedValue("o-stale");
+    membershipByOrgTakeFirst.mockResolvedValue(undefined); // not an active member there
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-earliest", status: "active" });
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-1");
+    expect(membershipByOrgTakeFirst).toHaveBeenCalled();
+    expect(ctx.organizationId).toBe("o-earliest");
   });
 });

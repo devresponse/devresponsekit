@@ -359,6 +359,25 @@ describe("POST /api/administrator/users/bulk", () => {
     expect(body.failed).toBe(1);
     expect(body.results[0].error).toBe("not_found");
   });
+
+  // bug-8: duplicate ids in the payload must be processed once. Zod's
+  // .min/.max only bound element count, not uniqueness, so without dedup a
+  // repeated id would double-count attempts (and double-audit / re-apply).
+  it("deduplicates repeated ids — three copies of one id collapse to a single attempt", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.manage"));
+    const { POST } = await importRoute();
+    const res = await POST(
+      makeRequest(url, {
+        method: "POST",
+        body: JSON.stringify({ action: "approve", ids: [TARGET_ID, TARGET_ID, TARGET_ID] }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.attempted).toBe(1);
+    expect(body.results).toHaveLength(1);
+  });
 });
 
 /* -------------------------------------------------------------------------- */

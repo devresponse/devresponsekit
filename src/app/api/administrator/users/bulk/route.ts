@@ -188,8 +188,13 @@ export async function POST(request: NextRequest) {
     targetIds = rows.map((r) => r.id);
   } else {
     // `idsSchema` already validates UUID format and caps at MAX_BULK_IDS,
-    // but defend against drift in the parser by re-checking here.
-    targetIds = parsed.data.ids.filter(isUuid).slice(0, MAX_BULK_IDS);
+    // but defend against drift in the parser by re-checking here. Dedup
+    // before processing: Zod's `.min`/`.max` validate element COUNT, not
+    // uniqueness, so a payload repeating an id would otherwise process it
+    // twice — double audit rows, inflated succeeded/attempted counts, and
+    // a re-applied action (e.g. a second ban resetting the expiry). `Set`
+    // preserves first-seen order; the `"*"` branch is already distinct.
+    targetIds = [...new Set(parsed.data.ids.filter(isUuid))].slice(0, MAX_BULK_IDS);
   }
 
   if (targetIds.length === 0) {

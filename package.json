@@ -18,6 +18,7 @@
     "db:auth:generate": "tsx src/db/migrations/run-better-auth-generate.ts",
     "db:app:migrate": "tsx src/db/migrations/run-migrations.ts",
     "db:seed": "tsx --conditions=react-server src/db/seeds/seed-local.ts",
+    "db:seed:dev": "tsx --conditions=react-server src/db/seeds/dev-init.ts",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
     "test": "node scripts/test-shards.mjs",
     "test:serial": "vitest run",

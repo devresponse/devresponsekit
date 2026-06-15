@@ -128,12 +128,44 @@ from authorization.
 | `pnpm db:up`     | Start the Postgres container (maps container `5432` → host `5444`). |
 | `pnpm db:down`   | Stop the container (keeps the `postgres17-data` volume).            |
 | `pnpm db:seed`   | Re-run the idempotent seed.                                         |
+| `pnpm db:seed:dev` | Optional: load 3 orgs × 7 users for testing (see below).          |
 | `pnpm dev`       | Dev server with hot reload.                                         |
 | `pnpm typecheck` / `pnpm lint` / `pnpm test` | The pre-PR quality gates.              |
 
 To wipe the database entirely and start clean: `docker compose down -v`, then
 re-run the migrate + seed steps. Deep dive on the database and Docker topology:
 [setup-better-auth.md §4](setup-better-auth.md#4-postgresql-with-docker-local).
+
+### Optional: load multi-organization test data
+
+`pnpm db:seed` creates a single local admin. To exercise multi-organization
+and multi-role scenarios, an **optional** development seed loads a richer
+fixture (run it after the migrate steps above):
+
+```bash
+pnpm db:seed:dev
+```
+
+It creates **three organizations** (ORG A / B / C), each with **seven
+accounts** — one superuser, one organization admin, and five regular users
+(21 accounts in total):
+
+| Account                      | Role (per org)   | Access                                             |
+| ---------------------------- | ---------------- | -------------------------------------------------- |
+| `superuser@org{a,b,c}.local` | `superuser`      | Cross-organization superadmin (holds `superuser`). |
+| `orgadmin@org{a,b,c}.local`  | `admin.platform` | Full `admin.*`, scoped to its own org (ADR-0001).  |
+| `user1..5@org{a,b,c}.local`  | `member`         | `shell.view` only — a plain user.                  |
+
+All accounts share one password — **`DevPassword123!`** by default (override
+with `DEV_SEED_PASSWORD`). Sign in at `/<locale>/sign-in`, e.g. as
+`superuser@orga.local`. Every account is **pre-approved** (`active`) in its
+assigned organization, so none sit in the `pending_approval` queue.
+
+The script is **idempotent** (safe to run repeatedly — it reconciles existing
+accounts rather than duplicating them) and **refuses to run under
+`NODE_ENV=production`** unless `DEV_SEED_ALLOW_PROD=1` is set, since it creates
+known-password accounts. Source:
+[`src/db/seeds/dev-init.ts`](../src/db/seeds/dev-init.ts).
 
 ---
 

@@ -577,6 +577,10 @@ The default local admin created by `pnpm db:seed` is
 `admin@devresponse.local` / `ChangeMe-LocalOnly-123!` unless you override
 `SEED_ADMIN_EMAIL` or `SEED_ADMIN_PASSWORD` in `.env`.
 
+For multi-organization testing, the optional `pnpm db:seed:dev` loads three
+organizations with seven accounts each (superuser / org admin / five users) —
+see [setup-guide.md](setup-guide.md#optional-load-multi-organization-test-data).
+
 If `pnpm db:seed` fails with `relation "user" does not exist`, Better Auth's
 vendor tables were not created yet. Run `pnpm db:auth:migrate` before
 `pnpm db:seed`.

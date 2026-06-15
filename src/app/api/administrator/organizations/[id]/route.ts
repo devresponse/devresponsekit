@@ -12,6 +12,7 @@ import {
   SLUG_RE,
 } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
@@ -74,6 +75,13 @@ const patchSchema = z
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.orgs.write",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   // ADR-0001: mutating the org entity (rename/status/default) is a
   // platform-level, SUPERADMIN-only action.
@@ -154,6 +162,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.orgs.write",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   // ADR-0001: deleting a tenant is a SUPERADMIN-only action.
   if (!isSuperadmin(guard.access)) {

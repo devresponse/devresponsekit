@@ -13,6 +13,7 @@ import {
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +91,13 @@ const patchSchema = z
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.apps.write",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await context.params;
   if (!APP_ID_RE.test(id)) {
@@ -185,6 +193,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.apps.write",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await context.params;
   if (!APP_ID_RE.test(id)) {

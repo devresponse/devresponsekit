@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { SLUG_RE } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
@@ -125,6 +126,13 @@ const createSchema = z
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.orgs.create",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   // ADR-0001: creating a new tenant is a SUPERADMIN-only action; an org
   // admin manages only their existing org.

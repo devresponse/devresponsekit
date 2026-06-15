@@ -4,6 +4,7 @@ import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { revokeBetterAuthUserSession } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,13 @@ type RouteContext = { params: Promise<{ id: string; sessionId: string }> };
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.sessions");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.users.session_revoke",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id, sessionId } = await ctx.params;
   if (!sessionId || sessionId.length < 1 || sessionId.length > 256) {

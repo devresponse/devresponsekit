@@ -11,6 +11,7 @@ import {
   parseListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
@@ -118,6 +119,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
+  const limited = enforceRateLimit(
+    "admin.users.memberships",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
+
   const { id } = await context.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
@@ -216,6 +224,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
+  const limited = enforceRateLimit(
+    "admin.users.memberships",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
+
   const { id } = await context.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
@@ -304,6 +319,13 @@ const deleteMembershipSchema = z
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.users.memberships",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await context.params;
   const target = await resolveTargetUser(id, guard.access);

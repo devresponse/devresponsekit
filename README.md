@@ -50,6 +50,10 @@ The seed creates a local admin (`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`
 from `.env`). New self-registered accounts start as `pending_approval`
 until an administrator approves them.
 
+For the complete path — prerequisites, configuration reference, production
+build, and deploying a fully functional instance — follow
+[docs/setup-guide.md](docs/setup-guide.md).
+
 ## Scripts
 
 | Command           | Purpose                                           |
@@ -96,7 +100,8 @@ tests/                                # unit / component / integration / securit
 
 ## Documentation
 
-- [docs/get-started.md](docs/get-started.md) — full local setup walkthrough
+- [docs/setup-guide.md](docs/setup-guide.md) — **start here**: install, configure, and deploy from a fresh clone (checkout → build → deployed instance)
+- [docs/get-started.md](docs/get-started.md) — developer orientation: architecture, auth boundary, routing, shell patterns
 - [docs/setup-better-auth.md](docs/setup-better-auth.md) — auth + schema + migrations
 - [docs/setup-sso-multi-app.md](docs/setup-sso-multi-app.md) — cross-subdomain SSO across two or more apps
 - [docs/setup-email.md](docs/setup-email.md) — email subsystem + provider integration

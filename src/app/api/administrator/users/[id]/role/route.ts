@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { setBetterAuthUserRole } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -31,6 +32,17 @@ const roleSchema = z
 export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.setRole");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  // Granting the Better Auth platform role (`admin`) is SUPERADMIN-only.
+  // The Better Auth `admin` role reaches the un-scoped `/api/auth/admin/*`
+  // plugin surface (list/ban/impersonate/set-password across ALL orgs),
+  // which bypasses the application permission catalog and ADR-0001 org
+  // scoping. Holding `admin.users.setRole` alone must therefore NOT let an
+  // org admin mint a platform admin (cross-tenant privilege escalation).
+  // Org-level role management goes through `app_user_roles` / app-roles.
+  if (!isSuperadmin(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   const limited = enforceRateLimit(
     "admin.users.role",

@@ -44,8 +44,12 @@ shells) so that you can land your first change with confidence.
 
 `devresponsekit` is an **enterprise Next.js 16 “Holy Grail” application
 shell** with first‑class authentication, internationalization, and a
-nestable shell layout. The product surface lives behind
-`/[locale]/app/*` and is composed of top‑level applications — Dashboard,
+nestable shell layout. Unauthenticated visitors land on a **localized
+marketing landing page** at `/[locale]` (the public home — hero, feature
+highlights, and a call to action to the GitHub repository, fully
+translated via the `public` message namespace). The authenticated product
+surface lives behind `/[locale]/app/*` and is composed of top‑level
+applications — Dashboard,
 Account (self-service), Workspace, an in-app Docs viewer, and
 Administrator — inside a single shell that you can extend with new
 sub‑applications. Supporting subsystems include outbound email
@@ -97,7 +101,7 @@ src/
 │   ├── api/                      Route handlers (auth, account, administrator, navigation, sso, preferences, v1)
 │   └── [locale]/
 │       ├── layout.tsx            Root layout: <html lang> + theme + NextIntlClientProvider
-│       ├── (public)/             Marketing / docs / logged-out pages
+│       ├── (public)/             Localized marketing landing page (/[locale]) + about / docs / logged-out
 │       ├── (auth)/               sign-in, sign-up, forgot-password, reset-password, status pages
 │       └── (secure)/             Authenticated product surface
 │           ├── layout.tsx        Server-side auth boundary + root shell

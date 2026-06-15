@@ -69,7 +69,7 @@
     },
     "stats": {
       "items": [
-        { "value": "744", "label": "tests automatisés" },
+        { "value": "958", "label": "tests automatisés" },
         { "value": "$0", "label": "coût marginal d’authentification" },
         { "value": "80+", "label": "pages de console d’administration" },
         { "value": "3 niveaux", "label": "contrôle d’accès" },

@@ -1,10 +1,15 @@
 # Administrator (User / Role / Org Manager) — Implementation Plan
 
-> Status: Plan / specification. This document defines the full
-> production-grade plan for the **Administrator** application that ships as
-> part of the existing `devresponsekit` framework. It does not yet describe
-> code that exists in the repository; everything here is to be built per
-> this plan.
+> Status: As-built specification (release 1.0). This document describes the
+> **Administrator** application that ships as part of `devresponsekit`. The
+> console, its guarded REST API, the three-tier access model (ADR-0001),
+> and the shared data grid are implemented and tested. A few advanced grid
+> affordances described in §7 — faceted/date-range filters, per-column
+> filter operators, column-visibility and density toggles, and
+> multi-column sort — remain **planned, not yet built**, and are flagged as
+> such inline. The shipped grid offers a debounced global-search box,
+> per-field `<select>` filters, single-column sort, pagination, row
+> selection + bulk actions, and CSV export.
 
 ---
 
@@ -92,12 +97,12 @@ src/app/[locale]/(secure)/app/administrator/
 │   ├── administrator-sidebar.tsx
 │   ├── administrator-breadcrumbs.tsx
 │   ├── grid/
-│   │   ├── data-grid.tsx
-│   │   ├── data-grid-toolbar.tsx
-│   │   ├── data-grid-pagination.tsx
-│   │   ├── data-grid-column-header.tsx
-│   │   ├── data-grid-faceted-filter.tsx
-│   │   └── use-grid-state.ts
+│   │   ├── data-grid.tsx              # grid shell + inlined pagination
+│   │   ├── data-grid-toolbar.tsx      # selection summary + bulk actions + CSV export
+│   │   ├── data-grid-filters.tsx      # DataGridFilterBar: debounced search + per-field <select> filters
+│   │   ├── data-grid-column-header.tsx# single-column sort button
+│   │   ├── use-grid-state.ts          # URL-backed page/sort/filter/q state + fetch
+│   │   └── use-grid-selection.ts      # row selection (page + select-all-matching)
 │   └── confirm-action-dialog.tsx
 ├── users/
 │   ├── page.tsx              # Users list (advanced grid)
@@ -360,7 +365,7 @@ removed — see §20.1 #1.)
 
 | Endpoint | Verbs | Permission | Notes |
 |---|---|---|---|
-| `/api/administrator/users` | GET | `admin.users.read` | Paginated; joins `app_users` with Better Auth list (page-by-page join, never full table). |
+| `/api/administrator/users` | GET | `admin.users.read` | Paginated `app_users` via Kysely; the Better Auth account list is **not** joined here (intentionally out of scope for this endpoint). |
 | `/api/administrator/users` | POST | `admin.users.create` | Server-side wrapper around `auth.api.createUser`. |
 | `/api/administrator/users/[id]` | GET, PATCH, DELETE | `admin.users.read/update/delete` | PATCH body `{ displayName?, preferredLocale? }` (`displayName` mirrors Better Auth `name`; `primary_email` is **not** editable — needs a verification flow). DELETE performs **soft delete only** (indefinite Better Auth ban + `app_users.status = 'deactivated'`); see §4.1. |
 | `/api/administrator/users/[id]/restore` | POST | `admin.users.delete` | Inverse of soft delete: unban + clear `deactivated_*`. |
@@ -426,11 +431,15 @@ Decision: the 30-key catalog below is adopted in full as the v1 set.
 machine credentials — the single source of truth is
 `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts`; do not
 hard-code a count elsewhere.)
-Permissions are **platform-wide** (decision: a single privileged user
-holding `admin.platform` — or any `admin.*.read/manage` permission —
-can see and manage **every** organization, not only orgs they are a
-member of). Per-org scoping for non-platform admins is left to a
-future iteration.
+A permission grants the *action*; its **reach** is set by the three-tier
+access model (ADR-0001, §6.2). A **superadmin** (holds `superuser`) sees
+and manages **every** organization and the global catalogs; an **org
+admin** (holds `admin.*` but not `superuser`) is confined to **their own**
+organization; a plain **user** is self-scoped. The boundary lives in one
+module — [`src/lib/admin/access-scope.server.ts`](../src/lib/admin/access-scope.server.ts)
+(`isSuperadmin`, `resolveOrgScope`, `canAccessOrg`, `canAccessUser`) — and
+a CI invariant fails the build if an admin route touches tenant data
+without it. Out-of-scope lookups return `404`, not `403`.
 
 ```
 admin.users.read
@@ -510,61 +519,62 @@ and feel matches the rest of the application by default.
 
 ### 7.1 Capabilities
 
-- Server-side **pagination** (page/pageSize) — uses
-  `@/components/ui/pagination` for the page bar.
-- Server-side **sorting** — multi-column with shift-click; encoded as
-  repeating `sort=field:dir` query params.
-- Server-side **filtering**:
-  - Per-column **text** filter with operators (`contains`,
-    `equals`, `startsWith`).
-  - Per-column **faceted** filter (multi-select from a fixed set, e.g.
-    user status, role) using `@/components/ui/popover` +
-    `@/components/ui/command` + `@/components/ui/checkbox`.
-  - **Date range** filter using `@/components/ui/calendar` and
-    `@/components/ui/popover` (single component
-    `DateRangeFacet`).
-  - **Global search** input bound to `?q=` (debounced 250 ms).
-- **Row selection** with "select all on page" + "select all matching"
-  (issues `?ids=*` to the bulk endpoint).
-- **Bulk actions** — destructive bulk actions go through
-  `ConfirmActionDialog` (`AlertDialog`).
-- **Column visibility** menu with persistent per-grid local-storage
-  state keyed by `grid:<name>`.
-- **Density** toggle (compact / comfortable) — defaults to compact
-  inside the secure shell per `specs.md` §28.4.
-- **Export** — "Export current view" button emits the same
-  filter/sort/q to `/api/administrator/export/<resource>` and downloads
-  a CSV.
-- **Empty state** built on `@/components/ui/empty`.
-- **Loading state** uses `@/components/ui/skeleton` rows.
-- **Error state** with retry button; surfaces `error.message` from the
-  API contract.
-- **Persistence** — pagination, sort, filters, and column visibility
-  are reflected in the URL (`useSearchParams`) so views are
-  bookmarkable and reload-safe.
-- **Keyboard** — full row navigation, `Space` to toggle selection,
-  `Enter` to open detail, arrow keys to move, `?` to open shortcut
-  help.
+**Shipped (1.0):**
+
+- Server-side **pagination** (page/pageSize) with a page-size selector
+  (10 / 25 / 50 / 100), rendered by an inlined `DataGridPagination` inside
+  `data-grid.tsx`.
+- Server-side **sorting** — **single-column**: clicking a sortable column
+  header cycles asc → desc → none, encoded as a `sort=field.dir` query
+  param. (The state model can hold multiple sort keys; the header UI
+  exposes one at a time — see "Planned" below.)
+- **Search + filtering** via `DataGridFilterBar` (`data-grid-filters.tsx`):
+  - A debounced **global search** box bound to `?q=` (300 ms), matching
+    the columns each endpoint allow-lists for `q`.
+  - Per-field **filters** as native `<select>` dropdowns — one per
+    allow-listed filter key (e.g. status, scope, is_default) — plus a
+    "Clear filters" control. Each writes `filter[<name>]=…` to the URL.
+  - The search box, filters, and any page-level action button flow in one
+    left-aligned row (the same layout on every grid).
+- **Row selection** — "select all on page" + "select all matching"
+  (issues `ids=*` plus the active filters to the bulk endpoint).
+- **Bulk actions** — surfaced in the toolbar; destructive actions confirm
+  through the shared dialog manager.
+- **Export** — an "Export CSV" button emits the same filter/sort/q to
+  `/api/administrator/export/<resource>` and downloads the result.
+- **Empty / loading / error** states (`empty`, `skeleton` rows, a retry
+  button surfacing the API error).
+- **URL persistence** — page, pageSize, sort, filters, and `q` are all
+  reflected in the URL (`useGridState`) so views are bookmarkable and
+  reload-safe.
+
+**Planned (not yet built):** per-column text-filter operators
+(`contains` / `equals` / `startsWith`), popover/command **faceted**
+multi-select filters, a **date-range** facet, a **column-visibility** menu,
+a per-grid **density** toggle, and **multi-column** shift-click sort. These
+remain design targets; the shipped filter UI is the simpler
+`<select>`-based `DataGridFilterBar` described above.
 
 ### 7.2 Components (under `_components/grid/`)
 
-- `DataGrid<TRow>` — orchestrates state, fetches, renders
-  `Table` from `@/components/ui/table`. Internally uses
-  `@tanstack/react-table` (`useReactTable`) in **manual** mode for
-  pagination/sorting/filtering (server is the source of truth).
-- `DataGridToolbar` — search input, faceted filters, density, export,
-  column visibility, bulk-actions menu.
-- `DataGridPagination` — wraps `Pagination` plus a page-size
-  `Select`.
-- `DataGridColumnHeader` — clickable sort indicator with
-  `DropdownMenu` (sort asc/desc, hide column, filter…).
-- `DataGridFacetedFilter` — popover/command-based multi-select.
-- `useGridState` — hook that owns the URL ↔ TanStack state mapping
-  (`PaginationState`, `SortingState`, `ColumnFiltersState`,
-  `VisibilityState`, `RowSelectionState`) and runs the fetch via
-  `useEffect` + `AbortController` (no SWR/React Query added).
-- `useGridSelection` — selection state wrapper supporting "select all
-  matching" mode in addition to TanStack's per-page selection.
+- `DataGrid<TRow>` (`data-grid.tsx`) — orchestrates URL state, fetches, and
+  renders `Table` from `@/components/ui/table` via `@tanstack/react-table`
+  (`useReactTable`) in **manual** mode (the server is the source of truth).
+  Pagination is **inlined** here as `DataGridPagination` (page buttons + a
+  page-size `<select>`); there is no separate pagination file.
+- `DataGridToolbar` (`data-grid-toolbar.tsx`) — the selection summary,
+  bulk-actions menu, "Export CSV", and any page-level header action (e.g.
+  "New user"), flowing in one row alongside the filter bar.
+- `DataGridFilterBar` (`data-grid-filters.tsx`) — the debounced search box
+  and the per-field `<select>` filters. Native `<select>` rather than a
+  Radix popover, for keyboard/SSR simplicity and testability.
+- `DataGridColumnHeader` (`data-grid-column-header.tsx`) — a clickable
+  single-column sort button (no hide/column-filter menu yet).
+- `useGridState` (`use-grid-state.ts`) — owns the URL ↔ grid-state mapping
+  (page, pageSize, sort, filters, `q`) and runs the fetch via `useEffect` +
+  `AbortController` (no SWR/React Query added).
+- `useGridSelection` (`use-grid-selection.ts`) — selection state supporting
+  "select all matching" in addition to per-page selection.
 
 ### 7.3 Per-grid configuration
 
@@ -834,14 +844,17 @@ runtime dependency introduced by this plan is **`@tanstack/react-table`**
   cardinality; `list-query.server.ts` chooses based on the resource.
 - Membership/role counts on the user grid use `lateral` subqueries to
   avoid N+1.
-- Joins with Better Auth `user` table are not done in SQL (different
-  abstraction layer); instead the server fetches the page from
-  `auth.api.listUsers`, then in a single Kysely query fetches matching
-  `app_users` rows by `better_auth_user_id IN (...)` and merges. This
-  keeps Better Auth as the system of record for identity.
-- Decision: **no optimistic-concurrency / `If-Match` checks in v1.**
-  PATCH/DELETE accept the request and apply last-write-wins. (May be
-  re-introduced later if conflicting-edit incidents emerge.)
+- Joins with the Better Auth `user` table are not done in SQL (different
+  abstraction layer). As built, the admin `GET /users` list queries
+  `app_users` directly via Kysely and does **not** merge the Better Auth
+  account list — Better Auth remains the system of record for identity,
+  resolved per-user on the detail page rather than joined into the list.
+- Optimistic concurrency: the **machine API** ships it —
+  `GET /api/v1/users/[id]` emits an `ETag` and
+  `POST /api/v1/users/[id]/status` honours `If-Match` (→ `412 Precondition
+  Failed`). The cookie-authenticated admin `PATCH/DELETE` endpoints still
+  apply last-write-wins; extending `If-Match` to them is a possible
+  follow-up.
 
 ---
 
@@ -1138,9 +1151,9 @@ in §18 across all phases combined.
 | 4 | Workspace shell | Fully self-contained — its own left rail in **addition** to the root `SecureSidebar` |
 | 5 | Path | `/[locale]/app/administrator` |
 | 6 | Filtering | Per-grid filters only — **no** global org scope picker |
-| 7 | Cross-org visibility | Platform-admin model — privileged users see/manage **all** organizations |
+| 7 | Cross-org visibility | Three-tier model (ADR-0001): superadmin sees/manages **all** orgs; org admin is confined to their own; out-of-scope lookups → `404` |
 | 8 | Indexes | Administrator indexes (incl. `pg_trgm`) shipped up-front; folded into `0001-initial-schema.sql` |
-| 9 | Optimistic concurrency | **Skipped** for v1 (no `If-Match`) |
+| 9 | Optimistic concurrency | **Shipped** on the machine API (`ETag` + `If-Match` → `412` on `/api/v1/users/[id]`); cookie admin writes are last-write-wins |
 | 10 | Impersonation | **Included** in v1, gated + double-confirm + audited |
 | 11 | User deletion | **Soft delete only** (§4.1) — never call `auth.api.removeUser` |
 | 12 | Set password | Admin can set directly **and** can optionally trigger a password-reset email |
@@ -1161,10 +1174,13 @@ in §18 across all phases combined.
 - **MFA enrollment** — when MFA is added project-wide
   (`specs.md` §2 currently excludes it), the Sessions tab will surface
   enrolled factors and a reset flow.
-- **Per-org admin permissions** — current model is platform-wide. A
-  follow-up may introduce per-organization scoping for the `admin.*`
-  permissions for delegated org admins.
-- **Optimistic concurrency** — re-introduce `If-Match` if conflicting
+- **Per-org admin scoping** — **shipped** (ADR-0001): org admins are
+  confined to their own organization; superadmins span all orgs. (A
+  finer-grained delegated-role model within an org remains a possible
+  follow-up.)
+- **Optimistic concurrency** — **shipped** for the machine API
+  (`/api/v1/users/[id]` emits an `ETag`; `POST /api/v1/users/[id]/status`
+  honours `If-Match` → `412`). May be extended to other writes if conflicting
   edits become a real-world problem.
 - **Hard delete / GDPR erasure** — if/when retention requirements
   demand it, layer a true erasure flow on top of the soft-delete state

@@ -746,9 +746,11 @@ admin-manager §17).
   re-mint from their long-lived key/secret, which is simpler and avoids a
   refresh-token store. Revisit only if a client genuinely cannot hold a
   long-lived secret.
-- **Per-org credential scoping.** Mirrors the existing platform-wide vs.
-  per-org admin question (admin-manager §20.2); inherit whatever that
-  resolves to.
+- **Per-org credential scoping.** The admin tiers now org-scope
+  (ADR-0001): a credential's authority is its scopes ∩ its owner's
+  permissions, which already carry the owner's org boundary. A finer-
+  grained per-org *credential* policy (beyond inheriting the owner's
+  scope) remains a possible follow-up.
 - **Webhooks / outbound signing.** Out of scope here, but the JWKS
   infrastructure from Phase 3 is the natural foundation for signing
   outbound webhook payloads later.

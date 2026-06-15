@@ -51,11 +51,11 @@ Four findings frame the entire competitive landscape:
 | **Email** | Outbox-first, **org-scoped**, pluggable Resend/Mailgun, editable per-locale templates |
 | **i18n** | next-intl, 4 locales (en/fr/es/uk), persisted user preference |
 | **Hardening** | Shipped HTTP security headers (HSTS, X-Frame-Options, CSP-report-only, Permissions-Policy) · PII-scrubbed Sentry · timing-safe secret comparison · trusted-proxy client-IP |
-| **Testing** | Vitest (unit/component/integration/security) + Playwright (e2e) + axe-core (a11y) — **744 tests**, deterministic shard runner, coverage- and build-gated CI |
+| **Testing** | Vitest (unit/component/integration/security) + Playwright (e2e) + axe-core (a11y) — **958 tests**, deterministic shard runner, coverage- and build-gated CI |
 
 **Core capabilities at a glance:**
 
-- **Administrator console** — 80+ pages: users, roles, permissions (26-key catalog), organizations, memberships, enterprise apps, email outbox/templates, audit log. Server-side pagination, filtering, bulk ops, CSV export.
+- **Administrator console** — 80+ pages: users, roles, permissions (30-key catalog), organizations, memberships, enterprise apps, email outbox/templates, audit log. Server-side pagination, filtering, bulk ops, CSV export.
 - **Three-tier access control** — superadmin manages every org and the global catalogs; org-admins are hard-confined to a single organization; users are self-scoped. Enforced by `access-scope.server.ts` primitives (`isSuperadmin`, `resolveOrgScope`, `canAccessOrg`, `canAccessUser`).
 - **Self-service account app** — profile, preferences (locale/timezone/formats), security (password, session management).
 - **Multi-tenant RBAC** — organizations with provider bindings (Google Workspace / Microsoft Entra), app-managed roles, 30 total permission keys, full user lifecycle (pending → active → blocked/suspended → soft-deleted/restored).
@@ -105,7 +105,7 @@ DevResponseKit sits at the intersection of three markets that buyers usually eva
 | Auth | **Better Auth (self-host)** | Supabase auth | Better Auth | NextAuth | Clerk | Wasp auth | NextAuth |
 | **Admin console (user/role UI)** | ✅ 80+ pages | ✅ Super Admin | ✅ Super Admin | ❌ | ❌ | 🟡 Basic | 🟡 Workspace |
 | **Multi-tenant orgs** | ✅ + provider bindings | ✅ | ✅ | ❌ | Pro only | ❌ | ✅ subdomain |
-| **Tiered RBAC** | ✅ 3-tier, 26-key catalog | ✅ | ✅ | ❌ | Pro only | 🟡 isAdmin flag | 🟡 team roles |
+| **Tiered RBAC** | ✅ 3-tier, 30-key catalog | ✅ | ✅ | ❌ | Pro only | 🟡 isAdmin flag | 🟡 team roles |
 | **CI-enforced tenant isolation** | ✅ route-scope invariant | 🟡 Postgres RLS | 🟡 app checks | ❌ | ❌ | ❌ | 🟡 |
 | **Machine API + API keys** | ✅ /api/v1, JWT+keys, scoped | ✅ API keys + SDK | ✅ REST + keys | ❌ | ❌ | ❌ | ❌ |
 | **Cross-subdomain SSO** | ✅ nonce JWT handoff | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -116,7 +116,7 @@ DevResponseKit sits at the intersection of three markets that buyers usually eva
 | **PII-scrubbed observability** | ✅ Sentry pre-send scrub | 🟡 n/d | 🟡 n/d | ❌ | 🟡 Sentry | ❌ | ❌ |
 | **i18n** | ✅ 4 locales | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
 | **Embedded docs viewer** | ✅ MD+Mermaid, XSS-safe | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Test suite** | ✅ 744, gated + build check | 🟡 Playwright | 🟡 Playwright | ❌ | ✅ strong | 🟡 minimal | ❌ |
+| **Test suite** | ✅ 958, gated + build check | 🟡 Playwright | 🟡 Playwright | ❌ | ✅ strong | 🟡 minimal | ❌ |
 | **Payments/billing** | ⬜ not bundled | ✅ advanced | ✅ multi-provider | ✅ Stripe/LS | ❌ | ✅ | ✅ Stripe |
 | Maintained 2026 | ✅ active | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ dormant '22 |
 
@@ -131,7 +131,7 @@ DevResponseKit sits at the intersection of three markets that buyers usually eva
 | Language | TypeScript | Python | Ruby |
 | Price | — | $249–999 one-time | Free (MIT) |
 | Multi-tenant teams | ✅ | ✅ (Pro tier+) | ✅ |
-| RBAC | ✅ 3-tier, 26-key | 🟡 | ✅ CanCanCan |
+| RBAC | ✅ 3-tier, 30-key | 🟡 | ✅ CanCanCan |
 | Machine API | ✅ scoped JWT+keys | ✅ (Pro tier+) | ✅ OpenAPI 3.1 |
 | Audit log | ✅ | 🟡 | ✅ PaperTrail |
 | i18n | ✅ | ✅ (Pro tier+) | 🟡 |
@@ -257,7 +257,7 @@ A seven-item hardening pass added: **timing-safe** client-secret comparison (`cr
 
 ### 6.7 Verifiable quality bar
 
-The suite is **744 tests** run by a deterministic shard runner (`scripts/test-shards.mjs`) — parallel for speed, isolated per shard to avoid transform races — and CI now runs `pnpm build` in the fast quality job so config/build regressions are caught before they reach Vercel.
+The suite is **958 tests** — 929 Vitest (unit/component/integration/security) run by a deterministic shard runner (`scripts/test-shards.mjs`), parallel for speed and isolated per shard to avoid transform races, plus 29 Playwright e2e/accessibility tests — and CI runs `pnpm build` in the fast quality job so config/build regressions are caught before they reach Vercel.
 
 ---
 
@@ -267,7 +267,7 @@ The suite is **744 tests** run by a deterministic shard runner (`scripts/test-sh
 
 **2. Enterprise-grade admin console out of the box.** 80+ pages with server-side pagination, bulk operations, CSV export, and full user-lifecycle management. Indie kits ship nothing here (you'd add Refine/AdminJS and build the screens); even Makerkit/Supastarter's super-admin is lighter than DevResponseKit's dedicated console.
 
-**3. Permission catalog as pure data.** The 26-key admin catalog is a single non-`server-only` TypeScript object imported by *both* the seed script and the runtime authorization layer — they structurally cannot drift. Most kits scatter role logic across the codebase.
+**3. Permission catalog as pure data.** The 30-key admin catalog is a single non-`server-only` TypeScript object imported by *both* the seed script and the runtime authorization layer — they structurally cannot drift. Most kits scatter role logic across the codebase.
 
 **4. Scoped machine API with real cryptography.** Versioned `/api/v1` with API keys (SHA-256-hashed, never stored in plaintext) and Ed25519 JWTs verifiable against a published JWKS, where a credential's authority is *always* the intersection of its scopes and its owner's permissions. A machine credential can never exceed its human owner's authority. This is rare even among the premium kits.
 

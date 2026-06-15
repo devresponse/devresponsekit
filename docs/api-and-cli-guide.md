@@ -364,8 +364,18 @@ tokens or redirect.
 The 30-key catalog (`ADMIN_PERMISSION_CATALOG` in
 [`src/lib/admin/permissions.ts`](../src/lib/admin/permissions.ts), seeded
 into `app_permissions` and granted to the `superuser` / `admin.platform`
-role). Permissions are **platform-wide** in v1: a holder manages **every**
-organization, not only their own.
+role). Holding a permission grants the *action*; how far that action
+reaches is decided by the **three-tier access model** (ADR-0001): a
+**superadmin** (holds `superuser`) acts across **every** organization, an
+**org admin** (holds `admin.*` but **not** `superuser`) is confined to
+**their own** organization, and a plain **user** is self-scoped.
+Out-of-scope lookups return `404` (never confirming another tenant
+exists), and a null scope yields an empty result, never "all". Enforced by
+[`src/lib/admin/access-scope.server.ts`](../src/lib/admin/access-scope.server.ts)
+(`isSuperadmin`, `resolveOrgScope`, `canAccessOrg`, `canAccessUser`) and a
+CI invariant that fails the build if an admin route touches tenant data
+without a scope primitive — see
+[docs/adr/0001-three-tier-access-control.md](adr/0001-three-tier-access-control.md).
 
 ```
 admin.users.read         admin.roles.read         admin.orgs.read
@@ -388,8 +398,11 @@ also the **scope** strings used by the `/api/v1` surface (plus four
 `account.*` scopes — see `docs/design-api-keys-and-tokens.md`).
 
 A caller's effective permissions are computed per request by joining
-`app_user_roles → app_role_permissions → app_permissions` for the user's
-first organization membership ([`getUserAccessContext`](../src/lib/auth-status.ts)).
+`app_user_roles → app_role_permissions → app_permissions`
+([`getUserAccessContext`](../src/lib/auth-status.ts)); the caller's
+organization **scope** is then resolved by `resolveOrgScope` (superadmin →
+all orgs; org admin → their own `organizationId`) and applied to every
+tenant-scoped query.
 
 ---
 
@@ -415,6 +428,30 @@ Response envelope:
 Sort fields and filters are **allow-listed per endpoint**; unknown values
 are silently dropped (you cannot pivot to unindexed columns). Default page
 size 25, max 200.
+
+**Searchable & filterable fields per resource.** The admin grids surface a
+debounced search box (driving `q`) and per-field `<select>` filters; the
+table below is the exact allow-list each endpoint enforces (taken from its
+`parseListQuery` call — unlisted keys are dropped):
+
+| Resource | `q` searches | `filter[…]` keys |
+| --- | --- | --- |
+| `/users` | email, display name | `status` |
+| `/users/[id]/memberships` | — | `status`, `organization_id` |
+| `/organizations` | slug, name | `status`, `is_default` |
+| `/organizations/[id]/members` | member display name | `status` |
+| `/organizations/[id]/provider-bindings` | — | `provider` |
+| `/memberships` | user name, org slug/name | `status`, `organization_id`, `source_provider` |
+| `/roles` | key, name | `organization`, `scope`, `permission` |
+| `/roles/[id]/members` | email, display name | — |
+| `/permissions` | key, description | — |
+| `/enterprise-apps` | id, label, subdomain | `status`, `organization_id` |
+| `/api-keys` | name, key prefix, owner email | `status`, `app_user_id`, `organization_id` |
+| `/audit` | event type, email, reason | `event_type`, `outcome`, `actor`, `app_user_id`, `organization_id`, `target_application_id` |
+| `/email/outbox` | recipient, subject, template key | `status`, `template_key` |
+
+Sort fields are likewise allow-listed per endpoint; consult each route's
+`parseListQuery` call for the exact sortable column set.
 
 ### 10.2 Error envelope
 

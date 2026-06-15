@@ -237,6 +237,12 @@ create index if not exists idx_app_user_roles_app_user_id
   on app_user_roles (app_user_id);
 create index if not exists idx_app_user_roles_role_id
   on app_user_roles (role_id);
+-- Reverse lookup on the role->permission junction. The composite PK is
+-- leftmost on role_id, so a predicate on permission_id alone (e.g. the
+-- `used_by_role_count` correlated sub-select in the permissions grid)
+-- cannot seek it. Mirrors the both-directions indexing of app_user_roles.
+create index if not exists idx_app_role_permissions_permission_id
+  on app_role_permissions (permission_id);
 
 -- Trigram GIN indexes power the global-search box (case-insensitive
 -- substring match against email / name) without sequential scans.
@@ -255,6 +261,12 @@ create index if not exists idx_app_audit_events_actor_created_at
 create index if not exists idx_app_audit_events_request_id
   on app_audit_events (request_id)
   where request_id is not null;
+-- Org-scoped audit reads (ADR-0001): an org admin's audit view filters to
+-- their org. This composite serves that `organization_id` filter AND the
+-- default `created_at desc` sort in one index scan (mirrors the sibling
+-- `idx_app_outbox_organization_id` so the two log tables stay symmetric).
+create index if not exists idx_app_audit_events_org_created_at
+  on app_audit_events (organization_id, created_at desc);
 
 -- Outbox explorer.
 create index if not exists idx_app_outbox_created_at_desc

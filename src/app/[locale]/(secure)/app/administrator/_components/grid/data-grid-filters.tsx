@@ -97,12 +97,12 @@ export function DataGridFilterBar(props: DataGridFilterBarProps) {
     setResetNonce((n) => n + 1);
   };
 
+  // `display: contents` so the search box, filter selects, and clear button
+  // become direct flex items of the grid's single controls row — they flow
+  // inline with the action buttons instead of forming a separately-aligned
+  // group. Spacing comes from that shared row's `gap`.
   return (
-    <div
-      data-testid="datagrid-filterbar"
-      role="search"
-      className="flex flex-wrap items-center gap-2"
-    >
+    <div data-testid="datagrid-filterbar" role="search" className="contents">
       {searchable ? (
         <GridSearchInput
           key={resetNonce}
@@ -188,7 +188,7 @@ function GridSearchInput({
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(() => onSearch(value), SEARCH_DEBOUNCE_MS);
       }}
-      className="h-8 w-full max-w-xs"
+      className="h-8 w-64 max-w-full"
     />
   );
 }

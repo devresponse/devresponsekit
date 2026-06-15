@@ -1,12 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import {
@@ -18,8 +16,11 @@ import {
 } from "@/components/ui/sheet";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
-import { useGridState } from "../_components/grid/use-grid-state";
+import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
+
+/** API-key statuses — the allow-listed `status` filter values. */
+const API_KEY_STATUSES = ["active", "revoked"] as const;
 
 /**
  * Client-side API-key governance grid (docs/admin-manager.md §8.12).
@@ -54,11 +55,14 @@ interface ApiKeyRow {
 export function AdministratorApiKeysGrid({
   locale,
   canManage,
+  headerActions,
 }: {
   locale: string;
   canManage: boolean;
+  headerActions?: ReactNode;
 }) {
   const t = useTranslations("administrator.apiKeys");
+  const tGrid = useTranslations("administrator.grid");
   const intlLocale = useLocale();
   const dialogs = useDialogs();
 
@@ -235,9 +239,19 @@ export function AdministratorApiKeysGrid({
     [t, locale, dateFormatter, canManage, onRotate, onRevoke],
   );
 
+  const filters = useMemo<GridFilterDescriptor[]>(
+    () => [
+      {
+        name: "status",
+        label: t("filters.status"),
+        options: toFilterOptions(tGrid, API_KEY_STATUSES),
+      },
+    ],
+    [t, tGrid],
+  );
+
   return (
     <div className="space-y-3">
-      <ApiKeysFilterToolbar />
       {rowError ? (
         <p className="text-destructive text-sm" role="alert">
           {rowError}
@@ -252,6 +266,10 @@ export function AdministratorApiKeysGrid({
           defaultPageSize: 25,
           defaultSort: [{ field: "created_at", direction: "desc" }],
         }}
+        searchable
+        searchPlaceholder={t("filters.searchPlaceholder")}
+        filters={filters}
+        headerActions={headerActions}
       />
       <Sheet open={detailId !== null} onOpenChange={(open) => !open && setDetailId(null)}>
         <SheetContent side="right" className="w-full sm:max-w-xl">
@@ -265,53 +283,6 @@ export function AdministratorApiKeysGrid({
         onClose={() => setRevealed(null)}
         namespace="administrator.apiKeys.reveal"
       />
-    </div>
-  );
-}
-
-/**
- * Status + owner filter toolbar. Mirrors the audit explorer: filters
- * write straight to URL state (its own `useGridState` instance) so the
- * inner grid re-fetches and a shared link reproduces the view.
- */
-function ApiKeysFilterToolbar() {
-  const t = useTranslations("administrator.apiKeys");
-  const { state, setFilter, setSearch } = useGridState({
-    defaultPageSize: 25,
-    defaultSort: [{ field: "created_at", direction: "desc" }],
-  });
-
-  const status = (state.filters.status as string | undefined) ?? "";
-
-  return (
-    <div className="grid gap-2 sm:grid-cols-3">
-      <div className="space-y-1">
-        <Label htmlFor="apikeys-search" className="text-xs">
-          {t("filters.search")}
-        </Label>
-        <Input
-          id="apikeys-search"
-          type="search"
-          defaultValue={state.q}
-          onChange={(e) => setSearch(e.currentTarget.value)}
-          placeholder={t("filters.searchPlaceholder")}
-        />
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="apikeys-status" className="text-xs">
-          {t("filters.status")}
-        </Label>
-        <select
-          id="apikeys-status"
-          value={status}
-          onChange={(e) => setFilter("status", e.currentTarget.value || null)}
-          className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-        >
-          <option value="">{t("filters.any")}</option>
-          <option value="active">{t("status.active")}</option>
-          <option value="revoked">{t("status.revoked")}</option>
-        </select>
-      </div>
     </div>
   );
 }

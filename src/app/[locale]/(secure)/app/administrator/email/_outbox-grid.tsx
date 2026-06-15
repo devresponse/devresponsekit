@@ -6,7 +6,6 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -134,7 +133,7 @@ export function AdministratorOutboxGrid({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="space-y-3">
-      <OutboxFilterToolbar />
+      <OutboxControls canManage={canManage} onSent={() => setGridEpoch((n) => n + 1)} />
       <DataGrid<OutboxRow>
         key={gridEpoch}
         name="administrator.email.outbox"
@@ -144,9 +143,6 @@ export function AdministratorOutboxGrid({ canManage }: { canManage: boolean }) {
           defaultPageSize: 50,
           defaultSort: [{ field: "created_at", direction: "desc" }],
         }}
-        headerActions={
-          canManage ? <SendTestEmail onSent={() => setGridEpoch((n) => n + 1)} /> : undefined
-        }
       />
       <Sheet open={openRow !== null} onOpenChange={(open) => !open && setOpenRow(null)}>
         <SheetContent side="right" className="w-full sm:max-w-xl">
@@ -163,7 +159,13 @@ function statusVariant(status: string): "default" | "destructive" | "secondary" 
   return "outline";
 }
 
-function OutboxFilterToolbar() {
+/**
+ * Outbox controls row: the `status` + `template_key` filters and the
+ * "Send test email" action all flow left-to-right in one wrapping flex
+ * row, matching the search/filter/action layout used by every other
+ * Administrator grid. Filters write to URL-backed grid state.
+ */
+function OutboxControls({ canManage, onSent }: { canManage: boolean; onSent: () => void }) {
   const t = useTranslations("administrator.email");
   const { state, setFilter } = useGridState({
     defaultPageSize: 50,
@@ -174,16 +176,13 @@ function OutboxFilterToolbar() {
   const templateKey = (state.filters.template_key as string | undefined) ?? "";
 
   return (
-    <div className="grid gap-2 sm:grid-cols-3">
-      <div className="space-y-1">
-        <Label htmlFor="outbox-status" className="text-xs">
-          {t("filters.status")}
-        </Label>
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="flex items-center gap-1.5 text-sm">
+        <span className="text-muted-foreground">{t("filters.status")}</span>
         <select
-          id="outbox-status"
           value={status}
           onChange={(e) => setFilter("status", e.currentTarget.value || null)}
-          className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
+          className="border-input bg-background h-8 rounded-md border px-2 text-sm"
         >
           <option value="">{t("filters.any")}</option>
           <option value="sent">{t("status.sent")}</option>
@@ -191,19 +190,18 @@ function OutboxFilterToolbar() {
           <option value="logged">{t("status.logged")}</option>
           <option value="pending">{t("status.pending")}</option>
         </select>
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor="outbox-template" className="text-xs">
-          {t("filters.template")}
-        </Label>
+      </label>
+      <label className="flex items-center gap-1.5 text-sm">
+        <span className="text-muted-foreground">{t("filters.template")}</span>
         <Input
-          id="outbox-template"
           type="text"
           value={templateKey}
           onChange={(e) => setFilter("template_key", e.currentTarget.value || null)}
           placeholder="password_reset"
+          className="h-8 w-48"
         />
-      </div>
+      </label>
+      {canManage ? <SendTestEmail onSent={onSent} /> : null}
     </div>
   );
 }

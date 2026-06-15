@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -69,11 +70,17 @@ export interface DataGridToolbarProps {
    * CSV so all primary affordances share one row.
    */
   headerActions?: ReactNode;
+  /**
+   * Extra classes for the root. The grid passes `ml-auto` so the toolbar
+   * (selection summary + actions) shares one row with the search/filter
+   * controls and right-aligns within it.
+   */
+  className?: string;
 }
 
 export function DataGridToolbar(props: DataGridToolbarProps) {
   const t = useTranslations("administrator.grid");
-  const { selection, bulkActions, exportResource, exportState, headerActions } = props;
+  const { selection, bulkActions, exportResource, exportState, headerActions, className } = props;
 
   const onExport = () => {
     if (!exportResource) return;
@@ -105,42 +112,39 @@ export function DataGridToolbar(props: DataGridToolbarProps) {
         ? t("selectionCount", { count: selection.count })
         : "";
 
+  // `display: contents` so the selection summary and every action button
+  // become direct flex items of the grid's single controls row, flowing
+  // inline (left-aligned) with the search + filter controls rather than
+  // forming a separately-aligned cluster.
   return (
-    <div
-      data-testid="datagrid-toolbar"
-      className="flex flex-wrap items-center justify-between gap-3 text-sm"
-    >
-      <div className="text-muted-foreground flex flex-wrap items-center gap-2">
-        {summary ? (
-          <>
-            <span aria-live="polite">{summary}</span>
-            {shouldOfferSelectAllMatching ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="link"
-                className="h-auto px-1"
-                onClick={selection.onSelectAllMatching}
-              >
-                {t("selectAllMatching", { total: props.totalRows })}
-              </Button>
-            ) : null}
+    <div data-testid="datagrid-toolbar" className={cn("contents text-sm", className)}>
+      {summary ? (
+        <div className="text-muted-foreground flex flex-wrap items-center gap-2">
+          <span aria-live="polite">{summary}</span>
+          {shouldOfferSelectAllMatching ? (
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              className="h-7 px-2"
-              onClick={selection.onClear}
+              variant="link"
+              className="h-auto px-1"
+              onClick={selection.onSelectAllMatching}
             >
-              {t("clearSelection")}
+              {t("selectAllMatching", { total: props.totalRows })}
             </Button>
-          </>
-        ) : (
-          <span aria-hidden>{/* keep grid spacing stable when empty */}&nbsp;</span>
-        )}
-      </div>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2"
+            onClick={selection.onClear}
+          >
+            {t("clearSelection")}
+          </Button>
+        </div>
+      ) : null}
 
-      <div className="flex items-center gap-2">
+      <div className="contents">
         {bulkActions && bulkActions.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

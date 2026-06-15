@@ -156,42 +156,51 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
 
   return (
     <div data-grid={props.name} className="flex flex-col gap-3">
-      {showFilterBar ? (
-        <DataGridFilterBar
-          searchable={props.searchable}
-          searchPlaceholder={props.searchPlaceholder}
-          q={state.q}
-          onSearch={setSearch}
-          filters={filters ?? []}
-          filterValues={state.filters}
-          onFilterChange={setFilter}
-        />
-      ) : null}
+      {/* All controls — search, filters, selection summary, and the action
+          buttons — live in one flex row and flow left-to-right, wrapping
+          naturally. The sub-components render with `display: contents` so
+          their elements are direct flex items of this row, not separately
+          aligned groups. */}
+      {showFilterBar || showToolbar ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {showFilterBar ? (
+            <DataGridFilterBar
+              searchable={props.searchable}
+              searchPlaceholder={props.searchPlaceholder}
+              q={state.q}
+              onSearch={setSearch}
+              filters={filters ?? []}
+              filterValues={state.filters}
+              onFilterChange={setFilter}
+            />
+          ) : null}
 
-      {showToolbar ? (
-        <DataGridToolbar
-          totalRows={total}
-          pageRowCount={items.length}
-          selection={
-            selection
-              ? {
-                  mode: selection.state.mode,
-                  count: selection.state.selectedIds.size,
-                  onSelectAllMatching: selection.state.selectAllMatching,
-                  onClear: selection.state.clear,
-                }
-              : {
-                  mode: "page",
-                  count: 0,
-                  onSelectAllMatching: () => {},
-                  onClear: () => {},
-                }
-          }
-          bulkActions={props.bulkActions}
-          exportResource={props.exportResource}
-          exportState={state}
-          headerActions={props.headerActions}
-        />
+          {showToolbar ? (
+            <DataGridToolbar
+              totalRows={total}
+              pageRowCount={items.length}
+              selection={
+                selection
+                  ? {
+                      mode: selection.state.mode,
+                      count: selection.state.selectedIds.size,
+                      onSelectAllMatching: selection.state.selectAllMatching,
+                      onClear: selection.state.clear,
+                    }
+                  : {
+                      mode: "page",
+                      count: 0,
+                      onSelectAllMatching: () => {},
+                      onClear: () => {},
+                    }
+              }
+              bulkActions={props.bulkActions}
+              exportResource={props.exportResource}
+              exportState={state}
+              headerActions={props.headerActions}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {fetched.error ? (

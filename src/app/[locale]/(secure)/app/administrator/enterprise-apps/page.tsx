@@ -35,17 +35,20 @@ export default async function AdministratorEnterpriseAppsPage({
 
   return (
     <section className="space-y-4 p-6">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold">{t("title")}</h1>
-        {canManage ? (
-          <Button asChild size="sm">
-            <LocaleLink locale={locale} href="/app/administrator/enterprise-apps/new">
-              {t("newButton")}
-            </LocaleLink>
-          </Button>
-        ) : null}
-      </div>
-      <AdministratorEnterpriseAppsGrid locale={locale} canManage={canManage} />
+      <h1 className="text-lg font-semibold">{t("title")}</h1>
+      <AdministratorEnterpriseAppsGrid
+        locale={locale}
+        canManage={canManage}
+        headerActions={
+          canManage ? (
+            <Button asChild size="sm">
+              <LocaleLink locale={locale} href="/app/administrator/enterprise-apps/new">
+                {t("newButton")}
+              </LocaleLink>
+            </Button>
+          ) : null
+        }
+      />
     </section>
   );
 }

@@ -36,17 +36,20 @@ export default async function AdministratorOrganizationsPage({
 
   return (
     <section className="space-y-4 p-6">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold">{t("title")}</h1>
-        {canCreate ? (
-          <Button asChild size="sm">
-            <LocaleLink locale={locale} href="/app/administrator/organizations/new">
-              {t("newButton")}
-            </LocaleLink>
-          </Button>
-        ) : null}
-      </div>
-      <AdministratorOrganizationsGrid locale={locale} canDelete={canDelete} />
+      <h1 className="text-lg font-semibold">{t("title")}</h1>
+      <AdministratorOrganizationsGrid
+        locale={locale}
+        canDelete={canDelete}
+        headerActions={
+          canCreate ? (
+            <Button asChild size="sm">
+              <LocaleLink locale={locale} href="/app/administrator/organizations/new">
+                {t("newButton")}
+              </LocaleLink>
+            </Button>
+          ) : null
+        }
+      />
     </section>
   );
 }

@@ -213,6 +213,62 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
       }),
     );
   });
+
+  // test-2: the privilege-escalation guard. Impersonation grants the actor
+  // the target's session, so a NON-superadmin must not assume a session that
+  // carries a permission they themselves lack (e.g. an org admin assuming a
+  // SUPERADMIN). The attempt must be rejected 403 and audited.
+  it("blocks a non-superadmin from impersonating a more-privileged target (403 + audit)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    // Actor (ACTOR_ID) holds impersonate but NOT superuser; the target
+    // (ba-target) additionally holds superuser — a permission the actor lacks.
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_ID
+        ? grantedAccess("admin.users.impersonate")
+        : {
+            ...grantedAccess("admin.users.impersonate"),
+            permissions: ["admin.users.impersonate", "superuser"],
+          },
+    );
+    dbMock.mockResolvedValue(targetRow);
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+    expect(res.status).toBe(403);
+    expect(authImpersonate).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_failed",
+        outcome: "failure",
+        reason: "privilege_escalation",
+      }),
+    );
+  });
+
+  // Inverse: a non-superadmin actor whose permissions are a strict superset
+  // of the target's is NOT escalating, so impersonation proceeds.
+  it("allows a non-superadmin to impersonate a less-privileged (subset) target", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_ID
+        ? {
+            ...grantedAccess("admin.users.impersonate"),
+            permissions: ["admin.users.impersonate", "admin.users.read"],
+          }
+        : { ...grantedAccess("admin.users.read"), permissions: ["admin.users.read"] },
+    );
+    dbMock.mockResolvedValue(targetRow);
+    const cookieHeaders = new Headers();
+    cookieHeaders.append("set-cookie", "ba.session=imp; Path=/; HttpOnly");
+    authImpersonate.mockResolvedValue({ headers: cookieHeaders });
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect(authImpersonate).toHaveBeenCalledWith("ba-target", expect.anything());
+  });
 });
 
 describe("DELETE /api/administrator/users/[id]/impersonate", () => {

@@ -68,6 +68,7 @@ build, and deploying a fully functional instance — follow
 | `pnpm test:a11y`  | Playwright + axe accessibility tests              |
 | `pnpm test:all`   | typecheck + lint + format check + coverage + e2e  |
 | `pnpm db:codegen` | Regenerate Kysely types from the live schema      |
+| `pnpm db:seed:dev` | Optional dev/testing seed: 3 orgs × 7 users      |
 
 ## Project layout
 

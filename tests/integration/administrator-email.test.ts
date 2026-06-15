@@ -110,6 +110,16 @@ const OK_ACCESS = (perms: string[]) => ({
   permissions: [...perms, "superuser"],
 });
 
+// A non-superadmin ORG ADMIN: holds `perms` in an org but NOT the global
+// `superuser` marker. "Lacks permission" (403) tests use this — a superuser
+// now passes every admin check by design (getUserAccessContext + the gate
+// short-circuit), so only a non-superuser can be denied a specific permission.
+const ORG_ADMIN = (perms: string[]) => ({
+  ...OK_ACCESS(perms),
+  organizationId: "o-1",
+  permissions: perms,
+});
+
 let outboxGET: typeof OutboxRouteModule.GET;
 let templatesGET: typeof TemplatesRouteModule.GET;
 let templatePUT: typeof TemplateRouteModule.PUT;
@@ -138,7 +148,7 @@ afterEach(() => vi.resetModules());
 
 describe("GET /api/administrator/email/outbox", () => {
   it("returns 403 without admin.email.read", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.users.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.users.read"]));
     const res = await outboxGET(makeReq("/api/administrator/email/outbox"));
     expect(res.status).toBe(403);
   });
@@ -183,7 +193,7 @@ describe("GET /api/administrator/email/outbox", () => {
 
 describe("GET /api/administrator/email/templates", () => {
   it("returns 403 without admin.email.read", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS([]));
+    accessGetter.mockResolvedValue(ORG_ADMIN([]));
     const res = await templatesGET(makeReq("/api/administrator/email/templates"));
     expect(res.status).toBe(403);
   });
@@ -203,7 +213,7 @@ describe("PUT /api/administrator/email/templates/[id]", () => {
   const validBody = { subject: "S", body_html: "<p>b</p>", body_text: null, description: null };
 
   it("requires admin.email.manage — read alone is rejected", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.email.read"]));
     const res = await templatePUT(
       makeReq(`/api/administrator/email/templates/${TEMPLATE_ID}`, {
         method: "PUT",
@@ -258,7 +268,7 @@ describe("PUT /api/administrator/email/templates/[id]", () => {
 
 describe("POST /api/administrator/email/test", () => {
   it("requires admin.email.manage", async () => {
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.email.read"]));
     const res = await testPOST(
       makeReq("/api/administrator/email/test", { method: "POST", body: { to: "t@x.com" } }),
     );

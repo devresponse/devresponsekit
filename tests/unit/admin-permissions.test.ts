@@ -142,6 +142,23 @@ describe("requireAdminPermission", () => {
     ]);
     expect(isAdminPermissionDenial(result)).toBe(false);
   });
+
+  it("grants a SUPERADMIN any admin permission via short-circuit, even without the specific key", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "su@x.com",
+      status: "active",
+      organizationId: "o-member",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["superuser"], // global superuser; no admin.* keys in the active org
+    });
+    const { requireAdminPermission, isAdminPermissionDenial } = await load();
+    const result = await requireAdminPermission(makeRequest(), "admin.users.read");
+    expect(isAdminPermissionDenial(result)).toBe(false);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("ADMIN_PERMISSION_CATALOG", () => {
@@ -217,5 +234,22 @@ describe("checkAdminPermissionServer", () => {
     if (typeof result === "object") {
       expect(result.betterAuthUserId).toBe("ba-1");
     }
+  });
+
+  it("grants a SUPERADMIN any admin permission via short-circuit", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "su@x.com",
+      status: "active",
+      organizationId: "o-member",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["superuser"], // no admin.* keys in the active org
+    });
+    const { checkAdminPermissionServer } = await load();
+    const result = await checkAdminPermissionServer("admin.users.read");
+    expect(result).not.toBe("denied");
+    expect(result).not.toBe("unauthenticated");
   });
 });

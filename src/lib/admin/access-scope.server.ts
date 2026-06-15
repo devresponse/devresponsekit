@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
+import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
 import type { UserAccessContext } from "@/lib/auth-status";
 
 /**
@@ -24,12 +25,12 @@ import type { UserAccessContext } from "@/lib/auth-status";
  */
 
 /**
- * The marker permission that elevates a principal to SUPERADMIN. Seeded on
- * the `superuser` role (0001-initial-schema.sql / seed-local). Holding it
- * is the ONLY thing that bypasses org scoping — checked explicitly here
- * rather than relying on "happens to hold every permission".
+ * Re-exported from the neutral catalog module (single source of truth).
+ * Holding this marker is the ONLY thing that bypasses org scoping — checked
+ * explicitly via {@link isSuperadmin} rather than relying on "happens to hold
+ * every permission".
  */
-export const SUPERADMIN_PERMISSION = "superuser";
+export { SUPERADMIN_PERMISSION };
 
 type AccessLike = Pick<UserAccessContext, "permissions" | "organizationId">;
 
@@ -96,4 +97,33 @@ export async function canAccessUser(access: AccessLike, appUserId: string): Prom
   if (isSuperadmin(access)) return true;
   if (!access.organizationId) return false;
   return userHasMembershipInOrg(appUserId, access.organizationId);
+}
+
+/**
+ * Whether the user holds the {@link SUPERADMIN_PERMISSION} marker via a role
+ * in ANY organization they are an ACTIVE member of — i.e. whether they are a
+ * superadmin regardless of which org is currently active.
+ *
+ * This is the GLOBAL superuser determination that makes "superuser = all
+ * orgs, always" a hard invariant: `getUserAccessContext` calls it so the
+ * active-org selector can never downgrade a superadmin. The active-membership
+ * join ensures a suspended/blocked membership cannot confer the marker.
+ */
+export async function userIsGlobalSuperuser(appUserId: string): Promise<boolean> {
+  const row = await db
+    .selectFrom("app_user_roles as ur")
+    .innerJoin("app_organization_memberships as m", (join) =>
+      join
+        .onRef("m.app_user_id", "=", "ur.app_user_id")
+        .onRef("m.organization_id", "=", "ur.organization_id")
+        .on("m.status", "=", "active"),
+    )
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.id")
+    .where("ur.app_user_id", "=", appUserId)
+    .where("p.key", "=", SUPERADMIN_PERMISSION)
+    .limit(1)
+    .executeTakeFirst();
+  return row !== undefined;
 }

@@ -2,6 +2,8 @@ import "server-only";
 import { cache } from "react";
 import { db } from "@/db/database";
 import { readActiveOrgId } from "@/lib/active-org.server";
+import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
+import { SUPERADMIN_PERMISSION, SUPERUSER_PERMISSIONS } from "@/lib/admin/permissions";
 
 /** Possible application-level user statuses. */
 export type AppUserStatus = "active" | "pending_approval" | "blocked" | "suspended" | "deactivated";
@@ -108,6 +110,20 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
       .where("ur.organization_id", "=", membership.organization_id)
       .execute();
     permissions = rows.map((r) => r.key);
+  }
+
+  // Global superuser: holding the `superuser` permission via a role in ANY
+  // org the user is an active member of makes them a SUPERADMIN everywhere —
+  // the active org must never downgrade it. Grant the full superuser set so
+  // every gate (admin routes, the server-filtered nav menu, …) recognizes
+  // them uniformly regardless of which org is active. Skip the lookup when the
+  // active org already grants the marker (the common case for a superuser).
+  if (
+    membership &&
+    !permissions.includes(SUPERADMIN_PERMISSION) &&
+    (await userIsGlobalSuperuser(user.id))
+  ) {
+    permissions = [...new Set([...permissions, ...SUPERUSER_PERMISSIONS])];
   }
 
   return {

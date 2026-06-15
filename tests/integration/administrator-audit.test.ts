@@ -84,6 +84,16 @@ const OK_ACCESS = (perms: string[]) => ({
   permissions: [...perms, "superuser"],
 });
 
+// A non-superadmin ORG ADMIN: holds `perms` in an org but NOT the global
+// `superuser` marker. "Lacks permission" (403) tests use this — a superuser
+// now passes every admin check by design (getUserAccessContext + the gate
+// short-circuit), so only a non-superuser can be denied a specific permission.
+const ORG_ADMIN = (perms: string[]) => ({
+  ...OK_ACCESS(perms),
+  organizationId: "o-1",
+  permissions: perms,
+});
+
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock, itemsExecute, selectFirst])
     m.mockReset();
@@ -102,7 +112,7 @@ describe("GET /api/administrator/audit", () => {
 
   it("returns 403 when caller lacks admin.audit.read", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.users.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.users.read"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
     expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));

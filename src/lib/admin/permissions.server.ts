@@ -16,6 +16,7 @@ import {
   type CallerKind,
 } from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 
 /**
  * Result of a successful permission check. Callers receive the resolved
@@ -125,9 +126,14 @@ export async function requireAdminPermission(
   // The caller must hold the permission AND, for bearer credentials, the
   // credential's scopes must authorize it (scopes ⊆ permissions — a key
   // can never out-scope its owner; design §7).
+  // A SUPERADMIN passes every admin permission check regardless of the active
+  // org (the superuser marker is global — see getUserAccessContext). Bearer
+  // credentials are still bounded by their scopes: a key can never out-scope
+  // its owner, even a superuser owner (design §7).
   const granted = required.some(
     (perm) =>
-      caller.access.permissions.includes(perm) && scopesAuthorize(caller.grantedScopes, perm),
+      (isSuperadmin(caller.access) || caller.access.permissions.includes(perm)) &&
+      scopesAuthorize(caller.grantedScopes, perm),
   );
   if (!granted) {
     await auditEvent({
@@ -172,7 +178,9 @@ export async function checkAdminPermissionServer(
   const decision = decideSecureAccess(access.status, access.membershipStatus);
   if (decision !== "allow") return "denied";
 
-  const granted = required.some((perm) => access.permissions.includes(perm));
+  const granted = required.some(
+    (perm) => isSuperadmin(access) || access.permissions.includes(perm),
+  );
   if (!granted) return "denied";
 
   return { betterAuthUserId: session.user.id, access };

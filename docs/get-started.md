@@ -6,6 +6,11 @@ the authentication boundary, the routing model, and the UI composition
 patterns (control composition, props drilling, and nested application
 shells) so that you can land your first change with confidence.
 
+> **Just want to stand up an instance?** For a linear install → configure →
+> deploy runbook — from a fresh `git clone` to a deployed instance — follow
+> [setup-guide.md](setup-guide.md) first, then return here for the
+> architecture orientation. (The condensed local setup is also in §8 below.)
+
 > File paths, exports, and commands referenced below correspond to real
 > artifacts in this repository. When in doubt, follow the citations and
 > read the source — it is the ultimate source of truth.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -39,10 +39,12 @@ export function AdministratorRolesGrid({
   locale,
   canDelete,
   canDuplicate,
+  headerActions,
 }: {
   locale: string;
   canDelete: boolean;
   canDuplicate: boolean;
+  headerActions?: ReactNode;
 }) {
   const t = useTranslations("administrator.roles");
   const tErr = useTranslations("administrator.errors");
@@ -229,6 +231,7 @@ export function AdministratorRolesGrid({
         }}
         searchable
         filters={filters}
+        headerActions={headerActions}
       />
     </div>
   );

@@ -33,18 +33,23 @@ export default async function AdministratorApiKeysPage({
 
   return (
     <section className="space-y-4 p-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="space-y-1">
         <h1 className="text-lg font-semibold">{t("title")}</h1>
-        {canManage ? (
-          <Button asChild size="sm">
-            <LocaleLink locale={locale} href="/app/administrator/api-keys/new">
-              {t("newButton")}
-            </LocaleLink>
-          </Button>
-        ) : null}
+        <p className="text-muted-foreground text-sm">{t("description")}</p>
       </div>
-      <p className="text-muted-foreground text-sm">{t("description")}</p>
-      <AdministratorApiKeysGrid locale={locale} canManage={canManage} />
+      <AdministratorApiKeysGrid
+        locale={locale}
+        canManage={canManage}
+        headerActions={
+          canManage ? (
+            <Button asChild size="sm">
+              <LocaleLink locale={locale} href="/app/administrator/api-keys/new">
+                {t("newButton")}
+              </LocaleLink>
+            </Button>
+          ) : null
+        }
+      />
     </section>
   );
 }

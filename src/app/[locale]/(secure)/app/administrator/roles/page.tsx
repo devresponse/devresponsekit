@@ -37,17 +37,21 @@ export default async function AdministratorRolesPage({
 
   return (
     <section className="space-y-4 p-6">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold">{t("title")}</h1>
-        {canCreate ? (
-          <Button asChild size="sm">
-            <LocaleLink locale={locale} href="/app/administrator/roles/new">
-              {t("newButton")}
-            </LocaleLink>
-          </Button>
-        ) : null}
-      </div>
-      <AdministratorRolesGrid locale={locale} canDelete={canDelete} canDuplicate={canDuplicate} />
+      <h1 className="text-lg font-semibold">{t("title")}</h1>
+      <AdministratorRolesGrid
+        locale={locale}
+        canDelete={canDelete}
+        canDuplicate={canDuplicate}
+        headerActions={
+          canCreate ? (
+            <Button asChild size="sm">
+              <LocaleLink locale={locale} href="/app/administrator/roles/new">
+                {t("newButton")}
+              </LocaleLink>
+            </Button>
+          ) : null
+        }
+      />
     </section>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -41,9 +41,11 @@ interface EnterpriseAppRow {
 export function AdministratorEnterpriseAppsGrid({
   locale,
   canManage,
+  headerActions,
 }: {
   locale: string;
   canManage: boolean;
+  headerActions?: ReactNode;
 }) {
   const t = useTranslations("administrator.enterpriseApps");
   const tErr = useTranslations("administrator.errors");
@@ -199,6 +201,7 @@ export function AdministratorEnterpriseAppsGrid({
         }}
         searchable
         filters={filters}
+        headerActions={headerActions}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
@@ -37,9 +37,11 @@ interface OrgRow {
 export function AdministratorOrganizationsGrid({
   locale,
   canDelete,
+  headerActions,
 }: {
   locale: string;
   canDelete: boolean;
+  headerActions?: ReactNode;
 }) {
   const t = useTranslations("administrator.orgs");
   const tErr = useTranslations("administrator.errors");
@@ -192,6 +194,7 @@ export function AdministratorOrganizationsGrid({
         }}
         searchable
         filters={filters}
+        headerActions={headerActions}
       />
     </div>
   );

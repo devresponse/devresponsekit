@@ -154,6 +154,16 @@ const OK_ACCESS = (perms: string[]) => ({
   permissions: [...perms, "superuser"],
 });
 
+// A non-superadmin ORG ADMIN: holds `perms` in an org but NOT the global
+// `superuser` marker. "Lacks permission" (403) tests use this — a superuser
+// now passes every admin check by design (getUserAccessContext + the gate
+// short-circuit), so only a non-superuser can be denied a specific permission.
+const ORG_ADMIN = (perms: string[]) => ({
+  ...OK_ACCESS(perms),
+  organizationId: "o-1",
+  permissions: perms,
+});
+
 describe("GET /api/administrator/roles", () => {
   it("returns 401 when not authenticated", async () => {
     sessionGetter.mockResolvedValue(null);
@@ -163,7 +173,7 @@ describe("GET /api/administrator/roles", () => {
 
   it("returns 403 when caller lacks admin.roles.read", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["shell.view"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["shell.view"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
     expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
@@ -197,7 +207,7 @@ describe("GET /api/administrator/roles", () => {
 describe("POST /api/administrator/roles", () => {
   it("returns 403 when caller lacks admin.roles.create", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.roles.read"]));
     const res = await POST(jsonReq({ key: "x.y", name: "X" }));
     expect(res.status).toBe(403);
   });
@@ -246,7 +256,7 @@ describe("DELETE /api/administrator/roles/[id]", () => {
 
   it("returns 403 when caller lacks admin.roles.delete", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.roles.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.roles.read"]));
     const res = await DELETE_BY_ID(delReq(), ctx);
     expect(res.status).toBe(403);
   });

@@ -60,3 +60,26 @@ export const ADMIN_PERMISSION_CATALOG: ReadonlyArray<AdminPermissionDescriptor> 
 export const ANY_ADMIN_PERMISSION: ReadonlyArray<string> = ADMIN_PERMISSION_CATALOG.map(
   (p) => p.key,
 );
+
+/**
+ * The marker permission that elevates a principal to SUPERADMIN — manages
+ * EVERY organization; org scoping is bypassed (ADR-0001). `isSuperadmin`
+ * checks for exactly this key. Defined in this neutral, non-`server-only`
+ * module so the access helpers, the runtime, and the seed share one source.
+ */
+export const SUPERADMIN_PERMISSION = "superuser";
+
+/**
+ * The complete permission set a SUPERADMIN effectively holds, independent of
+ * which organization is active. `getUserAccessContext` grants this to any
+ * GLOBAL superuser so every permission gate — admin routes, the server-
+ * filtered navigation menu, etc. — recognizes them uniformly. This is why the
+ * seeded `superuser` ROLE no longer needs to enumerate the whole `admin.*`
+ * catalog: a superuser's authority derives from the marker, not from grants.
+ */
+export const SUPERUSER_PERMISSIONS: ReadonlyArray<string> = [
+  "shell.view",
+  "audit.view",
+  SUPERADMIN_PERMISSION,
+  ...ANY_ADMIN_PERMISSION,
+];

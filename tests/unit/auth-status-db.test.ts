@@ -16,9 +16,13 @@ const membershipTakeFirst = vi.fn(); // fallback: .where().orderBy().executeTake
 const membershipByOrgTakeFirst = vi.fn(); // active-org: .where().where().executeTakeFirst()
 const rolesExecute = vi.fn();
 const readActiveOrgId = vi.fn();
+const userIsGlobalSuperuser = vi.fn();
 
 vi.mock("@/lib/active-org.server", () => ({
   readActiveOrgId: () => readActiveOrgId(),
+}));
+vi.mock("@/lib/admin/access-scope.server", () => ({
+  userIsGlobalSuperuser: () => userIsGlobalSuperuser(),
 }));
 
 vi.mock("@/db/database", () => ({
@@ -66,6 +70,8 @@ beforeEach(async () => {
   rolesExecute.mockReset();
   readActiveOrgId.mockReset();
   readActiveOrgId.mockResolvedValue(null); // no active-org cookie by default
+  userIsGlobalSuperuser.mockReset();
+  userIsGlobalSuperuser.mockResolvedValue(false); // not a global superuser by default
   ({ getUserAccessContext } = await import("@/lib/auth-status"));
 });
 afterEach(() => vi.resetModules());
@@ -157,5 +163,25 @@ describe("getUserAccessContext (DB-backed)", () => {
     const ctx = await getUserAccessContext("ba-1");
     expect(membershipByOrgTakeFirst).toHaveBeenCalled();
     expect(ctx.organizationId).toBe("o-earliest");
+  });
+
+  it("grants the full superuser set to a global superuser even when the active org grants none", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "su@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    // Active org is one where they're only a plain member (no admin perms)…
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-member", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "shell.view" }]);
+    // …but they hold the superuser marker in some other active membership.
+    userIsGlobalSuperuser.mockResolvedValue(true);
+
+    const ctx = await getUserAccessContext("ba-1");
+    // Recognized as a superadmin everywhere, with the full admin authority.
+    expect(ctx.permissions).toContain("superuser");
+    expect(ctx.permissions).toContain("admin.users.read");
+    expect(ctx.permissions).toContain("admin.audit.read");
   });
 });

@@ -71,3 +71,14 @@ describe("canAccessUser", () => {
     expect(await M.canAccessUser(access, "u1")).toBe(false);
   });
 });
+
+describe("userIsGlobalSuperuser", () => {
+  it("true when the user holds the superuser marker via an active membership", async () => {
+    takeFirst.mockResolvedValue({ id: "p1" });
+    expect(await M.userIsGlobalSuperuser("u1")).toBe(true);
+  });
+  it("false when no such row exists", async () => {
+    takeFirst.mockResolvedValue(undefined);
+    expect(await M.userIsGlobalSuperuser("u1")).toBe(false);
+  });
+});

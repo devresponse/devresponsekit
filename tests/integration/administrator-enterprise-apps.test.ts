@@ -137,6 +137,16 @@ const OK_ACCESS = (perms: string[]) => ({
   permissions: [...perms, "superuser"],
 });
 
+// A non-superadmin ORG ADMIN: holds `perms` in an org but NOT the global
+// `superuser` marker. "Lacks permission" (403) tests use this — a superuser
+// now passes every admin check by design (getUserAccessContext + the gate
+// short-circuit), so only a non-superuser can be denied a specific permission.
+const ORG_ADMIN = (perms: string[]) => ({
+  ...OK_ACCESS(perms),
+  organizationId: "o-1",
+  permissions: perms,
+});
+
 beforeEach(async () => {
   for (const m of [
     sessionGetter,
@@ -169,7 +179,7 @@ describe("GET /api/administrator/enterprise-apps", () => {
 
   it("returns 403 when caller lacks admin.apps.read", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["shell.view"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["shell.view"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
     expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
@@ -209,7 +219,7 @@ describe("GET /api/administrator/enterprise-apps", () => {
 describe("POST /api/administrator/enterprise-apps", () => {
   it("returns 403 when caller lacks admin.apps.manage", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.apps.read"]));
     const res = await POST(
       jsonReq({
         id: "docs",
@@ -345,7 +355,7 @@ describe("GET /api/administrator/enterprise-apps/:id", () => {
 describe("PATCH /api/administrator/enterprise-apps/:id", () => {
   it("returns 403 when caller lacks admin.apps.manage", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.apps.read"]));
     const res = await PATCH(idReq("docs", { label: "x" }), {
       params: Promise.resolve({ id: "docs" }),
     });
@@ -390,7 +400,7 @@ describe("PATCH /api/administrator/enterprise-apps/:id", () => {
 describe("DELETE /api/administrator/enterprise-apps/:id", () => {
   it("returns 403 when caller lacks admin.apps.manage", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.apps.read"]));
     const res = await DELETE(idReq("docs"), {
       params: Promise.resolve({ id: "docs" }),
     });

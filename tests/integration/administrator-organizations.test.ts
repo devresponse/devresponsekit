@@ -144,6 +144,16 @@ const OK_ACCESS = (perms: string[]) => ({
   permissions: [...perms, "superuser"],
 });
 
+// A non-superadmin ORG ADMIN: holds `perms` in an org but NOT the global
+// `superuser` marker. "Lacks permission" (403) tests use this — a superuser
+// now passes every admin check by design (getUserAccessContext + the gate
+// short-circuit), so only a non-superuser can be denied a specific permission.
+const ORG_ADMIN = (perms: string[]) => ({
+  ...OK_ACCESS(perms),
+  organizationId: "o-1",
+  permissions: perms,
+});
+
 beforeEach(async () => {
   for (const m of [
     sessionGetter,
@@ -176,7 +186,7 @@ describe("GET /api/administrator/organizations", () => {
 
   it("returns 403 when caller lacks admin.orgs.read", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["shell.view"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["shell.view"]));
     const res = await GET(listReq());
     expect(res.status).toBe(403);
     expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
@@ -211,7 +221,7 @@ describe("GET /api/administrator/organizations", () => {
 describe("POST /api/administrator/organizations", () => {
   it("returns 403 when caller lacks admin.orgs.create", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read"]));
     const res = await POST(jsonReq({ slug: "acme", name: "ACME" }));
     expect(res.status).toBe(403);
   });
@@ -272,7 +282,7 @@ describe("GET /api/administrator/organizations/:id", () => {
 describe("PATCH /api/administrator/organizations/:id", () => {
   it("returns 403 when caller lacks admin.orgs.update", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read"]));
     const res = await PATCH(
       idReq("PATCH", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", { name: "New Name" }),
       { params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }) },
@@ -284,7 +294,7 @@ describe("PATCH /api/administrator/organizations/:id", () => {
 describe("DELETE /api/administrator/organizations/:id", () => {
   it("returns 403 when caller lacks admin.orgs.delete", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.read"]));
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.read"]));
     const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
       params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
     });

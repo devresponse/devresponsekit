@@ -2,6 +2,11 @@ import type { NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { requireAccountUser } from "@/lib/account/guard.server";
 import { getApiKeyById, rotateApiKey } from "@/lib/api-auth/api-keys.server";
+import {
+  consumeToken,
+  rateLimitKey,
+  DEFAULT_ADMIN_MUTATION_LIMIT,
+} from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
@@ -23,6 +28,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAccountUser(request, "account.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
+
+  // Throttle credential rotation per principal (sec-2).
+  const limit = consumeToken(
+    rateLimitKey("api.me.apikeys", actor.betterAuthUserId),
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (!limit.ok) {
+    return problemResponse("rate_limited", 429, request, { headers: { "Retry-After": "2" } });
+  }
 
   const { id } = await ctx.params;
   if (!isUuid(id)) return problemResponse("invalid_request", 400, request);

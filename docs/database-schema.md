@@ -1,6 +1,6 @@
 ---
 title: Database Schema
-description: Entity-relationship reference for the app_* tables, generated from the single initial-schema migration.
+description: Entity-relationship reference for the app_* tables, derived from the single initial-schema migration.
 group: Reference
 order: 50
 ---
@@ -24,10 +24,11 @@ owned and migrated by Better Auth's own tooling, never hand-rolled here. The
 application links to them logically through `app_users.better_auth_user_id`
 (unique, 1:1) — there is no database foreign key across that boundary.
 
-> **Rendering note:** GitHub renders the Mermaid diagram below natively. The
-> in-app documentation viewer currently shows it as a syntax-highlighted code
-> block (Mermaid rendering is a planned Phase-2 enhancement); the per-domain
-> tables that follow describe the same relationships in prose.
+> **Rendering note:** GitHub renders the Mermaid diagram below natively, and
+> the in-app documentation viewer also renders it (the render pipeline
+> converts ```mermaid``` blocks to a client-mounted diagram, with the source
+> shown as a fallback if its JS never runs). The per-domain tables that
+> follow describe the same relationships in prose.
 
 ## Entity-relationship diagram
 
@@ -287,7 +288,7 @@ erDiagram
 | Table | Purpose | Key relationships |
 | --- | --- | --- |
 | `app_roles` | Named role, optionally scoped to an organization (`organization_id` nullable ⇒ a global role). Unique on `(organization_id, key)`. | → `app_organizations`. |
-| `app_permissions` | The permission catalog (`key` unique). Must stay in sync with `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts`. | — |
+| `app_permissions` | The permission catalog (`key` unique). The `admin.*` keys must stay in sync with `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts` (30 keys + `superuser`, all seeded by `0001`). `pnpm db:seed` adds the two user-level keys `shell.view` and `audit.view`. | — |
 | `app_role_permissions` | Junction: which permissions a role grants. Composite PK `(role_id, permission_id)`. | → `app_roles`, → `app_permissions`. |
 | `app_user_roles` | Junction: which roles a user holds in which org. Composite PK `(app_user_id, organization_id, role_id)`. | → `app_users`, → `app_organizations`, → `app_roles`. |
 
@@ -318,6 +319,12 @@ tables exist regardless. See
 | `app_user_locale_preferences` | Per-user locale/formatting preferences. `app_user_id` is both PK and FK (1:1 with `app_users`). | → `app_users`. |
 | `app_email_templates` | Editable email templates keyed by `(key, locale)` (unique). Falls back to code defaults when a row is missing. No foreign keys. | — |
 | `app_outbox` | Outbox-first email log; every send is recorded before any delivery attempt. With no provider configured rows stay `logged`. `organization_id` (nullable, `on delete set null`) is the owning tenant: org admins read their org's rows, while `null` (platform/system or multi-org-ambiguous mail) is SUPERADMIN-only. | → `app_organizations` (nullable). |
+
+### Migration ledger
+
+| Table | Purpose | Key relationships |
+| --- | --- | --- |
+| `app_schema_migrations` | Records each applied `*.sql` migration filename so the runner ([`run-migrations.ts`](../src/db/migrations/run-migrations.ts)) applies each at most once (currently just `0001-initial-schema.sql`). Created imperatively by the runner — it is not declared in `0001-initial-schema.sql` or `app-schema.ts`. | — |
 
 ## Notes
 

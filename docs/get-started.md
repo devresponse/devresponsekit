@@ -46,10 +46,12 @@ shells) so that you can land your first change with confidence.
 shell** with first‑class authentication, internationalization, and a
 nestable shell layout. The product surface lives behind
 `/[locale]/app/*` and is composed of top‑level applications — Dashboard,
-Account (self-service), Workspace, and Administrator — inside a single
-shell that you can extend with new sub‑applications. Supporting
-subsystems include outbound email (outbox-first, Resend/Mailgun),
-cross-subdomain SSO handoff, and a versioned **machine API** (`/api/v1`)
+Account (self-service), Workspace, an in-app Docs viewer, and
+Administrator — inside a single shell that you can extend with new
+sub‑applications. Supporting subsystems include outbound email
+(outbox-first, Resend/Mailgun), cross-subdomain SSO handoff, an in-app
+Markdown documentation reader (see `docs/docs-viewer.md`), and a
+versioned **machine API** (`/api/v1`)
 authenticated by API keys or JWT bearer tokens (see
 `docs/api-and-cli-guide.md`).
 
@@ -102,33 +104,47 @@ src/
 │           ├── _components/      Route-private client components
 │           └── app/
 │               ├── dashboard/    Landing workspace
-│               ├── account/      Self-service account (user-level, self-scoped)
+│               ├── account/      Self-service account (profile, preferences, security, api-keys)
 │               ├── workspace/    Nested ApplicationShell example
-│               └── administrator/  Admin console (permission-gated; users, roles, orgs, apps, audit, email)
+│               ├── docs/         In-app Markdown docs viewer (+ /[...slug])
+│               └── administrator/  Admin console (users, roles, permissions, orgs, memberships, apps, api-keys, audit, email)
 │
 ├── components/
+│   ├── admin/                    Admin console client widgets
+│   ├── api-keys/                 API-key issue/rotate dialogs (shared admin + account)
 │   ├── app-shell/                ShellContainer, ApplicationShell, regions
 │   ├── auth/                     Sign-in/up forms, sign-out, panels
 │   ├── i18n/                     LocaleLink, LocaleSwitcher
 │   ├── navigation/               Menu types + API client
+│   ├── observability/            Web Vitals reporter + client error boundary
+│   ├── theme/                    Theme provider + toggle
 │   └── ui/                       Radix-based design system primitives
 │
 ├── config/
 │   ├── i18n-config.ts            Supported locales, default locale
 │   └── route-regions.ts          classifyRoute() — single source of truth
 │
-├── db/                           Kysely schema, numbered migrations, seeds
+├── db/                           Kysely instance, numbered migrations, seeds
+├── hooks/                        Shared client hooks
 ├── i18n/                         next-intl routing & request config
 ├── lib/                          auth, guards, env, audit, jwt-handoff, + subsystem folders:
 │   ├── admin/                    admin permission guard, list-query, status, roles helpers
 │   ├── account/                  self-service account guard + helpers
 │   ├── api-auth/                 machine-API auth: API keys, JWT/JWKS, scopes, OAuth clients
-│   └── email/                    outbox-first sender, Resend/Mailgun providers, templates
+│   ├── docs/                     in-app docs reader: source, frontmatter, sanitize-first render pipeline
+│   ├── email/                    outbox-first sender, Resend/Mailgun providers, templates
+│   └── observability/            Sentry scrubbing + Web Vitals helpers
 ├── messages/                     Locale JSON message catalogs
 ├── stores/                       Zustand stores (client only)
 ├── styles/                       Tailwind layers, design tokens
-└── proxy.ts                      Edge proxy (locale + cookie redirect)
+├── proxy.ts                      Edge proxy (locale + cookie redirect)
+├── instrumentation.ts           Server/edge bootstrap + onRequestError → Sentry
+└── instrumentation-client.ts    Client Sentry init (Web Vitals, masked replay)
 ```
+
+> The `sentry.server.config.ts` / `sentry.edge.config.ts` files also live
+> at the `src/` root; observability is opt-in (see
+> [observability.md](observability.md)).
 
 A few conventions to internalize early:
 
@@ -356,6 +372,9 @@ Route handlers live under `src/app/api/`:
 - `administrator/` — the guarded admin REST API (users, roles,
   permissions, orgs, enterprise apps, audit, email, CSV export).
 - `preferences/` — the user's locale preference.
+- `docs/` — auth-gated image-asset streaming for the in-app docs viewer
+  (`docs/asset/[...path]`); requires a session + active membership +
+  `shell.view`. See [docs-viewer.md](docs-viewer.md).
 - `v1/` — the versioned **machine API** (see §4.6). A bearer-auth (API
   key or JWT) REST surface: `me`, `users`, `audit-events`, `auth/token`,
   `jwks.json`, `openapi.json`, and admin sub-routes for `api-keys` /

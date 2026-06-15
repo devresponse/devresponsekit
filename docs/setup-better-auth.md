@@ -308,10 +308,11 @@ are:
 
 | Variable                       | Required | Notes                                                                       |
 | ------------------------------ | -------- | --------------------------------------------------------------------------- |
-| `BETTER_AUTH_SECRET`           | ✅       | 32+ bytes of random entropy. Rotating invalidates all sessions.             |
+| `BETTER_AUTH_SECRET`           | ✅       | Boot requires ≥ 16 chars (`src/lib/env.ts`); use 32+ bytes of random entropy in production (`openssl rand -base64 48`). Rotating invalidates all sessions. |
 | `BETTER_AUTH_URL`              | ✅       | Public origin where `/api/auth/*` is reachable (e.g. `https://app.devresponse.com`). |
 | `DATABASE_URL`                 | ✅       | Postgres connection string. Use a pooled endpoint on serverless.            |
 | `NEXT_PUBLIC_APP_URL`          | ✅       | Used as a trusted origin in [`src/lib/auth.ts`](../src/lib/auth.ts).        |
+| `ADMIN_TRUSTED_ORIGINS`        | ⛔ opt   | Comma-separated extra origins. Unioned with `NEXT_PUBLIC_APP_URL` / `BETTER_AUTH_URL` for both Better Auth `trustedOrigins` and the admin mutation origin guard. |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | ⛔ opt   | Required only if Google sign-in is enabled.                                 |
 | `MICROSOFT_CLIENT_ID` / `_SECRET` | ⛔ opt | Required only if Microsoft sign-in is enabled.                              |
 | `GITHUB_CLIENT_ID` / `_SECRET` | ⛔ opt   | Required only if GitHub sign-in is enabled.                                 |

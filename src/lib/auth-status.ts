@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { db } from "@/db/database";
+import { readActiveOrgId } from "@/lib/active-org.server";
 
 /** Possible application-level user statuses. */
 export type AppUserStatus = "active" | "pending_approval" | "blocked" | "suspended" | "deactivated";
@@ -73,12 +74,28 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     };
   }
 
-  const membership = await db
-    .selectFrom("app_organization_memberships")
-    .select(["organization_id", "status"])
-    .where("app_user_id", "=", user.id)
-    .orderBy("created_at", "asc")
-    .executeTakeFirst();
+  // Multi-org: the active org is selected by a cookie. Prefer the membership
+  // it names; if the cookie is unset, stale, or names an org the user is not
+  // a member of, fall back to their earliest membership (the historical
+  // single-org behavior). The `app_user_id` filter makes a forged cookie
+  // harmless — it can only ever select among the user's own memberships.
+  const activeOrgId = await readActiveOrgId();
+  let membership = activeOrgId
+    ? await db
+        .selectFrom("app_organization_memberships")
+        .select(["organization_id", "status"])
+        .where("app_user_id", "=", user.id)
+        .where("organization_id", "=", activeOrgId)
+        .executeTakeFirst()
+    : undefined;
+  if (!membership) {
+    membership = await db
+      .selectFrom("app_organization_memberships")
+      .select(["organization_id", "status"])
+      .where("app_user_id", "=", user.id)
+      .orderBy("created_at", "asc")
+      .executeTakeFirst();
+  }
 
   let permissions: string[] = [];
   if (membership) {

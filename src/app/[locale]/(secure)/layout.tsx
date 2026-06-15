@@ -9,9 +9,11 @@ import { DialogManagerProvider } from "@/components/ui/dialog-manager";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/flexsidebar";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
+import { OrganizationSwitcher } from "@/components/app-shell/organization-switcher";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
+import { listUserActiveOrganizations } from "@/lib/active-org.server";
 import { SecureSidebar } from "./_components/secure-sidebar";
 import type { ReactNode } from "react";
 
@@ -53,6 +55,11 @@ export default async function SecureLayout({
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
 
+  // Multi-org accounts get an organization switcher in the brand bar; the
+  // active org itself is resolved from the `active_org` cookie inside
+  // `getUserAccessContext`, so `access.organizationId` is already the active one.
+  const organizations = access.appUserId ? await listUserActiveOrganizations(access.appUserId) : [];
+
   return (
     <CompactDensityWrapper density="compact" className="h-screen">
       <SidebarProvider defaultOpen={sidebarDefaultOpen} className="h-full">
@@ -66,6 +73,12 @@ export default async function SecureLayout({
               <span className="text-sm font-semibold">DevResponse</span>
               <div className="ml-auto flex items-center gap-2">
                 <ApplicationSwitcherSheet locale={safeLocale} />
+                {organizations.length > 1 && access.organizationId ? (
+                  <OrganizationSwitcher
+                    current={access.organizationId}
+                    organizations={organizations}
+                  />
+                ) : null}
                 <ThemeToggle />
                 <LocaleSwitcher current={safeLocale} persistAuthenticated />
                 <SignOutButton locale={safeLocale} />

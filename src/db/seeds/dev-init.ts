@@ -118,7 +118,11 @@ const ROLE_DEFS: ReadonlyArray<{ key: string; name: string; permissions: readonl
   {
     key: "superuser",
     name: "Superuser",
-    permissions: ["shell.view", "audit.view", "superuser", ...ANY_ADMIN_PERMISSION],
+    // Authority comes from the `superuser` MARKER post-hardening (PR #97):
+    // getUserAccessContext synthesizes the full set for any holder and the
+    // admin gate short-circuits on isSuperadmin, so the role needs only the
+    // marker (+ shell.view).
+    permissions: ["shell.view", "superuser"],
   },
 ];
 

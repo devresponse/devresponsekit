@@ -19,6 +19,8 @@
     "db:app:migrate": "tsx src/db/migrations/run-migrations.ts",
     "db:seed": "tsx --conditions=react-server src/db/seeds/seed-local.ts",
     "db:seed:dev": "tsx --conditions=react-server src/db/seeds/dev-init.ts",
+    "db:reset": "tsx src/db/reset-database.ts",
+    "db:reset:reload": "tsx src/db/reset-database.ts --yes && pnpm db:auth:migrate && pnpm db:app:migrate && pnpm db:seed",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
     "test": "node scripts/test-shards.mjs",
     "test:serial": "vitest run",

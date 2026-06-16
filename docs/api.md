@@ -19,7 +19,25 @@ _Audience: developers consuming or extending the HTTP API. The current route han
 
 All handlers are `dynamic = "force-dynamic"` (no caching of authorized data). Every mutating route runs a permission check, an origin/CSRF guard, a per-actor rate-limit, Zod validation, and an audit write.
 
-> **Authoritative machine spec:** the server serves a generated OpenAPI 3.1 document at **`GET /api/v1/openapi.json`**. Treat it as the source of truth for the `/api/v1` surface; this page is the human-readable companion.
+> **Authoritative machine spec:** the `/api/v1` surface is described by an OpenAPI 3.1 document — served live at **`GET /api/v1/openapi.json`** and committed as **[`docs/openapi.json`](./openapi.json)** for offline use. Both are produced by the same builder (`src/lib/api-auth/openapi.ts`), and a test keeps them in sync. Treat the spec as the source of truth for the `/api/v1` surface; this page is the human-readable companion.
+
+### Generating a client
+
+Point any OpenAPI generator at the committed `docs/openapi.json` (no running server needed). Regenerate the file after changing the API with `pnpm openapi:export`. Each operation has a stable `operationId` (e.g. `listUsers`, `createUser`, `issueToken`) so generated method names are predictable.
+
+```bash
+# TypeScript types only
+npx openapi-typescript docs/openapi.json -o src/generated/api.d.ts
+
+# A full typed client (example: openapi-generator)
+npx @openapitools/openapi-generator-cli generate \
+  -i docs/openapi.json -g typescript-fetch -o ./clients/ts
+
+# Or against a running server
+npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o api.d.ts
+```
+
+> Authenticate generated-client requests with `Authorization: Bearer <api-key-or-jwt>`; see [§2 Authentication](#2-authentication).
 
 ## 2. Authentication
 
@@ -188,8 +206,9 @@ Query parameters for `launch`: `applicationId` (required), `locale` (optional). 
 ## 10. Gaps / TODO
 
 - `TODO:` Some routes were summarized from structure rather than line-by-line (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`). Confirm exact request/response shapes against the handlers or the generated `openapi.json`.
-- `TODO:` Document the exact `account.*` scope list and the supported `export` resources/formats.
-- `TODO:` Publish/link a rendered version of `/api/v1/openapi.json` (e.g. a Swagger/Redoc page) for consumers.
+- `TODO:` Document the exact `account.*` scope list and the supported `export` resources/formats. (The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json).)
+- A committed OpenAPI 3.1 spec now ships at [`docs/openapi.json`](./openapi.json) for client generation (see [Generating a client](#generating-a-client)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
+- The OpenAPI spec covers the **`/api/v1`** machine surface only (the client-generation target). The cookie-session `/api/administrator/*` console API is intentionally excluded — it's CSRF/cookie-based and not meant for generated SDKs.
 
 ---
 

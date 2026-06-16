@@ -12,8 +12,8 @@ describe("FileSystemDocumentSource", () => {
   it("lists a catalog that includes the known repo docs", async () => {
     const catalog = await source.listCatalog();
     const slugs = catalog.map((e) => e.slug);
-    expect(slugs).toContain("get-started");
-    expect(slugs).toContain("setup-better-auth");
+    expect(slugs).toContain("developer-onboarding");
+    expect(slugs).toContain("architecture");
     // Every entry has the required catalog shape.
     for (const entry of catalog) {
       expect(typeof entry.title).toBe("string");
@@ -23,10 +23,10 @@ describe("FileSystemDocumentSource", () => {
   });
 
   it("loads a document body by slug", async () => {
-    const doc = await source.getDocument("get-started");
+    const doc = await source.getDocument("developer-onboarding");
     expect(doc).not.toBeNull();
     expect(doc!.format).toBe("md");
-    expect(doc!.entry.slug).toBe("get-started");
+    expect(doc!.entry.slug).toBe("developer-onboarding");
     expect(doc!.body.length).toBeGreaterThan(0);
   });
 

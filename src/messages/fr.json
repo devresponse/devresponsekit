@@ -272,6 +272,13 @@
         }
       }
     },
+    "organizationPicker": {
+      "label": "Organisation",
+      "global": "Globale (toutes les organisations)",
+      "placeholder": "Sélectionnez une organisation…",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger les organisations."
+    },
     "overview": {
       "title": "Aperçu de l'administrateur",
       "description": "Choisissez une section dans la navigation de gauche pour commencer à gérer la plateforme.",

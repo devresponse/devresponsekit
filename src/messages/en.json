@@ -272,6 +272,13 @@
         }
       }
     },
+    "organizationPicker": {
+      "label": "Organization",
+      "global": "Global (all organizations)",
+      "placeholder": "Select an organization…",
+      "loading": "Loading…",
+      "loadError": "Couldn't load organizations."
+    },
     "overview": {
       "title": "Administrator overview",
       "description": "Pick an area from the left navigation to begin managing the platform.",

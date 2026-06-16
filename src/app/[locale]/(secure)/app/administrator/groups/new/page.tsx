@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { NewGroupForm } from "./_new-group-form";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/groups/new
  *
  * Create-group form (ADR-0002). Caller MUST hold `admin.groups.create`.
+ * A SUPERADMIN must choose the target org; an org admin's group is forced
+ * into their own org server-side, so they get no picker.
  */
 export default async function NewGroupPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
@@ -22,7 +25,7 @@ export default async function NewGroupPage({ params }: { params: Promise<{ local
   return (
     <section className="space-y-4 p-6">
       <h1 className="text-lg font-semibold">{t("new.title")}</h1>
-      <NewGroupForm locale={locale} />
+      <NewGroupForm locale={locale} showOrgPicker={isSuperadmin(guard.access)} />
     </section>
   );
 }

@@ -135,7 +135,7 @@ describe("AdministratorGroupsGrid", () => {
 describe("NewGroupForm", () => {
   it("blocks submit and shows a validation error for an empty key", async () => {
     const user = userEvent.setup();
-    renderWithIntl(<NewGroupForm locale="en" />);
+    renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
 
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
@@ -146,7 +146,7 @@ describe("NewGroupForm", () => {
   it("posts and navigates to the created group on 201", async () => {
     fetchMock.mockResolvedValue(jsonOk({ id: "g9" }, 201));
     const user = userEvent.setup();
-    const { container } = renderWithIntl(<NewGroupForm locale="en" />);
+    const { container } = renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
 
     await user.type(container.querySelector("#group-key")!, "engineering");
     await user.type(container.querySelector("#group-name")!, "Engineering");
@@ -165,7 +165,7 @@ describe("NewGroupForm", () => {
   it("surfaces a key-taken error on 409", async () => {
     fetchMock.mockResolvedValue(jsonOk({ error: "key_taken" }, 409));
     const user = userEvent.setup();
-    const { container } = renderWithIntl(<NewGroupForm locale="en" />);
+    const { container } = renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
 
     await user.type(container.querySelector("#group-key")!, "engineering");
     await user.type(container.querySelector("#group-name")!, "Engineering");
@@ -177,10 +177,70 @@ describe("NewGroupForm", () => {
 
   it("navigates back to the list on cancel", async () => {
     const user = userEvent.setup();
-    renderWithIntl(<NewGroupForm locale="en" />);
+    renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(push).toHaveBeenCalledWith("/en/app/administrator/groups");
+  });
+});
+
+describe("NewGroupForm (SUPERADMIN org picker)", () => {
+  const ORG = { id: "o1", slug: "acme", name: "Acme" };
+
+  function routeOrgsAndGroups() {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes("/api/administrator/organizations")) {
+        return Promise.resolve(jsonOk({ items: [ORG], total: 1 }));
+      }
+      return Promise.resolve(jsonOk({ id: "g9" }, 201));
+    });
+  }
+
+  it("blocks submit until an organization is chosen", async () => {
+    routeOrgsAndGroups();
+    const user = userEvent.setup();
+    const { container } = renderWithIntl(<NewGroupForm locale="en" showOrgPicker />);
+
+    // The picker renders for a SUPERADMIN; org options load from the endpoint.
+    await waitFor(() => expect(container.querySelector("#group-organization")).not.toBeDisabled());
+    await user.type(container.querySelector("#group-key")!, "engineering");
+    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select an organization for this group.",
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("sends the chosen organizationId on submit", async () => {
+    routeOrgsAndGroups();
+    const user = userEvent.setup();
+    const { container } = renderWithIntl(<NewGroupForm locale="en" showOrgPicker />);
+
+    const picker = container.querySelector("#group-organization") as HTMLSelectElement;
+    await waitFor(() => expect(picker).not.toBeDisabled());
+    await user.selectOptions(picker, "o1");
+    await user.type(container.querySelector("#group-key")!, "engineering");
+    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/administrator/groups",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const postCall = fetchMock.mock.calls.find(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    )!;
+    expect(JSON.parse((postCall[1] as { body: string }).body)).toMatchObject({
+      organizationId: "o1",
+    });
   });
 });
 

@@ -222,9 +222,10 @@ describe("NewGroupForm (SUPERADMIN org picker)", () => {
     const user = userEvent.setup();
     const { container } = renderWithIntl(<NewGroupForm locale="en" showOrgPicker />);
 
-    const picker = container.querySelector("#group-organization") as HTMLSelectElement;
+    const picker = container.querySelector("#group-organization")!;
     await waitFor(() => expect(picker).not.toBeDisabled());
-    await user.selectOptions(picker, "o1");
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: /Acme/ }));
     await user.type(container.querySelector("#group-key")!, "engineering");
     await user.type(container.querySelector("#group-name")!, "Engineering");
     await user.click(screen.getByRole("button", { name: "Create group" }));

@@ -277,7 +277,9 @@
       "global": "Global (todas las organizaciones)",
       "placeholder": "Selecciona una organización…",
       "loading": "Cargando…",
-      "loadError": "No se pudieron cargar las organizaciones."
+      "loadError": "No se pudieron cargar las organizaciones.",
+      "searchPlaceholder": "Buscar organizaciones…",
+      "noResults": "No se encontraron organizaciones."
     },
     "overview": {
       "title": "Resumen del administrador",

@@ -277,7 +277,9 @@
       "global": "Global (all organizations)",
       "placeholder": "Select an organization…",
       "loading": "Loading…",
-      "loadError": "Couldn't load organizations."
+      "loadError": "Couldn't load organizations.",
+      "searchPlaceholder": "Search organizations…",
+      "noResults": "No organizations found."
     },
     "overview": {
       "title": "Administrator overview",

@@ -585,6 +585,14 @@ If `pnpm db:seed` fails with `relation "user" does not exist`, Better Auth's
 vendor tables were not created yet. Run `pnpm db:auth:migrate` before
 `pnpm db:seed`.
 
+To wipe the database and rebuild it from a blank slate — the quickest way to
+re-test initial setup — run **`pnpm db:reset:reload`**. It drops every table
+(app, Better Auth, and the migration ledger), then re-runs the auth + app
+migrations and the seed in one step. The rebuild is orchestrated in-process, so
+it works the same in cmd, PowerShell, and bash. It refuses non-local
+`DATABASE_URL` hosts and a bare `pnpm db:reset` is a no-op dry run — see
+[setup-guide.md → Resetting the database](setup-guide.md#resetting-the-database).
+
 `pnpm db:up` maps the container's internal Postgres port `5432` to host
 port `5444`, matching the default `DATABASE_URL` in [`.env.example`](../.env.example).
 

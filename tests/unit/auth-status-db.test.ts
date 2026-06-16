@@ -184,4 +184,28 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(ctx.permissions).toContain("admin.users.read");
     expect(ctx.permissions).toContain("admin.audit.read");
   });
+
+  it("expands a BARE `superuser` role (marker only) to the full admin set, without a DB lookup", async () => {
+    // The dev seed's per-org `superuser` role grants ONLY `shell.view` +
+    // `superuser` — not the individual admin.* keys. Such an account must
+    // still resolve to the full superuser authority, or every per-feature
+    // `permissions.includes("admin.*")` check (RSC `canX` toggles, the
+    // server-filtered nav) treats them as a plain user. (Regression: the old
+    // code skipped the expansion whenever the marker was already present.)
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "superuser@orga.local",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "shell.view" }, { key: "superuser" }]);
+
+    const ctx = await getUserAccessContext("ba-1");
+    expect(ctx.permissions).toContain("superuser");
+    expect(ctx.permissions).toContain("admin.users.read");
+    expect(ctx.permissions).toContain("admin.orgs.update");
+    // The marker is already present, so the redundant lookup is skipped.
+    expect(userIsGlobalSuperuser).not.toHaveBeenCalled();
+  });
 });

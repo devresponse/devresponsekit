@@ -114,15 +114,19 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
 
   // Global superuser: holding the `superuser` permission via a role in ANY
   // org the user is an active member of makes them a SUPERADMIN everywhere —
-  // the active org must never downgrade it. Grant the full superuser set so
-  // every gate (admin routes, the server-filtered nav menu, …) recognizes
-  // them uniformly regardless of which org is active. Skip the lookup when the
-  // active org already grants the marker (the common case for a superuser).
-  if (
-    membership &&
-    !permissions.includes(SUPERADMIN_PERMISSION) &&
-    (await userIsGlobalSuperuser(user.id))
-  ) {
+  // the active org must never downgrade it. Expand the marker to the FULL
+  // superuser permission set so every consumer of `permissions` — the admin
+  // gates, the server-filtered nav menu, and the per-feature `canX` toggles
+  // on the RSC pages — recognizes them uniformly, EVEN when their role
+  // carries only the bare marker (e.g. the dev seed's per-org `superuser`
+  // role, which grants `superuser` but not the individual `admin.*` keys).
+  //
+  // The marker already being present in the active org only lets us skip the
+  // extra `userIsGlobalSuperuser` DB lookup — it must NOT skip the expansion,
+  // or a bare-marker superuser ends up with `["shell.view", "superuser"]` and
+  // every `permissions.includes("admin.*")` check fails.
+  const holdsSuperuserMarker = permissions.includes(SUPERADMIN_PERMISSION);
+  if (membership && (holdsSuperuserMarker || (await userIsGlobalSuperuser(user.id)))) {
     permissions = [...new Set([...permissions, ...SUPERUSER_PERMISSIONS])];
   }
 

@@ -22,6 +22,7 @@
     "db:reset": "tsx src/db/reset-database.ts",
     "db:reset:reload": "tsx src/db/reset-database.ts --yes --reload",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
+    "openapi:export": "tsx scripts/export-openapi.ts",
     "test": "node scripts/test-shards.mjs",
     "test:serial": "vitest run",
     "test:unit": "vitest run tests/unit",

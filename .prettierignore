@@ -6,5 +6,6 @@ coverage
 playwright-report
 test-results
 src/db/schema/generated.ts
+docs/openapi.json
 pnpm-lock.yaml
 *.md

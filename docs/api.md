@@ -21,34 +21,16 @@ All handlers are `dynamic = "force-dynamic"` (no caching of authorized data). Ev
 
 > **Authoritative machine spec:** the `/api/v1` surface is described by an OpenAPI 3.1 document — served live at **`GET /api/v1/openapi.json`** and committed as **[`docs/openapi.json`](./openapi.json)** for offline use. Both are produced by the same builder (`src/lib/api-auth/openapi.ts`), and a test keeps them in sync. Treat the spec as the source of truth for the `/api/v1` surface; this page is the human-readable companion.
 
-### Generating a client
+### Clients & SDKs
 
-Point any OpenAPI generator at the committed `docs/openapi.json` (no running server needed). Regenerate the file after changing the API with `pnpm openapi:export`. Each operation has a stable `operationId` (e.g. `listUsers`, `createUser`, `issueToken`) so generated method names are predictable.
+Two surfaces, two client approaches:
 
-```bash
-# TypeScript types only
-npx openapi-typescript docs/openapi.json -o src/generated/api.d.ts
+- **v1 machine API** (`/api/v1`) — generate a typed client on demand from [`docs/openapi.json`](./openapi.json) (or the live `GET /api/v1/openapi.json`); authenticate with `Authorization: Bearer <api-key-or-jwt>`.
+- **Admin console API** (`/api/administrator`) — a **pre-generated, zero-dependency** TypeScript SDK is committed at [`sdk/admin/`](../sdk/admin/) (from [`docs/openapi-admin.json`](./openapi-admin.json)); authenticate with the session cookie + an `Origin` header on mutations. Regenerate with `pnpm sdk:admin:generate`.
 
-# A full typed client (example: openapi-generator)
-npx @openapitools/openapi-generator-cli generate \
-  -i docs/openapi.json -g typescript-fetch -o ./clients/ts
+Every operation has a stable `operationId` (`listUsers`, `createUser`, `issueToken`, …) so generated method names are predictable.
 
-# Or against a running server
-npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o api.d.ts
-```
-
-> Authenticate generated-client requests with `Authorization: Bearer <api-key-or-jwt>`; see [§2 Authentication](#2-authentication).
-
-### Internal admin SDK
-
-The cookie-session **`/api/administrator`** console API has its own committed OpenAPI document, [`docs/openapi-admin.json`](./openapi-admin.json) (built from `src/lib/api-auth/openapi-admin.ts`), and a **pre-generated, zero-dependency TypeScript client** committed under [`sdk/admin/`](../sdk/admin/) (openapi-generator `typescript-fetch`). Regenerate both with:
-
-```bash
-pnpm sdk:admin:generate    # re-export the admin spec + regenerate sdk/admin
-pnpm sdk:admin:typecheck   # type-check the generated client
-```
-
-Unlike the bearer-token v1 client, the admin SDK authenticates with the **session cookie** and must send an `Origin` header on every mutation (the CSRF guard) — see [`sdk/admin/README.md`](../sdk/admin/README.md) for usage.
+> **Full walkthrough — authentication, generating/using a client, pagination, errors, and troubleshooting for both surfaces — is in [API Clients & SDKs](./api-clients.md).**
 
 ## 2. Authentication
 

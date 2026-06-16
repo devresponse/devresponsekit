@@ -119,6 +119,37 @@ create table if not exists app_user_roles (
   primary key (app_user_id, organization_id, role_id)
 );
 
+-- Organization groups (ADR-0002): a named cohort within ONE organization
+-- (no global groups) that bundles roles and collects users. A user's
+-- effective roles in an org = direct (app_user_roles) UNION via-groups.
+create table if not exists app_groups (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references app_organizations(id) on delete cascade,
+  key text not null,
+  name text not null,
+  description text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, key)
+);
+
+-- Roles a group confers. The route layer enforces that role_id belongs to
+-- the SAME org as the group (no global/foreign-org roles); the FK only
+-- guarantees referential integrity.
+create table if not exists app_group_roles (
+  group_id uuid not null references app_groups(id) on delete cascade,
+  role_id uuid not null references app_roles(id) on delete cascade,
+  primary key (group_id, role_id)
+);
+
+-- Users that belong to a group (binary membership in v1).
+create table if not exists app_group_memberships (
+  group_id uuid not null references app_groups(id) on delete cascade,
+  app_user_id uuid not null references app_users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (group_id, app_user_id)
+);
+
 create table if not exists app_enterprise_applications (
   id text primary key,
   organization_id uuid references app_organizations(id),
@@ -237,6 +268,14 @@ create index if not exists idx_app_user_roles_app_user_id
   on app_user_roles (app_user_id);
 create index if not exists idx_app_user_roles_role_id
   on app_user_roles (role_id);
+-- Group resolution (ADR-0002): list a user's groups, a group's members, and
+-- the reverse role->group lookup.
+create index if not exists idx_app_groups_organization_id
+  on app_groups (organization_id);
+create index if not exists idx_app_group_roles_role_id
+  on app_group_roles (role_id);
+create index if not exists idx_app_group_memberships_user
+  on app_group_memberships (app_user_id);
 -- Reverse lookup on the role->permission junction. The composite PK is
 -- leftmost on role_id, so a predicate on permission_id alone (e.g. the
 -- `used_by_role_count` correlated sub-select in the permissions grid)

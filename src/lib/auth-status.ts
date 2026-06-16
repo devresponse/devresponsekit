@@ -101,15 +101,31 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
 
   let permissions: string[] = [];
   if (membership) {
-    const rows = await db
+    const orgId = membership.organization_id;
+    // Effective roles within the active org = roles assigned DIRECTLY
+    // (app_user_roles) UNION roles conferred by the user's GROUPS
+    // (app_group_memberships → app_group_roles), per ADR-0002. Both branches
+    // are filtered to the active org, so a group only counts when it belongs
+    // to that org — keeping groups inside the ADR-0001 boundary. Resolved to
+    // permission keys in one statement via UNION (dedups).
+    const directPerms = db
       .selectFrom("app_user_roles as ur")
       .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
       .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
-      .select(["p.key as key"])
+      .select("p.key as key")
       .where("ur.app_user_id", "=", user.id)
-      .where("ur.organization_id", "=", membership.organization_id)
-      .execute();
-    permissions = rows.map((r) => r.key);
+      .where("ur.organization_id", "=", orgId);
+    const groupPerms = db
+      .selectFrom("app_group_memberships as gm")
+      .innerJoin("app_groups as g", "g.id", "gm.group_id")
+      .innerJoin("app_group_roles as gr", "gr.group_id", "g.id")
+      .innerJoin("app_role_permissions as rp", "rp.role_id", "gr.role_id")
+      .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+      .select("p.key as key")
+      .where("gm.app_user_id", "=", user.id)
+      .where("g.organization_id", "=", orgId);
+    const rows = await directPerms.union(groupPerms).execute();
+    permissions = [...new Set(rows.map((r) => r.key))];
   }
 
   // Global superuser: holding the `superuser` permission via a role in ANY

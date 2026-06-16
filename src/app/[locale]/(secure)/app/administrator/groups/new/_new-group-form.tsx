@@ -6,20 +6,29 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { OrganizationPicker } from "../../_components/organization-picker";
 
 /**
- * Client-side new-group form (ADR-0002). An ORG ADMIN's group is created in
- * their own org server-side (no org picker needed); a SUPERADMIN must target
- * a specific org, which this v1 form does via the active organization — when
- * none is resolvable the server returns `organization_required`.
+ * Client-side new-group form (ADR-0002). Groups are ALWAYS org-scoped:
+ *   - an ORG ADMIN's group is created in their own org server-side, so no
+ *     picker is shown (`showOrgPicker={false}`);
+ *   - a SUPERADMIN must choose the target org via {@link OrganizationPicker}
+ *     and that `organizationId` is sent to the server.
  */
 const KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
 
-export function NewGroupForm({ locale }: { locale: string }) {
+export function NewGroupForm({
+  locale,
+  showOrgPicker,
+}: {
+  locale: string;
+  showOrgPicker: boolean;
+}) {
   const t = useTranslations("administrator.groups");
   const tErr = useTranslations("administrator.errors");
   const router = useRouter();
 
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -33,6 +42,11 @@ export function NewGroupForm({ locale }: { locale: string }) {
       setError(tErr("invalidBody"));
       return;
     }
+    // A SUPERADMIN must pick a target org (groups are never global).
+    if (showOrgPicker && !organizationId) {
+      setError(t("new.organizationRequired"));
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -44,6 +58,8 @@ export function NewGroupForm({ locale }: { locale: string }) {
           key: key.trim(),
           name: name.trim(),
           description: description.trim() || undefined,
+          // Org admins omit this — the server forces their own org.
+          ...(showOrgPicker ? { organizationId } : {}),
         }),
       });
       if (res.status === 201) {
@@ -78,6 +94,14 @@ export function NewGroupForm({ locale }: { locale: string }) {
 
   return (
     <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
+      {showOrgPicker ? (
+        <OrganizationPicker
+          id="group-organization"
+          value={organizationId}
+          onChange={setOrganizationId}
+        />
+      ) : null}
+
       <div className="space-y-2">
         <Label htmlFor="group-key">{t("fields.key")}</Label>
         <Input

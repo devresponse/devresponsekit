@@ -129,11 +129,39 @@ from authorization.
 | `pnpm db:down`   | Stop the container (keeps the `postgres17-data` volume).            |
 | `pnpm db:seed`   | Re-run the idempotent seed.                                         |
 | `pnpm db:seed:dev` | Optional: load 3 orgs × 7 users for testing (see below).          |
+| `pnpm db:reset`  | **Dry run**: list every table a reset would drop (changes nothing). |
+| `pnpm db:reset:reload` | **Destructive**: drop all tables, then re-run the migrations + seed. |
 | `pnpm dev`       | Dev server with hot reload.                                         |
 | `pnpm typecheck` / `pnpm lint` / `pnpm test` | The pre-PR quality gates.              |
 
-To wipe the database entirely and start clean: `docker compose down -v`, then
-re-run the migrate + seed steps. Deep dive on the database and Docker topology:
+### Resetting the database
+
+To wipe the database and rebuild it from scratch — the fastest way to re-test
+the initial-setup path — use the reset script. It drops **every** table in the
+`public` schema (the `app_*` tables, the Better Auth `user`/`session`/
+`account`/`verification` tables, and the `app_schema_migrations` ledger), so
+the next migration runs as if it were a first-time install.
+
+```bash
+pnpm db:reset           # DRY RUN — lists the tables it would drop, changes nothing
+pnpm db:reset --yes     # drop + recreate an empty public schema (data + tables gone)
+pnpm db:reset:reload    # the above, then db:auth:migrate + db:app:migrate + db:seed
+```
+
+`pnpm db:reset:reload` is the one-shot "blank slate → fully seeded" command. It
+runs the rebuild steps **in-process** (the reset script orchestrates them with
+`spawnSync`) rather than chaining shell commands with `&&`, so it behaves
+identically across cmd, PowerShell, and bash — on Windows the old `&&` chain
+could stop early and leave only the Better Auth tables.
+
+**Safety rails** (the reset is irreversible): it refuses any non-local
+`DATABASE_URL` host unless you pass `--force`, and the bare `pnpm db:reset` does
+nothing without `--yes` (it prints the target host + database and a dry-run list
+first). `db:reset:reload` passes `--yes` for you.
+
+For a deeper reset that also discards the Postgres data volume, use
+`docker compose down -v` and re-run the migrate + seed steps. Deep dive on the
+database and Docker topology:
 [setup-better-auth.md §4](setup-better-auth.md#4-postgresql-with-docker-local).
 
 ### Optional: load multi-organization test data

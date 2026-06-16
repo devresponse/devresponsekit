@@ -69,6 +69,8 @@ build, and deploying a fully functional instance — follow
 | `pnpm test:all`   | typecheck + lint + format check + coverage + e2e  |
 | `pnpm db:codegen` | Regenerate Kysely types from the live schema      |
 | `pnpm db:seed:dev` | Optional dev/testing seed: 3 orgs × 7 users      |
+| `pnpm db:reset`   | Dry run: list every table a reset would drop      |
+| `pnpm db:reset:reload` | Drop all tables, then re-run migrations + seed (local only) |
 
 ## Project layout
 

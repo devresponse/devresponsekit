@@ -277,7 +277,9 @@
       "global": "Globale (toutes les organisations)",
       "placeholder": "Sélectionnez une organisation…",
       "loading": "Chargement…",
-      "loadError": "Impossible de charger les organisations."
+      "loadError": "Impossible de charger les organisations.",
+      "searchPlaceholder": "Rechercher des organisations…",
+      "noResults": "Aucune organisation trouvée."
     },
     "overview": {
       "title": "Aperçu de l'administrateur",

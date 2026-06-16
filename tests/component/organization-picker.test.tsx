@@ -5,10 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
- * Component tests for the shared OrganizationPicker (ADR-0002) and its two
- * consumers' SUPERADMIN/org-admin wiring in the new-role form. The picker is
- * SUPERADMIN-only: an org admin's scope is forced server-side and the form
- * sends their own org id without rendering the control.
+ * Component tests for the shared OrganizationPicker (ADR-0002) — a Shadcn
+ * combobox (Popover + cmdk Command) — and its two consumers' SUPERADMIN /
+ * org-admin wiring in the new-role form. The picker is SUPERADMIN-only: an
+ * org admin's scope is forced server-side and the form sends their own org
+ * id without rendering the control.
  */
 const push = vi.fn();
 const refresh = vi.fn();
@@ -46,6 +47,12 @@ function postCall() {
   )!;
 }
 
+/** Opens the combobox once its org list has loaded (trigger un-disables). */
+async function openPicker(user: ReturnType<typeof userEvent.setup>, trigger: Element) {
+  await waitFor(() => expect(trigger).not.toBeDisabled());
+  await user.click(trigger);
+}
+
 beforeEach(() => {
   push.mockReset();
   refresh.mockReset();
@@ -61,28 +68,51 @@ describe("OrganizationPicker", () => {
   it("loads organizations and reports the chosen id", async () => {
     fetchMock.mockResolvedValue(jsonOk(ORGS));
     const onChange = vi.fn();
+    const user = userEvent.setup();
     const { container } = renderWithIntl(<OrganizationPicker value={null} onChange={onChange} />);
 
-    const select = container.querySelector("#organization-picker") as HTMLSelectElement;
-    await waitFor(() => expect(select).not.toBeDisabled());
-    expect(screen.getByRole("option", { name: "Acme (acme)" })).toBeInTheDocument();
+    await openPicker(user, container.querySelector("#organization-picker")!);
+    await user.click(await screen.findByRole("option", { name: /Globex/ }));
 
-    await userEvent.setup().selectOptions(select, "o2");
     expect(onChange).toHaveBeenCalledWith("o2");
+  });
+
+  it("filters the options client-side by name or slug", async () => {
+    fetchMock.mockResolvedValue(jsonOk(ORGS));
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const { container } = renderWithIntl(<OrganizationPicker value={null} onChange={onChange} />);
+
+    await openPicker(user, container.querySelector("#organization-picker")!);
+    await user.type(screen.getByPlaceholderText("Search organizations…"), "globex");
+
+    await waitFor(() =>
+      expect(screen.queryByRole("option", { name: /Acme/ })).not.toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("option", { name: /Globex/ }));
+    expect(onChange).toHaveBeenCalledWith("o2");
+  });
+
+  it("shows the selected org's label on the trigger", async () => {
+    fetchMock.mockResolvedValue(jsonOk(ORGS));
+    const { container } = renderWithIntl(<OrganizationPicker value="o1" onChange={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(container.querySelector("#organization-picker")).toHaveTextContent("Acme (acme)"),
+    );
   });
 
   it("offers a Global option that reports null when includeGlobal", async () => {
     fetchMock.mockResolvedValue(jsonOk(ORGS));
     const onChange = vi.fn();
+    const user = userEvent.setup();
     const { container } = renderWithIntl(
       <OrganizationPicker value="o1" onChange={onChange} includeGlobal />,
     );
 
-    const select = container.querySelector("#organization-picker") as HTMLSelectElement;
-    await waitFor(() => expect(select).not.toBeDisabled());
-    expect(screen.getByRole("option", { name: "Global (all organizations)" })).toBeInTheDocument();
+    await openPicker(user, container.querySelector("#organization-picker")!);
+    await user.click(await screen.findByRole("option", { name: /Global/ }));
 
-    await userEvent.setup().selectOptions(select, "");
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
@@ -116,7 +146,7 @@ describe("NewRoleForm scope wiring", () => {
     expect(bodyOf(postCall())).toMatchObject({ organizationId: "o1" });
   });
 
-  it("a SUPERADMIN can scope the role to a chosen org via the picker", async () => {
+  it("a SUPERADMIN can scope the role to a chosen org via the combobox", async () => {
     fetchMock.mockImplementation((url: string, init?: { method?: string }) => {
       if (String(url).includes("/api/administrator/organizations")) {
         return Promise.resolve(jsonOk(ORGS));
@@ -129,11 +159,10 @@ describe("NewRoleForm scope wiring", () => {
       <NewRoleForm locale="en" showOrgPicker defaultOrganizationId={null} />,
     );
 
-    const picker = container.querySelector("#role-organization") as HTMLSelectElement;
-    await waitFor(() => expect(picker).not.toBeDisabled());
+    await openPicker(user, container.querySelector("#role-organization")!);
+    await user.click(await screen.findByRole("option", { name: /Globex/ }));
     await user.type(container.querySelector("#role-key")!, "app.viewer");
     await user.type(container.querySelector("#role-name")!, "Viewer");
-    await user.selectOptions(picker, "o2");
     await user.click(screen.getByRole("button", { name: "Create role" }));
 
     await waitFor(() =>
@@ -163,7 +192,7 @@ describe("NewRoleForm scope wiring", () => {
     await user.type(container.querySelector("#role-name")!, "Viewer");
     await user.click(screen.getByRole("button", { name: "Create role" }));
 
-    await waitFor(() => expect(postCall).not.toThrow());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(bodyOf(postCall())).toMatchObject({ organizationId: null });
   });
 });

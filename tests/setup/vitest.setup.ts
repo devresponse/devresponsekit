@@ -8,11 +8,12 @@ import "@testing-library/jest-dom/vitest";
  * do not throw during unit tests.
  *
  * Also installs jsdom polyfills required by Radix UI primitives. jsdom
- * does not implement Pointer Events, `Element.scrollIntoView`, or
- * `Element.hasPointerCapture`, all of which Radix's Select / Dialog
- * primitives call as part of their interaction handlers. Without the
- * polyfills, opening a Radix Select inside a jsdom test throws a
- * TypeError that escapes the test runner.
+ * does not implement Pointer Events, `Element.scrollIntoView`,
+ * `Element.hasPointerCapture`, or `ResizeObserver`, all of which Radix's
+ * Select / Dialog / Popover and the cmdk Command primitives call as part
+ * of their interaction handlers. Without the polyfills, opening one of
+ * these inside a jsdom test throws a TypeError / ReferenceError that
+ * escapes the test runner.
  */
 // `process.env.NODE_ENV` is typed as readonly in Next's typings; use a
 // dynamic assignment to set the test default without conflicting with that.
@@ -66,4 +67,15 @@ if (typeof globalThis.Element !== "undefined") {
   if (!ElementProto.scrollIntoView) {
     ElementProto.scrollIntoView = () => {};
   }
+}
+
+// jsdom does not implement `ResizeObserver`, which cmdk (the Command /
+// combobox primitive) constructs on mount. Provide a no-op so combobox
+// components render under jsdom.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  } as unknown as typeof ResizeObserver;
 }

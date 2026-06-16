@@ -196,6 +196,7 @@
       "access": "Access",
       "roles": "Roles",
       "permissions": "Permissions",
+      "groups": "Groups",
       "tenancy": "Tenancy",
       "organizations": "Organizations",
       "memberships": "Memberships",
@@ -208,6 +209,68 @@
       "communication": "Communication",
       "emailOutbox": "Email outbox",
       "emailTemplates": "Email templates"
+    },
+    "groups": {
+      "title": "Groups",
+      "description": "Cohorts within an organization that bundle roles and collect users.",
+      "newButton": "New group",
+      "deleteButton": "Delete",
+      "memberCount": "{count, plural, =0 {No members} one {# member} other {# members}}",
+      "columns": {
+        "key": "Key",
+        "name": "Name",
+        "roleCount": "Roles",
+        "memberCount": "Members",
+        "createdAt": "Created"
+      },
+      "deleteDialog": {
+        "title": "Delete group",
+        "description": "This removes the group and its role bundle and memberships. Members keep any roles assigned to them directly.",
+        "confirm": "Delete group"
+      },
+      "fields": {
+        "key": "Key",
+        "name": "Name",
+        "description": "Description"
+      },
+      "tabs": {
+        "roles": "Roles",
+        "members": "Members",
+        "settings": "Settings"
+      },
+      "new": {
+        "title": "Create group",
+        "submit": "Create group",
+        "cancel": "Cancel",
+        "errorToast": "Could not create group.",
+        "organizationRequired": "Select an organization for this group."
+      },
+      "settings": {
+        "save": "Save changes",
+        "saved": "Saved.",
+        "errorToast": "Could not save changes.",
+        "keyReadOnly": "The key cannot be changed after creation."
+      },
+      "rolesEditor": {
+        "available": "Available",
+        "assigned": "Assigned",
+        "searchAvailable": "Search available roles",
+        "searchAssigned": "Search assigned roles",
+        "add": "Add",
+        "remove": "Remove",
+        "save": "Save changes",
+        "saving": "Saving…",
+        "saved": "Roles updated.",
+        "noResults": "No matching roles.",
+        "errorToast": "Could not update roles."
+      },
+      "members": {
+        "columns": {
+          "email": "Email",
+          "name": "Name",
+          "joinedAt": "Joined"
+        }
+      }
     },
     "overview": {
       "title": "Administrator overview",

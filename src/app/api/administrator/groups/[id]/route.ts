@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { loadGroupDetail } from "@/lib/admin/groups.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -49,6 +50,13 @@ const patchSchema = z
 export async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.groups.update",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await ctx.params;
   if (!isUuid(id)) return adminErrorResponse("invalid_id", 400, request);
@@ -103,6 +111,13 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.groups.delete",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await ctx.params;
   if (!isUuid(id)) return adminErrorResponse("invalid_id", 400, request);

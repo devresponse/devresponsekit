@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import {
   canAccessOrg,
   resolveOrgScope,
@@ -76,6 +77,13 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
+  const limited = enforceRateLimit(
+    "admin.groups.assign",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
+
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
@@ -123,6 +131,13 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
+
+  const limited = enforceRateLimit(
+    "admin.groups.assign",
+    guard.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+  );
+  if (limited) return limited;
 
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);

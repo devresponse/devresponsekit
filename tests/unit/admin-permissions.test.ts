@@ -162,13 +162,13 @@ describe("requireAdminPermission", () => {
 });
 
 describe("ADMIN_PERMISSION_CATALOG", () => {
-  it("has 30 entries with unique keys (plan §6.1 + email + credential governance)", async () => {
+  it("has 35 entries with unique keys (plan §6.1 + email + credential + group governance)", async () => {
     // Import from the canonical, non-server-only source so the test
     // asserts the source of truth rather than the re-export surface.
     const { ADMIN_PERMISSION_CATALOG } = await import("@/lib/admin/permissions");
-    expect(ADMIN_PERMISSION_CATALOG).toHaveLength(30);
+    expect(ADMIN_PERMISSION_CATALOG).toHaveLength(35);
     const keys = new Set(ADMIN_PERMISSION_CATALOG.map((p) => p.key));
-    expect(keys.size).toBe(30);
+    expect(keys.size).toBe(35);
     // Spot-check a representative sample.
     expect(keys.has("admin.users.read")).toBe(true);
     expect(keys.has("admin.users.impersonate")).toBe(true);
@@ -181,6 +181,12 @@ describe("ADMIN_PERMISSION_CATALOG", () => {
     expect(keys.has("admin.apikeys.manage")).toBe(true);
     expect(keys.has("admin.clients.read")).toBe(true);
     expect(keys.has("admin.clients.manage")).toBe(true);
+    // Group-governance keys (ADR-0002).
+    expect(keys.has("admin.groups.read")).toBe(true);
+    expect(keys.has("admin.groups.create")).toBe(true);
+    expect(keys.has("admin.groups.update")).toBe(true);
+    expect(keys.has("admin.groups.delete")).toBe(true);
+    expect(keys.has("admin.groups.assign")).toBe(true);
   });
 
   it("is re-exported by permissions.server for callers that need it via the helper module", async () => {

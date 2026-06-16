@@ -13,7 +13,8 @@ describe("admin openapi document", () => {
   it("is a 3.1 document served under /api/administrator with cookie auth", () => {
     expect(doc.openapi).toBe("3.1.0");
     expect(JSON.stringify(doc.servers)).toContain("https://app.devresponse.com/api/administrator");
-    const schemes = (doc.components as { securitySchemes: Record<string, unknown> }).securitySchemes;
+    const schemes = (doc.components as { securitySchemes: Record<string, unknown> })
+      .securitySchemes;
     expect(schemes.cookieSession).toBeTruthy();
   });
 

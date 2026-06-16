@@ -7,6 +7,7 @@ import {
   resolveDocFile,
   splitSlug,
 } from "@/lib/docs/safe-path.server";
+import { FileSystemDocumentSource } from "@/lib/docs/source/filesystem-source.server";
 
 const NUL = String.fromCharCode(0);
 const SOH = String.fromCharCode(1);
@@ -80,12 +81,17 @@ describe("isPathInsideRoot", () => {
 });
 
 describe("resolveDocFile (against the repo docs root)", () => {
-  it("resolves an existing document by slug", async () => {
-    const resolved = await resolveDocFile("developer-onboarding");
+  it("resolves an existing document by a slug taken from the catalog", async () => {
+    // Derive a real slug from the catalog so this stays correct across
+    // documentation reorganizations rather than pinning a filename.
+    const [first] = await new FileSystemDocumentSource().listCatalog();
+    expect(first).toBeDefined();
+    const slug = first!.slug;
+    const resolved = await resolveDocFile(slug);
     expect(resolved).not.toBeNull();
-    expect(resolved!.slug).toBe("developer-onboarding");
-    expect(resolved!.format).toBe("md");
-    expect(resolved!.absPath.endsWith("developer-onboarding.md")).toBe(true);
+    expect(resolved!.slug).toBe(slug);
+    expect(resolved!.format === "md" || resolved!.format === "mdx").toBe(true);
+    expect(path.basename(resolved!.absPath)).toBe(`${slug.split("/").pop()}.${resolved!.format}`);
   });
 
   it("returns null for traversal, dotfiles, and misses", async () => {

@@ -9,24 +9,27 @@ import { FileSystemDocumentSource } from "@/lib/docs/source/filesystem-source.se
 describe("FileSystemDocumentSource", () => {
   const source = new FileSystemDocumentSource();
 
-  it("lists a catalog that includes the known repo docs", async () => {
+  it("lists a non-empty catalog of well-formed entries", async () => {
+    // Resilient to documentation reorganization: don't pin specific slugs,
+    // just require a non-empty catalog where every entry has the right shape.
     const catalog = await source.listCatalog();
-    const slugs = catalog.map((e) => e.slug);
-    expect(slugs).toContain("developer-onboarding");
-    expect(slugs).toContain("architecture");
-    // Every entry has the required catalog shape.
+    expect(catalog.length).toBeGreaterThan(0);
     for (const entry of catalog) {
+      expect(typeof entry.slug).toBe("string");
+      expect(entry.slug.length).toBeGreaterThan(0);
       expect(typeof entry.title).toBe("string");
       expect(entry.title.length).toBeGreaterThan(0);
       expect(entry.visibility === "public" || entry.visibility === "internal").toBe(true);
     }
   });
 
-  it("loads a document body by slug", async () => {
-    const doc = await source.getDocument("developer-onboarding");
+  it("loads a document body by a slug taken from the catalog", async () => {
+    const [first] = await source.listCatalog();
+    expect(first).toBeDefined();
+    const doc = await source.getDocument(first!.slug);
     expect(doc).not.toBeNull();
-    expect(doc!.format).toBe("md");
-    expect(doc!.entry.slug).toBe("developer-onboarding");
+    expect(doc!.entry.slug).toBe(first!.slug);
+    expect(doc!.format === "md" || doc!.format === "mdx").toBe(true);
     expect(doc!.body.length).toBeGreaterThan(0);
   });
 

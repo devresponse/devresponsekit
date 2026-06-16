@@ -164,10 +164,20 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
   }, [groupId, diff, assigned, t, tErr]);
 
   if (!catalog) {
+    // A failed initial load sets `error` but leaves the catalog null; surface
+    // the message here rather than spinning the skeleton forever.
     return (
       <div className="space-y-2">
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-48 w-full" />
+        {error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {error}
+          </p>
+        ) : (
+          <>
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-48 w-full" />
+          </>
+        )}
       </div>
     );
   }

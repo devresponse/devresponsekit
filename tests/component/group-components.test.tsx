@@ -1,0 +1,362 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { renderWithIntl } from "../helpers/render-with-intl";
+
+/**
+ * Component tests for the Administrator Groups UI (ADR-0002).
+ *
+ * The group routes are covered at the HTTP layer by
+ * tests/integration/groups.test.ts; these pin the client behaviour of the
+ * grid, the create/settings forms, the dual-list roles editor, the members
+ * grid, and the detail tab container — the dirty-diff save flow and the
+ * error branches in particular.
+ */
+const push = vi.fn();
+const refresh = vi.fn();
+const replace = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push, refresh, replace, prefetch: vi.fn() }),
+  usePathname: () => "/en/app/administrator/groups",
+  useSearchParams: () => new URLSearchParams(""),
+}));
+
+vi.mock("@/components/i18n/locale-link", () => ({
+  LocaleLink: ({
+    href,
+    children,
+    className,
+  }: {
+    href: string;
+    children: React.ReactNode;
+    className?: string;
+  }) => (
+    <a href={typeof href === "string" ? href : "#"} className={className}>
+      {children}
+    </a>
+  ),
+}));
+
+const confirmMock = vi.fn();
+vi.mock("@/components/ui/dialog-manager", () => ({
+  useDialogs: () => ({ confirm: confirmMock, alert: vi.fn(), prompt: vi.fn() }),
+}));
+
+import { AdministratorGroupsGrid } from "@/app/[locale]/(secure)/app/administrator/groups/_groups-grid";
+import { NewGroupForm } from "@/app/[locale]/(secure)/app/administrator/groups/new/_new-group-form";
+import { GroupSettingsForm } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-settings-form";
+import { GroupRolesEditor } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-roles-editor";
+import { GroupMembersGrid } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-members-grid";
+import { GroupDetailTabs } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-detail-tabs";
+
+const fetchMock = vi.fn();
+
+function jsonOk(body: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body };
+}
+
+beforeEach(() => {
+  push.mockReset();
+  refresh.mockReset();
+  replace.mockReset();
+  confirmMock.mockReset();
+  fetchMock.mockReset();
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("AdministratorGroupsGrid", () => {
+  const row = {
+    id: "g1",
+    organization_id: "o1",
+    key: "engineering",
+    name: "Engineering",
+    description: null,
+    role_count: 2,
+    member_count: 5,
+    created_at: "2026-01-02T00:00:00Z",
+  };
+
+  it("renders fetched group rows with a key link and counts", async () => {
+    fetchMock.mockResolvedValue(jsonOk({ items: [row], total: 1 }));
+    renderWithIntl(<AdministratorGroupsGrid locale="en" canDelete={false} />);
+
+    expect(await screen.findByText("Engineering")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "engineering" });
+    expect(link).toHaveAttribute("href", "/app/administrator/groups/g1");
+    // No delete column when the caller lacks admin.groups.delete.
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  it("deletes a row after the confirm dialog resolves true", async () => {
+    fetchMock.mockImplementation((_url: string, init?: { method?: string }) => {
+      if (init?.method === "DELETE") return Promise.resolve(jsonOk({ ok: true }));
+      return Promise.resolve(jsonOk({ items: [row], total: 1 }));
+    });
+    confirmMock.mockResolvedValue(true);
+    const user = userEvent.setup();
+
+    renderWithIntl(<AdministratorGroupsGrid locale="en" canDelete />);
+    await screen.findByText("Engineering");
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/administrator/groups/g1",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+  });
+
+  it("does not issue a DELETE when the confirm dialog is dismissed", async () => {
+    fetchMock.mockResolvedValue(jsonOk({ items: [row], total: 1 }));
+    confirmMock.mockResolvedValue(false);
+    const user = userEvent.setup();
+
+    renderWithIntl(<AdministratorGroupsGrid locale="en" canDelete />);
+    await screen.findByText("Engineering");
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(
+      fetchMock.mock.calls.some(
+        (c) => (c[1] as { method?: string } | undefined)?.method === "DELETE",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("NewGroupForm", () => {
+  it("blocks submit and shows a validation error for an empty key", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<NewGroupForm locale="en" />);
+
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The submitted data is invalid.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("posts and navigates to the created group on 201", async () => {
+    fetchMock.mockResolvedValue(jsonOk({ id: "g9" }, 201));
+    const user = userEvent.setup();
+    const { container } = renderWithIntl(<NewGroupForm locale="en" />);
+
+    await user.type(container.querySelector("#group-key")!, "engineering");
+    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/administrator/groups",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/en/app/administrator/groups/g9"));
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("surfaces a key-taken error on 409", async () => {
+    fetchMock.mockResolvedValue(jsonOk({ error: "key_taken" }, 409));
+    const user = userEvent.setup();
+    const { container } = renderWithIntl(<NewGroupForm locale="en" />);
+
+    await user.type(container.querySelector("#group-key")!, "engineering");
+    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That key is already in use.");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("navigates back to the list on cancel", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(<NewGroupForm locale="en" />);
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(push).toHaveBeenCalledWith("/en/app/administrator/groups");
+  });
+});
+
+describe("GroupSettingsForm", () => {
+  it("PATCHes and shows the saved confirmation", async () => {
+    fetchMock.mockResolvedValue(jsonOk({ ok: true }));
+    const user = userEvent.setup();
+    renderWithIntl(
+      <GroupSettingsForm
+        groupId="g1"
+        initialKey="engineering"
+        initialName="Engineering"
+        initialDescription={null}
+        canUpdate
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/administrator/groups/g1",
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+  });
+
+  it("shows an invalid-body error on 400", async () => {
+    fetchMock.mockResolvedValue(jsonOk({ error: "invalid_body" }, 400));
+    const user = userEvent.setup();
+    renderWithIntl(
+      <GroupSettingsForm
+        groupId="g1"
+        initialKey="engineering"
+        initialName="Engineering"
+        initialDescription="Builds things"
+        canUpdate
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The submitted data is invalid.");
+  });
+});
+
+describe("GroupRolesEditor", () => {
+  const VIEWER = { id: "r1", key: "app.viewer", name: "Viewer" };
+  const EDITOR = { id: "r2", key: "app.editor", name: "Editor" };
+  const CATALOG = { items: [VIEWER, EDITOR] };
+
+  function routeRoles(opts: { assignedAfterPost?: typeof CATALOG.items } = {}) {
+    let posted = false;
+    fetchMock.mockImplementation((url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (u.includes("/api/administrator/roles")) return Promise.resolve(jsonOk(CATALOG));
+      if (u.includes("/roles") && init?.method === "POST") {
+        posted = true;
+        return Promise.resolve(jsonOk({ ok: true }));
+      }
+      if (u.includes("/roles") && init?.method === "DELETE") {
+        return Promise.resolve(jsonOk({ ok: true }));
+      }
+      // GET the group's assigned roles (initial + post-save refresh).
+      return Promise.resolve(jsonOk({ roles: posted ? (opts.assignedAfterPost ?? []) : [] }));
+    });
+  }
+
+  it("loads both columns and saves the diff as a POST", async () => {
+    routeRoles({ assignedAfterPost: [VIEWER] });
+    const user = userEvent.setup();
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign />);
+
+    // Available column populated from the catalog once the fetches resolve.
+    expect(await screen.findByText(/Available/)).toBeInTheDocument();
+    const available = screen.getAllByRole("listbox")[0]!;
+    await user.selectOptions(available, "r1");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const save = screen.getByRole("button", { name: "Save changes" });
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/administrator/groups/g1/roles",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Roles updated.");
+  });
+
+  it("shows an error when the initial load fails", async () => {
+    fetchMock.mockResolvedValue(jsonOk({}, 500));
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Try again.");
+  });
+
+  it("disables the controls when canAssign is false", async () => {
+    routeRoles();
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign={false} />);
+
+    await screen.findByText(/Available/);
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+  });
+});
+
+describe("GroupMembersGrid", () => {
+  it("renders members with an email link into the user detail", async () => {
+    fetchMock.mockResolvedValue(
+      jsonOk({
+        items: [
+          {
+            app_user_id: "u1",
+            primary_email: "ada@example.com",
+            display_name: "Ada",
+            status: "active",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      }),
+    );
+    renderWithIntl(<GroupMembersGrid groupId="g1" />);
+
+    const link = await screen.findByRole("link", { name: "ada@example.com" });
+    expect(link).toHaveAttribute("href", "/app/administrator/users/u1");
+  });
+});
+
+describe("GroupDetailTabs", () => {
+  it("switches between the roles, members, and settings tabs", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.includes("/api/administrator/roles")) {
+        return Promise.resolve(
+          jsonOk({ items: [{ id: "r1", key: "app.viewer", name: "Viewer" }] }),
+        );
+      }
+      if (u.includes("/members")) {
+        return Promise.resolve(
+          jsonOk({
+            items: [
+              {
+                app_user_id: "u1",
+                primary_email: "ada@example.com",
+                display_name: "Ada",
+                status: "active",
+                created_at: "2026-01-01T00:00:00Z",
+              },
+            ],
+            total: 1,
+          }),
+        );
+      }
+      return Promise.resolve(jsonOk({ roles: [] }));
+    });
+    const user = userEvent.setup();
+    renderWithIntl(
+      <GroupDetailTabs
+        group={{ id: "g1", key: "engineering", name: "Engineering", description: null }}
+        canUpdate
+        canAssign
+      />,
+    );
+
+    // Roles tab is the default.
+    expect(await screen.findByText(/Available/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Members" }));
+    expect(await screen.findByRole("link", { name: "ada@example.com" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    const keyField = (await screen.findByDisplayValue("engineering")) as HTMLInputElement;
+    expect(keyField).toHaveAttribute("readonly");
+  });
+});

@@ -7,5 +7,7 @@ playwright-report
 test-results
 src/db/schema/generated.ts
 docs/openapi.json
+docs/openapi-admin.json
+sdk
 pnpm-lock.yaml
 *.md

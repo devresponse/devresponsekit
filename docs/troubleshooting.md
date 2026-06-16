@@ -37,6 +37,9 @@ Use Node 22 (what CI runs). There is no `.nvmrc`/`engines` pin yet (`TODO:`), so
 - Does `DATABASE_URL` point at port 5444 with the right credentials (`devresponse:devresponse`)?
 - Did you run the migrations (`pnpm db:auth:migrate && pnpm db:app:migrate`)?
 
+**`psql` shows no tables / "relation does not exist".**
+All tables live in the **`auth`** schema (default; set by `DB_SCHEMA`), not `public`. A plain `psql` session defaults to `public` and sees nothing. List them with `\dt auth.*`, or run `SET search_path = auth, public;` first. The app itself sets this automatically via the connection `search_path` — don't add `?schema=…` to `DATABASE_URL` (it's ignored). If you use a transaction-pooling pooler, the session `search_path` can be dropped — set it as a role default (`ALTER ROLE <app> SET search_path = auth, public;`).
+
 **Boot fails with a secret/JWK error.**
 A required secret is missing or malformed:
 - `BETTER_AUTH_SECRET` and `SSO_HANDOFF_JWT_SECRET` must be set (and distinct).
@@ -118,7 +121,7 @@ They need a built, running, seeded app and installed browsers: `pnpm playwright 
 Use a **pooled** Postgres endpoint in `DATABASE_URL`; a direct connection can exhaust connections under serverless concurrency.
 
 **Migrations not applied / schema missing.**
-Run `pnpm db:auth:migrate && pnpm db:app:migrate` against the target **before** routing traffic. The schema is idempotent and safe to re-run.
+Run `pnpm db:auth:migrate && pnpm db:app:migrate` against the target **before** routing traffic. The migrate step **creates the `auth` schema** (or whatever `DB_SCHEMA` is set to) automatically and provisions every table into it — you don't create the schema by hand. The migrations are idempotent and safe to re-run.
 
 **HSTS/headers not present or mixed-content warnings.**
 Terminate TLS upstream; HSTS is inert over plain HTTP. Confirm the proxy forwards the headers emitted by `next.config.mjs`.

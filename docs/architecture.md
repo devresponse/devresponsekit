@@ -231,6 +231,8 @@ A credential's authority is the **intersection of its scopes and its owner's per
 
 PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The full schema is a single idempotent file, `src/db/migrations/0001-initial-schema.sql`; TypeScript types live in `src/db/schema/app-schema.ts`. See [DevOps Setup → Database](./devops-setup.md#3-database) and the historical [`docs-backup/database-schema.md`](../docs-backup/database-schema.md).
 
+**Schema:** every table — the `app_*` tables **and** the Better Auth vendor tables — is deployed into one schema, **`auth`** by default, configurable via `DB_SCHEMA` (`src/db/schema-config.ts`). The schema is applied at the **connection level** via `search_path=<DB_SCHEMA>,public`, so all (unqualified) Kysely queries resolve to it with no per-query qualification; the shared extensions (`pgcrypto`, `pg_trgm`) stay in `public`. Setting a different `DB_SCHEMA` per deployment isolates applications by schema with no code changes. See [Configuration → `DB_SCHEMA`](./configuration.md#database-postgresql).
+
 ```mermaid
 erDiagram
     app_organizations ||--o{ app_organization_memberships : has

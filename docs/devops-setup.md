@@ -55,20 +55,22 @@ flowchart TB
 ## 3. Database
 
 1. **Provision PostgreSQL 17** (managed recommended). Create a database and a user.
-2. **Enable extensions** the app expects:
+2. **Enable extensions** the app expects, in the **`public`** schema (kept on the search_path so they resolve from every app schema):
    ```sql
-   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+   CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;  -- gen_random_uuid()
+   CREATE EXTENSION IF NOT EXISTS pg_trgm  WITH SCHEMA public;  -- trigram search
    -- vector is enabled locally; enable only if you confirm production needs it
-   CREATE EXTENSION IF NOT EXISTS vector;
+   CREATE EXTENSION IF NOT EXISTS vector   WITH SCHEMA public;
    ```
-   Locally these are applied automatically by `docker/postgres/init/01-extensions.sql`.
-3. **Use a pooled endpoint** in `DATABASE_URL` on serverless platforms; tune `PGPOOL_MAX` and the timeouts for your host.
-4. **Apply schema before serving traffic** (idempotent):
+   Locally these are applied automatically by `docker/postgres/init/01-extensions.sql`. The migrations also run `create extension if not exists … with schema public`, so this step is belt-and-suspenders.
+3. **Choose the application schema** (optional). All tables (app + Better Auth) deploy into one schema, **`auth`** by default; override with `DB_SCHEMA`. The schema itself is created automatically by the migrate step — you do **not** create it by hand. Applied at the connection level via `search_path=<DB_SCHEMA>,public`. To isolate a second application, give it a different `DB_SCHEMA`.
+4. **Use a pooled endpoint** in `DATABASE_URL` on serverless platforms; tune `PGPOOL_MAX` and the timeouts for your host. Run migrations/seeds/reset against the **direct** (non-pooled) endpoint — a transaction-pooling pooler can drop the session `search_path` (see [Configuration](./configuration.md#database-postgresql) for the `ALTER ROLE … SET search_path` workaround).
+5. **Apply schema before serving traffic** (idempotent; creates the `DB_SCHEMA` schema and provisions all tables into it):
    ```bash
-   pnpm db:auth:migrate   # Better Auth tables
-   pnpm db:app:migrate    # application schema (0001-initial-schema.sql)
+   pnpm db:auth:migrate   # Better Auth tables → DB_SCHEMA
+   pnpm db:app:migrate    # application schema (0001-initial-schema.sql) → DB_SCHEMA
    ```
-5. **Bootstrap the first admin** (one-time):
+6. **Bootstrap the first admin** (one-time):
    ```bash
    pnpm db:seed           # default org + permission catalog + roles + admin user
    ```

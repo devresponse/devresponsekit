@@ -28,8 +28,13 @@
 -- ---------------------------------------------------------------------------
 -- Extensions
 -- ---------------------------------------------------------------------------
-create extension if not exists "pgcrypto"; -- gen_random_uuid()
-create extension if not exists "pg_trgm";  -- trigram indexes for name/email search
+-- Installed into `public` (a shared location on the search_path) so a single
+-- copy of gen_random_uuid() / gin_trgm_ops resolves from every application
+-- schema. The application tables themselves live in DB_SCHEMA (default
+-- `auth`), which the migration runner creates and sets as the search_path's
+-- first entry before this file runs.
+create extension if not exists "pgcrypto" with schema public; -- gen_random_uuid()
+create extension if not exists "pg_trgm" with schema public;  -- trigram indexes for name/email search
 
 -- ---------------------------------------------------------------------------
 -- Core tables

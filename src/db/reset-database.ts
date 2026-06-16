@@ -1,14 +1,16 @@
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
-import { Pool } from "pg";
+import { createAppPool, DB_SCHEMA } from "./schema-config";
 
 /**
  * Destructive local-database reset (testing only).
  *
- * Drops EVERYTHING in the `public` schema — every table (the `app_*`
- * tables, the Better Auth tables, and the `app_schema_migrations` ledger),
- * plus any sequences / types / functions — and recreates an empty schema.
- * After this the database is blank, so the full initial-setup path can be
+ * Drops EVERYTHING in the application schema (`DB_SCHEMA`, default `auth`) —
+ * every table (the `app_*` tables, the Better Auth tables, and the
+ * `app_schema_migrations` ledger), plus any sequences / types / functions —
+ * and recreates an empty schema. The shared `public` schema is left intact
+ * so the PostgreSQL extensions (pgcrypto, pg_trgm) survive. After this the
+ * application schema is blank, so the full initial-setup path can be
  * exercised from scratch:
  *
  *   pnpm db:auth:migrate && pnpm db:app:migrate && pnpm db:seed
@@ -23,7 +25,7 @@ import { Pool } from "pg";
  *
  * Usage:
  *   pnpm db:reset            # dry run — lists tables, changes nothing
- *   pnpm db:reset --yes      # actually drop + recreate the public schema
+ *   pnpm db:reset --yes      # actually drop + recreate the application schema
  *   pnpm db:reset:reload     # drop, then re-run auth + app migrations + seed
  *   pnpm db:reset --yes --force   # also allow a non-local host (careful!)
  *
@@ -94,23 +96,24 @@ async function main() {
   if (!LOCAL_HOSTS.has(host) && !force) {
     console.error(
       `[db:reset] REFUSING: host "${host}" is not local and --force was not given.\n` +
-        `           This command DROPS EVERY TABLE in the public schema.\n` +
+        `           This command DROPS EVERY TABLE in the "${DB_SCHEMA}" schema.\n` +
         `           If you really intend to reset a remote database, re-run with --force.`,
     );
     process.exitCode = 1;
     return;
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = createAppPool();
   try {
     const { rows } = await pool.query<{ tablename: string }>(
-      `select tablename from pg_tables where schemaname = 'public' order by tablename`,
+      `select tablename from pg_tables where schemaname = $1 order by tablename`,
+      [DB_SCHEMA],
     );
 
     if (rows.length === 0) {
-      console.log("[db:reset] the public schema already has no tables.");
+      console.log(`[db:reset] the "${DB_SCHEMA}" schema already has no tables.`);
     } else {
-      console.log(`[db:reset] ${rows.length} table(s) in public:`);
+      console.log(`[db:reset] ${rows.length} table(s) in "${DB_SCHEMA}":`);
       for (const r of rows) console.log(`             - ${r.tablename}`);
     }
 
@@ -122,16 +125,19 @@ async function main() {
       return;
     }
 
-    console.log('\n[db:reset] dropping and recreating schema "public" …');
+    console.log(`\n[db:reset] dropping and recreating schema "${DB_SCHEMA}" …`);
+    // DB_SCHEMA is identifier-validated in schema-config.ts, so it is safe to
+    // interpolate into this DDL. `public` is intentionally left untouched so
+    // the shared extensions (pgcrypto, pg_trgm) survive the reset.
     await pool.query("begin");
     try {
-      await pool.query("drop schema public cascade");
-      await pool.query("create schema public");
-      // Restore the grants Postgres normally puts on a fresh public schema
-      // so the migrator and app role can recreate objects.
+      await pool.query(`drop schema if exists "${DB_SCHEMA}" cascade`);
+      await pool.query(`create schema "${DB_SCHEMA}"`);
+      // Grant to the migrating role so it can recreate objects (the role that
+      // created the schema already owns it; this is defensive for split roles).
       const who = (await pool.query<{ u: string }>("select current_user as u")).rows[0]?.u;
-      if (who) await pool.query(`grant all on schema public to "${who.replace(/"/g, '""')}"`);
-      await pool.query("grant all on schema public to public");
+      if (who)
+        await pool.query(`grant all on schema "${DB_SCHEMA}" to "${who.replace(/"/g, '""')}"`);
       await pool.query("commit");
     } catch (error) {
       await pool.query("rollback");

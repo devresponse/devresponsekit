@@ -36,13 +36,14 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 
 | Variable | Required | Controls |
 | --- | --- | --- |
-| `DATABASE_URL` | **yes** | Primary connection string. On serverless, use a **pooled** endpoint. |
+| `DATABASE_URL` | **yes** | Primary connection string. On serverless, use a **pooled** endpoint. Do **not** add `?schema=…` — it is ignored by `pg`/Kysely; the schema is set via `DB_SCHEMA` (below). |
 | `DATABASE_TEST_URL` | for tests | Isolated test database connection. |
+| `DB_SCHEMA` | no | Schema **all** tables (app + Better Auth) are deployed into. Default `auth`. Applied at the connection level as `search_path=<DB_SCHEMA>,public`; extensions (`pgcrypto`, `pg_trgm`) stay shared in `public`. Set a different value per deployment to **isolate applications by schema**. Must be a plain SQL identifier. |
 | `PGPOOL_MAX` | no | Max pool connections (default 10). |
 | `PG_CONNECT_TIMEOUT_MS` | no | Connection acquisition timeout (default 5000). |
 | `PG_STATEMENT_TIMEOUT_MS` | no | Per-statement server-side ceiling (default 30000). |
 
-> `TODO:` Confirm the exact names/defaults of the pool tuning variables against `src/db/database.ts` before relying on them in production (`PGPOOL_MAX` / `PG_CONNECT_TIMEOUT_MS` / `PG_STATEMENT_TIMEOUT_MS` were reported by code analysis).
+> **Schema & connection poolers:** the connection sets `search_path` via the libpq `options` field. A **transaction-pooling** pooler (PgBouncer transaction mode, some Supabase tiers) can drop session-level `options`. If you use one, set the schema as a server-side role default instead — `ALTER ROLE <app_role> SET search_path = auth, public;` — and run migrations/seeds/reset against the **direct** (non-pooled) endpoint.
 
 ### Social login (all optional — a provider activates only when both id and secret are set)
 
@@ -164,7 +165,8 @@ NODE_ENV=development
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 BETTER_AUTH_SECRET=<32+ random bytes>
 BETTER_AUTH_URL=http://localhost:3000
-DATABASE_URL=postgresql://devresponse:devresponse@localhost:5444/devresponse_db?schema=public
+DATABASE_URL=postgresql://devresponse:devresponse@localhost:5444/devresponse_db
+DB_SCHEMA=auth
 
 # --- Required if using SSO handoff ---
 SSO_HANDOFF_ISSUER=http://localhost:3000

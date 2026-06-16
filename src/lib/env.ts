@@ -23,6 +23,17 @@ const serverEnvSchema = z
     BETTER_AUTH_URL: z.url(),
     DATABASE_URL: z.string().min(1),
     DATABASE_TEST_URL: z.string().optional(),
+    /**
+     * Schema every table is deployed into (app tables + Better Auth tables).
+     * Applied at the connection level via `search_path` (see
+     * `src/db/schema-config.ts`). Must be a plain SQL identifier — it is
+     * interpolated into DDL. Default `auth`; set a different value per
+     * deployment to isolate applications by schema.
+     */
+    DB_SCHEMA: z
+      .string()
+      .regex(/^[a-z_][a-z0-9_]*$/i, "DB_SCHEMA must be a plain SQL identifier")
+      .default("auth"),
     GOOGLE_CLIENT_ID: z.string().optional().default(""),
     GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
     MICROSOFT_CLIENT_ID: z.string().optional().default(""),

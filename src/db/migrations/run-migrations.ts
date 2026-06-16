@@ -2,7 +2,8 @@ import "dotenv/config";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Pool } from "pg";
+import type { Pool } from "pg";
+import { createAppPool, ensureSchema } from "../schema-config";
 
 /**
  * Lightweight migration runner.
@@ -42,9 +43,12 @@ async function main() {
     throw new Error("DATABASE_URL is required to run migrations.");
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = createAppPool();
 
   try {
+    // The target schema must exist before the (unqualified) ledger and
+    // schema DDL run, so they land in DB_SCHEMA rather than `public`.
+    await ensureSchema(pool);
     await ensureMigrationTable(pool);
     const applied = await getApplied(pool);
 

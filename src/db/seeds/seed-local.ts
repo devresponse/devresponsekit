@@ -1,5 +1,6 @@
 import "dotenv/config";
-import { Pool } from "pg";
+import type { Pool } from "pg";
+import { createAppPool, ensureSchema } from "@/db/schema-config";
 import { ADMIN_PERMISSION_CATALOG } from "@/lib/admin/permissions";
 
 const LOCAL_ADMIN_NAME = "Local Admin";
@@ -19,10 +20,14 @@ async function main() {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required to seed the database");
   }
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = createAppPool();
   let inTransaction = false;
 
   try {
+    // Defensive: makes `current_schema()` resolve to DB_SCHEMA even if the
+    // schema was not pre-created. Tables themselves come from the migrations.
+    await ensureSchema(pool);
+
     await pool.query("begin");
     inTransaction = true;
 

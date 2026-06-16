@@ -45,6 +45,8 @@ pnpm db:seed          # seed default org, permission catalog, roles, apps, admin
 pnpm dev              # start the dev server → http://localhost:3000
 ```
 
+> All tables are deployed into the **`auth`** schema (configurable via `DB_SCHEMA`; the migrate steps create it automatically). If you inspect the DB with `psql`, the tables won't be in `public` — use `\dt auth.*` or `SET search_path = auth, public;`. See [Configuration → `DB_SCHEMA`](./configuration.md#database-postgresql).
+
 Sign in with the seeded admin (defaults from `.env`):
 
 - **Email:** `admin@devresponse.local`

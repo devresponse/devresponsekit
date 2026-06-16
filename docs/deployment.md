@@ -38,7 +38,8 @@ There is **no Docker image for the application** in the repository (no `Dockerfi
 | --- | --- | --- |
 | Node.js | 22.x | CI (`.github/workflows/ci.yml`); no `.nvmrc`/`engines` pin (`TODO:` add one) |
 | pnpm | 10.33.2 | `package.json` → `packageManager` |
-| PostgreSQL | 17 (with `pg_trgm`) | `docker-compose.yml` / CI service image |
+| PostgreSQL | 17 (extensions `pgcrypto`/`pg_trgm` in `public`) | `docker-compose.yml` / CI service image |
+| DB schema | `auth` (default; `DB_SCHEMA`) — all tables; created by the migrate step | [Configuration](./configuration.md#database-postgresql) |
 | Listens on | port 3000 (default `next start`) | Next.js default |
 | Needs at runtime | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL` (+ SSO vars if used) | [Configuration](./configuration.md) |
 

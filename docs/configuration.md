@@ -141,7 +141,7 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 | `components.json` | shadcn/ui generator config. |
 | `postcss.config.mjs` | Tailwind/PostCSS. |
 | `docker-compose.yml` | Local PostgreSQL service. |
-| `docker/postgres/init/*.sql` | Postgres extensions on first boot (`vector`, `pg_trgm`). |
+| `docker/postgres/init/*.sql` | Postgres extensions on first boot (`pgcrypto`, `pg_trgm`, `vector`), installed into `public`. |
 | `.npmrc`, `.gitattributes`, `.gitignore` | Tooling/VCS settings. |
 
 ## 4. Local vs production
@@ -149,6 +149,7 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 | Concern | Local | Production |
 | --- | --- | --- |
 | Database | Docker `pgvector/pgvector:pg17` on port 5444 | Managed PostgreSQL 17 with `pg_trgm`; pooled endpoint |
+| DB schema | `auth` (default `DB_SCHEMA`) | `auth`, or a per-app value via `DB_SCHEMA`; extensions in `public` |
 | `NODE_ENV` | `development` | `production` |
 | Secrets | Placeholder values in `.env` | Real, rotated secrets from a secrets manager |
 | Email | Provider unset → outbox-only | Real provider (Resend/Mailgun) |

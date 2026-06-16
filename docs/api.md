@@ -39,6 +39,17 @@ npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o api.d.ts
 
 > Authenticate generated-client requests with `Authorization: Bearer <api-key-or-jwt>`; see [§2 Authentication](#2-authentication).
 
+### Internal admin SDK
+
+The cookie-session **`/api/administrator`** console API has its own committed OpenAPI document, [`docs/openapi-admin.json`](./openapi-admin.json) (built from `src/lib/api-auth/openapi-admin.ts`), and a **pre-generated, zero-dependency TypeScript client** committed under [`sdk/admin/`](../sdk/admin/) (openapi-generator `typescript-fetch`). Regenerate both with:
+
+```bash
+pnpm sdk:admin:generate    # re-export the admin spec + regenerate sdk/admin
+pnpm sdk:admin:typecheck   # type-check the generated client
+```
+
+Unlike the bearer-token v1 client, the admin SDK authenticates with the **session cookie** and must send an `Origin` header on every mutation (the CSRF guard) — see [`sdk/admin/README.md`](../sdk/admin/README.md) for usage.
+
 ## 2. Authentication
 
 ### Cookie session (browser & admin console)
@@ -207,8 +218,8 @@ Query parameters for `launch`: `applicationId` (required), `locale` (optional). 
 
 - `TODO:` Some routes were summarized from structure rather than line-by-line (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`). Confirm exact request/response shapes against the handlers or the generated `openapi.json`.
 - `TODO:` Document the exact `account.*` scope list and the supported `export` resources/formats. (The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json).)
-- A committed OpenAPI 3.1 spec now ships at [`docs/openapi.json`](./openapi.json) for client generation (see [Generating a client](#generating-a-client)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
-- The OpenAPI spec covers the **`/api/v1`** machine surface only (the client-generation target). The cookie-session `/api/administrator/*` console API is intentionally excluded — it's CSRF/cookie-based and not meant for generated SDKs.
+- Committed OpenAPI 3.1 specs ship for both surfaces — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`) — for client generation (see [Generating a client](#generating-a-client) and [Internal admin SDK](#internal-admin-sdk)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
+- The cookie-session admin SDK is committed under [`sdk/admin/`](../sdk/admin/); the v1 client is generated on demand from `docs/openapi.json`.
 
 ---
 

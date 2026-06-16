@@ -1,5 +1,5 @@
 import { Kysely, PostgresDialect } from "kysely";
-import { Pool } from "pg";
+import { createAppPool } from "./schema-config";
 import type { AppDatabase } from "./schema/app-schema";
 
 /**
@@ -9,12 +9,14 @@ import type { AppDatabase } from "./schema/app-schema";
  * compatible adapter so that auth storage and app storage share the same
  * database without introducing Prisma or Drizzle.
  *
+ * The pool is built via `createAppPool` so every connection starts with the
+ * configured `search_path` (`DB_SCHEMA`, default `auth`) — see
+ * `./schema-config`. This is the RUNTIME pool: it never creates schemas
+ * (that is the migration/seed/reset tools' job).
+ *
  * The pool is process-wide; do not call `db.destroy()` from request code.
  */
-const connectionString = process.env.DATABASE_URL;
-
-export const pgPool = new Pool({
-  connectionString,
+export const pgPool = createAppPool({
   max: Number(process.env.PGPOOL_MAX ?? 10),
   idleTimeoutMillis: 30_000,
   // Fail fast instead of blocking forever when every connection is checked

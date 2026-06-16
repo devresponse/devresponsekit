@@ -1,5 +1,6 @@
 import "dotenv/config";
-import { Pool } from "pg";
+import type { Pool } from "pg";
+import { createAppPool, ensureSchema } from "@/db/schema-config";
 import { ADMIN_PERMISSION_CATALOG, ANY_ADMIN_PERMISSION } from "@/lib/admin/permissions";
 
 /**
@@ -330,8 +331,11 @@ async function main() {
     );
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = createAppPool();
   try {
+    // Ensure the schema namespace exists so `current_schema()` resolves to
+    // DB_SCHEMA; `assertSchema` still verifies the migrations actually ran.
+    await ensureSchema(pool);
     await assertSchema(pool);
     await ensurePermissions(pool);
     for (const org of ORGS) {

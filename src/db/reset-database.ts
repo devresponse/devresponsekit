@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { spawnSync } from "node:child_process";
 import { Pool } from "pg";
 
 /**
@@ -23,17 +24,51 @@ import { Pool } from "pg";
  * Usage:
  *   pnpm db:reset            # dry run — lists tables, changes nothing
  *   pnpm db:reset --yes      # actually drop + recreate the public schema
+ *   pnpm db:reset:reload     # drop, then re-run auth + app migrations + seed
  *   pnpm db:reset --yes --force   # also allow a non-local host (careful!)
+ *
+ * `--reload` runs the rebuild steps IN-PROCESS (via spawnSync) rather than
+ * relying on a shell `&&` chain in package.json — that chaining is not
+ * portable across shells (PowerShell 5.1 has no `&&`, and pnpm's
+ * script-shell differs by platform), which could leave the app tables
+ * un-recreated. Driving the steps from Node guarantees the same ordered,
+ * fail-fast behaviour everywhere.
  */
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0", ""]);
 
-function parseArgs(argv: string[]): { yes: boolean; force: boolean } {
+function parseArgs(argv: string[]): { yes: boolean; force: boolean; reload: boolean } {
   const args = new Set(argv.slice(2));
   return {
     yes: args.has("--yes") || args.has("-y"),
     force: args.has("--force") || args.has("-f"),
+    reload: args.has("--reload"),
   };
+}
+
+/**
+ * Runs the initial-setup steps in order, aborting on the first failure.
+ * Each is spawned through the OS shell (cmd.exe on Windows, /bin/sh
+ * elsewhere) as a SINGLE command — never a `&&` chain — so it works the
+ * same regardless of the caller's shell.
+ */
+function runReloadSteps(): void {
+  const steps: Array<{ label: string; command: string }> = [
+    { label: "Better Auth migrations", command: "pnpm db:auth:migrate" },
+    { label: "application schema (0001-initial-schema.sql)", command: "pnpm db:app:migrate" },
+    { label: "local seed", command: "pnpm db:seed" },
+  ];
+  for (const { label, command } of steps) {
+    console.log(`\n[db:reset] → ${label}  (${command})`);
+    const result = spawnSync(command, { stdio: "inherit", shell: true });
+    if (result.status !== 0) {
+      console.error(
+        `[db:reset] reload aborted — "${command}" exited with code ${result.status ?? "signal"}.`,
+      );
+      process.exit(result.status ?? 1);
+    }
+  }
+  console.log("\n[db:reset] reload complete — schema + seed rebuilt from an empty database.");
 }
 
 function describeTarget(url: string): { host: string; database: string } {
@@ -51,7 +86,7 @@ async function main() {
     throw new Error("DATABASE_URL is required to reset the database.");
   }
 
-  const { yes, force } = parseArgs(process.argv);
+  const { yes, force, reload } = parseArgs(process.argv);
   const { host, database } = describeTarget(databaseUrl);
 
   console.log(`[db:reset] target  host=${host}  database=${database}`);
@@ -103,14 +138,19 @@ async function main() {
       throw error;
     }
 
-    console.log(
-      "[db:reset] done — the database is empty.\n" +
-        "           Reload the initial setup with:\n" +
-        "             pnpm db:auth:migrate && pnpm db:app:migrate && pnpm db:seed\n" +
-        "           (or in one step: pnpm db:reset:reload)",
-    );
+    console.log("[db:reset] done — the database is empty.");
   } finally {
     await pool.end();
+  }
+
+  if (reload) {
+    runReloadSteps();
+  } else {
+    console.log(
+      "           Reload the initial setup with:\n" +
+        "             pnpm db:reset:reload\n" +
+        "           (or manually: pnpm db:auth:migrate, then db:app:migrate, then db:seed)",
+    );
   }
 }
 

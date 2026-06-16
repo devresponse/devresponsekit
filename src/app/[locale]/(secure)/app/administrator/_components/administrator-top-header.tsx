@@ -35,6 +35,7 @@ export function AdministratorTopHeader({ locale, permissions }: AdministratorTop
   const tNav = useTranslations("administrator.nav");
   const tUsers = useTranslations("administrator.users");
   const tRoles = useTranslations("administrator.roles");
+  const tGroups = useTranslations("administrator.groups");
   const tOrganizations = useTranslations("administrator.orgs");
   const tEnterpriseApps = useTranslations("administrator.enterpriseApps");
   const tApiKeys = useTranslations("administrator.apiKeys");
@@ -43,6 +44,7 @@ export function AdministratorTopHeader({ locale, permissions }: AdministratorTop
     "new-enterprise-app": tEnterpriseApps("newButton"),
     "new-organization": tOrganizations("newButton"),
     "new-role": tRoles("newButton"),
+    "new-group": tGroups("newButton"),
     "new-user": tUsers("newButton"),
     "new-api-key": tApiKeys("newButton"),
   };

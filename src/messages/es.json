@@ -196,6 +196,7 @@
       "access": "Acceso",
       "roles": "Roles",
       "permissions": "Permisos",
+      "groups": "Grupos",
       "tenancy": "Tenencia",
       "organizations": "Organizaciones",
       "memberships": "Miembros",
@@ -208,6 +209,68 @@
       "communication": "Comunicación",
       "emailOutbox": "Bandeja de salida",
       "emailTemplates": "Plantillas de correo"
+    },
+    "groups": {
+      "title": "Grupos",
+      "description": "Cohortes dentro de una organización que agrupan roles y reúnen usuarios.",
+      "newButton": "Nuevo grupo",
+      "deleteButton": "Eliminar",
+      "memberCount": "{count, plural, =0 {Sin miembros} one {# miembro} other {# miembros}}",
+      "columns": {
+        "key": "Clave",
+        "name": "Nombre",
+        "roleCount": "Roles",
+        "memberCount": "Miembros",
+        "createdAt": "Creado"
+      },
+      "deleteDialog": {
+        "title": "Eliminar grupo",
+        "description": "Esto elimina el grupo y sus roles y membresías. Los miembros conservan los roles asignados directamente.",
+        "confirm": "Eliminar grupo"
+      },
+      "fields": {
+        "key": "Clave",
+        "name": "Nombre",
+        "description": "Descripción"
+      },
+      "tabs": {
+        "roles": "Roles",
+        "members": "Miembros",
+        "settings": "Ajustes"
+      },
+      "new": {
+        "title": "Crear grupo",
+        "submit": "Crear grupo",
+        "cancel": "Cancelar",
+        "errorToast": "No se pudo crear el grupo.",
+        "organizationRequired": "Selecciona una organización para este grupo."
+      },
+      "settings": {
+        "save": "Guardar cambios",
+        "saved": "Guardado.",
+        "errorToast": "No se pudieron guardar los cambios.",
+        "keyReadOnly": "La clave no se puede cambiar después de la creación."
+      },
+      "rolesEditor": {
+        "available": "Disponibles",
+        "assigned": "Asignados",
+        "searchAvailable": "Buscar roles disponibles",
+        "searchAssigned": "Buscar roles asignados",
+        "add": "Añadir",
+        "remove": "Quitar",
+        "save": "Guardar cambios",
+        "saving": "Guardando…",
+        "saved": "Roles actualizados.",
+        "noResults": "No hay roles coincidentes.",
+        "errorToast": "No se pudieron actualizar los roles."
+      },
+      "members": {
+        "columns": {
+          "email": "Correo electrónico",
+          "name": "Nombre",
+          "joinedAt": "Se unió"
+        }
+      }
     },
     "overview": {
       "title": "Resumen del administrador",

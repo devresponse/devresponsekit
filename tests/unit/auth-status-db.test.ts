@@ -47,16 +47,20 @@ vi.mock("@/db/database", () => ({
           }),
         };
       }
-      // app_user_roles join chain
-      return {
-        innerJoin: () => ({
-          innerJoin: () => ({
-            select: () => ({
-              where: () => ({ where: () => ({ execute: rolesExecute }) }),
-            }),
-          }),
-        }),
-      };
+      // Permission-resolution chains: the direct (app_user_roles) and
+      // group (app_group_memberships) builders feed a UNION; only the left
+      // builder's `.execute()` runs. A generic proxy handles any method chain
+      // (innerJoin/select/where/union) and routes `.execute` to rolesExecute.
+      const chain: unknown = new Proxy(
+        {},
+        {
+          get(_t, prop) {
+            if (prop === "execute") return rolesExecute;
+            return () => chain;
+          },
+        },
+      );
+      return chain;
     },
   },
 }));
@@ -114,7 +118,7 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(rolesExecute).not.toHaveBeenCalled();
   });
 
-  it("populates permissions from the role join when the user has a membership", async () => {
+  it("populates permissions from the effective-role (direct ∪ group) join when the user has a membership", async () => {
     userTakeFirst.mockResolvedValue({
       id: "u-1",
       primary_email: "u@x.com",
@@ -122,12 +126,42 @@ describe("getUserAccessContext (DB-backed)", () => {
       preferred_locale: "en",
     });
     membershipTakeFirst.mockResolvedValue({ organization_id: "o-1", status: "active" });
+    // The UNION query (ADR-0002) returns the deduplicated key set.
     rolesExecute.mockResolvedValue([{ key: "shell.view" }, { key: "audit.view" }]);
 
     const ctx = await getUserAccessContext("ba-1");
     expect(ctx.organizationId).toBe("o-1");
     expect(ctx.membershipStatus).toBe("active");
     expect(ctx.permissions).toEqual(["shell.view", "audit.view"]);
+  });
+
+  it("includes a permission reachable ONLY through a group (no direct role grants it)", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-1", status: "active" });
+    // Effective set = direct (shell.view) ∪ via-group (admin.users.read).
+    rolesExecute.mockResolvedValue([{ key: "shell.view" }, { key: "admin.users.read" }]);
+
+    const ctx = await getUserAccessContext("ba-1");
+    expect(ctx.permissions).toContain("admin.users.read");
+  });
+
+  it("deduplicates a permission granted by BOTH a direct role and a group", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-1", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "admin.users.read" }, { key: "admin.users.read" }]);
+
+    const ctx = await getUserAccessContext("ba-1");
+    expect(ctx.permissions).toEqual(["admin.users.read"]);
   });
 
   it("selects the org named by the active_org cookie (not the earliest)", async () => {

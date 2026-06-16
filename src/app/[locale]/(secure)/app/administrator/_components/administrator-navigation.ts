@@ -14,6 +14,7 @@ export interface AdministratorNavigationItem {
 export type AdministratorNavigationActionId =
   | "new-user"
   | "new-role"
+  | "new-group"
   | "new-organization"
   | "new-enterprise-app"
   | "new-api-key";
@@ -91,12 +92,24 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         icon: "key-round",
         requires: ["admin.roles.read"],
       },
+      {
+        id: "groups",
+        href: "/app/administrator/groups",
+        labelKey: "groups",
+        icon: "users-round",
+        requires: ["admin.groups.read"],
+      },
     ],
     actions: [
       {
         id: "new-role",
         href: "/app/administrator/roles/new",
         requires: ["admin.roles.create"],
+      },
+      {
+        id: "new-group",
+        href: "/app/administrator/groups/new",
+        requires: ["admin.groups.create"],
       },
     ],
   },

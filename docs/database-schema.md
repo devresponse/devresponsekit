@@ -47,6 +47,13 @@ erDiagram
   app_organizations ||--o{ app_user_roles       : "within org"
   app_roles         ||--o{ app_user_roles       : "of role"
 
+  %% ---- Groups (org-scoped cohorts that bundle roles) ----
+  app_organizations ||--o{ app_groups             : "owns"
+  app_groups        ||--o{ app_group_roles        : "bundles"
+  app_roles         ||--o{ app_group_roles        : "granted via"
+  app_groups        ||--o{ app_group_memberships  : "collects"
+  app_users         ||--o{ app_group_memberships  : "member of"
+
   %% ---- SSO & Applications ----
   app_organizations         |o--o{ app_enterprise_applications : "scopes (nullable)"
   app_users                 ||--o{ app_sso_handoff_nonces      : "initiates"
@@ -139,6 +146,27 @@ erDiagram
     uuid app_user_id PK,FK
     uuid organization_id PK,FK
     uuid role_id PK,FK
+    timestamptz created_at
+  }
+
+  app_groups {
+    uuid id PK
+    uuid organization_id FK "owning org"
+    text key "unique per org"
+    text name
+    text description
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  app_group_roles {
+    uuid group_id PK,FK
+    uuid role_id PK,FK
+  }
+
+  app_group_memberships {
+    uuid group_id PK,FK
+    uuid app_user_id PK,FK
     timestamptz created_at
   }
 
@@ -288,9 +316,19 @@ erDiagram
 | Table | Purpose | Key relationships |
 | --- | --- | --- |
 | `app_roles` | Named role, optionally scoped to an organization (`organization_id` nullable ⇒ a global role). Unique on `(organization_id, key)`. | → `app_organizations`. |
-| `app_permissions` | The permission catalog (`key` unique). The `admin.*` keys must stay in sync with `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts` (30 keys + `superuser`, all seeded by `0001`). `pnpm db:seed` adds the two user-level keys `shell.view` and `audit.view`. | — |
+| `app_permissions` | The permission catalog (`key` unique). The `admin.*` keys must stay in sync with `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts` (35 keys + `superuser`, all seeded by `0001`). `pnpm db:seed` adds the two user-level keys `shell.view` and `audit.view`. | — |
 | `app_role_permissions` | Junction: which permissions a role grants. Composite PK `(role_id, permission_id)`. | → `app_roles`, → `app_permissions`. |
 | `app_user_roles` | Junction: which roles a user holds in which org. Composite PK `(app_user_id, organization_id, role_id)`. | → `app_users`, → `app_organizations`, → `app_roles`. |
+
+### Groups (org-scoped cohorts)
+
+Groups (per [ADR-0002](adr/0002-organization-groups.md)) are org-scoped cohorts that bundle roles and collect users. A group grants no authority of its own — a member's effective roles in an org are the union of direct (`app_user_roles`) and via-group (`app_group_memberships` → `app_group_roles`) assignments. Permission resolution lives in `getUserAccessContext` (`src/lib/auth-status.ts`).
+
+| Table | Purpose | Key relationships |
+| --- | --- | --- |
+| `app_groups` | An org-scoped group. Unique on `(organization_id, key)`. Always org-scoped (never global). | → `app_organizations` (cascade delete). |
+| `app_group_roles` | Junction: which roles a group bundles. Composite PK `(group_id, role_id)`. Roles must belong to the group's org (or be global); bundling a superuser-granting role is SUPERADMIN-only. | → `app_groups`, → `app_roles`. |
+| `app_group_memberships` | Junction: which users belong to a group. Composite PK `(group_id, app_user_id)`. A user must hold an active membership in the group's org to join. | → `app_groups`, → `app_users`. |
 
 ### SSO &amp; Applications
 

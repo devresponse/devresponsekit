@@ -94,6 +94,30 @@ export interface AppUserRolesTable {
   created_at: Generated<Timestamp>;
 }
 
+/** Organization group — a cohort within one org that bundles roles (ADR-0002). */
+export interface AppGroupsTable {
+  id: Generated<string>;
+  organization_id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
+/** Roles a group confers (route layer enforces same-org roles). */
+export interface AppGroupRolesTable {
+  group_id: string;
+  role_id: string;
+}
+
+/** Users that belong to a group. */
+export interface AppGroupMembershipsTable {
+  group_id: string;
+  app_user_id: string;
+  created_at: Generated<Timestamp>;
+}
+
 export interface AppEnterpriseApplicationsTable {
   id: string;
   organization_id: string | null;
@@ -249,6 +273,9 @@ export interface AppDatabase {
   app_permissions: AppPermissionsTable;
   app_role_permissions: AppRolePermissionsTable;
   app_user_roles: AppUserRolesTable;
+  app_groups: AppGroupsTable;
+  app_group_roles: AppGroupRolesTable;
+  app_group_memberships: AppGroupMembershipsTable;
   app_enterprise_applications: AppEnterpriseApplicationsTable;
   app_sso_handoff_nonces: AppSsoHandoffNoncesTable;
   app_audit_events: AppAuditEventsTable;

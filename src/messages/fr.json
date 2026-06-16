@@ -196,6 +196,7 @@
       "access": "Accès",
       "roles": "Rôles",
       "permissions": "Permissions",
+      "groups": "Groupes",
       "tenancy": "Tenance",
       "organizations": "Organisations",
       "memberships": "Adhésions",
@@ -208,6 +209,68 @@
       "communication": "Communication",
       "emailOutbox": "Boîte d'envoi",
       "emailTemplates": "Modèles d'e-mail"
+    },
+    "groups": {
+      "title": "Groupes",
+      "description": "Cohortes au sein d'une organisation qui regroupent des rôles et rassemblent des utilisateurs.",
+      "newButton": "Nouveau groupe",
+      "deleteButton": "Supprimer",
+      "memberCount": "{count, plural, =0 {Aucun membre} one {# membre} other {# membres}}",
+      "columns": {
+        "key": "Clé",
+        "name": "Nom",
+        "roleCount": "Rôles",
+        "memberCount": "Membres",
+        "createdAt": "Créé"
+      },
+      "deleteDialog": {
+        "title": "Supprimer le groupe",
+        "description": "Ceci supprime le groupe ainsi que ses rôles et ses adhésions. Les membres conservent les rôles qui leur sont attribués directement.",
+        "confirm": "Supprimer le groupe"
+      },
+      "fields": {
+        "key": "Clé",
+        "name": "Nom",
+        "description": "Description"
+      },
+      "tabs": {
+        "roles": "Rôles",
+        "members": "Membres",
+        "settings": "Paramètres"
+      },
+      "new": {
+        "title": "Créer un groupe",
+        "submit": "Créer le groupe",
+        "cancel": "Annuler",
+        "errorToast": "Impossible de créer le groupe.",
+        "organizationRequired": "Sélectionnez une organisation pour ce groupe."
+      },
+      "settings": {
+        "save": "Enregistrer",
+        "saved": "Enregistré.",
+        "errorToast": "Impossible d'enregistrer les modifications.",
+        "keyReadOnly": "La clé ne peut pas être modifiée après la création."
+      },
+      "rolesEditor": {
+        "available": "Disponibles",
+        "assigned": "Attribués",
+        "searchAvailable": "Rechercher des rôles disponibles",
+        "searchAssigned": "Rechercher des rôles attribués",
+        "add": "Ajouter",
+        "remove": "Retirer",
+        "save": "Enregistrer",
+        "saving": "Enregistrement…",
+        "saved": "Rôles mis à jour.",
+        "noResults": "Aucun rôle correspondant.",
+        "errorToast": "Impossible de mettre à jour les rôles."
+      },
+      "members": {
+        "columns": {
+          "email": "E-mail",
+          "name": "Nom",
+          "joinedAt": "Rejoint"
+        }
+      }
     },
     "overview": {
       "title": "Aperçu de l'administrateur",

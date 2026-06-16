@@ -81,11 +81,11 @@ describe("isPathInsideRoot", () => {
 
 describe("resolveDocFile (against the repo docs root)", () => {
   it("resolves an existing document by slug", async () => {
-    const resolved = await resolveDocFile("get-started");
+    const resolved = await resolveDocFile("developer-onboarding");
     expect(resolved).not.toBeNull();
-    expect(resolved!.slug).toBe("get-started");
+    expect(resolved!.slug).toBe("developer-onboarding");
     expect(resolved!.format).toBe("md");
-    expect(resolved!.absPath.endsWith("get-started.md")).toBe(true);
+    expect(resolved!.absPath.endsWith("developer-onboarding.md")).toBe(true);
   });
 
   it("returns null for traversal, dotfiles, and misses", async () => {

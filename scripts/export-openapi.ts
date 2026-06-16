@@ -3,13 +3,18 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
+import { buildAdminOpenApiDocument } from "@/lib/api-auth/openapi-admin";
 
 /**
- * Exports the `/api/v1` OpenAPI 3.1 document to a committed static file
- * (`docs/openapi.json`) so API clients can be generated WITHOUT booting the
- * server. The same `buildOpenApiDocument` powers the live `/api/v1/openapi.json`
- * route, so the static file never describes a different API than the running
- * one — a drift guard test (`tests/unit/openapi-export.test.ts`) keeps them
+ * Exports the OpenAPI 3.1 documents to committed static files so API clients
+ * can be generated WITHOUT booting the server:
+ *   - `docs/openapi.json`       — the public `/api/v1` machine API.
+ *   - `docs/openapi-admin.json` — the cookie-session `/api/administrator` API
+ *     (the source for the internal admin SDK under `sdk/admin/`).
+ *
+ * The same builders power the live `/api/v1/openapi.json` route and the SDK,
+ * so the static files never describe a different API than the running one —
+ * drift-guard tests (`tests/unit/openapi-export.test.ts`) keep them
  * byte-identical.
  *
  *   pnpm openapi:export                 # default server URL
@@ -24,16 +29,23 @@ export function baseUrlFrom(argv: string[]): string {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const OUTPUT_FILE = path.join(__dirname, "..", "docs", "openapi.json");
+export const ADMIN_OUTPUT_FILE = path.join(__dirname, "..", "docs", "openapi-admin.json");
 
 /** Canonical serialized form — 2-space JSON with a trailing newline. */
 export function serializeOpenApi(baseUrl: string): string {
   return `${JSON.stringify(buildOpenApiDocument(baseUrl), null, 2)}\n`;
 }
 
+export function serializeAdminOpenApi(baseUrl: string): string {
+  return `${JSON.stringify(buildAdminOpenApiDocument(baseUrl), null, 2)}\n`;
+}
+
 async function main() {
   const baseUrl = baseUrlFrom(process.argv);
   await fs.writeFile(OUTPUT_FILE, serializeOpenApi(baseUrl), "utf8");
   console.log(`[openapi] wrote docs/openapi.json (server: ${baseUrl}/api/v1)`);
+  await fs.writeFile(ADMIN_OUTPUT_FILE, serializeAdminOpenApi(baseUrl), "utf8");
+  console.log(`[openapi] wrote docs/openapi-admin.json (server: ${baseUrl}/api/administrator)`);
 }
 
 // Only run when invoked directly (not when imported by the drift test).

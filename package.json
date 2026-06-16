@@ -23,6 +23,8 @@
     "db:reset:reload": "tsx src/db/reset-database.ts --yes --reload",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",
     "openapi:export": "tsx scripts/export-openapi.ts",
+    "sdk:admin:generate": "pnpm openapi:export && npx --yes @openapitools/openapi-generator-cli generate -i docs/openapi-admin.json -g typescript-fetch -o sdk/admin --additional-properties=supportsES6=true,typescriptThreePlus=true",
+    "sdk:admin:typecheck": "tsc -p sdk/admin/tsconfig.json",
     "test": "node scripts/test-shards.mjs",
     "test:serial": "vitest run",
     "test:unit": "vitest run tests/unit",

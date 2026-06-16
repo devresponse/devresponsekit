@@ -21,23 +21,16 @@ All handlers are `dynamic = "force-dynamic"` (no caching of authorized data). Ev
 
 > **Authoritative machine spec:** the `/api/v1` surface is described by an OpenAPI 3.1 document — served live at **`GET /api/v1/openapi.json`** and committed as **[`docs/openapi.json`](./openapi.json)** for offline use. Both are produced by the same builder (`src/lib/api-auth/openapi.ts`), and a test keeps them in sync. Treat the spec as the source of truth for the `/api/v1` surface; this page is the human-readable companion.
 
-### Generating a client
+### Clients & SDKs
 
-Point any OpenAPI generator at the committed `docs/openapi.json` (no running server needed). Regenerate the file after changing the API with `pnpm openapi:export`. Each operation has a stable `operationId` (e.g. `listUsers`, `createUser`, `issueToken`) so generated method names are predictable.
+Two surfaces, two client approaches:
 
-```bash
-# TypeScript types only
-npx openapi-typescript docs/openapi.json -o src/generated/api.d.ts
+- **v1 machine API** (`/api/v1`) — generate a typed client on demand from [`docs/openapi.json`](./openapi.json) (or the live `GET /api/v1/openapi.json`); authenticate with `Authorization: Bearer <api-key-or-jwt>`.
+- **Admin console API** (`/api/administrator`) — a **pre-generated, zero-dependency** TypeScript SDK is committed at [`sdk/admin/`](../sdk/admin/) (from [`docs/openapi-admin.json`](./openapi-admin.json)); authenticate with the session cookie + an `Origin` header on mutations. Regenerate with `pnpm sdk:admin:generate`.
 
-# A full typed client (example: openapi-generator)
-npx @openapitools/openapi-generator-cli generate \
-  -i docs/openapi.json -g typescript-fetch -o ./clients/ts
+Every operation has a stable `operationId` (`listUsers`, `createUser`, `issueToken`, …) so generated method names are predictable.
 
-# Or against a running server
-npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o api.d.ts
-```
-
-> Authenticate generated-client requests with `Authorization: Bearer <api-key-or-jwt>`; see [§2 Authentication](#2-authentication).
+> **Full walkthrough — authentication, generating/using a client, pagination, errors, and troubleshooting for both surfaces — is in [API Clients & SDKs](./api-clients.md).**
 
 ## 2. Authentication
 
@@ -207,8 +200,8 @@ Query parameters for `launch`: `applicationId` (required), `locale` (optional). 
 
 - `TODO:` Some routes were summarized from structure rather than line-by-line (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`). Confirm exact request/response shapes against the handlers or the generated `openapi.json`.
 - `TODO:` Document the exact `account.*` scope list and the supported `export` resources/formats. (The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json).)
-- A committed OpenAPI 3.1 spec now ships at [`docs/openapi.json`](./openapi.json) for client generation (see [Generating a client](#generating-a-client)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
-- The OpenAPI spec covers the **`/api/v1`** machine surface only (the client-generation target). The cookie-session `/api/administrator/*` console API is intentionally excluded — it's CSRF/cookie-based and not meant for generated SDKs.
+- Committed OpenAPI 3.1 specs ship for both surfaces — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`) — for client generation (see [Generating a client](#generating-a-client) and [Internal admin SDK](#internal-admin-sdk)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
+- The cookie-session admin SDK is committed under [`sdk/admin/`](../sdk/admin/); the v1 client is generated on demand from `docs/openapi.json`.
 
 ---
 

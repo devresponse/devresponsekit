@@ -14,6 +14,7 @@ export default tseslint.config(
       "out/**",
       "dist/**",
       "src/db/schema/generated.ts",
+      "sdk/**",
       "coverage/**",
       "playwright-report/**",
       "test-results/**",

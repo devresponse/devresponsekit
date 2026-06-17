@@ -1246,6 +1246,10 @@
     "requiredLegend": "indique un champ obligatoire",
     "key": "Utilisez uniquement des lettres, des chiffres et les caractères . _ - :",
     "slug": "Utilisez des minuscules, des chiffres et des traits d'union.",
-    "uuid": "Identifiant invalide."
+    "uuid": "Identifiant invalide.",
+    "appId": "Utilisez des minuscules, des chiffres et les caractères . _ -",
+    "subdomain": "Utilisez des minuscules, des chiffres et des traits d'union.",
+    "ssoAudience": "Utilisez des minuscules, des chiffres et les caractères . _ : -",
+    "number": "Saisissez un nombre valide."
   }
 }

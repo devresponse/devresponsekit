@@ -1243,6 +1243,9 @@
     "passwordMin": "Password must be at least 8 characters.",
     "passwordMax": "Password must be at most 128 characters.",
     "max": "This value is too long.",
-    "requiredLegend": "indicates a required field"
+    "requiredLegend": "indicates a required field",
+    "key": "Use only letters, numbers, and the characters . _ - :",
+    "slug": "Use lowercase letters, numbers, and hyphens.",
+    "uuid": "Invalid identifier."
   }
 }

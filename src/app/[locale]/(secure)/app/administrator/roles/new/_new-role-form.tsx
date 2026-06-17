@@ -1,30 +1,35 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { RequiredLegend } from "@/components/ui/required-legend";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import { createRoleSchema, type CreateRoleInput } from "@/lib/validation/roles";
 import { OrganizationPicker } from "../../_components/organization-picker";
 
 /**
- * Client-side new-role form (plan §8.5 + §8.6 — Settings analogue).
- *
- * Mirrors the new-user form's controlled-input style so the two forms
- * share a single pattern. Validation echoes the server Zod schema in
- * `/api/administrator/roles/route.ts` so the user sees the same rules
- * the server enforces; the server is still the source of truth.
+ * Client-side new-role form (plan §8.5; docs/form-validation.md). React Hook
+ * Form + the shared `createRoleSchema` (same schema the API route enforces):
+ * schema-derived required markers, field-level errors with a red border, and
+ * a 409 mapped onto the key field.
  *
  * Scope (ADR-0001):
  *   - a SUPERADMIN may create a Global role or scope it to any org, so the
  *     {@link OrganizationPicker} is shown with the Global option;
  *   - an ORG ADMIN may only create a role in their own org, so no picker is
- *     shown and `defaultOrganizationId` (their org) is sent — a global role
- *     would be rejected with 403.
+ *     shown and `defaultOrganizationId` (their org) is submitted — a global
+ *     role would be rejected with 403.
  */
-const KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
-
 export function NewRoleForm({
   locale,
   showOrgPicker,
@@ -38,135 +43,143 @@ export function NewRoleForm({
   const tErr = useTranslations("administrator.errors");
   const router = useRouter();
 
-  const [organizationId, setOrganizationId] = useState<string | null>(defaultOrganizationId);
-  const [key, setKey] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const form = useZodForm<CreateRoleInput>(createRoleSchema, {
+    defaultValues: {
+      key: "",
+      name: "",
+      description: "",
+      organizationId: defaultOrganizationId,
+    },
+  });
 
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-    if (!KEY_RE.test(key) || key.length === 0 || key.length > 120) {
-      setError(tErr("invalidBody"));
-      return;
-    }
-    if (name.trim().length === 0) {
-      setError(tErr("invalidBody"));
-      return;
-    }
-
-    setSubmitting(true);
+  const onValid = async (values: CreateRoleInput) => {
+    form.clearErrors("root");
     try {
       const res = await fetch("/api/administrator/roles", {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          key: key.trim(),
-          name: name.trim(),
-          description: description.trim() || undefined,
-          organizationId,
+          key: values.key.trim(),
+          name: values.name.trim(),
+          description: values.description?.trim() || undefined,
+          organizationId: values.organizationId ?? null,
         }),
       });
       if (res.status === 201) {
         const body = (await res.json()) as { id?: string };
-        if (body.id) {
-          router.push(`/${locale}/app/administrator/roles/${body.id}`);
-          router.refresh();
-          return;
-        }
-        router.push(`/${locale}/app/administrator/roles`);
+        router.push(
+          body.id
+            ? `/${locale}/app/administrator/roles/${body.id}`
+            : `/${locale}/app/administrator/roles`,
+        );
+        router.refresh();
         return;
       }
       if (res.status === 409) {
-        setError(tErr("keyTaken"));
+        form.setError("key", { type: "server", message: tErr("keyTaken") });
         return;
       }
       if (res.status === 400) {
-        setError(tErr("invalidBody"));
+        form.setError("root", { type: "server", message: tErr("invalidBody") });
         return;
       }
       if (res.status === 403) {
-        setError(tErr("forbidden"));
+        form.setError("root", { type: "server", message: tErr("forbidden") });
         return;
       }
-      setError(t("new.errorToast"));
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     } catch {
-      setError(t("new.errorToast"));
-    } finally {
-      setSubmitting(false);
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     }
   };
 
+  const rootError = form.formState.errors.root?.message;
+
   return (
-    <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
-      {showOrgPicker ? (
-        <OrganizationPicker
-          id="role-organization"
-          includeGlobal
-          value={organizationId}
-          onChange={setOrganizationId}
+    <Form {...form} schema={createRoleSchema}>
+      <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
+        <RequiredLegend />
+
+        {showOrgPicker ? (
+          <FormField
+            control={form.control}
+            name="organizationId"
+            render={({ field }) => (
+              // The picker renders its own label and manages a valid value
+              // (an org id or null for Global), so it isn't a FormControl child.
+              <OrganizationPicker
+                id="role-organization"
+                includeGlobal
+                value={field.value ?? null}
+                onChange={field.onChange}
+              />
+            )}
+          />
+        ) : null}
+
+        <FormField
+          control={form.control}
+          name="key"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.key")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      ) : null}
 
-      <div className="space-y-2">
-        <Label htmlFor="role-key">{t("fields.key")}</Label>
-        <Input
-          id="role-key"
-          type="text"
-          required
-          minLength={1}
-          maxLength={120}
-          value={key}
-          onChange={(e) => setKey(e.currentTarget.value)}
-          aria-invalid={error !== null && !KEY_RE.test(key) ? true : undefined}
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.name")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="role-name">{t("fields.name")}</Label>
-        <Input
-          id="role-name"
-          type="text"
-          required
-          maxLength={200}
-          value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
+        <FormField
+          control={form.control}
+          name="description"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.description")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} value={field.value ?? ""} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="role-description">{t("fields.description")}</Label>
-        <Input
-          id="role-description"
-          type="text"
-          maxLength={1000}
-          value={description}
-          onChange={(e) => setDescription(e.currentTarget.value)}
-        />
-      </div>
+        {rootError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {rootError}
+          </p>
+        ) : null}
 
-      {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="flex items-center gap-2">
-        <Button type="submit" disabled={submitting}>
-          {t("new.submit")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting}
-          onClick={() => router.push(`/${locale}/app/administrator/roles`)}
-        >
-          {t("new.cancel")}
-        </Button>
-      </div>
-    </form>
+        <div className="flex items-center gap-2">
+          <Button type="submit" disabled={form.formState.isSubmitting}>
+            {t("new.submit")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={form.formState.isSubmitting}
+            onClick={() => router.push(`/${locale}/app/administrator/roles`)}
+          >
+            {t("new.cancel")}
+          </Button>
+        </div>
+      </form>
+    </Form>
   );
 }

@@ -29,10 +29,15 @@ function jsonOk(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+// Org ids must be real UUIDs: the new-role form now validates `organizationId`
+// client-side against the shared schema's UUID rule before submitting.
+const O1 = "11111111-1111-4111-8111-111111111111";
+const O2 = "22222222-2222-4222-8222-222222222222";
+
 const ORGS = {
   items: [
-    { id: "o1", slug: "acme", name: "Acme" },
-    { id: "o2", slug: "globex", name: "Globex" },
+    { id: O1, slug: "acme", name: "Acme" },
+    { id: O2, slug: "globex", name: "Globex" },
   ],
   total: 2,
 };
@@ -74,7 +79,7 @@ describe("OrganizationPicker", () => {
     await openPicker(user, container.querySelector("#organization-picker")!);
     await user.click(await screen.findByRole("option", { name: /Globex/ }));
 
-    expect(onChange).toHaveBeenCalledWith("o2");
+    expect(onChange).toHaveBeenCalledWith(O2);
   });
 
   it("filters the options client-side by name or slug", async () => {
@@ -90,12 +95,12 @@ describe("OrganizationPicker", () => {
       expect(screen.queryByRole("option", { name: /Acme/ })).not.toBeInTheDocument(),
     );
     await user.click(screen.getByRole("option", { name: /Globex/ }));
-    expect(onChange).toHaveBeenCalledWith("o2");
+    expect(onChange).toHaveBeenCalledWith(O2);
   });
 
   it("shows the selected org's label on the trigger", async () => {
     fetchMock.mockResolvedValue(jsonOk(ORGS));
-    const { container } = renderWithIntl(<OrganizationPicker value="o1" onChange={vi.fn()} />);
+    const { container } = renderWithIntl(<OrganizationPicker value={O1} onChange={vi.fn()} />);
 
     await waitFor(() =>
       expect(container.querySelector("#organization-picker")).toHaveTextContent("Acme (acme)"),
@@ -107,7 +112,7 @@ describe("OrganizationPicker", () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     const { container } = renderWithIntl(
-      <OrganizationPicker value="o1" onChange={onChange} includeGlobal />,
+      <OrganizationPicker value={O1} onChange={onChange} includeGlobal />,
     );
 
     await openPicker(user, container.querySelector("#organization-picker")!);
@@ -129,12 +134,12 @@ describe("NewRoleForm scope wiring", () => {
     fetchMock.mockResolvedValue(jsonOk({ id: "r9" }, 201));
     const user = userEvent.setup();
     const { container } = renderWithIntl(
-      <NewRoleForm locale="en" showOrgPicker={false} defaultOrganizationId="o1" />,
+      <NewRoleForm locale="en" showOrgPicker={false} defaultOrganizationId={O1} />,
     );
 
     expect(container.querySelector("#role-organization")).toBeNull();
-    await user.type(container.querySelector("#role-key")!, "app.viewer");
-    await user.type(container.querySelector("#role-name")!, "Viewer");
+    await user.type(screen.getByRole("textbox", { name: "Key" }), "app.viewer");
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Viewer");
     await user.click(screen.getByRole("button", { name: "Create role" }));
 
     await waitFor(() =>
@@ -143,7 +148,7 @@ describe("NewRoleForm scope wiring", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
-    expect(bodyOf(postCall())).toMatchObject({ organizationId: "o1" });
+    expect(bodyOf(postCall())).toMatchObject({ organizationId: O1 });
   });
 
   it("a SUPERADMIN can scope the role to a chosen org via the combobox", async () => {
@@ -161,8 +166,8 @@ describe("NewRoleForm scope wiring", () => {
 
     await openPicker(user, container.querySelector("#role-organization")!);
     await user.click(await screen.findByRole("option", { name: /Globex/ }));
-    await user.type(container.querySelector("#role-key")!, "app.viewer");
-    await user.type(container.querySelector("#role-name")!, "Viewer");
+    await user.type(screen.getByRole("textbox", { name: "Key" }), "app.viewer");
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Viewer");
     await user.click(screen.getByRole("button", { name: "Create role" }));
 
     await waitFor(() =>
@@ -171,7 +176,7 @@ describe("NewRoleForm scope wiring", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
-    expect(bodyOf(postCall())).toMatchObject({ organizationId: "o2" });
+    expect(bodyOf(postCall())).toMatchObject({ organizationId: O2 });
   });
 
   it("a SUPERADMIN defaults to the Global (null) scope", async () => {
@@ -188,8 +193,8 @@ describe("NewRoleForm scope wiring", () => {
     );
 
     await waitFor(() => expect(container.querySelector("#role-organization")).not.toBeDisabled());
-    await user.type(container.querySelector("#role-key")!, "app.viewer");
-    await user.type(container.querySelector("#role-name")!, "Viewer");
+    await user.type(screen.getByRole("textbox", { name: "Key" }), "app.viewer");
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Viewer");
     await user.click(screen.getByRole("button", { name: "Create role" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());

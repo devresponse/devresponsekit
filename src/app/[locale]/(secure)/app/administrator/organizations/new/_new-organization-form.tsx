@@ -1,145 +1,160 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { RequiredLegend } from "@/components/ui/required-legend";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import {
+  createOrganizationSchema,
+  type CreateOrganizationInput,
+} from "@/lib/validation/organizations";
 
 /**
- * Client-side new-organization form (docs/admin-manager.md §19).
- *
- * Mirrors the new-role form's controlled-input style so the two forms
- * share a single pattern. Validation echoes the server Zod schema in
- * `/api/administrator/organizations/route.ts` so the user sees the same
- * rules the server enforces; the server is still the source of truth.
+ * Client-side new-organization form (docs/admin-manager.md §19;
+ * docs/form-validation.md). React Hook Form + the shared
+ * `createOrganizationSchema` (same schema the API route enforces): required
+ * markers on slug/name, field-level errors with a red border, and a 409
+ * mapped onto the slug field.
  */
-const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
-
 export function NewOrganizationForm({ locale }: { locale: string }) {
   const t = useTranslations("administrator.orgs");
   const tErr = useTranslations("administrator.errors");
   const router = useRouter();
 
-  const [slug, setSlug] = useState("");
-  const [name, setName] = useState("");
-  const [isDefault, setIsDefault] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const form = useZodForm<CreateOrganizationInput>(createOrganizationSchema, {
+    defaultValues: { slug: "", name: "", isDefault: false },
+  });
 
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-    if (!SLUG_RE.test(slug) || slug.length === 0 || slug.length > 64) {
-      setError(tErr("invalidBody"));
-      return;
-    }
-    if (name.trim().length === 0) {
-      setError(tErr("invalidBody"));
-      return;
-    }
-
-    setSubmitting(true);
+  const onValid = async (values: CreateOrganizationInput) => {
+    form.clearErrors("root");
     try {
       const res = await fetch("/api/administrator/organizations", {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          slug: slug.trim(),
-          name: name.trim(),
-          isDefault,
+          slug: values.slug.trim(),
+          name: values.name.trim(),
+          isDefault: values.isDefault ?? false,
         }),
       });
       if (res.status === 201) {
         const body = (await res.json()) as { id?: string };
-        if (body.id) {
-          router.push(`/${locale}/app/administrator/organizations/${body.id}`);
-          router.refresh();
-          return;
-        }
-        router.push(`/${locale}/app/administrator/organizations`);
+        router.push(
+          body.id
+            ? `/${locale}/app/administrator/organizations/${body.id}`
+            : `/${locale}/app/administrator/organizations`,
+        );
+        router.refresh();
         return;
       }
       if (res.status === 409) {
-        setError(tErr("slugTaken"));
+        form.setError("slug", { type: "server", message: tErr("slugTaken") });
         return;
       }
       if (res.status === 400) {
-        setError(tErr("invalidBody"));
+        form.setError("root", { type: "server", message: tErr("invalidBody") });
         return;
       }
       if (res.status === 403) {
-        setError(tErr("forbidden"));
+        form.setError("root", { type: "server", message: tErr("forbidden") });
         return;
       }
-      setError(t("new.errorToast"));
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     } catch {
-      setError(t("new.errorToast"));
-    } finally {
-      setSubmitting(false);
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     }
   };
 
+  const rootError = form.formState.errors.root?.message;
+
   return (
-    <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
-      <div className="space-y-2">
-        <Label htmlFor="org-slug">{t("fields.slug")}</Label>
-        <Input
-          id="org-slug"
-          type="text"
-          required
-          minLength={1}
-          maxLength={64}
-          value={slug}
-          onChange={(e) => setSlug(e.currentTarget.value.toLowerCase())}
-          aria-invalid={error !== null && !SLUG_RE.test(slug) ? true : undefined}
+    <Form {...form} schema={createOrganizationSchema}>
+      <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
+        <RequiredLegend />
+
+        <FormField
+          control={form.control}
+          name="slug"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.slug")}</FormLabel>
+              <FormControl>
+                <Input
+                  type="text"
+                  {...field}
+                  // Slugs are lowercase; normalize as the user types.
+                  onChange={(e) => field.onChange(e.currentTarget.value.toLowerCase())}
+                />
+              </FormControl>
+              <FormDescription>{t("fields.slugHelp")}</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-        <p className="text-muted-foreground text-xs">{t("fields.slugHelp")}</p>
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="org-name">{t("fields.name")}</Label>
-        <Input
-          id="org-name"
-          type="text"
-          required
-          maxLength={200}
-          value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.name")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="org-is-default"
-          checked={isDefault}
-          onCheckedChange={(v) => setIsDefault(v === true)}
+        <FormField
+          control={form.control}
+          name="isDefault"
+          render={({ field }) => (
+            <FormItem className="flex flex-row items-center gap-2 space-y-0">
+              <FormControl>
+                <Checkbox
+                  checked={field.value ?? false}
+                  onCheckedChange={(v) => field.onChange(v === true)}
+                />
+              </FormControl>
+              <FormLabel className="font-normal">{t("fields.isDefault")}</FormLabel>
+            </FormItem>
+          )}
         />
-        <Label htmlFor="org-is-default">{t("fields.isDefault")}</Label>
-      </div>
 
-      {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
-      ) : null}
+        {rootError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {rootError}
+          </p>
+        ) : null}
 
-      <div className="flex items-center gap-2">
-        <Button type="submit" disabled={submitting}>
-          {t("new.submit")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting}
-          onClick={() => router.push(`/${locale}/app/administrator/organizations`)}
-        >
-          {t("new.cancel")}
-        </Button>
-      </div>
-    </form>
+        <div className="flex items-center gap-2">
+          <Button type="submit" disabled={form.formState.isSubmitting}>
+            {t("new.submit")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={form.formState.isSubmitting}
+            onClick={() => router.push(`/${locale}/app/administrator/organizations`)}
+          >
+            {t("new.cancel")}
+          </Button>
+        </div>
+      </form>
+    </Form>
   );
 }

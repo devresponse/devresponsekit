@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { db } from "@/db/database";
+import { updateGroupSchema } from "@/lib/validation/groups";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -40,13 +40,6 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * Partial update of name / description. `key` is read-only after creation.
  * Caller MUST hold `admin.groups.update`.
  */
-const patchSchema = z
-  .object({
-    name: z.string().min(1).max(200).optional(),
-    description: z.string().max(1000).nullable().optional(),
-  })
-  .strict();
-
 export async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
@@ -67,7 +60,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = patchSchema.safeParse(json);
+  const parsed = updateGroupSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

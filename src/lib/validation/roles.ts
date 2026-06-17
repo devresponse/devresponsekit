@@ -18,3 +18,20 @@ export const createRoleSchema = z
   .strict();
 
 export type CreateRoleInput = z.input<typeof createRoleSchema>;
+
+/**
+ * Partial update contract for `PATCH /api/administrator/roles/[id]` — every
+ * field optional (the key is immutable and not editable). The settings FORM
+ * derives a stricter view from this (name required) so field rules stay
+ * single-sourced.
+ */
+export const updateRoleSchema = z
+  .object({
+    name: z.string().min(1, "required").max(200, "max").optional(),
+    description: z.string().max(1000, "max").nullable().optional(),
+  })
+  .strict();
+
+/** Role settings form view: name is required (full edit), description optional. */
+export const roleSettingsSchema = updateRoleSchema.required({ name: true });
+export type RoleSettingsInput = z.input<typeof roleSettingsSchema>;

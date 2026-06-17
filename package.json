@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Enterprise Next.js 16 Holy Grail Application Shell with Better Auth, Kysely, and next-intl.",
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

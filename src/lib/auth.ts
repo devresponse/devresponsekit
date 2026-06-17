@@ -64,6 +64,16 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
+    // AUTH-2: revoke ALL of the user's sessions on a successful password
+    // reset. A reset is the canonical "I think my account is compromised"
+    // action, so it must also evict any attacker session — otherwise the
+    // reset leaves the attacker signed in, defeating its purpose. (The
+    // self-service change-password form already passes revokeOtherSessions.)
+    // Better Auth honors this flag at runtime (deletes the user's sessions
+    // after the reset) but does not yet expose it in its options type, so
+    // the block is asserted to the option type — the same pattern the
+    // admin-plugin wrappers use in auth-admin.server.ts.
+    revokeSessionsOnPasswordReset: true,
     // Outbox-first delivery (specs.md §35): the email is rendered and
     // recorded in `app_outbox` even when no provider is configured, so
     // the forgot-password flow and the administrator "send reset email"
@@ -79,7 +89,7 @@ export const auth = betterAuth({
         relatedBetterAuthUserId: user.id,
       });
     },
-  },
+  } as NonNullable<BetterAuthOptions["emailAndPassword"]>,
 
   socialProviders,
 

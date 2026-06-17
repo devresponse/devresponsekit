@@ -2,6 +2,7 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { logServerError } from "@/lib/observability/logger.server";
 
 /**
  * Permitted audit outcomes (docs/admin-manager.md §12):
@@ -50,6 +51,24 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
   const ipForwarded = reqHeaders?.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = reqHeaders?.get("user-agent") ?? null;
   const requestId = input.requestId ?? (input.request ? getOrCreateRequestId(input.request) : null);
+
+  // OBSERVABILITY-2: mirror unexpected failures to the structured stdout
+  // logger so a no-Sentry deployment (the default) still has a correlated
+  // error stream. Only `error`/`failure` (5xx-class) outcomes are logged —
+  // `success`/`denied` live in the audit table only, keeping the error
+  // stream signal-rich. `metadata` may carry an `err.message` but, per the
+  // audit contract, never secrets.
+  if (input.outcome === "error" || input.outcome === "failure") {
+    logServerError(`audit.${input.eventType}`, {
+      requestId,
+      eventType: input.eventType,
+      outcome: input.outcome,
+      organizationId: input.organizationId ?? undefined,
+      appUserId: input.appUserId ?? undefined,
+      reason: input.reason ?? undefined,
+      metadata: input.metadata,
+    });
+  }
 
   await db
     .insertInto("app_audit_events")

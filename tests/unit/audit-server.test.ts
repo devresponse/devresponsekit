@@ -11,6 +11,7 @@ import type * as AuditServerModule from "@/lib/audit.server";
 
 const insertExecute = vi.fn().mockResolvedValue(undefined);
 const valuesArg = vi.fn();
+const logServerError = vi.fn();
 
 vi.mock("@/db/database", () => ({
   db: {
@@ -22,12 +23,16 @@ vi.mock("@/db/database", () => ({
     }),
   },
 }));
+vi.mock("@/lib/observability/logger.server", () => ({
+  logServerError: (...a: unknown[]) => logServerError(...a),
+}));
 
 let auditEvent: typeof AuditServerModule.auditEvent;
 
 beforeEach(async () => {
   insertExecute.mockClear();
   valuesArg.mockReset();
+  logServerError.mockReset();
   ({ auditEvent } = await import("@/lib/audit.server"));
 });
 afterEach(() => vi.resetModules());
@@ -69,6 +74,35 @@ describe("auditEvent", () => {
     expect(row.ip_address).toBeNull();
     expect(row.user_agent).toBeNull();
     expect(row.metadata).toBe("{}");
+  });
+
+  it("mirrors error/failure outcomes to the structured logger (OBSERVABILITY-2)", async () => {
+    await auditEvent({
+      eventType: "admin.user.ban_failed",
+      outcome: "error",
+      requestId: "req-123",
+      organizationId: "o-1",
+      reason: "auth_ban_failed",
+      metadata: { message: "boom" },
+    });
+    expect(logServerError).toHaveBeenCalledTimes(1);
+    expect(logServerError).toHaveBeenCalledWith(
+      "audit.admin.user.ban_failed",
+      expect.objectContaining({
+        requestId: "req-123",
+        eventType: "admin.user.ban_failed",
+        outcome: "error",
+        reason: "auth_ban_failed",
+      }),
+    );
+  });
+
+  it("does NOT log success or denied outcomes (keeps the error stream signal-rich)", async () => {
+    await auditEvent({ eventType: "admin.user.approved", outcome: "success" });
+    await auditEvent({ eventType: "administrator.access.denied", outcome: "denied" });
+    expect(logServerError).not.toHaveBeenCalled();
+    // Both are still written to the audit table.
+    expect(insertExecute).toHaveBeenCalledTimes(2);
   });
 
   it("propagates DB errors so callers can surface them (no silent swallow)", async () => {

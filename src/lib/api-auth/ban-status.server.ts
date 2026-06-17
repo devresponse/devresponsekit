@@ -1,5 +1,4 @@
 import "server-only";
-import { auth } from "@/lib/auth";
 
 /**
  * Returns true when the given Better Auth user is currently banned.
@@ -24,6 +23,12 @@ import { auth } from "@/lib/auth";
  * resolver's job (a credential for a missing user fails elsewhere).
  */
 export async function isBetterAuthUserBanned(betterAuthUserId: string): Promise<boolean> {
+  // Lazy import so the heavy Better Auth instance — which eagerly reads
+  // `pgPool` at module load (auth.ts) — stays OUT of the static import graph
+  // of every /api/v1 and admin route that transitively pulls in the caller
+  // resolver. It is constructed only when a bearer credential is actually
+  // being resolved at runtime.
+  const { auth } = await import("@/lib/auth");
   const ctx = await auth.$context;
   const user = await ctx.internalAdapter.findUserById(betterAuthUserId);
   if (!user) return false;

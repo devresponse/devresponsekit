@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
+import { createPermissionSchema } from "@/lib/validation/permissions";
 import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -85,13 +85,6 @@ export async function GET(request: NextRequest) {
  * `admin.permissions.manage`. Note: adding a permission alone grants
  * no power — it must subsequently be attached to a role.
  */
-const KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
-const createSchema = z
-  .object({
-    key: z.string().min(1).max(120).regex(KEY_RE),
-    description: z.string().max(1000).optional(),
-  })
-  .strict();
 
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
@@ -116,7 +109,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = createSchema.safeParse(json);
+  const parsed = createPermissionSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

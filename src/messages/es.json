@@ -1243,6 +1243,9 @@
     "passwordMin": "La contraseña debe tener al menos 8 caracteres.",
     "passwordMax": "La contraseña no debe superar los 128 caracteres.",
     "max": "Este valor es demasiado largo.",
-    "requiredLegend": "indica un campo obligatorio"
+    "requiredLegend": "indica un campo obligatorio",
+    "key": "Usa solo letras, números y los caracteres . _ - :",
+    "slug": "Usa minúsculas, números y guiones.",
+    "uuid": "Identificador no válido."
   }
 }

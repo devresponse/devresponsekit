@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
+import { createRoleSchema } from "@/lib/validation/roles";
 import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -151,15 +151,6 @@ export async function GET(request: NextRequest) {
  *     globally unique — we enforce this in code because the SQL unique
  *     index treats NULLs as distinct.
  */
-const KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
-const createSchema = z
-  .object({
-    key: z.string().min(1).max(120).regex(KEY_RE),
-    name: z.string().min(1).max(200),
-    description: z.string().max(1000).optional(),
-    organizationId: z.string().regex(UUID_RE).nullable().optional(),
-  })
-  .strict();
 
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.roles.create");
@@ -178,7 +169,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = createSchema.safeParse(json);
+  const parsed = createRoleSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

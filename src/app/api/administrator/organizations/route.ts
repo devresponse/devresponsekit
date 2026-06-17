@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
 import { db } from "@/db/database";
+import { createOrganizationSchema } from "@/lib/validation/organizations";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -12,7 +12,6 @@ import {
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
-import { SLUG_RE } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
@@ -117,13 +116,6 @@ export async function GET(request: NextRequest) {
  * If `isDefault: true`, in a single transaction we first clear the
  * existing default then insert with `is_default = true`.
  */
-const createSchema = z
-  .object({
-    slug: z.string().min(1).max(64).regex(SLUG_RE),
-    name: z.string().min(1).max(200),
-    isDefault: z.boolean().optional(),
-  })
-  .strict();
 
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.create");
@@ -148,7 +140,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = createSchema.safeParse(json);
+  const parsed = createOrganizationSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

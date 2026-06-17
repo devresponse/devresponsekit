@@ -5,22 +5,31 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { RequiredLegend } from "@/components/ui/required-legend";
 import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import { createApiKeySchema, type CreateApiKeyInput } from "@/lib/validation/api-keys";
 
 /**
- * Issue-an-API-key-on-behalf-of-a-user form (docs/admin-manager.md
- * §8.12).
+ * Issue-an-API-key-on-behalf-of-a-user form (docs/admin-manager.md §8.12;
+ * docs/form-validation.md). React Hook Form + the shared `createApiKeySchema`
+ * (same schema the API route enforces): schema-derived required markers,
+ * field-level errors with a red border.
  *
- * The owner is identified by their application user id (copyable from
- * the Users console). Scopes are picked from the catalog the server
- * passed down; the server independently rejects any scope the OWNER
- * does not hold, surfaced here as `invalid_scope` with the offending
- * keys. On success the plaintext is revealed exactly once before we
- * return to the list.
+ * Server-only checks map onto the relevant field: a missing/inactive owner
+ * (404/409) onto the owner id, and scopes the OWNER does not hold (422,
+ * `ungrantableScopes`) onto the scopes group. On success the plaintext is
+ * revealed exactly once before returning to the list (no navigation yet).
  */
 export function NewApiKeyForm({
   locale,
@@ -33,49 +42,27 @@ export function NewApiKeyForm({
   const tErr = useTranslations("administrator.errors");
   const router = useRouter();
 
-  const [name, setName] = useState("");
-  const [ownerAppUserId, setOwnerAppUserId] = useState("");
-  const [expiresInDays, setExpiresInDays] = useState("");
-  const [scopes, setScopes] = useState<Set<string>>(() => new Set());
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const sortedScopes = useMemo(() => [...scopeCatalog].sort(), [scopeCatalog]);
   const [revealed, setRevealed] = useState<string | null>(null);
 
-  const sortedScopes = useMemo(() => [...scopeCatalog].sort(), [scopeCatalog]);
+  const form = useZodForm<CreateApiKeyInput>(createApiKeySchema, {
+    defaultValues: { name: "", ownerAppUserId: "", scopes: [], expiresInDays: undefined },
+  });
 
-  const toggleScope = (scope: string) => {
-    setScopes((prev) => {
-      const next = new Set(prev);
-      if (next.has(scope)) next.delete(scope);
-      else next.add(scope);
-      return next;
-    });
+  const backToList = () => {
+    router.push(`/${locale}/app/administrator/api-keys`);
+    router.refresh();
   };
 
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-
-    if (name.trim().length === 0) {
-      setError(tErr("invalidBody"));
-      return;
-    }
-    if (!UUID_RE.test(ownerAppUserId.trim())) {
-      setError(t("new.invalidOwnerId"));
-      return;
-    }
-
+  const onValid = async (values: CreateApiKeyInput) => {
+    form.clearErrors("root");
     const body: Record<string, unknown> = {
-      name: name.trim(),
-      ownerAppUserId: ownerAppUserId.trim(),
-      scopes: [...scopes],
+      name: values.name.trim(),
+      ownerAppUserId: values.ownerAppUserId.trim(),
+      scopes: values.scopes ?? [],
     };
-    const days = Number.parseInt(expiresInDays, 10);
-    if (expiresInDays.trim() !== "" && Number.isFinite(days) && days > 0) {
-      body.expiresInDays = days;
-    }
+    if (values.expiresInDays != null) body.expiresInDays = values.expiresInDays;
 
-    setSubmitting(true);
     try {
       const res = await fetch("/api/administrator/api-keys", {
         method: "POST",
@@ -89,111 +76,158 @@ export function NewApiKeyForm({
         return;
       }
       if (res.status === 404) {
-        setError(t("new.ownerNotFound"));
+        form.setError("ownerAppUserId", { type: "server", message: t("new.ownerNotFound") });
         return;
       }
       if (res.status === 409) {
-        setError(t("new.ownerInactive"));
+        form.setError("ownerAppUserId", { type: "server", message: t("new.ownerInactive") });
         return;
       }
       if (res.status === 422) {
         const data = (await res.json().catch(() => ({}))) as { ungrantableScopes?: string[] };
-        setError(
-          data.ungrantableScopes && data.ungrantableScopes.length > 0
-            ? t("new.invalidScope", { scopes: data.ungrantableScopes.join(", ") })
-            : t("new.errorToast"),
-        );
+        form.setError("scopes", {
+          type: "server",
+          message:
+            data.ungrantableScopes && data.ungrantableScopes.length > 0
+              ? t("new.invalidScope", { scopes: data.ungrantableScopes.join(", ") })
+              : t("new.errorToast"),
+        });
         return;
       }
       if (res.status === 403) {
-        setError(tErr("forbidden"));
+        form.setError("root", { type: "server", message: tErr("forbidden") });
         return;
       }
-      setError(t("new.errorToast"));
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     } catch {
-      setError(t("new.errorToast"));
-    } finally {
-      setSubmitting(false);
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     }
   };
 
-  const backToList = () => {
-    router.push(`/${locale}/app/administrator/api-keys`);
-    router.refresh();
-  };
+  const rootError = form.formState.errors.root?.message;
 
   return (
     <>
-      <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
-        <div className="space-y-2">
-          <Label htmlFor="apikey-name">{t("fields.name")}</Label>
-          <Input
-            id="apikey-name"
-            type="text"
-            required
-            maxLength={120}
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            placeholder={t("fields.namePlaceholder")}
-          />
-        </div>
+      <Form {...form} schema={createApiKeySchema}>
+        <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
+          <RequiredLegend />
 
-        <div className="space-y-2">
-          <Label htmlFor="apikey-owner">{t("fields.owner")}</Label>
-          <Input
-            id="apikey-owner"
-            type="text"
-            required
-            value={ownerAppUserId}
-            onChange={(e) => setOwnerAppUserId(e.currentTarget.value)}
-            placeholder="00000000-0000-0000-0000-000000000000"
+          <FormField
+            control={form.control}
+            name="name"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("fields.name")}</FormLabel>
+                <FormControl>
+                  <Input type="text" placeholder={t("fields.namePlaceholder")} {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
           />
-          <p className="text-muted-foreground text-xs">{t("fields.ownerHelp")}</p>
-        </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="apikey-expires">{t("fields.expiresInDays")}</Label>
-          <Input
-            id="apikey-expires"
-            type="number"
-            min={1}
-            max={3650}
-            step={1}
-            value={expiresInDays}
-            onChange={(e) => setExpiresInDays(e.currentTarget.value)}
-            placeholder={t("fields.expiresInDaysPlaceholder")}
+          <FormField
+            control={form.control}
+            name="ownerAppUserId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("fields.owner")}</FormLabel>
+                <FormControl>
+                  <Input
+                    type="text"
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                    {...field}
+                  />
+                </FormControl>
+                <FormDescription>{t("fields.ownerHelp")}</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
           />
-          <p className="text-muted-foreground text-xs">{t("fields.expiresInDaysHelp")}</p>
-        </div>
 
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">{t("fields.scopes")}</legend>
-          <p className="text-muted-foreground text-xs">{t("fields.scopesHelp")}</p>
-          <div className="grid max-h-72 grid-cols-1 gap-1 overflow-y-auto rounded-md border p-3 sm:grid-cols-2">
-            {sortedScopes.map((scope) => (
-              <label key={scope} className="flex items-center gap-2 text-xs">
-                <Checkbox checked={scopes.has(scope)} onCheckedChange={() => toggleScope(scope)} />
-                <code>{scope}</code>
-              </label>
-            ))}
+          <FormField
+            control={form.control}
+            name="expiresInDays"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("fields.expiresInDays")}</FormLabel>
+                <FormControl>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    step={1}
+                    placeholder={t("fields.expiresInDaysPlaceholder")}
+                    {...field}
+                    value={field.value ?? ""}
+                    onChange={(e) =>
+                      field.onChange(
+                        e.currentTarget.value === "" ? undefined : e.currentTarget.valueAsNumber,
+                      )
+                    }
+                  />
+                </FormControl>
+                <FormDescription>{t("fields.expiresInDaysHelp")}</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="scopes"
+            render={({ field }) => {
+              const selected = field.value ?? [];
+              return (
+                <FormItem>
+                  <fieldset className="space-y-2">
+                    <legend className="text-sm font-medium">{t("fields.scopes")}</legend>
+                    <p className="text-muted-foreground text-xs">{t("fields.scopesHelp")}</p>
+                    <div className="grid max-h-72 grid-cols-1 gap-1 overflow-y-auto rounded-md border p-3 sm:grid-cols-2">
+                      {sortedScopes.map((scope) => (
+                        <label key={scope} className="flex items-center gap-2 text-xs">
+                          <Checkbox
+                            checked={selected.includes(scope)}
+                            onCheckedChange={() =>
+                              field.onChange(
+                                selected.includes(scope)
+                                  ? selected.filter((s) => s !== scope)
+                                  : [...selected, scope],
+                              )
+                            }
+                          />
+                          <code>{scope}</code>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <FormMessage />
+                </FormItem>
+              );
+            }}
+          />
+
+          {rootError ? (
+            <p className="text-destructive text-sm" role="alert">
+              {rootError}
+            </p>
+          ) : null}
+
+          <div className="flex items-center gap-2">
+            <Button type="submit" disabled={form.formState.isSubmitting}>
+              {t("new.submit")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={form.formState.isSubmitting}
+              onClick={backToList}
+            >
+              {t("new.cancel")}
+            </Button>
           </div>
-        </fieldset>
-
-        {error ? (
-          <p className="text-destructive text-sm" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="flex items-center gap-2">
-          <Button type="submit" disabled={submitting}>
-            {t("new.submit")}
-          </Button>
-          <Button type="button" variant="outline" disabled={submitting} onClick={backToList}>
-            {t("new.cancel")}
-          </Button>
-        </div>
-      </form>
+        </form>
+      </Form>
       <ApiKeyRevealDialog
         secret={revealed}
         namespace="administrator.apiKeys.reveal"

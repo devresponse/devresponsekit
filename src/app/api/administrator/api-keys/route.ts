@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
 import { db } from "@/db/database";
+import { createApiKeySchema } from "@/lib/validation/api-keys";
 import { auditEvent } from "@/lib/audit.server";
 import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -43,8 +43,6 @@ const SORT_COLUMNS: Record<string, string> = {
   last_used_at: "k.last_used_at",
   expires_at: "k.expires_at",
 };
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * GET /api/administrator/api-keys
@@ -152,14 +150,6 @@ export async function GET(request: NextRequest) {
  *     admin-minted key can never out-scope the user who will wield it.
  *   - Unknown scopes are rejected.
  */
-const createSchema = z
-  .object({
-    name: z.string().trim().min(1).max(120),
-    ownerAppUserId: z.string().regex(UUID_RE),
-    scopes: z.array(z.string().min(1).max(120)).max(64).default([]),
-    expiresInDays: z.number().int().positive().max(3650).optional(),
-  })
-  .strict();
 
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apikeys.manage");
@@ -183,7 +173,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request, { requestId: guard.requestId });
   }
-  const parsed = createSchema.safeParse(json);
+  const parsed = createApiKeySchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request, { requestId: guard.requestId });
   }

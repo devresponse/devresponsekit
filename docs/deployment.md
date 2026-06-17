@@ -98,7 +98,7 @@ See [DevOps Setup → Build pipeline](./devops-setup.md#5-build-pipeline-ci) and
 
 ## 8. Post-deployment verification
 
-1. **Health:** the app responds on its public URL; a known route renders.
+1. **Health:** `GET /api/health` returns `200 {"status":"ok"}` (liveness) and `GET /api/health/ready` returns `200 {"status":"ready"}` when the database is reachable (`503 {"status":"unavailable"}` otherwise). Wire these to the orchestrator's liveness/readiness probes; both are unauthenticated and `no-store`.
 2. **Auth:** sign in with a known account; sessions persist; sign-out works.
 3. **Database:** an admin list (e.g. Users) loads — confirms DB connectivity and migrations.
 4. **Audit:** perform a small admin action and confirm a new `app_audit_events` row with a matching `x-request-id`.

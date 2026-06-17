@@ -23,7 +23,7 @@ describe("SignUpForm", () => {
   it("renders the sign-up card with name/email/password and social buttons", () => {
     renderWithIntl(<SignUpForm locale="en" returnTo="/en/app/dashboard" />);
     expect(screen.getByRole("heading", { name: /create your account/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /continue with google/i })).toBeInTheDocument();

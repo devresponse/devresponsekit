@@ -13,9 +13,13 @@ const banMock = vi.fn();
 const unbanMock = vi.fn();
 const auditMock = vi.fn();
 const txRun = vi.fn();
+const requiresSuperadminMock = vi.fn();
 
 vi.mock("@/lib/admin-status.server", () => ({
   performAdminStatusChange: (...a: unknown[]) => performStatusChange(...a),
+}));
+vi.mock("@/lib/admin/access-scope.server", () => ({
+  requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
 }));
 vi.mock("@/lib/admin/auth-admin.server", () => ({
   banBetterAuthUser: (...a: unknown[]) => banMock(...a),
@@ -52,13 +56,21 @@ const target = {
   primaryEmail: "u@x.com",
   status: "active",
 };
-const actor = { betterAuthUserId: "admin", request: { headers: new Headers() } };
+const actor = {
+  betterAuthUserId: "admin",
+  request: { headers: new Headers() },
+  scope: { kind: "all" } as const,
+};
 
 beforeEach(async () => {
-  for (const m of [performStatusChange, banMock, unbanMock, auditMock, txRun]) m.mockReset();
+  for (const m of [performStatusChange, banMock, unbanMock, auditMock, txRun, requiresSuperadminMock])
+    m.mockReset();
   performStatusChange.mockResolvedValue({ ok: true });
   banMock.mockResolvedValue(undefined);
   unbanMock.mockResolvedValue(undefined);
+  // Default: target is not shared / actor is superadmin → account-global
+  // actions are allowed (AUTHZ-2 gate is a no-op).
+  requiresSuperadminMock.mockResolvedValue(false);
   txRun.mockImplementation(async (cb: (t: unknown) => Promise<unknown>, t: unknown) => cb(t));
   ({ executeBulkUserAction } = await import("@/lib/admin/user-actions.server"));
 });
@@ -163,5 +175,32 @@ describe("soft_delete / restore", () => {
     const out = await executeBulkUserAction("restore", target, actor);
     expect(out).toEqual({ ok: false, appUserId: "u1", error: "auth_unban_failed" });
     expect(txRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("account-global actions refuse a shared target for a non-superadmin (AUTHZ-2)", () => {
+  beforeEach(() => {
+    // Org admin acting on a user shared with other orgs.
+    requiresSuperadminMock.mockResolvedValue(true);
+  });
+
+  it.each(["ban", "unban", "soft_delete", "restore"] as const)(
+    "%s is refused without touching Better Auth / the DB",
+    async (action) => {
+      const out = await executeBulkUserAction(action, target, actor, { reason: "x" });
+      expect(out).toEqual({ ok: false, appUserId: "u1", error: "forbidden_shared_target" });
+      expect(banMock).not.toHaveBeenCalled();
+      expect(unbanMock).not.toHaveBeenCalled();
+      expect(txRun).not.toHaveBeenCalled();
+    },
+  );
+
+  it("status actions are NOT gated here — confinement happens inside performAdminStatusChange", async () => {
+    // suspend on a shared target still dispatches; the mutation core scopes it.
+    const out = await executeBulkUserAction("suspend", target, actor);
+    expect(out).toEqual({ ok: true, appUserId: "u1" });
+    expect(performStatusChange).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: actor.scope, newStatus: "suspended" }),
+    );
   });
 });

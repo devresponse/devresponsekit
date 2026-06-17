@@ -100,6 +100,45 @@ export async function canAccessUser(access: AccessLike, appUserId: string): Prom
 }
 
 /**
+ * True when `appUserId` holds a membership in ANY organization OTHER than
+ * `organizationId` — i.e. the user is shared across tenants. Used to decide
+ * whether a non-SUPERADMIN's lifecycle action would reach outside their org
+ * (AUTHZ-1/2): a single-org user can be managed account-globally, but a
+ * shared user must be confined to the actor's org.
+ */
+export async function userHasMembershipOutsideOrg(
+  appUserId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const row = await db
+    .selectFrom("app_organization_memberships")
+    .select("id")
+    .where("app_user_id", "=", appUserId)
+    .where("organization_id", "!=", organizationId)
+    .limit(1)
+    .executeTakeFirst();
+  return row !== undefined;
+}
+
+/**
+ * Whether an ACCOUNT-GLOBAL action (Better Auth ban/unban, soft-delete/
+ * restore — actions that lock a user out of, or back into, EVERY org) is
+ * forbidden for this actor against this target (AUTHZ-2).
+ *
+ * A SUPERADMIN may always act account-globally. A non-SUPERADMIN may only do
+ * so when the target is NOT shared with other orgs — otherwise the action
+ * would change the user's access in tenants the actor does not administer, so
+ * it is reserved for a SUPERADMIN (the caller returns 403).
+ */
+export async function requiresSuperadminForSharedTarget(
+  scope: OrgScope,
+  appUserId: string,
+): Promise<boolean> {
+  if (scope.kind === "all") return false;
+  return userHasMembershipOutsideOrg(appUserId, scope.organizationId);
+}
+
+/**
  * Whether the user holds the {@link SUPERADMIN_PERMISSION} marker via a role
  * in ANY organization they are an ACTIVE member of — i.e. whether they are a
  * superadmin regardless of which org is currently active.

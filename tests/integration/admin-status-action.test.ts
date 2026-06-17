@@ -13,27 +13,52 @@ import type * as AdminStatusModule from "@/lib/admin-status.server";
  */
 
 const auditMock = vi.fn();
-const trxRun = vi.fn();
-const userExecuteTakeFirst = vi.fn();
+const trxRun = vi.fn(); // counts UPDATE executes inside the transaction
+const userExecuteTakeFirst = vi.fn(); // app_users target lookup
+const sharedExecuteTakeFirst = vi.fn(); // app_organization_memberships "outside org" probe (AUTHZ-1)
 
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
 
+function tableKey(t: unknown): string {
+  return String(t).split(" ")[0] ?? "";
+}
+function selectChain(table: string): unknown {
+  // app_organization_memberships → the userHasMembershipOutsideOrg probe;
+  // everything else → the app_users target lookup. A generic proxy handles
+  // any chain length (.select().where().where().limit().executeTakeFirst()).
+  const takeFirst =
+    table === "app_organization_memberships" ? sharedExecuteTakeFirst : userExecuteTakeFirst;
+  const proxy: unknown = new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        if (prop === "executeTakeFirst") return takeFirst;
+        return () => proxy;
+      },
+    },
+  );
+  return proxy;
+}
 const dbStub = {
-  selectFrom: () => ({
-    select: () => ({
-      where: () => ({ executeTakeFirst: userExecuteTakeFirst }),
-    }),
-  }),
+  selectFrom: (t: unknown) => selectChain(tableKey(t)),
   transaction: () => ({
     execute: (fn: (trx: unknown) => unknown) =>
       fn({
-        updateTable: () => ({
-          set: () => ({
-            where: () => ({ execute: trxRun }),
-          }),
-        }),
+        updateTable: () => {
+          // Any-length .set().where()....execute() routes to trxRun.
+          const p: unknown = new Proxy(
+            {},
+            {
+              get(_t, prop) {
+                if (prop === "execute") return trxRun;
+                return () => p;
+              },
+            },
+          );
+          return p;
+        },
       }),
   }),
 };
@@ -41,13 +66,18 @@ vi.mock("@/db/database", () => ({ db: dbStub }));
 
 const TARGET_ID = "11111111-1111-4111-8111-111111111199";
 const ACTOR_ID = "ba-admin";
+const ORG_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ALL = { kind: "all" } as const;
 
 let performAdminStatusChange: typeof AdminStatusModule.performAdminStatusChange;
 
 beforeEach(async () => {
   auditMock.mockReset();
   trxRun.mockReset();
+  trxRun.mockResolvedValue(undefined);
   userExecuteTakeFirst.mockReset();
+  sharedExecuteTakeFirst.mockReset();
+  sharedExecuteTakeFirst.mockResolvedValue(undefined); // not shared by default
   ({ performAdminStatusChange } = await import("@/lib/admin-status.server"));
 });
 afterEach(() => vi.resetModules());
@@ -57,6 +87,7 @@ describe("performAdminStatusChange (approve)", () => {
     userExecuteTakeFirst.mockResolvedValue(undefined);
     const result = await performAdminStatusChange({
       actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
       targetAppUserId: TARGET_ID,
       newStatus: "active",
       newMembershipStatus: "active",
@@ -76,6 +107,7 @@ describe("performAdminStatusChange (approve)", () => {
 
     const result = await performAdminStatusChange({
       actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
       targetAppUserId: TARGET_ID,
       reason: "Verified onboarding ticket",
       newStatus: "active",
@@ -123,6 +155,7 @@ describe.each([
 
     const result = await performAdminStatusChange({
       actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
       targetAppUserId: TARGET_ID,
       newStatus,
       newMembershipStatus,
@@ -132,5 +165,57 @@ describe.each([
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: event, outcome: "success" }),
     );
+  });
+});
+
+describe("performAdminStatusChange — org scoping (AUTHZ-1)", () => {
+  const ORG_SCOPE = { kind: "org", organizationId: ORG_A } as const;
+
+  beforeEach(() => {
+    userExecuteTakeFirst.mockResolvedValue({ id: TARGET_ID, primary_email: "target@x.com" });
+  });
+
+  it("block of a SHARED user touches ONLY the membership, not the account-global status", async () => {
+    sharedExecuteTakeFirst.mockResolvedValue({ id: "m-other-org" }); // shared with another org
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ORG_SCOPE,
+      targetAppUserId: TARGET_ID,
+      newStatus: "blocked",
+      newMembershipStatus: "blocked",
+      eventType: "admin.user.blocked",
+    });
+    expect(result).toEqual({ ok: true, status: "blocked" });
+    // Only the membership UPDATE runs — the account-global status is left alone.
+    expect(trxRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("block of a SINGLE-ORG user updates both account status and membership (unchanged behavior)", async () => {
+    sharedExecuteTakeFirst.mockResolvedValue(undefined); // no membership outside the actor's org
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ORG_SCOPE,
+      targetAppUserId: TARGET_ID,
+      newStatus: "blocked",
+      newMembershipStatus: "blocked",
+      eventType: "admin.user.blocked",
+    });
+    expect(result).toEqual({ ok: true, status: "blocked" });
+    expect(trxRun).toHaveBeenCalledTimes(2); // app_users + membership
+  });
+
+  it("approve of a SHARED user lifts the (pending) account AND activates the membership", async () => {
+    sharedExecuteTakeFirst.mockResolvedValue({ id: "m-other-org" });
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ORG_SCOPE,
+      targetAppUserId: TARGET_ID,
+      newStatus: "active",
+      newMembershipStatus: "active",
+      eventType: "admin.user.approved",
+    });
+    expect(result).toEqual({ ok: true, status: "active" });
+    // Grant lifts a pending account to active (conditional UPDATE) + membership.
+    expect(trxRun).toHaveBeenCalledTimes(2);
   });
 });

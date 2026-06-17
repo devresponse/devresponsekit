@@ -3,7 +3,7 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
-import { canAccessUser } from "@/lib/admin/access-scope.server";
+import { canAccessUser, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
@@ -68,6 +68,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (!current || !(await canAccessUser(grant.caller.access, current.id))) {
     return problemResponse("not_found", 404, request);
   }
+  // AUTHZ-1: confine an org admin's status change to their own org (the
+  // mutation core scopes the membership + leaves account-global status alone
+  // for a shared user). canAccessUser already 404s a non-superadmin without a
+  // resolvable org, so a null scope here is defensive.
+  const scope = resolveOrgScope(grant.caller.access);
+  if (!scope) return problemResponse("not_found", 404, request, { requestId: grant.requestId });
 
   // Optimistic concurrency: reject a write made against a stale read.
   const ifMatch = request.headers.get("if-match");
@@ -92,6 +98,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const mapping = ACTIONS[parsed.data.action];
   const result = await performAdminStatusChange({
     actorBetterAuthUserId: grant.caller.betterAuthUserId,
+    scope,
     request,
     requestId: grant.requestId,
     targetAppUserId: id,

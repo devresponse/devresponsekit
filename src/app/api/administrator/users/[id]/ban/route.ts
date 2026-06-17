@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requiresSuperadminForSharedTarget, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -49,6 +50,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // AUTHZ-2: a Better Auth ban locks the account out of EVERY org. A non-
+  // SUPERADMIN may not ban a user shared with other orgs (it would lock them
+  // out of tenants the actor does not administer); that is SUPERADMIN-only.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return adminErrorResponse("not_found", 404, request);
+  if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   let json: unknown;
   try {

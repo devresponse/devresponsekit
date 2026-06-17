@@ -9,6 +9,10 @@ import {
   unbanBetterAuthUser,
   updateBetterAuthUser,
 } from "@/lib/admin/auth-admin.server";
+import {
+  requiresSuperadminForSharedTarget,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -176,6 +180,16 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // AUTHZ-2: soft-delete is an account-global lockout (Better Auth ban +
+  // deactivation + cascade). A non-SUPERADMIN may not apply it to a user
+  // shared with other orgs — that would deactivate them in tenants the actor
+  // does not administer. Such a user is SUPERADMIN-only.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return adminErrorResponse("not_found", 404, request);
+  if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   // Body is optional for DELETE — treat missing/empty as no reason.
   let body: unknown = {};

@@ -1,6 +1,10 @@
 import type { NextRequest } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
+import {
+  requiresSuperadminForSharedTarget,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server";
@@ -47,6 +51,17 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // AUTHZ-2: restore reverses an account-global soft-delete. A non-SUPERADMIN
+  // may not restore a user shared with other orgs (such a user can only have
+  // been soft-deleted by a SUPERADMIN); that is SUPERADMIN-only.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
+    return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });
+  }
+  if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
+    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+  }
 
   if (target.status !== "deactivated") {
     return adminErrorResponse("not_deactivated", 409, request, {

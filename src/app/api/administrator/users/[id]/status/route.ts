@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -71,6 +72,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
+  // AUTHZ-1: derive the actor's tenant scope so the mutation core can confine
+  // an org admin to their own org. resolveTargetUser already 404s a non-
+  // superadmin without a resolvable org, so a null scope here is defensive.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
+    return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });
+  }
+
   let json: unknown;
   try {
     json = await request.json();
@@ -85,6 +94,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const mapping = ACTION_TO_STATUS[parsed.data.action];
   const result = await performAdminStatusChange({
     actorBetterAuthUserId: guard.betterAuthUserId,
+    scope,
     request,
     requestId: guard.requestId,
     targetAppUserId: target.appUserId,

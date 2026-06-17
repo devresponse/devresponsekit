@@ -1,5 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import {
+  requiresSuperadminForSharedTarget,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -31,6 +35,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // AUTHZ-2: unban restores account-global access. A non-SUPERADMIN may not
+  // unban a user shared with other orgs (a shared user can only have been
+  // banned by a SUPERADMIN in the first place); that is SUPERADMIN-only.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return adminErrorResponse("not_found", 404, request);
+  if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   try {
     await unbanBetterAuthUser(target.betterAuthUserId, request);

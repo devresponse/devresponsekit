@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "kysely";
 import { db } from "@/db/database";
+import { requiresSuperadminForSharedTarget, type OrgScope } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
@@ -29,6 +30,27 @@ export type BulkUserAction =
 export interface BulkUserActor {
   betterAuthUserId: string;
   request: { headers: Headers };
+  /**
+   * The actor's tenant scope (AUTHZ-1/2). Status actions are confined to this
+   * org for an org admin; account-global actions (ban/unban, soft-delete/
+   * restore) on a user shared with other orgs are refused unless SUPERADMIN.
+   */
+  scope: OrgScope;
+}
+
+/**
+ * Per-row guard for the account-global bulk actions (ban/unban/soft-delete/
+ * restore): a non-SUPERADMIN may not act account-globally on a user shared
+ * with other orgs (AUTHZ-2). Returns the refusal outcome, or null when allowed.
+ */
+async function refuseSharedAccountGlobal(
+  target: BulkUserTarget,
+  actor: BulkUserActor,
+): Promise<BulkUserOutcome | null> {
+  if (await requiresSuperadminForSharedTarget(actor.scope, target.appUserId)) {
+    return { ok: false, appUserId: target.appUserId, error: "forbidden_shared_target" };
+  }
+  return null;
 }
 
 export interface BulkUserTarget {
@@ -96,6 +118,7 @@ async function performStatusAction(
   // audit row records the original IP / UA.
   const result = await performAdminStatusChange({
     actorBetterAuthUserId: actor.betterAuthUserId,
+    scope: actor.scope,
     request: actor.request,
     targetAppUserId: target.appUserId,
     reason: options.reason,
@@ -118,6 +141,8 @@ async function performBan(
   if (!options.reason) {
     return { ok: false, appUserId: target.appUserId, error: "reason_required" };
   }
+  const refused = await refuseSharedAccountGlobal(target, actor);
+  if (refused) return refused;
   try {
     await banBetterAuthUser(
       {
@@ -153,6 +178,8 @@ async function performUnban(
   target: BulkUserTarget,
   actor: BulkUserActor,
 ): Promise<BulkUserOutcome> {
+  const refused = await refuseSharedAccountGlobal(target, actor);
+  if (refused) return refused;
   try {
     await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
   } catch (err) {
@@ -181,6 +208,8 @@ async function performSoftDelete(
   actor: BulkUserActor,
   options: BulkUserOptions,
 ): Promise<BulkUserOutcome> {
+  const refused = await refuseSharedAccountGlobal(target, actor);
+  if (refused) return refused;
   const reason = options.reason ?? null;
   try {
     await banBetterAuthUser(
@@ -274,6 +303,8 @@ async function performRestore(
   target: BulkUserTarget,
   actor: BulkUserActor,
 ): Promise<BulkUserOutcome> {
+  const refused = await refuseSharedAccountGlobal(target, actor);
+  if (refused) return refused;
   try {
     await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
   } catch (err) {

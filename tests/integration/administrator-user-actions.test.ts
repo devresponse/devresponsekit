@@ -25,10 +25,22 @@ const authRevokeSession = vi.fn();
 const authRevokeSessions = vi.fn();
 const authCreateUser = vi.fn();
 const authUpdateUser = vi.fn();
+// AUTHZ-2 shared-target gate. Default false (single-org / superadmin); flip to
+// true to exercise the "account-global action on a shared user → 403" path.
+const requiresSuperadminMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
 }));
+vi.mock("@/lib/admin/access-scope.server", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/admin/access-scope.server")>(
+    "@/lib/admin/access-scope.server",
+  );
+  return {
+    ...actual,
+    requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
+  };
+});
 vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return {
@@ -142,6 +154,8 @@ beforeEach(() => {
   authRevokeSessions.mockReset();
   authCreateUser.mockReset();
   authUpdateUser.mockReset();
+  requiresSuperadminMock.mockReset();
+  requiresSuperadminMock.mockResolvedValue(false); // target not shared by default
 });
 afterEach(() => vi.resetModules());
 
@@ -280,6 +294,23 @@ describe("POST /api/administrator/users/[id]/ban", () => {
       }),
     );
   });
+
+  it("returns 403 when a non-superadmin bans a user shared with other orgs (AUTHZ-2)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.ban"));
+    dbMock.mockResolvedValue(targetRow);
+    requiresSuperadminMock.mockResolvedValue(true); // target is shared
+    const { POST } = await import("@/app/api/administrator/users/[id]/ban/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/ban`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "spam" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(403);
+    expect(authBan).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/administrator/users/[id]/password", () => {
@@ -369,6 +400,23 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
         reason: "spam-account",
       }),
     );
+  });
+
+  it("returns 403 when a non-superadmin soft-deletes a user shared with other orgs (AUTHZ-2)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
+    dbMock.mockResolvedValue(targetRow);
+    requiresSuperadminMock.mockResolvedValue(true); // target is shared
+    const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
+    const res = await DELETE(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+        method: "DELETE",
+        body: JSON.stringify({ reason: "spam-account" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(403);
+    expect(authBan).not.toHaveBeenCalled();
   });
 });
 

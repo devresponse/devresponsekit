@@ -46,6 +46,8 @@ interface UserRow {
   preferred_locale: string;
   created_at: string;
   updated_at: string;
+  /** Org name(s) the user belongs to — server-scoped to what the caller may see. */
+  organization_names: string | null;
 }
 
 type BulkActionKey = "approve" | "block" | "ban" | "soft_delete";
@@ -70,7 +72,7 @@ export function AdministratorUsersGrid({
   // expensive part; reusing it across rows and renders keeps the grid
   // cheap.
   const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
+    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium", timeStyle: "short" }),
     [intlLocale],
   );
 
@@ -95,6 +97,15 @@ export function AdministratorUsersGrid({
         accessorKey: "display_name",
         header: () => t("displayName"),
         cell: ({ row }) => row.original.display_name ?? "—",
+      },
+      {
+        id: "organization_names",
+        accessorKey: "organization_names",
+        header: () => t("organization"),
+        // Aggregated across the user's memberships server-side, so it is not a
+        // sortable column (no single backing field to ORDER BY).
+        enableSorting: false,
+        cell: ({ row }) => row.original.organization_names ?? "—",
       },
       {
         id: "status",

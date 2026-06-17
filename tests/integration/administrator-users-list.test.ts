@@ -65,14 +65,16 @@ vi.mock("@/db/database", () => ({
             return (...args: unknown[]) => {
               const cb = args[0];
               if (typeof cb === "function") {
-                // Invoke the eb callback so the handler doesn't crash
-                // on the `eb.or([...])` builder shape.
-                (cb as (eb: unknown) => unknown)(
-                  new Proxy(() => ({}), {
-                    get: () => () => ({}),
-                    apply: () => ({}),
-                  }),
-                );
+                // Invoke the eb callback so the handler doesn't crash on the
+                // builder shapes it uses: `eb.or([...])` (q search) and the
+                // org-scoped `eb.exists(eb.selectFrom(...).select(...)...)`
+                // subquery. A fully chainable proxy stands in for the
+                // expression builder so any nested chain returns itself.
+                const eb: unknown = new Proxy(function () {}, {
+                  get: () => () => eb,
+                  apply: () => eb,
+                });
+                (cb as (eb: unknown) => unknown)(eb);
               }
               return proxy;
             };
@@ -158,6 +160,8 @@ describe("GET /api/administrator/users", () => {
         preferred_locale: "en",
         created_at: "2025-01-01T00:00:00.000Z",
         updated_at: "2025-01-01T00:00:00.000Z",
+        // SUPERADMIN: the org-name column aggregates every org the user is in.
+        organization_names: "Acme, Globex",
         __total: "42",
       },
     ]);
@@ -166,18 +170,58 @@ describe("GET /api/administrator/users", () => {
     const res = await GET(makeRequest(""));
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      items: unknown[];
+      items: { organization_names?: string }[];
       page: number;
       pageSize: number;
       total: number;
       sort: { field: string; direction: string }[];
     };
     expect(body.items).toHaveLength(1);
+    // The new Organization column rides on each row.
+    expect(body.items[0]?.organization_names).toBe("Acme, Globex");
     expect(body.total).toBe(42);
     expect(body.page).toBe(1);
     expect(body.pageSize).toBe(25);
     // Default sort applied when none requested.
     expect(body.sort).toEqual([{ field: "created_at", direction: "desc" }]);
+  });
+
+  it("an org admin still gets a scoped page with the organization column", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    // Org admin: holds admin.users.read but NOT the superuser marker, with a
+    // resolvable org — exercises the org-scoped branch (row filter + the
+    // org-confined org-name subquery).
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "orgadmin@orgb.local",
+      status: "active",
+      organizationId: "org-b",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["admin.users.read"],
+    });
+    itemsExecute.mockResolvedValue([
+      {
+        id: "22222222-2222-4222-8222-222222222202",
+        better_auth_user_id: "ba-7",
+        primary_email: "user1@orgb.local",
+        display_name: "ORG B User 1",
+        status: "active",
+        preferred_locale: "en",
+        created_at: "2026-06-16T00:00:00.000Z",
+        updated_at: "2026-06-16T00:00:00.000Z",
+        // Scoped subquery → only the caller's own org name is ever returned.
+        organization_names: "ORG B",
+        __total: "1",
+      },
+    ]);
+    totalExecute.mockResolvedValue({ total: "1" });
+
+    const res = await GET(makeRequest(""));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { organization_names?: string }[]; total: number };
+    expect(body.total).toBe(1);
+    expect(body.items[0]?.organization_names).toBe("ORG B");
   });
 
   it("clamps oversize pageSize at 200 (no DOS via huge pages)", async () => {

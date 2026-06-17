@@ -361,7 +361,8 @@
         "email": "Correo electrónico",
         "displayName": "Nombre",
         "status": "Estado",
-        "createdAt": "Creado"
+        "createdAt": "Creado",
+        "organization": "Organización"
       },
       "filters": {
         "status": "Estado",

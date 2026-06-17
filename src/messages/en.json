@@ -361,7 +361,8 @@
         "email": "Email",
         "displayName": "Name",
         "status": "Status",
-        "createdAt": "Created"
+        "createdAt": "Created",
+        "organization": "Organization"
       },
       "filters": {
         "status": "Status",

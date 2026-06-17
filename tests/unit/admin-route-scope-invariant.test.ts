@@ -31,6 +31,10 @@ const SCOPE_MARKERS = [
   "@/lib/admin/access-scope.server",
   // resolveTargetUser(id, access) embeds canAccessUser — scoped by contract.
   "resolveTargetUser",
+  // selectDashboardMetrics(access) is the shared dashboard-metrics selector;
+  // it derives system-vs-org scope from access-scope.server (isSuperadmin /
+  // resolveOrgScope) by construction, so a route delegating to it is scoped.
+  "selectDashboardMetrics",
 ];
 
 /**

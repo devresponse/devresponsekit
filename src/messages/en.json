@@ -70,11 +70,26 @@
     },
     "stats": {
       "items": [
-        { "value": "958", "label": "automated tests" },
-        { "value": "$0", "label": "marginal auth cost" },
-        { "value": "80+", "label": "admin console pages" },
-        { "value": "3-tier", "label": "access control" },
-        { "value": "4", "label": "languages" }
+        {
+          "value": "958",
+          "label": "automated tests"
+        },
+        {
+          "value": "$0",
+          "label": "marginal auth cost"
+        },
+        {
+          "value": "80+",
+          "label": "admin console pages"
+        },
+        {
+          "value": "3-tier",
+          "label": "access control"
+        },
+        {
+          "value": "4",
+          "label": "languages"
+        }
       ]
     },
     "features": {
@@ -312,6 +327,30 @@
           "when": "When",
           "name": "Name",
           "slug": "Slug"
+        }
+      },
+      "insights": {
+        "title": "Insights",
+        "description": "Activity over the last 7 days, scoped to what you can access.",
+        "empty": "Not enough data to chart yet.",
+        "table": {
+          "day": "Day",
+          "organization": "Organization",
+          "count": "Count"
+        },
+        "mostActiveOrgs": {
+          "title": "Most active organizations",
+          "subtitle": "New signups per organization over the last {days} days"
+        },
+        "registrations": {
+          "title": "Daily registrations",
+          "system": "New users across all organizations",
+          "org": "New members in your organization"
+        },
+        "logins": {
+          "title": "Daily logins",
+          "system": "Sign-ins across all organizations",
+          "org": "Sign-ins in your organization"
         }
       }
     },

@@ -70,11 +70,26 @@
     },
     "stats": {
       "items": [
-        { "value": "958", "label": "tests automatisés" },
-        { "value": "$0", "label": "coût marginal d’authentification" },
-        { "value": "80+", "label": "pages de console d’administration" },
-        { "value": "3 niveaux", "label": "contrôle d’accès" },
-        { "value": "4", "label": "langues" }
+        {
+          "value": "958",
+          "label": "tests automatisés"
+        },
+        {
+          "value": "$0",
+          "label": "coût marginal d’authentification"
+        },
+        {
+          "value": "80+",
+          "label": "pages de console d’administration"
+        },
+        {
+          "value": "3 niveaux",
+          "label": "contrôle d’accès"
+        },
+        {
+          "value": "4",
+          "label": "langues"
+        }
       ]
     },
     "features": {
@@ -312,6 +327,30 @@
           "when": "Quand",
           "name": "Nom",
           "slug": "Slug"
+        }
+      },
+      "insights": {
+        "title": "Statistiques",
+        "description": "Activité des 7 derniers jours, limitée à votre périmètre d'accès.",
+        "empty": "Pas encore assez de données à afficher.",
+        "table": {
+          "day": "Jour",
+          "organization": "Organisation",
+          "count": "Nombre"
+        },
+        "mostActiveOrgs": {
+          "title": "Organisations les plus actives",
+          "subtitle": "Nouvelles inscriptions par organisation sur les {days} derniers jours"
+        },
+        "registrations": {
+          "title": "Inscriptions quotidiennes",
+          "system": "Nouveaux utilisateurs, toutes organisations confondues",
+          "org": "Nouveaux membres de votre organisation"
+        },
+        "logins": {
+          "title": "Connexions quotidiennes",
+          "system": "Connexions, toutes organisations confondues",
+          "org": "Connexions dans votre organisation"
         }
       }
     },

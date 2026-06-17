@@ -10,6 +10,14 @@ import * as Sentry from "@sentry/nextjs";
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("./sentry.server.config");
+    // OPS-4: drain the pg pool on SIGTERM/SIGINT so a deploy/rollout closes
+    // DB connections cleanly. Skipped during the production *build* phase
+    // (no live pool to drain) and confined to the Node runtime — the
+    // shutdown module imports `pg`, which the edge runtime cannot load.
+    if (process.env.NEXT_PHASE !== "phase-production-build") {
+      const { registerGracefulShutdown } = await import("@/lib/shutdown.server");
+      registerGracefulShutdown();
+    }
   }
   if (process.env.NEXT_RUNTIME === "edge") {
     await import("./sentry.edge.config");

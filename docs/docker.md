@@ -187,15 +187,19 @@ volumes:
 - **Resource limits:** set CPU/memory limits and a restart policy.
 - **Secrets:** inject via the orchestrator's secret store, not image layers
   or committed env files.
+- **Health probes:** wire the orchestrator's `livenessProbe` to
+  `GET /api/health` (200, no DB) and its `readinessProbe` to
+  `GET /api/health/ready` (`select 1` → 200, or 503 when the database is
+  unreachable). Both are unauthenticated and `no-store`.
+- **Graceful shutdown:** the server drains the PostgreSQL pool on `SIGTERM`/
+  `SIGINT` before exiting, bounded by `SHUTDOWN_TIMEOUT_MS` (default 10s), so a
+  rolling deploy closes DB connections cleanly. Set the orchestrator's
+  termination grace period to at least `SHUTDOWN_TIMEOUT_MS`.
 
 ---
 
 ## 8. Caveats / known limitations
 
-- **No built-in health endpoint yet.** There is no `/api/health` route at the
-  time of writing (tracked separately). For liveness/readiness probes, hit a
-  cheap rendered route such as `GET /en/sign-in` (200) until a dedicated probe
-  lands. A readiness check that proves DB connectivity is planned.
 - **In-process rate limiter.** The admin abuse-guard rate limiter is per
   process and not shared across replicas, so its budget multiplies by the
   number of containers and resets on restart. Until a shared (Redis/Postgres)

@@ -1,0 +1,44 @@
+# Keep the build context small and never ship secrets or local state.
+# (The standalone build only needs source + manifests; everything below is
+# either rebuilt, irrelevant to the runtime image, or sensitive.)
+
+# Dependencies / build output (reinstalled & rebuilt inside the image)
+node_modules
+.next
+out
+dist
+sdk
+
+# VCS / CI / tooling
+.git
+.github
+.claude
+.vscode
+
+# Tests, coverage, reports (not needed to build or run the server)
+tests
+test-results
+playwright-report
+coverage
+coverage-*.log
+
+# Local-only and generated artifacts
+docs-backup
+*.log
+tsconfig.tsbuildinfo
+
+# Secrets and local env — NEVER copy these into the image.
+# .env.example is intentionally allowed so the build context documents the
+# expected variables, but it is not consumed by the build.
+.env
+.env.*
+!.env.example
+
+# The Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# OS noise
+.DS_Store
+Thumbs.db

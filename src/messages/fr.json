@@ -1236,5 +1236,13 @@
     "description": "Une erreur inattendue s’est produite lors de l’affichage de cette page. Réessayez, ou rechargez si le problème persiste.",
     "retry": "Réessayer",
     "supportId": "Identifiant de support"
+  },
+  "validation": {
+    "required": "Ce champ est obligatoire.",
+    "email": "Saisissez une adresse e-mail valide.",
+    "passwordMin": "Le mot de passe doit comporter au moins 8 caractères.",
+    "passwordMax": "Le mot de passe ne doit pas dépasser 128 caractères.",
+    "max": "Cette valeur est trop longue.",
+    "requiredLegend": "indique un champ obligatoire"
   }
 }

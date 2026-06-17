@@ -1236,5 +1236,13 @@
     "description": "An unexpected error occurred while rendering this page. You can try again, or reload if the problem persists.",
     "retry": "Try again",
     "supportId": "Support ID"
+  },
+  "validation": {
+    "required": "This field is required.",
+    "email": "Enter a valid email address.",
+    "passwordMin": "Password must be at least 8 characters.",
+    "passwordMax": "Password must be at most 128 characters.",
+    "max": "This value is too long.",
+    "requiredLegend": "indicates a required field"
   }
 }

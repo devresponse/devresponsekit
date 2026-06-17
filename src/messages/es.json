@@ -1236,5 +1236,13 @@
     "description": "Ocurrió un error inesperado al mostrar esta página. Puedes reintentar o recargar si el problema persiste.",
     "retry": "Reintentar",
     "supportId": "ID de soporte"
+  },
+  "validation": {
+    "required": "Este campo es obligatorio.",
+    "email": "Introduce una dirección de correo electrónico válida.",
+    "passwordMin": "La contraseña debe tener al menos 8 caracteres.",
+    "passwordMax": "La contraseña no debe superar los 128 caracteres.",
+    "max": "Este valor es demasiado largo.",
+    "requiredLegend": "indica un campo obligatorio"
   }
 }

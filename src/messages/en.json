@@ -1250,6 +1250,9 @@
     "appId": "Use lowercase letters, numbers, and the characters . _ -",
     "subdomain": "Use lowercase letters, numbers, and hyphens.",
     "ssoAudience": "Use lowercase letters, numbers, and the characters . _ : -",
-    "number": "Enter a valid number."
+    "number": "Enter a valid number.",
+    "passwordsMismatch": "Passwords do not match.",
+    "locale": "Choose a supported language.",
+    "dateFormat": "Choose a valid date format."
   }
 }

@@ -70,11 +70,26 @@
     },
     "stats": {
       "items": [
-        { "value": "958", "label": "pruebas automatizadas" },
-        { "value": "$0", "label": "coste marginal de autenticación" },
-        { "value": "80+", "label": "páginas de consola de administración" },
-        { "value": "3 niveles", "label": "control de acceso" },
-        { "value": "4", "label": "idiomas" }
+        {
+          "value": "958",
+          "label": "pruebas automatizadas"
+        },
+        {
+          "value": "$0",
+          "label": "coste marginal de autenticación"
+        },
+        {
+          "value": "80+",
+          "label": "páginas de consola de administración"
+        },
+        {
+          "value": "3 niveles",
+          "label": "control de acceso"
+        },
+        {
+          "value": "4",
+          "label": "idiomas"
+        }
       ]
     },
     "features": {
@@ -312,6 +327,30 @@
           "when": "Cuándo",
           "name": "Nombre",
           "slug": "Slug"
+        }
+      },
+      "insights": {
+        "title": "Estadísticas",
+        "description": "Actividad de los últimos 7 días, limitada a lo que puedes ver.",
+        "empty": "Aún no hay datos suficientes para mostrar.",
+        "table": {
+          "day": "Día",
+          "organization": "Organización",
+          "count": "Recuento"
+        },
+        "mostActiveOrgs": {
+          "title": "Organizaciones más activas",
+          "subtitle": "Nuevos registros por organización en los últimos {days} días"
+        },
+        "registrations": {
+          "title": "Registros diarios",
+          "system": "Nuevos usuarios en todas las organizaciones",
+          "org": "Nuevos miembros de tu organización"
+        },
+        "logins": {
+          "title": "Inicios de sesión diarios",
+          "system": "Inicios de sesión en todas las organizaciones",
+          "org": "Inicios de sesión en tu organización"
         }
       }
     },

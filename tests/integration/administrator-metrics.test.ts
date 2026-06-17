@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as MetricsRoute from "@/app/api/administrator/metrics/route";
+import type * as MetricsServer from "@/lib/admin/metrics.server";
 
 /**
  * RBAC scoping for GET /api/administrator/metrics. The guard and the metrics
@@ -20,7 +21,7 @@ vi.mock("@/lib/admin/permissions.server", () => ({
   isAdminPermissionDenial: (g: unknown) => (g as { denied?: boolean })?.denied === true,
 }));
 vi.mock("@/lib/admin/metrics.server", async (orig) => {
-  const actual = await orig<typeof import("@/lib/admin/metrics.server")>();
+  const actual = await orig<typeof MetricsServer>();
   return {
     ...actual,
     signupsPerOrg: (...a: unknown[]) => signupsPerOrg(...a),

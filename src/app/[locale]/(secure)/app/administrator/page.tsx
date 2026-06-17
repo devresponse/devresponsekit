@@ -1,12 +1,18 @@
 import { getTranslations } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getAdministratorOverviewActivity,
   getAdministratorOverviewMetrics,
   type OverviewActivity,
   type OverviewMetrics,
 } from "@/lib/admin/overview.server";
+import {
+  selectDashboardMetrics,
+  type DashboardMetrics,
+} from "@/lib/admin/dashboard-metrics.server";
 import { ANY_ADMIN_PERMISSION, checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { MetricBarChart, type MetricBarDatum } from "./_components/metric-bar-chart";
 import { MetricCard, type MetricCardProps } from "./_components/metric-card";
 import { OverviewListCard, type OverviewListCardProps } from "./_components/overview-list-card";
 
@@ -72,12 +78,13 @@ export default async function AdministratorPage({
   // is request-cached (React cache on the access context) and gives the
   // page the exact permission set for per-card gating.
   const guard = await checkAdminPermissionServer([...ANY_ADMIN_PERMISSION]);
-  const permissions = typeof guard === "string" ? [] : guard.access.permissions;
+  const access = typeof guard === "string" ? null : guard.access;
+  const permissions = access?.permissions ?? [];
 
   const visible = METRIC_DESCRIPTORS.filter((d) => permissions.includes(d.permission));
   const visibleIds = new Set<MetricId>(visible.map((d) => d.id));
 
-  const [metrics, activity] = await Promise.all([
+  const [metrics, activity, dashboardMetrics] = await Promise.all([
     getAdministratorOverviewMetrics({
       users: visibleIds.has("users"),
       organizations: visibleIds.has("organizations"),
@@ -93,6 +100,10 @@ export default async function AdministratorPage({
       auditEvents: permissions.includes("admin.audit.read"),
       organizations: permissions.includes("admin.orgs.read"),
     }),
+    // RBAC scoping (system vs. own-org, per-series visibility) is decided
+    // server-side — shared with GET /api/administrator/metrics so the charts
+    // and the API can never show different things to the same caller.
+    access ? selectDashboardMetrics(access) : Promise.resolve(null),
   ]);
 
   const cards = visible
@@ -100,6 +111,7 @@ export default async function AdministratorPage({
     .filter((c): c is MetricCardProps => c !== null);
 
   const lists = buildActivityLists(activity, t, locale);
+  const insights = dashboardMetrics ? buildInsights(dashboardMetrics, t, locale) : [];
 
   return (
     <section className="space-y-6 p-6">
@@ -125,8 +137,107 @@ export default async function AdministratorPage({
           ))}
         </div>
       ) : null}
+
+      {insights.length > 0 ? (
+        <section aria-labelledby="insights-heading" className="space-y-4">
+          <div className="space-y-1">
+            <h2 id="insights-heading" className="text-base font-semibold">
+              {t("insights.title")}
+            </h2>
+            <p className="text-muted-foreground text-sm">{t("insights.description")}</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {insights.map((insight) => (
+              <Card key={insight.key} className="h-full">
+                <CardHeader className="space-y-1 pb-2">
+                  <CardTitle className="text-sm font-medium">{insight.title}</CardTitle>
+                  <p className="text-muted-foreground text-xs">{insight.subtitle}</p>
+                </CardHeader>
+                <CardContent>
+                  <MetricBarChart
+                    data={insight.data}
+                    caption={insight.title}
+                    categoryHeader={insight.categoryHeader}
+                    valueHeader={t("insights.table.count")}
+                    emptyLabel={t("insights.empty")}
+                    fill={insight.fill}
+                  />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </section>
   );
+}
+
+/** A single chart descriptor: localized chrome plus its plotted series. */
+interface InsightChart {
+  key: string;
+  title: string;
+  subtitle: string;
+  categoryHeader: string;
+  data: MetricBarDatum[];
+  fill: string;
+}
+
+/**
+ * Maps the server-scoped {@link DashboardMetrics} to localized chart
+ * descriptors. Only the series the caller is allowed to see are present on
+ * `dashboardMetrics`, so this never re-decides visibility — it just shapes
+ * what survived scoping. SUPERADMIN sees most-active-orgs (cross-org) plus
+ * system registrations/logins; an org admin sees only their org's series.
+ */
+function buildInsights(
+  dashboardMetrics: DashboardMetrics,
+  t: Awaited<ReturnType<typeof getTranslations>>,
+  locale: string,
+): InsightChart[] {
+  const dayLabel = (iso: string) =>
+    new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" }).format(
+      new Date(`${iso}T00:00:00Z`),
+    );
+  const daySeries = (series: { date: string; count: number }[]): MetricBarDatum[] =>
+    series.map((d) => ({ label: dayLabel(d.date), value: d.count }));
+
+  const charts: InsightChart[] = [];
+  const isSystem = dashboardMetrics.scope === "system";
+
+  if (dashboardMetrics.mostActiveOrgs) {
+    charts.push({
+      key: "mostActiveOrgs",
+      title: t("insights.mostActiveOrgs.title"),
+      subtitle: t("insights.mostActiveOrgs.subtitle", { days: dashboardMetrics.windowDays }),
+      categoryHeader: t("insights.table.organization"),
+      data: dashboardMetrics.mostActiveOrgs.map((o) => ({ label: o.name, value: o.count })),
+      fill: "var(--chart-1)",
+    });
+  }
+
+  if (dashboardMetrics.registrationsDaily) {
+    charts.push({
+      key: "registrations",
+      title: t("insights.registrations.title"),
+      subtitle: isSystem ? t("insights.registrations.system") : t("insights.registrations.org"),
+      categoryHeader: t("insights.table.day"),
+      data: daySeries(dashboardMetrics.registrationsDaily),
+      fill: "var(--chart-2)",
+    });
+  }
+
+  if (dashboardMetrics.loginsDaily) {
+    charts.push({
+      key: "logins",
+      title: t("insights.logins.title"),
+      subtitle: isSystem ? t("insights.logins.system") : t("insights.logins.org"),
+      categoryHeader: t("insights.table.day"),
+      data: daySeries(dashboardMetrics.loginsDaily),
+      fill: "var(--chart-3)",
+    });
+  }
+
+  return charts;
 }
 
 /**

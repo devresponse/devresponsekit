@@ -1128,7 +1128,10 @@
       "memberships": "Organizaciones",
       "noMemberships": "No eres miembro de ninguna organización.",
       "roles": "Roles",
-      "noRoles": "Sin roles asignados."
+      "noRoles": "Sin roles asignados.",
+      "permissions": "Permisos",
+      "permissionsDescription": "Todas las acciones que tienes permitido realizar actualmente, otorgadas por tus roles en la organización activa.",
+      "noPermissions": "No tienes permisos en la organización activa."
     },
     "security": {
       "passwordTitle": "Contraseña",

@@ -7,7 +7,10 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
-import { permissionKeysForRoles, unheldPermissionKeys } from "@/lib/admin/grantable-permissions.server";
+import {
+  permissionKeysForRoles,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";

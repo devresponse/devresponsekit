@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
 import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { createUserSchema } from "@/lib/validation/users";
 import {
   applySortAndPagination,
   buildListResponse,
@@ -160,17 +160,11 @@ export async function GET(request: NextRequest) {
  *     approval is still required even when an admin creates the user.
  *   - The new password is forwarded to Better Auth and never logged or
  *     returned in the response or audit metadata.
+ *
+ * The request body is validated with the shared `createUserSchema`
+ * (`@/lib/validation/users`) — the SAME schema the create-user form uses, so
+ * client and server enforce identical rules.
  */
-const createSchema = z
-  .object({
-    email: z.email(),
-    password: z.string().min(8).max(128),
-    name: z.string().min(1).max(200).optional(),
-    role: z.enum(["admin", "user"]).optional(),
-    initialAppStatus: z.enum(["active", "pending_approval"]).optional().default("pending_approval"),
-    preferredLocale: z.string().min(2).max(10).optional(),
-  })
-  .strict();
 
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.create");
@@ -189,7 +183,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = createSchema.safeParse(json);
+  const parsed = createUserSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }
@@ -221,7 +215,7 @@ export async function POST(request: NextRequest) {
       {
         email: normalisedEmail,
         password: input.password,
-        name: input.name ?? normalisedEmail,
+        name: input.name?.trim() || normalisedEmail,
         role: input.role,
       },
       request,
@@ -264,7 +258,7 @@ export async function POST(request: NextRequest) {
       .values({
         better_auth_user_id: betterAuthUserId,
         primary_email: normalisedEmail,
-        display_name: input.name ?? null,
+        display_name: input.name?.trim() || null,
         status: input.initialAppStatus,
         preferred_locale: input.preferredLocale ?? "en",
       })

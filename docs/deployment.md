@@ -16,7 +16,7 @@ pnpm start                        # next start (serves the built app)
 
 Build characteristics (from `next.config.mjs` and `package.json`):
 
-- **No `output: "standalone"`** — the build is the conventional `.next/` output, run with `next start` against `node_modules`. It is **not** pre-packaged as a self-contained server bundle.
+- **`output: "standalone"`** — the build also emits a self-contained server bundle (`.next/standalone`) used by the container image. `next start` against the conventional `.next/` output and serverless targets still work unchanged. See [docker.md](./docker.md).
 - **next-intl plugin** wires localized routing from `src/i18n/request.ts`.
 - **Sentry plugin is opt-in** — it only engages when `NEXT_PUBLIC_SENTRY_DSN` is set, and source-map *upload* additionally needs `SENTRY_AUTH_TOKEN` (+ `SENTRY_ORG`/`SENTRY_PROJECT`). Without a DSN the build is byte-for-byte unchanged.
 - **Security headers** are emitted for every route by the `headers()` config.
@@ -30,7 +30,7 @@ Build characteristics (from `next.config.mjs` and `package.json`):
 | Coverage report | CI `quality` job | Uploaded as a CI artifact (7-day retention). |
 | Playwright traces | CI `browser` job | Uploaded on failure (7-day retention). |
 
-There is **no Docker image for the application** in the repository (no `Dockerfile`). The only container defined is **PostgreSQL** (`docker-compose.yml`, for local development).
+A production **`Dockerfile`** (multi-stage, non-root, built from the standalone output) and a **`.dockerignore`** are provided — build/run/deploy steps are documented in [docker.md](./docker.md). `docker-compose.yml` additionally defines **PostgreSQL** for local development.
 
 ## 3. Runtime requirements
 
@@ -49,20 +49,23 @@ The repository **does not pin a hosting target**. Two models are consistent with
 
 | Model | Fit | Evidence / considerations |
 | --- | --- | --- |
-| **Serverless (e.g. Vercel)** | Natural for Next.js | `TRUSTED_PROXY_COUNT` defaults to 1 (a CDN/LB in front); no `output: standalone`; `NEXT_PUBLIC_PRODUCTION_HOST` suggests a hosted origin. Use a **pooled** Postgres endpoint. |
-| **Node server / container** | Self-hosted | Run `pnpm build` then `pnpm start` behind a TLS-terminating reverse proxy; run migrations as an init step. You'd add your own `Dockerfile` (none is provided). |
+| **Serverless (e.g. Vercel)** | Natural for Next.js | `TRUSTED_PROXY_COUNT` defaults to 1 (a CDN/LB in front); `NEXT_PUBLIC_PRODUCTION_HOST` suggests a hosted origin. Use a **pooled** Postgres endpoint. |
+| **Node server / container** | Self-hosted | Build the provided [`Dockerfile`](../Dockerfile) (standalone, non-root) and run it behind a TLS-terminating reverse proxy; run migrations as a separate init step. Full instructions in [docker.md](./docker.md). |
 
-> `TODO:` Choose and document the production hosting target. If containerizing, add a `Dockerfile` (consider enabling `output: "standalone"` to slim the image) and a deploy manifest. The historical [`docs-backup/setup-guide.md`](../docs-backup/setup-guide.md) references Vercel as the primary target and Docker/self-hosted as an alternative — confirm against your actual infrastructure.
+> `TODO:` Choose and document the production hosting target for your infrastructure. The historical [`docs-backup/setup-guide.md`](../docs-backup/setup-guide.md) references Vercel as the primary target and Docker/self-hosted as an alternative — confirm against your actual setup. A container path is now provided (see below); the serverless path needs no extra packaging.
 
-## 5. Container notes (if you containerize)
+## 5. Containerized deployment
 
-There is no app Dockerfile today. A minimal approach:
+A production-ready, multi-stage **`Dockerfile`** is included: it builds from
+the Next.js standalone output, runs as an unprivileged user, and copies only
+the traced runtime bundle (`.next/standalone`), `.next/static`, `public/`,
+and `docs/`. Build/configure/run/deploy — including running migrations as a
+separate init step, the required env vars, a `docker compose` example, and
+hardening recommendations — are documented in **[docker.md](./docker.md)**.
 
-- Build stage: `pnpm install --frozen-lockfile && pnpm build`.
-- Runtime stage: copy `.next/`, `public/`, `package.json`, `node_modules` (or use `output: "standalone"` and copy `.next/standalone`), run `pnpm start`.
-- Provide all required env at runtime; run migrations as a separate init job, not in the web container's start command.
-
-For local PostgreSQL, the provided `docker-compose.yml` runs `pgvector/pgvector:pg17` on host port 5444 with an init script that enables `vector` and `pg_trgm`.
+For local PostgreSQL, the provided `docker-compose.yml` runs
+`pgvector/pgvector:pg17` on host port 5444 with an init script that enables
+`vector` and `pg_trgm`.
 
 ## 6. CI/CD pipeline
 

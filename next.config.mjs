@@ -55,6 +55,12 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Emit a self-contained server bundle (`.next/standalone`) with only the
+  // traced runtime dependencies, so the production container is a thin
+  // `node server.js` image instead of the full repo + node_modules. This is
+  // an ADDITIONAL build artifact: `next start` and serverless targets are
+  // unaffected. See the Dockerfile and docs/docker.md.
+  output: "standalone",
   // The proxy.ts (formerly middleware.ts) file lives under src/.
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

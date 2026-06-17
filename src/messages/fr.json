@@ -1250,6 +1250,9 @@
     "appId": "Utilisez des minuscules, des chiffres et les caractères . _ -",
     "subdomain": "Utilisez des minuscules, des chiffres et des traits d'union.",
     "ssoAudience": "Utilisez des minuscules, des chiffres et les caractères . _ : -",
-    "number": "Saisissez un nombre valide."
+    "number": "Saisissez un nombre valide.",
+    "passwordsMismatch": "Les mots de passe ne correspondent pas.",
+    "locale": "Choisissez une langue prise en charge.",
+    "dateFormat": "Choisissez un format de date valide."
   }
 }

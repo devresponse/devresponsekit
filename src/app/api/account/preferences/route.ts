@@ -1,12 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { requireAccountUser } from "@/lib/account/guard.server";
-import { isSupportedLocale } from "@/config/i18n-config";
-import { isDateFormatOption, isValidTimeZone, normalizeOptional } from "@/lib/account/preferences";
+import { isValidTimeZone, normalizeOptional } from "@/lib/account/preferences";
+import { updatePreferencesSchema } from "@/lib/validation/account";
 
 export const dynamic = "force-dynamic";
 
@@ -24,16 +23,6 @@ export const dynamic = "force-dynamic";
  * format against the fixed option set, number-format locale against the
  * supported locales (or "system" → NULL).
  */
-const bodySchema = z
-  .object({
-    preferredLocale: z.string().refine(isSupportedLocale, { message: "unsupported_locale" }),
-    timeZone: z.string().max(64).nullable().optional(),
-    dateFormat: z.string().refine(isDateFormatOption, { message: "invalid_date_format" }),
-    numberFormatLocale: z
-      .string()
-      .refine((v) => v === "system" || isSupportedLocale(v), { message: "invalid_number_locale" }),
-  })
-  .strict();
 
 export async function PUT(request: NextRequest) {
   const guard = await requireAccountUser(request);
@@ -46,7 +35,7 @@ export async function PUT(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
-  const parsed = bodySchema.safeParse(json);
+  const parsed = updatePreferencesSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }

@@ -4,14 +4,23 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { RequiredLegend } from "@/components/ui/required-legend";
 import { DATE_FORMAT_OPTIONS } from "@/lib/account/preferences";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import { updatePreferencesSchema, type UpdatePreferencesInput } from "@/lib/validation/account";
 
 /**
- * Preferences editor (self-service): locale, time zone, date format, and
- * number-format locale. Controlled selects whose allowed values mirror
- * the server Zod schema in `/api/account/preferences` (the source of
- * truth). Self-scoped endpoint — no identifier is sent.
+ * Preferences editor (self-service; docs/form-validation.md). React Hook Form +
+ * the shared `updatePreferencesSchema` (the same schema `/api/account/preferences`
+ * enforces) — locale/date/number are constrained choices; time zone is optional.
  */
 export interface PreferencesFormProps {
   locales: string[];
@@ -23,11 +32,10 @@ export interface PreferencesFormProps {
   };
 }
 
-const SELECT_CLASS = "border-input bg-background h-9 w-full rounded-md border px-2 text-sm";
+const SELECT_CLASS =
+  "border-input bg-background aria-invalid:border-destructive h-9 w-full rounded-md border px-2 text-sm";
 
 function listTimeZones(): string[] {
-  // `Intl.supportedValuesOf` is available in modern engines; fall back to
-  // a small common set so the control still works if it is absent.
   const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
   try {
     return intl.supportedValuesOf?.("timeZone") ?? [];
@@ -42,137 +50,159 @@ export function PreferencesForm({ locales, initial }: PreferencesFormProps) {
   const router = useRouter();
 
   const timeZones = useMemo(() => listTimeZones(), []);
+  const [saved, setSaved] = useState(false);
+  const form = useZodForm<UpdatePreferencesInput>(updatePreferencesSchema, {
+    defaultValues: {
+      preferredLocale: initial.preferredLocale,
+      timeZone: initial.timeZone,
+      dateFormat: initial.dateFormat,
+      numberFormatLocale: initial.numberFormatLocale,
+    },
+  });
 
-  const [preferredLocale, setPreferredLocale] = useState(initial.preferredLocale);
-  const [timeZone, setTimeZone] = useState(initial.timeZone);
-  const [dateFormat, setDateFormat] = useState(initial.dateFormat);
-  const [numberFormatLocale, setNumberFormatLocale] = useState(initial.numberFormatLocale);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "saved">("idle");
-  const [submitting, setSubmitting] = useState(false);
-
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-    setStatus("idle");
-    setSubmitting(true);
+  const onValid = async (values: UpdatePreferencesInput) => {
+    form.clearErrors("root");
+    setSaved(false);
     try {
       const res = await fetch("/api/account/preferences", {
         method: "PUT",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          preferredLocale,
-          timeZone: timeZone || null,
-          dateFormat,
-          numberFormatLocale,
+          preferredLocale: values.preferredLocale,
+          timeZone: values.timeZone || null,
+          dateFormat: values.dateFormat,
+          numberFormatLocale: values.numberFormatLocale,
         }),
       });
       if (res.ok) {
-        setStatus("saved");
+        setSaved(true);
         router.refresh();
         return;
       }
-      setError(res.status === 400 ? t("errors.invalid") : t("errors.saveFailed"));
+      form.setError("root", {
+        type: "server",
+        message: res.status === 400 ? t("errors.invalid") : t("errors.saveFailed"),
+      });
     } catch {
-      setError(t("errors.saveFailed"));
-    } finally {
-      setSubmitting(false);
+      form.setError("root", { type: "server", message: t("errors.saveFailed") });
     }
   };
 
+  const rootError = form.formState.errors.root?.message;
+
   return (
-    <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
-      <div className="space-y-2">
-        <Label htmlFor="pref-locale">{t("fields.locale")}</Label>
-        <select
-          id="pref-locale"
-          className={SELECT_CLASS}
-          value={preferredLocale}
-          onChange={(e) => setPreferredLocale(e.currentTarget.value)}
-        >
-          {locales.map((loc) => (
-            <option key={loc} value={loc}>
-              {t(`locales.${loc}` as Parameters<typeof t>[0])}
-            </option>
-          ))}
-        </select>
-      </div>
+    <Form {...form} schema={updatePreferencesSchema}>
+      <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
+        <RequiredLegend />
 
-      <div className="space-y-2">
-        <Label htmlFor="pref-timezone">{t("fields.timeZone")}</Label>
-        <select
-          id="pref-timezone"
-          className={SELECT_CLASS}
-          value={timeZone}
-          onChange={(e) => setTimeZone(e.currentTarget.value)}
-        >
-          <option value="">{t("fields.system")}</option>
-          {timeZones.map((tz) => (
-            <option key={tz} value={tz}>
-              {tz}
-            </option>
-          ))}
-        </select>
-      </div>
+        <FormField
+          control={form.control}
+          name="preferredLocale"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.locale")}</FormLabel>
+              <FormControl>
+                <select className={SELECT_CLASS} {...field}>
+                  {locales.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {t(`locales.${loc}` as Parameters<typeof t>[0])}
+                    </option>
+                  ))}
+                </select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      <div className="space-y-2">
-        <Label htmlFor="pref-date-format">{t("fields.dateFormat")}</Label>
-        <select
-          id="pref-date-format"
-          className={SELECT_CLASS}
-          value={dateFormat}
-          onChange={(e) => setDateFormat(e.currentTarget.value)}
-        >
-          {DATE_FORMAT_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>
-              {t(`dateFormats.${opt}` as Parameters<typeof t>[0])}
-            </option>
-          ))}
-        </select>
-      </div>
+        <FormField
+          control={form.control}
+          name="timeZone"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.timeZone")}</FormLabel>
+              <FormControl>
+                <select className={SELECT_CLASS} {...field} value={field.value ?? ""}>
+                  <option value="">{t("fields.system")}</option>
+                  {timeZones.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz}
+                    </option>
+                  ))}
+                </select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      <div className="space-y-2">
-        <Label htmlFor="pref-number-locale">{t("fields.numberFormatLocale")}</Label>
-        <select
-          id="pref-number-locale"
-          className={SELECT_CLASS}
-          value={numberFormatLocale}
-          onChange={(e) => setNumberFormatLocale(e.currentTarget.value)}
-        >
-          <option value="system">{t("fields.system")}</option>
-          {locales.map((loc) => (
-            <option key={loc} value={loc}>
-              {t(`locales.${loc}` as Parameters<typeof t>[0])}
-            </option>
-          ))}
-        </select>
-      </div>
+        <FormField
+          control={form.control}
+          name="dateFormat"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.dateFormat")}</FormLabel>
+              <FormControl>
+                <select className={SELECT_CLASS} {...field}>
+                  {DATE_FORMAT_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {t(`dateFormats.${opt}` as Parameters<typeof t>[0])}
+                    </option>
+                  ))}
+                </select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {status === "saved" ? (
-        <p className="text-muted-foreground text-sm" role="status">
-          {t("saved")}
-        </p>
-      ) : null}
+        <FormField
+          control={form.control}
+          name="numberFormatLocale"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.numberFormatLocale")}</FormLabel>
+              <FormControl>
+                <select className={SELECT_CLASS} {...field}>
+                  <option value="system">{t("fields.system")}</option>
+                  {locales.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {t(`locales.${loc}` as Parameters<typeof t>[0])}
+                    </option>
+                  ))}
+                </select>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      <div className="flex items-center gap-2">
-        <Button type="submit" disabled={submitting}>
-          {t("save")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting}
-          onClick={() => router.refresh()}
-        >
-          {tCommon("cancel")}
-        </Button>
-      </div>
-    </form>
+        {rootError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {rootError}
+          </p>
+        ) : null}
+        {saved ? (
+          <p className="text-muted-foreground text-sm" role="status">
+            {t("saved")}
+          </p>
+        ) : null}
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" disabled={form.formState.isSubmitting}>
+            {t("save")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={form.formState.isSubmitting}
+            onClick={() => router.refresh()}
+          >
+            {tCommon("cancel")}
+          </Button>
+        </div>
+      </form>
+    </Form>
   );
 }

@@ -3,115 +3,124 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import {
+  changePasswordSchema,
+  passwordFieldsSchema,
+  type ChangePasswordInput,
+} from "@/lib/validation/account";
 
 /**
- * Password change (self-service) via Better Auth's client. Better Auth
- * verifies the current password and owns the hashing — this form never
- * sees or stores a hash. `revokeOtherSessions` signs out other devices
- * on success, which is the safe default after a credential change.
+ * Password change (self-service; docs/form-validation.md) via Better Auth's
+ * client — it verifies the current password and owns the hashing, so this form
+ * never sees a hash. `revokeOtherSessions` signs out other devices on success.
+ *
+ * React Hook Form validates with `changePasswordSchema` (min length + the
+ * new/confirm match, surfaced on the confirm field); the unrefined
+ * `passwordFieldsSchema` drives the required markers (a `.refine()` object has
+ * no `.shape` for asterisk derivation).
  */
 export function PasswordForm() {
   const t = useTranslations("account");
   const tCommon = useTranslations("common");
 
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const form = useZodForm<ChangePasswordInput>(changePasswordSchema, {
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+  });
 
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
+  const onValid = async (values: ChangePasswordInput) => {
+    form.clearErrors("root");
     setDone(false);
-
-    if (next.length < 8) {
-      setError(t("errors.passwordTooShort"));
-      return;
-    }
-    if (next !== confirm) {
-      setError(t("errors.passwordMismatch"));
-      return;
-    }
-
-    setSubmitting(true);
     try {
       const res = await authClient.changePassword({
-        currentPassword: current,
-        newPassword: next,
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword,
         revokeOtherSessions: true,
       });
       if (res.error) {
-        setError(t("errors.passwordChangeFailed"));
+        form.setError("root", { type: "server", message: t("errors.passwordChangeFailed") });
         return;
       }
       setDone(true);
-      setCurrent("");
-      setNext("");
-      setConfirm("");
+      form.reset({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch {
-      setError(t("errors.passwordChangeFailed"));
-    } finally {
-      setSubmitting(false);
+      form.setError("root", { type: "server", message: t("errors.passwordChangeFailed") });
     }
   };
 
+  const rootError = form.formState.errors.root?.message;
+
   return (
-    <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
-      <div className="space-y-2">
-        <Label htmlFor="current-password">{t("security.currentPassword")}</Label>
-        <Input
-          id="current-password"
-          type="password"
-          required
-          autoComplete="current-password"
-          value={current}
-          onChange={(e) => setCurrent(e.currentTarget.value)}
+    <Form {...form} schema={passwordFieldsSchema}>
+      <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
+        <FormField
+          control={form.control}
+          name="currentPassword"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("security.currentPassword")}</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="current-password" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="new-password">{t("security.newPassword")}</Label>
-        <Input
-          id="new-password"
-          type="password"
-          required
-          minLength={8}
-          autoComplete="new-password"
-          value={next}
-          onChange={(e) => setNext(e.currentTarget.value)}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="confirm-password">{t("security.confirmPassword")}</Label>
-        <Input
-          id="confirm-password"
-          type="password"
-          required
-          minLength={8}
-          autoComplete="new-password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.currentTarget.value)}
-        />
-      </div>
 
-      {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {done ? (
-        <p className="text-muted-foreground text-sm" role="status">
-          {t("security.passwordChanged")}
-        </p>
-      ) : null}
+        <FormField
+          control={form.control}
+          name="newPassword"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("security.newPassword")}</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="new-password" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      <Button type="submit" disabled={submitting || current.length === 0}>
-        {submitting ? tCommon("loading") : t("security.changePassword")}
-      </Button>
-    </form>
+        <FormField
+          control={form.control}
+          name="confirmPassword"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("security.confirmPassword")}</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="new-password" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {rootError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {rootError}
+          </p>
+        ) : null}
+        {done ? (
+          <p className="text-muted-foreground text-sm" role="status">
+            {t("security.passwordChanged")}
+          </p>
+        ) : null}
+
+        <Button type="submit" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? tCommon("loading") : t("security.changePassword")}
+        </Button>
+      </form>
+    </Form>
   );
 }

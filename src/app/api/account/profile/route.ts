@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
 import { db } from "@/db/database";
 import { auth } from "@/lib/auth";
 import { auditEvent } from "@/lib/audit.server";
 import { requireAccountUser } from "@/lib/account/guard.server";
+import { updateProfileSchema } from "@/lib/validation/account";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +18,6 @@ export const dynamic = "force-dynamic";
  * name by the session itself (`auth.api.updateUser` acts on the current
  * user). There is no way to target another account.
  */
-const bodySchema = z
-  .object({
-    name: z.string().trim().min(1).max(120),
-    displayName: z.string().trim().max(120).nullable().optional(),
-  })
-  .strict();
 
 export async function PATCH(request: NextRequest) {
   const guard = await requireAccountUser(request);
@@ -36,7 +30,7 @@ export async function PATCH(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
-  const parsed = bodySchema.safeParse(json);
+  const parsed = updateProfileSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }

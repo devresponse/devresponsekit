@@ -139,17 +139,21 @@ describe("NewGroupForm", () => {
 
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("The submitted data is invalid.");
+    // Field-level validation marks the control invalid (red border) instead of
+    // the old generic banner, and blocks the request.
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Key" })).toHaveAttribute("aria-invalid", "true"),
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("posts and navigates to the created group on 201", async () => {
     fetchMock.mockResolvedValue(jsonOk({ id: "g9" }, 201));
     const user = userEvent.setup();
-    const { container } = renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
+    renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
 
-    await user.type(container.querySelector("#group-key")!, "engineering");
-    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.type(screen.getByRole("textbox", { name: "Key" }), "engineering");
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Engineering");
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
     await waitFor(() =>
@@ -165,13 +169,13 @@ describe("NewGroupForm", () => {
   it("surfaces a key-taken error on 409", async () => {
     fetchMock.mockResolvedValue(jsonOk({ error: "key_taken" }, 409));
     const user = userEvent.setup();
-    const { container } = renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
+    renderWithIntl(<NewGroupForm locale="en" showOrgPicker={false} />);
 
-    await user.type(container.querySelector("#group-key")!, "engineering");
-    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.type(screen.getByRole("textbox", { name: "Key" }), "engineering");
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Engineering");
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("That key is already in use.");
+    expect(await screen.findByText("That key is already in use.")).toBeInTheDocument();
     expect(push).not.toHaveBeenCalled();
   });
 
@@ -185,7 +189,8 @@ describe("NewGroupForm", () => {
 });
 
 describe("NewGroupForm (SUPERADMIN org picker)", () => {
-  const ORG = { id: "o1", slug: "acme", name: "Acme" };
+  // The form now validates organizationId against the shared schema's UUID rule.
+  const ORG = { id: "11111111-1111-4111-8111-111111111111", slug: "acme", name: "Acme" };
 
   function routeOrgsAndGroups() {
     fetchMock.mockImplementation((url: string) => {
@@ -203,13 +208,11 @@ describe("NewGroupForm (SUPERADMIN org picker)", () => {
 
     // The picker renders for a SUPERADMIN; org options load from the endpoint.
     await waitFor(() => expect(container.querySelector("#group-organization")).not.toBeDisabled());
-    await user.type(container.querySelector("#group-key")!, "engineering");
-    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.type(screen.getByRole("textbox", { name: "Key" }), "engineering");
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Engineering");
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Select an organization for this group.",
-    );
+    expect(await screen.findByText("Select an organization for this group.")).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(
         (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
@@ -226,8 +229,8 @@ describe("NewGroupForm (SUPERADMIN org picker)", () => {
     await waitFor(() => expect(picker).not.toBeDisabled());
     await user.click(picker);
     await user.click(await screen.findByRole("option", { name: /Acme/ }));
-    await user.type(container.querySelector("#group-key")!, "engineering");
-    await user.type(container.querySelector("#group-name")!, "Engineering");
+    await user.type(screen.getByRole("textbox", { name: "Key" }), "engineering");
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Engineering");
     await user.click(screen.getByRole("button", { name: "Create group" }));
 
     await waitFor(() =>
@@ -240,7 +243,7 @@ describe("NewGroupForm (SUPERADMIN org picker)", () => {
       (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
     )!;
     expect(JSON.parse((postCall[1] as { body: string }).body)).toMatchObject({
-      organizationId: "o1",
+      organizationId: ORG.id,
     });
   });
 });

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
+import { createGroupSchema } from "@/lib/validation/groups";
 import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -17,7 +17,6 @@ import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-
 export const dynamic = "force-dynamic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
 
 /**
  * GET /api/administrator/groups
@@ -109,14 +108,6 @@ export async function GET(request: NextRequest) {
  * only in their own org (the client-supplied `organizationId` is ignored); a
  * SUPERADMIN must name the target org. `(organization_id, key)` is unique.
  */
-const createSchema = z
-  .object({
-    key: z.string().min(1).max(120).regex(KEY_RE),
-    name: z.string().min(1).max(200),
-    description: z.string().max(1000).optional(),
-    organizationId: z.string().regex(UUID_RE).optional(),
-  })
-  .strict();
 
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.groups.create");
@@ -135,7 +126,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = createSchema.safeParse(json);
+  const parsed = createGroupSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

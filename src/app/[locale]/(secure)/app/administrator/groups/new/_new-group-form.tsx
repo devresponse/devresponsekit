@@ -1,22 +1,32 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { RequiredLegend } from "@/components/ui/required-legend";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import { createGroupSchema, type CreateGroupInput } from "@/lib/validation/groups";
 import { OrganizationPicker } from "../../_components/organization-picker";
 
 /**
- * Client-side new-group form (ADR-0002). Groups are ALWAYS org-scoped:
+ * Client-side new-group form (ADR-0002; docs/form-validation.md). React Hook
+ * Form + the shared `createGroupSchema` (same schema the API route enforces).
+ *
+ * Groups are ALWAYS org-scoped:
  *   - an ORG ADMIN's group is created in their own org server-side, so no
- *     picker is shown (`showOrgPicker={false}`);
+ *     picker is shown and `organizationId` is omitted;
  *   - a SUPERADMIN must choose the target org via {@link OrganizationPicker}
- *     and that `organizationId` is sent to the server.
+ *     (no Global option) — required, enforced here on submit.
  */
-const KEY_RE = /^[a-zA-Z0-9_.\-:]+$/;
-
 export function NewGroupForm({
   locale,
   showOrgPicker,
@@ -28,38 +38,28 @@ export function NewGroupForm({
   const tErr = useTranslations("administrator.errors");
   const router = useRouter();
 
-  const [organizationId, setOrganizationId] = useState<string | null>(null);
-  const [key, setKey] = useState("");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const form = useZodForm<CreateGroupInput>(createGroupSchema, {
+    defaultValues: { key: "", name: "", description: "", organizationId: undefined },
+  });
 
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-    if (!KEY_RE.test(key) || key.length === 0 || key.length > 120 || name.trim().length === 0) {
-      setError(tErr("invalidBody"));
-      return;
-    }
+  const onValid = async (values: CreateGroupInput) => {
+    form.clearErrors("root");
     // A SUPERADMIN must pick a target org (groups are never global).
-    if (showOrgPicker && !organizationId) {
-      setError(t("new.organizationRequired"));
+    if (showOrgPicker && !values.organizationId) {
+      form.setError("organizationId", { type: "manual", message: t("new.organizationRequired") });
       return;
     }
-
-    setSubmitting(true);
     try {
       const res = await fetch("/api/administrator/groups", {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          key: key.trim(),
-          name: name.trim(),
-          description: description.trim() || undefined,
+          key: values.key.trim(),
+          name: values.name.trim(),
+          description: values.description?.trim() || undefined,
           // Org admins omit this — the server forces their own org.
-          ...(showOrgPicker ? { organizationId } : {}),
+          ...(showOrgPicker ? { organizationId: values.organizationId } : {}),
         }),
       });
       if (res.status === 201) {
@@ -73,90 +73,109 @@ export function NewGroupForm({
         return;
       }
       if (res.status === 409) {
-        setError(tErr("keyTaken"));
+        form.setError("key", { type: "server", message: tErr("keyTaken") });
         return;
       }
       if (res.status === 400) {
-        setError(t("new.organizationRequired"));
+        form.setError("root", { type: "server", message: t("new.organizationRequired") });
         return;
       }
       if (res.status === 403) {
-        setError(tErr("forbidden"));
+        form.setError("root", { type: "server", message: tErr("forbidden") });
         return;
       }
-      setError(t("new.errorToast"));
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     } catch {
-      setError(t("new.errorToast"));
-    } finally {
-      setSubmitting(false);
+      form.setError("root", { type: "server", message: t("new.errorToast") });
     }
   };
 
+  const rootError = form.formState.errors.root?.message;
+
   return (
-    <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
-      {showOrgPicker ? (
-        <OrganizationPicker
-          id="group-organization"
-          value={organizationId}
-          onChange={setOrganizationId}
+    <Form {...form} schema={createGroupSchema}>
+      <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
+        <RequiredLegend />
+
+        {showOrgPicker ? (
+          <FormField
+            control={form.control}
+            name="organizationId"
+            render={({ field }) => (
+              <FormItem>
+                <OrganizationPicker
+                  id="group-organization"
+                  value={field.value ?? null}
+                  onChange={field.onChange}
+                />
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        ) : null}
+
+        <FormField
+          control={form.control}
+          name="key"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.key")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      ) : null}
 
-      <div className="space-y-2">
-        <Label htmlFor="group-key">{t("fields.key")}</Label>
-        <Input
-          id="group-key"
-          type="text"
-          required
-          minLength={1}
-          maxLength={120}
-          value={key}
-          onChange={(e) => setKey(e.currentTarget.value)}
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.name")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="group-name">{t("fields.name")}</Label>
-        <Input
-          id="group-name"
-          type="text"
-          required
-          maxLength={200}
-          value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
+        <FormField
+          control={form.control}
+          name="description"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("fields.description")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} value={field.value ?? ""} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="group-description">{t("fields.description")}</Label>
-        <Input
-          id="group-description"
-          type="text"
-          maxLength={1000}
-          value={description}
-          onChange={(e) => setDescription(e.currentTarget.value)}
-        />
-      </div>
+        {rootError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {rootError}
+          </p>
+        ) : null}
 
-      {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="flex items-center gap-2">
-        <Button type="submit" disabled={submitting}>
-          {t("new.submit")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={submitting}
-          onClick={() => router.push(`/${locale}/app/administrator/groups`)}
-        >
-          {t("new.cancel")}
-        </Button>
-      </div>
-    </form>
+        <div className="flex items-center gap-2">
+          <Button type="submit" disabled={form.formState.isSubmitting}>
+            {t("new.submit")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={form.formState.isSubmitting}
+            onClick={() => router.push(`/${locale}/app/administrator/groups`)}
+          >
+            {t("new.cancel")}
+          </Button>
+        </div>
+      </form>
+    </Form>
   );
 }

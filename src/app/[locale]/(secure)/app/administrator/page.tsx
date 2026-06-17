@@ -11,6 +11,7 @@ import {
   selectDashboardMetrics,
   type DashboardMetrics,
 } from "@/lib/admin/dashboard-metrics.server";
+import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { ANY_ADMIN_PERMISSION, checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { MetricBarChart, type MetricBarDatum } from "./_components/metric-bar-chart";
 import { MetricCard, type MetricCardProps } from "./_components/metric-card";
@@ -84,22 +85,38 @@ export default async function AdministratorPage({
   const visible = METRIC_DESCRIPTORS.filter((d) => permissions.includes(d.permission));
   const visibleIds = new Set<MetricId>(visible.map((d) => d.id));
 
+  // ADR-0001: every metric/activity query is bounded by the caller's org
+  // boundary. SUPERADMIN → `{ kind: "all" }` (system-wide); org admin →
+  // their own org only; `null` → no resolvable org, so the dashboard shows
+  // nothing rather than leaking cross-tenant data.
+  const scope = access ? resolveOrgScope(access) : null;
+
   const [metrics, activity, dashboardMetrics] = await Promise.all([
-    getAdministratorOverviewMetrics({
-      users: visibleIds.has("users"),
-      organizations: visibleIds.has("organizations"),
-      roles: visibleIds.has("roles"),
-      permissions: visibleIds.has("permissions"),
-      enterpriseApps: visibleIds.has("enterpriseApps"),
-    }),
-    getAdministratorOverviewActivity({
-      registrations: permissions.includes("admin.users.read"),
-      // Session rows carry IPs — gate on the session-management
-      // permission, not the broader users.read.
-      sessions: permissions.includes("admin.users.sessions"),
-      auditEvents: permissions.includes("admin.audit.read"),
-      organizations: permissions.includes("admin.orgs.read"),
-    }),
+    scope
+      ? getAdministratorOverviewMetrics(
+          {
+            users: visibleIds.has("users"),
+            organizations: visibleIds.has("organizations"),
+            roles: visibleIds.has("roles"),
+            permissions: visibleIds.has("permissions"),
+            enterpriseApps: visibleIds.has("enterpriseApps"),
+          },
+          scope,
+        )
+      : Promise.resolve({} as OverviewMetrics),
+    scope
+      ? getAdministratorOverviewActivity(
+          {
+            registrations: permissions.includes("admin.users.read"),
+            // Session rows carry IPs — gate on the session-management
+            // permission, not the broader users.read.
+            sessions: permissions.includes("admin.users.sessions"),
+            auditEvents: permissions.includes("admin.audit.read"),
+            organizations: permissions.includes("admin.orgs.read"),
+          },
+          scope,
+        )
+      : Promise.resolve({} as OverviewActivity),
     // RBAC scoping (system vs. own-org, per-series visibility) is decided
     // server-side — shared with GET /api/administrator/metrics so the charts
     // and the API can never show different things to the same caller.

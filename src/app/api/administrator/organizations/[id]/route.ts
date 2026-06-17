@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { db } from "@/db/database";
+import { updateOrganizationSchema } from "@/lib/validation/organizations";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -9,7 +9,6 @@ import {
   assertOrgEmpty,
   assertOrgNotDefault,
   loadOrgOrThrow,
-  SLUG_RE,
 } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -63,14 +62,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
  *   - status: "active" | "pending" | "suspended" | "archived"
  *   - isDefault: boolean
  */
-const patchSchema = z
-  .object({
-    slug: z.string().min(1).max(64).regex(SLUG_RE).optional(),
-    name: z.string().min(1).max(200).optional(),
-    status: z.enum(["active", "pending", "suspended", "archived"]).optional(),
-    isDefault: z.boolean().optional(),
-  })
-  .strict();
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
@@ -100,7 +91,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = patchSchema.safeParse(json);
+  const parsed = updateOrganizationSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

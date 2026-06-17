@@ -22,3 +22,23 @@ export const createOrganizationSchema = z
   .strict();
 
 export type CreateOrganizationInput = z.input<typeof createOrganizationSchema>;
+
+/** Organization statuses (matches the DB + PATCH route). */
+export const ORGANIZATION_STATUSES = ["active", "pending", "suspended", "archived"] as const;
+
+/** Partial update contract for `PATCH /api/administrator/organizations/[id]`. */
+export const updateOrganizationSchema = z
+  .object({
+    slug: z.string().min(1, "required").max(64, "max").regex(SLUG_RE, "slug").optional(),
+    name: z.string().min(1, "required").max(200, "max").optional(),
+    status: z.enum(ORGANIZATION_STATUSES).optional(),
+    isDefault: z.boolean().optional(),
+  })
+  .strict();
+
+/** Org settings form view: slug + name required, status/isDefault optional. */
+export const organizationSettingsSchema = updateOrganizationSchema.required({
+  slug: true,
+  name: true,
+});
+export type OrganizationSettingsInput = z.input<typeof organizationSettingsSchema>;

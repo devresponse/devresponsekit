@@ -22,3 +22,15 @@ export const createGroupSchema = z
   .strict();
 
 export type CreateGroupInput = z.input<typeof createGroupSchema>;
+
+/** Partial update contract for `PATCH /api/administrator/groups/[id]` (key immutable). */
+export const updateGroupSchema = z
+  .object({
+    name: z.string().min(1, "required").max(200, "max").optional(),
+    description: z.string().max(1000, "max").nullable().optional(),
+  })
+  .strict();
+
+/** Group settings form view: name required, description optional. */
+export const groupSettingsSchema = updateGroupSchema.required({ name: true });
+export type GroupSettingsInput = z.input<typeof groupSettingsSchema>;

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { db } from "@/db/database";
+import { updateRoleSchema } from "@/lib/validation/roles";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -52,13 +52,6 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * read-only after creation (mirrors §8.6 — "Settings" tab) so audit
  * trails referencing it stay valid.
  */
-const patchSchema = z
-  .object({
-    name: z.string().min(1).max(200).optional(),
-    description: z.string().max(1000).nullable().optional(),
-  })
-  .strict();
-
 export async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
@@ -81,7 +74,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = patchSchema.safeParse(json);
+  const parsed = updateRoleSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

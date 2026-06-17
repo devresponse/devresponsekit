@@ -3,9 +3,17 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -13,14 +21,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RequiredLegend } from "@/components/ui/required-legend";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import {
+  organizationSettingsSchema,
+  type OrganizationSettingsInput,
+} from "@/lib/validation/organizations";
 
 /**
- * Settings tab for the organization detail (docs/admin-manager.md §19).
- *
- * Edits the name, slug, status and is_default flag.
+ * Settings tab for the organization detail (docs/admin-manager.md §19;
+ * docs/form-validation.md). React Hook Form + the shared
+ * `organizationSettingsSchema`. Edits slug, name, status, and the default flag.
  */
-const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
-
 export function OrganizationSettingsForm({
   orgId,
   initialSlug,
@@ -40,129 +52,150 @@ export function OrganizationSettingsForm({
   const tFields = useTranslations("administrator.orgs.fields");
   const tErr = useTranslations("administrator.errors");
 
-  const [slug, setSlug] = useState(initialSlug);
-  const [name, setName] = useState(initialName);
-  const [status, setStatus] = useState(initialStatus);
-  const [isDefault, setIsDefault] = useState(initialIsDefault);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const form = useZodForm<OrganizationSettingsInput>(organizationSettingsSchema, {
+    defaultValues: {
+      slug: initialSlug,
+      name: initialName,
+      status: initialStatus as OrganizationSettingsInput["status"],
+      isDefault: initialIsDefault,
+    },
+  });
 
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-    setSaved(null);
-    if (!SLUG_RE.test(slug)) {
-      setError(tErr("invalidBody"));
-      return;
-    }
-    setSaving(true);
+  const onValid = async (values: OrganizationSettingsInput) => {
+    form.clearErrors("root");
+    setSaved(false);
     try {
       const res = await fetch(`/api/administrator/organizations/${orgId}`, {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          slug: slug.trim(),
-          name: name.trim(),
-          status,
-          isDefault,
+          slug: values.slug.trim(),
+          name: values.name.trim(),
+          status: values.status,
+          isDefault: values.isDefault ?? false,
         }),
       });
       if (res.ok) {
-        setSaved(t("saved"));
+        setSaved(true);
         return;
       }
       if (res.status === 409) {
-        setError(tErr("slugTaken"));
+        form.setError("slug", { type: "server", message: tErr("slugTaken") });
         return;
       }
       if (res.status === 400) {
-        setError(tErr("invalidBody"));
+        form.setError("root", { type: "server", message: tErr("invalidBody") });
         return;
       }
       if (res.status === 403) {
-        setError(tErr("forbidden"));
+        form.setError("root", { type: "server", message: tErr("forbidden") });
         return;
       }
-      setError(t("errorToast"));
+      form.setError("root", { type: "server", message: t("errorToast") });
     } catch {
-      setError(t("errorToast"));
-    } finally {
-      setSaving(false);
+      form.setError("root", { type: "server", message: t("errorToast") });
     }
   };
 
+  const rootError = form.formState.errors.root?.message;
+
   return (
-    <form className="max-w-xl space-y-4" onSubmit={onSubmit} noValidate>
-      <div className="space-y-2">
-        <Label htmlFor="org-slug-edit">{tFields("slug")}</Label>
-        <Input
-          id="org-slug-edit"
-          type="text"
-          required
-          minLength={1}
-          maxLength={64}
-          value={slug}
-          onChange={(e) => setSlug(e.currentTarget.value.toLowerCase())}
-          disabled={!canUpdate}
-          aria-invalid={error !== null && !SLUG_RE.test(slug) ? true : undefined}
+    <Form {...form} schema={organizationSettingsSchema}>
+      <form className="max-w-xl space-y-4" onSubmit={form.handleSubmit(onValid)} noValidate>
+        {canUpdate ? <RequiredLegend /> : null}
+
+        <FormField
+          control={form.control}
+          name="slug"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{tFields("slug")}</FormLabel>
+              <FormControl>
+                <Input
+                  type="text"
+                  {...field}
+                  onChange={(e) => field.onChange(e.currentTarget.value.toLowerCase())}
+                  disabled={!canUpdate}
+                />
+              </FormControl>
+              <FormDescription>{tFields("slugHelp")}</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-        <p className="text-muted-foreground text-xs">{tFields("slugHelp")}</p>
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="org-name-edit">{tFields("name")}</Label>
-        <Input
-          id="org-name-edit"
-          type="text"
-          required
-          maxLength={200}
-          value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
-          disabled={!canUpdate}
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{tFields("name")}</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} disabled={!canUpdate} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="org-status-edit">{tFields("status")}</Label>
-        <Select value={status} onValueChange={(v) => setStatus(v)} disabled={!canUpdate}>
-          <SelectTrigger id="org-status-edit">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">{t("statusActive")}</SelectItem>
-            <SelectItem value="pending">{t("statusPending")}</SelectItem>
-            <SelectItem value="suspended">{t("statusSuspended")}</SelectItem>
-            <SelectItem value="archived">{t("statusArchived")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="org-is-default-edit"
-          checked={isDefault}
-          onCheckedChange={(v) => setIsDefault(v === true)}
-          disabled={!canUpdate}
+        <FormField
+          control={form.control}
+          name="status"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{tFields("status")}</FormLabel>
+              <Select value={field.value} onValueChange={field.onChange} disabled={!canUpdate}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="active">{t("statusActive")}</SelectItem>
+                  <SelectItem value="pending">{t("statusPending")}</SelectItem>
+                  <SelectItem value="suspended">{t("statusSuspended")}</SelectItem>
+                  <SelectItem value="archived">{t("statusArchived")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-        <Label htmlFor="org-is-default-edit">{tFields("isDefault")}</Label>
-      </div>
 
-      {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {saved ? (
-        <p className="text-success text-sm" role="status">
-          {saved}
-        </p>
-      ) : null}
+        <FormField
+          control={form.control}
+          name="isDefault"
+          render={({ field }) => (
+            <FormItem className="flex flex-row items-center gap-2 space-y-0">
+              <FormControl>
+                <Checkbox
+                  checked={field.value ?? false}
+                  onCheckedChange={(v) => field.onChange(v === true)}
+                  disabled={!canUpdate}
+                />
+              </FormControl>
+              <FormLabel className="font-normal">{tFields("isDefault")}</FormLabel>
+            </FormItem>
+          )}
+        />
 
-      <Button type="submit" disabled={!canUpdate || saving}>
-        {t("save")}
-      </Button>
-    </form>
+        {rootError ? (
+          <p className="text-destructive text-sm" role="alert">
+            {rootError}
+          </p>
+        ) : null}
+        {saved ? (
+          <p className="text-success text-sm" role="status">
+            {t("saved")}
+          </p>
+        ) : null}
+
+        <Button type="submit" disabled={!canUpdate || form.formState.isSubmitting}>
+          {t("save")}
+        </Button>
+      </form>
+    </Form>
   );
 }

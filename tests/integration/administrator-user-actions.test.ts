@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 
 /**
@@ -33,9 +34,7 @@ vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
 }));
 vi.mock("@/lib/admin/access-scope.server", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/admin/access-scope.server")>(
-    "@/lib/admin/access-scope.server",
-  );
+  const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
   return {
     ...actual,
     requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),

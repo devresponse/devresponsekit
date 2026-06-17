@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type * as EnvModule from "@/lib/env";
 import { getServerEnv } from "@/lib/env";
 
@@ -34,6 +34,124 @@ describe("getServerEnv", () => {
       expect(() => fresh.getServerEnv()).toThrow(/SSO_HANDOFF_JWT_SECRET/);
     } finally {
       process.env.SSO_HANDOFF_JWT_SECRET = original;
+    }
+  });
+});
+
+/**
+ * Loads a fresh copy of the env module with `patch` applied to process.env
+ * (a value of `undefined` deletes the key), returning the module plus a
+ * `restore()` to undo the changes. `CI` is cleared unless the patch sets it,
+ * because GitHub Actions sets `CI=true` ambiently and several cases below
+ * assert the non-CI behavior. `vi.resetModules()` busts the module cache so
+ * each case re-parses (getServerEnv caches after the first success).
+ */
+const TOUCHED_KEYS = [
+  "NODE_ENV",
+  "CI",
+  "AUTH_RATE_LIMIT_DISABLED",
+  "SKIP_ENV_VALIDATION",
+  "NEXT_PHASE",
+  "BETTER_AUTH_SECRET",
+] as const;
+
+async function loadEnvWith(patch: Record<string, string | undefined>) {
+  // process.env types NODE_ENV as read-only; treat it as a plain string map.
+  const penv = process.env as Record<string, string | undefined>;
+  const snapshot: Record<string, string | undefined> = {};
+  for (const k of TOUCHED_KEYS) snapshot[k] = penv[k];
+  const restore = () => {
+    for (const k of TOUCHED_KEYS) {
+      if (snapshot[k] === undefined) delete penv[k];
+      else penv[k] = snapshot[k];
+    }
+  };
+  if (!("CI" in patch)) delete penv.CI;
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete penv[k];
+    else penv[k] = v;
+  }
+  vi.resetModules();
+  const mod = (await import("@/lib/env")) as typeof EnvModule;
+  return { mod, restore };
+}
+
+describe("AUTH_RATE_LIMIT_DISABLED production guard (AUTH-5)", () => {
+  it("throws in production when enabled outside CI", async () => {
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      AUTH_RATE_LIMIT_DISABLED: "1",
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/AUTH_RATE_LIMIT_DISABLED/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("is permitted in production under CI (browser job runs next start)", async () => {
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      AUTH_RATE_LIMIT_DISABLED: "1",
+      CI: "true",
+    });
+    try {
+      expect(mod.getServerEnv().AUTH_RATE_LIMIT_DISABLED).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("is permitted outside production", async () => {
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "development",
+      AUTH_RATE_LIMIT_DISABLED: "1",
+    });
+    try {
+      expect(mod.getServerEnv().AUTH_RATE_LIMIT_DISABLED).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("SKIP_ENV_VALIDATION build-phase escape (OPS-6)", () => {
+  it("does NOT mask missing secrets at production runtime", async () => {
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      SKIP_ENV_VALIDATION: "1",
+      BETTER_AUTH_SECRET: undefined,
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/Invalid server environment variables/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("still substitutes placeholders for a non-production build harness", async () => {
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "development",
+      SKIP_ENV_VALIDATION: "1",
+      BETTER_AUTH_SECRET: undefined,
+    });
+    try {
+      expect(() => mod.getServerEnv()).not.toThrow();
+    } finally {
+      restore();
+    }
+  });
+
+  it("substitutes placeholders during the genuine Next production build", async () => {
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+      BETTER_AUTH_SECRET: undefined,
+    });
+    try {
+      expect(() => mod.getServerEnv()).not.toThrow();
+    } finally {
+      restore();
     }
   });
 });

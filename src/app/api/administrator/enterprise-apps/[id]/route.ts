@@ -1,14 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { db } from "@/db/database";
+import { updateEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
   APP_ID_RE,
-  APP_STATUS_VALUES,
-  SSO_AUDIENCE_RE,
-  SUBDOMAIN_RE,
   isAllowedEnterpriseOrigin,
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
@@ -75,19 +72,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
  * stable primary key referenced by SSO handoff nonces and is therefore
  * not editable here. Caller MUST hold `admin.apps.manage`.
  */
-const patchSchema = z
-  .object({
-    label: z.string().min(1).max(200).optional(),
-    description: z.string().max(1000).nullable().optional(),
-    origin: z.string().min(1).max(500).optional(),
-    subdomain: z.string().min(1).max(63).regex(SUBDOMAIN_RE).optional(),
-    sso_audience: z.string().min(1).max(200).regex(SSO_AUDIENCE_RE).optional(),
-    status: z.enum(APP_STATUS_VALUES).optional(),
-    sort_order: z.number().int().min(0).max(10000).optional(),
-    organization_id: z.string().uuid().nullable().optional(),
-  })
-  .strict();
-
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
@@ -110,7 +94,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = patchSchema.safeParse(json);
+  const parsed = updateEnterpriseAppSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

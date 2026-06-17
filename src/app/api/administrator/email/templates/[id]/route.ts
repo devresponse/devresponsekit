@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { updateEmailTemplateSchema } from "@/lib/validation/email-templates";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -65,14 +66,6 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * `admin.email.template_updated` (subjects/bodies are not echoed into
  * audit metadata — the template row itself is the record).
  */
-const updateSchema = z
-  .object({
-    subject: z.string().min(1).max(500),
-    body_html: z.string().min(1).max(100_000),
-    body_text: z.string().max(100_000).nullable().optional(),
-    description: z.string().max(1000).nullable().optional(),
-  })
-  .strict();
 
 export async function PUT(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.manage");
@@ -100,7 +93,7 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = updateSchema.safeParse(json);
+  const parsed = updateEmailTemplateSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

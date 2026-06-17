@@ -39,3 +39,40 @@ export const createEnterpriseAppSchema = z
   .strict();
 
 export type CreateEnterpriseAppInput = z.input<typeof createEnterpriseAppSchema>;
+
+/**
+ * Partial update contract for `PATCH /api/administrator/enterprise-apps/[id]`
+ * — the `id` is immutable, every other field optional. (HTTPS/trusted-suffix
+ * origin checks stay in the route.)
+ */
+export const updateEnterpriseAppSchema = z
+  .object({
+    label: z.string().min(1, "required").max(200, "max").optional(),
+    description: z.string().max(1000, "max").nullable().optional(),
+    origin: z.string().min(1, "required").max(500, "max").optional(),
+    subdomain: z
+      .string()
+      .min(1, "required")
+      .max(63, "max")
+      .regex(SUBDOMAIN_RE, "subdomain")
+      .optional(),
+    sso_audience: z
+      .string()
+      .min(1, "required")
+      .max(200, "max")
+      .regex(SSO_AUDIENCE_RE, "ssoAudience")
+      .optional(),
+    status: z.enum(APP_STATUS_VALUES).optional(),
+    sort_order: z.number("number").int("number").min(0, "number").max(10000, "max").optional(),
+    organization_id: z.string().regex(UUID_RE, "uuid").nullable().optional(),
+  })
+  .strict();
+
+/** Enterprise-app settings form view: the create-required fields stay required. */
+export const enterpriseAppSettingsSchema = updateEnterpriseAppSchema.required({
+  label: true,
+  origin: true,
+  subdomain: true,
+  sso_audience: true,
+});
+export type EnterpriseAppSettingsInput = z.input<typeof enterpriseAppSettingsSchema>;

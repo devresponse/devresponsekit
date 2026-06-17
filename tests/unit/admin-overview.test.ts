@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const executeByTable = new Map<string, ReturnType<typeof vi.fn>>();
 const takeFirstByTable = new Map<string, ReturnType<typeof vi.fn>>();
 const queriedTables: string[] = [];
+/** Args passed to every `.where(...)` on the outer query, keyed by table. */
+const whereArgsByTable = new Map<string, unknown[][]>();
 
 vi.mock("@/db/database", () => ({
   db: {
@@ -19,12 +21,20 @@ vi.mock("@/db/database", () => ({
       // One chainable stub covers both query shapes:
       //   counts:   select(...).groupBy(...).execute() / select(...).executeTakeFirst()
       //   activity: [innerJoin(...)].select(...).orderBy(...).limit(...).execute()
+      // `.where(...)` (the org-scope filter) records its args so tests can
+      // assert how each table is scoped without a real database.
       const chain = {
         innerJoin: () => chain,
         select: () => chain,
         groupBy: () => chain,
         orderBy: () => chain,
         limit: () => chain,
+        where: (...args: unknown[]) => {
+          const calls = whereArgsByTable.get(table) ?? [];
+          calls.push(args);
+          whereArgsByTable.set(table, calls);
+          return chain;
+        },
         execute: () => (executeByTable.get(table) ?? vi.fn().mockResolvedValue([]))(),
         executeTakeFirst: () =>
           (takeFirstByTable.get(table) ?? vi.fn().mockResolvedValue(undefined))(),
@@ -38,6 +48,7 @@ import {
   getAdministratorOverviewActivity,
   getAdministratorOverviewMetrics,
 } from "@/lib/admin/overview.server";
+import type { OrgScope } from "@/lib/admin/access-scope.server";
 
 const ALL = {
   users: true,
@@ -47,10 +58,16 @@ const ALL = {
   enterpriseApps: true,
 };
 
+/** SUPERADMIN: system-wide, unscoped. */
+const SUPER: OrgScope = { kind: "all" };
+/** ORG ADMIN: confined to org-1. */
+const ORG: OrgScope = { kind: "org", organizationId: "org-1" };
+
 beforeEach(() => {
   executeByTable.clear();
   takeFirstByTable.clear();
   queriedTables.length = 0;
+  whereArgsByTable.clear();
 });
 
 describe("getAdministratorOverviewMetrics", () => {
@@ -74,7 +91,7 @@ describe("getAdministratorOverviewMetrics", () => {
     takeFirstByTable.set("app_roles", vi.fn().mockResolvedValue({ count: "7" }));
     takeFirstByTable.set("app_permissions", vi.fn().mockResolvedValue({ count: "24" }));
 
-    const metrics = await getAdministratorOverviewMetrics(ALL);
+    const metrics = await getAdministratorOverviewMetrics(ALL, SUPER);
 
     expect(metrics.users).toEqual({ total: 16, active: 12, pendingApproval: 3 });
     expect(metrics.organizations).toEqual({ total: 5 });
@@ -84,20 +101,23 @@ describe("getAdministratorOverviewMetrics", () => {
   });
 
   it("returns zeroed slices for empty tables and missing rows", async () => {
-    const metrics = await getAdministratorOverviewMetrics(ALL);
+    const metrics = await getAdministratorOverviewMetrics(ALL, SUPER);
     expect(metrics.users).toEqual({ total: 0, active: 0, pendingApproval: 0 });
     expect(metrics.organizations).toEqual({ total: 0 });
     expect(metrics.enterpriseApps).toEqual({ total: 0, available: 0 });
   });
 
   it("never queries slices excluded by the permission flags", async () => {
-    const metrics = await getAdministratorOverviewMetrics({
-      users: true,
-      organizations: false,
-      roles: false,
-      permissions: false,
-      enterpriseApps: false,
-    });
+    const metrics = await getAdministratorOverviewMetrics(
+      {
+        users: true,
+        organizations: false,
+        roles: false,
+        permissions: false,
+        enterpriseApps: false,
+      },
+      SUPER,
+    );
 
     expect(queriedTables).toEqual(["app_users"]);
     expect(metrics.users).toBeDefined();
@@ -167,7 +187,7 @@ describe("getAdministratorOverviewActivity", () => {
       ]),
     );
 
-    const activity = await getAdministratorOverviewActivity(ALL_ACTIVITY);
+    const activity = await getAdministratorOverviewActivity(ALL_ACTIVITY, SUPER);
 
     expect(activity.registrations).toEqual([
       {
@@ -208,17 +228,57 @@ describe("getAdministratorOverviewActivity", () => {
   });
 
   it("never queries lists excluded by the permission flags", async () => {
-    const activity = await getAdministratorOverviewActivity({
-      registrations: false,
-      sessions: true,
-      auditEvents: false,
-      organizations: false,
-    });
+    const activity = await getAdministratorOverviewActivity(
+      {
+        registrations: false,
+        sessions: true,
+        auditEvents: false,
+        organizations: false,
+      },
+      SUPER,
+    );
 
     expect(queriedTables).toEqual(["session"]);
     expect(activity.sessions).toEqual([]);
     expect(activity.registrations).toBeUndefined();
     expect(activity.auditEvents).toBeUndefined();
     expect(activity.organizations).toBeUndefined();
+  });
+});
+
+describe("ADR-0001 org scoping", () => {
+  /** First `.where(...)` args recorded for a table, or undefined if unscoped. */
+  const whereFor = (table: string) => whereArgsByTable.get(table)?.[0];
+
+  it("SUPERADMIN scope applies NO org filter to any table (system-wide)", async () => {
+    await getAdministratorOverviewMetrics(ALL, SUPER);
+    await getAdministratorOverviewActivity(ALL_ACTIVITY, SUPER);
+    // A superadmin's queries are unscoped — nothing calls `.where`.
+    expect(whereArgsByTable.size).toBe(0);
+  });
+
+  it("ORG ADMIN metrics confine every tenant table to their org", async () => {
+    await getAdministratorOverviewMetrics(ALL, ORG);
+
+    // Users have no org column → scoped via a membership EXISTS (a callback).
+    expect(whereArgsByTable.get("app_users")).toHaveLength(1);
+    expect(typeof whereFor("app_users")?.[0]).toBe("function");
+    // Org-columned tables filter to the caller's org directly.
+    expect(whereFor("app_organizations")).toEqual(["id", "=", "org-1"]);
+    expect(whereFor("app_roles")).toEqual(["organization_id", "=", "org-1"]);
+    expect(whereFor("app_enterprise_applications")).toEqual(["organization_id", "=", "org-1"]);
+    // Permissions are a platform-global catalog — never org-scoped.
+    expect(whereArgsByTable.has("app_permissions")).toBe(false);
+  });
+
+  it("ORG ADMIN activity confines every tenant list to their org", async () => {
+    await getAdministratorOverviewActivity(ALL_ACTIVITY, ORG);
+
+    // Registrations (users) and sessions bridge to memberships via EXISTS.
+    expect(typeof whereFor("app_users")?.[0]).toBe("function");
+    expect(typeof whereFor("session")?.[0]).toBe("function");
+    // Audit rows and organizations filter by their own org column directly.
+    expect(whereFor("app_audit_events")).toEqual(["organization_id", "=", "org-1"]);
+    expect(whereFor("app_organizations")).toEqual(["id", "=", "org-1"]);
   });
 });

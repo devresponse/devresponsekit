@@ -155,6 +155,40 @@ describe("GET /api/sso/consume", () => {
     expect(res.headers.get("set-cookie")).toContain("better-auth.session_token=tok.sig");
   });
 
+  it("forwards EACH Set-Cookie separately when Better Auth emits more than one (AUTH-3)", async () => {
+    verifyMock.mockResolvedValue({
+      payload: {
+        jti: "j3b",
+        sub: "ba-9",
+        targetApplicationId: "portal",
+        email: "u@x.com",
+        organizationId: "o-1",
+        appUserId: "u-1",
+        locale: "en",
+        roles: [],
+        iat: 0,
+        exp: 60,
+      },
+    });
+    consumeMock.mockResolvedValue(true);
+    // Better Auth can emit multiple Set-Cookie headers (e.g. the session
+    // token plus a dont_remember marker). The old entries() loop collapsed
+    // them into one comma-joined value; getSetCookie() keeps them distinct.
+    const multi = new Headers();
+    multi.append("set-cookie", "better-auth.session_token=tok.sig; Path=/; HttpOnly");
+    multi.append("set-cookie", "better-auth.dont_remember=1; Path=/; HttpOnly");
+    createSsoSessionMock.mockResolvedValue({ headers: multi, response: { ok: true } });
+
+    const res = await GET(makeRequest("http://localhost/api/sso/consume?token=abc"));
+    expect(res.status).toBe(307);
+    const cookies = res.headers.getSetCookie();
+    expect(cookies).toHaveLength(2);
+    expect(cookies.some((c) => c.startsWith("better-auth.session_token="))).toBe(true);
+    expect(cookies.some((c) => c.startsWith("better-auth.dont_remember="))).toBe(true);
+    // Never comma-joined into a single corrupted header.
+    expect(cookies.every((c) => !c.includes(", better-auth"))).toBe(true);
+  });
+
   it("returns 401 and audits when session establishment fails (e.g. banned user)", async () => {
     verifyMock.mockResolvedValue({
       payload: {

@@ -107,11 +107,13 @@ export async function GET(request: NextRequest) {
     response.headers.set("Referrer-Policy", "no-referrer");
     response.headers.set("Cache-Control", "no-store");
     // Forward the signed Better Auth session cookie(s) so the browser
-    // lands on the dashboard already signed in.
-    for (const [name, value] of sessionHeaders.entries()) {
-      if (name.toLowerCase() === "set-cookie") {
-        response.headers.append("set-cookie", value);
-      }
+    // lands on the dashboard already signed in. Use the dedicated
+    // getSetCookie() accessor: iterating entries() collapses multiple
+    // same-name headers into one comma-joined value, which corrupts a
+    // Set-Cookie when Better Auth emits more than one (e.g. session token +
+    // dont_remember) — browsers then fail to parse it (AUTH-3).
+    for (const cookie of sessionHeaders.getSetCookie()) {
+      response.headers.append("set-cookie", cookie);
     }
     return response;
   } catch (error) {

@@ -122,6 +122,17 @@ export const auth = betterAuth({
             return;
           }
 
+          // Record the login (every session creation is one login; refreshes
+          // don't fire this hook) for the "daily logins" dashboard metrics.
+          // Best-effort and lazily imported — it never blocks or breaks
+          // sign-in. Runs for ALL logins, so it must precede the
+          // existing-user early return below.
+          const { recordSessionLogin } = await import("@/lib/auth-login-audit.server");
+          await recordSessionLogin(
+            authUser.id,
+            context.request ? { headers: context.request.headers } : undefined,
+          );
+
           const existing = await db
             .selectFrom("app_users")
             .select(["id"])

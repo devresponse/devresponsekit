@@ -13,11 +13,15 @@ const verifyAccessToken = vi.fn();
 const isJtiRevoked = vi.fn();
 const getCurrentSession = vi.fn();
 const getUserAccessContext = vi.fn();
+const isBetterAuthUserBanned = vi.fn();
 
 vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
 vi.mock("@/lib/api-auth/api-keys.server", () => ({
   verifyApiKey: (...a: unknown[]) => verifyApiKey(...a),
   touchApiKeyUsage: vi.fn(),
+}));
+vi.mock("@/lib/api-auth/ban-status.server", () => ({
+  isBetterAuthUserBanned: (...a: unknown[]) => isBetterAuthUserBanned(...a),
 }));
 vi.mock("@/lib/api-auth/jwt.server", () => ({
   verifyAccessToken: (...a: unknown[]) => verifyAccessToken(...a),
@@ -47,9 +51,11 @@ beforeEach(async () => {
     isJtiRevoked,
     getCurrentSession,
     getUserAccessContext,
+    isBetterAuthUserBanned,
   ])
     m.mockReset();
   getUserAccessContext.mockResolvedValue(ACCESS);
+  isBetterAuthUserBanned.mockResolvedValue(false);
   mod = await import("@/lib/api-auth/resolve-caller.server");
 });
 afterEach(() => vi.resetModules());
@@ -110,6 +116,20 @@ describe("resolveCaller — API key path", () => {
     verifyApiKey.mockResolvedValue(null);
     expect(await mod.resolveCaller(req("Bearer drk_live_bad"))).toBeNull();
   });
+
+  it("returns null when the key owner is banned (AUTH-1)", async () => {
+    env.API_KEYS_ENABLED = true;
+    verifyApiKey.mockResolvedValue({
+      id: "k1",
+      betterAuthUserId: "ba1",
+      scopes: ["admin.users.read"],
+    });
+    isBetterAuthUserBanned.mockResolvedValue(true);
+    expect(await mod.resolveCaller(req("Bearer drk_live_abc"))).toBeNull();
+    expect(isBetterAuthUserBanned).toHaveBeenCalledWith("ba1");
+    // A banned owner must never reach the access-context build step.
+    expect(getUserAccessContext).not.toHaveBeenCalled();
+  });
 });
 
 describe("resolveCaller — JWT path", () => {
@@ -135,6 +155,16 @@ describe("resolveCaller — JWT path", () => {
     verifyAccessToken.mockResolvedValue({ subject: "ba1", jti: "j1", scopes: [] });
     isJtiRevoked.mockResolvedValue(true);
     expect(await mod.resolveCaller(req("Bearer eyJ.token.sig"))).toBeNull();
+  });
+
+  it("returns null when the token subject is banned (AUTH-1)", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue({ subject: "ba1", jti: "j1", scopes: [] });
+    isJtiRevoked.mockResolvedValue(false);
+    isBetterAuthUserBanned.mockResolvedValue(true);
+    expect(await mod.resolveCaller(req("Bearer eyJ.token.sig"))).toBeNull();
+    expect(isBetterAuthUserBanned).toHaveBeenCalledWith("ba1");
+    expect(getUserAccessContext).not.toHaveBeenCalled();
   });
 
   it("returns null when verification throws (invalid/expired)", async () => {

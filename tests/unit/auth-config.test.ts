@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * regression that drops `revokeSessionsOnPasswordReset` fails here rather
  * than silently leaving attacker sessions alive after a password reset.
  */
-const betterAuthMock = vi.fn(() => ({ api: {}, $context: Promise.resolve({}) }));
+const betterAuthMock = vi.fn((_options: unknown) => ({ api: {}, $context: Promise.resolve({}) }));
 
 vi.mock("better-auth", () => ({
   betterAuth: (opts: unknown) => betterAuthMock(opts),

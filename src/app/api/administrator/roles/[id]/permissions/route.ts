@@ -6,7 +6,8 @@ import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin, SUPERADMIN_PERMISSION } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import { unheldPermissionKeys } from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -125,10 +126,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (!canAccessOrg(guard.access, role.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
   }
-  // Privilege-escalation guard: only a SUPERADMIN may attach the
-  // `superuser` marker (which would let the role mint superadmins).
-  if (!isSuperadmin(guard.access) && parsed.data.ids.includes(SUPERADMIN_PERMISSION)) {
-    return adminErrorResponse("forbidden", 403, request);
+  // Privilege-escalation guard (AUTHZ-3): a non-SUPERADMIN may attach only
+  // permission keys they themselves currently hold. Otherwise an org admin
+  // could grant a role authority they lack — including the `superuser` marker
+  // (subsumed here, since it is never in a non-superadmin's held set) — and
+  // then assign that role to themselves.
+  if (!isSuperadmin(guard.access)) {
+    const unheld = unheldPermissionKeys(guard.access.permissions, parsed.data.ids);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
   // Resolve key -> permission_id. Keys not in the catalog are dropped.

@@ -6,7 +6,8 @@ import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import { permissionKeysForRoles, unheldPermissionKeys } from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,16 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // tenant). 404 to avoid confirming a foreign/global role exists.
   if (!canAccessOrg(guard.access, source.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
+  }
+
+  // Privilege-escalation guard (AUTHZ-3): a non-SUPERADMIN may duplicate a
+  // role only when its permissions are a subset of their own — otherwise the
+  // clone would hand them an editable role carrying authority they lack
+  // (including a `superuser`-bearing role), which they could then assign.
+  if (!isSuperadmin(guard.access)) {
+    const conferred = await permissionKeysForRoles([source.id]);
+    const unheld = unheldPermissionKeys(guard.access.permissions, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
   // Compute a unique key suffix. We collect all candidate "starts-with"

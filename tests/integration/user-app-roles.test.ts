@@ -21,8 +21,9 @@ const auditMock = vi.fn();
 const state: {
   role: { id: string; key: string; organization_id: string | null } | undefined;
   org: { id: string } | undefined;
-  grantsSuperuser: { id: string } | undefined;
-} = { role: undefined, org: undefined, grantsSuperuser: undefined };
+  /** Permission keys the assigned role confers (AUTHZ-3 subset check). */
+  conferredPermKeys: { key: string }[];
+} = { role: undefined, org: undefined, conferredPermKeys: [] };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -51,8 +52,12 @@ function tableKey(t: unknown): string {
 function firstFor(table: string) {
   if (table === "app_roles") return state.role;
   if (table === "app_organizations") return state.org;
-  if (table === "app_role_permissions") return state.grantsSuperuser;
   return undefined;
+}
+function execFor(table: string): unknown[] {
+  // permissionKeysForRoles(...) selects the role's conferred permission keys.
+  if (table === "app_role_permissions") return state.conferredPermKeys;
+  return [];
 }
 function makeChain(table: string): unknown {
   return new Proxy(
@@ -60,7 +65,7 @@ function makeChain(table: string): unknown {
     {
       get(_t, prop) {
         if (prop === "executeTakeFirst") return async () => firstFor(table);
-        if (prop === "execute") return async () => [];
+        if (prop === "execute") return async () => execFor(table);
         return (...args: unknown[]) => {
           const cb = args[0];
           if (typeof cb === "function") {
@@ -127,7 +132,7 @@ beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
   state.role = { id: ROLE, key: "editor", organization_id: ORG_A };
   state.org = { id: ORG_A };
-  state.grantsSuperuser = undefined;
+  state.conferredPermKeys = [];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ POST, DELETE } = await import("@/app/api/administrator/users/[id]/app-roles/route"));
 });
@@ -163,16 +168,30 @@ describe("POST /users/[id]/app-roles — assignment scoping", () => {
   });
 
   it("403 when a non-superadmin assigns a role granting `superuser`", async () => {
-    state.grantsSuperuser = { id: "perm-superuser" };
+    state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
     const res = await POST(jsonReq(body(ORG_A)), ctx);
     expect(res.status).toBe(403);
   });
 
+  it("403 when a non-superadmin assigns a role conferring a permission they lack (AUTHZ-3)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
+    const res = await POST(jsonReq(body(ORG_A)), ctx);
+    expect(res.status).toBe(403);
+  });
+
+  it("201 when the role's permissions are a subset the actor holds (AUTHZ-3)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign", "admin.users.read"]));
+    const res = await POST(jsonReq(body(ORG_A)), ctx);
+    expect(res.status).toBe(201);
+  });
+
   it("SUPERADMIN MAY assign a role granting `superuser` (201)", async () => {
     state.role = { id: ROLE, key: "superuser", organization_id: null };
     state.org = { id: ORG_A };
-    state.grantsSuperuser = { id: "perm-superuser" };
+    state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(superadmin(["admin.roles.assign"]));
     const res = await POST(jsonReq(body(ORG_A)), ctx);
     expect(res.status).toBe(201);

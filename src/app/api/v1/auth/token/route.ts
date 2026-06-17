@@ -110,8 +110,12 @@ export async function POST(request: NextRequest) {
     return problemResponse("unsupported_grant_type", 400, request, { headers: NO_STORE });
   }
 
-  // The principal must still be an active member.
-  const access = await getUserAccessContext(principalBetterAuthUserId);
+  // The principal must still be an active member OF THE CREDENTIAL'S BOUND
+  // ORG — evaluate the issuance gate against that org, not the active_org
+  // cookie / earliest membership, so a token is never minted for a tenant the
+  // principal is no longer active in (MACHINE-1, consistent with the use-time
+  // resolution in resolveCaller).
+  const access = await getUserAccessContext(principalBetterAuthUserId, { organizationId });
   if (decideSecureAccess(access.status, access.membershipStatus) !== "allow") {
     return problemResponse("invalid_client", 401, request, {
       detail: "The credential's principal is not an active member.",

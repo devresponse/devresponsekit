@@ -219,6 +219,59 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(ctx.permissions).toContain("admin.audit.read");
   });
 
+  it("bearer bound-org: resolves the credential's org and ignores the active_org cookie (MACHINE-1)", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    // A cookie is present but must be ignored on the bearer path.
+    readActiveOrgId.mockResolvedValue("o-cookie");
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-bound", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
+
+    const ctx = await getUserAccessContext("ba-1", { organizationId: "o-bound" });
+    expect(ctx.organizationId).toBe("o-bound");
+    expect(ctx.permissions).toEqual(["admin.users.read"]);
+    expect(readActiveOrgId).not.toHaveBeenCalled();
+    expect(membershipTakeFirst).not.toHaveBeenCalled();
+  });
+
+  it("bearer bound-org: a non-member bound org yields no membership / no permissions (fails closed)", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipByOrgTakeFirst.mockResolvedValue(undefined); // not an active member of the bound org
+
+    const ctx = await getUserAccessContext("ba-1", { organizationId: "o-foreign" });
+    expect(ctx.organizationId).toBeNull();
+    expect(ctx.membershipStatus).toBeNull();
+    expect(ctx.permissions).toEqual([]);
+    expect(rolesExecute).not.toHaveBeenCalled();
+    expect(readActiveOrgId).not.toHaveBeenCalled();
+  });
+
+  it("bearer bound-org: a null bound org (org-less credential) uses the earliest membership, not the cookie", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    readActiveOrgId.mockResolvedValue("o-cookie");
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-earliest", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "shell.view" }]);
+
+    const ctx = await getUserAccessContext("ba-1", { organizationId: null });
+    expect(ctx.organizationId).toBe("o-earliest");
+    expect(membershipByOrgTakeFirst).not.toHaveBeenCalled();
+    expect(readActiveOrgId).not.toHaveBeenCalled();
+  });
+
   it("expands a BARE `superuser` role (marker only) to the full admin set, without a DB lookup", async () => {
     // The dev seed's per-org `superuser` role grants ONLY `shell.view` +
     // `superuser` — not the individual admin.* keys. Such an account must

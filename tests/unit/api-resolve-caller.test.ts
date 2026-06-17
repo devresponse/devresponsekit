@@ -31,7 +31,7 @@ vi.mock("@/lib/api-auth/revocation.server", () => ({
 }));
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => getCurrentSession() }));
 vi.mock("@/lib/auth-status", () => ({
-  getUserAccessContext: (id: string) => getUserAccessContext(id),
+  getUserAccessContext: (...a: unknown[]) => getUserAccessContext(...a),
 }));
 
 const ACCESS = { appUserId: "u1", permissions: ["admin.users.read"], status: "active" };
@@ -100,6 +100,7 @@ describe("resolveCaller — API key path", () => {
     verifyApiKey.mockResolvedValue({
       id: "k1",
       betterAuthUserId: "ba1",
+      organizationId: "org-a",
       scopes: ["admin.users.read"],
     });
     const caller = await mod.resolveCaller(req("Bearer drk_live_abc"));
@@ -109,6 +110,18 @@ describe("resolveCaller — API key path", () => {
       credentialId: "k1",
       grantedScopes: ["admin.users.read"],
     });
+  });
+
+  it("resolves against the key's bound org, not the active_org cookie (MACHINE-1)", async () => {
+    env.API_KEYS_ENABLED = true;
+    verifyApiKey.mockResolvedValue({
+      id: "k1",
+      betterAuthUserId: "ba1",
+      organizationId: "org-a",
+      scopes: ["admin.users.read"],
+    });
+    await mod.resolveCaller(req("Bearer drk_live_abc"));
+    expect(getUserAccessContext).toHaveBeenCalledWith("ba1", { organizationId: "org-a" });
   });
 
   it("returns null when the key fails verification", async () => {
@@ -143,11 +156,25 @@ describe("resolveCaller — JWT path", () => {
     verifyAccessToken.mockResolvedValue({
       subject: "ba1",
       jti: "j1",
+      organizationId: "org-b",
       scopes: ["admin.users.read"],
     });
     isJtiRevoked.mockResolvedValue(false);
     const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
     expect(caller).toMatchObject({ kind: "jwt", credentialId: "j1", isBearer: true });
+  });
+
+  it("resolves against the token's bound org claim, not the active_org cookie (MACHINE-1)", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue({
+      subject: "ba1",
+      jti: "j1",
+      organizationId: "org-b",
+      scopes: ["admin.users.read"],
+    });
+    isJtiRevoked.mockResolvedValue(false);
+    await mod.resolveCaller(req("Bearer eyJ.token.sig"));
+    expect(getUserAccessContext).toHaveBeenCalledWith("ba1", { organizationId: "org-b" });
   });
 
   it("returns null when the token's jti is revoked", async () => {

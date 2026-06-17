@@ -55,8 +55,24 @@ export function decideSecureAccess(
  * no-op outside React rendering), so it never serves stale permissions
  * across requests.
  */
+/**
+ * Selects which organization a bearer credential (API key / JWT) acts in.
+ *
+ * `organizationId` is the org the credential was MINTED for
+ * (`app_api_keys.organization_id` / the JWT `org` claim). Passing this to
+ * {@link getUserAccessContext} makes the credential resolve against that org
+ * and bypass the `active_org` cookie entirely, so a credential can never be
+ * steered into a different tenant by a (spoofable) cookie — see MACHINE-1.
+ * A `null` bound org (an org-less credential) falls back to the principal's
+ * earliest membership: deterministic, and still cookie-independent.
+ */
+export interface BoundOrg {
+  organizationId: string | null;
+}
+
 export const getUserAccessContext = cache(async function getUserAccessContext(
   betterAuthUserId: string,
+  boundOrg?: BoundOrg,
 ): Promise<UserAccessContext> {
   const user = await db
     .selectFrom("app_users")
@@ -76,27 +92,50 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     };
   }
 
-  // Multi-org: the active org is selected by a cookie. Prefer the membership
-  // it names; if the cookie is unset, stale, or names an org the user is not
-  // a member of, fall back to their earliest membership (the historical
-  // single-org behavior). The `app_user_id` filter makes a forged cookie
-  // harmless — it can only ever select among the user's own memberships.
-  const activeOrgId = await readActiveOrgId();
-  let membership = activeOrgId
-    ? await db
+  let membership;
+  if (boundOrg !== undefined) {
+    // Bearer-credential path: act in the org the credential is bound to, and
+    // NEVER read the active_org cookie (MACHINE-1). A bound org the principal
+    // no longer holds an active membership in resolves to no membership, so
+    // the access context carries no permissions and the guard denies — the
+    // credential fails closed rather than silently acting elsewhere.
+    membership = boundOrg.organizationId
+      ? await db
+          .selectFrom("app_organization_memberships")
+          .select(["organization_id", "status"])
+          .where("app_user_id", "=", user.id)
+          .where("organization_id", "=", boundOrg.organizationId)
+          .executeTakeFirst()
+      : await db
+          .selectFrom("app_organization_memberships")
+          .select(["organization_id", "status"])
+          .where("app_user_id", "=", user.id)
+          .orderBy("created_at", "asc")
+          .executeTakeFirst();
+  } else {
+    // Cookie/session path. Multi-org: the active org is selected by a cookie.
+    // Prefer the membership it names; if the cookie is unset, stale, or names
+    // an org the user is not a member of, fall back to their earliest
+    // membership (the historical single-org behavior). The `app_user_id`
+    // filter makes a forged cookie harmless — it can only ever select among
+    // the user's own memberships.
+    const activeOrgId = await readActiveOrgId();
+    membership = activeOrgId
+      ? await db
+          .selectFrom("app_organization_memberships")
+          .select(["organization_id", "status"])
+          .where("app_user_id", "=", user.id)
+          .where("organization_id", "=", activeOrgId)
+          .executeTakeFirst()
+      : undefined;
+    if (!membership) {
+      membership = await db
         .selectFrom("app_organization_memberships")
         .select(["organization_id", "status"])
         .where("app_user_id", "=", user.id)
-        .where("organization_id", "=", activeOrgId)
-        .executeTakeFirst()
-    : undefined;
-  if (!membership) {
-    membership = await db
-      .selectFrom("app_organization_memberships")
-      .select(["organization_id", "status"])
-      .where("app_user_id", "=", user.id)
-      .orderBy("created_at", "asc")
-      .executeTakeFirst();
+        .orderBy("created_at", "asc")
+        .executeTakeFirst();
+    }
   }
 
   let permissions: string[] = [];

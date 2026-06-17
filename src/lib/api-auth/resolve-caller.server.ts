@@ -80,7 +80,11 @@ export async function resolveCaller(request: { headers: Headers }): Promise<Reso
       // API key would otherwise keep authenticating after its owner is
       // banned. Deny here, at the single resolution chokepoint (AUTH-1).
       if (await isBetterAuthUserBanned(verified.betterAuthUserId)) return null;
-      const access = await getUserAccessContext(verified.betterAuthUserId);
+      // Resolve against the org the key is BOUND to, not the active_org
+      // cookie, so a credential always acts in its minted tenant (MACHINE-1).
+      const access = await getUserAccessContext(verified.betterAuthUserId, {
+        organizationId: verified.organizationId,
+      });
       // Best-effort usage stamp; never blocks or breaks auth.
       touchApiKeyUsage(verified.id, clientIp(request.headers));
       return {
@@ -101,7 +105,11 @@ export async function resolveCaller(request: { headers: Headers }): Promise<Reso
         // Same as the API-key path: a banned owner's still-valid, non-revoked
         // access token must stop authenticating immediately (AUTH-1).
         if (await isBetterAuthUserBanned(verified.subject)) return null;
-        const access = await getUserAccessContext(verified.subject);
+        // The token's `org` claim is the bound tenant; ignore the cookie
+        // (MACHINE-1).
+        const access = await getUserAccessContext(verified.subject, {
+          organizationId: verified.organizationId,
+        });
         return {
           kind: "jwt",
           betterAuthUserId: verified.subject,

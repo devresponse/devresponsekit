@@ -18,6 +18,17 @@ test("overview shows the user's own account info", async ({ page }) => {
   await expect(page.getByText("admin@devresponse.local").first()).toBeVisible();
 });
 
+test("overview lists the user's own permissions", async ({ page }) => {
+  await page.goto("/en/app/account");
+  await expect(page.getByRole("heading", { name: "Permissions" })).toBeVisible();
+
+  const permissions = page.getByTestId("account-permissions");
+  await expect(permissions).toBeVisible();
+  // Every active member holds the baseline shell permission, so it must be
+  // present and individually addressable for assertions.
+  await expect(permissions.locator('[data-permission="shell.view"]')).toBeVisible();
+});
+
 test("profile edit persists across a reload, then restores", async ({ page }) => {
   await page.goto("/en/app/account/profile");
   const displayName = page.getByLabel("Display name", { exact: true });

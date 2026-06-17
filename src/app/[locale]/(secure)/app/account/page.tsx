@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
+import { PermissionsCard } from "./_components/permissions-card";
 import { getAccountOverview } from "./_data.server";
 
 export const dynamic = "force-dynamic";
@@ -107,6 +108,13 @@ export default async function AccountOverviewPage({
           </CardContent>
         </Card>
       </div>
+
+      <PermissionsCard
+        permissions={access.permissions}
+        title={t("overview.permissions")}
+        description={t("overview.permissionsDescription")}
+        emptyLabel={t("overview.noPermissions")}
+      />
     </section>
   );
 }

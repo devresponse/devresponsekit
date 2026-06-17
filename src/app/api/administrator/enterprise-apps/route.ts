@@ -1,18 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
-import { z } from "zod";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import {
-  APP_ID_RE,
-  APP_STATUS_VALUES,
-  SSO_AUDIENCE_RE,
-  SUBDOMAIN_RE,
-  isAllowedEnterpriseOrigin,
-  isHttpsOrigin,
-} from "@/lib/admin/enterprise-apps.server";
+import { createEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
+import { isAllowedEnterpriseOrigin, isHttpsOrigin } from "@/lib/admin/enterprise-apps.server";
 import {
   applySortAndPagination,
   buildListResponse,
@@ -146,20 +139,6 @@ export async function GET(request: NextRequest) {
  *   - sort_order: integer (default 100)
  *   - organization_id: optional UUID scope (null = global)
  */
-const createSchema = z
-  .object({
-    id: z.string().min(1).max(128).regex(APP_ID_RE),
-    label: z.string().min(1).max(200),
-    description: z.string().max(1000).nullable().optional(),
-    origin: z.string().min(1).max(500),
-    subdomain: z.string().min(1).max(63).regex(SUBDOMAIN_RE),
-    sso_audience: z.string().min(1).max(200).regex(SSO_AUDIENCE_RE),
-    status: z.enum(APP_STATUS_VALUES).optional(),
-    sort_order: z.number().int().min(0).max(10000).optional(),
-    organization_id: z.string().uuid().nullable().optional(),
-  })
-  .strict();
-
 export async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
@@ -177,7 +156,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return adminErrorResponse("invalid_body", 400, request);
   }
-  const parsed = createSchema.safeParse(json);
+  const parsed = createEnterpriseAppSchema.safeParse(json);
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }

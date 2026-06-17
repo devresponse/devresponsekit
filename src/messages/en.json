@@ -1246,6 +1246,10 @@
     "requiredLegend": "indicates a required field",
     "key": "Use only letters, numbers, and the characters . _ - :",
     "slug": "Use lowercase letters, numbers, and hyphens.",
-    "uuid": "Invalid identifier."
+    "uuid": "Invalid identifier.",
+    "appId": "Use lowercase letters, numbers, and the characters . _ -",
+    "subdomain": "Use lowercase letters, numbers, and hyphens.",
+    "ssoAudience": "Use lowercase letters, numbers, and the characters . _ : -",
+    "number": "Enter a valid number."
   }
 }

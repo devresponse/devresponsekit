@@ -1,7 +1,10 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requiresSuperadminForSharedTarget, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  requiresSuperadminForSharedTarget,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";

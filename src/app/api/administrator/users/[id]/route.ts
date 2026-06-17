@@ -9,7 +9,10 @@ import {
   unbanBetterAuthUser,
   updateBetterAuthUser,
 } from "@/lib/admin/auth-admin.server";
-import { requiresSuperadminForSharedTarget, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  requiresSuperadminForSharedTarget,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";

@@ -63,7 +63,14 @@ const actor = {
 };
 
 beforeEach(async () => {
-  for (const m of [performStatusChange, banMock, unbanMock, auditMock, txRun, requiresSuperadminMock])
+  for (const m of [
+    performStatusChange,
+    banMock,
+    unbanMock,
+    auditMock,
+    txRun,
+    requiresSuperadminMock,
+  ])
     m.mockReset();
   performStatusChange.mockResolvedValue({ ok: true });
   banMock.mockResolvedValue(undefined);

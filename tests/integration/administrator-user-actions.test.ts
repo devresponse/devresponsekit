@@ -33,10 +33,9 @@ vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
 }));
 vi.mock("@/lib/admin/access-scope.server", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/admin/access-scope.server")>(
-      "@/lib/admin/access-scope.server",
-    );
+  const actual = await vi.importActual<typeof import("@/lib/admin/access-scope.server")>(
+    "@/lib/admin/access-scope.server",
+  );
   return {
     ...actual,
     requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),

@@ -163,10 +163,31 @@ describe("roles/[id]/permissions — org scoping + superuser guard", () => {
     expect((await permsGET(req("permissions"), ctx)).status).toBe(404);
   });
 
-  it("POST 200 attaching a normal permission in own org", async () => {
-    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+  it("POST 200 attaching a permission the actor holds, in own org", async () => {
+    // AUTHZ-3: the actor must HOLD a permission to attach it.
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update", "admin.users.read"]));
     const res = await permsPOST(
       req("permissions", { method: "POST", body: { ids: ["admin.users.read"] } }),
+      ctx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("POST 403 attaching a permission the actor does NOT hold (AUTHZ-3)", async () => {
+    // Org admin holds only admin.roles.update; cannot grant admin.users.delete
+    // (which they lack) and then assign the role to themselves.
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+    const res = await permsPOST(
+      req("permissions", { method: "POST", body: { ids: ["admin.users.delete"] } }),
+      ctx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("POST 200 — a SUPERADMIN may attach any permission", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    const res = await permsPOST(
+      req("permissions", { method: "POST", body: { ids: ["admin.users.delete"] } }),
       ctx,
     );
     expect(res.status).toBe(200);
@@ -238,9 +259,17 @@ describe("roles/[id]/members — org scoping", () => {
 });
 
 describe("roles/[id]/duplicate — org scoping", () => {
-  it("POST 201 for own-org role", async () => {
-    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.create"]));
+  it("POST 201 for own-org role whose permissions the actor holds", async () => {
+    // The mock source role confers admin.users.read; the actor must hold it.
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.create", "admin.users.read"]));
     expect((await duplicatePOST(req("duplicate", { method: "POST" }), ctx)).status).toBe(201);
+  });
+
+  it("POST 403 duplicating a role that confers a permission the actor lacks (AUTHZ-3)", async () => {
+    // Source role confers admin.users.read (mock); actor does not hold it, so
+    // the clone would hand them an editable role exceeding their authority.
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.create"]));
+    expect((await duplicatePOST(req("duplicate", { method: "POST" }), ctx)).status).toBe(403);
   });
 
   it("POST 404 for a foreign-org role", async () => {

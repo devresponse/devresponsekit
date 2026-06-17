@@ -22,7 +22,8 @@ const state: {
   group: Record<string, unknown> | undefined;
   org: { id: string } | undefined;
   roles: Array<{ id: string; organization_id: string | null }>;
-  grantsSuperuser: { id: string } | undefined;
+  /** Permission keys the bundled roles confer (AUTHZ-3 subset check). */
+  conferredPermKeys: { key: string }[];
   eligibleMembers: Array<{ app_user_id: string }>;
   membership: { id: string } | undefined;
   listExec: unknown[];
@@ -30,7 +31,7 @@ const state: {
   group: undefined,
   org: undefined,
   roles: [],
-  grantsSuperuser: undefined,
+  conferredPermKeys: [],
   eligibleMembers: [],
   membership: undefined,
   listExec: [],
@@ -64,7 +65,6 @@ function tableKey(t: unknown): string {
 function firstFor(table: string): unknown {
   if (table === "app_groups") return state.group;
   if (table === "app_organizations") return state.org;
-  if (table === "app_role_permissions") return state.grantsSuperuser;
   if (table === "app_organization_memberships") return state.membership;
   if (table === "app_group_roles" || table === "app_group_memberships")
     return { c: "0", total: "0" };
@@ -72,6 +72,8 @@ function firstFor(table: string): unknown {
 }
 function execFor(table: string): unknown[] {
   if (table === "app_roles") return state.roles;
+  // permissionKeysForRoles(...) selects the bundled roles' conferred keys.
+  if (table === "app_role_permissions") return state.conferredPermKeys;
   if (table === "app_organization_memberships") return state.eligibleMembers;
   return state.listExec;
 }
@@ -162,7 +164,7 @@ beforeEach(async () => {
   };
   state.org = { id: ORG_A };
   state.roles = [{ id: ROLE, organization_id: ORG_A }];
-  state.grantsSuperuser = undefined;
+  state.conferredPermKeys = [];
   state.eligibleMembers = [{ app_user_id: USER }];
   state.membership = { id: "m-1" };
   state.listExec = [];
@@ -283,15 +285,31 @@ describe("groups/[id]/roles — same-org + superuser guards", () => {
   });
 
   it("403 when a non-superadmin bundles a role granting `superuser`", async () => {
-    state.grantsSuperuser = { id: "perm-su" };
+    state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     expect(
       (await roles.POST(req(`groups/${GROUP}/roles`, { method: "POST", body }), groupCtx)).status,
     ).toBe(403);
   });
 
+  it("403 when a non-superadmin bundles a role conferring a permission they lack (AUTHZ-3)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    expect(
+      (await roles.POST(req(`groups/${GROUP}/roles`, { method: "POST", body }), groupCtx)).status,
+    ).toBe(403);
+  });
+
+  it("200 when the bundled role's permissions are a subset the actor holds (AUTHZ-3)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign", "admin.users.read"]));
+    expect(
+      (await roles.POST(req(`groups/${GROUP}/roles`, { method: "POST", body }), groupCtx)).status,
+    ).toBe(200);
+  });
+
   it("SUPERADMIN MAY bundle a `superuser`-granting role (200)", async () => {
-    state.grantsSuperuser = { id: "perm-su" };
+    state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(superadmin(["admin.groups.assign"]));
     expect(
       (await roles.POST(req(`groups/${GROUP}/roles`, { method: "POST", body }), groupCtx)).status,

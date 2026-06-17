@@ -6,7 +6,11 @@ import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin, SUPERADMIN_PERMISSION } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import {
+  permissionKeysForRoles,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -111,17 +115,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("role_not_found", 404, request);
   }
 
-  // Privilege-escalation guard: only a SUPERADMIN may bundle a role that
-  // grants the `superuser` marker.
+  // Privilege-escalation guard (AUTHZ-3): a non-SUPERADMIN may bundle into a
+  // group only roles whose conferred permissions are a subset of their own —
+  // group roles confer their permissions to every member (ADR-0002), so this
+  // prevents an org admin from assembling a group that out-authorizes them.
+  // Subsumes the old `superuser`-marker-only check.
   if (!isSuperadmin(guard.access)) {
-    const grantsSuperuser = await db
-      .selectFrom("app_role_permissions as rp")
-      .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
-      .select("p.id")
-      .where("rp.role_id", "in", parsed.data.roleIds)
-      .where("p.key", "=", SUPERADMIN_PERMISSION)
-      .executeTakeFirst();
-    if (grantsSuperuser) return adminErrorResponse("forbidden", 403, request);
+    const conferred = await permissionKeysForRoles(parsed.data.roleIds);
+    const unheld = unheldPermissionKeys(guard.access.permissions, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
   await db

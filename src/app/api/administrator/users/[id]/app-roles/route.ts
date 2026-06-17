@@ -7,6 +7,10 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import {
+  permissionKeysForRoles,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -124,19 +128,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (!canAccessOrg(guard.access, role.organization_id)) {
     return adminErrorResponse("role_not_found", 404, request);
   }
-  // Privilege-escalation guard: only a SUPERADMIN may grant a role that
-  // carries the `superuser` marker (which would mint another superadmin).
+  // Privilege-escalation guard (AUTHZ-3): a non-SUPERADMIN may assign only a
+  // role whose conferred permissions are a subset of their own — otherwise
+  // they could grant a user (including themselves) authority they lack. This
+  // subsumes the old `superuser`-marker-only check.
   if (!isSuperadmin(guard.access)) {
-    const grantsSuperuser = await db
-      .selectFrom("app_role_permissions as rp")
-      .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
-      .select("p.id")
-      .where("rp.role_id", "=", role.id)
-      .where("p.key", "=", "superuser")
-      .executeTakeFirst();
-    if (grantsSuperuser) {
-      return adminErrorResponse("forbidden", 403, request);
-    }
+    const conferred = await permissionKeysForRoles([role.id]);
+    const unheld = unheldPermissionKeys(guard.access.permissions, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
   await db.transaction().execute(async (trx) => {

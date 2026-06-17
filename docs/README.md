@@ -27,6 +27,7 @@ Onboard, understand the architecture, and start building.
 | [Developer Onboarding](./developer-onboarding.md) | Tooling, install, run, test, project structure, conventions, "how to add a feature" |
 | [API Reference](./api.md) | HTTP API surface, auth requirements, request/response examples, error model |
 | [API Clients & SDKs](./api-clients.md) | Authenticate, generate (or use) a typed client for the v1 API and the committed admin SDK |
+| [Form Validation Plan](./form-validation.md) | System-wide plan to standardize form validation on React Hook Form + Zod: required-field asterisks, error-border highlighting, shared schemas, accessibility |
 | [Testing](./testing.md) | Test strategy, frameworks, how to run each suite, coverage, manual QA checklist |
 
 ### 🛠️ DevOps & Infrastructure

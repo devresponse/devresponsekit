@@ -152,6 +152,20 @@ const serverEnvSchema = z
         message: "required when API_JWT_ENABLED",
       });
     }
+    // Production hardening (AUTH-5): the rate-limit kill switch disables
+    // Better Auth's sign-in brute-force protection. It exists only for
+    // test/CI suites that sign in faster than the per-IP limiter allows.
+    // Refuse it in a real production deployment so it can never silently
+    // weaken auth. CI is still permitted: the browser job runs `next start`
+    // (NODE_ENV=production) and sets CI=true, which is the legitimate case.
+    if (env.AUTH_RATE_LIMIT_DISABLED && env.NODE_ENV === "production" && !process.env.CI) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["AUTH_RATE_LIMIT_DISABLED"],
+        message:
+          "must not be enabled in a production deployment (it disables sign-in rate limiting); permitted only outside production or in CI",
+      });
+    }
   });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -167,9 +181,15 @@ let cached: ServerEnv | null = null;
  * `SKIP_ENV_VALIDATION` covers non-Next build harnesses (Docker, CI).
  */
 function isBuildPhase(): boolean {
-  return (
-    process.env.NEXT_PHASE === "phase-production-build" || Boolean(process.env.SKIP_ENV_VALIDATION)
-  );
+  // The genuine Next.js production *build* always sets this — and never the
+  // running server (which is `phase-production-server`). Always safe to honor.
+  if (process.env.NEXT_PHASE === "phase-production-build") return true;
+  // SKIP_ENV_VALIDATION is an escape hatch for non-Next build harnesses
+  // (Docker layers, codegen scripts). It must NEVER mask missing/invalid
+  // secrets in a real production *runtime*, or the server would silently boot
+  // on placeholder auth secrets. Honor it only outside production (OPS-6).
+  if (process.env.SKIP_ENV_VALIDATION && process.env.NODE_ENV !== "production") return true;
+  return false;
 }
 
 function buildPhasePlaceholders(): ServerEnv {

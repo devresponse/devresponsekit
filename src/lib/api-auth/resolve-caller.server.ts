@@ -5,6 +5,7 @@ import { getServerEnv } from "@/lib/env";
 import { getClientIp } from "@/lib/client-ip";
 import { looksLikeApiKey } from "@/lib/api-auth/api-key";
 import { touchApiKeyUsage, verifyApiKey } from "@/lib/api-auth/api-keys.server";
+import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 import { verifyAccessToken } from "@/lib/api-auth/jwt.server";
 import { isJtiRevoked } from "@/lib/api-auth/revocation.server";
 
@@ -74,6 +75,11 @@ export async function resolveCaller(request: { headers: Headers }): Promise<Reso
       if (!env.API_KEYS_ENABLED) return null;
       const verified = await verifyApiKey(token);
       if (!verified) return null;
+      // A Better Auth ban revokes browser sessions but does NOT touch
+      // app_users.status, which is all getUserAccessContext reads — so an
+      // API key would otherwise keep authenticating after its owner is
+      // banned. Deny here, at the single resolution chokepoint (AUTH-1).
+      if (await isBetterAuthUserBanned(verified.betterAuthUserId)) return null;
       const access = await getUserAccessContext(verified.betterAuthUserId);
       // Best-effort usage stamp; never blocks or breaks auth.
       touchApiKeyUsage(verified.id, clientIp(request.headers));
@@ -92,6 +98,9 @@ export async function resolveCaller(request: { headers: Headers }): Promise<Reso
       try {
         const verified = await verifyAccessToken(token);
         if (await isJtiRevoked(verified.jti)) return null;
+        // Same as the API-key path: a banned owner's still-valid, non-revoked
+        // access token must stop authenticating immediately (AUTH-1).
+        if (await isBetterAuthUserBanned(verified.subject)) return null;
         const access = await getUserAccessContext(verified.subject);
         return {
           kind: "jwt",

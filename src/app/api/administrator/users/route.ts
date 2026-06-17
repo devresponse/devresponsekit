@@ -99,6 +99,28 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Organization name(s) the user belongs to — shown as a grid column so a
+  // SUPERADMIN can tell which org each cross-org user is in. A correlated
+  // scalar subquery (not a join) keeps the result one row per user, so the
+  // count and pagination stay correct even for multi-org users. It is scoped
+  // the SAME way as the row set above: an org admin only ever sees THEIR
+  // org's name (revealing a user's OTHER orgs would itself be a cross-tenant
+  // leak); a SUPERADMIN sees every org the user belongs to.
+  const orgNames =
+    scope.kind === "org"
+      ? sql<string | null>`(
+          select string_agg(o.name, ', ' order by o.name)
+          from app_organization_memberships m
+          join app_organizations o on o.id = m.organization_id
+          where m.app_user_id = app_users.id and m.organization_id = ${scope.organizationId}
+        )`
+      : sql<string | null>`(
+          select string_agg(o.name, ', ' order by o.name)
+          from app_organization_memberships m
+          join app_organizations o on o.id = m.organization_id
+          where m.app_user_id = app_users.id
+        )`;
+
   const itemsQuery = applySortAndPagination(
     base.select([
       "id",
@@ -109,6 +131,7 @@ export async function GET(request: NextRequest) {
       "preferred_locale",
       "created_at",
       "updated_at",
+      orgNames.as("organization_names"),
     ]),
     query,
   );

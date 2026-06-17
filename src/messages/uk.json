@@ -361,7 +361,8 @@
         "email": "Електронна пошта",
         "displayName": "Імʼя",
         "status": "Статус",
-        "createdAt": "Створено"
+        "createdAt": "Створено",
+        "organization": "Організація"
       },
       "filters": {
         "status": "Статус",

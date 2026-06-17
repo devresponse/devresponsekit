@@ -79,6 +79,8 @@ test("preferences edit persists across a reload, then restores", async ({ page }
 
 test("security page exposes the password change form", async ({ page }) => {
   await page.goto("/en/app/account/security");
-  await expect(page.getByLabel("Current password", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("New password", { exact: true })).toBeVisible();
+  // These fields are required, so their labels carry an asterisk now —
+  // match by prefix (anchored so "New password" doesn't hit "Confirm new…").
+  await expect(page.getByLabel(/^Current password/)).toBeVisible();
+  await expect(page.getByLabel(/^New password/)).toBeVisible();
 });

@@ -3,9 +3,19 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { RequiredLegend } from "@/components/ui/required-legend";
 import { authClient } from "@/lib/auth-client";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/validation/auth";
 
 export interface ForgotPasswordFormProps {
   /** Localized path the reset link in the email lands on. */
@@ -15,42 +25,33 @@ export interface ForgotPasswordFormProps {
 /**
  * ForgotPasswordForm
  *
- * Requests a Better Auth password-reset email. The server renders and
- * records the email through the outbox pipeline (specs.md §35).
- *
- * Anti-enumeration: Better Auth returns success whether or not the
- * address exists, and this form shows the same confirmation either way
- * — it never reveals whether an account exists.
+ * Requests a Better Auth password-reset email (React Hook Form + the shared
+ * `forgotPasswordSchema`). Anti-enumeration: Better Auth returns success
+ * whether or not the address exists, and this form shows the same
+ * confirmation either way.
  */
 export function ForgotPasswordForm({ redirectTo }: ForgotPasswordFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
-  const [email, setEmail] = useState("");
+
   const [done, setDone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const form = useZodForm<ForgotPasswordInput>(forgotPasswordSchema, {
+    defaultValues: { email: "" },
+  });
 
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPending(true);
-    setError(null);
-
+  const onValid = async (values: ForgotPasswordInput) => {
+    form.clearErrors("root");
     try {
-      const result = await authClient.requestPasswordReset({
-        email,
-        redirectTo,
-      });
+      const result = await authClient.requestPasswordReset({ email: values.email, redirectTo });
       if (result.error) {
-        setError(t("unexpectedError"));
+        form.setError("root", { type: "server", message: t("unexpectedError") });
       } else {
         setDone(true);
       }
     } catch {
-      setError(t("unexpectedError"));
-    } finally {
-      setPending(false);
+      form.setError("root", { type: "server", message: t("unexpectedError") });
     }
-  }
+  };
 
   if (done) {
     return (
@@ -60,31 +61,38 @@ export function ForgotPasswordForm({ redirectTo }: ForgotPasswordFormProps) {
     );
   }
 
+  const rootError = form.formState.errors.root?.message;
+
   return (
-    <form onSubmit={onSubmit} className="space-y-4" noValidate>
-      <p className="text-muted-foreground text-sm">{t("forgotPasswordDescription")}</p>
-      <div className="space-y-2">
-        <Label htmlFor="email">{tCommon("email")}</Label>
-        <Input
-          id="email"
+    <Form {...form} schema={forgotPasswordSchema}>
+      <form onSubmit={form.handleSubmit(onValid)} className="space-y-4" noValidate>
+        <p className="text-muted-foreground text-sm">{t("forgotPasswordDescription")}</p>
+        <RequiredLegend />
+
+        <FormField
+          control={form.control}
           name="email"
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{tCommon("email")}</FormLabel>
+              <FormControl>
+                <Input type="email" autoComplete="email" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      {error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
-      ) : null}
+        {rootError ? (
+          <p role="alert" className="text-destructive text-sm">
+            {rootError}
+          </p>
+        ) : null}
 
-      <Button type="submit" className="w-full" disabled={pending || email.trim().length === 0}>
-        {pending ? tCommon("loading") : t("sendResetLink")}
-      </Button>
-    </form>
+        <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? tCommon("loading") : t("sendResetLink")}
+        </Button>
+      </form>
+    </Form>
   );
 }

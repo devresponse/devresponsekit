@@ -3,10 +3,24 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { RequiredLegend } from "@/components/ui/required-legend";
 import { authClient } from "@/lib/auth-client";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import {
+  resetPasswordFieldsSchema,
+  resetPasswordSchema,
+  type ResetPasswordInput,
+} from "@/lib/validation/auth";
 
 export interface ResetPasswordFormProps {
   locale: string;
@@ -17,19 +31,37 @@ export interface ResetPasswordFormProps {
 /**
  * ResetPasswordForm
  *
- * Completes the Better Auth password-reset flow with the one-time token
- * from the emailed link. Passwords live only in component state. The
- * token is single-use and short-lived; an invalid/expired token shows a
- * translated error with a path back to requesting a fresh link.
+ * Completes the Better Auth password-reset flow (React Hook Form + the shared
+ * `resetPasswordSchema`). Validated with the refined schema (min length + the
+ * new/confirm match, surfaced on confirm); the unrefined
+ * `resetPasswordFieldsSchema` drives the required markers. The token is
+ * single-use; an invalid/expired token shows a path back to request a fresh one.
  */
 export function ResetPasswordForm({ locale, token }: ResetPasswordFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+
   const [done, setDone] = useState(false);
+  const form = useZodForm<ResetPasswordInput>(resetPasswordSchema, {
+    defaultValues: { password: "", confirmPassword: "" },
+  });
+
+  const onValid = async (values: ResetPasswordInput) => {
+    form.clearErrors("root");
+    try {
+      const result = await authClient.resetPassword({
+        newPassword: values.password,
+        token: token as string,
+      });
+      if (result.error) {
+        form.setError("root", { type: "server", message: t("resetTokenInvalid") });
+      } else {
+        setDone(true);
+      }
+    } catch {
+      form.setError("root", { type: "server", message: t("unexpectedError") });
+    }
+  };
 
   if (!token) {
     return (
@@ -53,76 +85,51 @@ export function ResetPasswordForm({ locale, token }: ResetPasswordFormProps) {
     );
   }
 
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-
-    if (password.length < 8) {
-      setError(t("passwordTooShort"));
-      return;
-    }
-    if (password !== confirm) {
-      setError(t("passwordMismatch"));
-      return;
-    }
-
-    setPending(true);
-    try {
-      const result = await authClient.resetPassword({
-        newPassword: password,
-        token: token as string,
-      });
-      if (result.error) {
-        setError(t("resetTokenInvalid"));
-      } else {
-        setDone(true);
-      }
-    } catch {
-      setError(t("unexpectedError"));
-    } finally {
-      setPending(false);
-    }
-  }
+  const rootError = form.formState.errors.root?.message;
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4" noValidate>
-      <div className="space-y-2">
-        <Label htmlFor="new-password">{t("newPassword")}</Label>
-        <Input
-          id="new-password"
-          name="new-password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
+    <Form {...form} schema={resetPasswordFieldsSchema}>
+      <form onSubmit={form.handleSubmit(onValid)} className="space-y-4" noValidate>
+        <RequiredLegend />
+
+        <FormField
+          control={form.control}
+          name="password"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("newPassword")}</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="new-password" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="confirm-password">{t("confirmPassword")}</Label>
-        <Input
-          id="confirm-password"
-          name="confirm-password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={8}
-          value={confirm}
-          onChange={(event) => setConfirm(event.target.value)}
+        <FormField
+          control={form.control}
+          name="confirmPassword"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t("confirmPassword")}</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="new-password" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      {error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
-      ) : null}
+        {rootError ? (
+          <p role="alert" className="text-destructive text-sm">
+            {rootError}
+          </p>
+        ) : null}
 
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? tCommon("loading") : t("setNewPassword")}
-      </Button>
-    </form>
+        <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? tCommon("loading") : t("setNewPassword")}
+        </Button>
+      </form>
+    </Form>
   );
 }

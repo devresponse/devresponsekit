@@ -109,7 +109,7 @@ test("password reset round trip: form → outbox → emailed link → new passwo
       // Follow the emailed link and choose a new password.
       await userPage.goto(resetUrl!);
       await expect(userPage).toHaveURL(/reset-password/);
-      await userPage.getByLabel(/^new password$/i).fill(newPassword);
+      await userPage.getByLabel(/^new password/i).fill(newPassword);
       await userPage.getByLabel(/confirm password/i).fill(newPassword);
       await userPage.getByRole("button", { name: /set new password/i }).click();
       await expect(userPage.getByRole("status")).toBeVisible();

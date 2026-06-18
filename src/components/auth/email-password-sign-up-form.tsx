@@ -1,12 +1,21 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { RequiredLegend } from "@/components/ui/required-legend";
 import { authClient } from "@/lib/auth-client";
+import { useZodForm } from "@/lib/forms/use-zod-form";
+import { signUpSchema, type SignUpInput } from "@/lib/validation/auth";
 
 export interface EmailPasswordSignUpFormProps {
   pendingApprovalHref: string;
@@ -15,96 +24,97 @@ export interface EmailPasswordSignUpFormProps {
 /**
  * EmailPasswordSignUpForm
  *
- * Self-registration via Better Auth. Successful registrations move to the
- * localized pending-approval page immediately so the user never appears
- * stranded on the sign-up form after account creation.
+ * Self-registration via Better Auth (React Hook Form + the shared
+ * `signUpSchema`). On success the user is moved to the localized
+ * pending-approval page immediately.
  */
 export function EmailPasswordSignUpForm({ pendingApprovalHref }: EmailPasswordSignUpFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
 
-  async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPending(true);
-    setError(null);
+  const form = useZodForm<SignUpInput>(signUpSchema, {
+    defaultValues: { name: "", email: "", password: "" },
+  });
 
+  const onValid = async (values: SignUpInput) => {
+    form.clearErrors("root");
     try {
       const result = await authClient.signUp.email({
-        email,
-        password,
-        name,
+        email: values.email,
+        password: values.password,
+        name: values.name.trim(),
         callbackURL: pendingApprovalHref,
       });
       if (result.error) {
-        setError(t("unexpectedError"));
+        form.setError("root", { type: "server", message: t("unexpectedError") });
         return;
       }
-
       router.replace(pendingApprovalHref);
     } catch {
-      setError(t("unexpectedError"));
-    } finally {
-      setPending(false);
+      form.setError("root", { type: "server", message: t("unexpectedError") });
     }
-  }
+  };
+
+  const rootError = form.formState.errors.root?.message;
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4" noValidate>
-      <div className="space-y-2">
-        <Label htmlFor="name">{tCommon("displayName")}</Label>
-        <Input
-          id="name"
+    <Form {...form} schema={signUpSchema}>
+      <form onSubmit={form.handleSubmit(onValid)} className="space-y-4" noValidate>
+        <RequiredLegend />
+
+        <FormField
+          control={form.control}
           name="name"
-          type="text"
-          autoComplete="name"
-          required
-          value={name}
-          onChange={(event) => setName(event.target.value)}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{tCommon("displayName")}</FormLabel>
+              <FormControl>
+                <Input type="text" autoComplete="name" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="email">{tCommon("email")}</Label>
-        <Input
-          id="email"
+        <FormField
+          control={form.control}
           name="email"
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{tCommon("email")}</FormLabel>
+              <FormControl>
+                <Input type="email" autoComplete="email" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="password">{tCommon("password")}</Label>
-        <Input
-          id="password"
+        <FormField
+          control={form.control}
           name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{tCommon("password")}</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="new-password" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      {error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {error}
-        </p>
-      ) : null}
+        {rootError ? (
+          <p role="alert" className="text-destructive text-sm">
+            {rootError}
+          </p>
+        ) : null}
 
-      <Button type="submit" className="w-full" disabled={pending}>
-        {pending ? tCommon("loading") : t("createAccount")}
-      </Button>
-    </form>
+        <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? tCommon("loading") : t("createAccount")}
+        </Button>
+      </form>
+    </Form>
   );
 }

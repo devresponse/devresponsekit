@@ -11,7 +11,7 @@ test("seed admin signs in through the form and reaches the dashboard", async ({ 
   await page.goto("/en/sign-in");
 
   await page.getByLabel(/email/i).fill(SEED_ADMIN.email);
-  await page.getByLabel(/^password$/i).fill(SEED_ADMIN.password);
+  await page.getByLabel(/^password/i).fill(SEED_ADMIN.password);
   await page.getByRole("button", { name: /^sign in$/i }).click();
 
   await expect(page).toHaveURL(/\/en\/app\/dashboard/, { timeout: 15_000 });

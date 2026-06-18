@@ -141,5 +141,15 @@
     "vite-tsconfig-paths": "6.1.1",
     "vitest": "4.0.5"
   },
-  "packageManager": "pnpm@10.33.2"
+  "packageManager": "pnpm@10.33.2",
+  "pnpm": {
+    "auditConfig": {
+      "//": "Allowlist for `pnpm audit --audit-level high` (BUILD-1). Each entry is a dev/build-only advisory with no production exposure — they reach the tree only through test/build tooling (vitest, vite, supertest), never the shipped app. Review and prune when the upstream fix lands; a NEW high/critical not listed here fails CI.",
+      "ignoreGhsas": [
+        "GHSA-5xrq-8626-4rwp",
+        "GHSA-hmw2-7cc7-3qxx",
+        "GHSA-fx2h-pf6j-xcff"
+      ]
+    }
+  }
 }

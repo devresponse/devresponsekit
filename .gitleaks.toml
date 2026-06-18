@@ -1,0 +1,34 @@
+# gitleaks configuration (BUILD-1).
+#
+# Extends the bundled default rules and allowlists the repo's intentional
+# NON-secrets so the scan is honest — it fails only on real, novel leaks, not
+# on fixtures, examples, or generated build output.
+title = "devresponsekit gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Build output, fixtures, archived docs, and documented local-only/CI dummy values — not real credentials."
+
+# Path-scoped allowances. Real secrets must never live in these locations;
+# they carry only generated artifacts or deliberate dummy values.
+paths = [
+  '''(^|/)\.next/''',        # Next.js build output (generated, gitignored)
+  '''(^|/)node_modules/''',
+  '''(^|/)coverage/''',
+  '''(^|/)test-results/''',
+  '''(^|/)tests/''',         # fixtures use throwaway `drk_` keys / fake secrets
+  '''(^|/)docs-backup/''',   # archived reference docs with example values
+  '''setup-sso-multi-app\.md$''', # SSO setup guide: all env-var values are placeholders
+  '''(^|/)\.env\.example$''',
+]
+
+# Documented dummy values that appear in CI config / seed defaults / setup
+# docs. Belt-and-suspenders alongside the path rules above.
+regexes = [
+  '''ci-only-[a-z0-9-]+-not-for-production''',
+  '''ChangeMe-LocalOnly-123!''',
+  '''change-me-min-16-chars''',
+  '''test-secret-test-secret-test-secret''',
+]

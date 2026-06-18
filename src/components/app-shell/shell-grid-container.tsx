@@ -54,12 +54,10 @@ export function ShellGridContainer(props: ShellGridContainerProps) {
       data-left-hidden={(!hasLeft).toString()}
       data-right-hidden={(!hasRight).toString()}
       data-footer-hidden={(!hasFooter).toString()}
-      role="application"
-      aria-label={ariaLabel}
     >
       {header ? <ShellHeader>{header}</ShellHeader> : null}
       {hasLeft ? <ShellLeft>{left}</ShellLeft> : null}
-      <ShellMain id={mainId} className={mainClassName}>
+      <ShellMain id={mainId} className={mainClassName} ariaLabel={ariaLabel}>
         {children}
       </ShellMain>
       {hasRight ? <ShellRight>{right}</ShellRight> : null}

@@ -13,7 +13,8 @@ describe("ShellGridContainer", () => {
     );
     const main = screen.getByText("main-content").closest("main");
     expect(main).toHaveAttribute("id", "m1");
-    expect(screen.getByRole("application", { name: "Root" })).toBeInTheDocument();
+    // ariaLabel labels the <main> landmark (not a bogus role="application").
+    expect(screen.getByRole("main", { name: "Root" })).toBe(main);
   });
 
   it("hides regions when their content is missing", () => {

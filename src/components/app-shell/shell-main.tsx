@@ -23,13 +23,17 @@ export function ShellMain({
   children,
   className,
   id = "main",
+  ariaLabel,
 }: {
   children: ReactNode;
   className?: string;
   id?: string;
+  /** Accessible name for the `<main>` landmark — helps distinguish the
+   *  root vs a nested shell's main region for assistive tech. */
+  ariaLabel?: string;
 }) {
   return (
-    <main id={id} className={cn("sh-main", className)} tabIndex={0}>
+    <main id={id} className={cn("sh-main", className)} tabIndex={0} aria-label={ariaLabel}>
       {children}
     </main>
   );

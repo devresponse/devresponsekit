@@ -469,6 +469,14 @@
         "removeConfirm": "¿Eliminar esta membresía?",
         "removeError": "No se pudo eliminar la membresía."
       },
+      "roles": {
+        "columns": {
+          "role": "Rol",
+          "key": "Clave",
+          "organization": "Organización",
+          "assigned": "Asignado"
+        }
+      },
       "bulk": {
         "approve": "Aprobar selección",
         "block": "Bloquear selección",

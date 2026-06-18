@@ -12,7 +12,11 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import {
+  permissionKeysForGroup,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -124,6 +128,17 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const group = await loadGroup(id);
   if (!group || !canAccessOrg(guard.access, group.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
+  }
+
+  // Privilege-escalation guard (AUTHZ-3): group membership confers the union
+  // of the group's roles' permissions to every member (ADR-0002), so a
+  // non-SUPERADMIN may only add members to a group whose conferred permissions
+  // are a subset of their own. Mirrors the role-attach guard in
+  // groups/[id]/roles; checked per-group, so it covers the whole batch.
+  if (!isSuperadmin(guard.access)) {
+    const conferred = await permissionKeysForGroup(group.id);
+    const unheld = unheldPermissionKeys(guard.access.permissions, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
   // Confine to users who are ACTIVE members of the group's org.

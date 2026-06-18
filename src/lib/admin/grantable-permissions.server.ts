@@ -21,6 +21,24 @@ import { db } from "@/db/database";
  * and now a role/group bundle can never out-authorize the admin who edits it.
  */
 
+/**
+ * Distinct permission keys a group confers via its currently-attached roles
+ * (empty when the group has no roles). Group membership grants every member
+ * the union of the group's roles' permissions (ADR-0002), so adding a member
+ * is a conferral and must pass the same {@link unheldPermissionKeys} guard as
+ * attaching a role to the group.
+ */
+export async function permissionKeysForGroup(groupId: string): Promise<string[]> {
+  const rows = await db
+    .selectFrom("app_group_roles as gr")
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "gr.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.key as key")
+    .where("gr.group_id", "=", groupId)
+    .execute();
+  return [...new Set(rows.map((r) => r.key))];
+}
+
 /** Distinct permission keys conferred by the given roles (empty for `[]`). */
 export async function permissionKeysForRoles(roleIds: ReadonlyArray<string>): Promise<string[]> {
   if (roleIds.length === 0) return [];

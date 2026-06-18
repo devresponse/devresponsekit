@@ -27,6 +27,7 @@ const ROLE_SCOPES = ["global", "org"] as const;
 interface RoleRow {
   id: string;
   organization_id: string | null;
+  organization_name: string | null;
   key: string;
   name: string;
   description: string | null;
@@ -145,6 +146,25 @@ export function AdministratorRolesGrid({
             <Badge variant="outline">{t("scope.global")}</Badge>
           ) : (
             <Badge variant="outline">{t("scope.org")}</Badge>
+          ),
+      },
+      {
+        id: "organization_name",
+        accessorKey: "organization_name",
+        header: () => t("columns.organization"),
+        // Lets a superadmin tell apart same-key roles that exist once per org
+        // (e.g. four "admin / Administrator" rows). Global roles have no org.
+        cell: ({ row }) =>
+          row.original.organization_id && row.original.organization_name ? (
+            <LocaleLink
+              locale={locale}
+              href={`/app/administrator/organizations/${row.original.organization_id}`}
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              {row.original.organization_name}
+            </LocaleLink>
+          ) : (
+            <span className="text-muted-foreground">—</span>
           ),
       },
       {

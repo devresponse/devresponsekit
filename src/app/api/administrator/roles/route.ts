@@ -42,14 +42,26 @@ export async function GET(request: NextRequest) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["key", "name", "created_at", "permission_count", "member_count"],
+    allowedSortFields: [
+      "key",
+      "name",
+      "created_at",
+      "permission_count",
+      "member_count",
+      "organization_name",
+    ],
     allowedFilters: ["organization", "scope", "permission"],
     defaultSort: [{ field: "key", direction: "asc" }],
     defaultPageSize: 25,
     maxPageSize: 200,
   });
 
-  let base = db.selectFrom("app_roles as r");
+  // LEFT JOIN so each role carries its owning org's name. Global roles have
+  // `organization_id IS NULL`, so the joined name is null for them. 1:1 on the
+  // org PK, so the row count (reused for the COUNT(*) total) is unchanged.
+  let base = db
+    .selectFrom("app_roles as r")
+    .leftJoin("app_organizations as o", "o.id", "r.organization_id");
 
   const orgFilter = query.filters.organization;
   if (typeof orgFilter === "string") {
@@ -101,6 +113,7 @@ export async function GET(request: NextRequest) {
     base.select((eb) => [
       "r.id",
       "r.organization_id",
+      "o.name as organization_name",
       "r.key",
       "r.name",
       "r.description",
@@ -130,6 +143,7 @@ export async function GET(request: NextRequest) {
   const normalised = items.map((row) => ({
     id: row.id,
     organization_id: row.organization_id,
+    organization_name: row.organization_name ?? null,
     key: row.key,
     name: row.name,
     description: row.description,

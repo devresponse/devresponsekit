@@ -160,7 +160,20 @@ export const auth = betterAuth({
 
   // The nextCookies plugin makes Better Auth set cookies via Next.js
   // server actions and route handlers correctly — it MUST stay last.
-  plugins: [admin(), ssoSession(), nextCookies()],
+  plugins: [
+    // `allowImpersonatingAdmins`: Better Auth otherwise refuses to impersonate
+    // ANY user holding the `admin` role ("You cannot impersonate admins"),
+    // which blocks a superadmin from impersonating an org admin — a legitimate
+    // support action. We delegate the real policy to the impersonate route
+    // (`/api/administrator/users/[id]/impersonate`), which gates on the app
+    // RBAC `admin.users.impersonate` permission AND enforces a privilege-
+    // escalation guard (a non-superadmin can never assume a session carrying a
+    // permission they lack). That guard is finer-grained than Better Auth's
+    // blanket block, so the block here only causes false negatives.
+    admin({ allowImpersonatingAdmins: true }),
+    ssoSession(),
+    nextCookies(),
+  ],
 });
 
 /** Convenience type for the resolved session shape. */

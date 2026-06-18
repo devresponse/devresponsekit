@@ -11,10 +11,14 @@
 -- `app_revoked_tokens`, the `admin.apikeys.*` / `admin.clients.*`
 -- permissions), all folded into one authoritative definition.
 --
--- A fresh database needs only this file, plus the Better Auth vendor
--- schema applied by `pnpm db:auth:migrate`, and `pnpm db:seed` for the
--- local admin user and baseline roles. There are no other application
--- migration files and no further application migrations are required.
+-- A fresh database needs this file (plus the Better Auth vendor schema
+-- applied by `pnpm db:auth:migrate`, and `pnpm db:seed` for the local admin
+-- user and baseline roles), followed by the forward migrations 0002+.
+--
+-- This file is FROZEN: never edit its DDL. `create … if not exists` is a
+-- no-op against an existing table, so changes here cannot alter a
+-- provisioned database. Append schema changes as new numbered `NNNN-*.sql`
+-- files (see run-migrations.ts and 0002-sso-nonce-expires-index.sql).
 --
 -- Scope note: the Better Auth tables (`user`, `session`, `account`,
 -- `verification`, …) are owned and created by Better Auth's own

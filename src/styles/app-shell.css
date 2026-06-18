@@ -103,8 +103,20 @@
   background-color: var(--color-shell-bg);
 }
 
+/*
+ * The three scroll regions set `position: relative` so each becomes the
+ * containing block for its absolutely-positioned descendants. Without it, an
+ * `position: absolute` child (e.g. a chart's visually-hidden `.sr-only`
+ * data table, which a <table> keeps at full layout height) escapes this
+ * region's `overflow` clip — its containing block falls through to the
+ * viewport — and extends the DOCUMENT height. On a tall, reflowed page that
+ * produced a second, document-level scrollbar alongside the region's own
+ * (the "double scrollbar" at narrow widths). A scroll container must own its
+ * abs-positioned descendants so `overflow` can clip them.
+ */
 .sh-left {
   grid-area: left;
+  position: relative;
   overflow-y: auto;
   border-right: 1px solid var(--color-shell-border);
   background-color: var(--color-shell-muted);
@@ -112,6 +124,7 @@
 
 .sh-main {
   grid-area: main;
+  position: relative;
   overflow-y: auto;
   min-width: 0;
   min-height: 0;
@@ -119,6 +132,7 @@
 
 .sh-right {
   grid-area: right;
+  position: relative;
   overflow-y: auto;
   border-left: 1px solid var(--color-shell-border);
   background-color: var(--color-shell-muted);

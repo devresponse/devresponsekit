@@ -6,15 +6,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { UserSessionsPanel } from "./_user-sessions-panel";
 import { UserMembershipsPanel } from "./_user-memberships-panel";
+import { UserRolesPanel } from "./_user-roles-panel";
 
 /**
  * Client-side tab container for the user detail page (plan §8.4).
  *
  * The Overview tab renders read-only metadata that the parent RSC has
- * already streamed in (no client fetch). The Sessions and Audit tabs
- * own their own data fetches so heavy reads only happen when the user
- * opens that tab. Roles and Memberships render as "coming soon"
- * placeholders until Phases 4-5 land their data sources.
+ * already streamed in (no client fetch). The Roles, Memberships, and
+ * Sessions tabs own their own data fetches so heavy reads only happen when
+ * the user opens that tab. The Audit tab remains a placeholder until its
+ * filtered-by-app_user_id grid lands.
  */
 export interface UserDetailJson {
   id: string;
@@ -98,9 +99,8 @@ export function UserDetailTabs({
         ) : null}
       </TabsContent>
 
-      <TabsContent value="roles" className="text-muted-foreground mt-4 text-sm">
-        {/* Phase 4 placeholder. */}
-        <p>—</p>
+      <TabsContent value="roles" className="mt-4">
+        <UserRolesPanel userId={user.id} />
       </TabsContent>
       <TabsContent value="memberships" className="mt-4">
         <UserMembershipsPanel userId={user.id} canUpdate={canUpdateMemberships} />

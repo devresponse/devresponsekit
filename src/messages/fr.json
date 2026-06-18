@@ -469,6 +469,14 @@
         "removeConfirm": "Supprimer cette adhésion ?",
         "removeError": "Impossible de supprimer l'adhésion."
       },
+      "roles": {
+        "columns": {
+          "role": "Rôle",
+          "key": "Clé",
+          "organization": "Organisation",
+          "assigned": "Attribué"
+        }
+      },
       "bulk": {
         "approve": "Approuver la sélection",
         "block": "Bloquer la sélection",

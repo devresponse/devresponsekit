@@ -21,9 +21,9 @@ export const dynamic = "force-dynamic";
  *      gated the entire `/administrator/*` tree on any admin permission,
  *      so passing this read check means the caller is an admin reader).
  *   3. Renders the static metadata header + a client `UserDetailTabs`
- *      component that owns the interactive tabs (Overview, Sessions,
- *      and Audit). Roles / Memberships tabs render as "coming soon"
- *      placeholders until Phases 4-5 land their endpoints.
+ *      component that owns the interactive tabs (Overview, Roles,
+ *      Memberships, Sessions). The Audit tab remains a placeholder until
+ *      its filtered-by-app_user_id grid lands.
  */
 export default async function AdministratorUserDetailPage({
   params,

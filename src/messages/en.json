@@ -493,6 +493,14 @@
         "removeButton": "Remove",
         "removeConfirm": "Remove this membership?",
         "removeError": "Could not remove the membership."
+      },
+      "roles": {
+        "columns": {
+          "role": "Role",
+          "key": "Key",
+          "organization": "Organization",
+          "assigned": "Assigned"
+        }
       }
     },
     "grid": {

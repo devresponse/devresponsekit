@@ -1,0 +1,46 @@
+name: CodeQL
+
+# Static application security testing (BUILD-1). Runs CodeQL's
+# security-extended query suite over the TypeScript/JavaScript source and
+# publishes findings to the repo's Security tab (code scanning). JS/TS needs no
+# build step — CodeQL extracts directly from source.
+#
+# Note: code scanning (SARIF) requires GitHub Advanced Security on private
+# repos; it is free for public repos.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly catch-all so advisories that land between commits still surface.
+    - cron: "27 4 * * 1"
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

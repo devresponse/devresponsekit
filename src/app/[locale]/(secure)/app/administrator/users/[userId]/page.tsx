@@ -22,8 +22,8 @@ export const dynamic = "force-dynamic";
  *      so passing this read check means the caller is an admin reader).
  *   3. Renders the static metadata header + a client `UserDetailTabs`
  *      component that owns the interactive tabs (Overview, Roles,
- *      Memberships, Sessions). The Audit tab remains a placeholder until
- *      its filtered-by-app_user_id grid lands.
+ *      Memberships, Sessions, and — for callers holding `admin.audit.read`
+ *      — Audit, the user's `app_user_id`-filtered audit trail).
  */
 export default async function AdministratorUserDetailPage({
   params,
@@ -74,6 +74,7 @@ export default async function AdministratorUserDetailPage({
 
   const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
   const canImpersonate = guard.access.permissions.includes("admin.users.impersonate");
+  const canReadAudit = guard.access.permissions.includes("admin.audit.read");
   const isSelfTarget = guard.betterAuthUserId === user.better_auth_user_id;
 
   // ISO-string-ify timestamps so the value crosses the RSC/client
@@ -113,7 +114,11 @@ export default async function AdministratorUserDetailPage({
         </div>
       </div>
 
-      <UserDetailTabs user={userJson} canUpdateMemberships={canUpdateMemberships} />
+      <UserDetailTabs
+        user={userJson}
+        canUpdateMemberships={canUpdateMemberships}
+        canReadAudit={canReadAudit}
+      />
     </section>
   );
 }

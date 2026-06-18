@@ -7,15 +7,16 @@ import { Separator } from "@/components/ui/separator";
 import { UserSessionsPanel } from "./_user-sessions-panel";
 import { UserMembershipsPanel } from "./_user-memberships-panel";
 import { UserRolesPanel } from "./_user-roles-panel";
+import { UserAuditPanel } from "./_user-audit-panel";
 
 /**
  * Client-side tab container for the user detail page (plan §8.4).
  *
  * The Overview tab renders read-only metadata that the parent RSC has
- * already streamed in (no client fetch). The Roles, Memberships, and
- * Sessions tabs own their own data fetches so heavy reads only happen when
- * the user opens that tab. The Audit tab remains a placeholder until its
- * filtered-by-app_user_id grid lands.
+ * already streamed in (no client fetch). The Roles, Memberships, Sessions,
+ * and Audit tabs own their own data fetches so heavy reads only happen when
+ * the user opens that tab. The Audit tab is shown only to callers holding
+ * `admin.audit.read` (audit data is gated separately from the user record).
  */
 export interface UserDetailJson {
   id: string;
@@ -35,9 +36,11 @@ export interface UserDetailJson {
 export function UserDetailTabs({
   user,
   canUpdateMemberships,
+  canReadAudit,
 }: {
   user: UserDetailJson;
   canUpdateMemberships: boolean;
+  canReadAudit: boolean;
 }) {
   const t = useTranslations("administrator.users");
   const locale = useLocale();
@@ -64,7 +67,7 @@ export function UserDetailTabs({
         <TabsTrigger value="roles">{t("tabs.roles")}</TabsTrigger>
         <TabsTrigger value="memberships">{t("tabs.memberships")}</TabsTrigger>
         <TabsTrigger value="sessions">{t("tabs.sessions")}</TabsTrigger>
-        <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger>
+        {canReadAudit ? <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger> : null}
       </TabsList>
 
       <TabsContent value="overview" className="mt-4 space-y-3">
@@ -110,10 +113,11 @@ export function UserDetailTabs({
         <UserSessionsPanel userId={user.id} />
       </TabsContent>
 
-      <TabsContent value="audit" className="text-muted-foreground mt-4 text-sm">
-        {/* Phase 6 placeholder — will render the audit grid filtered by app_user_id. */}
-        <p>—</p>
-      </TabsContent>
+      {canReadAudit ? (
+        <TabsContent value="audit" className="mt-4">
+          <UserAuditPanel userId={user.id} />
+        </TabsContent>
+      ) : null}
     </Tabs>
   );
 }

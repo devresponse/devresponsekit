@@ -53,7 +53,21 @@ interface AuditRow {
   created_at: string;
 }
 
-export function AdministratorAuditGrid() {
+export interface AdministratorAuditGridProps {
+  /** List endpoint; defaults to the global audit feed. A per-user route
+   *  (`/api/administrator/users/:id/audit`) reuses this same grid. */
+  endpoint?: string;
+  /** Stable grid name for URL/a11y bookkeeping. */
+  name?: string;
+  /** Show the event-type/outcome/actor filter toolbar (off for scoped views). */
+  showToolbar?: boolean;
+}
+
+export function AdministratorAuditGrid({
+  endpoint = "/api/administrator/audit",
+  name = "administrator.audit",
+  showToolbar = true,
+}: AdministratorAuditGridProps = {}) {
   const t = useTranslations("administrator.audit");
   const intlLocale = useLocale();
 
@@ -154,10 +168,10 @@ export function AdministratorAuditGrid() {
 
   return (
     <div className="space-y-3">
-      <AuditFilterToolbar />
+      {showToolbar ? <AuditFilterToolbar /> : null}
       <DataGrid<AuditRow>
-        name="administrator.audit"
-        endpoint="/api/administrator/audit"
+        name={name}
+        endpoint={endpoint}
         columns={columns}
         options={{
           defaultPageSize: 50,

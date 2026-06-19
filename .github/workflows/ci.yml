@@ -123,6 +123,11 @@ jobs:
       # The suites sign in far faster than the production limiter's
       # 3 req / 10 s budget for /sign-in/email — test-only escape hatch.
       AUTH_RATE_LIMIT_DISABLED: "1"
+      # F2: enable the machine API (client-credentials e2e) and allow the SSO
+      # e2e to register a destination app under devresponse.com. The signing
+      # key is generated per run in the step below (never committed).
+      API_JWT_ENABLED: "1"
+      SSO_ALLOWED_ORIGIN_SUFFIXES: devresponse.com
 
     steps:
       - uses: actions/checkout@v4
@@ -136,6 +141,14 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # F2: the machine-API e2e needs a JWT signing key. Mint an ephemeral
+      # CI-only Ed25519 key at runtime and export it for the server boot — a
+      # private key must never be committed (gitleaks would flag it).
+      - name: Generate an ephemeral API JWT signing key (CI only)
+        run: |
+          KEY=$(node -e "import('jose').then(async (j) => { const { privateKey } = await j.generateKeyPair('EdDSA', { extractable: true }); process.stdout.write(JSON.stringify(await j.exportJWK(privateKey))) })")
+          echo "API_JWT_PRIVATE_KEY=$KEY" >> "$GITHUB_ENV"
 
       - name: Install Playwright browsers
         run: pnpm playwright install --with-deps chromium

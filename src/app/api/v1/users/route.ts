@@ -160,8 +160,9 @@ export async function POST(request: NextRequest) {
       { email, password: input.password, name: input.name ?? email, role: input.role },
       request,
     );
-  } catch {
+  } catch (err) {
     return problemResponse("internal_error", 502, request, {
+      cause: err,
       detail: "Identity provider rejected the user creation.",
       requestId: grant.requestId,
     });
@@ -170,7 +171,10 @@ export async function POST(request: NextRequest) {
     (created as { user?: { id?: string }; id?: string })?.user?.id ??
     (created as { id?: string })?.id;
   if (!betterAuthUserId) {
-    return problemResponse("internal_error", 502, request, { requestId: grant.requestId });
+    return problemResponse("internal_error", 502, request, {
+      cause: new Error("identity provider returned no user id on create"),
+      requestId: grant.requestId,
+    });
   }
 
   const appUser = await db

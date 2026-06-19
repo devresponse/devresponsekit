@@ -1,6 +1,7 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { captureServerError } from "@/lib/observability/server";
 
 /**
  * Standard administrator error envelope (docs/admin-manager.md §5.1,
@@ -31,6 +32,13 @@ export interface AdminErrorOptions {
   requestId?: string;
   /** Additional response headers. */
   headers?: Record<string, string>;
+  /**
+   * The originating exception, for a 5xx. When set on a `status >= 500`
+   * response it is captured to Sentry, tagged with `request_id` (D4) — so a
+   * swallowed-then-audited server error still surfaces in observability.
+   * Ignored for 4xx (those are expected client errors, not incidents).
+   */
+  cause?: unknown;
 }
 
 export function adminErrorResponse(
@@ -40,6 +48,9 @@ export function adminErrorResponse(
   options: AdminErrorOptions = {},
 ): NextResponse {
   const requestId = options.requestId ?? getOrCreateRequestId(request);
+  if (status >= 500 && options.cause !== undefined) {
+    captureServerError(options.cause, { requestId, status });
+  }
   const body = {
     error: code,
     message: `errors.${code}`,

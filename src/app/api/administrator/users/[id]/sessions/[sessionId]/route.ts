@@ -57,7 +57,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
         sessionTokenLength: sessionId.length,
       },
     });
-    return adminErrorResponse("auth_revoke_session_failed", 502, request);
+    return adminErrorResponse("auth_revoke_session_failed", 502, request, { cause: err });
   }
 
   await auditUserAction("admin.user.session_revoked", "success", {

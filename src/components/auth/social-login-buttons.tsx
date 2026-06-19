@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Github } from "lucide-react";
+import { GithubIcon } from "@/components/icons/github-icon";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
 
@@ -36,7 +36,7 @@ export function SocialLoginButtons({ returnTo }: SocialLoginButtonsProps) {
         {t("signInWithMicrosoft")}
       </Button>
       <Button type="button" variant="outline" onClick={() => signIn("github")}>
-        <Github className="mr-2 h-4 w-4" aria-hidden="true" />
+        <GithubIcon className="mr-2 h-4 w-4" />
         {t("signInWithGitHub")}
       </Button>
     </div>

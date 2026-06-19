@@ -130,7 +130,7 @@ Terminate TLS upstream; HSTS is inert over plain HTTP. Confirm the proxy forward
 Set `TRUSTED_PROXY_COUNT` to your actual proxy depth so the client IP is read correctly from `X-Forwarded-For`.
 
 **Rate limits behave inconsistently across instances.**
-The limiter is in-process per instance. For multi-instance deployments treat it as best-effort until a shared backend is introduced (`TODO:` in [DevOps Setup](./devops-setup.md#8-monitoring--logging)).
+The limiter is in-process per instance, so the **supported 1.0 topology is a single application instance** (see [Deployment → Supported topology](./deployment.md#4-hosting-model)). Multi-instance deployments still run, but the rate limit is best-effort per instance until a shared (Redis/Postgres) backend lands post-1.0.
 
 ---
 
@@ -138,7 +138,7 @@ The limiter is in-process per instance. For multi-instance deployments treat it 
 
 - **Hosting target is not defined in the repo** — choose Vercel vs. Node/container and document it (no app `Dockerfile` is provided). See [Deployment → Hosting model](./deployment.md#4-hosting-model).
 - **No Node version pin** (`.nvmrc`/`engines`) — only CI evidences Node 22.
-- **In-memory rate limiting** — not shared across instances; plan a shared backend for horizontal scale.
+- **In-memory rate limiting** — not shared across instances; the supported 1.0 topology is a single application instance (see [Deployment → Supported topology](./deployment.md#4-hosting-model)). A shared backend for horizontal scale is planned post-1.0.
 - **CSP is report-only** — clickjacking is blocked via `X-Frame-Options`, but the CSP itself isn't yet enforcing.
 - **`pgvector`/`vector` extension** is enabled locally; confirm whether production actually needs it (`pg_trgm` definitely is required).
 - Some API request/response shapes were summarized from structure — verify against handlers or `/api/v1/openapi.json` (see [API → Gaps](./api.md#10-gaps--todo)).

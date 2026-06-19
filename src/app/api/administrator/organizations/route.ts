@@ -72,19 +72,33 @@ export async function GET(request: NextRequest) {
     base = base.where((eb) => eb.or([eb("o.slug", "ilike", like), eb("o.name", "ilike", like)]));
   }
 
+  // Precompute member_count as a GROUPed derived table + LEFT JOIN, instead
+  // of a correlated scalar sub-select (P2-17). With the sub-select aliased as
+  // a sort field, `ORDER BY member_count` forces Postgres to evaluate the
+  // count for EVERY matching org, sort the whole set, then LIMIT. The grouped
+  // join lets the planner hash-aggregate `app_organization_memberships` once.
+  // The derived table is unique on `organization_id`, so the join stays 1:1
+  // and the `count(*)` total (computed below on the join-free `base`) is
+  // unchanged.
+  const withCounts = base.leftJoin(
+    (eb) =>
+      eb
+        .selectFrom("app_organization_memberships")
+        .select(["organization_id", sql<string>`count(*)`.as("c")])
+        .groupBy("organization_id")
+        .as("mc"),
+    (join) => join.onRef("mc.organization_id", "=", "o.id"),
+  );
+
   const itemsQuery = applySortAndPagination(
-    base.select((eb) => [
+    withCounts.select([
       "o.id",
       "o.slug",
       "o.name",
       "o.status",
       "o.is_default",
       "o.created_at",
-      eb
-        .selectFrom("app_organization_memberships as m")
-        .select(sql<string>`count(*)`.as("c"))
-        .whereRef("m.organization_id", "=", "o.id")
-        .as("member_count"),
+      sql<string>`coalesce(${sql.ref("mc.c")}, 0)`.as("member_count"),
     ]),
     query,
   );

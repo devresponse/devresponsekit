@@ -109,8 +109,37 @@ export async function GET(request: NextRequest) {
     base = base.where("r.organization_id", "=", scope.organizationId);
   }
 
+  // Precompute the permission / member counts as GROUPed derived tables and
+  // LEFT JOIN them, instead of correlated scalar sub-selects (P2-17). With a
+  // sub-select aliased as a sort field, `ORDER BY permission_count` forces
+  // Postgres to evaluate the count for EVERY matching role, sort the whole
+  // set, then LIMIT — O(rows) sub-select runs on a superadmin's deep grid,
+  // compounding the `count(*) over()` materialization. The grouped join lets
+  // the planner hash-aggregate each table once. Each derived table is unique
+  // on the role id (GROUP BY role_id), so the join stays 1:1 and the
+  // `count(*)` total (computed below on the join-free `base`) is unchanged.
+  const withCounts = base
+    .leftJoin(
+      (eb) =>
+        eb
+          .selectFrom("app_role_permissions")
+          .select(["role_id", sql<string>`count(*)`.as("c")])
+          .groupBy("role_id")
+          .as("rpc"),
+      (join) => join.onRef("rpc.role_id", "=", "r.id"),
+    )
+    .leftJoin(
+      (eb) =>
+        eb
+          .selectFrom("app_user_roles")
+          .select(["role_id", sql<string>`count(distinct app_user_id)`.as("c")])
+          .groupBy("role_id")
+          .as("urc"),
+      (join) => join.onRef("urc.role_id", "=", "r.id"),
+    );
+
   const itemsQuery = applySortAndPagination(
-    base.select((eb) => [
+    withCounts.select([
       "r.id",
       "r.organization_id",
       "o.name as organization_name",
@@ -118,18 +147,8 @@ export async function GET(request: NextRequest) {
       "r.name",
       "r.description",
       "r.created_at",
-      // Aggregate counts via correlated sub-selects so we can keep the
-      // base query free of GROUP BY (and thus reusable for COUNT(*)).
-      eb
-        .selectFrom("app_role_permissions as rp")
-        .select(sql<string>`count(*)`.as("c"))
-        .whereRef("rp.role_id", "=", "r.id")
-        .as("permission_count"),
-      eb
-        .selectFrom("app_user_roles as ur")
-        .select(sql<string>`count(distinct ur.app_user_id)`.as("c"))
-        .whereRef("ur.role_id", "=", "r.id")
-        .as("member_count"),
+      sql<string>`coalesce(${sql.ref("rpc.c")}, 0)`.as("permission_count"),
+      sql<string>`coalesce(${sql.ref("urc.c")}, 0)`.as("member_count"),
     ]),
     query,
   );

@@ -1263,5 +1263,16 @@
     "passwordsMismatch": "Las contraseñas no coinciden.",
     "locale": "Elige un idioma compatible.",
     "dateFormat": "Elige un formato de fecha válido."
+  },
+  "sso": {
+    "confirm": {
+      "title": "Confirmar inicio de sesión",
+      "body": "Estás a punto de iniciar sesión como {email}.",
+      "continue": "Continuar",
+      "cancel": "Cancelar",
+      "invalidTitle": "Enlace de inicio de sesión no válido",
+      "invalidBody": "Este enlace de inicio de sesión no es válido o ha caducado. Solicita uno nuevo desde la aplicación de origen.",
+      "backToSignIn": "Volver a iniciar sesión"
+    }
   }
 }

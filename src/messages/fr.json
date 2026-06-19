@@ -1263,5 +1263,16 @@
     "passwordsMismatch": "Les mots de passe ne correspondent pas.",
     "locale": "Choisissez une langue prise en charge.",
     "dateFormat": "Choisissez un format de date valide."
+  },
+  "sso": {
+    "confirm": {
+      "title": "Confirmer la connexion",
+      "body": "Vous êtes sur le point de vous connecter en tant que {email}.",
+      "continue": "Continuer",
+      "cancel": "Annuler",
+      "invalidTitle": "Lien de connexion invalide",
+      "invalidBody": "Ce lien de connexion est invalide ou a expiré. Demandez-en un nouveau depuis l’application d’origine.",
+      "backToSignIn": "Retour à la connexion"
+    }
   }
 }

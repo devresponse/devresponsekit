@@ -13,12 +13,15 @@ import { createAppPool, ensureSchema } from "../schema-config";
  * migration tooling). Tracks applied filenames in an
  * `app_schema_migrations` table so each file runs at most once.
  *
- * The entire application schema lives in ONE file,
- * `0001-initial-schema.sql`, which provisions every `app_*` table,
- * index, and baseline row for a first-time setup — no further
- * application migrations are required. The runner stays multi-file
- * capable (applying every `NNNN-*.sql` in lexical order) so future
- * schema changes can be appended as new files if ever needed.
+ * `0001-initial-schema.sql` is the consolidated baseline that provisions
+ * every `app_*` table, index, and baseline row for a first-time setup. It
+ * is now FROZEN — `CREATE … IF NOT EXISTS` is a no-op against an existing
+ * table, so editing 0001 can never alter a provisioned database. Schema
+ * changes after 0001 are appended as new numbered `NNNN-*.sql` files
+ * (`0002-…` onward), each append-only and idempotent; the runner applies
+ * any not-yet-recorded file in lexical order inside a transaction and
+ * ledgers it, so a fresh DB applies 0001 then the forward files in order
+ * and a provisioned DB applies only the new ones.
  */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

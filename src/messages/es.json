@@ -1246,6 +1246,11 @@
     "retry": "Reintentar",
     "supportId": "ID de soporte"
   },
+  "notFound": {
+    "title": "Página no encontrada",
+    "description": "La página que buscas no existe o ha sido movida.",
+    "home": "Volver al inicio"
+  },
   "validation": {
     "required": "Este campo es obligatorio.",
     "email": "Introduce una dirección de correo electrónico válida.",

@@ -3,6 +3,7 @@ import { db } from "@/db/database";
 import { getServerEnv } from "@/lib/env";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { getConfiguredEmailProvider } from "./providers.server";
+import { backoffDelayMs } from "./outbox-worker.server";
 import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
 
 /**
@@ -13,12 +14,15 @@ import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
  * provider configuration or delivery outcome:
  *
  *   - provider configured, delivery ok     → `sent` (+ provider id)
- *   - provider configured, delivery threw  → `failed` (+ error)
+ *   - provider configured, delivery threw  → `pending`, scheduled for retry
+ *     (the outbox worker re-attempts with backoff; → `failed` only after the
+ *     attempt cap, see outbox-worker.server.ts)
  *   - no provider configured               → `logged` (recorded only)
  *
  * Delivery failures are recorded, never thrown: a password-reset
- * request must not 500 because a third-party API hiccuped — operators
- * watch the outbox (and audit log) instead. Template resolution
+ * request must not 500 because a third-party API hiccuped — the inline
+ * attempt is best-effort and the outbox worker (`pnpm outbox:drain`)
+ * guarantees eventual delivery. Template resolution
  * prefers the editable `app_email_templates` row for the recipient's
  * locale, falls back to the `en` row, then to the code-level default
  * in `templates.ts`.
@@ -44,7 +48,8 @@ export interface SendAppEmailInput {
 
 export interface SendAppEmailResult {
   outboxId: string;
-  status: "sent" | "failed" | "logged";
+  /** `pending` = the inline attempt failed but the row is queued for retry. */
+  status: "sent" | "failed" | "logged" | "pending";
 }
 
 interface ResolvedTemplate {
@@ -161,25 +166,35 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
       html: bodyHtml,
       text: bodyText ?? undefined,
     });
+    const now = new Date();
     await db
       .updateTable("app_outbox")
       .set({
         status: "sent",
         provider_message_id: result.providerMessageId ?? null,
-        sent_at: new Date(),
+        attempts: 1,
+        last_attempt_at: now,
+        next_attempt_at: null,
+        sent_at: now,
       })
       .where("id", "=", inserted.id)
       .execute();
     return { outboxId: inserted.id, status: "sent" };
   } catch (err) {
+    // Attempt #1 failed. Leave the row RETRYABLE (still `pending`, scheduled
+    // for the next attempt) rather than terminally `failed` — the outbox
+    // worker re-attempts with backoff until it succeeds or hits the cap.
+    const now = new Date();
     await db
       .updateTable("app_outbox")
       .set({
-        status: "failed",
-        error: err instanceof Error ? err.message : String(err),
+        attempts: 1,
+        last_attempt_at: now,
+        next_attempt_at: new Date(now.getTime() + backoffDelayMs(1)),
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 500),
       })
       .where("id", "=", inserted.id)
       .execute();
-    return { outboxId: inserted.id, status: "failed" };
+    return { outboxId: inserted.id, status: "pending" };
   }
 }

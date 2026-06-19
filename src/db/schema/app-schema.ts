@@ -202,6 +202,11 @@ export interface AppOutboxTable {
   provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;
   error: ColumnType<string | null, string | null | undefined, string | null>;
   related_better_auth_user_id: string | null;
+  /** Delivery attempts made so far (0001 baseline rows default to 0). */
+  attempts: ColumnType<number, number | undefined, number>;
+  /** When the row is next eligible for a delivery attempt; null once terminal. */
+  next_attempt_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  last_attempt_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   created_at: Generated<Timestamp>;
   sent_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
 }

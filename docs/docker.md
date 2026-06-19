@@ -211,3 +211,11 @@ volumes:
 - **In-app docs viewer.** `docs/` is copied into the image so the `/docs`
   viewer works out of the box (it defaults to `<cwd>/docs`). Override with
   `DOCS_ROOT` to serve a different directory (e.g. a mounted volume).
+- **Email retries need a scheduled drainer.** `sendAppEmail` attempts delivery
+  once inline; a transient provider failure leaves the row retryable in
+  `app_outbox`. Run **`pnpm outbox:drain`** periodically (cron / K8s CronJob /
+  scheduled task) to re-attempt those rows with backoff until they succeed or
+  hit the cap. Like migrations, it needs the dev toolchain (`tsx`, `src/db`),
+  so run it from a source checkout or a "tools" image — not the runtime
+  container. `OUTBOX_DRAIN_LIMIT` (default 100) bounds rows per run; concurrent
+  runs are safe (`FOR UPDATE SKIP LOCKED`).

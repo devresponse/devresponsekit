@@ -178,16 +178,18 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
     dbMock.mockResolvedValue(targetRow);
-    const cookieHeaders = new Headers();
-    cookieHeaders.append("set-cookie", "ba.session=imp; Path=/; HttpOnly");
-    authImpersonate.mockResolvedValue({ headers: cookieHeaders });
+    authImpersonate.mockResolvedValue({ user: { id: "ba-target" } });
     const { POST } = await importRoute();
     const res = await POST(makeRequest(url, { method: "POST" }), {
       params: Promise.resolve({ id: TARGET_ID }),
     });
     expect(res.status).toBe(200);
     expect(authImpersonate).toHaveBeenCalledWith("ba-target", expect.anything());
-    expect(res.headers.get("set-cookie")).toContain("ba.session=imp");
+    // The impersonated-session cookies are delivered by Better Auth's
+    // nextCookies plugin during the impersonateUser call, NOT forwarded by the
+    // route — so the route returns a plain ok body (P3-1: the old manual
+    // Set-Cookie loop was dead, since the helper omits returnHeaders).
+    expect(await res.json()).toEqual({ ok: true });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.impersonation_started",

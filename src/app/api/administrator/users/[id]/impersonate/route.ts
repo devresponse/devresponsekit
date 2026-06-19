@@ -20,11 +20,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  * POST /api/administrator/users/[id]/impersonate
  *
  * Starts a Better Auth impersonation session as the target user and
- * audits the action (docs/admin-manager.md §19 Phase 7). Forwarded
- * `Set-Cookie` headers from Better Auth must reach the browser so the
- * caller's next request hits the impersonated session — we therefore
- * synthesize the response from Better Auth's headers rather than from
- * a bare JSON body.
+ * audits the action (docs/admin-manager.md §19 Phase 7). The impersonated
+ * session cookies are delivered by Better Auth's `nextCookies` plugin (it
+ * sets them via Next's `cookies()` during `api.impersonateUser`), so the
+ * handler returns a plain JSON body.
  *
  * Threat / contract:
  *   - Caller MUST hold `admin.users.impersonate`.
@@ -79,9 +78,8 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     }
   }
 
-  let result: unknown;
   try {
-    result = await impersonateBetterAuthUser(target.betterAuthUserId, request);
+    await impersonateBetterAuthUser(target.betterAuthUserId, request);
   } catch (err) {
     await auditUserAction("admin.user.impersonation_failed", "failure", {
       request,
@@ -104,21 +102,10 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     },
   });
 
-  // Forward any Set-Cookie headers Better Auth may have attached to
-  // the underlying response so the caller's browser actually adopts
-  // the new impersonated session. Better Auth's plugin shape varies
-  // between versions — we defensively check both `headers` and a bare
-  // result object.
-  const response = NextResponse.json({ ok: true });
-  const upstreamHeaders = (result as { headers?: Headers } | null | undefined)?.headers;
-  if (upstreamHeaders instanceof Headers) {
-    for (const [name, value] of upstreamHeaders.entries()) {
-      if (name.toLowerCase() === "set-cookie") {
-        response.headers.append("set-cookie", value);
-      }
-    }
-  }
-  return response;
+  // The impersonated-session cookies are set by Better Auth's nextCookies
+  // plugin during the call above (see src/lib/auth.ts), so a plain JSON body
+  // is sufficient.
+  return NextResponse.json({ ok: true });
 }
 
 /**
@@ -144,9 +131,8 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
-  let result: unknown;
   try {
-    result = await stopBetterAuthImpersonating(request);
+    await stopBetterAuthImpersonating(request);
   } catch (err) {
     await auditUserAction("admin.user.impersonation_stop_failed", "failure", {
       request,
@@ -166,14 +152,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     email: target.primaryEmail,
   });
 
-  const response = NextResponse.json({ ok: true });
-  const upstreamHeaders = (result as { headers?: Headers } | null | undefined)?.headers;
-  if (upstreamHeaders instanceof Headers) {
-    for (const [name, value] of upstreamHeaders.entries()) {
-      if (name.toLowerCase() === "set-cookie") {
-        response.headers.append("set-cookie", value);
-      }
-    }
-  }
-  return response;
+  // As with the start endpoint, the restored actor cookies are delivered by
+  // Better Auth's nextCookies plugin during the call above.
+  return NextResponse.json({ ok: true });
 }

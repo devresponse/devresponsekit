@@ -6,6 +6,10 @@ import { auth } from "@/lib/auth";
 import { auditEvent } from "@/lib/audit.server";
 import { requireAccountUser } from "@/lib/account/guard.server";
 import { updateProfileSchema } from "@/lib/validation/account";
+// Shared first-party JSON error envelope ({ error, message, requestId } +
+// x-request-id). Despite the module name it is a generic envelope; reusing it
+// here unifies the account/navigation surfaces with the admin one (P3-12).
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +32,11 @@ export async function PATCH(request: NextRequest) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = updateProfileSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   // Better Auth name (vendor table) — updated through the API for the
@@ -52,7 +56,7 @@ export async function PATCH(request: NextRequest) {
       reason: "auth_update_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return NextResponse.json({ error: "update_failed" }, { status: 502 });
+    return adminErrorResponse("update_failed", 502, request);
   }
 
   // App-side display name — scoped strictly to the caller's own row.

@@ -3,6 +3,7 @@ import {
   SignJWT,
   importJWK,
   jwtVerify,
+  createLocalJWKSet,
   calculateJwkThumbprint,
   type JWK,
   type CryptoKey,
@@ -37,6 +38,25 @@ interface KeyMaterial {
 }
 
 let cached: KeyMaterial | null = null;
+let cachedPublicJwks: JWK[] | null = null;
+
+/** Strips the secret `d` member and stamps the metadata clients need to select
+ *  and verify with the right key. `kidOverride` wins; otherwise the JWK
+ *  thumbprint (so the kid changes with the key material). */
+async function toPublicJwk(jwk: JWK, kidOverride?: string): Promise<JWK> {
+  const { d: _d, ...publicMembers } = jwk;
+  void _d;
+  const kid = kidOverride || (await calculateJwkThumbprint(jwk));
+  return { ...publicMembers, alg: ALG, use: "sig", kid };
+}
+
+function parseJwk(raw: string, label: string): JWK {
+  try {
+    return JSON.parse(raw) as JWK;
+  } catch {
+    throw new Error(`${label} must be a JSON-encoded Ed25519 JWK`);
+  }
+}
 
 /**
  * Parses `API_JWT_PRIVATE_KEY` (an Ed25519 JWK JSON string containing the
@@ -50,29 +70,38 @@ async function getKeyMaterial(): Promise<KeyMaterial> {
     throw new Error("API_JWT_PRIVATE_KEY is not configured (API_JWT_ENABLED requires it)");
   }
 
-  let jwk: JWK;
-  try {
-    jwk = JSON.parse(env.API_JWT_PRIVATE_KEY) as JWK;
-  } catch {
-    throw new Error("API_JWT_PRIVATE_KEY must be a JSON-encoded Ed25519 JWK");
-  }
-
+  const jwk = parseJwk(env.API_JWT_PRIVATE_KEY, "API_JWT_PRIVATE_KEY");
   const privateKey = (await importJWK({ ...jwk, alg: ALG }, ALG)) as CryptoKey;
+  const publicJwk = await toPublicJwk(jwk, env.API_JWT_KID);
 
-  // Public JWK = the private JWK without the secret `d` member, plus the
-  // metadata clients need to select and verify with the right key.
-  const { d: _d, ...publicMembers } = jwk;
-  void _d;
-  const kid = env.API_JWT_KID || (await calculateJwkThumbprint(jwk));
-  const publicJwk: JWK = { ...publicMembers, alg: ALG, use: "sig", kid };
-
-  cached = { privateKey, publicJwk, kid };
+  cached = { privateKey, publicJwk, kid: publicJwk.kid! };
   return cached;
+}
+
+/**
+ * The public JWKs to PUBLISH and VERIFY against: the current signing key, plus
+ * an OPTIONAL previous key kept during a rotation overlap (P3-7) so tokens
+ * minted before the rotation still verify until they expire. The previous key's
+ * public half is derived from `API_JWT_PREVIOUS_PRIVATE_KEY` (never imported as
+ * a signing key); its kid comes from `API_JWT_PREVIOUS_KID` or the thumbprint.
+ */
+async function getPublicJwks(): Promise<JWK[]> {
+  if (cachedPublicJwks) return cachedPublicJwks;
+  const env = getServerEnv();
+  const { publicJwk } = await getKeyMaterial();
+  const keys: JWK[] = [publicJwk];
+  if (env.API_JWT_PREVIOUS_PRIVATE_KEY) {
+    const prev = parseJwk(env.API_JWT_PREVIOUS_PRIVATE_KEY, "API_JWT_PREVIOUS_PRIVATE_KEY");
+    keys.push(await toPublicJwk(prev, env.API_JWT_PREVIOUS_KID));
+  }
+  cachedPublicJwks = keys;
+  return keys;
 }
 
 /** Test-only: drop the cached key material so a new env can be applied. */
 export function __resetJwtKeyCacheForTests(): void {
   cached = null;
+  cachedPublicJwks = null;
 }
 
 export interface MintAccessTokenInput {
@@ -132,10 +161,12 @@ export interface VerifiedAccessToken {
  */
 export async function verifyAccessToken(token: string): Promise<VerifiedAccessToken> {
   const env = getServerEnv();
-  const { publicJwk } = await getKeyMaterial();
-  const key = (await importJWK(publicJwk, ALG)) as CryptoKey;
+  // A local JWK Set (current + optional previous key) selects the key by the
+  // token's `kid`, so a token minted with either key verifies during a rotation
+  // overlap (P3-7).
+  const jwks = createLocalJWKSet({ keys: await getPublicJwks() });
 
-  const { payload } = await jwtVerify(token, key, {
+  const { payload } = await jwtVerify(token, jwks, {
     issuer: env.API_JWT_ISSUER ?? env.BETTER_AUTH_URL,
     audience: env.API_JWT_AUDIENCE,
     algorithms: [ALG],
@@ -155,8 +186,11 @@ export async function verifyAccessToken(token: string): Promise<VerifiedAccessTo
   };
 }
 
-/** Returns the public JWK Set served at `/api/v1/jwks.json`. */
+/**
+ * Returns the public JWK Set served at `/api/v1/jwks.json` — the current
+ * signing key plus the optional previous key during a rotation overlap (P3-7),
+ * so external verifiers accept tokens signed by either.
+ */
 export async function getJwks(): Promise<{ keys: JWK[] }> {
-  const { publicJwk } = await getKeyMaterial();
-  return { keys: [publicJwk] };
+  return { keys: await getPublicJwks() };
 }

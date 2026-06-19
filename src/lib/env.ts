@@ -133,6 +133,20 @@ const serverEnvSchema = z
     API_JWT_PRIVATE_KEY: z.string().optional(),
     /** Optional explicit key id; defaults to the JWK thumbprint. */
     API_JWT_KID: z.string().optional(),
+    /**
+     * OPTIONAL previous signing key (the prior API_JWT_PRIVATE_KEY) kept during
+     * a rotation overlap: its PUBLIC half is published in JWKS and accepted by
+     * verifyAccessToken, so tokens minted BEFORE the rotation keep verifying
+     * until they expire (≤ API_JWT_ACCESS_TTL_SECONDS). Remove once that window
+     * drains (P3-7). Never used to mint. To rotate with zero downtime: move the
+     * old key here, set the new key as API_JWT_PRIVATE_KEY.
+     */
+    API_JWT_PREVIOUS_PRIVATE_KEY: z.string().optional(),
+    /**
+     * The previous key's `kid`, ONLY needed when the deployment pins a fixed
+     * API_JWT_KID (otherwise the JWK thumbprint is used and matches automatically).
+     */
+    API_JWT_PREVIOUS_KID: z.string().optional(),
     /** Access-token lifetime in seconds (≤ 1 hour). */
     API_JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(900),
     SEED_ADMIN_EMAIL: z.string().email().optional(),

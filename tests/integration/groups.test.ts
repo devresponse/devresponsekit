@@ -74,6 +74,9 @@ function execFor(table: string): unknown[] {
   if (table === "app_roles") return state.roles;
   // permissionKeysForRoles(...) selects the bundled roles' conferred keys.
   if (table === "app_role_permissions") return state.conferredPermKeys;
+  // permissionKeysForGroup(...) selects from app_group_roles → the keys the
+  // group confers to its members (AUTHZ-3 membership escalation guard).
+  if (table === "app_group_roles") return state.conferredPermKeys;
   if (table === "app_organization_memberships") return state.eligibleMembers;
   return state.listExec;
 }
@@ -345,6 +348,46 @@ describe("groups/[id]/members — org-membership constraint", () => {
     expect(res.status).toBe(404);
   });
 
+  it("403 when the group confers a permission the actor lacks (AUTHZ-3 membership)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await members.POST(
+      req(`groups/${GROUP}/members`, { method: "POST", body: { appUserIds: [USER] } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("403 when the group confers `superuser` to a non-superadmin", async () => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await members.POST(
+      req(`groups/${GROUP}/members`, { method: "POST", body: { appUserIds: [USER] } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("200 when the group's conferred permissions are a subset the actor holds", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign", "admin.users.read"]));
+    const res = await members.POST(
+      req(`groups/${GROUP}/members`, { method: "POST", body: { appUserIds: [USER] } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("SUPERADMIN MAY add members to a `superuser`-conferring group (200)", async () => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.groups.assign"]));
+    const res = await members.POST(
+      req(`groups/${GROUP}/members`, { method: "POST", body: { appUserIds: [USER] } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("404 for a foreign group", async () => {
     state.group = { ...state.group!, organization_id: ORG_B };
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.read"]));
@@ -385,5 +428,35 @@ describe("users/[id]/groups", () => {
       userCtx,
     );
     expect(res.status).toBe(404);
+  });
+
+  it("POST 403 when the group confers a permission the actor lacks (AUTHZ-3 — self-escalation)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await userGroups.POST(
+      req(`users/${USER}/groups`, { method: "POST", body: { groupId: GROUP } }),
+      userCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("POST 201 when the group's conferred permissions are a subset the actor holds", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign", "admin.users.read"]));
+    const res = await userGroups.POST(
+      req(`users/${USER}/groups`, { method: "POST", body: { groupId: GROUP } }),
+      userCtx,
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("SUPERADMIN bypasses the conferral guard (201) even for a `superuser` group", async () => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.groups.assign"]));
+    const res = await userGroups.POST(
+      req(`users/${USER}/groups`, { method: "POST", body: { groupId: GROUP } }),
+      userCtx,
+    );
+    expect(res.status).toBe(201);
   });
 });

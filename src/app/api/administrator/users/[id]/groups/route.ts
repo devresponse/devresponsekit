@@ -8,9 +8,14 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import {
   canAccessOrg,
+  isSuperadmin,
   resolveOrgScope,
   userHasMembershipInOrg,
 } from "@/lib/admin/access-scope.server";
+import {
+  permissionKeysForGroup,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -101,6 +106,19 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (!group || !canAccessOrg(guard.access, group.organization_id)) {
     return adminErrorResponse("group_not_found", 404, request);
   }
+
+  // Privilege-escalation guard (AUTHZ-3): group membership confers the union
+  // of the group's roles' permissions to the member (ADR-0002), so a
+  // non-SUPERADMIN may only add a user to a group whose conferred permissions
+  // are a subset of their own — otherwise an org admin could add themselves
+  // (or anyone) to a more-authoritative group and escalate. Mirrors the
+  // role-attach guard in groups/[id]/roles.
+  if (!isSuperadmin(guard.access)) {
+    const conferred = await permissionKeysForGroup(group.id);
+    const unheld = unheldPermissionKeys(guard.access.permissions, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+  }
+
   if (!(await userHasMembershipInOrg(target.appUserId, group.organization_id))) {
     return adminErrorResponse("user_not_found", 404, request);
   }

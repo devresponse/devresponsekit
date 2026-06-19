@@ -200,11 +200,15 @@ volumes:
 
 ## 8. Caveats / known limitations
 
-- **In-process rate limiter.** The admin abuse-guard rate limiter is per
-  process and not shared across replicas, so its budget multiplies by the
-  number of containers and resets on restart. Until a shared (Redis/Postgres)
-  backend lands, treat the rate limit as best-effort under horizontal scaling.
-  See [troubleshooting.md](troubleshooting.md).
+- **In-process rate limiter → single instance is the supported 1.0 topology.**
+  The admin abuse-guard rate limiter is per process and not shared across
+  replicas, so under horizontal scaling its budget multiplies by the number of
+  containers and resets on restart. The **supported 1.0 topology is a single
+  application instance**, where the limit enforces one global budget;
+  multi-instance still runs but the rate limit is best-effort until a shared
+  (Redis/Postgres) backend lands post-1.0. See
+  [Deployment → Supported topology](deployment.md#4-hosting-model) and
+  [troubleshooting.md](troubleshooting.md).
 - **Observability is opt-in.** Sentry only initializes when
   `NEXT_PUBLIC_SENTRY_DSN` is set; the image is unchanged otherwise. See
   [configuration.md](configuration.md).

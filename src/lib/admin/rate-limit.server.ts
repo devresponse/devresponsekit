@@ -5,7 +5,7 @@ import { clientIpKey } from "@/lib/client-ip";
 
 /**
  * In-memory token-bucket rate limiter for Administrator mutation
- * endpoints (docs/admin-manager.md §19 Phase 7, §20.1 #16).
+ * endpoints.
  *
  * Why an in-memory bucket?
  *   - The plan explicitly calls for an in-memory token bucket as the v1
@@ -24,8 +24,10 @@ import { clientIpKey } from "@/lib/client-ip";
  *   - Keys MUST include the actor identifier so one noisy admin cannot
  *     starve another. Callers compose keys via {@link rateLimitKey}.
  *   - The limiter is a soft floor: a process restart resets all
- *     buckets. That is acceptable for v1; once a Redis backend lands
- *     this contract continues to hold.
+ *     buckets, and the budget is NOT shared across processes. The
+ *     supported 1.0 deployment topology is therefore a SINGLE application
+ *     instance (see docs/deployment.md "Supported topology for 1.0");
+ *     multi-instance is best-effort until a shared backend lands post-1.0.
  *   - Deny responses include a `Retry-After` header (seconds) and a
  *     standard error envelope `{ error: "rate_limited", retryAfter }`.
  */

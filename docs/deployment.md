@@ -54,6 +54,32 @@ The repository **does not pin a hosting target**. Two models are consistent with
 
 > `TODO:` Choose and document the production hosting target for your infrastructure. The historical [`docs-backup/setup-guide.md`](../docs-backup/setup-guide.md) references Vercel as the primary target and Docker/self-hosted as an alternative — confirm against your actual setup. A container path is now provided (see below); the serverless path needs no extra packaging.
 
+### Supported topology for 1.0: a single application instance
+
+The abuse-mitigation **rate limiter** on admin mutations, bulk operations, and
+CSV export is **in-process** (`src/lib/admin/rate-limit.server.ts`) — its budget
+lives in the memory of one Node process. The **supported 1.0 deployment
+topology is therefore a single application instance** (one long-running
+container) behind your TLS-terminating proxy: in that topology the limit
+enforces one global, cluster-wide budget exactly as designed.
+
+Horizontal scaling still *runs* — nothing in the app requires a single instance
+to serve traffic, and all durable state is already external (PostgreSQL holds
+sessions, audit, outbox, and token revocations). But with more than one instance
+(multiple containers, or a serverless host where each invocation is a separate
+process) the rate limit degrades to **best-effort**: the budget is enforced per
+instance, so it effectively multiplies by the instance count and resets on each
+cold start. The limiter is an abuse guard layered on top of the real
+authorization checks, so this is a hardening regression, not an authz hole.
+
+For a hard, cluster-wide rate limit in 1.0, run a single instance. A shared
+(Redis/Postgres) rate-limit backend that lifts this constraint is planned
+post-1.0 — see
+[troubleshooting → rate limits across instances](./troubleshooting.md#deployment-issues).
+
+> "Single instance" refers only to the **application** tier. PostgreSQL is
+> external and unaffected — run it managed / HA / pooled as usual.
+
 ## 5. Containerized deployment
 
 A production-ready, multi-stage **`Dockerfile`** is included: it builds from

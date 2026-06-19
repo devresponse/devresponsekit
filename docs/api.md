@@ -200,7 +200,7 @@ Query parameters for `launch`: `applicationId` (required), `locale` (optional). 
 
 - `TODO:` Some routes were summarized from structure rather than line-by-line (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`). Confirm exact request/response shapes against the handlers or the generated `openapi.json`.
 - `TODO:` Document the exact `account.*` scope list and the supported `export` resources/formats. (The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json).)
-- Committed OpenAPI 3.1 specs ship for both surfaces — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`) — for client generation (see [Generating a client](#generating-a-client) and [Internal admin SDK](#internal-admin-sdk)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
+- Committed OpenAPI 3.1 specs ship for both surfaces — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`) — for client generation (see [Generating a client](./api-clients.md#1-the-v1-machine-api-client) and [Internal admin SDK](./api-clients.md#2-the-admin-console-sdk)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
 - The cookie-session admin SDK is committed under [`sdk/admin/`](../sdk/admin/); the v1 client is generated on demand from `docs/openapi.json`.
 
 ---

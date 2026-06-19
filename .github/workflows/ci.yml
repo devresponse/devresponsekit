@@ -244,3 +244,28 @@ jobs:
 
       - name: Typecheck the generated SDK
         run: pnpm sdk:admin:typecheck
+
+  links:
+    name: Markdown links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # F6: catch documentation link rot — a moved/renamed doc or a stale
+    # #heading anchor — before it ships. The G1 README rot regressed precisely
+    # because nothing checked. lychee runs in --offline mode: it verifies that
+    # every relative file link and #fragment in the PUBLISHED docs resolves to
+    # a real target, with zero network calls. External URL liveness is
+    # deliberately OUT of scope here — it flakes in a hard gate (a slow/blocked
+    # third-party site would randomly block merges); a scheduled non-blocking
+    # job is the right home for that if we want it later. lychee runs from its
+    # official MIT-licensed container image, matching the gitleaks pattern in
+    # secret-scan.yml. docs-backup/, generated SDK docs, and internal planning
+    # files (specs.md, PRODUCTION-READINESS-*) are intentionally not checked.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check documentation links (offline, with fragments)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" -w /repo \
+            lycheeverse/lychee:latest \
+            --offline --include-fragments --no-progress \
+            README.md SECURITY.md CONTRIBUTING.md CHANGELOG.md docs

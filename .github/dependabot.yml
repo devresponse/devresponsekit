@@ -1,0 +1,48 @@
+# Dependabot keeps our pinned dependencies current (review finding F4).
+#
+# Why this exists: the GitHub Actions in .github/workflows/* are pinned to
+# immutable commit SHAs (a compromised or force-moved tag therefore can't
+# inject code). A SHA pin is only safe if something proposes the upgrades —
+# that is Dependabot's job here. It opens one PR per update with the new SHA
+# and a refreshed `# vX.Y.Z` comment, so every bump (including major jumps such
+# as actions/checkout v4 -> v7) is reviewed and CI-gated individually instead
+# of silently floating on a mutable tag.
+#
+# The npm updates burn down the dependency backlog so we can eventually lower
+# the audit gate from `high` to `moderate` (see F4 / package.json auditConfig).
+#
+# NOT covered here: the gitleaks and lychee container images are pinned by
+# digest inside `docker run` steps (not `uses:`), which no Dependabot ecosystem
+# tracks — bump those manually using the `# vX.Y.Z` comment next to each digest.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # Group routine minor/patch bumps to keep PR volume sane; major updates and
+    # security advisories still open as individual PRs for closer review.
+    groups:
+      dev-minor-patch:
+        applies-to: version-updates
+        dependency-type: development
+        update-types: ["minor", "patch"]
+      prod-minor-patch:
+        applies-to: version-updates
+        dependency-type: production
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev

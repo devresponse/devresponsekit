@@ -42,12 +42,12 @@ jobs:
       DB_SCHEMA: auth
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         # Version comes from the packageManager field in package.json.
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -86,7 +86,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-report
           path: coverage/
@@ -138,11 +138,11 @@ jobs:
       SSO_ALLOWED_ORIGIN_SUFFIXES: devresponse.com
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload Playwright traces
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-results
           path: test-results/
@@ -206,11 +206,11 @@ jobs:
     # NEW high+ that nobody has reviewed is what trips the gate — not the
     # existing, triaged backlog. Prune the allowlist as upstream fixes land.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -234,17 +234,17 @@ jobs:
     # a stale spec or SDK. Deterministic: the generator version is pinned in
     # openapitools.json (7.12.0) and .gitattributes normalizes output to LF.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
 
       # openapi-generator-cli runs on the JVM.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
           java-version: 21
@@ -282,12 +282,12 @@ jobs:
     # secret-scan.yml. docs-backup/, generated SDK docs, and internal planning
     # files (specs.md, PRODUCTION-READINESS-*) are intentionally not checked.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Check documentation links (offline, with fragments)
         run: |
           docker run --rm -v "${{ github.workspace }}:/repo" -w /repo \
-            lycheeverse/lychee:latest \
+            lycheeverse/lychee:0.24.2@sha256:e2d19e57cf6ab037026f20b8e449a1f30d9d7f81eef4194763aab2eab20bd28d \
             --offline --include-fragments --no-progress \
             README.md SECURITY.md CONTRIBUTING.md CHANGELOG.md docs
 

@@ -23,7 +23,6 @@ coverage
 coverage-*.log
 
 # Local-only and generated artifacts
-docs-backup
 *.log
 tsconfig.tsbuildinfo
 

@@ -108,7 +108,7 @@ Common console affordances include server-side **pagination**, **search**, per-f
 
 > `TODO: Add screenshot of the administrator Users grid.`
 > `TODO: Add screenshot of the Role detail (permissions dual-list editor).`
-> `TODO:` Confirm which advanced grid affordances (faceted/date-range filters, column visibility, multi-column sort) are shipped vs. planned — the historical `docs-backup/admin-manager.md` lists several as planned.
+> `TODO:` Confirm which advanced grid affordances (faceted/date-range filters, column visibility, multi-column sort) are shipped vs. planned.
 
 ### Selected administrator flows
 

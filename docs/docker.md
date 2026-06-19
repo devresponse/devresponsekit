@@ -47,7 +47,7 @@ No secrets are needed at build time. `next build` runs with
 `NEXT_PHASE=phase-production-build`, so `src/lib/env.ts` substitutes
 placeholder values and nothing real is baked into the image. (Sentry
 source-map upload stays disabled unless you pass `SENTRY_AUTH_TOKEN` as a
-build arg — see [observability.md](observability.md).)
+build arg — see [configuration.md](configuration.md).)
 
 ---
 
@@ -207,7 +207,7 @@ volumes:
   See [troubleshooting.md](troubleshooting.md).
 - **Observability is opt-in.** Sentry only initializes when
   `NEXT_PUBLIC_SENTRY_DSN` is set; the image is unchanged otherwise. See
-  [observability.md](observability.md).
+  [configuration.md](configuration.md).
 - **In-app docs viewer.** `docs/` is copied into the image so the `/docs`
   viewer works out of the box (it defaults to `<cwd>/docs`). Override with
   `DOCS_ROOT` to serve a different directory (e.g. a mounted volume).

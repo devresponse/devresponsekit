@@ -20,10 +20,10 @@ handoff.
 - **Machine API** — a versioned `/api/v1` REST surface authenticated by
   API keys (`drk_…`) or Ed25519 JWT access tokens, with a published
   JWKS document, OAuth client-credentials, and an OpenAPI spec. Ships
-  disabled by default (see [docs/api-and-cli-guide.md](docs/api-and-cli-guide.md)
-  and [docs/design-api-keys-and-tokens.md](docs/design-api-keys-and-tokens.md))
+  disabled by default (see [docs/api.md](docs/api.md) and
+  [docs/api-clients.md](docs/api-clients.md))
 - **Outbound email** — outbox-first, with pluggable Resend / Mailgun
-  delivery and editable templates (see [docs/setup-email.md](docs/setup-email.md))
+  delivery and editable templates (see [docs/configuration.md](docs/configuration.md))
 - **next-intl** — localized routing (`en`, `fr`, `es`, `uk`)
 - **Tailwind CSS 4 + shadcn/ui** — design system primitives
 - **Vitest / Playwright / axe-core** — unit, component, integration,
@@ -51,8 +51,9 @@ from `.env`). New self-registered accounts start as `pending_approval`
 until an administrator approves them.
 
 For the complete path — prerequisites, configuration reference, production
-build, and deploying a fully functional instance — follow
-[docs/setup-guide.md](docs/setup-guide.md).
+build, and deploying a fully functional instance — see the canonical docs in
+[docs/](docs/README.md) (start with [Configuration](docs/configuration.md) and
+[Deployment](docs/deployment.md)).
 
 ## Scripts
 
@@ -103,17 +104,21 @@ tests/                                # unit / component / integration / securit
 
 ## Documentation
 
-- [docs/setup-guide.md](docs/setup-guide.md) — **start here**: install, configure, and deploy from a fresh clone (checkout → build → deployed instance)
-- [docs/get-started.md](docs/get-started.md) — developer orientation: architecture, auth boundary, routing, shell patterns
-- [docs/setup-better-auth.md](docs/setup-better-auth.md) — auth + schema + migrations
-- [docs/setup-sso-multi-app.md](docs/setup-sso-multi-app.md) — cross-subdomain SSO across two or more apps
-- [docs/setup-email.md](docs/setup-email.md) — email subsystem + provider integration
-- [docs/api-and-cli-guide.md](docs/api-and-cli-guide.md) — external API & CLI integration
-- [docs/design-api-keys-and-tokens.md](docs/design-api-keys-and-tokens.md) — machine credentials (API keys, JWT, OAuth clients) design
-- [docs/admin-manager.md](docs/admin-manager.md) — administrator console spec
-- [docs/database-schema.md](docs/database-schema.md) — entity-relationship reference for the `app_*` tables
-- [docs/docs-viewer.md](docs/docs-viewer.md) — in-app Markdown documentation reader (routes, frontmatter, rendering, env)
-- [docs/observability.md](docs/observability.md) — optional Sentry errors + tracing + Web Vitals + masked replay
+The canonical, audience-organized documentation set lives in **[docs/](docs/README.md)** — start there. Direct links:
+
+- [docs/product-overview.md](docs/product-overview.md) — what it is, who it's for, value proposition
+- [docs/features.md](docs/features.md) — feature catalog, user flows, roles & permissions
+- [docs/architecture.md](docs/architecture.md) — system design, boundaries, auth/authz, data flow, diagrams
+- [docs/developer-onboarding.md](docs/developer-onboarding.md) — **start here as a developer**: install, run, test, structure, conventions
+- [docs/configuration.md](docs/configuration.md) — every environment variable, config files, secrets, local vs production
+- [docs/devops-setup.md](docs/devops-setup.md) — from-scratch infrastructure, provisioning, CI/CD, readiness checklist
+- [docs/deployment.md](docs/deployment.md) — build, artifacts, container, release & post-deploy verification
+- [docs/docker.md](docs/docker.md) — container build/run, env, and the migrations init step
+- [docs/api.md](docs/api.md) — HTTP API surface, auth requirements, request/response, error model
+- [docs/api-clients.md](docs/api-clients.md) — typed clients/SDKs for the `/api/v1` surface and the committed admin SDK
+- [docs/testing.md](docs/testing.md) — test strategy, suites, coverage, manual QA checklist
+- [docs/troubleshooting.md](docs/troubleshooting.md) — common setup, build, runtime, and deployment failures and fixes
+- [docs/adr/](docs/adr/) — architecture decision records: [ADR-0001 three-tier access control](docs/adr/0001-three-tier-access-control.md), [ADR-0002 organization groups](docs/adr/0002-organization-groups.md)
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)
 
 ## Security model (summary)

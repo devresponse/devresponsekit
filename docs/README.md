@@ -24,6 +24,7 @@ Onboard, understand the architecture, and start building.
 | Document | What's inside |
 | --- | --- |
 | [Architecture](./architecture.md) | System design, modules, boundaries, data flow, auth/authz, diagrams |
+| [Architecture Decision Records](./adr/) | The load-bearing design decisions — [ADR-0001](./adr/0001-three-tier-access-control.md) three-tier access control, [ADR-0002](./adr/0002-organization-groups.md) organization groups |
 | [Developer Onboarding](./developer-onboarding.md) | Tooling, install, run, test, project structure, conventions, "how to add a feature" |
 | [API Reference](./api.md) | HTTP API surface, auth requirements, request/response examples, error model |
 | [API Clients & SDKs](./api-clients.md) | Authenticate, generate (or use) a typed client for the v1 API and the committed admin SDK |

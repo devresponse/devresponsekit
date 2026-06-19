@@ -111,7 +111,7 @@ Better Auth uses the **same `pg` pool** as the app (`src/db/database.ts`) — th
 
 ### Authorization: the three-tier model
 
-Authorization is an **application-layer** concern layered on top of authentication (ADR-0001, see [`docs-backup/adr/0001-three-tier-access-control.md`](../docs-backup/adr/0001-three-tier-access-control.md)).
+Authorization is an **application-layer** concern layered on top of authentication (ADR-0001, see [`docs/adr/0001-three-tier-access-control.md`](./adr/0001-three-tier-access-control.md)).
 
 ```mermaid
 flowchart TB

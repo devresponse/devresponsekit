@@ -263,6 +263,7 @@ function PromptDialog({
   onResult: (value: string | null) => void;
 }) {
   const open = state !== null;
+  const t = useTranslations("common.dialogs");
 
   return (
     <Dialog
@@ -271,7 +272,7 @@ function PromptDialog({
         if (!v) onResult(null);
       }}
     >
-      <DialogContent>
+      <DialogContent closeLabel={t("close")}>
         <DialogHeader>
           <DialogTitle>{state?.title}</DialogTitle>
           {state?.description ? <DialogDescription>{state.description}</DialogDescription> : null}

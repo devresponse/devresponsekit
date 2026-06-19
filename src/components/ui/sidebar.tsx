@@ -317,8 +317,8 @@ Sidebar.displayName = "Sidebar";
 
 const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
-  React.ComponentProps<typeof Button>
->(({ className, onClick, ...props }, ref) => {
+  React.ComponentProps<typeof Button> & { srLabel?: string }
+>(({ className, onClick, srLabel = "Toggle Sidebar", ...props }, ref) => {
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -335,7 +335,9 @@ const SidebarTrigger = React.forwardRef<
       {...props}
     >
       <PanelLeft />
-      <span className="sr-only">Toggle Sidebar</span>
+      {/* Localized by the caller (P2-15); English default keeps unlocalized
+          callers working. */}
+      <span className="sr-only">{srLabel}</span>
     </Button>
   );
 });

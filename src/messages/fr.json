@@ -23,7 +23,8 @@
       "notifyTitle": "Information",
       "ok": "OK",
       "confirm": "Confirmer",
-      "cancel": "Annuler"
+      "cancel": "Annuler",
+      "close": "Fermer"
     }
   },
   "auth": {
@@ -177,6 +178,14 @@
     }
   },
   "shell": {
+    "regions": {
+      "banner": "Barre de marque de l’application",
+      "primaryNavigation": "Principale",
+      "workspaceNavigation": "Espace de travail",
+      "workspaceShell": "Shell de l’espace de travail",
+      "skipLinks": "Liens d’évitement",
+      "toggleSidebar": "Basculer la barre latérale"
+    },
     "applications": "Applications",
     "dashboard": "Tableau de bord",
     "workspace": "Espace de travail",

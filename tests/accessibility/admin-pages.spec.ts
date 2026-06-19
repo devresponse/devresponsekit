@@ -63,3 +63,15 @@ test("account preferences form has no axe violations", async ({ page }) => {
 test("account security page has no axe violations", async ({ page }) => {
   await expectNoAxeViolations(page, "/en/app/account/security");
 });
+
+// P3-14: sweep a second locale so the localized shell landmarks (P2-15) —
+// banner, primary nav, main, sidebar toggle — can't silently regress in
+// non-en. The session cookie is locale-agnostic, so the beforeEach sign-in
+// carries over to the /uk shell.
+test("secure dashboard (uk) has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/uk/app/dashboard");
+});
+
+test("administrator overview (uk) has no axe violations", async ({ page }) => {
+  await expectNoAxeViolations(page, "/uk/app/administrator");
+});

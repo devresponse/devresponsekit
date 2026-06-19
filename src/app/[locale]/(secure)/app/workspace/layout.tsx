@@ -11,8 +11,9 @@ import { ApplicationShell } from "@/components/app-shell/application-shell";
  * automatically via `data-variant="nested"`.
  */
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
+  const t = useTranslations("shell");
   return (
-    <ApplicationShell ariaLabel="Workspace shell" left={<WorkspaceSidebar />}>
+    <ApplicationShell ariaLabel={t("regions.workspaceShell")} left={<WorkspaceSidebar />}>
       {children}
     </ApplicationShell>
   );
@@ -21,7 +22,7 @@ export default function WorkspaceLayout({ children }: { children: ReactNode }) {
 function WorkspaceSidebar() {
   const t = useTranslations("shell");
   return (
-    <nav aria-label="Workspace" className="p-3 text-sm">
+    <nav aria-label={t("regions.workspaceNavigation")} className="p-3 text-sm">
       <ul className="flex flex-col gap-1">
         <li className="hover:bg-muted rounded-md px-2 py-1.5">{t("settings")}</li>
       </ul>

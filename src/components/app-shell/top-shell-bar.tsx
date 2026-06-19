@@ -14,16 +14,19 @@ import { cn } from "@/lib/utils";
 export function TopShellBar({
   children,
   className,
+  ariaLabel = "Application brand bar",
 }: {
   children?: React.ReactNode;
   className?: string;
+  /**
+   * Landmark label for the banner. Server Component, so it cannot call
+   * useTranslations — the parent layout passes the localized string (P2-15).
+   * Defaults to English for any caller that has not been localized yet.
+   */
+  ariaLabel?: string;
 }) {
   return (
-    <header
-      className={cn("sh-top-bar gap-3 px-4", className)}
-      role="banner"
-      aria-label="Application brand bar"
-    >
+    <header className={cn("sh-top-bar gap-3 px-4", className)} role="banner" aria-label={ariaLabel}>
       {children}
     </header>
   );

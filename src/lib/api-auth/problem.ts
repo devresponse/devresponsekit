@@ -12,6 +12,7 @@
 import { NextResponse } from "next/server";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { captureServerError } from "@/lib/observability/server";
+import { logServerError } from "@/lib/observability/logger.server";
 
 export interface ProblemOptions {
   /** Human-readable detail (non-secret). Falls back to a generic line. */
@@ -63,8 +64,15 @@ export function problemResponse(
   options: ProblemOptions = {},
 ): NextResponse {
   const requestId = options.requestId ?? getOrCreateRequestId(request);
-  if (status >= 500 && options.cause !== undefined) {
-    captureServerError(options.cause, { requestId, status });
+  if (status >= 500) {
+    // OPS-OBS-2: every v1 5xx must reach the always-on stdout stream, not just
+    // Sentry — a default (no-DSN) deploy would otherwise be blind to its own
+    // 500s. Sentry capture stays gated on a cause (matches D4); the structured
+    // log fires for all 5xx and serializes the cause when present.
+    if (options.cause !== undefined) {
+      captureServerError(options.cause, { requestId, status });
+    }
+    logServerError(`v1.${code}`, { requestId, status, code, err: options.cause });
   }
   const body = {
     type: `https://devresponse.com/problems/${code}`,

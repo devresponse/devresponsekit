@@ -38,11 +38,28 @@ export async function register() {
  * whole point of wiring Sentry to the existing correlation id rather than
  * bolting on a parallel one.
  */
-export const onRequestError: typeof Sentry.captureRequestError = (error, request, context) => {
+export const onRequestError = async (
+  ...args: Parameters<typeof Sentry.captureRequestError>
+): Promise<void> => {
+  const [error, request] = args;
   const raw = request.headers?.["x-request-id"];
   const requestId = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : undefined;
   if (requestId) {
     Sentry.getCurrentScope().setTag("request_id", requestId);
   }
-  return Sentry.captureRequestError(error, request, context);
+  Sentry.captureRequestError(...args);
+
+  // OPS-OBS-1: also write the uncaught error to the always-on stdout stream so a
+  // default (no-DSN) deploy isn't blind to its own 500s. The logger pulls in
+  // pino (node-only) and is `server-only`, while this hook also fires in the
+  // edge runtime — so guard on the runtime and import lazily, mirroring
+  // `register()`. Logging must never mask the original error.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    try {
+      const { logServerError } = await import("@/lib/observability/logger.server");
+      logServerError("route.unhandled_error", { requestId, err: error });
+    } catch {
+      /* swallow — observability must not throw out of the error hook */
+    }
+  }
 };

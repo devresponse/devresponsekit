@@ -6,6 +6,7 @@ import { consumeToken, rateLimitKey } from "@/lib/admin/rate-limit.server";
 import { clientIpKey } from "@/lib/client-ip";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
 import { verifyApiKey } from "@/lib/api-auth/api-keys.server";
+import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 import { mintAccessToken } from "@/lib/api-auth/jwt.server";
 import { normalizeScopes, scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
@@ -119,6 +120,29 @@ export async function POST(request: NextRequest) {
   if (decideSecureAccess(access.status, access.membershipStatus) !== "allow") {
     return problemResponse("invalid_client", 401, request, {
       detail: "The credential's principal is not an active member.",
+      headers: NO_STORE,
+    });
+  }
+
+  // MAPI-2: decideSecureAccess is status/membership-based and never reads the
+  // Better Auth `banned` flag, so a banned principal would still mint a token
+  // here — dead-on-arrival at resolveCaller, but it should never be issued.
+  // Reject + audit at mint time. Applies to both grant types (each resolved a
+  // betterAuthUserId above). 401 invalid_client matches the other failed-
+  // credential responses on this endpoint.
+  if (await isBetterAuthUserBanned(principalBetterAuthUserId)) {
+    await auditEvent({
+      eventType: "token.denied",
+      outcome: "denied",
+      actorBetterAuthUserId: principalBetterAuthUserId,
+      appUserId: access.appUserId,
+      organizationId,
+      reason: "principal_banned",
+      request,
+      metadata: { grantType, credential: credentialLabel },
+    });
+    return problemResponse("invalid_client", 401, request, {
+      detail: "The credential's principal is banned.",
       headers: NO_STORE,
     });
   }

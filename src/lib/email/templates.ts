@@ -11,19 +11,31 @@
  * import it under plain Node.
  */
 
-export interface EmailTemplateDefinition {
-  key: string;
+/** The locale-varying parts of a template. `en` is the base + final fallback. */
+export interface LocalizedEmailContent {
   subject: string;
   bodyHtml: string;
   bodyText: string;
+}
+
+export interface EmailTemplateDefinition extends LocalizedEmailContent {
+  key: string;
   description: string;
   /** Variable names the template understands, for the editor UI. */
   variables: ReadonlyArray<string>;
+  /**
+   * Non-`en` translations, keyed by locale. The top-level fields are the `en`
+   * base; {@link getDefaultEmailTemplate} overlays the requested locale's
+   * content when present. Keep these aligned with the supported locales in
+   * `src/config/i18n-config.ts`.
+   */
+  translations?: Readonly<Record<string, LocalizedEmailContent>>;
 }
 
 /**
- * Built-in defaults. Keep in sync with the seeded templates in the
- * initial schema `0001-initial-schema.sql`.
+ * Built-in defaults. Keep in sync with the seeded templates in the initial
+ * schema `0001-initial-schema.sql` (the `en` rows) and
+ * `0006-email-template-locales.sql` (the fr/es/uk rows).
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -42,6 +54,47 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
     description:
       'Sent for the forgot-password flow and the administrator "send reset email" action.',
     variables: ["name", "resetUrl"],
+    translations: {
+      fr: {
+        subject: "Réinitialisez votre mot de passe",
+        bodyHtml:
+          "<p>Bonjour {{name}},</p>" +
+          "<p>Nous avons reçu une demande de réinitialisation de votre mot de passe. Cliquez sur le lien ci-dessous pour en choisir un nouveau. Ce lien expire bientôt.</p>" +
+          '<p><a href="{{resetUrl}}">Réinitialiser votre mot de passe</a></p>' +
+          "<p>Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail.</p>",
+        bodyText:
+          "Bonjour {{name}},\n\n" +
+          "Nous avons reçu une demande de réinitialisation de votre mot de passe. Ouvrez le lien ci-dessous pour en choisir un nouveau. Ce lien expire bientôt.\n\n" +
+          "{{resetUrl}}\n\n" +
+          "Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail.",
+      },
+      es: {
+        subject: "Restablece tu contraseña",
+        bodyHtml:
+          "<p>Hola {{name}},</p>" +
+          "<p>Recibimos una solicitud para restablecer tu contraseña. Haz clic en el enlace de abajo para elegir una nueva. Este enlace caduca pronto.</p>" +
+          '<p><a href="{{resetUrl}}">Restablecer tu contraseña</a></p>' +
+          "<p>Si no solicitaste esto, puedes ignorar este correo de forma segura.</p>",
+        bodyText:
+          "Hola {{name}},\n\n" +
+          "Recibimos una solicitud para restablecer tu contraseña. Abre el enlace de abajo para elegir una nueva. Este enlace caduca pronto.\n\n" +
+          "{{resetUrl}}\n\n" +
+          "Si no solicitaste esto, puedes ignorar este correo de forma segura.",
+      },
+      uk: {
+        subject: "Скиньте свій пароль",
+        bodyHtml:
+          "<p>Вітаємо, {{name}}!</p>" +
+          "<p>Ми отримали запит на скидання вашого пароля. Натисніть посилання нижче, щоб обрати новий. Це посилання незабаром стане недійсним.</p>" +
+          '<p><a href="{{resetUrl}}">Скинути пароль</a></p>' +
+          "<p>Якщо ви не надсилали цей запит, можете проігнорувати цей лист.</p>",
+        bodyText:
+          "Вітаємо, {{name}}!\n\n" +
+          "Ми отримали запит на скидання вашого пароля. Відкрийте посилання нижче, щоб обрати новий. Це посилання незабаром стане недійсним.\n\n" +
+          "{{resetUrl}}\n\n" +
+          "Якщо ви не надсилали цей запит, можете проігнорувати цей лист.",
+      },
+    },
   },
   {
     key: "test_email",
@@ -54,13 +107,54 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
       "If you can read this, outbound email delivery is working.",
     description: 'Sent by the administrator "send test email" action.',
     variables: ["appName", "sentBy"],
+    translations: {
+      fr: {
+        subject: "E-mail de test de {{appName}}",
+        bodyHtml:
+          "<p>Ceci est un e-mail de test envoyé depuis l'espace Email de l'administrateur de {{appName}} par {{sentBy}}.</p>" +
+          "<p>Si vous lisez ceci, l'envoi d'e-mails sortants fonctionne.</p>",
+        bodyText:
+          "Ceci est un e-mail de test envoyé depuis l'espace Email de l'administrateur de {{appName}} par {{sentBy}}.\n\n" +
+          "Si vous lisez ceci, l'envoi d'e-mails sortants fonctionne.",
+      },
+      es: {
+        subject: "Correo de prueba de {{appName}}",
+        bodyHtml:
+          "<p>Este es un correo de prueba enviado desde el espacio de Email del administrador de {{appName}} por {{sentBy}}.</p>" +
+          "<p>Si puedes leer esto, el envío de correos salientes funciona.</p>",
+        bodyText:
+          "Este es un correo de prueba enviado desde el espacio de Email del administrador de {{appName}} por {{sentBy}}.\n\n" +
+          "Si puedes leer esto, el envío de correos salientes funciona.",
+      },
+      uk: {
+        subject: "Тестовий лист від {{appName}}",
+        bodyHtml:
+          "<p>Це тестовий лист, надісланий з робочого простору Email адміністратора {{appName}} користувачем {{sentBy}}.</p>" +
+          "<p>Якщо ви це читаєте, надсилання вихідних листів працює.</p>",
+        bodyText:
+          "Це тестовий лист, надісланий з робочого простору Email адміністратора {{appName}} користувачем {{sentBy}}.\n\n" +
+          "Якщо ви це читаєте, надсилання вихідних листів працює.",
+      },
+    },
   },
 ] as const;
 
 export type EmailTemplateKey = "password_reset" | "test_email";
 
-export function getDefaultEmailTemplate(key: string): EmailTemplateDefinition | undefined {
-  return DEFAULT_EMAIL_TEMPLATES.find((t) => t.key === key);
+/**
+ * Returns the code-level default for `key`, with the requested `locale`'s
+ * translation overlaid when one exists (otherwise the `en` base). `locale`
+ * defaults to `"en"` — kept as a literal so this module stays import-free and
+ * usable from the seed script and unit tests under plain Node.
+ */
+export function getDefaultEmailTemplate(
+  key: string,
+  locale: string = "en",
+): EmailTemplateDefinition | undefined {
+  const template = DEFAULT_EMAIL_TEMPLATES.find((t) => t.key === key);
+  if (!template || locale === "en") return template;
+  const localized = template.translations?.[locale];
+  return localized ? { ...template, ...localized } : template;
 }
 
 /** Minimal HTML entity escape for variable VALUES interpolated into HTML bodies. */

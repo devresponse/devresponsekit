@@ -81,3 +81,60 @@ describe("DEFAULT_EMAIL_TEMPLATES", () => {
     }
   });
 });
+
+describe("localized templates (P3-8)", () => {
+  const LOCALES = ["fr", "es", "uk"] as const;
+
+  it("overlays the requested locale's content, falling back to en for unknown locales", () => {
+    const en = getDefaultEmailTemplate("password_reset", "en");
+    const fr = getDefaultEmailTemplate("password_reset", "fr");
+    expect(fr?.subject).toBeDefined();
+    expect(fr?.subject).not.toBe(en?.subject); // fr overlay applied
+    // An unsupported locale degrades to the en base rather than failing.
+    expect(getDefaultEmailTemplate("password_reset", "de")?.subject).toBe(en?.subject);
+    // Default arg is en.
+    expect(getDefaultEmailTemplate("password_reset")?.subject).toBe(en?.subject);
+  });
+
+  it("ships every supported non-en locale for every template", () => {
+    for (const t of DEFAULT_EMAIL_TEMPLATES) {
+      for (const locale of LOCALES) {
+        expect(
+          t.translations?.[locale],
+          `${t.key} is missing the ${locale} translation`,
+        ).toBeDefined();
+      }
+    }
+  });
+
+  it("every translation preserves the declared variables (e.g. fr reset keeps {{resetUrl}})", () => {
+    for (const t of DEFAULT_EMAIL_TEMPLATES) {
+      for (const locale of LOCALES) {
+        const localized = getDefaultEmailTemplate(t.key, locale)!;
+        const everywhere = localized.subject + localized.bodyHtml + localized.bodyText;
+        for (const variable of t.variables) {
+          expect(everywhere, `${t.key}/${locale} should keep {{${variable}}}`).toContain(
+            `{{${variable}}}`,
+          );
+        }
+      }
+    }
+  });
+
+  it("no translation references an undeclared variable", () => {
+    for (const t of DEFAULT_EMAIL_TEMPLATES) {
+      for (const locale of LOCALES) {
+        const localized = getDefaultEmailTemplate(t.key, locale)!;
+        const everywhere = localized.subject + localized.bodyHtml + localized.bodyText;
+        const referenced = [...everywhere.matchAll(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g)].map(
+          (m) => m[1],
+        );
+        for (const name of referenced) {
+          expect(t.variables, `${t.key}/${locale} references undeclared {{${name}}}`).toContain(
+            name,
+          );
+        }
+      }
+    }
+  });
+});

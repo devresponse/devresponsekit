@@ -3,7 +3,7 @@ import { db } from "@/db/database";
 import { getServerEnv } from "@/lib/env";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { getConfiguredEmailProvider } from "./providers.server";
-import { backoffDelayMs } from "./outbox-worker.server";
+import { backoffDelayMs, summarizeDeliveryError } from "./outbox-worker.server";
 import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
 
 /**
@@ -71,7 +71,9 @@ async function resolveTemplate(templateKey: string, locale: string): Promise<Res
     return { subject: row.subject, bodyHtml: row.body_html, bodyText: row.body_text };
   }
 
-  const fallback = getDefaultEmailTemplate(templateKey);
+  // No DB row at all (key never seeded / both rows deleted) → the code-level
+  // default, localized for the recipient when a translation exists.
+  const fallback = getDefaultEmailTemplate(templateKey, locale);
   if (!fallback) {
     // Unknown key is a programmer error, not an operational condition.
     throw new Error(`Unknown email template key: ${templateKey}`);
@@ -191,7 +193,9 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
         attempts: 1,
         last_attempt_at: now,
         next_attempt_at: new Date(now.getTime() + backoffDelayMs(1)),
-        error: (err instanceof Error ? err.message : String(err)).slice(0, 500),
+        // Short, sanitized reason — never the provider's raw response body
+        // (P3-8); `app_outbox.error` is surfaced in the admin Email workspace.
+        error: summarizeDeliveryError(err),
       })
       .where("id", "=", inserted.id)
       .execute();

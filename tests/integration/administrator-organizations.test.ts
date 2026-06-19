@@ -300,4 +300,34 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("returns ok and audits success on a clean delete (DB-1)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
+    // existing lookup + assertOrgNotDefault + assertOrgEmpty all read this row.
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
+    itemsExecute.mockResolvedValue([]); // the delete statement succeeds
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
+    expect(res.status).toBe(200);
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "success" }));
+  });
+
+  it("maps a FK violation to 409 organization_in_use instead of a raw 500 (DB-1)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
+    // The org still owns roles/apps/credentials → Postgres raises a FK violation.
+    itemsExecute.mockRejectedValue(
+      new Error('update or delete on table "app_organizations" violates foreign key constraint'),
+    );
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ error: "organization_in_use" });
+    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
+  });
 });

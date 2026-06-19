@@ -196,7 +196,26 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     throw err;
   }
 
-  await db.deleteFrom("app_organizations").where("id", "=", id).execute();
+  try {
+    await db.deleteFrom("app_organizations").where("id", "=", id).execute();
+  } catch (err) {
+    // The emptiness guard only covers memberships. An org can still own roles,
+    // provider bindings, enterprise apps, or API/OAuth credentials whose FKs
+    // block the delete. Translate that FK violation into the documented 409
+    // (DB-1) instead of letting it surface as a raw 500. Audit rows do NOT
+    // reach here — their FK is ON DELETE SET NULL (migration 0005).
+    const message = err instanceof Error ? err.message : "unknown";
+    if (/foreign key/i.test(message)) {
+      await auditOrgAction("admin.organization.delete_blocked", "denied", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        organizationId: id,
+        metadata: { organizationId: id, slug: existing.slug, reason: "organization_in_use" },
+      });
+      return adminErrorResponse("organization_in_use", 409, request);
+    }
+    throw err;
+  }
 
   await auditOrgAction("admin.organization.deleted", "success", {
     request,

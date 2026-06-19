@@ -72,6 +72,11 @@ build, and deploying a fully functional instance — see the canonical docs in
 | `pnpm db:seed:dev` | Optional dev/testing seed: 3 orgs × 7 users      |
 | `pnpm db:reset`   | Dry run: list every table a reset would drop      |
 | `pnpm db:reset:reload` | Drop all tables, then re-run migrations + seed (local only) |
+| `pnpm db:app:migrate` | Apply the app schema migrations                  |
+| `pnpm db:prune`   | Prune expired revocations + aged audit/outbox rows (cron — see [Deployment](docs/deployment.md)) |
+| `pnpm outbox:drain` | Retry pending outbox emails (cron)               |
+| `pnpm openapi:export` | Write the admin OpenAPI document to `docs/`      |
+| `pnpm sdk:admin:generate` | Regenerate the typed admin SDK from the OpenAPI doc |
 
 ## Project layout
 

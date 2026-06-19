@@ -1,5 +1,5 @@
 import "server-only";
-import { sql, type SelectQueryBuilder } from "kysely";
+import { sql, type SelectQueryBuilder, type SqlBool } from "kysely";
 
 /**
  * Generic list-query parsing and application for Administrator API
@@ -222,4 +222,119 @@ export async function executeListWithTotal<TRow>(
   const total =
     offsetFor(query) === 0 ? 0 : Number((await countQuery.executeTakeFirst())?.total ?? 0);
   return { items: [], total };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Keyset (seek) pagination                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One column of a keyset sort key. `nullable` drives both the `NULLS LAST`
+ * ordering and the null-aware seek predicate — non-null columns skip those
+ * branches so the generated SQL stays index-friendly.
+ */
+export interface KeysetField {
+  field: string;
+  direction: "asc" | "desc";
+  nullable: boolean;
+}
+
+/** A keyset cursor: the seek columns' values read from the last emitted row. */
+export type KeysetCursor = Record<string, unknown>;
+
+/**
+ * Derives the keyset sort key from a parsed {@link ListQuery.sort}: the
+ * requested sort columns, then `id` appended as a unique, non-null tiebreaker
+ * so the total order is fully deterministic — a hard requirement for correct
+ * seek pagination (a non-unique ORDER BY can drop or duplicate rows across
+ * page boundaries). If the sort already targets `id`, it is left as the
+ * tiebreaker and not duplicated.
+ *
+ * `nullableFields` names the sort columns that can be NULL so they can be
+ * ordered and sought with explicit `NULLS LAST` semantics.
+ */
+export function buildKeysetSort(
+  sort: SortSpec[],
+  nullableFields: ReadonlySet<string> = new Set(),
+): KeysetField[] {
+  const fields: KeysetField[] = sort.map((s) => ({
+    field: s.field,
+    direction: s.direction,
+    nullable: nullableFields.has(s.field),
+  }));
+  if (!fields.some((f) => f.field === "id")) {
+    fields.push({ field: "id", direction: "asc", nullable: false });
+  }
+  return fields;
+}
+
+/** Reads a {@link KeysetCursor} (the seek-column values) from a result row. */
+export function keysetCursorFrom(row: Record<string, unknown>, sort: KeysetField[]): KeysetCursor {
+  const cursor: KeysetCursor = {};
+  for (const f of sort) cursor[f.field] = row[f.field];
+  return cursor;
+}
+
+/** `row.col` ⋛ cursor at this level — the strictly-after half of the seek. */
+function levelAfter(f: KeysetField, value: unknown) {
+  // A NULL cursor value sits at the NULLS-LAST tail: nothing sorts strictly
+  // after it here, so this level contributes nothing (deeper levels carry the
+  // equal-NULL → id comparison).
+  if (value === null || value === undefined) return sql<SqlBool>`false`;
+  const cmp = f.direction === "asc" ? sql`>` : sql`<`;
+  // NULLS LAST: a NULL row sorts after any non-null cursor value, so include
+  // it — but only for genuinely nullable columns, to keep non-null seeks
+  // (e.g. `created_at < $1`) clean and index-friendly.
+  return f.nullable
+    ? sql<SqlBool>`(${sql.ref(f.field)} ${cmp} ${value} or ${sql.ref(f.field)} is null)`
+    : sql<SqlBool>`${sql.ref(f.field)} ${cmp} ${value}`;
+}
+
+/** `row.col` = cursor at this level — NULL-safe (a NULL matches a NULL). */
+function levelEqual(f: KeysetField, value: unknown) {
+  if (value === null || value === undefined) return sql<SqlBool>`${sql.ref(f.field)} is null`;
+  return sql<SqlBool>`${sql.ref(f.field)} = ${value}`;
+}
+
+/**
+ * Applies a keyset (seek) ORDER BY, the LIMIT, and — when a `cursor` is given
+ * — the seek predicate to a Kysely select. This replaces OFFSET pagination:
+ * rather than asking the database to scan and discard `offset` rows (an
+ * O(offset) cost that degrades badly on deep pages and large exports), it
+ * seeks straight past the last row of the previous page via a lexicographic
+ * row comparison, so every page is a bounded indexed range scan regardless of
+ * how far in we are.
+ *
+ * The seek predicate is the standard expansion of "strictly after the cursor"
+ * under the (possibly mixed-direction, possibly NULL-bearing) sort key:
+ *
+ *   after₀ OR (eq₀ AND after₁) OR (eq₀ AND eq₁ AND after₂) OR …
+ *
+ * where `eqᵢ`/`afterᵢ` are NULL-safe per {@link levelEqual}/{@link levelAfter}
+ * and NULLs are ordered last. Pass the SAME `sort` to {@link keysetCursorFrom}
+ * so the cursor carries exactly the columns the predicate reads.
+ */
+export function applyKeyset<DB, TB extends keyof DB, O>(
+  qb: SelectQueryBuilder<DB, TB, O>,
+  sort: KeysetField[],
+  cursor: KeysetCursor | null,
+  limit: number,
+): SelectQueryBuilder<DB, TB, O> {
+  let next = qb;
+  if (cursor) {
+    const orTerms = sort.map((after, p) => {
+      // Levels 0..p-1 equal the cursor, level p is strictly after it.
+      const andTerms = sort.slice(0, p).map((eq) => levelEqual(eq, cursor[eq.field]));
+      andTerms.push(levelAfter(after, cursor[after.field]));
+      return sql<SqlBool>`(${sql.join(andTerms, sql` and `)})`;
+    });
+    next = next.where(sql<SqlBool>`(${sql.join(orTerms, sql` or `)})`);
+  }
+  for (const f of sort) {
+    const dir = f.direction === "desc" ? sql`desc` : sql`asc`;
+    next = next.orderBy(
+      f.nullable ? sql`${sql.ref(f.field)} ${dir} nulls last` : sql`${sql.ref(f.field)} ${dir}`,
+    );
+  }
+  return next.limit(limit);
 }

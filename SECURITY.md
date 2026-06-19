@@ -5,15 +5,13 @@ shell, so we take vulnerability reports seriously and aim to respond quickly.
 
 ## Supported versions
 
-The project is pre-1.0. Until `1.0.0` is tagged, security fixes are applied to
-the latest `main` only.
+Security fixes land on the latest `1.0.x` release and the `main` branch.
 
-| Version            | Supported          |
-| ------------------ | ------------------ |
-| `main` (latest)    | :white_check_mark: |
-| older commits/tags | :x:                |
-
-Once `1.0.0` ships, this table will track the supported release line(s).
+| Version         | Supported          |
+| --------------- | ------------------ |
+| `1.0.x`         | :white_check_mark: |
+| `main` (latest) | :white_check_mark: |
+| `< 1.0`         | :x:                |
 
 ## Reporting a vulnerability
 

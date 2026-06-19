@@ -78,6 +78,8 @@ export function AdministratorOrganizationsGrid({
           setRowError(tErr("organizationNotEmpty"));
         } else if (body.error === "organization_is_default") {
           setRowError(tErr("organizationIsDefault"));
+        } else if (body.error === "organization_in_use") {
+          setRowError(tErr("organizationInUse"));
         } else {
           setRowError(t("deleteError"));
         }

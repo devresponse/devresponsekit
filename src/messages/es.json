@@ -559,6 +559,7 @@
       "slugTaken": "Ese slug ya está en uso.",
       "organizationNotEmpty": "Esta organización todavía tiene miembros y no se puede eliminar.",
       "organizationIsDefault": "La organización predeterminada no se puede eliminar.",
+      "organizationInUse": "Esta organización todavía tiene roles, aplicaciones o credenciales y no se puede eliminar.",
       "membershipExists": "Este usuario ya es miembro de la organización.",
       "bindingExists": "Este enlace de proveedor ya existe.",
       "idTaken": "Ese identificador ya está en uso.",

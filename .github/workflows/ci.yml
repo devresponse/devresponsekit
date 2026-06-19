@@ -244,3 +244,63 @@ jobs:
 
       - name: Typecheck the generated SDK
         run: pnpm sdk:admin:typecheck
+
+  auth-schema-drift:
+    name: Better Auth schema drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # B4: src/db/migrations/better-auth-schema.sql is a GENERATED snapshot of
+    # the Better Auth identity DDL that `pnpm db:auth:migrate` applies at deploy.
+    # Regenerate it and fail if it differs from the committed file — so a
+    # better-auth upgrade that silently changes the vendor schema is caught here
+    # (and is the cue to re-check the hand-typed Kysely mirrors in app-schema.ts).
+    # The generator compiles against a throwaway, freshly-empty schema, so its
+    # output is deterministic regardless of the service DB's state.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: devresponse
+          POSTGRES_PASSWORD: devresponse
+          POSTGRES_DB: devresponse_db
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U devresponse -d devresponse_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
+      DB_SCHEMA: auth
+      # Importing @/lib/auth validates the env at load; CI-only placeholders.
+      BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SSO_HANDOFF_ISSUER: http://localhost:3000
+      SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
+      SSO_HANDOFF_APPLICATION_ID: portal
+      SSO_HANDOFF_JWT_SECRET: ci-only-sso-handoff-secret-not-for-production
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate the Better Auth schema snapshot
+        run: pnpm db:auth:generate
+
+      - name: Fail on schema drift
+        run: |
+          if ! git diff --quiet -- src/db/migrations/better-auth-schema.sql; then
+            echo "::error::Better Auth schema snapshot is stale — run 'pnpm db:auth:generate' and commit src/db/migrations/better-auth-schema.sql."
+            git --no-pager diff -- src/db/migrations/better-auth-schema.sql
+            exit 1
+          fi

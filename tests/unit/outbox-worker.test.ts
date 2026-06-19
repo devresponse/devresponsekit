@@ -58,6 +58,7 @@ vi.mock("@/db/database", () => ({
 
 let drainOutbox: typeof WorkerModule.drainOutbox;
 let backoffDelayMs: typeof WorkerModule.backoffDelayMs;
+let summarizeDeliveryError: typeof WorkerModule.summarizeDeliveryError;
 let OUTBOX_MAX_ATTEMPTS: number;
 
 const row = (attempts: number) => ({
@@ -75,7 +76,7 @@ beforeEach(async () => {
   state.provider = null;
   state.updateSets = [];
   state.selectCount = 0;
-  ({ drainOutbox, backoffDelayMs, OUTBOX_MAX_ATTEMPTS } =
+  ({ drainOutbox, backoffDelayMs, summarizeDeliveryError, OUTBOX_MAX_ATTEMPTS } =
     await import("@/lib/email/outbox-worker.server"));
 });
 afterEach(() => vi.resetModules());
@@ -86,6 +87,27 @@ describe("backoffDelayMs", () => {
     expect(backoffDelayMs(2)).toBe(120_000);
     expect(backoffDelayMs(3)).toBe(240_000);
     expect(backoffDelayMs(100)).toBe(60 * 60_000);
+  });
+});
+
+describe("summarizeDeliveryError (P3-8)", () => {
+  it("returns a short, single-line message unchanged", () => {
+    expect(summarizeDeliveryError(new Error("mailgun 500: rejected"))).toBe(
+      "mailgun 500: rejected",
+    );
+  });
+
+  it("collapses a multi-line raw provider body to one line and hard-caps the length", () => {
+    const raw = `resend 422: <!doctype html>\n${"<div>x</div>\n".repeat(200)}`;
+    const out = summarizeDeliveryError(new Error(raw));
+    expect(out).not.toContain("\n"); // not a multi-line dump
+    expect(out.length).toBeLessThanOrEqual(201); // 200 + the ellipsis
+    expect(out.startsWith("resend 422:")).toBe(true); // useful status prefix kept
+    expect(out).not.toBe(raw); // the raw body is dropped
+  });
+
+  it("stringifies a non-Error throwable", () => {
+    expect(summarizeDeliveryError("plain string failure")).toBe("plain string failure");
   });
 });
 

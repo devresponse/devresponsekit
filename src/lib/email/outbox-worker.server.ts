@@ -22,12 +22,32 @@ import { getConfiguredEmailProvider } from "./providers.server";
 export const OUTBOX_MAX_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 60_000; // 1 minute
 const BACKOFF_CAP_MS = 60 * 60_000; // 1 hour
-const ERROR_MAX_LEN = 500;
+/** Bound on the reason stored in `app_outbox.error` (a short reason, not a body). */
+const ERROR_MAX_LEN = 200;
 
 /** Backoff before the Nth attempt (1-indexed): base · 2^(n-1), capped. */
 export function backoffDelayMs(attempts: number): number {
   const exp = BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1);
   return Math.min(exp, BACKOFF_CAP_MS);
+}
+
+/**
+ * Distils a delivery error into a SHORT, single-line reason for
+ * `app_outbox.error` (P3-8). Providers embed the vendor's raw HTTP response
+ * body in the thrown message (see providers.server.ts); that body is
+ * attacker/vendor-influenced and `app_outbox.error` is surfaced in the
+ * org-scoped admin Email workspace, so we must not persist it verbatim.
+ * Strip control characters (the newlines etc. that carry multi-line dumps),
+ * collapse whitespace, and hard-cap the length — keeping the useful
+ * `"<provider> <status>: …"` prefix while dropping the bulk of the body.
+ */
+export function summarizeDeliveryError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const oneLine = raw
+    .replace(/\p{Cc}/gu, " ") // strip control chars (newlines, tabs, …)
+    .replace(/\s+/g, " ")
+    .trim();
+  return oneLine.length > ERROR_MAX_LEN ? `${oneLine.slice(0, ERROR_MAX_LEN)}…` : oneLine;
 }
 
 export interface DrainOutboxResult {
@@ -39,8 +59,8 @@ export interface DrainOutboxResult {
 
 /**
  * Process up to `limit` due rows (`status='pending'` AND `next_attempt_at`
- * null-or-past). Returns a per-outcome summary. A no-op (and no DB work) when
- * no email provider is configured.
+ * null-or-past) for the CURRENTLY configured provider. Returns a per-outcome
+ * summary. A no-op (and no DB work) when no email provider is configured.
  */
 export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
   const provider = getConfiguredEmailProvider();
@@ -53,6 +73,12 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
         .selectFrom("app_outbox")
         .select(["id", "to_email", "from_email", "subject", "body_html", "body_text", "attempts"])
         .where("status", "=", "pending")
+        // Claim ONLY rows enqueued for the active provider (P3-8). A row's
+        // `from_email`/headers were chosen for the provider it was queued
+        // against; if `EMAIL_PROVIDER` was switched mid-retry, re-sending it
+        // through the new provider would use a `from` the new provider may
+        // not own. Rows for the old provider wait until it is active again.
+        .where("provider", "=", provider.id)
         .where((eb) =>
           eb.or([eb("next_attempt_at", "is", null), eb("next_attempt_at", "<=", new Date())]),
         )
@@ -88,7 +114,7 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
           .execute();
         return "sent" as const;
       } catch (err) {
-        const message = (err instanceof Error ? err.message : String(err)).slice(0, ERROR_MAX_LEN);
+        const message = summarizeDeliveryError(err);
         const terminal = attempts >= OUTBOX_MAX_ATTEMPTS;
         await trx
           .updateTable("app_outbox")

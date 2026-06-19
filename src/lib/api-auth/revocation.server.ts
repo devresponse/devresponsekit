@@ -16,6 +16,11 @@ export async function revokeJti(jti: string, expiresAt: Date, reason?: string): 
     .values({ jti, expires_at: expiresAt, reason: reason ?? null })
     .onConflict((oc) => oc.column("jti").doNothing())
     .execute();
+  // This insert is the table's ONLY writer, so pruning expired rows here keeps
+  // it bounded to live revocations without a scheduled job (D3) — the same
+  // opportunistic pattern as the SSO-nonce purge. The scheduled `pnpm db:prune`
+  // covers it too, for deployments that never revoke.
+  await pruneExpiredRevocations();
 }
 
 /** True when the token id has been revoked. */
@@ -38,5 +43,5 @@ export async function pruneExpiredRevocations(): Promise<number> {
     .deleteFrom("app_revoked_tokens")
     .where("expires_at", "<", sql<Date>`now()`)
     .executeTakeFirst();
-  return Number(result.numDeletedRows ?? 0);
+  return Number(result?.numDeletedRows ?? 0);
 }

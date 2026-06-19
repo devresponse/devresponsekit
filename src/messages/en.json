@@ -1277,5 +1277,16 @@
     "passwordsMismatch": "Passwords do not match.",
     "locale": "Choose a supported language.",
     "dateFormat": "Choose a valid date format."
+  },
+  "sso": {
+    "confirm": {
+      "title": "Confirm sign-in",
+      "body": "You're about to sign in as {email}.",
+      "continue": "Continue",
+      "cancel": "Cancel",
+      "invalidTitle": "Sign-in link invalid",
+      "invalidBody": "This sign-in link is invalid or has expired. Request a new one from the application you came from.",
+      "backToSignIn": "Back to sign in"
+    }
   }
 }

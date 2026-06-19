@@ -3,10 +3,12 @@ import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
 
 /**
  * E2E — the cross-subdomain SSO handoff end to end against the real DB
- * (review F2): register a destination app, launch a one-time handoff token,
- * consume it (which burns its `jti` and establishes a session), then prove a
- * REPLAY of the same token is rejected. This exercises the real
- * sign/verify/nonce-consume path that is otherwise mock-only.
+ * (review F2 + P2-2): register a destination app, launch a one-time handoff
+ * token, follow the consume GET to the confirmation interstitial (which does
+ * NOT yet sign in), POST to confirm (which burns the `jti` and establishes the
+ * session), then prove a REPLAY of the same token is rejected. This exercises
+ * the real sign/verify/nonce-consume path that is otherwise mock-only, plus the
+ * P2-2 confirmation step that defeats IdP-initiated login-CSRF.
  *
  * The launch signs the token with the app's `sso_audience`, and the consumer
  * checks it against this deployment's `SSO_HANDOFF_AUDIENCE_PREFIX` +
@@ -53,19 +55,32 @@ test("sso handoff: launch -> consume -> replay rejected", async ({ page }, testI
     const token = new URL(location!).searchParams.get("token");
     expect(token, "launch redirect should carry a token").toBeTruthy();
 
-    // CONSUME on this origin — verifies the token, burns the jti, establishes
-    // a session, and redirects to the dashboard (302).
+    // CONSUME (GET) on this origin — verifies the token and redirects to the
+    // localized confirmation interstitial. It does NOT burn the jti or sign in
+    // yet (P2-2: a silent GET sign-in would enable login-CSRF).
     const consumeRes = await page.request.get(
       `/api/sso/consume?token=${encodeURIComponent(token!)}`,
       { maxRedirects: 0 },
     );
     expect(consumeRes.status(), await consumeRes.text()).toBe(307);
+    expect(consumeRes.headers()["location"]).toContain("/sso/confirm");
 
-    // REPLAY the same one-time token — rejected, the jti is already consumed.
-    const replayRes = await page.request.get(
-      `/api/sso/consume?token=${encodeURIComponent(token!)}`,
-      { maxRedirects: 0 },
-    );
+    // CONFIRM (POST) — the interstitial's same-origin, trusted-origin-guarded
+    // submit burns the jti, establishes the session, and 303s to the dashboard.
+    const confirmRes = await page.request.post("/api/sso/consume", {
+      form: { token: token! },
+      headers: ADMIN_API_HEADERS,
+      maxRedirects: 0,
+    });
+    expect(confirmRes.status(), await confirmRes.text()).toBe(303);
+    expect(confirmRes.headers()["location"]).toContain("/app/dashboard");
+
+    // REPLAY the same one-time token via POST — rejected, the jti is consumed.
+    const replayRes = await page.request.post("/api/sso/consume", {
+      form: { token: token! },
+      headers: ADMIN_API_HEADERS,
+      maxRedirects: 0,
+    });
     expect(replayRes.status()).toBe(401);
   } finally {
     await page.request.delete(`/api/administrator/enterprise-apps/${slug}`, {

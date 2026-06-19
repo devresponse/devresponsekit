@@ -7,7 +7,7 @@ import type * as SendModule from "@/lib/email/send.server";
  *
  *   - no provider          → row inserted as `logged`, no delivery
  *   - provider succeeds    → `pending` insert, update to `sent`
- *   - provider throws      → update to `failed`, error recorded, NO throw
+ *   - provider throws      → row stays `pending`, scheduled for retry, NO throw
  *   - unknown template key → throws (programmer error)
  */
 const state = vi.hoisted(() => ({
@@ -156,7 +156,7 @@ describe("sendAppEmail", () => {
     expect(state.updateSets[0]).toMatchObject({ status: "sent", provider_message_id: "msg-9" });
   });
 
-  it("records delivery failures as `failed` and does NOT throw", async () => {
+  it("leaves a failed inline delivery RETRYABLE (pending + scheduled), does NOT throw", async () => {
     state.provider = {
       id: "mailgun",
       deliver: vi.fn().mockRejectedValue(new Error("mailgun 500: boom")),
@@ -168,11 +168,13 @@ describe("sendAppEmail", () => {
       variables: { appName: "App", sentBy: "ba-1" },
     });
 
-    expect(result.status).toBe("failed");
-    expect(state.updateSets[0]).toMatchObject({
-      status: "failed",
-      error: "mailgun 500: boom",
-    });
+    // Attempt #1 failed: the row stays `pending` (inserted that way; the catch
+    // does NOT flip it to `failed`) and is scheduled for the outbox worker.
+    expect(result.status).toBe("pending");
+    const upd = state.updateSets[0]!;
+    expect(upd).toMatchObject({ attempts: 1, error: "mailgun 500: boom" });
+    expect(upd.status).toBeUndefined();
+    expect(upd.next_attempt_at).toBeInstanceOf(Date);
   });
 
   it("resolves the recipient locale from the related app user", async () => {

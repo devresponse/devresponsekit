@@ -45,7 +45,7 @@ flowchart TB
 | Service | Why | Setup pointer |
 | --- | --- | --- |
 | PostgreSQL host (managed or self-run) | Primary datastore | A managed Postgres 17 with a pooled connection endpoint is recommended for serverless hosts. |
-| Application host | Run the Next.js app | See [Deployment → Hosting model](./deployment.md#hosting-model). `TODO:` choose Vercel vs. Node server/container. |
+| Application host | Run the Next.js app | See [Deployment → Hosting model](./deployment.md#4-hosting-model). `TODO:` choose Vercel vs. Node server/container. |
 | Git host with Actions (GitHub) | CI pipeline | The pipeline is GitHub Actions (`.github/workflows/ci.yml`). |
 | Secrets manager | Inject env at deploy | `TODO:` choose (platform secrets, Vault, etc.). |
 | OAuth provider consoles | Social login (optional) | Register redirect URIs `BETTER_AUTH_URL/api/auth/callback/<provider>`. |
@@ -112,7 +112,7 @@ flowchart LR
 | **browser** | yes | install Playwright → build → migrate + seed → start server → e2e → accessibility (axe-core) → upload traces on failure |
 | **audit** | no | `pnpm audit --audit-level high` (non-blocking backlog) |
 
-See [Testing](./testing.md) and [Deployment → CI/CD](./deployment.md#cicd-pipeline).
+See [Testing](./testing.md) and [Deployment → CI/CD](./deployment.md#6-cicd-pipeline).
 
 ## 6. Deployment steps (platform-neutral)
 
@@ -128,7 +128,7 @@ flowchart LR
    ```
    The schema is idempotent and the runner records applied files, so re-running is safe.
 3. **Build & deploy** the app (`pnpm build` then `pnpm start`, or your platform's build step). See [Deployment](./deployment.md).
-4. **Verify** (see §11 and [Deployment → Post-deploy](./deployment.md#post-deployment-verification)).
+4. **Verify** (see §11 and [Deployment → Post-deploy](./deployment.md#8-post-deployment-verification)).
 
 ## 7. Rollback strategy
 

@@ -177,7 +177,7 @@ DevResponseKit uses a **three-tier** model. See [Architecture → Authorization]
 | **Organization Admin** | Holds `admin.*` permissions (no `superuser`) | A single organization |
 | **User** | No `admin.*` permissions | Themselves only |
 
-The permission catalog contains **35** `admin.*` permission keys grouped by domain (users, roles, groups, organizations, permissions, enterprise apps, API keys, OAuth clients, audit, email), plus the `superuser` marker and the `shell.view` / `audit.view` user-level markers. The full enumerated list is in [API Reference → Permission catalog](./api.md#permission-catalog).
+The permission catalog contains **35** `admin.*` permission keys grouped by domain (users, roles, groups, organizations, permissions, enterprise apps, API keys, OAuth clients, audit, email), plus the `superuser` marker and the `shell.view` / `audit.view` user-level markers. The full enumerated list is in [API Reference → Permission catalog](./api.md#5-permission-catalog).
 
 ---
 

@@ -6,6 +6,8 @@ import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { isSupportedLocale, locales } from "@/config/i18n-config";
+// Shared first-party JSON error envelope (P3-12).
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 
 export const dynamic = "force-dynamic";
 
@@ -24,28 +26,28 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return adminErrorResponse("unauthenticated", 401, request);
   }
 
   const access = await getUserAccessContext(session.user.id);
   // Even pending users may set their preferred locale.
   if (decideSecureAccess(access.status, access.membershipStatus) === "blocked") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return adminErrorResponse("forbidden", 403, request);
   }
   if (!access.appUserId) {
-    return NextResponse.json({ error: "not_provisioned" }, { status: 403 });
+    return adminErrorResponse("not_provisioned", 403, request);
   }
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_locale", allowed: locales }, { status: 400 });
+    return adminErrorResponse("invalid_locale", 400, request, { extra: { allowed: locales } });
   }
 
   await db

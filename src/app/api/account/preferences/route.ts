@@ -6,6 +6,8 @@ import { auditEvent } from "@/lib/audit.server";
 import { requireAccountUser } from "@/lib/account/guard.server";
 import { isValidTimeZone, normalizeOptional } from "@/lib/account/preferences";
 import { updatePreferencesSchema } from "@/lib/validation/account";
+// Shared first-party JSON error envelope (P3-12).
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 
 export const dynamic = "force-dynamic";
 
@@ -33,16 +35,16 @@ export async function PUT(request: NextRequest) {
   try {
     json = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
   const parsed = updatePreferencesSchema.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return adminErrorResponse("invalid_body", 400, request);
   }
 
   const timeZone = normalizeOptional(parsed.data.timeZone);
   if (timeZone !== null && !isValidTimeZone(timeZone)) {
-    return NextResponse.json({ error: "invalid_time_zone" }, { status: 400 });
+    return adminErrorResponse("invalid_time_zone", 400, request);
   }
   const dateFormat = parsed.data.dateFormat === "system" ? null : parsed.data.dateFormat;
   const numberFormatLocale = normalizeOptional(parsed.data.numberFormatLocale);

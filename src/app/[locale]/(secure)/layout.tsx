@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { getTranslations } from "next-intl/server";
 import { ApplicationSwitcherSheet } from "@/components/app-shell/application-switcher-sheet";
 import { CompactDensityWrapper } from "@/components/app-shell/compact-density-wrapper";
 import { ShellContainer } from "@/components/app-shell/shell-container";
@@ -60,16 +61,22 @@ export default async function SecureLayout({
   // `getUserAccessContext`, so `access.organizationId` is already the active one.
   const organizations = access.appUserId ? await listUserActiveOrganizations(access.appUserId) : [];
 
+  // Localized landmark labels (P2-15). This layout is a Server Component, so it
+  // resolves the strings and passes them to the (Server) shell components,
+  // which cannot call useTranslations themselves.
+  const tRegions = await getTranslations("shell.regions");
+  const tCommon = await getTranslations("common");
+
   return (
     <CompactDensityWrapper density="compact" className="h-screen">
       <SidebarProvider defaultOpen={sidebarDefaultOpen} className="h-full">
         <ShellSkipLinks />
         <ShellContainer
           className="w-full"
-          ariaLabel="DevResponse Enterprise Application"
+          ariaLabel={tCommon("appName")}
           branding={
-            <TopShellBar>
-              <SidebarTrigger className="-ml-1" />
+            <TopShellBar ariaLabel={tRegions("banner")}>
+              <SidebarTrigger className="-ml-1" srLabel={tRegions("toggleSidebar")} />
               <span className="text-sm font-semibold">DevResponse</span>
               <div className="ml-auto flex items-center gap-2">
                 <ApplicationSwitcherSheet locale={safeLocale} />

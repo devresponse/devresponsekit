@@ -23,7 +23,8 @@
       "notifyTitle": "Повідомлення",
       "ok": "OK",
       "confirm": "Підтвердити",
-      "cancel": "Скасувати"
+      "cancel": "Скасувати",
+      "close": "Закрити"
     }
   },
   "auth": {
@@ -177,6 +178,14 @@
     }
   },
   "shell": {
+    "regions": {
+      "banner": "Панель бренду застосунку",
+      "primaryNavigation": "Основна",
+      "workspaceNavigation": "Робоча область",
+      "workspaceShell": "Оболонка робочої області",
+      "skipLinks": "Посилання для пропуску",
+      "toggleSidebar": "Перемкнути бічну панель"
+    },
     "applications": "Додатки",
     "dashboard": "Панель",
     "workspace": "Робоча область",

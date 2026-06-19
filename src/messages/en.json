@@ -23,7 +23,8 @@
       "notifyTitle": "Notice",
       "ok": "OK",
       "confirm": "Confirm",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "close": "Close"
     }
   },
   "auth": {
@@ -177,6 +178,14 @@
     }
   },
   "shell": {
+    "regions": {
+      "banner": "Application brand bar",
+      "primaryNavigation": "Primary",
+      "workspaceNavigation": "Workspace",
+      "workspaceShell": "Workspace shell",
+      "skipLinks": "Skip links",
+      "toggleSidebar": "Toggle sidebar"
+    },
     "applications": "Applications",
     "dashboard": "Dashboard",
     "workspace": "Workspace",

@@ -94,7 +94,7 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
     );
   } else {
     body = (
-      <nav aria-label="Primary" className="p-2">
+      <nav aria-label={t("regions.primaryNavigation")} className="p-2">
         <SidebarMenu>
           {(items ?? []).map((item) => {
             const Icon = getMenuIcon(item.icon);

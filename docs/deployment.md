@@ -52,7 +52,7 @@ The repository **does not pin a hosting target**. Two models are consistent with
 | **Serverless (e.g. Vercel)** | Natural for Next.js | `TRUSTED_PROXY_COUNT` defaults to 1 (a CDN/LB in front); `NEXT_PUBLIC_PRODUCTION_HOST` suggests a hosted origin. Use a **pooled** Postgres endpoint. |
 | **Node server / container** | Self-hosted | Build the provided [`Dockerfile`](../Dockerfile) (standalone, non-root) and run it behind a TLS-terminating reverse proxy; run migrations as a separate init step. Full instructions in [docker.md](./docker.md). |
 
-> `TODO:` Choose and document the production hosting target for your infrastructure. The historical [`docs-backup/setup-guide.md`](../docs-backup/setup-guide.md) references Vercel as the primary target and Docker/self-hosted as an alternative — confirm against your actual setup. A container path is now provided (see below); the serverless path needs no extra packaging.
+> `TODO:` Choose and document the production hosting target for your infrastructure. A container path is now provided (see below); the serverless path needs no extra packaging.
 
 ## 5. Containerized deployment
 

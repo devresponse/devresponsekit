@@ -142,7 +142,7 @@ flowchart LR
 | Signal | Source | Notes |
 | --- | --- | --- |
 | **Audit trail** | `app_audit_events` table | First-party, durable record of who-did-what; query by `request_id`. |
-| **Errors / traces / Web Vitals** | Sentry (opt-in) | Enable via `NEXT_PUBLIC_SENTRY_DSN`; PII scrubbed before send. See [`docs-backup/observability.md`](../docs-backup/observability.md). |
+| **Errors / traces / Web Vitals** | Sentry (opt-in) | Enable via `NEXT_PUBLIC_SENTRY_DSN`; PII scrubbed before send. See [Configuration](./configuration.md). |
 | **Request correlation** | `x-request-id` response header | Ties a response to its audit rows and Sentry events. |
 | **App logs** | stdout/stderr of the Node process | Captured by your platform's log aggregation. |
 | **DB health** | Postgres metrics | Connections, slow queries; the app sets per-statement timeouts. |

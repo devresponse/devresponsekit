@@ -64,8 +64,6 @@ See the [Features](./features.md) document for a plain-English breakdown of each
 5. **Cross-subdomain SSO done safely** — single-use, short-lived handoff tokens with an allow-list of trusted destinations.
 6. **Self-hosted, zero marginal identity cost** — the authentication layer is open-source and runs on your own infrastructure.
 
-> The project's own [competitive analysis](../docs-backup/competitive-analysis.md) (in `/docs-backup`) includes a detailed cost-comparison model versus hosted identity vendors. Treat its specific dollar figures as illustrative estimates rather than guarantees.
-
 ## Use cases
 
 - **Internal enterprise platform** — a company-wide tool suite where employees in different departments need different access, with SSO between the tools and a full audit trail.

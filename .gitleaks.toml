@@ -19,8 +19,6 @@ paths = [
   '''(^|/)coverage/''',
   '''(^|/)test-results/''',
   '''(^|/)tests/''',         # fixtures use throwaway `drk_` keys / fake secrets
-  '''(^|/)docs-backup/''',   # archived reference docs with example values
-  '''setup-sso-multi-app\.md$''', # SSO setup guide: all env-var values are placeholders
   '''(^|/)\.env\.example$''',
 ]
 

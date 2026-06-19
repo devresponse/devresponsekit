@@ -4,8 +4,6 @@
 
 This folder is the canonical documentation set. It is organized by **audience** so you can jump straight to what you need.
 
-> Historical/previous documentation lives in [`/docs-backup`](../docs-backup) and is kept as **read-only reference material**. Where the two disagree, **this `/docs` set and the current code are authoritative.**
-
 ---
 
 ## Pick your path

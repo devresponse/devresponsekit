@@ -31,6 +31,15 @@ export interface EmailProvider {
   deliver(email: OutboundEmail): Promise<EmailDeliveryResult>;
 }
 
+/**
+ * Per-call timeout for a provider HTTP request. `sendAppEmail` runs inline on
+ * the request path (e.g. the password-reset flow), so without an abort a hung
+ * provider connection would hold the request open until the platform's own
+ * timeout. `AbortSignal.timeout` rejects the fetch, which the caller records as
+ * a failed outbox row (and a future retry worker can re-attempt).
+ */
+const PROVIDER_TIMEOUT_MS = 10_000;
+
 /** https://resend.com/docs/api-reference/emails/send-email */
 function createResendProvider(apiKey: string): EmailProvider {
   return {
@@ -38,6 +47,7 @@ function createResendProvider(apiKey: string): EmailProvider {
     async deliver(email) {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         headers: {
           authorization: `Bearer ${apiKey}`,
           "content-type": "application/json",
@@ -73,6 +83,7 @@ function createMailgunProvider(apiKey: string, domain: string, baseUrl: string):
 
       const res = await fetch(`${baseUrl}/v3/${domain}/messages`, {
         method: "POST",
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         headers: {
           authorization: `Basic ${Buffer.from(`api:${apiKey}`).toString("base64")}`,
           "content-type": "application/x-www-form-urlencoded",

@@ -46,6 +46,9 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   }
 
   return v1JsonResponse({ user }, request, {
+    // Kysely surfaces `updated_at` as its `Timestamp`/`ColumnType` wrapper, not
+    // a bare Date, so this bridge to `userEtag(Date | string)` is required (it
+    // is a Date at runtime) — NOT a redundant cast.
     headers: { ETag: userEtag(user.updated_at as unknown as Date) },
   });
 }

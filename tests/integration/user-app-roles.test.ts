@@ -125,6 +125,7 @@ function jsonReq(body: unknown): NextRequest {
 const ctx = { params: Promise.resolve({ id: USER }) };
 const body = (organizationId: string) => ({ roleId: ROLE, organizationId });
 
+let GET: typeof Route.GET;
 let POST: typeof Route.POST;
 let DELETE: typeof Route.DELETE;
 
@@ -134,9 +135,25 @@ beforeEach(async () => {
   state.org = { id: ORG_A };
   state.conferredPermKeys = [];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
-  ({ POST, DELETE } = await import("@/app/api/administrator/users/[id]/app-roles/route"));
+  ({ GET, POST, DELETE } = await import("@/app/api/administrator/users/[id]/app-roles/route"));
 });
 afterEach(() => vi.resetModules());
+
+describe("GET /users/[id]/app-roles — listing scope (A3)", () => {
+  it("ORG ADMIN gets 200 (assignments scoped to their org)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
+    const res = await GET(jsonReq(undefined), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("a null-scope admin gets an empty list (no foreign-org assignment leak)", async () => {
+    accessGetter.mockResolvedValue({ ...orgAdmin(["admin.roles.assign"]), organizationId: null });
+    const res = await GET(jsonReq(undefined), ctx);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { assignments: unknown[] };
+    expect(body.assignments).toEqual([]);
+  });
+});
 
 describe("POST /users/[id]/app-roles — assignment scoping", () => {
   it("ORG ADMIN assigns a role in their own org (201)", async () => {

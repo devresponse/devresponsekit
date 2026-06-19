@@ -6,7 +6,7 @@ import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import {
   permissionKeysForRoles,
   unheldPermissionKeys,
@@ -38,10 +38,22 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
-  const rows = await db
+  // ADR-0001: an org admin sees only this user's assignments in their own org
+  // — never the user's role footprint in other tenants (the sibling /roles
+  // route is scoped the same way). SUPERADMIN: all orgs.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return NextResponse.json({ assignments: [] });
+
+  let query = db
     .selectFrom("app_user_roles as ur")
     .innerJoin("app_roles as r", "r.id", "ur.role_id")
     .leftJoin("app_organizations as o", "o.id", "ur.organization_id")
+    .where("ur.app_user_id", "=", target.appUserId);
+  if (scope.kind === "org") {
+    query = query.where("ur.organization_id", "=", scope.organizationId);
+  }
+
+  const rows = await query
     .select([
       "r.id as role_id",
       "r.key as role_key",
@@ -50,7 +62,6 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
       "o.name as organization_name",
       "ur.created_at as created_at",
     ])
-    .where("ur.app_user_id", "=", target.appUserId)
     .orderBy("r.key", "asc")
     .execute();
 

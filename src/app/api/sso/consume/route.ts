@@ -4,8 +4,23 @@ import { auth } from "@/lib/auth";
 import { consumeSsoHandoffNonce } from "@/lib/sso.server";
 import { verifySsoHandoff } from "@/lib/jwt-handoff.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
+import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { logServerError } from "@/lib/observability/logger.server";
+import { captureServerError } from "@/lib/observability/server";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Error JSON for the SSO consume endpoint. Echoes the correlation id in both
+ * the `x-request-id` header and the body so a failed handoff can be traced to
+ * the audit row / server log (OPS-OBS-4) — the admin/v1 surfaces already do.
+ */
+function ssoErrorResponse(code: string, status: number, requestId: string): NextResponse {
+  return NextResponse.json(
+    { error: code, requestId },
+    { status, headers: { [REQUEST_ID_HEADER]: requestId } },
+  );
+}
 
 /**
  * GET /api/sso/consume
@@ -26,6 +41,10 @@ export const dynamic = "force-dynamic";
  *   5. The success response sets `Referrer-Policy: no-referrer`.
  */
 export async function GET(request: NextRequest) {
+  // Mint/echo a correlation id up front (memoised per-request), so every
+  // response — including the misconfig 500s below — and the audit rows share
+  // one id (OPS-OBS-4).
+  const requestId = getOrCreateRequestId(request);
   const token = request.nextUrl.searchParams.get("token");
   const localeParam = request.nextUrl.searchParams.get("locale");
   const locale = localeParam && isSupportedLocale(localeParam) ? localeParam : defaultLocale;
@@ -37,12 +56,23 @@ export async function GET(request: NextRequest) {
       reason: "missing_token",
       request,
     });
-    return NextResponse.json({ error: "missing_token" }, { status: 400 });
+    return ssoErrorResponse("missing_token", 400, requestId);
   }
 
+  // A receiving deployment that is missing its audience config 500s on the
+  // FIRST handoff but boots clean — a silent landmine. These branches `return`
+  // (they do not throw), so `onRequestError` never fires; log + capture them
+  // explicitly so the misconfiguration is visible in stdout and Sentry.
   const audiencePrefix = process.env.SSO_HANDOFF_AUDIENCE_PREFIX;
   if (!audiencePrefix) {
-    return NextResponse.json({ error: "audience_not_configured" }, { status: 500 });
+    const err = new Error("SSO_HANDOFF_AUDIENCE_PREFIX is not configured");
+    logServerError("sso.consume.config_error", {
+      requestId,
+      reason: "audience_prefix_not_configured",
+      err,
+    });
+    captureServerError(err, { requestId, status: 500 });
+    return ssoErrorResponse("audience_not_configured", 500, requestId);
   }
 
   // SECURITY: do NOT derive the expected audience from the request Host
@@ -51,7 +81,14 @@ export async function GET(request: NextRequest) {
   // its own application id explicitly via `SSO_HANDOFF_APPLICATION_ID`.
   const applicationId = process.env.SSO_HANDOFF_APPLICATION_ID;
   if (!applicationId) {
-    return NextResponse.json({ error: "audience_not_configured" }, { status: 500 });
+    const err = new Error("SSO_HANDOFF_APPLICATION_ID is not configured");
+    logServerError("sso.consume.config_error", {
+      requestId,
+      reason: "application_id_not_configured",
+      err,
+    });
+    captureServerError(err, { requestId, status: 500 });
+    return ssoErrorResponse("audience_not_configured", 500, requestId);
   }
   const expectedAudience = `${audiencePrefix}:${applicationId}`;
 
@@ -65,7 +102,7 @@ export async function GET(request: NextRequest) {
         reason: "nonce_replay_or_expired",
         request,
       });
-      return NextResponse.json({ error: "token_already_used" }, { status: 401 });
+      return ssoErrorResponse("token_already_used", 401, requestId);
     }
 
     // Establish the consumer-side session. The nonce is already burned,
@@ -91,7 +128,7 @@ export async function GET(request: NextRequest) {
         request,
         metadata: { message: err instanceof Error ? err.message : "unknown" },
       });
-      return NextResponse.json({ error: "session_establishment_failed" }, { status: 401 });
+      return ssoErrorResponse("session_establishment_failed", 401, requestId);
     }
 
     await auditEvent({
@@ -106,6 +143,7 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.redirect(dashboardUrl);
     response.headers.set("Referrer-Policy", "no-referrer");
     response.headers.set("Cache-Control", "no-store");
+    response.headers.set(REQUEST_ID_HEADER, requestId);
     // Forward the signed Better Auth session cookie(s) so the browser
     // lands on the dashboard already signed in. Use the dedicated
     // getSetCookie() accessor: iterating entries() collapses multiple
@@ -123,6 +161,6 @@ export async function GET(request: NextRequest) {
       reason: error instanceof Error ? error.message : "unknown_error",
       request,
     });
-    return NextResponse.json({ error: "invalid_token" }, { status: 401 });
+    return ssoErrorResponse("invalid_token", 401, requestId);
   }
 }

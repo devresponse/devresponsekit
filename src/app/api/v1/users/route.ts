@@ -177,17 +177,46 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const appUser = await db
-    .insertInto("app_users")
-    .values({
-      better_auth_user_id: betterAuthUserId,
-      primary_email: email,
-      display_name: input.name ?? null,
-      status: input.initialAppStatus,
-      preferred_locale: input.preferredLocale ?? "en",
-    })
-    .returning(["id", "primary_email", "status"])
-    .executeTakeFirstOrThrow();
+  let appUser;
+  try {
+    appUser = await db
+      .insertInto("app_users")
+      .values({
+        better_auth_user_id: betterAuthUserId,
+        primary_email: email,
+        display_name: input.name ?? null,
+        status: input.initialAppStatus,
+        preferred_locale: input.preferredLocale ?? "en",
+      })
+      .returning(["id", "primary_email", "status"])
+      .executeTakeFirstOrThrow();
+  } catch (err) {
+    // OPS-OBS-1: the up-front email check is best-effort; a concurrent create
+    // can still lose the unique race, and any other insert failure here would
+    // otherwise surface as a generic 500 with no audit row (unlike the admin
+    // twin). Audit the failure and return a typed problem — which now logs the
+    // 5xx to stdout regardless of Sentry.
+    await auditUserAction("admin.user.create_failed", "error", {
+      request,
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: "00000000-0000-0000-0000-000000000000",
+      email,
+      requestId: grant.requestId,
+      reason: isUniqueViolation(err) ? "email_taken_race" : "db_insert_failed",
+      metadata: { betterAuthUserId, via: "api.v1" },
+    });
+    if (isUniqueViolation(err)) {
+      return problemResponse("conflict", 409, request, {
+        detail: "A user with this email already exists.",
+        requestId: grant.requestId,
+      });
+    }
+    return problemResponse("internal_error", 502, request, {
+      cause: err,
+      detail: "Failed to persist the user.",
+      requestId: grant.requestId,
+    });
+  }
 
   await auditUserAction("admin.user.created", "success", {
     request,
@@ -207,5 +236,15 @@ export async function POST(request: NextRequest) {
     },
     request,
     { status: 201, requestId: grant.requestId },
+  );
+}
+
+/** Postgres unique-violation (SQLSTATE 23505) detector — mirrors the admin twin. */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "23505"
   );
 }

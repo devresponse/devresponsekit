@@ -15,6 +15,8 @@ const verifyMock = vi.fn();
 const consumeMock = vi.fn();
 const auditMock = vi.fn();
 const createSsoSessionMock = vi.fn();
+const logErrMock = vi.fn();
+const captureMock = vi.fn();
 
 vi.mock("@/lib/jwt-handoff.server", () => ({
   verifySsoHandoff: (...args: unknown[]) => verifyMock(...args),
@@ -24,6 +26,12 @@ vi.mock("@/lib/sso.server", () => ({
 }));
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
+}));
+vi.mock("@/lib/observability/logger.server", () => ({
+  logServerError: (...args: unknown[]) => logErrMock(...args),
+}));
+vi.mock("@/lib/observability/server", () => ({
+  captureServerError: (...args: unknown[]) => captureMock(...args),
 }));
 vi.mock("@/lib/auth", () => ({
   auth: {
@@ -45,6 +53,8 @@ beforeEach(async () => {
   consumeMock.mockReset();
   auditMock.mockReset();
   createSsoSessionMock.mockReset();
+  logErrMock.mockReset();
+  captureMock.mockReset();
   createSsoSessionMock.mockResolvedValue({
     headers: new Headers([["set-cookie", "better-auth.session_token=tok.sig; Path=/; HttpOnly"]]),
     response: { ok: true },
@@ -70,10 +80,32 @@ describe("GET /api/sso/consume", () => {
     );
   });
 
-  it("returns 500 if the application id is not configured", async () => {
+  it("returns 500 if the application id is not configured, with a correlated request id + log (OPS-OBS-4)", async () => {
     delete process.env.SSO_HANDOFF_APPLICATION_ID;
     const res = await GET(makeRequest("http://localhost/api/sso/consume?token=abc"));
     expect(res.status).toBe(500);
+    // The silent misconfig 500 now carries an x-request-id and is logged +
+    // captured (it returns rather than throws, so onRequestError never fires).
+    expect(res.headers.get("x-request-id")).toMatch(/[0-9a-f-]{36}/);
+    const body = (await res.json()) as { error?: string; requestId?: string };
+    expect(body.error).toBe("audience_not_configured");
+    expect(body.requestId).toBe(res.headers.get("x-request-id"));
+    expect(logErrMock).toHaveBeenCalledWith(
+      "sso.consume.config_error",
+      expect.objectContaining({ reason: "application_id_not_configured" }),
+    );
+    expect(captureMock).toHaveBeenCalled();
+  });
+
+  it("returns 500 with a logged config error when the audience prefix is missing", async () => {
+    delete process.env.SSO_HANDOFF_AUDIENCE_PREFIX;
+    const res = await GET(makeRequest("http://localhost/api/sso/consume?token=abc"));
+    expect(res.status).toBe(500);
+    expect(res.headers.get("x-request-id")).toMatch(/[0-9a-f-]{36}/);
+    expect(logErrMock).toHaveBeenCalledWith(
+      "sso.consume.config_error",
+      expect.objectContaining({ reason: "audience_prefix_not_configured" }),
+    );
   });
 
   it("rejects replayed nonces with 401 and audits the reason", async () => {

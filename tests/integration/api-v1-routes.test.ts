@@ -37,7 +37,10 @@ function chain(): unknown {
       if (prop === "execute") return () => Promise.resolve(dbState.execute);
       if (prop === "executeTakeFirst") return () => Promise.resolve(dbState.takeFirst);
       if (prop === "executeTakeFirstOrThrow")
-        return () => Promise.resolve(dbState.takeFirstOrThrow);
+        return () =>
+          dbState.takeFirstOrThrow instanceof Error
+            ? Promise.reject(dbState.takeFirstOrThrow)
+            : Promise.resolve(dbState.takeFirstOrThrow);
       if (prop === "then") return undefined;
       return (cb?: unknown) => {
         if (typeof cb === "function")
@@ -368,6 +371,46 @@ describe("/api/v1/users", () => {
       "admin.user.created",
       "success",
       expect.objectContaining({ metadata: expect.objectContaining({ via: "api.v1" }) }),
+    );
+  });
+
+  it("POST 409 + create_failed audit when the insert loses the unique race (OPS-OBS-1)", async () => {
+    requireApiPermission.mockResolvedValue(grant);
+    dbState.takeFirst = undefined; // up-front email check passes
+    createBetterAuthUser.mockResolvedValue({ user: { id: "ba-race" } });
+    dbState.takeFirstOrThrow = Object.assign(new Error("duplicate key"), { code: "23505" });
+    const { POST } = await import("@/app/api/v1/users/route");
+    const res = await POST(
+      req("/api/v1/users", {
+        method: "POST",
+        body: { email: "race@x.com", password: "password123" },
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(auditUserAction).toHaveBeenCalledWith(
+      "admin.user.create_failed",
+      "error",
+      expect.objectContaining({ reason: "email_taken_race" }),
+    );
+  });
+
+  it("POST 502 + create_failed audit when the insert fails for another reason (OPS-OBS-1)", async () => {
+    requireApiPermission.mockResolvedValue(grant);
+    dbState.takeFirst = undefined;
+    createBetterAuthUser.mockResolvedValue({ user: { id: "ba-x" } });
+    dbState.takeFirstOrThrow = new Error("connection reset");
+    const { POST } = await import("@/app/api/v1/users/route");
+    const res = await POST(
+      req("/api/v1/users", {
+        method: "POST",
+        body: { email: "x@x.com", password: "password123" },
+      }),
+    );
+    expect(res.status).toBe(502);
+    expect(auditUserAction).toHaveBeenCalledWith(
+      "admin.user.create_failed",
+      "error",
+      expect.objectContaining({ reason: "db_insert_failed" }),
     );
   });
 });

@@ -71,5 +71,14 @@ COPY --from=builder --chown=nextjs:nodejs /app/docs ./docs
 USER nextjs
 EXPOSE 3000
 
+# Wire the readiness endpoint to the container health status. /api/health/ready
+# runs `select 1` and returns 503 when the DB is unreachable, so this reports
+# the container healthy only when it can actually serve — not the instant the
+# process starts (Compose `service_healthy`, Swarm, and `docker run` all read
+# this). Node 22 ships a global `fetch`; Docker's `--timeout` bounds the probe,
+# and `--start-period` keeps boot-time failures from counting.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 # The Next.js standalone server reads PORT / HOSTNAME from the env above.
 CMD ["node", "server.js"]

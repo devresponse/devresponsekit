@@ -36,6 +36,11 @@ export const pgPool = createAppPool({
   // Tunable via PG_STATEMENT_TIMEOUT_MS; raise it if a deployment runs
   // legitimately long single statements.
   statement_timeout: intFromEnv("PG_STATEMENT_TIMEOUT_MS", 30_000),
+  // statement_timeout bounds a single statement, but a transaction that stalls
+  // on an await BETWEEN statements would otherwise pin its connection + any
+  // locks it holds indefinitely. Cap idle-in-transaction time so a stuck
+  // request can't wedge the pool (P3-15). Tunable via PG_IDLE_IN_TX_TIMEOUT_MS.
+  idle_in_transaction_session_timeout: intFromEnv("PG_IDLE_IN_TX_TIMEOUT_MS", 30_000),
 });
 
 export const db: Kysely<AppDatabase> = new Kysely<AppDatabase>({

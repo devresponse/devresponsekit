@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/observability/logger.server";
+import { consumeToken, rateLimitKey } from "@/lib/admin/rate-limit.server";
+import { clientIpKey } from "@/lib/client-ip";
 
 export const dynamic = "force-dynamic";
 
@@ -22,12 +24,24 @@ export const dynamic = "force-dynamic";
  * so it does the minimum work and leaks nothing — body size is capped, parse
  * failures are swallowed, individual fields are truncated, and it ALWAYS answers
  * `204` so a probe can't distinguish accepted from rejected input.
+ *
+ * Flood control (P2-5): the sink is attacker-influenced and potentially
+ * high-volume, so beyond the body cap it (1) applies a coarse per-IP + global
+ * token-bucket floor before any work, (2) processes at most
+ * MAX_VIOLATIONS_PER_REQUEST entries from a batch (a `reports+json` array can
+ * pack ~1.8k into 64 KiB), and (3) aggregates to ONE log line per effective
+ * directive (with a count) instead of one per violation.
  */
 
 /** A CSP report is < 2 KiB; anything larger is hostile bulk — drop it unread. */
 const MAX_BODY_BYTES = 64 * 1024;
 /** Bound a single URL/field so one report can't flood the log. */
 const MAX_FIELD_LEN = 2048;
+/** Process at most this many violations from one (possibly batched) request. */
+const MAX_VIOLATIONS_PER_REQUEST = 20;
+/** Coarse flood floors — generous for real reporting, hard cap on abuse. */
+const CSP_GLOBAL_LIMIT = { capacity: 600, refillPerSec: 10 };
+const CSP_IP_LIMIT = { capacity: 30, refillPerSec: 1 };
 
 interface NormalizedViolation {
   documentUri?: string;
@@ -81,6 +95,15 @@ function noContent(): NextResponse {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  // Flood floor FIRST (P2-5): cap request volume per IP + globally before any
+  // parsing or logging. Always 204 so a throttled probe learns nothing.
+  if (
+    !consumeToken(rateLimitKey("csp.report", "__global__"), CSP_GLOBAL_LIMIT).ok ||
+    !consumeToken(rateLimitKey("csp.report", clientIpKey(request.headers)), CSP_IP_LIMIT).ok
+  ) {
+    return noContent();
+  }
+
   let raw: string;
   try {
     raw = await request.text();
@@ -111,13 +134,32 @@ export async function POST(request: Request): Promise<NextResponse> {
     violations.push(fromLegacy(parsed["csp-report"]));
   }
 
-  for (const violation of violations) {
+  // Cap + aggregate (P2-5): collapse the (capped) batch to ONE line per
+  // effective directive — with a count and a representative sample — so a
+  // single request can't pump dozens of lines into the stream.
+  const capped = violations.slice(0, MAX_VIOLATIONS_PER_REQUEST);
+  const byDirective = new Map<string, { count: number; sample: NormalizedViolation }>();
+  for (const violation of capped) {
+    const key = violation.effectiveDirective ?? "unknown";
+    const agg = byDirective.get(key);
+    if (agg) agg.count += 1;
+    else byDirective.set(key, { count: 1, sample: violation });
+  }
+
+  for (const [effectiveDirective, { count, sample }] of byDirective) {
     logger.warn(
       {
         kind: "csp-violation",
-        disposition: violation.disposition ?? "report",
+        effectiveDirective,
+        count,
+        disposition: sample.disposition ?? "report",
         userAgent,
-        ...violation,
+        documentUri: sample.documentUri,
+        blockedUri: sample.blockedUri,
+        sourceFile: sample.sourceFile,
+        lineNumber: sample.lineNumber,
+        // Flag when the batch exceeded the per-request cap so a flood is visible.
+        truncated: violations.length > capped.length ? violations.length : undefined,
       },
       "csp violation report (report-only)",
     );

@@ -108,4 +108,42 @@ describe("POST /api/security/csp-report", () => {
     expect(res.status).toBe(204);
     expect(warnSpy).not.toHaveBeenCalled();
   });
+
+  it("aggregates same-directive violations into one line with a count (P2-5)", async () => {
+    const body = JSON.stringify([
+      { type: "csp-violation", body: { effectiveDirective: "script-src", blockedURL: "a" } },
+      { type: "csp-violation", body: { effectiveDirective: "script-src", blockedURL: "b" } },
+      { type: "csp-violation", body: { effectiveDirective: "script-src", blockedURL: "c" } },
+    ]);
+    await POST(post(body, "application/reports+json"));
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[0]).toMatchObject({
+      effectiveDirective: "script-src",
+      count: 3,
+    });
+  });
+
+  it("caps violations processed per request and flags truncation (P2-5)", async () => {
+    const entries = Array.from({ length: 50 }, (_, i) => ({
+      type: "csp-violation",
+      body: { effectiveDirective: `dir-${i}`, blockedURL: "x" },
+    }));
+    await POST(post(JSON.stringify(entries), "application/reports+json"));
+    // At most MAX_VIOLATIONS_PER_REQUEST (20) distinct directives are logged.
+    expect(warnSpy.mock.calls.length).toBeLessThanOrEqual(20);
+    expect(warnSpy.mock.calls.some((c) => (c[0] as { truncated?: number }).truncated === 50)).toBe(
+      true,
+    );
+  });
+
+  it("applies a per-IP flood floor — drops reports once the bucket is exhausted (P2-5)", async () => {
+    const body = JSON.stringify({ "csp-report": { "effective-directive": "img-src" } });
+    for (let i = 0; i < 40; i += 1) {
+      const res = await POST(post(body, "application/csp-report"));
+      expect(res.status).toBe(204); // always 204, even when throttled
+    }
+    // The per-IP token bucket caps logged reports well below the 40 sent.
+    expect(warnSpy.mock.calls.length).toBeGreaterThan(0);
+    expect(warnSpy.mock.calls.length).toBeLessThan(40);
+  });
 });

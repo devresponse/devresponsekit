@@ -19,6 +19,7 @@ import type {
   AdminError,
   AppRoleAssignments,
   AppRoleRef,
+  AuditEventList,
   BanRequest,
   BulkUserRequest,
   BulkUserResult,
@@ -42,6 +43,7 @@ import type {
   UserGroupRef,
   UserGroups,
   UserList,
+  UserRoleAssignmentList,
   UserStatusRequest,
 } from '../models/index';
 import {
@@ -53,6 +55,8 @@ import {
     AppRoleAssignmentsToJSON,
     AppRoleRefFromJSON,
     AppRoleRefToJSON,
+    AuditEventListFromJSON,
+    AuditEventListToJSON,
     BanRequestFromJSON,
     BanRequestToJSON,
     BulkUserRequestFromJSON,
@@ -99,6 +103,8 @@ import {
     UserGroupsToJSON,
     UserListFromJSON,
     UserListToJSON,
+    UserRoleAssignmentListFromJSON,
+    UserRoleAssignmentListToJSON,
     UserStatusRequestFromJSON,
     UserStatusRequestToJSON,
 } from '../models/index';
@@ -144,6 +150,15 @@ export interface ListUserAppRolesRequest {
     id: string;
 }
 
+export interface ListUserAuditEventsRequest {
+    id: string;
+    page?: number;
+    pageSize?: number;
+    sort?: Array<string>;
+    filterEventType?: Array<string>;
+    filterOutcome?: Array<string>;
+}
+
 export interface ListUserGroupsRequest {
     id: string;
 }
@@ -154,6 +169,14 @@ export interface ListUserMembershipsRequest {
     pageSize?: number;
     sort?: Array<string>;
     filterStatus?: Array<string>;
+    filterOrganizationId?: Array<string>;
+}
+
+export interface ListUserRolesRequest {
+    id: string;
+    page?: number;
+    pageSize?: number;
+    sort?: Array<string>;
     filterOrganizationId?: Array<string>;
 }
 
@@ -586,6 +609,59 @@ export class UsersApi extends runtime.BaseAPI {
     }
 
     /**
+     * List a user\'s audit events
+     */
+    async listUserAuditEventsRaw(requestParameters: ListUserAuditEventsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<AuditEventList>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling listUserAuditEvents().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters['page'] != null) {
+            queryParameters['page'] = requestParameters['page'];
+        }
+
+        if (requestParameters['pageSize'] != null) {
+            queryParameters['pageSize'] = requestParameters['pageSize'];
+        }
+
+        if (requestParameters['sort'] != null) {
+            queryParameters['sort'] = requestParameters['sort'];
+        }
+
+        if (requestParameters['filterEventType'] != null) {
+            queryParameters['filter[event_type]'] = requestParameters['filterEventType'];
+        }
+
+        if (requestParameters['filterOutcome'] != null) {
+            queryParameters['filter[outcome]'] = requestParameters['filterOutcome'];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/users/{id}/audit`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => AuditEventListFromJSON(jsonValue));
+    }
+
+    /**
+     * List a user\'s audit events
+     */
+    async listUserAuditEvents(requestParameters: ListUserAuditEventsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<AuditEventList> {
+        const response = await this.listUserAuditEventsRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
      * List the groups a user belongs to
      */
     async listUserGroupsRaw(requestParameters: ListUserGroupsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<UserGroups>> {
@@ -668,6 +744,55 @@ export class UsersApi extends runtime.BaseAPI {
      */
     async listUserMemberships(requestParameters: ListUserMembershipsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<MembershipList> {
         const response = await this.listUserMembershipsRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * List a user\'s application role assignments
+     */
+    async listUserRolesRaw(requestParameters: ListUserRolesRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<UserRoleAssignmentList>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling listUserRoles().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters['page'] != null) {
+            queryParameters['page'] = requestParameters['page'];
+        }
+
+        if (requestParameters['pageSize'] != null) {
+            queryParameters['pageSize'] = requestParameters['pageSize'];
+        }
+
+        if (requestParameters['sort'] != null) {
+            queryParameters['sort'] = requestParameters['sort'];
+        }
+
+        if (requestParameters['filterOrganizationId'] != null) {
+            queryParameters['filter[organization_id]'] = requestParameters['filterOrganizationId'];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/users/{id}/roles`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => UserRoleAssignmentListFromJSON(jsonValue));
+    }
+
+    /**
+     * List a user\'s application role assignments
+     */
+    async listUserRoles(requestParameters: ListUserRolesRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<UserRoleAssignmentList> {
+        const response = await this.listUserRolesRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

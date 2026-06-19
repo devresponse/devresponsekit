@@ -983,6 +983,22 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         },
 
         // ---- Audit -------------------------------------------------------
+        UserRoleAssignmentItem: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            role_id: uuid(),
+            role_key: { type: "string" },
+            role_name: { type: "string" },
+            role_description: nullableString(),
+            organization_id: uuid(),
+            organization_slug: { type: "string" },
+            organization_name: { type: "string" },
+            created_at: dateTime(),
+          },
+          required: ["id", "role_id", "role_key", "role_name", "organization_id", "created_at"],
+        },
+        UserRoleAssignmentList: listOf("UserRoleAssignmentItem"),
         AuditEventItem: {
           type: "object",
           properties: {
@@ -1229,6 +1245,24 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           parameters: [idParam()],
           requestBody: { required: true, ...json(ref("AppRoleRef")) },
           responses: { "200": okResp(), ...writeErrors() },
+        },
+      },
+      "/users/{id}/roles": {
+        get: {
+          operationId: "listUserRoles",
+          tags: ["Users"],
+          summary: "List a user's application role assignments",
+          parameters: [idParam(), ...listParams(["filter[organization_id]"], false)],
+          responses: { "200": okResp("UserRoleAssignmentList"), ...readErrors() },
+        },
+      },
+      "/users/{id}/audit": {
+        get: {
+          operationId: "listUserAuditEvents",
+          tags: ["Users"],
+          summary: "List a user's audit events",
+          parameters: [idParam(), ...listParams(["filter[event_type]", "filter[outcome]"], false)],
+          responses: { "200": okResp("AuditEventList"), ...readErrors() },
         },
       },
       "/users/{id}/groups": {

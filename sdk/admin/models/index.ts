@@ -101,4 +101,6 @@ export * from './UserGroups';
 export * from './UserGroupsGroupsInner';
 export * from './UserList';
 export * from './UserListItem';
+export * from './UserRoleAssignmentItem';
+export * from './UserRoleAssignmentList';
 export * from './UserStatusRequest';

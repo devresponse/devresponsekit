@@ -40,7 +40,9 @@ export default defineConfig({
     environment: "node",
     setupFiles: ["tests/setup/vitest.setup.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-    exclude: ["tests/e2e/**", "tests/accessibility/**", "node_modules/**"],
+    // tests/db/** are DB-backed (live Postgres) and run via vitest.db.config.ts
+    // (`pnpm test:db`), not in this mocked-DB default run.
+    exclude: ["tests/e2e/**", "tests/accessibility/**", "tests/db/**", "node_modules/**"],
     // Process-isolated forks (Vitest 4 default; pinned for clarity).
     pool: "forks",
     // --- Flaky-runner fix ---

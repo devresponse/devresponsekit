@@ -76,6 +76,14 @@ jobs:
       - name: Tests with coverage gate
         run: pnpm test:coverage
 
+      # F1: the postgres service declared above (added as groundwork) is finally
+      # exercised here — apply the app migrations, then run the live-DB scoping
+      # suites that verify SQL / tenant-isolation correctness, not just mocks.
+      - name: DB-backed integration tests
+        run: |
+          pnpm db:app:migrate
+          pnpm test:db
+
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v4

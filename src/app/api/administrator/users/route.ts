@@ -229,7 +229,7 @@ export async function POST(request: NextRequest) {
       reason: "auth_create_user_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return adminErrorResponse("auth_create_failed", 502, request);
+    return adminErrorResponse("auth_create_failed", 502, request, { cause: err });
   }
 
   // Better Auth's create-user returns either `{ user: { id, ... } }` or
@@ -238,7 +238,9 @@ export async function POST(request: NextRequest) {
     (created as { user?: { id?: string }; id?: string } | null | undefined)?.user?.id ??
     (created as { id?: string } | null | undefined)?.id;
   if (!betterAuthUserId) {
-    return adminErrorResponse("auth_create_failed", 502, request);
+    return adminErrorResponse("auth_create_failed", 502, request, {
+      cause: new Error("identity provider returned no user id on create"),
+    });
   }
 
   // Insert the application user row. We deliberately do NOT auto-create

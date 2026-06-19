@@ -82,6 +82,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
     return adminErrorResponse("auth_unban_failed", 502, request, {
+      cause: err,
       requestId: guard.requestId,
     });
   }

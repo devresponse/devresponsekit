@@ -227,6 +227,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
     return adminErrorResponse("auth_ban_failed", 502, request, {
+      cause: err,
       requestId: guard.requestId,
     });
   }
@@ -300,6 +301,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
     return adminErrorResponse("soft_delete_failed", 500, request, {
+      cause: err,
       requestId: guard.requestId,
     });
   }

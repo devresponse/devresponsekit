@@ -91,7 +91,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       reason: "auth_impersonate_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return adminErrorResponse("auth_impersonate_failed", 502, request);
+    return adminErrorResponse("auth_impersonate_failed", 502, request, { cause: err });
   }
 
   await auditUserAction("admin.user.impersonation_started", "success", {
@@ -156,7 +156,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       reason: "auth_stop_impersonate_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return adminErrorResponse("auth_stop_impersonate_failed", 502, request);
+    return adminErrorResponse("auth_stop_impersonate_failed", 502, request, { cause: err });
   }
 
   await auditUserAction("admin.user.impersonation_stopped", "success", {

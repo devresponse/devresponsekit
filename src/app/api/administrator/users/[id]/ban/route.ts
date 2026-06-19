@@ -92,7 +92,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       reason: "auth_ban_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return adminErrorResponse("auth_ban_failed", 502, request);
+    return adminErrorResponse("auth_ban_failed", 502, request, { cause: err });
   }
 
   await auditUserAction("admin.user.banned", "success", {

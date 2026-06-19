@@ -140,7 +140,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
         message: err instanceof Error ? err.message : "unknown",
       },
     });
-    return adminErrorResponse("export_failed", 502, request);
+    return adminErrorResponse("export_failed", 502, request, { cause: err });
   }
 
   let rowsEmitted = 0;

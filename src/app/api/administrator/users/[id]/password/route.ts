@@ -101,7 +101,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
         reason: "auth_set_password_failed",
         metadata: { message: err instanceof Error ? err.message : "unknown" },
       });
-      return adminErrorResponse("auth_set_password_failed", 502, request);
+      return adminErrorResponse("auth_set_password_failed", 502, request, { cause: err });
     }
 
     await auditUserAction("admin.user.password_set", "success", {
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       reason: "auth_forgot_password_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return adminErrorResponse("auth_forgot_password_failed", 502, request);
+    return adminErrorResponse("auth_forgot_password_failed", 502, request, { cause: err });
   }
 
   await auditUserAction("admin.user.password_reset_email_sent", "success", {

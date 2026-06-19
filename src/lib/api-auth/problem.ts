@@ -11,6 +11,7 @@
  */
 import { NextResponse } from "next/server";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { captureServerError } from "@/lib/observability/server";
 
 export interface ProblemOptions {
   /** Human-readable detail (non-secret). Falls back to a generic line. */
@@ -21,6 +22,12 @@ export interface ProblemOptions {
   requestId?: string;
   /** Additional response headers (e.g. Retry-After, WWW-Authenticate). */
   headers?: Record<string, string>;
+  /**
+   * The originating exception, for a 5xx. Captured to Sentry (tagged with
+   * `request_id`) when `status >= 500`, so a swallowed-then-returned server
+   * error still reaches observability (D4). Ignored for 4xx.
+   */
+  cause?: unknown;
 }
 
 /** Stable titles per machine code. Keep snake_case codes for the body. */
@@ -56,6 +63,9 @@ export function problemResponse(
   options: ProblemOptions = {},
 ): NextResponse {
   const requestId = options.requestId ?? getOrCreateRequestId(request);
+  if (status >= 500 && options.cause !== undefined) {
+    captureServerError(options.cause, { requestId, status });
+  }
   const body = {
     type: `https://devresponse.com/problems/${code}`,
     title: TITLES[code] ?? "Error",

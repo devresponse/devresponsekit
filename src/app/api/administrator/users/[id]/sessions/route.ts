@@ -48,7 +48,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
       reason: "auth_list_sessions_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return adminErrorResponse("auth_list_sessions_failed", 502, request);
+    return adminErrorResponse("auth_list_sessions_failed", 502, request, { cause: err });
   }
 
   // Better Auth returns `{ sessions: [...] }` or a bare array depending
@@ -102,7 +102,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       reason: "auth_revoke_all_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
-    return adminErrorResponse("auth_revoke_all_failed", 502, request);
+    return adminErrorResponse("auth_revoke_all_failed", 502, request, { cause: err });
   }
 
   await auditUserAction("admin.user.sessions_revoked_all", "success", {

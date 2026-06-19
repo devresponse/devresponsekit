@@ -45,6 +45,7 @@ const serverEnvSchema = z
     PGPOOL_MAX: z.coerce.number().int().positive().default(10),
     PG_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     PG_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    PG_IDLE_IN_TX_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     /**
      * Trusted reverse-proxy hop count for client-IP extraction (P2-4): the
      * (count)-th `X-Forwarded-For` entry from the right is the IP the trusted

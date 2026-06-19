@@ -52,6 +52,22 @@ The repository **does not pin a hosting target**. Two models are consistent with
 | **Serverless (e.g. Vercel)** | Natural for Next.js | `TRUSTED_PROXY_COUNT` defaults to 1 (a CDN/LB in front); `NEXT_PUBLIC_PRODUCTION_HOST` suggests a hosted origin. Use a **pooled** Postgres endpoint. |
 | **Node server / container** | Self-hosted | Build the provided [`Dockerfile`](../Dockerfile) (standalone, non-root) and run it behind a TLS-terminating reverse proxy; run migrations as a separate init step. Full instructions in [docker.md](./docker.md). |
 
+**Connection pool sizing (`PGPOOL_MAX`).** The runtime pool holds up to
+`PGPOOL_MAX` (default `10`) connections **per process**, so the database sees
+`PGPOOL_MAX × (number of running instances)` connections at peak:
+
+- **Serverless:** each warm function instance opens its own pool, so total
+  connections scale with concurrency. Set a **low** `PGPOOL_MAX` (e.g. `2`–`5`)
+  and point `DATABASE_URL` at a **pooled** endpoint (PgBouncer / your provider's
+  pooler), or you can exhaust `max_connections` under load.
+- **Node server / container:** size `PGPOOL_MAX` so
+  `PGPOOL_MAX × instances` stays comfortably under the database's
+  `max_connections`, leaving headroom for migrations and admin tools.
+
+A stalled transaction can no longer pin a connection indefinitely: the pool
+sets `idle_in_transaction_session_timeout` (default 30s, `PG_IDLE_IN_TX_TIMEOUT_MS`)
+alongside the per-statement `statement_timeout`.
+
 > `TODO:` Choose and document the production hosting target for your infrastructure. A container path is now provided (see below); the serverless path needs no extra packaging.
 
 ### Supported topology for 1.0: a single application instance

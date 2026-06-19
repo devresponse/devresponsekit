@@ -4,7 +4,15 @@ import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { parseListQuery, type FilterValue, type ListQuery } from "@/lib/admin/list-query.server";
+import {
+  applyKeyset,
+  buildKeysetSort,
+  keysetCursorFrom,
+  parseListQuery,
+  type FilterValue,
+  type KeysetCursor,
+  type ListQuery,
+} from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope, type OrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -36,7 +44,12 @@ export const dynamic = "force-dynamic";
  *   - We stream rows in pages of {@link PAGE_SIZE} so memory stays
  *     bounded regardless of total size — the response itself is
  *     emitted as a `ReadableStream` so the client can start downloading
- *     immediately.
+ *     immediately. Pages are walked by KEYSET (seek) pagination rather
+ *     than a growing `OFFSET`: each page seeks past the previous page's
+ *     last row on `(…sort, id)`, so reading row 99,000 costs the same as
+ *     reading row 0 instead of forcing the DB to scan-and-discard 99,000
+ *     rows. The `id` tiebreaker makes the order total, so no row is
+ *     dropped or duplicated across a page boundary.
  *   - CSV escaping is implemented locally (see {@link csvEscape}); we
  *     do NOT add a CSV library dependency for one function.
  *   - A `admin.export.completed` (or `_failed`) audit row is written
@@ -114,17 +127,14 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   // status + JSON envelope. Once we hand a `ReadableStream` back to
   // Next.js the status is locked at 200 and any later error can only
   // be surfaced as a CSV body, which most consumers cannot detect.
-  let exporter: {
-    header: string[];
-    fetchPage: (limit: number, offset: number) => Promise<unknown[][]>;
-  };
-  let firstPage: unknown[][];
+  let exporter: Exporter;
+  let firstPage: ExportPage;
   // ADR-0001: confine the export to the caller's org. SUPERADMIN → all
   // orgs; ORG ADMIN → their org only; no resolvable org → empty export.
   const scope = resolveOrgScope(guard.access);
   try {
     exporter = buildExporter(resource, query, scope);
-    firstPage = await exporter.fetchPage(Math.min(PAGE_SIZE, MAX_EXPORT_ROWS), 0);
+    firstPage = await exporter.fetchPage(Math.min(PAGE_SIZE, MAX_EXPORT_ROWS), null);
   } catch (err) {
     await auditEvent({
       eventType: "admin.export.failed",
@@ -155,31 +165,32 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
         writeLine(exporter.header.map(csvEscape).join(","));
 
         // Emit the preflight page first.
-        for (const row of firstPage) {
+        for (const row of firstPage.rows) {
           writeLine(row.map(csvEscape).join(","));
           rowsEmitted += 1;
         }
-        let offset = firstPage.length;
+        let cursor = firstPage.cursor;
 
         // Continue streaming subsequent pages until exhausted or
-        // truncated. If the first page already exhausted the source
-        // we skip the loop entirely.
-        if (firstPage.length >= Math.min(PAGE_SIZE, MAX_EXPORT_ROWS)) {
-          while (true) {
+        // truncated, seeking past `cursor` each iteration (no growing
+        // OFFSET). If the first page already exhausted the source — or it
+        // yielded no cursor to seek from — we skip the loop entirely.
+        if (firstPage.rows.length >= Math.min(PAGE_SIZE, MAX_EXPORT_ROWS)) {
+          while (cursor) {
             const remaining = MAX_EXPORT_ROWS - rowsEmitted;
             if (remaining <= 0) {
               truncated = true;
               break;
             }
             const limit = Math.min(PAGE_SIZE, remaining);
-            const rows = await exporter.fetchPage(limit, offset);
-            if (rows.length === 0) break;
-            for (const row of rows) {
+            const page = await exporter.fetchPage(limit, cursor);
+            if (page.rows.length === 0) break;
+            for (const row of page.rows) {
               writeLine(row.map(csvEscape).join(","));
               rowsEmitted += 1;
             }
-            if (rows.length < limit) break;
-            offset += rows.length;
+            cursor = page.cursor;
+            if (page.rows.length < limit) break;
           }
         }
 
@@ -253,28 +264,23 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 /*  Per-resource exporters                                                    */
 /* -------------------------------------------------------------------------- */
 
+// Only CONCRETE, selected columns are sortable here. The list endpoints also
+// expose derived sort fields (member_count, permission_count,
+// used_by_role_count, user_display_name, organization_slug) backed by joins /
+// correlated sub-selects, but the export's plain per-table queries never
+// compute those columns — sorting by one previously raised a SQL error
+// (caught as a 502), and a keyset cursor can't be read off a column that
+// isn't in the row. So they are intentionally omitted; an export requested
+// with such a sort falls back to the resource's default order. (Real
+// aggregate-sort support is tracked separately by P2-17.)
 const ALLOWED_SORT_BY_RESOURCE: Record<Resource, string[]> = {
   users: ["created_at", "primary_email", "display_name", "status"],
   audit: ["created_at", "event_type", "outcome", "actor_better_auth_user_id"],
-  organizations: ["slug", "name", "status", "created_at", "is_default", "member_count"],
-  roles: ["key", "name", "created_at", "permission_count", "member_count"],
-  permissions: ["key", "description", "used_by_role_count"],
-  memberships: [
-    "status",
-    "created_at",
-    "user_display_name",
-    "organization_slug",
-    "source_provider",
-  ],
-  "enterprise-apps": [
-    "id",
-    "label",
-    "subdomain",
-    "status",
-    "sort_order",
-    "created_at",
-    "organization_slug",
-  ],
+  organizations: ["slug", "name", "status", "created_at", "is_default"],
+  roles: ["key", "name", "created_at"],
+  permissions: ["key", "description"],
+  memberships: ["status", "created_at", "source_provider"],
+  "enterprise-apps": ["id", "label", "subdomain", "status", "sort_order", "created_at"],
 };
 
 const ALLOWED_FILTERS_BY_RESOURCE: Record<Resource, string[]> = {
@@ -305,9 +311,34 @@ const DEFAULT_SORT_BY_RESOURCE: Record<Resource, ListQuery["sort"]> = {
   "enterprise-apps": [{ field: "sort_order", direction: "asc" }],
 };
 
+/** One page of CSV rows plus the keyset cursor to seek the next page. */
+interface ExportPage {
+  rows: unknown[][];
+  /** Cursor of the last row, or `null` when the page is empty. */
+  cursor: KeysetCursor | null;
+}
+
 interface Exporter {
   header: string[];
-  fetchPage: (limit: number, offset: number) => Promise<unknown[][]>;
+  fetchPage: (limit: number, cursor: KeysetCursor | null) => Promise<ExportPage>;
+}
+
+/**
+ * Nullable sort columns per resource — they are ordered and sought with
+ * explicit `NULLS LAST` semantics. Every other allowed sort column below is
+ * `NOT NULL`, so it omits the null branches and stays index-friendly.
+ */
+const USERS_NULLABLE_SORTS: ReadonlySet<string> = new Set(["display_name"]);
+const AUDIT_NULLABLE_SORTS: ReadonlySet<string> = new Set(["actor_better_auth_user_id"]);
+const MEMBERSHIPS_NULLABLE_SORTS: ReadonlySet<string> = new Set(["source_provider"]);
+
+/** Reads the keyset cursor off the last row of a just-fetched page. */
+function pageCursor(
+  rows: ReadonlyArray<Record<string, unknown>>,
+  sort: ReturnType<typeof buildKeysetSort>,
+): KeysetCursor | null {
+  const last = rows.at(-1);
+  return last ? keysetCursorFrom(last, sort) : null;
 }
 
 function buildExporter(resource: Resource, query: ListQuery, scope: OrgScope | null): Exporter {
@@ -353,8 +384,8 @@ function buildUsersExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       "created_at",
       "updated_at",
     ],
-    fetchPage: async (limit, offset) => {
-      if (!scope) return [];
+    fetchPage: async (limit, cursor) => {
+      if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_users");
       if (scope.kind === "org") {
         const orgId = scope.organizationId;
@@ -381,8 +412,9 @@ function buildUsersExporter(query: ListQuery, scope: OrgScope | null): Exporter 
           eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
         );
       }
-      let qSorted = q
-        .select([
+      const seek = buildKeysetSort(query.sort, USERS_NULLABLE_SORTS);
+      const rows = await applyKeyset(
+        q.select([
           "id",
           "better_auth_user_id",
           "primary_email",
@@ -391,23 +423,24 @@ function buildUsersExporter(query: ListQuery, scope: OrgScope | null): Exporter 
           "preferred_locale",
           "created_at",
           "updated_at",
-        ])
-        .limit(limit)
-        .offset(offset);
-      for (const s of query.sort) {
-        qSorted = qSorted.orderBy(sql.ref(s.field), s.direction);
-      }
-      const rows = await qSorted.execute();
-      return rows.map((r) => [
-        r.id,
-        r.better_auth_user_id,
-        r.primary_email,
-        r.display_name ?? "",
-        r.status,
-        r.preferred_locale,
-        toIso(r.created_at),
-        toIso(r.updated_at),
-      ]);
+        ]),
+        seek,
+        cursor,
+        limit,
+      ).execute();
+      return {
+        rows: rows.map((r) => [
+          r.id,
+          r.better_auth_user_id,
+          r.primary_email,
+          r.display_name ?? "",
+          r.status,
+          r.preferred_locale,
+          toIso(r.created_at),
+          toIso(r.updated_at),
+        ]),
+        cursor: pageCursor(rows, seek),
+      };
     },
   };
 }
@@ -429,8 +462,8 @@ function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       "reason",
       "created_at",
     ],
-    fetchPage: async (limit, offset) => {
-      if (!scope) return [];
+    fetchPage: async (limit, cursor) => {
+      if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_audit_events as e");
       if (scope.kind === "org") q = q.where("e.organization_id", "=", scope.organizationId);
       const eventType = query.filters.event_type;
@@ -462,8 +495,9 @@ function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter 
           ]),
         );
       }
-      let qSorted = q
-        .select([
+      const seek = buildKeysetSort(query.sort, AUDIT_NULLABLE_SORTS);
+      const rows = await applyKeyset(
+        q.select([
           "e.id",
           "e.event_type",
           "e.outcome",
@@ -477,28 +511,29 @@ function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter 
           "e.user_agent",
           "e.reason",
           "e.created_at",
-        ])
-        .limit(limit)
-        .offset(offset);
-      for (const s of query.sort) {
-        qSorted = qSorted.orderBy(sql.ref(s.field), s.direction);
-      }
-      const rows = await qSorted.execute();
-      return rows.map((r) => [
-        r.id,
-        r.event_type,
-        r.outcome,
-        r.actor_better_auth_user_id ?? "",
-        r.app_user_id ?? "",
-        r.organization_id ?? "",
-        r.target_application_id ?? "",
-        r.provider ?? "",
-        r.email ?? "",
-        r.ip_address ?? "",
-        r.user_agent ?? "",
-        r.reason ?? "",
-        toIso(r.created_at),
-      ]);
+        ]),
+        seek,
+        cursor,
+        limit,
+      ).execute();
+      return {
+        rows: rows.map((r) => [
+          r.id,
+          r.event_type,
+          r.outcome,
+          r.actor_better_auth_user_id ?? "",
+          r.app_user_id ?? "",
+          r.organization_id ?? "",
+          r.target_application_id ?? "",
+          r.provider ?? "",
+          r.email ?? "",
+          r.ip_address ?? "",
+          r.user_agent ?? "",
+          r.reason ?? "",
+          toIso(r.created_at),
+        ]),
+        cursor: pageCursor(rows, seek),
+      };
     },
   };
 }
@@ -506,8 +541,8 @@ function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter 
 function buildOrganizationsExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "slug", "name", "status", "is_default", "created_at", "updated_at"],
-    fetchPage: async (limit, offset) => {
-      if (!scope) return [];
+    fetchPage: async (limit, cursor) => {
+      if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_organizations");
       if (scope.kind === "org") q = q.where("id", "=", scope.organizationId);
       const status = query.filters.status;
@@ -519,21 +554,25 @@ function buildOrganizationsExporter(query: ListQuery, scope: OrgScope | null): E
         const like = `%${query.q}%`;
         q = q.where((eb) => eb.or([eb("slug", "ilike", like), eb("name", "ilike", like)]));
       }
-      let qSorted = q
-        .select(["id", "slug", "name", "status", "is_default", "created_at", "updated_at"])
-        .limit(limit)
-        .offset(offset);
-      for (const s of query.sort) qSorted = qSorted.orderBy(sql.ref(s.field), s.direction);
-      const rows = await qSorted.execute();
-      return rows.map((r) => [
-        r.id,
-        r.slug,
-        r.name,
-        r.status,
-        String(r.is_default),
-        toIso(r.created_at),
-        toIso(r.updated_at),
-      ]);
+      const seek = buildKeysetSort(query.sort);
+      const rows = await applyKeyset(
+        q.select(["id", "slug", "name", "status", "is_default", "created_at", "updated_at"]),
+        seek,
+        cursor,
+        limit,
+      ).execute();
+      return {
+        rows: rows.map((r) => [
+          r.id,
+          r.slug,
+          r.name,
+          r.status,
+          String(r.is_default),
+          toIso(r.created_at),
+          toIso(r.updated_at),
+        ]),
+        cursor: pageCursor(rows, seek),
+      };
     },
   };
 }
@@ -541,8 +580,8 @@ function buildOrganizationsExporter(query: ListQuery, scope: OrgScope | null): E
 function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "key", "name", "description", "organization_id", "created_at"],
-    fetchPage: async (limit, offset) => {
-      if (!scope) return [];
+    fetchPage: async (limit, cursor) => {
+      if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_roles");
       // ADR-0001: an org admin exports only their org's roles (global
       // roles are platform config, superadmin-only).
@@ -556,20 +595,24 @@ function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter 
         const like = `%${query.q}%`;
         q = q.where((eb) => eb.or([eb("key", "ilike", like), eb("name", "ilike", like)]));
       }
-      let qSorted = q
-        .select(["id", "key", "name", "description", "organization_id", "created_at"])
-        .limit(limit)
-        .offset(offset);
-      for (const s of query.sort) qSorted = qSorted.orderBy(sql.ref(s.field), s.direction);
-      const rows = await qSorted.execute();
-      return rows.map((r) => [
-        r.id,
-        r.key,
-        r.name,
-        r.description ?? "",
-        r.organization_id ?? "",
-        toIso(r.created_at),
-      ]);
+      const seek = buildKeysetSort(query.sort);
+      const rows = await applyKeyset(
+        q.select(["id", "key", "name", "description", "organization_id", "created_at"]),
+        seek,
+        cursor,
+        limit,
+      ).execute();
+      return {
+        rows: rows.map((r) => [
+          r.id,
+          r.key,
+          r.name,
+          r.description ?? "",
+          r.organization_id ?? "",
+          toIso(r.created_at),
+        ]),
+        cursor: pageCursor(rows, seek),
+      };
     },
   };
 }
@@ -577,23 +620,30 @@ function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter 
 function buildPermissionsExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "key", "description"],
-    fetchPage: async (limit, offset) => {
+    fetchPage: async (limit, cursor) => {
       // The permission catalog is GLOBAL config (identical for every
       // tenant), not tenant data — any admin may read it. Only the
       // no-org edge case yields nothing.
-      if (!scope) return [];
+      if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_permissions");
       if (query.q) {
         const like = `%${query.q}%`;
         q = q.where((eb) => eb.or([eb("key", "ilike", like), eb("description", "ilike", like)]));
       }
-      const qSorted = q
-        .select(["id", "key", "description"])
-        .orderBy("key", "asc")
-        .limit(limit)
-        .offset(offset);
-      const rows = await qSorted.execute();
-      return rows.map((r) => [r.id, r.key, r.description ?? ""]);
+      // The catalog has a single canonical order (by `key`); it ignores the
+      // caller's `sort`. `key` is unique, but pair it with `id` so the keyset
+      // tiebreaker is uniform with the other resources.
+      const seek = buildKeysetSort([{ field: "key", direction: "asc" }]);
+      const rows = await applyKeyset(
+        q.select(["id", "key", "description"]),
+        seek,
+        cursor,
+        limit,
+      ).execute();
+      return {
+        rows: rows.map((r) => [r.id, r.key, r.description ?? ""]),
+        cursor: pageCursor(rows, seek),
+      };
     },
   };
 }
@@ -601,8 +651,8 @@ function buildPermissionsExporter(query: ListQuery, scope: OrgScope | null): Exp
 function buildMembershipsExporter(query: ListQuery, scope: OrgScope | null): Exporter {
   return {
     header: ["id", "app_user_id", "organization_id", "status", "source_provider", "created_at"],
-    fetchPage: async (limit, offset) => {
-      if (!scope) return [];
+    fetchPage: async (limit, cursor) => {
+      if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_organization_memberships as m");
       if (scope.kind === "org") q = q.where("m.organization_id", "=", scope.organizationId);
       const status = query.filters.status;
@@ -611,27 +661,31 @@ function buildMembershipsExporter(query: ListQuery, scope: OrgScope | null): Exp
       if (typeof orgId === "string") q = q.where("m.organization_id", "=", orgId);
       const source = query.filters.source_provider;
       if (typeof source === "string") q = q.where("m.source_provider", "=", source);
-      let qSorted = q
-        .select([
+      const seek = buildKeysetSort(query.sort, MEMBERSHIPS_NULLABLE_SORTS);
+      const rows = await applyKeyset(
+        q.select([
           "m.id",
           "m.app_user_id",
           "m.organization_id",
           "m.status",
           "m.source_provider",
           "m.created_at",
-        ])
-        .limit(limit)
-        .offset(offset);
-      for (const s of query.sort) qSorted = qSorted.orderBy(sql.ref(s.field), s.direction);
-      const rows = await qSorted.execute();
-      return rows.map((r) => [
-        r.id,
-        r.app_user_id,
-        r.organization_id,
-        r.status,
-        r.source_provider ?? "",
-        toIso(r.created_at),
-      ]);
+        ]),
+        seek,
+        cursor,
+        limit,
+      ).execute();
+      return {
+        rows: rows.map((r) => [
+          r.id,
+          r.app_user_id,
+          r.organization_id,
+          r.status,
+          r.source_provider ?? "",
+          toIso(r.created_at),
+        ]),
+        cursor: pageCursor(rows, seek),
+      };
     },
   };
 }
@@ -649,8 +703,8 @@ function buildEnterpriseAppsExporter(query: ListQuery, scope: OrgScope | null): 
       "organization_id",
       "created_at",
     ],
-    fetchPage: async (limit, offset) => {
-      if (!scope) return [];
+    fetchPage: async (limit, cursor) => {
+      if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_enterprise_applications as a");
       if (scope.kind === "org") q = q.where("a.organization_id", "=", scope.organizationId);
       const status = query.filters.status;
@@ -661,8 +715,9 @@ function buildEnterpriseAppsExporter(query: ListQuery, scope: OrgScope | null): 
         const like = `%${query.q}%`;
         q = q.where((eb) => eb.or([eb("a.id", "ilike", like), eb("a.label", "ilike", like)]));
       }
-      let qSorted = q
-        .select([
+      const seek = buildKeysetSort(query.sort);
+      const rows = await applyKeyset(
+        q.select([
           "a.id",
           "a.label",
           "a.subdomain",
@@ -672,22 +727,25 @@ function buildEnterpriseAppsExporter(query: ListQuery, scope: OrgScope | null): 
           "a.sort_order",
           "a.organization_id",
           "a.created_at",
-        ])
-        .limit(limit)
-        .offset(offset);
-      for (const s of query.sort) qSorted = qSorted.orderBy(sql.ref(s.field), s.direction);
-      const rows = await qSorted.execute();
-      return rows.map((r) => [
-        r.id,
-        r.label,
-        r.subdomain,
-        r.origin,
-        r.sso_audience,
-        r.status,
-        String(r.sort_order),
-        r.organization_id ?? "",
-        toIso(r.created_at),
-      ]);
+        ]),
+        seek,
+        cursor,
+        limit,
+      ).execute();
+      return {
+        rows: rows.map((r) => [
+          r.id,
+          r.label,
+          r.subdomain,
+          r.origin,
+          r.sso_audience,
+          r.status,
+          String(r.sort_order),
+          r.organization_id ?? "",
+          toIso(r.created_at),
+        ]),
+        cursor: pageCursor(rows, seek),
+      };
     },
   };
 }

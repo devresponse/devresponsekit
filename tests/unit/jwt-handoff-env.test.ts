@@ -67,20 +67,44 @@ describe("jwt-handoff.server env guards", () => {
     }
   });
 
-  it("rejects tokens missing jti/sub claims", async () => {
-    // Sign a token without using setJti to simulate a malformed input.
+  it("rejects tokens with an invalid or incomplete claim set (P3-11)", async () => {
     const { SignJWT } = await import("jose");
-    const token = await new SignJWT({ foo: "bar" })
+    const secret = new TextEncoder().encode(process.env.SSO_HANDOFF_JWT_SECRET!);
+    const base = () =>
+      new SignJWT({})
+        .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+        .setIssuer(process.env.SSO_HANDOFF_ISSUER!)
+        .setAudience("devresponse-app:portal")
+        .setIssuedAt()
+        .setExpirationTime("60s");
+
+    // Missing jti/sub (and every custom claim).
+    const noJtiSub = await base().sign(secret);
+    await expect(
+      verifySsoHandoff({ token: noJtiSub, expectedAudience: "devresponse-app:portal" }),
+    ).rejects.toThrow(/invalid or incomplete claim set/);
+
+    // Has jti/sub but omits a required custom claim (email) — the full-claim
+    // boundary validation rejects it rather than `as`-casting a partial payload
+    // into session establishment.
+    const missingEmail = await new SignJWT({
+      organizationId: "o1",
+      appUserId: "u1",
+      targetApplicationId: "portal",
+      locale: "en",
+      roles: [],
+    })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setIssuer(process.env.SSO_HANDOFF_ISSUER!)
       .setAudience("devresponse-app:portal")
+      .setSubject("ba-1")
+      .setJti("j1")
       .setIssuedAt()
       .setExpirationTime("60s")
-      .sign(new TextEncoder().encode(process.env.SSO_HANDOFF_JWT_SECRET!));
-
+      .sign(secret);
     await expect(
-      verifySsoHandoff({ token, expectedAudience: "devresponse-app:portal" }),
-    ).rejects.toThrow(/missing required jti\/sub/);
+      verifySsoHandoff({ token: missingEmail, expectedAudience: "devresponse-app:portal" }),
+    ).rejects.toThrow(/invalid or incomplete claim set/);
   });
 
   it("re-exports the clamp helper used by SSO callers", () => {

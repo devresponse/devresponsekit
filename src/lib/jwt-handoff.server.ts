@@ -1,7 +1,28 @@
 import "server-only";
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
+import { z } from "zod";
 
 const JWT_ALG = "HS256";
+
+/**
+ * The full handoff claim set, validated at the verify boundary (P3-11). The
+ * consumer builds a session + audience-scoped context from every one of these
+ * claims, so verifying only `jti`/`sub` and `as`-casting the rest would let a
+ * token with a malformed/missing claim flow into session establishment. jose
+ * has already checked the signature, issuer, audience, and expiry before this.
+ */
+const handoffClaimsSchema = z.object({
+  jti: z.string().min(1),
+  sub: z.string().min(1),
+  email: z.string(),
+  organizationId: z.string(),
+  appUserId: z.string(),
+  targetApplicationId: z.string(),
+  locale: z.string(),
+  roles: z.array(z.string()),
+  iat: z.number(),
+  exp: z.number(),
+});
 
 /**
  * Hard upper bound on SSO handoff token TTL in seconds.
@@ -100,9 +121,11 @@ export async function verifySsoHandoff(input: VerifySsoHandoffInput): Promise<Ve
     audience: input.expectedAudience,
   });
 
-  if (typeof payload.jti !== "string" || typeof payload.sub !== "string") {
-    throw new Error("SSO handoff token is missing required jti/sub claims");
+  const parsed = handoffClaimsSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("SSO handoff token has an invalid or incomplete claim set");
   }
 
-  return { payload: payload as VerifiedSsoHandoff["payload"] };
+  // Validated above — the cast only bridges to JWTPayload's index signature.
+  return { payload: parsed.data as VerifiedSsoHandoff["payload"] };
 }

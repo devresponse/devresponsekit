@@ -24,6 +24,41 @@ export interface UserAccessContext {
 /** Status values that block access to all secure routes. */
 const BLOCKED_USER_STATUSES = new Set<AppUserStatus>(["blocked", "suspended", "deactivated"]);
 
+/** Every recognized app/membership status, for boundary validation. */
+const USER_STATUSES = new Set<AppUserStatus>([
+  "active",
+  "pending_approval",
+  "blocked",
+  "suspended",
+  "deactivated",
+]);
+const MEMBERSHIP_STATUSES = new Set<MembershipStatus>([
+  "active",
+  "pending_approval",
+  "blocked",
+  "suspended",
+]);
+
+/**
+ * Coerce a raw DB status to {@link AppUserStatus}, failing CLOSED on an
+ * unrecognized value (P3-11). The status feeds the security decision, so a
+ * schema drift / bad row must never be `as`-cast into a value that could grant
+ * access — an unknown status resolves to a blocking one.
+ */
+function toUserStatus(value: unknown): AppUserStatus {
+  return typeof value === "string" && USER_STATUSES.has(value as AppUserStatus)
+    ? (value as AppUserStatus)
+    : "deactivated";
+}
+
+/** Coerce a raw DB membership status, failing CLOSED (`suspended`) on an
+ *  unrecognized value so it can never resolve to `active`. */
+function toMembershipStatus(value: unknown): MembershipStatus {
+  return typeof value === "string" && MEMBERSHIP_STATUSES.has(value as MembershipStatus)
+    ? (value as MembershipStatus)
+    : "suspended";
+}
+
 /**
  * Pure helper: maps user + membership statuses to a final secure-access
  * decision. Kept pure so it can be unit-tested without a database.
@@ -188,9 +223,9 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
   return {
     appUserId: user.id,
     primaryEmail: user.primary_email,
-    status: user.status as AppUserStatus,
+    status: toUserStatus(user.status),
     organizationId: membership?.organization_id ?? null,
-    membershipStatus: (membership?.status as MembershipStatus | undefined) ?? null,
+    membershipStatus: membership ? toMembershipStatus(membership.status) : null,
     preferredLocale: user.preferred_locale,
     permissions,
   };

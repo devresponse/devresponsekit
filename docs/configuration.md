@@ -132,7 +132,7 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 
 | File | Purpose |
 | --- | --- |
-| `next.config.mjs` | Security headers (X-Frame-Options, HSTS, report-only CSP, …), next-intl plugin, opt-in Sentry plugin. |
+| `next.config.mjs` | Static security headers (X-Frame-Options, HSTS, Reporting-Endpoints, …), next-intl plugin, opt-in Sentry plugin. The enforcing nonce-based CSP is minted per request in `src/proxy.ts`. |
 | `vitest.config.ts` | Test config + coverage thresholds (the ratchet). |
 | `playwright.config.ts` | E2E/accessibility browser test config. |
 | `tsconfig.json` | TypeScript (strict; path aliases). |

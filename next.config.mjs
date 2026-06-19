@@ -10,47 +10,22 @@ import { withSentryConfig } from "@sentry/nextjs";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 /**
- * Content-Security-Policy shipped in **Report-Only** mode to start. Next.js
- * injects inline/eval scripts for hydration, so an enforcing strict CSP
- * would break the app until we move to per-request nonces — report-only
- * lets us observe violations first, then tighten without an outage.
- * Violations are now collected at `POST /api/security/csp-report` (A7).
- * Clickjacking is blocked TODAY regardless, via the enforced
- * `X-Frame-Options: DENY` + `frame-ancestors 'none'` below.
- *
- * Enforcing cutover plan (post-1.0): (1) watch the sink until the only
- * reports are known-safe; (2) emit a per-request nonce from `src/proxy.ts`
- * and add it to `script-src` / `style-src`; (3) drop `unsafe-inline` /
- * `unsafe-eval`; (4) rename the header to `Content-Security-Policy` to
- * enforce. Keep `report-uri` / `report-to` through the switch so any
- * regression still surfaces.
+ * The enforcing **Content-Security-Policy** is set PER REQUEST in
+ * `src/proxy.ts`, not here: it carries a per-request `'nonce-…'` in
+ * `script-src` (with `'strict-dynamic'`, dropping `'unsafe-inline'` /
+ * `'unsafe-eval'`), which a static `next.config` header cannot express.
+ * Violations still report to the hardened sink at
+ * `POST /api/security/csp-report` (A7) via the `report-uri` / `report-to` the
+ * proxy keeps. The static headers below are the request-invariant ones; they
+ * apply to every response (including `/api` and assets the proxy matcher
+ * skips). Clickjacking is blocked by `X-Frame-Options: DENY` here AND
+ * `frame-ancestors 'none'` in the proxy CSP.
  */
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  // Sentry ingest — only contacted when observability is enabled.
-  "connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io",
-  "worker-src 'self' blob:",
-  // CSP violation sink (A7): collect Report-Only violations so we can see what
-  // an enforcing policy would block before flipping the switch. `report-uri` is
-  // honored by the most browsers; `report-to` is the modern Reporting API form
-  // (its group is declared by the `Reporting-Endpoints` header below).
-  "report-uri /api/security/csp-report",
-  "report-to csp-endpoint",
-  "upgrade-insecure-requests",
-].join("; ");
 
 /**
  * Baseline security headers applied to every response (enterprise
- * hardening). The non-CSP headers are enforced; HSTS is inert over plain
- * HTTP (browsers ignore it) so it is safe to send everywhere.
+ * hardening). HSTS is inert over plain HTTP (browsers ignore it) so it is
+ * safe to send everywhere.
  */
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
@@ -62,9 +37,9 @@ const securityHeaders = [
     value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
   },
   { key: "X-DNS-Prefetch-Control", value: "off" },
-  // Declares the `csp-endpoint` reporting group referenced by `report-to`.
+  // Declares the `csp-endpoint` reporting group referenced by the proxy CSP's
+  // `report-to`. Static so it rides on every response alongside the CSP.
   { key: "Reporting-Endpoints", value: 'csp-endpoint="/api/security/csp-report"' },
-  { key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy },
 ];
 
 /** @type {import('next').NextConfig} */

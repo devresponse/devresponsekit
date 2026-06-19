@@ -8,8 +8,9 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/security/csp-report — Content-Security-Policy violation sink (A7).
  *
- * The app-wide CSP ships in **Report-Only** mode (see `next.config.mjs`); this
- * endpoint is the sink the policy reports to, so violations are actually
+ * The app-wide CSP is **enforcing**, nonce-based, and minted per request in
+ * `src/proxy.ts`; it keeps `report-uri` / `report-to` pointed here, so this is
+ * the sink real blocks (and any regression after the cutover) report to —
  * collected instead of dropped on the floor. Each violation is written to the
  * structured logger at `warn` — which always ships to stdout (and any
  * aggregator) regardless of whether Sentry is enabled — rather than to the
@@ -161,7 +162,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         // Flag when the batch exceeded the per-request cap so a flood is visible.
         truncated: violations.length > capped.length ? violations.length : undefined,
       },
-      "csp violation report (report-only)",
+      "csp violation report (enforced)",
     );
   }
 

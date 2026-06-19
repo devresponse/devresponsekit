@@ -62,6 +62,14 @@ export default defineConfig({
     // its own transform server, so there is no shared race. `pnpm test`
     // drives the shards (scripts/test-shards.mjs): deterministic AND fast.
     // `pnpm test:serial` is the plain single-process fallback.
+    //
+    // F3: this setting applies to EVERY invocation, including `pnpm
+    // test:coverage` — the CI quality gate, which cannot shard because coverage
+    // must aggregate in a single process. So CI's coverage run is already
+    // single-worker and race-safe; it does NOT bypass the mitigation. `retry`
+    // is deliberately NOT configured: per the root cause above, the corrupted
+    // transform is cached, so a retry just re-hits it — single-worker is the
+    // only cure, not retries.
     maxWorkers: 1,
     // Headroom for the slowest module-init when several shards share a box.
     testTimeout: 20_000,

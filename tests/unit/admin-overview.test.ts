@@ -8,8 +8,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *   - excluded slices are never queried (permission-driven `include`).
  */
 
-const executeByTable = new Map<string, ReturnType<typeof vi.fn>>();
-const takeFirstByTable = new Map<string, ReturnType<typeof vi.fn>>();
+// Typed by usage (a no-arg call returning a promise) rather than
+// `ReturnType<typeof vi.fn>` — under vitest 4.1 that resolves to the
+// `Mock<Procedure | Constructable>` union, which is not directly callable
+// (TS2348). A `vi.fn().mockResolvedValue(...)` still assigns to this.
+const executeByTable = new Map<string, () => Promise<unknown>>();
+const takeFirstByTable = new Map<string, () => Promise<unknown>>();
 const queriedTables: string[] = [];
 /** Args passed to every `.where(...)` on the outer query, keyed by table. */
 const whereArgsByTable = new Map<string, unknown[][]>();

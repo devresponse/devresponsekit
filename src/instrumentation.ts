@@ -17,6 +17,10 @@ export async function register() {
     if (process.env.NEXT_PHASE !== "phase-production-build") {
       const { registerGracefulShutdown } = await import("@/lib/shutdown.server");
       registerGracefulShutdown();
+      // D5: capture stray unhandledRejection/uncaughtException to Sentry + the
+      // log before the process dies (otherwise a crash is silent).
+      const { registerProcessErrorHandlers } = await import("@/lib/process-errors.server");
+      registerProcessErrorHandlers();
     }
   }
   if (process.env.NEXT_RUNTIME === "edge") {

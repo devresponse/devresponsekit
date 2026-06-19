@@ -7,9 +7,8 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## Versioning policy
 
-The package is pre-1.0 (`0.x`); while in `0.x`, any release may contain
-breaking changes. At `1.0.0`, semantic versioning applies, and three surfaces
-are versioned with distinct guarantees:
+As of `1.0.0`, [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+applies, and three surfaces are versioned with distinct guarantees:
 
 - **The package / application shell** — semver on tagged releases.
 - **The machine API (`/api/v1`)** — the `v1` path is the compatibility
@@ -17,11 +16,11 @@ are versioned with distinct guarantees:
 - **The admin SDK** (`sdk/admin/`) — regenerated from the OpenAPI spec; tracks
   the admin API surface.
 
-## [Unreleased]
+## [1.0.0] - 2026-06-18
 
-Work toward the `1.0.0` release (tracked in `PRODUCTION-READINESS-1.0.md` and
-`PRODUCTION-READINESS-1.0-REVIEW-2.md`). Notable changes since the readiness
-reviews include:
+The first stable release. Closes the 1.0 blockers and the full second-pass
+hardening review (`PRODUCTION-READINESS-1.0.md`,
+`PRODUCTION-READINESS-1.0-REVIEW-2.md`). Highlights:
 
 ### Added
 
@@ -39,6 +38,19 @@ reviews include:
   error-border highlighting, shared client/server schemas, accessibility.
 - Governance docs: `SECURITY.md`, `CONTRIBUTING.md`, this changelog;
   `engines` / `.nvmrc`; `LICENSE` (MIT).
+- CSP violation report sink (`/api/security/csp-report`); OpenAPI
+  `/users/{id}/roles` + `/audit` endpoints with a regenerated admin SDK and an
+  SDK-drift CI gate.
+- Email outbox retry worker with exponential backoff (`pnpm outbox:drain`) and
+  data-retention pruning (`pnpm db:prune`: expired token revocations + audit /
+  outbox windows).
+- Committed Better Auth identity-schema snapshot with a drift CI gate.
+- DB-backed integration test tier (`pnpm test:db`) plus end-to-end coverage of
+  the SSO handoff and client-credentials machine flows.
+- Markdown link checker; Dependabot with SHA-pinned GitHub Actions and
+  digest-pinned tool images.
+- Process-level `unhandledRejection` / `uncaughtException` handlers
+  (log + Sentry + controlled exit).
 
 ### Fixed
 
@@ -51,6 +63,21 @@ reviews include:
   `application` ARIA landmarks.
 - Email provider HTTP calls now time out instead of hanging the request.
 - Bumped `undici` (and `kysely` / `better-auth`) to clear advisories.
+
+### Security
+
+- `app_audit_events` is now append-only — a database trigger blocks
+  UPDATE/DELETE outside the explicit retention job, making the audit log
+  tamper-evident.
+- Server-side 5xx errors are captured to Sentry, tagged with the `request_id`
+  that correlates the structured log, the audit row, and the Sentry issue.
+
+### Changed
+
+- Documented single-instance as the supported 1.0 deployment topology (the
+  abuse-guard rate limiter is in-process; a shared backend is post-1.0).
+- Documented the `pnpm audit` GHSA allowlist — per-advisory package,
+  reachability rationale, and review date — in `SECURITY.md`.
 
 > Older history predates this changelog; see the git log and the
 > `PRODUCTION-READINESS-1.0*.md` reviews.

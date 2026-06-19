@@ -36,6 +36,19 @@ describe("getServerEnv", () => {
       process.env.SSO_HANDOFF_JWT_SECRET = original;
     }
   });
+
+  it("fails at boot when SSO_HANDOFF_APPLICATION_ID is missing (P3-6)", async () => {
+    // The consume endpoint needs prefix + app id together to compute the
+    // expected audience; a missing app id must fail at boot, not first handoff.
+    const original = process.env.SSO_HANDOFF_APPLICATION_ID;
+    delete process.env.SSO_HANDOFF_APPLICATION_ID;
+    const fresh = (await import("@/lib/env" + "?fresh-appid")) as typeof EnvModule;
+    try {
+      expect(() => fresh.getServerEnv()).toThrow(/SSO_HANDOFF_APPLICATION_ID/);
+    } finally {
+      process.env.SSO_HANDOFF_APPLICATION_ID = original;
+    }
+  });
 });
 
 /**

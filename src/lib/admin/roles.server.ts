@@ -116,17 +116,31 @@ export async function loadRoleOrThrow(id: string): Promise<LoadedRole> {
 
 /**
  * DELETE guard. Throws {@link AdminError} with `role_in_use` when any
- * `app_user_roles` row still references the role. Route handlers
- * translate the throw into HTTP 409 with the `role_in_use` machine
- * code per §5.1.
+ * `app_user_roles` OR `app_group_roles` row still references the role.
+ * Route handlers translate the throw into HTTP 409 with the `role_in_use`
+ * machine code per §5.1.
+ *
+ * DB-2: group-conferred roles must block deletion too. `app_group_roles`
+ * is `ON DELETE CASCADE` on `role_id`, so a role bundled into a group but
+ * assigned to no user would otherwise pass this guard and be silently
+ * cascade-stripped from the group — quietly revoking the permissions that
+ * group conferred (resolved via the ADR-0002 UNION in auth-status.ts),
+ * instead of surfacing the documented 409.
  */
 export async function assertRoleNotInUse(roleId: string): Promise<void> {
-  const row = await db
-    .selectFrom("app_user_roles")
-    .select(sql<string>`count(*)`.as("count"))
-    .where("role_id", "=", roleId)
-    .executeTakeFirst();
-  if (Number(row?.count ?? 0) > 0) {
+  const [userRow, groupRow] = await Promise.all([
+    db
+      .selectFrom("app_user_roles")
+      .select(sql<string>`count(*)`.as("count"))
+      .where("role_id", "=", roleId)
+      .executeTakeFirst(),
+    db
+      .selectFrom("app_group_roles")
+      .select(sql<string>`count(*)`.as("count"))
+      .where("role_id", "=", roleId)
+      .executeTakeFirst(),
+  ]);
+  if (Number(userRow?.count ?? 0) > 0 || Number(groupRow?.count ?? 0) > 0) {
     throw new AdminError("role_in_use");
   }
 }

@@ -4,7 +4,6 @@ import {
   ArrowRight,
   BookOpen,
   Check,
-  Github,
   KeyRound,
   Languages,
   LayoutDashboard,
@@ -13,6 +12,7 @@ import {
   Network,
   ShieldCheck,
 } from "lucide-react";
+import { GithubIcon } from "@/components/icons/github-icon";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Button } from "@/components/ui/button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
@@ -99,7 +99,7 @@ function Landing({ locale }: { locale: SupportedLocale }) {
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <Button asChild size="lg">
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-                <Github className="h-4 w-4" aria-hidden />
+                <GithubIcon className="h-4 w-4" />
                 {t("hero.primaryCta")}
               </a>
             </Button>
@@ -245,7 +245,7 @@ function Landing({ locale }: { locale: SupportedLocale }) {
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
               <Button asChild size="lg">
                 <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-                  <Github className="h-4 w-4" aria-hidden />
+                  <GithubIcon className="h-4 w-4" />
                   {t("cta.primary")}
                 </a>
               </Button>
@@ -261,7 +261,7 @@ function Landing({ locale }: { locale: SupportedLocale }) {
               rel="noopener noreferrer"
               className="text-muted-foreground hover:text-foreground mt-6 inline-flex items-center gap-1.5 text-sm"
             >
-              <Github className="h-4 w-4" aria-hidden />
+              <GithubIcon className="h-4 w-4" />
               {t("cta.repoLabel")}
               <ArrowRight className="h-3.5 w-3.5" aria-hidden />
             </a>
@@ -279,7 +279,7 @@ function Landing({ locale }: { locale: SupportedLocale }) {
             rel="noopener noreferrer"
             className="hover:text-foreground inline-flex items-center gap-1.5"
           >
-            <Github className="h-4 w-4" aria-hidden />
+            <GithubIcon className="h-4 w-4" />
             {t("footer.githubLink")}
           </a>
         </div>

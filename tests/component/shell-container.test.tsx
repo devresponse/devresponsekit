@@ -12,7 +12,7 @@ describe("ShellContainer", () => {
       </ShellContainer>,
     );
     expect(screen.getByText("page").closest("main")).toHaveAttribute("id", "root-main");
-    expect(screen.getByRole("application", { name: "Root shell" })).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "Root shell" })).toBeInTheDocument();
   });
 
   it("renders branding above the grid", () => {

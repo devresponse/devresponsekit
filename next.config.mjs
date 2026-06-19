@@ -13,10 +13,17 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
  * Content-Security-Policy shipped in **Report-Only** mode to start. Next.js
  * injects inline/eval scripts for hydration, so an enforcing strict CSP
  * would break the app until we move to per-request nonces — report-only
- * lets us observe violations first, then tighten (drop `unsafe-inline` /
- * `unsafe-eval`, add a nonce) without an outage. Clickjacking is blocked
- * TODAY regardless, via the enforced `X-Frame-Options: DENY` +
- * `frame-ancestors 'none'` below.
+ * lets us observe violations first, then tighten without an outage.
+ * Violations are now collected at `POST /api/security/csp-report` (A7).
+ * Clickjacking is blocked TODAY regardless, via the enforced
+ * `X-Frame-Options: DENY` + `frame-ancestors 'none'` below.
+ *
+ * Enforcing cutover plan (post-1.0): (1) watch the sink until the only
+ * reports are known-safe; (2) emit a per-request nonce from `src/proxy.ts`
+ * and add it to `script-src` / `style-src`; (3) drop `unsafe-inline` /
+ * `unsafe-eval`; (4) rename the header to `Content-Security-Policy` to
+ * enforce. Keep `report-uri` / `report-to` through the switch so any
+ * regression still surfaces.
  */
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -31,6 +38,12 @@ const contentSecurityPolicy = [
   // Sentry ingest — only contacted when observability is enabled.
   "connect-src 'self' https://*.ingest.sentry.io https://*.sentry.io",
   "worker-src 'self' blob:",
+  // CSP violation sink (A7): collect Report-Only violations so we can see what
+  // an enforcing policy would block before flipping the switch. `report-uri` is
+  // honored by the most browsers; `report-to` is the modern Reporting API form
+  // (its group is declared by the `Reporting-Endpoints` header below).
+  "report-uri /api/security/csp-report",
+  "report-to csp-endpoint",
   "upgrade-insecure-requests",
 ].join("; ");
 
@@ -49,6 +62,8 @@ const securityHeaders = [
     value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
   },
   { key: "X-DNS-Prefetch-Control", value: "off" },
+  // Declares the `csp-endpoint` reporting group referenced by `report-to`.
+  { key: "Reporting-Endpoints", value: 'csp-endpoint="/api/security/csp-report"' },
   { key: "Content-Security-Policy-Report-Only", value: contentSecurityPolicy },
 ];
 

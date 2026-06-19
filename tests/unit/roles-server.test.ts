@@ -9,9 +9,16 @@ import type * as RolesServerModule from "@/lib/admin/roles.server";
 const state: {
   role: Record<string, unknown> | undefined;
   userRolesCount: { count: string };
+  groupRolesCount: { count: string };
   permUseCount: { count: string };
   permRows: Array<{ key: string }>;
-} = { role: undefined, userRolesCount: { count: "0" }, permUseCount: { count: "0" }, permRows: [] };
+} = {
+  role: undefined,
+  userRolesCount: { count: "0" },
+  groupRolesCount: { count: "0" },
+  permUseCount: { count: "0" },
+  permRows: [],
+};
 
 function tableKey(t: unknown) {
   return String(t).split(" ")[0] ?? "";
@@ -30,9 +37,11 @@ vi.mock("@/db/database", () => ({
                   ? state.role
                   : table === "app_user_roles"
                     ? state.userRolesCount
-                    : table === "app_role_permissions"
-                      ? state.permUseCount
-                      : undefined;
+                    : table === "app_group_roles"
+                      ? state.groupRolesCount
+                      : table === "app_role_permissions"
+                        ? state.permUseCount
+                        : undefined;
             if (prop === "execute")
               return async () => (table === "app_role_permissions" ? state.permRows : []);
             // Chain methods return the SAME proxy so the terminal call routes here.
@@ -57,6 +66,7 @@ beforeEach(async () => {
     created_at: "2026-01-01",
   };
   state.userRolesCount = { count: "0" };
+  state.groupRolesCount = { count: "0" };
   state.permUseCount = { count: "0" };
   state.permRows = [{ key: "admin.users.read" }];
   M = await import("@/lib/admin/roles.server");
@@ -67,8 +77,15 @@ describe("assertRoleNotInUse", () => {
   it("resolves when no assignment references the role", async () => {
     await expect(M.assertRoleNotInUse("r1")).resolves.toBeUndefined();
   });
-  it("throws role_in_use when assignments still exist", async () => {
+  it("throws role_in_use when direct user assignments still exist", async () => {
     state.userRolesCount = { count: "3" };
+    await expect(M.assertRoleNotInUse("r1")).rejects.toMatchObject({ code: "role_in_use" });
+  });
+  it("throws role_in_use when only a group confers the role (DB-2)", async () => {
+    // No direct user assignment, but a group bundles the role — deleting it
+    // would silently cascade-strip the group_role row instead of 409.
+    state.userRolesCount = { count: "0" };
+    state.groupRolesCount = { count: "1" };
     await expect(M.assertRoleNotInUse("r1")).rejects.toMatchObject({ code: "role_in_use" });
   });
 });

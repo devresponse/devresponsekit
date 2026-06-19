@@ -29,12 +29,16 @@ export default tseslint.config(
       },
     },
     rules: {
-      "@typescript-eslint/consistent-type-imports": ["warn", { prefer: "type-imports" }],
+      // P2-11: these are `error`, not `warn`. `pnpm lint` (= bare `eslint .`)
+      // exits 0 on warnings, so a warn-level safety rule passes CI and lets a
+      // stray `any` / unused symbol / value-import accumulate. The tree is
+      // clean today, so promoting them is zero-cost and keeps it that way.
+      "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
-      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-explicit-any": "error",
       // React-Compiler-era hooks checks (react-hooks v6 via
       // eslint-config-next 16) run at their default ERROR severity —
       // the flagged patterns (refs during render, setState in effects,

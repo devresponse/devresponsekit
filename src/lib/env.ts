@@ -61,8 +61,16 @@ const serverEnvSchema = z
     SSO_HANDOFF_AUDIENCE_PREFIX: z.string().min(1),
     SSO_HANDOFF_JWT_SECRET: z.string().min(16, "SSO_HANDOFF_JWT_SECRET must be at least 16 chars"),
     SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
-    /** Identifier of THIS deployment when consuming SSO handoffs. */
-    SSO_HANDOFF_APPLICATION_ID: z.string().min(1).optional(),
+    /**
+     * Identifier of THIS deployment when consuming SSO handoffs. Required (not
+     * optional): the consume endpoint computes the expected audience as
+     * `${SSO_HANDOFF_AUDIENCE_PREFIX}:${SSO_HANDOFF_APPLICATION_ID}`, so a
+     * deployment that sets the (already-required) prefix but omits the app id
+     * would 500 on its FIRST handoff instead of failing at boot (P3-6). The
+     * shell mounts /api/sso/consume on every instance, so this pairs with the
+     * other required SSO_HANDOFF_* vars.
+     */
+    SSO_HANDOFF_APPLICATION_ID: z.string().min(1),
     /**
      * Comma-separated registrable-domain suffixes an enterprise-app origin may
      * sit under to be a valid SSO handoff target (e.g. `devresponse.com`).
@@ -242,6 +250,7 @@ function buildPhasePlaceholders(): ServerEnv {
     DATABASE_URL: "postgresql://build:build@localhost:5432/build",
     SSO_HANDOFF_ISSUER: "build-placeholder",
     SSO_HANDOFF_AUDIENCE_PREFIX: "build-placeholder",
+    SSO_HANDOFF_APPLICATION_ID: "build-placeholder",
     SSO_HANDOFF_JWT_SECRET: "build-placeholder-secret-0000",
   });
 }

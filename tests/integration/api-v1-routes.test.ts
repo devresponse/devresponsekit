@@ -18,6 +18,7 @@ const getUserAccessContext = vi.fn();
 const consumeToken = vi.fn();
 const verifyClientCredentials = vi.fn();
 const verifyApiKey = vi.fn();
+const isBetterAuthUserBanned = vi.fn();
 const mintAccessToken = vi.fn();
 const getJwks = vi.fn();
 const requireApiPermission = vi.fn();
@@ -77,6 +78,9 @@ vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
 vi.mock("@/lib/api-auth/api-keys.server", () => ({
   verifyApiKey: (...a: unknown[]) => verifyApiKey(...a),
 }));
+vi.mock("@/lib/api-auth/ban-status.server", () => ({
+  isBetterAuthUserBanned: (...a: unknown[]) => isBetterAuthUserBanned(...a),
+}));
 vi.mock("@/lib/api-auth/jwt.server", () => ({
   mintAccessToken: (...a: unknown[]) => mintAccessToken(...a),
   getJwks: () => getJwks(),
@@ -126,6 +130,7 @@ beforeEach(() => {
     consumeToken,
     verifyClientCredentials,
     verifyApiKey,
+    isBetterAuthUserBanned,
     mintAccessToken,
     getJwks,
     requireApiPermission,
@@ -138,6 +143,7 @@ beforeEach(() => {
   consumeToken.mockReturnValue({ ok: true });
   getUserAccessContext.mockResolvedValue(ACTIVE);
   enforceApiRateLimit.mockReturnValue(null);
+  isBetterAuthUserBanned.mockResolvedValue(false);
 });
 afterEach(() => vi.resetModules());
 
@@ -228,6 +234,35 @@ describe("POST /api/v1/auth/token", () => {
       }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("401 invalid_client + token.denied audit when the principal is banned (MAPI-2)", async () => {
+    verifyClientCredentials.mockResolvedValue({
+      betterAuthUserId: "ba-banned",
+      scopes: ["admin.users.read"],
+      organizationId: null,
+    });
+    isBetterAuthUserBanned.mockResolvedValue(true);
+    const POST = await load();
+    const res = await POST(
+      req("/api/v1/auth/token", {
+        method: "POST",
+        body: { grant_type: "client_credentials", client_id: "drkc_x", client_secret: "drkcsec_y" },
+      }),
+    );
+    expect(res.status).toBe(401);
+    // The banned principal never gets a token.
+    expect(mintAccessToken).not.toHaveBeenCalled();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "token.denied",
+        outcome: "denied",
+        reason: "principal_banned",
+      }),
+    );
+    expect(auditEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "token.issued" }),
+    );
   });
 
   it("400 on an unknown grant type", async () => {

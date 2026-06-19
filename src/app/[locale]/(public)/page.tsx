@@ -123,7 +123,7 @@ function Landing({ locale }: { locale: SupportedLocale }) {
             />
             <div className="border-border bg-card overflow-hidden rounded-xl border shadow-2xl">
               <Image
-                src="/screen1.png"
+                src="/screen2.png"
                 alt={t("hero.screenshotAlt")}
                 width={1446}
                 height={981}

@@ -1,3 +1,5 @@
+import { intFromEnv } from "@/lib/env";
+
 /**
  * Trustworthy client-IP extraction for rate-limit keys (P2-4).
  *
@@ -14,8 +16,9 @@
  * the proxy actually observed connecting to it.
  */
 function trustedProxyCount(): number {
-  const raw = Number(process.env.TRUSTED_PROXY_COUNT);
-  return Number.isInteger(raw) && raw >= 1 ? raw : 1;
+  // NaN-safe read shared with the pool config (P2-12); also declared in
+  // serverEnvSchema for boot-time validation.
+  return intFromEnv("TRUSTED_PROXY_COUNT", 1);
 }
 
 /** Returns the best-effort real client IP, or null when none can be trusted. */

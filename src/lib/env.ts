@@ -34,6 +34,23 @@ const serverEnvSchema = z
       .string()
       .regex(/^[a-z_][a-z0-9_]*$/i, "DB_SCHEMA must be a plain SQL identifier")
       .default("auth"),
+    /**
+     * PostgreSQL RUNTIME-pool sizing + timeouts (src/db/database.ts). Coerced
+     * and bounded here so a non-numeric value fails fast at boot instead of
+     * silently becoming `NaN` and being handed to `pg` (P2-12). database.ts
+     * also reads them defensively via {@link intFromEnv} — it is imported by
+     * env-poor cron scripts (outbox:drain, db:prune) that must NOT require the
+     * full schema — with the SAME defaults. Keep the two in sync.
+     */
+    PGPOOL_MAX: z.coerce.number().int().positive().default(10),
+    PG_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+    PG_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    /**
+     * Trusted reverse-proxy hop count for client-IP extraction (P2-4): the
+     * (count)-th `X-Forwarded-For` entry from the right is the IP the trusted
+     * edge observed. Must be >= 1. Read via {@link intFromEnv} in client-ip.ts.
+     */
+    TRUSTED_PROXY_COUNT: z.coerce.number().int().min(1).default(1),
     GOOGLE_CLIENT_ID: z.string().optional().default(""),
     GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
     MICROSOFT_CLIENT_ID: z.string().optional().default(""),
@@ -46,6 +63,13 @@ const serverEnvSchema = z
     SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
     /** Identifier of THIS deployment when consuming SSO handoffs. */
     SSO_HANDOFF_APPLICATION_ID: z.string().min(1).optional(),
+    /**
+     * Comma-separated registrable-domain suffixes an enterprise-app origin may
+     * sit under to be a valid SSO handoff target (e.g. `devresponse.com`).
+     * Parsed by `allowedOriginSuffixes()`; validated here as a string so the
+     * var is no longer read entirely outside the schema (P2-12).
+     */
+    SSO_ALLOWED_ORIGIN_SUFFIXES: z.string().optional(),
     /**
      * Comma-separated list of additional trusted origins shared by Better
      * Auth's `trustedOrigins` and the administrator origin guard.
@@ -169,6 +193,24 @@ const serverEnvSchema = z
   });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
+
+/**
+ * NaN-safe integer read straight from `process.env`, for modules that must not
+ * trigger full-schema validation — notably `src/db/database.ts`, which is
+ * imported by env-poor cron scripts (`outbox:drain`, `db:prune`) that should
+ * not require every app secret to be present just to open a pool.
+ *
+ * Returns `fallback` when the value is absent, non-numeric, non-integer, or
+ * below `min` (default 1) — so `PGPOOL_MAX=abc` yields the default, never the
+ * `NaN` that `Number(x ?? N)` silently produced (P2-12). The same vars are also
+ * declared in {@link serverEnvSchema}, so a running server still fails fast on a
+ * bad value via {@link getServerEnv}; this is the defensive read for the early /
+ * script path. Keep the defaults here in sync with the schema.
+ */
+export function intFromEnv(name: string, fallback: number, min = 1): number {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n >= min ? n : fallback;
+}
 
 let cached: ServerEnv | null = null;
 

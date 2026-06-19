@@ -17,7 +17,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | Variable | Required | Default (example) | Controls |
 | --- | --- | --- | --- |
 | `NODE_ENV` | yes | `development` | Standard Node environment; `production` for deploys. |
-| `NEXT_PUBLIC_APP_NAME` | no | `DevResponse Enterprise Platform` | Display name in the UI. |
+| `NEXT_PUBLIC_APP_NAME` | no | `DevResponse Enterprise` | Display name in the UI. |
 | `NEXT_PUBLIC_APP_URL` | yes | `http://localhost:3000` | Public origin; trusted origin, inlined at build. |
 | `NEXT_PUBLIC_PRIMARY_HOST` | no | `localhost` | Primary host label. |
 | `NEXT_PUBLIC_PRODUCTION_HOST` | no | `app.devresponse.com` | Production host; also seeds the SSO origin-suffix default. |

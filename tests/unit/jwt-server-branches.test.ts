@@ -21,6 +21,10 @@ const AUDIENCE = "devresponse-api";
 function baseEnv(overrides: Record<string, unknown> = {}) {
   return {
     API_JWT_PRIVATE_KEY: jwkJson,
+    // Pin the kid so the published JWK's kid matches signRaw's `kid: "k"`
+    // header (verifyAccessToken now selects the key by kid via a local JWK
+    // Set for rotation support, P3-7).
+    API_JWT_KID: "k",
     API_JWT_ISSUER: ISSUER,
     API_JWT_AUDIENCE: AUDIENCE,
     API_JWT_ACCESS_TTL_SECONDS: 900,
@@ -131,5 +135,48 @@ describe("verifyAccessToken — payload-shape branches", () => {
     const token = await signRaw({ scope: "account.read", org: { not: "a string" } });
     const verified = await M.verifyAccessToken(token);
     expect(verified.organizationId).toBeNull();
+  });
+});
+
+describe("verifyAccessToken — key rotation overlap (P3-7)", () => {
+  it("verifies a pre-rotation token via the previous key, publishes both, then drops it", async () => {
+    const a = JSON.stringify(
+      await exportJWK((await generateKeyPair("EdDSA", { extractable: true })).privateKey),
+    );
+    const b = JSON.stringify(
+      await exportJWK((await generateKeyPair("EdDSA", { extractable: true })).privateKey),
+    );
+
+    // Phase 1: A is the current signing key (thumbprint kid), no previous.
+    envState.value = baseEnv({ API_JWT_PRIVATE_KEY: a, API_JWT_KID: undefined });
+    M.__resetJwtKeyCacheForTests();
+    const oldToken = (await M.mintAccessToken({ subject: "ba-rot", scopes: [], jti: "rot-1" }))
+      .token;
+
+    // Phase 2: rotate — B becomes current, A retained as the overlap key.
+    envState.value = baseEnv({
+      API_JWT_PRIVATE_KEY: b,
+      API_JWT_KID: undefined,
+      API_JWT_PREVIOUS_PRIVATE_KEY: a,
+    });
+    M.__resetJwtKeyCacheForTests();
+
+    // The pre-rotation token (signed by A) still verifies during the overlap…
+    expect((await M.verifyAccessToken(oldToken)).subject).toBe("ba-rot");
+    // …and a freshly minted token (signed by B) verifies too.
+    const newToken = (await M.mintAccessToken({ subject: "ba-rot", scopes: [], jti: "rot-2" }))
+      .token;
+    expect((await M.verifyAccessToken(newToken)).jti).toBe("rot-2");
+
+    // JWKS publishes BOTH keys, with distinct kids and no private material.
+    const jwks = await M.getJwks();
+    expect(jwks.keys).toHaveLength(2);
+    expect(new Set(jwks.keys.map((k) => k.kid)).size).toBe(2);
+    expect(jwks.keys.every((k) => (k as Record<string, unknown>).d === undefined)).toBe(true);
+
+    // Phase 3: overlap ends — previous removed, the old token no longer verifies.
+    envState.value = baseEnv({ API_JWT_PRIVATE_KEY: b, API_JWT_KID: undefined });
+    M.__resetJwtKeyCacheForTests();
+    await expect(M.verifyAccessToken(oldToken)).rejects.toBeDefined();
   });
 });

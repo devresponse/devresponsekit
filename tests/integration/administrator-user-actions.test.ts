@@ -357,6 +357,57 @@ describe("POST /api/administrator/users/[id]/password", () => {
       expect.objectContaining({ eventType: "admin.user.password_reset_email_sent" }),
     );
   });
+
+  it("returns 403 when a non-superadmin sets the password of a shared user (AUTHZ-2)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.setPassword"));
+    dbMock.mockResolvedValue(targetRow);
+    requiresSuperadminMock.mockResolvedValue(true); // target shared across orgs
+    const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "set", password: "supersecret-pw-123" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(403);
+    expect(authSetPassword).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/administrator/users/[id]/sessions (revoke all)", () => {
+  it("revokes all sessions for a non-shared target (200)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.sessions"));
+    dbMock.mockResolvedValue(targetRow);
+    authRevokeSessions.mockResolvedValue({ ok: true });
+    const { DELETE } = await import("@/app/api/administrator/users/[id]/sessions/route");
+    const res = await DELETE(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/sessions`, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(authRevokeSessions).toHaveBeenCalled();
+  });
+
+  it("returns 403 when a non-superadmin revokes all sessions of a shared user (AUTHZ-2)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.sessions"));
+    dbMock.mockResolvedValue(targetRow);
+    requiresSuperadminMock.mockResolvedValue(true); // target shared across orgs
+    const { DELETE } = await import("@/app/api/administrator/users/[id]/sessions/route");
+    const res = await DELETE(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/sessions`, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(403);
+    expect(authRevokeSessions).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/administrator/users/[id] (soft delete)", () => {

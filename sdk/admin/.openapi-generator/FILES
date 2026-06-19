@@ -1,4 +1,3 @@
-.openapi-generator-ignore
 apis/APIKeysApi.ts
 apis/AuditApi.ts
 apis/EmailApi.ts
@@ -113,6 +112,8 @@ models/UserGroups.ts
 models/UserGroupsGroupsInner.ts
 models/UserList.ts
 models/UserListItem.ts
+models/UserRoleAssignmentItem.ts
+models/UserRoleAssignmentList.ts
 models/UserStatusRequest.ts
 models/index.ts
 runtime.ts

@@ -9,6 +9,10 @@ import {
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import {
+  requiresSuperadminForSharedTarget,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +73,17 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   }
 
   if (parsed.data.mode === "set") {
+    // AUTHZ-2: directly setting a password is account-global — it grants a
+    // credential usable in EVERY org the user belongs to. For a user shared
+    // across tenants, that's SUPERADMIN-only; an org admin may only set the
+    // password of a user confined to their own org. (The reset-email mode is
+    // a recovery flow the user completes themselves, so it isn't gated here.)
+    const scope = resolveOrgScope(guard.access);
+    if (!scope) return adminErrorResponse("not_found", 404, request);
+    if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
+      return adminErrorResponse("forbidden", 403, request);
+    }
+
     try {
       await setBetterAuthUserPassword(
         {

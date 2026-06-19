@@ -202,3 +202,45 @@ jobs:
       # `moderate` once the moderate backlog is clear.
       - name: Audit dependencies (high and above)
         run: pnpm audit --audit-level high
+
+  sdk-drift:
+    name: OpenAPI + admin SDK drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # BUILD-2: the OpenAPI spec (docs/openapi*.json) and the admin SDK
+    # (sdk/admin) are GENERATED artifacts. Regenerate them from source and fail
+    # if anything changed — so a new or edited admin route can never ship with
+    # a stale spec or SDK. Deterministic: the generator version is pinned in
+    # openapitools.json (7.12.0) and .gitattributes normalizes output to LF.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # openapi-generator-cli runs on the JVM.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate the OpenAPI spec + admin SDK
+        run: pnpm sdk:admin:generate
+
+      - name: Fail on spec / SDK drift
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::OpenAPI spec or admin SDK is out of date — run 'pnpm sdk:admin:generate' and commit the result."
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+      - name: Typecheck the generated SDK
+        run: pnpm sdk:admin:typecheck

@@ -161,7 +161,7 @@ Every significant action (create, update, delete, status change, sign-in events,
 
 ## 9. Security & observability
 
-- **Browser security headers** (clickjacking protection, content-type sniffing protection, HSTS, a report-only Content-Security-Policy, and more) ship on every response.
+- **Browser security headers** (clickjacking protection, content-type sniffing protection, HSTS, an enforcing nonce-based Content-Security-Policy, and more) ship on every response.
 - **Session controls** let users and admins view and revoke active sessions.
 - **Optional error & performance monitoring** via Sentry, with personal data scrubbed before anything leaves the server. Disabled unless explicitly configured.
 

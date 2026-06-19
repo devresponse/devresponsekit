@@ -162,7 +162,7 @@ flowchart LR
 ## 10. Security considerations
 
 - **Secrets:** distinct `BETTER_AUTH_SECRET` and `SSO_HANDOFF_JWT_SECRET`; rotate on a schedule (rotating the auth secret signs users out). Keep `SENTRY_AUTH_TOKEN` build-only.
-- **Headers:** shipped by `next.config.mjs` (X-Frame-Options DENY, nosniff, HSTS, report-only CSP, Permissions-Policy). CSP is **report-only** today — plan to move to enforcing with nonces.
+- **Headers:** static ones (X-Frame-Options DENY, nosniff, HSTS, Permissions-Policy, Reporting-Endpoints) ship from `next.config.mjs`. The CSP is **enforcing** and nonce-based, minted per request in `src/proxy.ts` (`script-src` uses `'nonce-…' 'strict-dynamic'`, no `'unsafe-inline'`/`'unsafe-eval'`); violations still report to `/api/security/csp-report`.
 - **Origin/CSRF guard** on admin mutations; **trusted proxy count** for correct client-IP attribution behind a CDN.
 - **Machine API** is off by default; enable per environment with a real signing key and least-privilege scopes.
 - **TLS everywhere** in production so HSTS is meaningful.

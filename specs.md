@@ -787,7 +787,7 @@ Create `.env.example`.
 ```bash
 # Application
 NODE_ENV=development
-NEXT_PUBLIC_APP_NAME="DevResponse Enterprise Platform"
+NEXT_PUBLIC_APP_NAME="DevResponse Enterprise"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 NEXT_PUBLIC_PRIMARY_HOST="localhost"
 NEXT_PUBLIC_PRODUCTION_HOST="app.devresponse.com"

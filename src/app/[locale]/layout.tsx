@@ -17,7 +17,7 @@ export const dynamicParams = false;
 
 export const metadata: Metadata = {
   title: {
-    default: "DevResponse Enterprise Platform",
+    default: "DevResponse Enterprise",
     template: "%s · DevResponse",
   },
   description: "Enterprise application shell.",

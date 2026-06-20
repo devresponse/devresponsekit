@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["iad1"],
+  "crons": [
+    {
+      "path": "/api/internal/outbox-drain",
+      "schedule": "* * * * *"
+    }
+  ],
+  "functions": {
+    "src/app/api/internal/outbox-drain/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}

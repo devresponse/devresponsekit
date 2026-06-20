@@ -79,6 +79,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `EMAIL_FROM` | From address/name. |
 | `RESEND_API_KEY` | Resend API key (when provider = resend). |
 | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_BASE_URL` | Mailgun config (use `https://api.eu.mailgun.net` for EU). |
+| `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to `GET /api/internal/outbox-drain`, which retries `pending` outbox rows on a serverless host (no long-running `pnpm outbox:drain` process). The route **fails closed** when unset. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#6-cicd-pipeline). |
 
 ### Machine API credentials (both paths DARK by default)
 

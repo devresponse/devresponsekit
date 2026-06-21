@@ -110,7 +110,7 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 | `DEV_SEED_PASSWORD` | Shared password for the multi-org dev fixture. |
 | `DEV_SEED_ALLOW_PROD` | Set `1` to allow the dev fixture under `NODE_ENV=production` (otherwise it refuses). |
 
-### Observability (Sentry — opt-in)
+### Observability (opt-in)
 
 | Variable | Controls |
 | --- | --- |
@@ -121,6 +121,7 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 | `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_TRACES_SAMPLE_RATE` | Tracing sample rates. |
 | `NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE`, `…_ERROR_SAMPLE_RATE` | Session-replay sampling. |
 | `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | **Build/CI only** — source-map upload. Never expose `SENTRY_AUTH_TOKEN` to the client. |
+| `METRICS_TOKEN` | **Presence enables** the Prometheus scrape endpoint `GET /api/metrics`. The route **fails closed** when unset (401, nothing exposed). Scrapers present it as `Authorization: Bearer …`; compared in constant time. See [observability.md](./observability.md#5-metrics). |
 
 ### Docs viewer & test escape hatch
 
@@ -198,6 +199,7 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 - [ ] OAuth client secrets — per provider, only if social login enabled.
 - [ ] `RESEND_API_KEY` / `MAILGUN_API_KEY` — only if email enabled.
 - [ ] `SENTRY_AUTH_TOKEN` — build/CI only, never client-exposed.
+- [ ] `METRICS_TOKEN` — only if scraping `/api/metrics`; long random secret, scraper-side only.
 - [ ] `DATABASE_URL` — pooled endpoint on serverless.
 
 ---

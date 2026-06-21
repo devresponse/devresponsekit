@@ -14,6 +14,7 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | **Request-id correlation** | `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) | Accepts a valid inbound `x-request-id` (UUID) or mints one. Echoed on every admin (`adminErrorResponse`) and RFC 7807 (`problemResponse`) error response. |
 | **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
+| **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` business counter. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
 | **Error monitoring (opt-in)** | `src/sentry.*.config.ts`, `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Events are scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process. |
 | **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the database is reachable, `503` otherwise. Wire both to your orchestrator probes (see [deployment.md](./deployment.md), §8). |
 | **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged (not swallowed) so a crashing worker is visible in the log stream. |
@@ -58,14 +59,56 @@ same change.
 If a caller supplies their own valid `x-request-id`, it is preserved end-to-end, so a
 client-side trace id flows straight into server logs and audit rows.
 
-## 5. Roadmap — not yet shipped
+## 5. Metrics
 
-The signals above cover **logs, errors, audit, and health**. The following are deliberately
-**not** implemented in 1.0 and are tracked as a post-1.0 observability epic:
+A Prometheus scrape endpoint ships at **`GET /api/metrics`** (`src/lib/observability/metrics.server.ts`).
+This is the **first increment** of the metrics roadmap (§6) — process health plus the first
+business counter — not the full target set.
 
-- **Metrics** — no metrics endpoint/client. Targets: request latency + status by route,
-  database latency, auth failures, rate-limit denials, outbox delivery, and audit-write
-  failures.
+**What it exposes (Prometheus text exposition format):**
+
+- **Node/process defaults** (prefix `devresponsekit_`): heap, RSS, event-loop lag, GC, CPU,
+  active handles — the highest signal-per-effort view for catching leaks and saturation, with
+  zero application instrumentation.
+- **`devresponsekit_rate_limit_denials_total{scope}`** — a counter incremented on **every**
+  rate-limit denial (HTTP 429), labelled by limiter scope. Unlike the sampled denial *audit*
+  (which is flood-gated), this counts all denials, so a spike is the canonical abuse signal.
+
+**Security model:**
+
+- **Token-guarded, fails closed.** The endpoint requires `Authorization: Bearer <METRICS_TOKEN>`,
+  compared in constant time. With `METRICS_TOKEN` unset the route returns `401` and exposes
+  nothing — a deployment that forgets to configure it never leaks metric names, route labels,
+  or counts. The response is always `no-store`.
+- Treat `METRICS_TOKEN` as a secret (scraper-side only) and keep `/api/metrics` reachable only
+  from your monitoring network, not the public internet.
+
+**Scraping:** point Prometheus at the route with a bearer credential, e.g.
+
+```yaml
+scrape_configs:
+  - job_name: devresponsekit
+    metrics_path: /api/metrics
+    authorization:
+      type: Bearer
+      credentials: "<METRICS_TOKEN>"
+    static_configs:
+      - targets: ["your-app-host:443"]
+```
+
+**Topology note:** counters are **per-process** (like the in-memory rate limiter). Under the
+single-instance 1.0 topology that is the whole picture; a multi-instance deployment scrapes each
+target independently and aggregates at the Prometheus layer.
+
+## 6. Roadmap — not yet shipped
+
+The signals above cover **logs, errors, audit, health, and a first metrics increment**. The
+following are deliberately **not** implemented in 1.0 and are tracked as a post-1.0
+observability epic:
+
+- **Metrics — remaining surface.** The endpoint exists (§5) but still lacks the application
+  signals: request latency + status by route, database latency, auth failures, outbox
+  delivery, and audit-write failures.
 - **Distributed tracing** — no OpenTelemetry spans / trace propagation across request → DB →
   external provider.
 - **Dashboards & alerting** — no shipped dashboards or alert rules; wire your platform's

@@ -2,6 +2,7 @@ import "server-only";
 import type { NextRequest, NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { clientIpKey } from "@/lib/client-ip";
+import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 
 /**
  * In-memory token-bucket rate limiter for Administrator mutation
@@ -206,6 +207,10 @@ export function enforceRateLimit(
 ): NextResponse | null {
   const result = consumeToken(rateLimitKey(scope, actorId), options, nowMs);
   if (result.ok) return null;
+
+  // Count EVERY denial (cheap in-memory counter, no flood concern — unlike the
+  // sampled audit below) for the Prometheus `/api/metrics` scrape (#52).
+  rateLimitDenialsTotal.inc({ scope });
 
   // Flood-safe denial audit (P3-9): record that an actor tripped the limit, but
   // gate the write through its OWN very-low-rate bucket (DENIAL_AUDIT_LIMIT) so

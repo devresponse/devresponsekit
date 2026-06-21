@@ -151,7 +151,8 @@
   "packageManager": "pnpm@10.33.2",
   "pnpm": {
     "overrides": {
-      "jsdom>undici": "^7.28.0"
+      "jsdom>undici": "^7.28.0",
+      "dompurify": "^3.4.11"
     },
     "auditConfig": {
       "//": "Allowlist for `pnpm audit --audit-level high` (BUILD-1). Each muted advisory is dev/build/test-only — see SECURITY.md ('Dependency advisory allowlist') for the per-GHSA package, reachability rationale, and review-by date. A NEW high/critical not listed here fails CI; drop entries when the upstream fix lands.",

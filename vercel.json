@@ -4,12 +4,7 @@
   "crons": [
     {
       "path": "/api/internal/outbox-drain",
-      "schedule": "* * * * *"
+      "schedule": "0 8 * * *"
     }
-  ],
-  "functions": {
-    "src/app/api/internal/outbox-drain/route.ts": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }

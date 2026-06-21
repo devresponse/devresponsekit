@@ -6,6 +6,11 @@ import { logServerError, logger } from "@/lib/observability/logger.server";
 // Touches the pg pool + node:crypto, so it must run on the Node runtime.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// A drain makes up to a page of external provider calls (~10s each on a hung
+// provider), so bound the wall-clock. Route-segment `maxDuration` is clamped to
+// the plan's ceiling rather than failing the build — unlike `vercel.json`
+// `functions`, which for a Next.js App Router route does not match and errors.
+export const maxDuration = 60;
 
 /**
  * GET /api/internal/outbox-drain — scheduler entrypoint for the email outbox

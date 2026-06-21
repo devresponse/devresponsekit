@@ -143,8 +143,14 @@ deploys** so this workflow is the sole path to production. Required secrets:
 **Outbox drainer (serverless).** A serverless host has no process to run
 `pnpm outbox:drain`, so `vercel.json` declares a **Cron Job** that calls the
 secret-guarded `GET /api/internal/outbox-drain` (gated by `CRON_SECRET`) to
-retry queued emails. Set the cron `schedule` to your needs (sub-daily
-schedules require a paid Vercel plan) and pin `regions` to your database's
+retry queued emails. The committed `schedule` is **daily** (`0 8 * * *`)
+because Vercel's **Hobby** plan rejects sub-daily crons at deploy time; on
+**Pro/Enterprise** tighten it (e.g. `*/5 * * * *`) for timely retries. The
+drain is idempotent (rows are claimed in individual committed transactions), so
+a daily run safely chips away at any backlog over successive days. To drain
+frequently regardless of plan, schedule an external caller instead — e.g. a
+GitHub Actions `schedule:` workflow that `curl`s the endpoint with the
+`CRON_SECRET` bearer every few minutes. Also pin `regions` to your database's
 region.
 
 See [DevOps Setup → Build pipeline](./devops-setup.md#5-build-pipeline-ci) and [Testing](./testing.md).

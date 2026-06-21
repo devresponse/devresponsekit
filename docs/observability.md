@@ -72,10 +72,10 @@ The signals above cover **logs, errors, audit, and health**. The following are d
   tooling to the log/Sentry streams in the interim.
 - **SLOs** — availability, latency, error-rate, auth-failure, and (if email is
   production-critical) delivery-latency objectives are not yet defined.
-- **Incident runbook** — no in-repo production debugging / incident-response procedure.
 
 Until these land, incident detection relies on the log stream, `app_audit_events`, optional
-Sentry, and the health probes.
+Sentry, and the health probes — see the [incident response runbook](./incident-response.md)
+for the triage flow and playbooks built on exactly those signals.
 
 ---
 

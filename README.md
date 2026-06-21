@@ -124,6 +124,7 @@ The canonical, audience-organized documentation set lives in **[docs/](docs/READ
 - [docs/api-clients.md](docs/api-clients.md) — typed clients/SDKs for the `/api/v1` surface and the committed admin SDK
 - [docs/testing.md](docs/testing.md) — test strategy, suites, coverage, manual QA checklist
 - [docs/observability.md](docs/observability.md) — logs, redaction, request-id correlation, audit, Sentry, health probes, and the roadmap
+- [docs/incident-response.md](docs/incident-response.md) — on-call runbook: severity, triage by signal, playbooks, rollback
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common setup, build, runtime, and deployment failures and fixes
 - [docs/adr/](docs/adr/) — architecture decision records: [ADR-0001 three-tier access control](docs/adr/0001-three-tier-access-control.md), [ADR-0002 organization groups](docs/adr/0002-organization-groups.md)
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)

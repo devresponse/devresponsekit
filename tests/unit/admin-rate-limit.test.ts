@@ -69,8 +69,8 @@ describe("admin rate limiter", () => {
 
   it("enforceRateLimit returns 429 with Retry-After on deny", async () => {
     const opts = { capacity: 1, refillPerSec: 1 };
-    expect(enforceRateLimit("scope", "actor", opts, 0)).toBeNull();
-    const denied = enforceRateLimit("scope", "actor", opts, 0);
+    expect(enforceRateLimit("scope", "actor", opts, undefined, undefined, 0)).toBeNull();
+    const denied = enforceRateLimit("scope", "actor", opts, undefined, undefined, 0);
     expect(denied).not.toBeNull();
     expect(denied?.status).toBe(429);
     expect(denied?.headers.get("Retry-After")).toBeTruthy();

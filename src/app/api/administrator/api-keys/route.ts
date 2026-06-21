@@ -159,6 +159,8 @@ export async function POST(request: NextRequest) {
     "admin.apikeys.create",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

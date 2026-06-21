@@ -79,6 +79,8 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
     "admin.email.templates",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

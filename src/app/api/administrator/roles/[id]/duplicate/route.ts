@@ -39,6 +39,8 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     "admin.roles.duplicate",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

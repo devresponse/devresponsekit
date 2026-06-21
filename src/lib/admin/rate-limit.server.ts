@@ -178,14 +178,20 @@ export const DEFAULT_ADMIN_EXPORT_LIMIT: RateLimitOptions = {
  * Convenience for route handlers: enforces a rate limit and returns
  * either `null` (allow — keep going) or a ready-to-return
  * `NextResponse` (deny). Adds the `Retry-After` header on deny.
+ *
+ * Signature: `(scope, actorId, options?, request?, requestId?, nowMs?)`.
+ * Passing `request` + `requestId` makes the 429 correlate with the
+ * request's `x-request-id` / audit rows (the same correlation id the
+ * caller's `guard` carries); `nowMs` is test-only and stays last so
+ * production callers never need to pass it.
  */
 export function enforceRateLimit(
   scope: string,
   actorId: string,
   options: RateLimitOptions = DEFAULT_ADMIN_MUTATION_LIMIT,
-  nowMs?: number,
   request?: { headers: Headers },
   requestId?: string,
+  nowMs?: number,
 ): NextResponse | null {
   const result = consumeToken(rateLimitKey(scope, actorId), options, nowMs);
   if (result.ok) return null;

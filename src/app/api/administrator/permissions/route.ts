@@ -94,6 +94,8 @@ export async function POST(request: NextRequest) {
     "admin.permissions.create",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
   // ADR-0001: the permission catalog is platform-global; mutating it

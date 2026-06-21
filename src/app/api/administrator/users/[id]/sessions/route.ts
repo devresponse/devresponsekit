@@ -74,6 +74,8 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     "admin.users.sessions",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

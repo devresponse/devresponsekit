@@ -117,6 +117,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     "admin.orgs.bindings",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 
@@ -209,6 +211,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     "admin.orgs.bindings",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

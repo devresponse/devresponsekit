@@ -19,6 +19,11 @@ import { fileURLToPath } from "node:url";
  * `enforceRateLimit`; the v1 surface calls `enforceApiRateLimit` (and the
  * token endpoint the lower-level `consumeToken`). GET (read) handlers are not
  * required to throttle.
+ *
+ * The admin check additionally requires each `enforceRateLimit` call to thread
+ * the request CONTEXT (`request, guard.requestId`), so a 429 carries the same
+ * `x-request-id` as the request's logs/audit rows (P3-9) — a call that omits
+ * it does not count and fails CI.
  */
 
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
@@ -26,7 +31,11 @@ const ADMIN_ROUTES_DIR = join(SRC_DIR, "app", "api", "administrator");
 const V1_ROUTES_DIR = join(SRC_DIR, "app", "api", "v1");
 
 const MUTATING_HANDLER = /export async function (?:POST|PATCH|PUT|DELETE)\b/g;
-const ADMIN_RATE_LIMIT_CALL = /enforceRateLimit\s*\(/g;
+// Admin calls must thread the request CONTEXT so the 429 correlates (P3-9):
+// match `enforceRateLimit(…guard.requestId…)`. The lazy `[\s\S]*?` spans the
+// multi-line call (and any parenthesized arg) up to the closing paren, so a
+// call WITHOUT `guard.requestId` is not counted and trips the gate below.
+const ADMIN_RATE_LIMIT_CALL = /enforceRateLimit\s*\([\s\S]*?guard\.requestId[\s\S]*?\)/g;
 // v1 wraps the bucket as enforceApiRateLimit; the token endpoint calls the
 // low-level consumeToken directly (per-credential/IP + a global floor).
 const V1_RATE_LIMIT_CALL = /(?:enforceApiRateLimit|consumeToken)\s*\(/g;
@@ -72,7 +81,9 @@ function assertRateLimited(
     limited >= mutating,
     `${relPath} exports ${mutating} mutating handler(s) (POST/PATCH/PUT/DELETE) but ` +
       `references ${primitive} ${limited} time(s). Every privileged mutation must go ` +
-      `through the token bucket — add the ${primitive} call or a justified EXEMPT entry.`,
+      `through the token bucket — add the ${primitive} call or a justified EXEMPT entry. ` +
+      `(Admin calls must thread \`request, guard.requestId\` so the 429 correlates; a ` +
+      `call that omits the context is not counted.)`,
   ).toBe(true);
 }
 

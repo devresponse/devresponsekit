@@ -29,6 +29,8 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     "admin.users.unban",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

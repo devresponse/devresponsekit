@@ -71,6 +71,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     "admin.orgs.write",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 
@@ -158,6 +160,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     "admin.orgs.write",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

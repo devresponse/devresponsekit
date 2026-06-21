@@ -126,6 +126,8 @@ export async function POST(request: NextRequest) {
     "admin.users.bulk",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_BULK_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

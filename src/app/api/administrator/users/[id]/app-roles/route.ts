@@ -96,6 +96,8 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     "admin.users.approles",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 
@@ -193,6 +195,8 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     "admin.users.approles",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

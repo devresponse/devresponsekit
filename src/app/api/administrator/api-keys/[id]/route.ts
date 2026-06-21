@@ -90,6 +90,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     "admin.apikeys.delete",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

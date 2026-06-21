@@ -42,7 +42,6 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     "admin.users.restore",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
-    undefined,
     request,
     guard.requestId,
   );

@@ -36,6 +36,8 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
     "admin.permissions.write",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
   // ADR-0001: the permission catalog is platform-global; confine writes to
@@ -99,6 +101,8 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     "admin.permissions.write",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
   // ADR-0001: the permission catalog is platform-global; confine writes to

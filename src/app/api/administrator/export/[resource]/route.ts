@@ -107,6 +107,8 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     `admin.export.${resource}`,
     guard.betterAuthUserId,
     DEFAULT_ADMIN_EXPORT_LIMIT,
+    request,
+    guard.requestId,
   );
   if (limited) return limited;
 

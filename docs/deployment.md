@@ -127,7 +127,31 @@ flowchart TD
 
 - Both `quality` and `browser` run against a **PostgreSQL 17 service container**; the `browser` job migrates, seeds, starts the server, then runs Playwright e2e + accessibility.
 - The `audit` job is non-blocking.
-- **Deployment is not defined in the repo.** `TODO:` wire the deploy step (platform Git integration, a separate workflow with environment protection rules, or a CD tool). The historical docs mention a `production` GitHub environment with required reviewers and a separate DDL role for migrations — adopt or adapt that.
+
+**Production deploy (Vercel).** `.github/workflows/deploy.yml` promotes `main`
+to Vercel production and **applies migrations first**: it runs
+`pnpm db:app:migrate` against the **direct** (non-pooled)
+`PRODUCTION_DIRECT_DATABASE_URL` secret, then `vercel pull` → `vercel build
+--prod` → `vercel deploy --prebuilt --prod`. Because migrations land before the
+new build promotes, the live build always sees a schema it understands (they
+are additive / idempotent by contract). Gated by a `production` GitHub
+Environment (required reviewers). **Disable Vercel's automatic Git production
+deploys** so this workflow is the sole path to production. Required secrets:
+`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
+`PRODUCTION_DIRECT_DATABASE_URL`.
+
+**Outbox drainer (serverless).** A serverless host has no process to run
+`pnpm outbox:drain`, so `vercel.json` declares a **Cron Job** that calls the
+secret-guarded `GET /api/internal/outbox-drain` (gated by `CRON_SECRET`) to
+retry queued emails. The committed `schedule` is **daily** (`0 8 * * *`)
+because Vercel's **Hobby** plan rejects sub-daily crons at deploy time; on
+**Pro/Enterprise** tighten it (e.g. `*/5 * * * *`) for timely retries. The
+drain is idempotent (rows are claimed in individual committed transactions), so
+a daily run safely chips away at any backlog over successive days. To drain
+frequently regardless of plan, schedule an external caller instead — e.g. a
+GitHub Actions `schedule:` workflow that `curl`s the endpoint with the
+`CRON_SECRET` bearer every few minutes. Also pin `regions` to your database's
+region.
 
 See [DevOps Setup → Build pipeline](./devops-setup.md#5-build-pipeline-ci) and [Testing](./testing.md).
 

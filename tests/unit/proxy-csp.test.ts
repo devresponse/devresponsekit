@@ -9,8 +9,8 @@ import type * as ProxyModule from "@/proxy";
  * (never the old `-Report-Only`) is set on every response; in production
  * `script-src` carries a per-request `'nonce-…'` + `'strict-dynamic'` and
  * drops `'unsafe-inline'`/`'unsafe-eval'`; the same nonce is threaded into the
- * request (`x-nonce` + the CSP) so Next/next-themes can stamp it onto inline
- * scripts; and the report sink wiring survives the switch.
+ * request (`x-nonce` + the CSP) so Next + the server theme script can stamp it
+ * onto inline scripts; and the report sink wiring survives the switch.
  */
 const intlState = vi.hoisted(() => ({ captured: null as NextRequest | null }));
 const guard = vi.hoisted(() => ({ session: "ba.session=x" as string | null, secure: false }));

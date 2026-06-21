@@ -26,7 +26,7 @@ function getLocaleFromPath(pathname: string): string {
  * Deliberate exception — `style-src` keeps `'unsafe-inline'`. React renders
  * `style={{…}}` props as inline `style="…"` ATTRIBUTES, which a nonce cannot
  * cover (nonces apply to `<script>`/`<style>` elements, not attributes), and
- * libraries inject `<style>` blobs (recharts' `chart.tsx`, next-themes). Style
+ * libraries inject `<style>` blobs (recharts' `chart.tsx`, the theme provider). Style
  * injection is a far weaker vector than script injection, so allowing inline
  * styles is the standard pragmatic trade to keep the UI intact.
  *
@@ -73,7 +73,7 @@ function generateNonce(): string {
  *   1. A per-request CSP nonce: an enforcing `Content-Security-Policy` is set
  *      on every response, and the nonce is threaded into the request headers
  *      (`x-nonce` + the CSP itself) so Next.js — and the root layout, which
- *      hands it to `next-themes` — can stamp it onto inline scripts.
+ *      hands it to the server theme script — can stamp it onto inline scripts.
  *   2. next-intl locale routing (rewrites `/` to `/<defaultLocale>` and
  *      validates the locale segment).
  *   3. Early redirect for localized secure browser paths

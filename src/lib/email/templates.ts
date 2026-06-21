@@ -35,8 +35,9 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
 /**
  * Built-in defaults. Keep in sync with the seeded templates in the initial
  * schema `0001-initial-schema.sql` (the `en` rows),
- * `0006-email-template-locales.sql` (the fr/es/uk rows), and
- * `0007-email-template-locales-pt.sql` (the pt rows).
+ * `0006-email-template-locales.sql` (the fr/es/uk rows),
+ * `0007-email-template-locales-pt.sql` (the pt rows), and
+ * `0008-email-template-locales-zh.sql` (the zh rows).
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -108,6 +109,19 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
           "{{resetUrl}}\n\n" +
           "Se não foi você que fez este pedido, pode ignorar este e-mail com segurança.",
       },
+      zh: {
+        subject: "重置您的密码",
+        bodyHtml:
+          "<p>您好 {{name}}，</p>" +
+          "<p>我们收到了重置您密码的请求。请点击下方链接设置新密码。此链接将很快失效。</p>" +
+          '<p><a href="{{resetUrl}}">重置您的密码</a></p>' +
+          "<p>如果这不是您本人的操作，您可以安全地忽略此邮件。</p>",
+        bodyText:
+          "您好 {{name}}，\n\n" +
+          "我们收到了重置您密码的请求。请打开下方链接设置新密码。此链接将很快失效。\n\n" +
+          "{{resetUrl}}\n\n" +
+          "如果这不是您本人的操作，您可以安全地忽略此邮件。",
+      },
     },
   },
   {
@@ -157,6 +171,15 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
         bodyText:
           "Este é um e-mail de teste enviado a partir do espaço de Email do administrador de {{appName}} por {{sentBy}}.\n\n" +
           "Se consegue ler isto, o envio de e-mails está a funcionar.",
+      },
+      zh: {
+        subject: "来自 {{appName}} 的测试邮件",
+        bodyHtml:
+          "<p>这是一封由 {{sentBy}} 从 {{appName}} 管理员邮件工作区发送的测试邮件。</p>" +
+          "<p>如果您能看到此内容，说明出站邮件发送功能正常。</p>",
+        bodyText:
+          "这是一封由 {{sentBy}} 从 {{appName}} 管理员邮件工作区发送的测试邮件。\n\n" +
+          "如果您能看到此内容，说明出站邮件发送功能正常。",
       },
     },
   },

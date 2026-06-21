@@ -1,0 +1,1294 @@
+{
+  "common": {
+    "appName": "DevResponse Enterprise",
+    "signIn": "登录",
+    "signUp": "注册",
+    "signOut": "退出登录",
+    "email": "电子邮箱",
+    "password": "密码",
+    "submit": "提交",
+    "cancel": "取消",
+    "loading": "加载中…",
+    "retry": "重试",
+    "language": "语言",
+    "organization": "组织",
+    "compactMode": "紧凑模式",
+    "openMenu": "打开菜单",
+    "closeMenu": "关闭菜单",
+    "skipToMain": "跳转到主要内容",
+    "skipToNavigation": "跳转到导航",
+    "displayName": "姓名",
+    "unexpectedError": "发生了意外错误，请重试。",
+    "dialogs": {
+      "notifyTitle": "提示",
+      "ok": "确定",
+      "confirm": "确认",
+      "cancel": "取消",
+      "close": "关闭"
+    }
+  },
+  "auth": {
+    "signInTitle": "登录您的账户",
+    "signUpTitle": "创建您的账户",
+    "signInWithGoogle": "使用 Google 继续",
+    "signInWithMicrosoft": "使用 Microsoft 继续",
+    "signInWithGitHub": "使用 GitHub 继续",
+    "or": "或",
+    "forgotPassword": "忘记密码？",
+    "noAccount": "还没有账户？",
+    "haveAccount": "已有账户？",
+    "createAccount": "创建账户",
+    "loggedOutTitle": "您已退出登录",
+    "loggedOutDescription": "请重新登录以继续。",
+    "pendingApprovalTitle": "您的账户正在等待审批",
+    "pendingApprovalDescription": "管理员必须先批准您的账户，您才能访问安全页面。",
+    "blockedTitle": "账户访问受限",
+    "blockedDescription": "您的账户当前被封禁、暂停或停用。请联系您的管理员。",
+    "invalidCredentials": "电子邮箱或密码无效。",
+    "unexpectedError": "发生了意外错误，请重试。",
+    "forgotPasswordDescription": "请输入您账户的电子邮箱，我们将向您发送一个用于重置密码的链接。",
+    "sendResetLink": "发送重置链接",
+    "resetEmailSent": "如果该地址存在对应账户，密码重置链接将很快送达。",
+    "resetPasswordTitle": "设置新密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认密码",
+    "setNewPassword": "设置新密码",
+    "passwordTooShort": "密码长度至少为 8 个字符。",
+    "passwordMismatch": "两次输入的密码不一致。",
+    "resetTokenInvalid": "此重置链接无效或已过期。",
+    "requestNewResetLink": "申请新链接",
+    "resetPasswordDone": "您的密码已更新。"
+  },
+  "public": {
+    "hero": {
+      "eyebrow": "开源 · MIT · 自托管",
+      "title": "完全归你所有的企业级 SaaS 框架。",
+      "subtitle": "安全源于设计。开源出于选择。完全归你所有。",
+      "screenshotAlt": "DevResponseKit 管理员控制台。",
+      "primaryCta": "在 GitHub 免费获取",
+      "secondaryCta": "开始使用",
+      "signInCta": "登录"
+    },
+    "stats": {
+      "items": [
+        {
+          "value": "958",
+          "label": "项自动化测试"
+        },
+        {
+          "value": "$0",
+          "label": "边际身份验证成本"
+        },
+        {
+          "value": "80+",
+          "label": "个管理控制台页面"
+        },
+        {
+          "value": "3-tier",
+          "label": "访问控制"
+        },
+        {
+          "value": "4",
+          "label": "种语言"
+        }
+      ]
+    },
+    "features": {
+      "eyebrow": "B2B 平台所需的一切",
+      "title": "独立模板从不构建的生产层。",
+      "subtitle": "分叉它、拥有它、发布它。DevResponseKit 整合了大多数团队需要数周才能搭建的多租户基础——并且已经过测试和文档化。",
+      "items": [
+        {
+          "title": "管理员控制台",
+          "description": "为用户、角色、30 个权限项的权限目录、组织、成员关系、企业应用、邮件和审计提供 80 多个页面——并支持服务端搜索、筛选、批量操作和 CSV 导出。"
+        },
+        {
+          "title": "三级访问控制",
+          "description": "超级管理员、组织管理员和用户三级，构建于单一可信来源的作用域原语之上。超出作用域的查询返回 404，因此一个租户永远无法得知另一个租户的存在。"
+        },
+        {
+          "title": "作用域受限的机器 API",
+          "description": "带版本的 /api/v1，使用经 SHA-256 哈希的 API 密钥和 Ed25519 JWT，并对照已发布的 JWKS 进行验证。凭据永远不能超出其所有者的权限。"
+        },
+        {
+          "title": "跨子域单点登录",
+          "description": "一次性、60 秒有效的 nonce JWT 让用户在你的各个应用之间切换而无需重新登录——并由可注册源的白名单提供支撑。"
+        },
+        {
+          "title": "发件箱优先的邮件",
+          "description": "每封邮件在投递之前都会记录在可检视、按组织限定作用域的发件箱中，配有可插拔的 Resend 和 Mailgun 提供商以及可按语言编辑的模板。"
+        },
+        {
+          "title": "默认本地化",
+          "description": "next-intl 支持四种语言，并为每位用户持久保存语言偏好——每个路由、消息和邮件模板都会遵循访客的语言。"
+        },
+        {
+          "title": "内嵌文档查看器",
+          "description": "Markdown、Mermaid 和 Shiki 通过经 XSS 加固、先净化的管线渲染——你的文档随应用一同发布。"
+        },
+        {
+          "title": "落地交付而非纸上谈兵的安全",
+          "description": "HTTP 安全标头、剔除个人身份信息的可观测性、时序安全的密钥比对，以及一项在任何路由跳过租户作用域时令构建失败的 CI 测试。"
+        }
+      ]
+    },
+    "why": {
+      "eyebrow": "为什么选择 DevResponseKit",
+      "title": "Clerk 和 WorkOS 级别的身份能力，以零边际成本自托管。",
+      "subtitle": "组织、三级 RBAC、单点登录、API 密钥和审计全部构建于开源的 Better Auth 之上——没有按用户、按组织或按单点登录连接计费的账单随你的增长而累积。",
+      "items": [
+        {
+          "title": "可验证的多租户隔离",
+          "description": "租户隔离在构建关口强制执行：一项 CI 测试扫描每个管理路由，一旦有任何路由未使用作用域原语就访问数据便会失败。隔离从而成为一种你可以阅读和运行的保证，而非凭信任接受。"
+        },
+        {
+          "title": "拥有代码，拥有数据",
+          "description": "可复制推进的源代码，供你分叉并发布——没有框架锁定，也没有按席位的运行时费用。自托管于由你掌控的 PostgreSQL 数据库上。"
+        },
+        {
+          "title": "经过测试和文档化",
+          "description": "744 项测试，涵盖单元、组件、集成、安全、端到端和无障碍套件，外加架构决策记录和一个内嵌的文档站点。"
+        }
+      ]
+    },
+    "stack": {
+      "eyebrow": "构建于你的团队已在使用的技术栈之上",
+      "title": "现代、类型安全，没有抽象开销。",
+      "items": [
+        "Next.js 16",
+        "React 19",
+        "TypeScript 5.9",
+        "PostgreSQL + Kysely",
+        "Better Auth",
+        "next-intl",
+        "Tailwind CSS 4",
+        "Vitest · Playwright · axe"
+      ]
+    },
+    "cta": {
+      "title": "分叉它。拥有它。发布它。",
+      "subtitle": "DevResponseKit 免费且开源。克隆代码仓库，几分钟内即可让一个安全、多租户、本地化的 B2B 平台运行起来。",
+      "primary": "在 GitHub 免费获取",
+      "secondary": "创建账户",
+      "repoLabel": "github.com/devresponse/devresponsekit"
+    },
+    "footer": {
+      "githubLink": "GitHub",
+      "rights": "基于 MIT 许可证免费开源。"
+    }
+  },
+  "shell": {
+    "regions": {
+      "banner": "应用品牌栏",
+      "primaryNavigation": "主导航",
+      "workspaceNavigation": "工作区",
+      "workspaceShell": "工作区框架",
+      "skipLinks": "跳转链接",
+      "toggleSidebar": "切换侧边栏"
+    },
+    "applications": "应用",
+    "dashboard": "仪表板",
+    "workspace": "工作区",
+    "settings": "设置",
+    "admin": "管理",
+    "users": "用户",
+    "audit": "审计日志",
+    "switchApplication": "切换应用",
+    "loadingMenu": "正在加载菜单…",
+    "menuLoadError": "加载菜单失败。",
+    "unauthorized": "您没有权限查看此内容。",
+    "noApplications": "目前还没有可供您使用的应用。",
+    "showLeft": "显示左侧边栏",
+    "hideLeft": "隐藏左侧边栏",
+    "showRight": "显示右侧边栏",
+    "hideRight": "隐藏右侧边栏",
+    "showFooter": "显示页脚",
+    "hideFooter": "隐藏页脚",
+    "skipToMain": "跳转到主要内容",
+    "skipToNavigation": "跳转到导航",
+    "account": "账户",
+    "documentation": "文档"
+  },
+  "administrator": {
+    "appTitle": "管理员",
+    "appDescription": "管理用户、角色、组织和审计活动。",
+    "nav": {
+      "overview": "概览",
+      "identity": "身份",
+      "users": "用户",
+      "sessions": "会话",
+      "access": "访问控制",
+      "roles": "角色",
+      "permissions": "权限",
+      "groups": "用户组",
+      "tenancy": "租户",
+      "organizations": "组织",
+      "memberships": "成员关系",
+      "apps": "应用",
+      "enterpriseApps": "企业应用",
+      "apis": "API",
+      "apiKeys": "API 密钥",
+      "activity": "活动",
+      "auditLog": "审计日志",
+      "communication": "通信",
+      "emailOutbox": "邮件发件箱",
+      "emailTemplates": "邮件模板"
+    },
+    "groups": {
+      "title": "用户组",
+      "description": "组织内的群组，用于打包角色并归集用户。",
+      "newButton": "新建用户组",
+      "deleteButton": "删除",
+      "memberCount": "{count, plural, =0 {无成员} one {# 名成员} other {# 名成员}}",
+      "columns": {
+        "key": "键",
+        "name": "名称",
+        "roleCount": "角色",
+        "memberCount": "成员",
+        "createdAt": "创建时间"
+      },
+      "deleteDialog": {
+        "title": "删除用户组",
+        "description": "此操作将移除该用户组及其角色集合和成员关系。成员仍保留直接分配给他们的任何角色。",
+        "confirm": "删除用户组"
+      },
+      "fields": {
+        "key": "键",
+        "name": "名称",
+        "description": "描述"
+      },
+      "tabs": {
+        "roles": "角色",
+        "members": "成员",
+        "settings": "设置"
+      },
+      "new": {
+        "title": "创建用户组",
+        "submit": "创建用户组",
+        "cancel": "取消",
+        "errorToast": "无法创建用户组。",
+        "organizationRequired": "请为此用户组选择一个组织。"
+      },
+      "settings": {
+        "save": "保存更改",
+        "saved": "已保存。",
+        "errorToast": "无法保存更改。",
+        "keyReadOnly": "键在创建后无法更改。"
+      },
+      "rolesEditor": {
+        "available": "可用",
+        "assigned": "已分配",
+        "searchAvailable": "搜索可用角色",
+        "searchAssigned": "搜索已分配角色",
+        "add": "添加",
+        "remove": "移除",
+        "save": "保存更改",
+        "saving": "正在保存…",
+        "saved": "角色已更新。",
+        "noResults": "没有匹配的角色。",
+        "errorToast": "无法更新角色。"
+      },
+      "members": {
+        "columns": {
+          "email": "电子邮箱",
+          "name": "名称",
+          "joinedAt": "加入时间"
+        }
+      }
+    },
+    "organizationPicker": {
+      "label": "组织",
+      "global": "全局（所有组织）",
+      "placeholder": "选择一个组织…",
+      "loading": "加载中…",
+      "loadError": "无法加载组织。",
+      "searchPlaceholder": "搜索组织…",
+      "noResults": "未找到组织。"
+    },
+    "overview": {
+      "title": "管理员概览",
+      "description": "从左侧导航中选择一个区域，开始管理平台。",
+      "metrics": {
+        "users": "用户",
+        "usersHint": "{active} 个活跃 · {pending} 个待审批",
+        "organizations": "组织",
+        "roles": "角色",
+        "permissions": "权限",
+        "enterpriseApps": "企业应用",
+        "enterpriseAppsHint": "{available} 个可用",
+        "none": "您目前还没有权限查看任何指标。"
+      },
+      "recent": {
+        "registrationsTitle": "最新注册",
+        "sessionsTitle": "最新登录",
+        "auditTitle": "最新审计事件",
+        "organizationsTitle": "最新组织",
+        "viewAll": "查看全部",
+        "empty": "这里还没有内容。",
+        "columns": {
+          "user": "用户",
+          "status": "状态",
+          "created": "创建时间",
+          "ip": "IP 地址",
+          "signedIn": "登录时间",
+          "event": "事件",
+          "outcome": "结果",
+          "when": "时间",
+          "name": "名称",
+          "slug": "标识"
+        }
+      },
+      "insights": {
+        "title": "洞察",
+        "description": "最近 7 天的活动，仅限于您可访问的范围。",
+        "empty": "数据尚不足以生成图表。",
+        "table": {
+          "day": "日期",
+          "organization": "组织",
+          "count": "数量"
+        },
+        "mostActiveOrgs": {
+          "title": "最活跃的组织",
+          "subtitle": "最近 {days} 天内各组织的新注册数"
+        },
+        "registrations": {
+          "title": "每日注册",
+          "system": "所有组织的新用户",
+          "org": "您组织的新成员"
+        },
+        "logins": {
+          "title": "每日登录",
+          "system": "所有组织的登录",
+          "org": "您组织的登录"
+        }
+      }
+    },
+    "users": {
+      "title": "用户",
+      "newButton": "新建用户",
+      "columns": {
+        "email": "电子邮箱",
+        "displayName": "名称",
+        "status": "状态",
+        "createdAt": "创建时间",
+        "organization": "组织"
+      },
+      "filters": {
+        "status": "状态",
+        "search": "搜索用户"
+      },
+      "status": {
+        "active": "活跃",
+        "pending_approval": "待审批",
+        "blocked": "已封禁",
+        "suspended": "已暂停",
+        "deactivated": "已停用"
+      },
+      "tabs": {
+        "overview": "概览",
+        "roles": "角色",
+        "memberships": "成员关系",
+        "sessions": "会话",
+        "audit": "审计"
+      },
+      "detail": {
+        "notFound": "未找到用户。",
+        "metaCreated": "创建于 {value}",
+        "metaUpdated": "更新于 {value}",
+        "betterAuthId": "Better Auth 用户 ID",
+        "appUserId": "应用用户 ID",
+        "deactivated": "停用于 {value}",
+        "deactivatedBy": "由 {actor} 停用",
+        "deactivatedReason": "原因：{reason}"
+      },
+      "fields": {
+        "email": "电子邮箱",
+        "displayName": "显示名称",
+        "preferredLocale": "首选语言",
+        "password": "密码",
+        "role": "Better Auth 角色",
+        "initialAppStatus": "初始应用状态",
+        "reason": "原因"
+      },
+      "new": {
+        "title": "创建用户",
+        "description": "创建一个 Better Auth 用户及其对应的应用记录。用户将以所选的应用状态创建；建议对非受信任账户采用管理员审批。",
+        "submit": "创建用户",
+        "cancel": "取消",
+        "passwordHint": "至少 8 个字符。该密码会转发给 Better Auth，且绝不会被记录。",
+        "successToast": "已创建用户 {email}。",
+        "errorToast": "无法创建用户。"
+      },
+      "actions": {
+        "viewDetail": "查看",
+        "approve": "批准",
+        "block": "封禁",
+        "suspend": "暂停",
+        "reactivate": "重新启用",
+        "ban": "封禁",
+        "unban": "解除封禁",
+        "setRole": "设置 Better Auth 角色",
+        "setPassword": "设置密码",
+        "revokeSessions": "吊销所有会话",
+        "softDelete": "删除（软删除）",
+        "restore": "恢复",
+        "impersonate": "模拟登录",
+        "stopImpersonating": "停止模拟登录",
+        "confirm": "确认",
+        "cancel": "取消"
+      },
+      "bulk": {
+        "approve": "批准所选",
+        "block": "封禁所选",
+        "ban": "封禁所选…",
+        "softDelete": "删除所选（软删除）…",
+        "reasonPrompt": "原因（记录在审计日志中）：",
+        "confirmDelete": "对所选用户执行软删除？此操作会在 Better Auth 中封禁他们并停用其应用记录。",
+        "successToast": "已对 {succeeded} 名用户执行“{action}”。",
+        "partialFailureToast": "已对 {succeeded}/{attempted} 名用户执行“{action}”；{failed} 个失败。",
+        "errorToast": "批量操作失败。",
+        "rateLimitedToast": "批量请求过多。请稍后重试。"
+      },
+      "impersonation": {
+        "confirmTitle": "模拟登录 {email}？",
+        "confirmDescription": "您将以 {email} 的身份登录。此操作将记录在审计日志中。要返回您自己的会话，请点击每个页面上出现的横幅中的“停止模拟登录”。",
+        "confirmAck": "我了解此操作将被审计。",
+        "startButton": "模拟登录此用户",
+        "startToast": "正在模拟登录 {email}…",
+        "stopButton": "停止模拟登录",
+        "stopToast": "已返回您自己的会话。",
+        "errorToast": "无法开始模拟登录。",
+        "selfError": "您不能模拟登录自己。",
+        "bannerLabel": "您正在模拟登录 {email}。",
+        "stopErrorToast": "无法停止模拟登录。请重试。"
+      },
+      "dialogs": {
+        "ban": {
+          "title": "封禁用户",
+          "description": "封禁会阻止该用户登录。必须填写原因，并会记录在审计日志中。"
+        },
+        "softDelete": {
+          "title": "删除用户（软删除）",
+          "description": "软删除会在 Better Auth 中封禁该用户，并将应用记录标记为已停用。“恢复”操作可撤销此操作。"
+        },
+        "setPassword": {
+          "title": "设置密码",
+          "description": "请选择一种模式。“设置新密码”会直接覆盖用户的密码。“发送重置邮件”会触发 Better Auth 通过邮件发送密码重置链接。",
+          "modeSet": "设置新密码",
+          "modeReset": "发送重置邮件"
+        },
+        "setRole": {
+          "title": "设置 Better Auth 角色",
+          "description": "这是身份验证级别的角色（admin / user），区别于应用角色。"
+        }
+      },
+      "sessions": {
+        "title": "活跃会话",
+        "empty": "没有活跃会话。",
+        "revokeOne": "吊销",
+        "revokeAll": "吊销所有会话",
+        "expiresAt": "{value} 过期",
+        "ipAddress": "IP",
+        "userAgent": "用户代理"
+      },
+      "memberships": {
+        "columns": {
+          "organization": "组织",
+          "orgName": "名称",
+          "status": "状态",
+          "source": "来源",
+          "joinedAt": "加入时间"
+        },
+        "removeButton": "移除",
+        "removeConfirm": "移除此成员关系？",
+        "removeError": "无法移除该成员关系。"
+      },
+      "roles": {
+        "columns": {
+          "role": "角色",
+          "key": "键",
+          "organization": "组织",
+          "assigned": "分配时间"
+        }
+      }
+    },
+    "grid": {
+      "loading": "加载中…",
+      "empty": "没有结果与当前筛选条件匹配。",
+      "error": "加载失败。请重试。",
+      "retry": "重试",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "pageOf": "第 {page} 页，共 {totalPages} 页",
+      "rowsPerPage": "每页行数",
+      "totalRows": "{count, plural, one {# 行} other {# 行}}",
+      "search": "搜索",
+      "sortAsc": "升序排列",
+      "sortDesc": "降序排列",
+      "sortNone": "未排序",
+      "selectPage": "选择本页全部",
+      "selectRow": "选择行",
+      "selectionCount": "{count, plural, one {已选择 #} other {已选择 #}}",
+      "selectionAllMatching": "已选择全部 {total, number} 个匹配行",
+      "selectAllMatching": "选择全部 {total, number} 个匹配行",
+      "clearSelection": "清除选择",
+      "bulkActions": "批量操作",
+      "exportCsv": "导出 CSV",
+      "searchPlaceholder": "搜索…",
+      "filterAll": "全部",
+      "filterBy": "按 {label} 筛选",
+      "clearFilters": "清除筛选",
+      "optionLabels": {
+        "active": "活跃",
+        "pending_approval": "待审批",
+        "pending": "待处理",
+        "blocked": "已封禁",
+        "suspended": "已暂停",
+        "deactivated": "已停用",
+        "archived": "已归档",
+        "available": "可用",
+        "disabled": "已禁用",
+        "revoked": "已吊销",
+        "global": "全局",
+        "org": "组织",
+        "true": "是",
+        "false": "否"
+      }
+    },
+    "errors": {
+      "forbidden": "您没有权限查看此页面。",
+      "generic": "出了点问题。请重试。",
+      "invalidBody": "提交的数据无效。",
+      "emailTaken": "该电子邮箱地址已被使用。",
+      "notFound": "找不到请求的资源。",
+      "authBackendFailed": "身份验证后端拒绝了该请求。",
+      "roleInUse": "此角色仍分配给一个或多个用户，无法删除。",
+      "permissionInUse": "此权限仍分配给一个或多个角色，无法删除。",
+      "keyTaken": "该键已被使用。",
+      "slugTaken": "该标识已被使用。",
+      "organizationNotEmpty": "此组织仍有成员，无法删除。",
+      "organizationIsDefault": "无法删除默认组织。",
+      "organizationInUse": "此组织仍有角色、应用或凭据，无法删除。",
+      "membershipExists": "此用户已是该组织的成员。",
+      "bindingExists": "此提供商绑定已存在。",
+      "idTaken": "该 id 已被使用。",
+      "invalidOrigin": "源必须是不含路径的 HTTPS URL。",
+      "applicationInUse": "此应用仍被引用，无法删除。",
+      "rateLimited": "请求过多。请稍后重试。",
+      "exportTruncated": "导出已达到最大行数上限。请细化筛选条件并重新导出以获取其余内容。",
+      "originNotAllowed": "源主机不在 SSO 重定向的允许列表中。"
+    },
+    "roles": {
+      "title": "角色",
+      "newButton": "新建角色",
+      "duplicateButton": "复制",
+      "deleteButton": "删除",
+      "editButton": "编辑",
+      "scope": {
+        "global": "全局",
+        "org": "组织"
+      },
+      "columns": {
+        "key": "键",
+        "name": "名称",
+        "scope": "作用域",
+        "organization": "组织",
+        "permissionCount": "权限",
+        "memberCount": "成员",
+        "createdAt": "创建时间"
+      },
+      "filters": {
+        "scope": "作用域",
+        "organization": "组织",
+        "permission": "权限键",
+        "search": "搜索角色"
+      },
+      "tabs": {
+        "permissions": "权限",
+        "members": "成员",
+        "settings": "设置"
+      },
+      "fields": {
+        "key": "键",
+        "name": "名称",
+        "description": "描述",
+        "scope": "作用域",
+        "organization": "组织"
+      },
+      "new": {
+        "title": "创建角色",
+        "description": "创建一个新的应用角色。选择“全局”以创建平台范围的角色，或将其分配给某个组织。键在创建后将永久固定。",
+        "submit": "创建角色",
+        "cancel": "取消",
+        "successToast": "已创建角色 {key}。",
+        "errorToast": "无法创建角色。"
+      },
+      "settings": {
+        "save": "保存更改",
+        "saved": "已保存。",
+        "errorToast": "无法保存更改。",
+        "keyReadOnly": "键在创建后无法更改。"
+      },
+      "permissionsEditor": {
+        "title": "管理权限",
+        "available": "可用",
+        "assigned": "已分配",
+        "searchAvailable": "搜索可用权限",
+        "searchAssigned": "搜索已分配权限",
+        "add": "添加",
+        "remove": "移除",
+        "save": "保存更改",
+        "saving": "正在保存…",
+        "saved": "权限已更新。",
+        "noResults": "没有匹配的权限。",
+        "empty": "尚未分配任何权限。",
+        "errorToast": "无法更新权限。"
+      },
+      "members": {
+        "empty": "目前还没有成员持有此角色。",
+        "revoke": "撤销",
+        "revokeConfirm": "从 {email} 撤销此角色？",
+        "errorToast": "无法撤销该角色。",
+        "columns": {
+          "email": "电子邮箱",
+          "name": "名称",
+          "organization": "组织",
+          "assignedAt": "分配时间"
+        }
+      },
+      "deleteDialog": {
+        "title": "删除角色",
+        "description": "删除会移除该角色及其权限关联。该角色不得分配给任何用户。",
+        "confirm": "删除角色"
+      },
+      "duplicateConfirm": "创建此角色的副本？",
+      "duplicateError": "无法复制该角色。",
+      "deleteError": "无法删除该角色。"
+    },
+    "permissions": {
+      "title": "权限",
+      "description": "应用角色所使用的权限键目录。",
+      "newButton": "新建权限",
+      "editButton": "编辑",
+      "deleteButton": "删除",
+      "columns": {
+        "key": "键",
+        "description": "描述",
+        "usedByRoleCount": "使用此权限的角色",
+        "actions": "操作"
+      },
+      "filters": {
+        "search": "搜索权限"
+      },
+      "fields": {
+        "key": "键",
+        "description": "描述"
+      },
+      "new": {
+        "title": "创建权限",
+        "description": "向目录中添加一个新的权限键。该键会被代码和审计记录引用；请谨慎选择。",
+        "submit": "创建权限",
+        "cancel": "取消",
+        "errorToast": "无法创建权限。"
+      },
+      "edit": {
+        "title": "编辑权限",
+        "submit": "保存",
+        "cancel": "取消",
+        "errorToast": "无法保存更改。"
+      },
+      "rolesUsing": {
+        "title": "使用此权限的角色",
+        "empty": "目前没有角色使用此权限。",
+        "viewRole": "查看角色"
+      },
+      "deleteDialog": {
+        "title": "删除权限",
+        "description": "删除会将该权限从目录中移除。它不得被任何角色引用。",
+        "confirm": "删除权限"
+      },
+      "deleteError": "无法删除该权限。"
+    },
+    "orgs": {
+      "title": "组织",
+      "newButton": "新建组织",
+      "deleteButton": "删除",
+      "defaultYes": "默认",
+      "columns": {
+        "slug": "标识",
+        "name": "名称",
+        "status": "状态",
+        "isDefault": "默认",
+        "memberCount": "成员",
+        "createdAt": "创建时间"
+      },
+      "fields": {
+        "slug": "标识",
+        "slugHelp": "小写字母、数字、连字符。1-64 个字符。",
+        "name": "名称",
+        "status": "状态",
+        "isDefault": "设为默认组织"
+      },
+      "tabs": {
+        "members": "成员",
+        "providers": "提供商",
+        "settings": "设置"
+      },
+      "new": {
+        "title": "创建组织",
+        "description": "添加一个新组织。标识用于 URL，创建后不易更改。",
+        "submit": "创建组织",
+        "cancel": "取消",
+        "errorToast": "无法创建组织。"
+      },
+      "settings": {
+        "save": "保存更改",
+        "saved": "组织已更新。",
+        "errorToast": "无法保存更改。",
+        "statusActive": "活跃",
+        "statusPending": "待处理",
+        "statusSuspended": "已暂停",
+        "statusArchived": "已归档"
+      },
+      "members": {
+        "columns": {
+          "user": "用户",
+          "status": "状态",
+          "source": "来源",
+          "joinedAt": "加入时间"
+        },
+        "removeButton": "移除",
+        "removeConfirm": "将此成员从组织中移除？",
+        "removeError": "无法移除该成员。"
+      },
+      "providers": {
+        "columns": {
+          "provider": "提供商",
+          "key": "键",
+          "displayName": "显示名称",
+          "boundAt": "绑定时间"
+        },
+        "removeButton": "移除",
+        "removeConfirm": "移除此提供商绑定？",
+        "removeError": "无法移除该绑定。"
+      },
+      "deleteDialog": {
+        "title": "删除组织",
+        "description": "删除会移除该组织。该组织必须为空（无成员）。"
+      },
+      "deleteError": "无法删除该组织。"
+    },
+    "memberships": {
+      "title": "成员关系",
+      "columns": {
+        "organization": "组织",
+        "user": "用户",
+        "status": "状态",
+        "source": "来源",
+        "createdAt": "创建时间"
+      }
+    },
+    "enterpriseApps": {
+      "title": "企业应用",
+      "newButton": "新建应用",
+      "deleteButton": "删除",
+      "global": "全局",
+      "columns": {
+        "id": "ID",
+        "label": "标签",
+        "subdomain": "子域",
+        "status": "状态",
+        "organization": "组织",
+        "sortOrder": "排序",
+        "createdAt": "创建时间"
+      },
+      "fields": {
+        "id": "ID",
+        "idHelp": "小写字母、数字、点、下划线和连字符。1–128 个字符。创建后无法更改。",
+        "label": "标签",
+        "description": "描述",
+        "origin": "源",
+        "originHelp": "必须是不含路径、查询或片段的 HTTPS URL（例如 https://docs.example.com）。",
+        "subdomain": "子域",
+        "subdomainHelp": "主机名安全的 DNS 标签：小写字母、数字和连字符，1–63 个字符。",
+        "ssoAudience": "SSO 受众",
+        "status": "状态",
+        "sortOrder": "排序",
+        "organization": "组织作用域"
+      },
+      "status": {
+        "available": "可用",
+        "disabled": "已禁用"
+      },
+      "new": {
+        "title": "创建企业应用",
+        "description": "注册一个新的企业应用。ID 在创建后将永久固定，因为它会被 SSO 交接记录引用。",
+        "submit": "创建应用",
+        "cancel": "取消",
+        "errorToast": "无法创建应用。"
+      },
+      "settings": {
+        "save": "保存更改",
+        "saved": "应用已更新。",
+        "errorToast": "无法保存更改。"
+      },
+      "deleteDialog": {
+        "title": "删除企业应用",
+        "description": "删除会将该应用从目录中移除。该应用不得被任何 SSO 交接引用。"
+      },
+      "deleteError": "无法删除该应用。"
+    },
+    "apiKeys": {
+      "title": "API 密钥",
+      "description": "所有用户和组织的全部 API 密钥清单。检视作用域和使用情况、轮换或吊销密钥，或代表用户签发密钥。此处绝不显示密钥明文——仅在创建或轮换密钥时显示。",
+      "newButton": "签发 API 密钥",
+      "never": "从不",
+      "noExpiry": "永不过期",
+      "scopeCount": "{count, plural, one {# 个作用域} other {# 个作用域}}",
+      "columns": {
+        "name": "名称",
+        "prefix": "前缀",
+        "owner": "所有者",
+        "scopes": "作用域",
+        "status": "状态",
+        "lastUsed": "最近使用",
+        "expires": "过期时间",
+        "created": "创建时间"
+      },
+      "filters": {
+        "search": "搜索",
+        "searchPlaceholder": "名称、前缀或所有者电子邮箱",
+        "status": "状态",
+        "any": "任意"
+      },
+      "status": {
+        "active": "活跃",
+        "revoked": "已吊销"
+      },
+      "actions": {
+        "view": "查看",
+        "rotate": "轮换",
+        "revoke": "吊销"
+      },
+      "revokeError": "无法吊销该密钥。",
+      "rotateError": "无法轮换该密钥。",
+      "dialogs": {
+        "revoke": {
+          "title": "吊销 API 密钥",
+          "description": "此操作会立即且永久地使该密钥失效。任何使用它的客户端都将开始收到 401 响应。此操作无法撤销。"
+        },
+        "rotate": {
+          "title": "轮换 API 密钥",
+          "description": "将以相同的所有者、作用域和过期时间签发一个新密钥，并吊销当前密钥。请用新密钥更新客户端——旧密钥会立即停止工作。"
+        }
+      },
+      "reveal": {
+        "title": "立即复制密钥",
+        "description": "这是唯一一次显示完整密钥明文。请将其妥善保存——它无法再次获取。如果丢失，请轮换该密钥。",
+        "copy": "复制",
+        "copied": "已复制",
+        "done": "完成"
+      },
+      "detail": {
+        "loading": "加载中…",
+        "loadError": "无法加载该密钥。",
+        "status": "状态",
+        "owner": "所有者",
+        "organization": "组织",
+        "created": "创建时间",
+        "createdBy": "创建者",
+        "lastUsed": "最近使用",
+        "lastUsedIp": "最近使用 IP",
+        "expires": "过期时间",
+        "revoked": "已吊销",
+        "revokedBy": "吊销者",
+        "revokedReason": "吊销原因",
+        "scopes": "作用域",
+        "noScopes": "无作用域——此密钥无法调用任何受作用域限制的端点。"
+      },
+      "fields": {
+        "name": "名称",
+        "namePlaceholder": "例如 CI 部署机器人",
+        "owner": "所有者（应用用户 ID）",
+        "ownerHelp": "密钥所代表的应用用户。请从“用户”控制台复制其 ID。密钥永远不能超出该用户自身的权限。",
+        "expiresInDays": "过期天数（天）",
+        "expiresInDaysPlaceholder": "留空表示永不过期",
+        "expiresInDaysHelp": "可选。经过这么多天后密钥将停止工作。留空表示永不过期。",
+        "scopes": "作用域",
+        "scopesHelp": "选择此密钥可使用的权限。您只能授予所有者持有的作用域；其余的将被拒绝。"
+      },
+      "new": {
+        "title": "签发 API 密钥",
+        "description": "代表用户创建一个 API 密钥。密钥明文在创建后仅显示一次。",
+        "submit": "签发密钥",
+        "cancel": "取消",
+        "errorToast": "无法签发该密钥。",
+        "invalidOwnerId": "请输入有效的应用用户 ID（UUID）。",
+        "ownerNotFound": "未找到具有该应用用户 ID 的用户。",
+        "ownerInactive": "该用户未处于活跃状态，无法为其签发密钥。",
+        "invalidScope": "所有者不持有这些作用域：{scopes}"
+      }
+    },
+    "audit": {
+      "title": "审计日志",
+      "description": "管理员和身份验证事件的只读分页视图。每一行都会打开一个面板，显示完整的元数据、IP 地址、用户代理和原因。",
+      "viewDetail": "查看",
+      "columns": {
+        "createdAt": "时间",
+        "eventType": "事件类型",
+        "outcome": "结果",
+        "actor": "操作者",
+        "target": "目标"
+      },
+      "filters": {
+        "eventType": "事件类型",
+        "outcome": "结果",
+        "actor": "操作者（Better Auth 用户 id）",
+        "actorPlaceholder": "Better Auth 用户 id",
+        "any": "任意"
+      },
+      "outcome": {
+        "success": "成功",
+        "error": "错误",
+        "failure": "失败",
+        "denied": "已拒绝"
+      },
+      "detail": {
+        "actor": "操作者",
+        "appUser": "应用用户",
+        "organization": "组织",
+        "targetApplication": "目标应用",
+        "provider": "提供商",
+        "email": "电子邮箱",
+        "ipAddress": "IP 地址",
+        "userAgent": "用户代理",
+        "reason": "原因",
+        "metadata": "元数据"
+      }
+    },
+    "email": {
+      "title": "邮件发件箱",
+      "description": "每封外发邮件在任何投递尝试之前都会记录在此处——包括未配置投递提供商的环境。",
+      "viewDetail": "查看",
+      "columns": {
+        "createdAt": "创建时间",
+        "to": "收件人",
+        "subject": "主题",
+        "template": "模板",
+        "status": "状态"
+      },
+      "status": {
+        "pending": "待处理",
+        "sent": "已发送",
+        "failed": "失败",
+        "logged": "已记录"
+      },
+      "filters": {
+        "status": "状态",
+        "template": "模板键",
+        "any": "任意"
+      },
+      "test": {
+        "placeholder": "recipient@example.com",
+        "send": "发送测试邮件",
+        "error": "发送测试邮件失败。",
+        "result": {
+          "sent": "测试邮件已发送。",
+          "failed": "投递失败——请查看发件箱中的对应行。",
+          "logged": "已记录在发件箱中（未配置投递提供商）。"
+        }
+      },
+      "detail": {
+        "from": "发件人",
+        "to": "收件人",
+        "template": "模板",
+        "provider": "提供商",
+        "providerMessageId": "提供商消息 id",
+        "createdAt": "创建时间",
+        "sentAt": "发送时间",
+        "relatedUser": "相关用户",
+        "organization": "组织",
+        "error": "错误",
+        "bodyText": "文本正文",
+        "bodyHtml": "HTML 正文"
+      },
+      "templates": {
+        "title": "邮件模板",
+        "description": "用于外发邮件的可编辑模板。删除或破坏某个模板绝不会阻断流程——内置默认值会作为回退生效。",
+        "empty": "未找到模板。请运行数据库迁移以植入默认值。",
+        "edit": "编辑",
+        "editTitle": "编辑邮件模板",
+        "columns": {
+          "key": "键",
+          "locale": "语言",
+          "subject": "主题",
+          "updatedAt": "更新时间"
+        },
+        "fields": {
+          "subject": "主题",
+          "bodyHtml": "HTML 正文",
+          "bodyText": "文本正文",
+          "bodyTextHint": "可选的纯文本替代内容。留空表示仅发送 HTML。",
+          "description": "描述"
+        },
+        "variablesHint": "可用变量：",
+        "save": "保存模板",
+        "cancel": "取消",
+        "saveError": "保存模板失败。"
+      }
+    }
+  },
+  "errors": {
+    "application_in_use": "此应用正在使用中，无法删除。",
+    "application_not_found": "未找到应用。",
+    "auth_ban_failed": "身份验证服务拒绝了此封禁。",
+    "auth_create_failed": "身份验证服务拒绝创建该用户。",
+    "auth_forgot_password_failed": "无法发送密码重置邮件。",
+    "auth_impersonate_failed": "无法开始模拟登录。",
+    "auth_list_sessions_failed": "无法列出会话。",
+    "auth_revoke_all_failed": "无法吊销所有会话。",
+    "auth_revoke_session_failed": "无法吊销该会话。",
+    "auth_set_password_failed": "无法更改密码。",
+    "auth_set_role_failed": "无法更改用户角色。",
+    "auth_stop_impersonate_failed": "无法停止模拟登录。",
+    "auth_unban_failed": "身份验证服务拒绝解除此封禁。",
+    "binding_exists": "此绑定已存在。",
+    "binding_not_found": "未找到绑定。",
+    "cannot_impersonate_self": "您不能模拟登录自己。",
+    "email_taken": "此电子邮箱已被使用。",
+    "export_failed": "导出在发送任何行之前已失败。",
+    "filters_required_for_select_all": "全选时需要设置筛选条件。",
+    "forbidden": "您没有权限执行此操作。",
+    "id_taken": "此标识符已被使用。",
+    "invalid_body": "请求正文无效。",
+    "invalid_id": "提供的 id 不是有效的 UUID。",
+    "invalid_origin": "请求来源不被允许。",
+    "invalid_session_id": "会话 id 无效。",
+    "key_taken": "此键已被使用。",
+    "membership_exists": "此成员关系已存在。",
+    "membership_not_found": "未找到成员关系。",
+    "no_changes": "未提供任何更改。",
+    "not_deactivated": "该用户未被停用。",
+    "not_found": "未找到。",
+    "organization_not_found": "未找到组织。",
+    "permission_in_use": "此权限正在使用中。",
+    "rate_limited": "请求过多。请放慢速度。",
+    "role_in_use": "此角色正在使用中。",
+    "role_not_found": "未找到角色。",
+    "slug_taken": "此标识已被使用。",
+    "soft_delete_failed": "软删除失败；请重试。",
+    "unauthenticated": "需要登录。",
+    "unknown_resource": "未知资源。",
+    "untrusted_origin": "请求来源不受信任。",
+    "user_not_found": "未找到用户。"
+  },
+  "account": {
+    "appTitle": "账户",
+    "save": "保存更改",
+    "saved": "您的更改已保存。",
+    "sections": {
+      "overview": {
+        "title": "概览",
+        "description": "您的账户信息摘要。"
+      },
+      "profile": {
+        "title": "个人资料",
+        "description": "您的姓名以及您在应用中的显示方式。"
+      },
+      "preferences": {
+        "title": "偏好设置",
+        "description": "语言、时区和格式。"
+      },
+      "security": {
+        "title": "安全",
+        "description": "密码和活跃会话。"
+      },
+      "apiKeys": {
+        "title": "API 密钥",
+        "description": "创建和管理用于以编程方式访问您账户的个人 API 密钥。"
+      }
+    },
+    "fields": {
+      "name": "姓名",
+      "displayName": "显示名称",
+      "displayNameHint": "在整个应用中显示。留空则使用您的姓名。",
+      "email": "电子邮箱",
+      "emailReadonlyHint": "如需更改电子邮箱，请联系管理员。",
+      "locale": "语言",
+      "timeZone": "时区",
+      "system": "系统默认",
+      "dateFormat": "日期格式",
+      "numberFormatLocale": "数字格式"
+    },
+    "locales": {
+      "en": "英语",
+      "fr": "法语",
+      "es": "西班牙语",
+      "uk": "乌克兰语",
+      "pt": "葡萄牙语",
+      "zh": "简体中文"
+    },
+    "dateFormats": {
+      "system": "系统默认",
+      "iso8601": "ISO 8601 (2026-06-13)",
+      "us": "美国 (06/13/2026)",
+      "eu": "欧洲 (13/06/2026)",
+      "long": "完整 (June 13, 2026)"
+    },
+    "status": {
+      "active": "活跃",
+      "pending_approval": "待审批",
+      "blocked": "已封禁",
+      "suspended": "已暂停",
+      "deactivated": "已停用"
+    },
+    "overview": {
+      "identity": "身份",
+      "status": "状态",
+      "memberSince": "加入时间",
+      "memberships": "组织",
+      "noMemberships": "您不是任何组织的成员。",
+      "roles": "角色",
+      "noRoles": "未分配任何角色。",
+      "permissions": "权限",
+      "permissionsDescription": "您当前在活跃组织中由角色授予的、所有获准执行的操作。",
+      "noPermissions": "您在活跃组织中没有任何权限。"
+    },
+    "security": {
+      "passwordTitle": "密码",
+      "sessionsTitle": "活跃会话",
+      "currentPassword": "当前密码",
+      "newPassword": "新密码",
+      "confirmPassword": "确认新密码",
+      "changePassword": "更改密码",
+      "passwordChanged": "您的密码已更改。其他会话已被退出登录。",
+      "sessionsDescription": "当前已登录您账户的设备。",
+      "revokeOthers": "退出其他会话",
+      "noSessions": "没有活跃会话。",
+      "expiresAt": "{value} 过期",
+      "ipAddress": "IP",
+      "userAgent": "设备",
+      "revoke": "吊销"
+    },
+    "errors": {
+      "nameRequired": "姓名为必填项。",
+      "invalid": "请检查表单后重试。",
+      "saveFailed": "保存您的更改失败。请重试。",
+      "passwordTooShort": "密码长度至少为 8 个字符。",
+      "passwordMismatch": "两次输入的密码不一致。",
+      "passwordChangeFailed": "无法更改您的密码。请检查您的当前密码。",
+      "sessionsLoadFailed": "无法加载您的会话。",
+      "sessionsRevokeFailed": "无法吊销该会话。"
+    },
+    "apiKeys": {
+      "listTitle": "您的 API 密钥",
+      "empty": "您还没有任何 API 密钥。",
+      "loadError": "无法加载您的 API 密钥。",
+      "never": "从不",
+      "noExpiry": "永不过期",
+      "noScopes": "无作用域",
+      "status": {
+        "active": "活跃",
+        "revoked": "已吊销"
+      },
+      "created": "创建于 {value}",
+      "lastUsed": "最近使用 {value}",
+      "expires": "{value} 过期",
+      "actions": {
+        "rotate": "轮换",
+        "revoke": "吊销"
+      },
+      "rotateError": "无法轮换该密钥。",
+      "revokeError": "无法吊销该密钥。",
+      "revokeConfirm": {
+        "title": "吊销 API 密钥",
+        "description": "此操作会永久使该密钥失效。任何使用它的客户端都会立即停止工作。此操作无法撤销。"
+      },
+      "rotateConfirm": {
+        "title": "轮换 API 密钥",
+        "description": "将以相同的作用域和过期时间签发一个新密钥，并吊销此密钥。请用新密钥更新您的客户端——旧密钥会立即停止工作。"
+      },
+      "reveal": {
+        "title": "立即复制您的密钥",
+        "description": "这是唯一一次显示完整密钥明文。请将其妥善保存——它无法再次获取。如果丢失，请轮换该密钥。",
+        "copy": "复制",
+        "copied": "已复制",
+        "done": "完成"
+      },
+      "create": {
+        "title": "创建新密钥",
+        "name": "名称",
+        "namePlaceholder": "例如 我的笔记本电脑 CLI",
+        "expiresInDays": "过期天数（天）",
+        "expiresInDaysPlaceholder": "留空表示永不过期",
+        "expiresInDaysHelp": "可选。经过这么多天后密钥将停止工作。",
+        "scopes": "作用域",
+        "scopesHelp": "选择此密钥可执行的操作。密钥永远不能超出您自身的权限。",
+        "noScopesAvailable": "没有可授予的作用域。",
+        "submit": "创建密钥",
+        "nameRequired": "请输入名称。",
+        "error": "无法创建该密钥。",
+        "invalidScope": "您无法授予这些作用域：{scopes}"
+      }
+    }
+  },
+  "docs": {
+    "appTitle": "文档",
+    "index": {
+      "title": "文档",
+      "description": "浏览平台的指南和参考资料。"
+    },
+    "emptyCatalog": "目前还没有可供您使用的文档。",
+    "onThisPage": "本页内容",
+    "lastUpdated": "最后更新于 {date}",
+    "breadcrumbHome": "文档",
+    "readDocument": "阅读",
+    "diagram": {
+      "expand": "将图表展开为完整视图",
+      "title": "图表——完整视图",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "reset": "重置缩放"
+    }
+  },
+  "errorBoundary": {
+    "title": "出了点问题",
+    "description": "渲染此页面时发生了意外错误。您可以重试，如果问题持续存在请重新加载。",
+    "retry": "重试",
+    "supportId": "支持 ID"
+  },
+  "notFound": {
+    "title": "未找到页面",
+    "description": "您要查找的页面不存在或已被移动。",
+    "home": "返回首页"
+  },
+  "validation": {
+    "required": "此字段为必填项。",
+    "email": "请输入有效的电子邮箱地址。",
+    "passwordMin": "密码长度至少为 8 个字符。",
+    "passwordMax": "密码长度不得超过 128 个字符。",
+    "max": "此值过长。",
+    "requiredLegend": "表示必填字段",
+    "key": "只能使用字母、数字以及字符 . _ - :",
+    "slug": "请使用小写字母、数字和连字符。",
+    "uuid": "标识符无效。",
+    "appId": "只能使用小写字母、数字以及字符 . _ -",
+    "subdomain": "请使用小写字母、数字和连字符。",
+    "ssoAudience": "只能使用小写字母、数字以及字符 . _ : -",
+    "number": "请输入有效的数字。",
+    "passwordsMismatch": "两次输入的密码不一致。",
+    "locale": "请选择一种受支持的语言。",
+    "dateFormat": "请选择有效的日期格式。"
+  },
+  "sso": {
+    "confirm": {
+      "title": "确认登录",
+      "body": "您即将以 {email} 的身份登录。",
+      "continue": "继续",
+      "cancel": "取消",
+      "invalidTitle": "登录链接无效",
+      "invalidBody": "此登录链接无效或已过期。请从您来自的应用中申请一个新链接。",
+      "backToSignIn": "返回登录"
+    }
+  }
+}

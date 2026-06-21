@@ -1125,7 +1125,8 @@
       "fr": "French",
       "es": "Spanish",
       "uk": "Ukrainian",
-      "pt": "Portuguese"
+      "pt": "Portuguese",
+      "zh": "Chinese (Simplified)"
     },
     "dateFormats": {
       "system": "System default",

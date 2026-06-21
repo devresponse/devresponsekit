@@ -84,7 +84,7 @@ These encode project rules and will fail the build if violated:
 | --- | --- |
 | `tests/unit/admin-route-scope-invariant.test.ts` | Every `/api/administrator/**` route references a tenant-scope primitive. |
 | Admin rate-limit invariant | Every admin mutation calls `enforceRateLimit`. |
-| Locale message parity | Every text key exists in **all five** locales (`en`/`fr`/`es`/`uk`/`pt`). |
+| Locale message parity | Every text key exists in **all six** locales (`en`/`fr`/`es`/`uk`/`pt`/`zh`). |
 | Permission catalog count | The `ADMIN_PERMISSION_CATALOG` has the expected number of keys (currently **35**). |
 
 When you add a route, permission, or string, expect to update the corresponding invariant.

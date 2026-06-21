@@ -18,6 +18,7 @@ const LOCALE_LABELS: Record<SupportedLocale, string> = {
   es: "Español",
   uk: "Українська",
   pt: "Português",
+  zh: "简体中文",
 };
 
 export interface LocaleSwitcherProps {

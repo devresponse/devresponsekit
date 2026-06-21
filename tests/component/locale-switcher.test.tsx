@@ -35,7 +35,7 @@ describe("LocaleSwitcher", () => {
     await user.click(screen.getByRole("combobox", { name: /language/i }));
 
     const listbox = await screen.findByRole("listbox");
-    for (const label of ["English", "Français", "Español", "Українська", "Português"]) {
+    for (const label of ["English", "Français", "Español", "Українська", "Português", "简体中文"]) {
       expect(within(listbox).getByText(label)).toBeInTheDocument();
     }
   });

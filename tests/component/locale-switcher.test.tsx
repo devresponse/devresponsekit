@@ -43,6 +43,7 @@ describe("LocaleSwitcher", () => {
       "Português",
       "简体中文",
       "हिन्दी",
+      "日本語",
     ]) {
       expect(within(listbox).getByText(label)).toBeInTheDocument();
     }

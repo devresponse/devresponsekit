@@ -1127,7 +1127,8 @@
       "uk": "Ukrainian",
       "pt": "Portuguese",
       "zh": "Chinese (Simplified)",
-      "hi": "Hindi"
+      "hi": "Hindi",
+      "ja": "Japanese"
     },
     "dateFormats": {
       "system": "System default",

@@ -7,7 +7,7 @@
  *  3. Updating the `NEXT_PUBLIC_SUPPORTED_LOCALES` env value used by the
  *     client locale switcher.
  */
-export const locales = ["en", "fr", "es", "uk", "pt", "zh", "hi"] as const;
+export const locales = ["en", "fr", "es", "uk", "pt", "zh", "hi", "ja"] as const;
 export const defaultLocale = "en" as const;
 
 export type SupportedLocale = (typeof locales)[number];

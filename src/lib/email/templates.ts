@@ -37,8 +37,9 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
  * schema `0001-initial-schema.sql` (the `en` rows),
  * `0006-email-template-locales.sql` (the fr/es/uk rows),
  * `0007-email-template-locales-pt.sql` (the pt rows),
- * `0008-email-template-locales-zh.sql` (the zh rows), and
- * `0009-email-template-locales-hi.sql` (the hi rows).
+ * `0008-email-template-locales-zh.sql` (the zh rows),
+ * `0009-email-template-locales-hi.sql` (the hi rows), and
+ * `0010-email-template-locales-ja.sql` (the ja rows).
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -136,6 +137,19 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
           "{{resetUrl}}\n\n" +
           "यदि आपने यह अनुरोध नहीं किया है, तो आप इस ईमेल को सुरक्षित रूप से अनदेखा कर सकते हैं।",
       },
+      ja: {
+        subject: "パスワードをリセットする",
+        bodyHtml:
+          "<p>{{name}} 様</p>" +
+          "<p>パスワードのリセットのリクエストを受け付けました。新しいパスワードを設定するには、下のリンクをクリックしてください。このリンクはまもなく無効になります。</p>" +
+          '<p><a href="{{resetUrl}}">パスワードをリセットする</a></p>' +
+          "<p>このリクエストに心当たりがない場合は、このメールを無視していただいて問題ありません。</p>",
+        bodyText:
+          "{{name}} 様\n\n" +
+          "パスワードのリセットのリクエストを受け付けました。新しいパスワードを設定するには、下のリンクを開いてください。このリンクはまもなく無効になります。\n\n" +
+          "{{resetUrl}}\n\n" +
+          "このリクエストに心当たりがない場合は、このメールを無視していただいて問題ありません。",
+      },
     },
   },
   {
@@ -203,6 +217,15 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
         bodyText:
           "यह {{sentBy}} द्वारा {{appName}} व्यवस्थापक ईमेल कार्यक्षेत्र से भेजा गया एक परीक्षण ईमेल है।\n\n" +
           "यदि आप इसे पढ़ सकते हैं, तो आउटबाउंड ईमेल डिलीवरी काम कर रही है।",
+      },
+      ja: {
+        subject: "{{appName}} からのテストメール",
+        bodyHtml:
+          "<p>これは、{{sentBy}} が {{appName}} の管理者メールワークスペースから送信したテストメールです。</p>" +
+          "<p>このメッセージが読める場合、送信メールの配信は正常に機能しています。</p>",
+        bodyText:
+          "これは、{{sentBy}} が {{appName}} の管理者メールワークスペースから送信したテストメールです。\n\n" +
+          "このメッセージが読める場合、送信メールの配信は正常に機能しています。",
       },
     },
   },

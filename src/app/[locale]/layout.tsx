@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { ThemeProvider } from "@/components/theme/theme-provider";
+import { ThemeScript } from "@/components/theme/theme-script";
 import type { ReactNode } from "react";
 
 /**
@@ -65,9 +66,9 @@ export default async function LocaleLayout({
 
   const messages = await getMessages({ locale });
 
-  // Per-request CSP nonce minted in `proxy.ts`. `next-themes` injects an inline
-  // anti-flash <script>; under the enforcing (production) policy that script
-  // must carry the nonce or it is blocked. Reading the request header opts the
+  // Per-request CSP nonce minted in `proxy.ts`. The server `ThemeScript` renders
+  // an inline anti-flash <script>; under the enforcing (production) policy that
+  // script must carry the nonce or it is blocked. Reading the request header opts the
   // shell into dynamic rendering — an accepted cost of a per-request nonce, and
   // moot for the secure routes (already dynamic). Undefined in dev, where the
   // policy keeps `'unsafe-inline'` for HMR.
@@ -76,7 +77,8 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <body>
-        <ThemeProvider nonce={nonce}>
+        <ThemeScript nonce={nonce} />
+        <ThemeProvider>
           <NextIntlClientProvider locale={locale} messages={messages}>
             <div data-locale={locale}>{children}</div>
           </NextIntlClientProvider>

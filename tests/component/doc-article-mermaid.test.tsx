@@ -6,7 +6,7 @@ import { DocArticle } from "@/app/[locale]/(secure)/app/docs/_components/doc-art
 /**
  * DocArticle lazily renders `.mermaid` mounts with Mermaid and makes each
  * rendered diagram a clickable control that opens the full-view modal. We
- * mock the (heavy, browser-only) library, next-themes, and next-intl so
+ * mock the (heavy, browser-only) library, the theme provider, and next-intl so
  * the effects run under jsdom, then assert the contract: render → SVG,
  * skip when absent, fall back on error, a11y affordance, and open-modal.
  */
@@ -22,7 +22,7 @@ vi.mock("mermaid", () => ({
   },
 }));
 
-vi.mock("next-themes", () => ({
+vi.mock("@/components/theme/theme-provider", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
 }));
 

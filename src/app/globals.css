@@ -10,7 +10,7 @@
  *
  * Architecture (in preparation for global theme changes):
  *   1. Raw palette values live on `:root` (light) and `.dark` as plain
- *      CSS custom properties. `next-themes` toggles the `dark` class on
+ *      CSS custom properties. The theme provider toggles the `dark` class on
  *      <html>, so every token below swaps automatically.
  *   2. `@theme inline` maps the palette into Tailwind utility tokens
  *      (`bg-background`, `border-border`, ...). `inline` keeps them as
@@ -241,7 +241,7 @@
  *
  * The pipeline emits two color values per token as `--shiki-light` /
  * `--shiki-dark` custom properties; these rules pick the right one based
- * on the `.dark` class `next-themes` toggles on <html>. Scoped under
+ * on the `.dark` class the theme provider toggles on <html>. Scoped under
  * `.prose` so they outrank the Typography plugin's default `pre`/`code`
  * styles without `!important`.
  */

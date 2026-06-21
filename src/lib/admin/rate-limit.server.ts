@@ -175,6 +175,17 @@ export const DEFAULT_ADMIN_EXPORT_LIMIT: RateLimitOptions = {
 };
 
 /**
+ * Budget for the DENIAL AUDIT, not for traffic. A sustained flood of 429s must
+ * not amplify into unbounded `app_audit_events` rows, so each denied actor is
+ * audited at most ≈once per minute per scope — enough to know "actor X tripped
+ * the limit on scope Y" for forensics, without write-amplifying the attack.
+ */
+const DENIAL_AUDIT_LIMIT: RateLimitOptions = {
+  capacity: 1,
+  refillPerSec: 1 / 60,
+};
+
+/**
  * Convenience for route handlers: enforces a rate limit and returns
  * either `null` (allow — keep going) or a ready-to-return
  * `NextResponse` (deny). Adds the `Retry-After` header on deny.
@@ -195,6 +206,35 @@ export function enforceRateLimit(
 ): NextResponse | null {
   const result = consumeToken(rateLimitKey(scope, actorId), options, nowMs);
   if (result.ok) return null;
+
+  // Flood-safe denial audit (P3-9): record that an actor tripped the limit, but
+  // gate the write through its OWN very-low-rate bucket (DENIAL_AUDIT_LIMIT) so
+  // a sustained 429 flood can't amplify into unbounded audit rows. `auditEvent`
+  // is lazy-imported (keeps `audit.server` → `db` out of this module's static
+  // graph — the edge-adjacent CSP sink imports this file) and fire-and-forget
+  // so it never blocks or fails the 429.
+  if (
+    consumeToken(rateLimitKey("ratelimit.audit", `${scope}:${actorId}`), DENIAL_AUDIT_LIMIT, nowMs)
+      .ok
+  ) {
+    const isUserId = !actorId.startsWith("ip:") && actorId !== "anon";
+    void import("@/lib/audit.server")
+      .then(({ auditEvent }) =>
+        auditEvent({
+          eventType: "administrator.rate_limited",
+          outcome: "denied",
+          actorBetterAuthUserId: isUserId ? actorId : null,
+          request,
+          requestId,
+          reason: scope,
+          metadata: { scope, actor: actorId, retryAfterSeconds: result.retryAfterSeconds },
+        }),
+      )
+      .catch(() => {
+        /* best-effort: a denial audit must never break the 429 path */
+      });
+  }
+
   return adminErrorResponse("rate_limited", 429, request, {
     requestId,
     extra: { retryAfter: result.retryAfterSeconds },

@@ -83,7 +83,7 @@ describe("DEFAULT_EMAIL_TEMPLATES", () => {
 });
 
 describe("localized templates (P3-8)", () => {
-  const LOCALES = ["fr", "es", "uk", "pt", "zh"] as const;
+  const LOCALES = ["fr", "es", "uk", "pt", "zh", "hi"] as const;
 
   it("overlays the requested locale's content, falling back to en for unknown locales", () => {
     const en = getDefaultEmailTemplate("password_reset", "en");

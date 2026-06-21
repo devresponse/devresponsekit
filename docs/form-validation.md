@@ -31,7 +31,7 @@ consistently, not adding dependencies.
 | Base controls | `input.tsx` / `textarea.tsx` / `select.tsx` have **no `aria-invalid` styling**. `input-group.tsx` already uses `has-[[aria-invalid=true]]` — precedent for the CSS approach. |
 | Forms (21) | All use `useState` + hand-rolled validation + a **single generic error banner**. No asterisks. Several raw `<select>` elements. |
 | Validation rules | Server Zod schemas are authoritative; each client form **re-implements** the regexes/lengths → drift risk. |
-| i18n | next-intl, `*.errors.*` namespaces; **no** dedicated `validation.*` namespace. Locale parity enforced across `en/fr/es/uk/pt/zh`. |
+| i18n | next-intl, `*.errors.*` namespaces; **no** dedicated `validation.*` namespace. Locale parity enforced across `en/fr/es/uk/pt/zh/hi`. |
 | Tests | Auth form component tests (happy path + banner) and API-schema security tests. **No** field-level / `aria-invalid` / asterisk assertions. |
 
 ---
@@ -98,7 +98,7 @@ a `root.server` fallback for the banner.
 
 ### 0.4 i18n
 New `validation.*` namespace (`required`, `email`, `min`, `max`, `pattern`,
-`passwordMin`, `passwordsMismatch`, `slug`, `key`, …) in **en/fr/es/uk/pt/zh**,
+`passwordMin`, `passwordsMismatch`, `slug`, `key`, …) in **en/fr/es/uk/pt/zh/hi**,
 surfaced through a Zod error map so schemas stay message-agnostic. The
 locale-parity test guards all four.
 
@@ -165,7 +165,7 @@ asterisks, and field errors, with auth failures mapped to the root banner.
   client can map them precisely — done per route as its form migrates.
 - **Guardrail test**: scan `*-form.tsx` files to ensure new forms route through
   `FormControl` (prevents regressing to raw inputs).
-- **Locale parity** stays green — validation keys added to all six locales in
+- **Locale parity** stays green — validation keys added to all seven locales in
   each PR that introduces them.
 
 ## Accessibility checklist (every migrated form)

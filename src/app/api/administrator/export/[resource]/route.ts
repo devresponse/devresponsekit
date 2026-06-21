@@ -60,16 +60,10 @@ export const dynamic = "force-dynamic";
 const MAX_EXPORT_ROWS = Number(process.env.ADMIN_EXPORT_MAX_ROWS) || 100_000;
 const PAGE_SIZE = 1_000;
 
-type Resource =
-  | "users"
-  | "audit"
-  | "organizations"
-  | "roles"
-  | "permissions"
-  | "memberships"
-  | "enterprise-apps";
-
-const VALID_RESOURCES: ReadonlySet<Resource> = new Set([
+// Single source of truth for the exportable resources: the list below derives
+// both the `Resource` union (compile time) and the membership set (run time), so
+// the two can never drift out of sync.
+const RESOURCES = [
   "users",
   "audit",
   "organizations",
@@ -77,7 +71,21 @@ const VALID_RESOURCES: ReadonlySet<Resource> = new Set([
   "permissions",
   "memberships",
   "enterprise-apps",
-]);
+] as const;
+
+type Resource = (typeof RESOURCES)[number];
+
+const VALID_RESOURCES: ReadonlySet<string> = new Set(RESOURCES);
+
+/**
+ * Narrows an untrusted `<resource>` path segment to the `Resource` union via the
+ * membership set — validated narrowing in place of an `as Resource` assertion,
+ * so a malformed segment is rejected (404) instead of being trusted as a real
+ * resource and flowing into the permission / exporter lookups below.
+ */
+function isValidResource(value: string): value is Resource {
+  return VALID_RESOURCES.has(value);
+}
 
 const RESOURCE_PERMISSION: Record<Resource, string> = {
   users: "admin.users.read",
@@ -94,11 +102,11 @@ interface RouteContext {
 }
 
 export async function GET(request: NextRequest, ctx: RouteContext) {
-  const { resource: resourceParam } = await ctx.params;
-  if (!VALID_RESOURCES.has(resourceParam as Resource)) {
+  const { resource } = await ctx.params;
+  if (!isValidResource(resource)) {
     return adminErrorResponse("unknown_resource", 404, request);
   }
-  const resource = resourceParam as Resource;
+  // `resource` is now narrowed to `Resource` by the type guard above.
 
   const guard = await requireAdminPermission(request, RESOURCE_PERMISSION[resource]);
   if (isAdminPermissionDenial(guard)) return guard.response;

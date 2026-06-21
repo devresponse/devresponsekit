@@ -126,7 +126,7 @@ build is safe to re-promote against the current schema**.
   write the timeline from them.
 - File follow-ups for any missing signal — if triage was slow because a metric or
   trace didn't exist, that gap is itself an action item (the metrics/tracing
-  roadmap is tracked in [observability.md §5](./observability.md)).
+  roadmap is tracked in [observability.md §6](./observability.md)).
 
 ---
 

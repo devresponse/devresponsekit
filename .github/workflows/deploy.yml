@@ -68,7 +68,7 @@ jobs:
       # 2) Only after migrations succeed: build with the production env pulled
       #    from Vercel (so NEXT_PUBLIC_* inline correctly) and promote.
       - name: Install Vercel CLI
-        run: pnpm add -g vercel@latest # TODO: pin to an exact version for reproducibility
+        run: pnpm add -g vercel@54.14.5 # pin for reproducibility; bump deliberately
 
       - name: Pull Vercel production environment + project settings
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"

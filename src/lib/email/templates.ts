@@ -36,8 +36,9 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
  * Built-in defaults. Keep in sync with the seeded templates in the initial
  * schema `0001-initial-schema.sql` (the `en` rows),
  * `0006-email-template-locales.sql` (the fr/es/uk rows),
- * `0007-email-template-locales-pt.sql` (the pt rows), and
- * `0008-email-template-locales-zh.sql` (the zh rows).
+ * `0007-email-template-locales-pt.sql` (the pt rows),
+ * `0008-email-template-locales-zh.sql` (the zh rows), and
+ * `0009-email-template-locales-hi.sql` (the hi rows).
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -122,6 +123,19 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
           "{{resetUrl}}\n\n" +
           "如果这不是您本人的操作，您可以安全地忽略此邮件。",
       },
+      hi: {
+        subject: "अपना पासवर्ड रीसेट करें",
+        bodyHtml:
+          "<p>नमस्ते {{name}},</p>" +
+          "<p>हमें आपका पासवर्ड रीसेट करने का अनुरोध प्राप्त हुआ है। नया पासवर्ड चुनने के लिए नीचे दिए गए लिंक पर क्लिक करें। यह लिंक शीघ्र ही समाप्त हो जाएगा।</p>" +
+          '<p><a href="{{resetUrl}}">अपना पासवर्ड रीसेट करें</a></p>' +
+          "<p>यदि आपने यह अनुरोध नहीं किया है, तो आप इस ईमेल को सुरक्षित रूप से अनदेखा कर सकते हैं।</p>",
+        bodyText:
+          "नमस्ते {{name}},\n\n" +
+          "हमें आपका पासवर्ड रीसेट करने का अनुरोध प्राप्त हुआ है। नया पासवर्ड चुनने के लिए नीचे दिया गया लिंक खोलें। यह लिंक शीघ्र ही समाप्त हो जाएगा।\n\n" +
+          "{{resetUrl}}\n\n" +
+          "यदि आपने यह अनुरोध नहीं किया है, तो आप इस ईमेल को सुरक्षित रूप से अनदेखा कर सकते हैं।",
+      },
     },
   },
   {
@@ -180,6 +194,15 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
         bodyText:
           "这是一封由 {{sentBy}} 从 {{appName}} 管理员邮件工作区发送的测试邮件。\n\n" +
           "如果您能看到此内容，说明出站邮件发送功能正常。",
+      },
+      hi: {
+        subject: "{{appName}} से परीक्षण ईमेल",
+        bodyHtml:
+          "<p>यह {{sentBy}} द्वारा {{appName}} व्यवस्थापक ईमेल कार्यक्षेत्र से भेजा गया एक परीक्षण ईमेल है।</p>" +
+          "<p>यदि आप इसे पढ़ सकते हैं, तो आउटबाउंड ईमेल डिलीवरी काम कर रही है।</p>",
+        bodyText:
+          "यह {{sentBy}} द्वारा {{appName}} व्यवस्थापक ईमेल कार्यक्षेत्र से भेजा गया एक परीक्षण ईमेल है।\n\n" +
+          "यदि आप इसे पढ़ सकते हैं, तो आउटबाउंड ईमेल डिलीवरी काम कर रही है।",
       },
     },
   },

@@ -1126,7 +1126,8 @@
       "es": "Español",
       "uk": "Ucraniano",
       "pt": "Portugués",
-      "zh": "Chino (simplificado)"
+      "zh": "Chino (simplificado)",
+      "hi": "Hindi"
     },
     "dateFormats": {
       "system": "Predeterminado del sistema",

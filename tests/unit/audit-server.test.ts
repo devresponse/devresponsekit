@@ -4,9 +4,10 @@ import type * as AuditServerModule from "@/lib/audit.server";
 /**
  * Unit tests for `audit.server.ts` (§29.6.13).
  *
- * The DB layer is mocked; we verify the helper extracts the first
- * `x-forwarded-for` IP, the user agent, and serializes metadata as JSON
- * without leaking unexpected fields.
+ * The DB layer is mocked; we verify the helper records the TRUSTED-hop client
+ * IP (via `getClientIp`, not the spoofable leftmost `x-forwarded-for`), the
+ * user agent, and serializes metadata as JSON without leaking unexpected
+ * fields.
  */
 
 const insertExecute = vi.fn().mockResolvedValue(undefined);
@@ -33,14 +34,21 @@ beforeEach(async () => {
   insertExecute.mockClear();
   valuesArg.mockReset();
   logServerError.mockReset();
+  vi.stubEnv("TRUSTED_PROXY_COUNT", "1"); // one proxy in front → rightmost XFF is real
   ({ auditEvent } = await import("@/lib/audit.server"));
 });
-afterEach(() => vi.resetModules());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 describe("auditEvent", () => {
-  it("writes the documented columns and trims the first XFF hop", async () => {
+  it("records the TRUSTED-hop XFF IP, not the spoofable leftmost", async () => {
     const headers = new Headers();
-    headers.set("x-forwarded-for", "10.0.0.5, 10.0.0.6");
+    // A client spoofs a leftmost value; the trusted edge proxy appends the
+    // real source IP to the right. With TRUSTED_PROXY_COUNT=1 the rightmost
+    // entry is what the proxy actually observed.
+    headers.set("x-forwarded-for", "1.2.3.4, 203.0.113.9");
     headers.set("user-agent", "vitest/1.0");
 
     await auditEvent({
@@ -58,11 +66,20 @@ describe("auditEvent", () => {
       event_type: "auth.signin.failure",
       outcome: "failure",
       actor_better_auth_user_id: "ba-1",
-      ip_address: "10.0.0.5",
+      ip_address: "203.0.113.9",
       user_agent: "vitest/1.0",
       reason: "invalid_credentials",
       metadata: JSON.stringify({ attempt: 3 }),
     });
+    // The spoofed leftmost value must NOT be what gets recorded.
+    expect(row.ip_address).not.toBe("1.2.3.4");
+  });
+
+  it("falls back to x-real-ip when there is no forwarded chain", async () => {
+    const headers = new Headers();
+    headers.set("x-real-ip", "198.51.100.7");
+    await auditEvent({ eventType: "system.probe", outcome: "success", request: { headers } });
+    expect(valuesArg.mock.calls[0]![0].ip_address).toBe("198.51.100.7");
   });
 
   it("nulls IP and UA when no request is supplied", async () => {

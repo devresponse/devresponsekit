@@ -21,6 +21,18 @@ interface RoleOption {
   id: string;
   key: string;
   name: string;
+  organization_id: string | null;
+  organization_name: string | null;
+}
+
+/**
+ * Formats a role's display label as `key — Organization` so roles that share a
+ * key stay distinguishable. The catalog is scoped to the group's org, so in
+ * practice every option carries the same org — the label keeps it explicit
+ * rather than showing a bare `admin` that looks like a duplicate of another org's.
+ */
+function formatRoleLabel(key: string, organizationName: string | null): string {
+  return organizationName ? `${key} — ${organizationName}` : key;
 }
 
 export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canAssign: boolean }) {
@@ -37,23 +49,47 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // The group's organization id, fetched from the API (not passed as a prop) so
+  // the editor is self-contained and the scope can never go stale.
+  const [orgId, setOrgId] = useState<string | null>(null);
 
-  // Load the org's role catalog and the group's currently-assigned roles.
+  // Load the group's org + currently-assigned roles, then the org-scoped role
+  // catalog. The org id comes from the group-detail endpoint (a live request),
+  // NOT a prop, so the scope is always correct regardless of how the editor is
+  // mounted.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [rolesRes, assignedRes] = await Promise.all([
-          fetch("/api/administrator/roles?pageSize=200", { credentials: "same-origin" }),
+        const [detailRes, assignedRes] = await Promise.all([
+          fetch(`/api/administrator/groups/${groupId}`, { credentials: "same-origin" }),
           fetch(`/api/administrator/groups/${groupId}/roles`, { credentials: "same-origin" }),
         ]);
-        if (!rolesRes.ok || !assignedRes.ok) {
+        if (!detailRes.ok || !assignedRes.ok) {
+          if (!cancelled) setError(tErr("generic"));
+          return;
+        }
+        const detailBody = (await detailRes.json()) as { group: { organization_id: string } };
+        const assignedBody = (await assignedRes.json()) as { roles: Array<{ id: string }> };
+        const groupOrgId = detailBody.group.organization_id;
+
+        // Scope the catalog to the group's OWN org: the assignment endpoint
+        // rejects foreign-org / global roles (404), so only same-org roles are
+        // assignable. Scoping the list means it never shows a role that would
+        // fail on save, and drops the cross-org "duplicate" noise. Server-side
+        // scoping is required because of the pageSize cap — a client-only filter
+        // could miss the group's roles if other orgs' filled the first page.
+        const rolesRes = await fetch(
+          `/api/administrator/roles?organization=${groupOrgId}&pageSize=200`,
+          { credentials: "same-origin" },
+        );
+        if (!rolesRes.ok) {
           if (!cancelled) setError(tErr("generic"));
           return;
         }
         const rolesBody = (await rolesRes.json()) as { items: RoleOption[] };
-        const assignedBody = (await assignedRes.json()) as { roles: RoleOption[] };
         if (cancelled) return;
+        setOrgId(groupOrgId);
         setCatalog(rolesBody.items);
         const ids = assignedBody.roles.map((r) => r.id).sort();
         setAssigned(ids);
@@ -73,15 +109,29 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
     return m;
   }, [catalog]);
 
+  // Org name per role id, so the assigned column can carry the same
+  // `key — Organization` label as the available column.
+  const orgNameById = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const r of catalog ?? []) m.set(r.id, r.organization_name);
+    return m;
+  }, [catalog]);
+
   const assignedSet = useMemo(() => new Set(assigned), [assigned]);
 
   const availableFiltered = useMemo(() => {
     if (!catalog) return [];
     const q = availableQ.trim().toLowerCase();
-    return catalog
-      .filter((r) => !assignedSet.has(r.id))
-      .filter((r) => (q ? r.key.toLowerCase().includes(q) : true));
-  }, [catalog, assignedSet, availableQ]);
+    return (
+      catalog
+        // Only the group's own org is assignable. The fetch is already scoped to
+        // it; this is a belt-and-suspenders guard so a foreign-org role can never
+        // slip into the list (and then fail on save).
+        .filter((r) => r.organization_id === orgId)
+        .filter((r) => !assignedSet.has(r.id))
+        .filter((r) => (q ? r.key.toLowerCase().includes(q) : true))
+    );
+  }, [catalog, assignedSet, availableQ, orgId]);
 
   const assignedFiltered = useMemo(() => {
     const q = assignedQ.trim().toLowerCase();
@@ -148,7 +198,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
         credentials: "same-origin",
       });
       if (fresh.ok) {
-        const body = (await fresh.json()) as { roles: RoleOption[] };
+        const body = (await fresh.json()) as { roles: Array<{ id: string }> };
         const ids = body.roles.map((r) => r.id).sort();
         setAssigned(ids);
         setServerAssigned(ids);
@@ -199,7 +249,10 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
         <Column
           titleKey="available"
           searchKey="searchAvailable"
-          options={availableFiltered.map((r) => ({ id: r.id, label: r.key }))}
+          options={availableFiltered.map((r) => ({
+            id: r.id,
+            label: formatRoleLabel(r.key, r.organization_name),
+          }))}
           selected={availableSelected}
           onSelectedChange={setAvailableSelected}
           q={availableQ}
@@ -209,7 +262,10 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
         <Column
           titleKey="assigned"
           searchKey="searchAssigned"
-          options={assignedFiltered.map((id) => ({ id, label: keyById.get(id) ?? id }))}
+          options={assignedFiltered.map((id) => ({
+            id,
+            label: formatRoleLabel(keyById.get(id) ?? id, orgNameById.get(id) ?? null),
+          }))}
           selected={assignedSelected}
           onSelectedChange={setAssignedSelected}
           q={assignedQ}

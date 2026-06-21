@@ -292,14 +292,30 @@ describe("GroupSettingsForm", () => {
 });
 
 describe("GroupRolesEditor", () => {
-  const VIEWER = { id: "r1", key: "app.viewer", name: "Viewer" };
-  const EDITOR = { id: "r2", key: "app.editor", name: "Editor" };
+  const VIEWER = {
+    id: "r1",
+    key: "app.viewer",
+    name: "Viewer",
+    organization_id: "o1",
+    organization_name: "Acme",
+  };
+  const EDITOR = {
+    id: "r2",
+    key: "app.editor",
+    name: "Editor",
+    organization_id: "o1",
+    organization_name: "Acme",
+  };
   const CATALOG = { items: [VIEWER, EDITOR] };
 
   function routeRoles(opts: { assignedAfterPost?: typeof CATALOG.items } = {}) {
     let posted = false;
     fetchMock.mockImplementation((url: string, init?: { method?: string }) => {
       const u = String(url);
+      // Group detail → the editor reads the group's org id from here.
+      if (/\/api\/administrator\/groups\/g1$/.test(u)) {
+        return Promise.resolve(jsonOk({ group: { id: "g1", organization_id: "o1" } }));
+      }
       if (u.includes("/api/administrator/roles")) return Promise.resolve(jsonOk(CATALOG));
       if (u.includes("/roles") && init?.method === "POST") {
         posted = true;
@@ -320,6 +336,15 @@ describe("GroupRolesEditor", () => {
 
     // Available column populated from the catalog once the fetches resolve.
     expect(await screen.findByText(/Available/)).toBeInTheDocument();
+    // The catalog fetch is scoped to the group's org.
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/administrator/roles?organization=o1"),
+        expect.objectContaining({ credentials: "same-origin" }),
+      ),
+    );
+    // Each option is labelled `key — Organization` so same-key roles stay distinct.
+    expect(await screen.findByText("app.viewer — Acme")).toBeInTheDocument();
     const available = screen.getAllByRole("listbox")[0]!;
     await user.selectOptions(available, "r1");
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -381,9 +406,22 @@ describe("GroupDetailTabs", () => {
   it("switches between the roles, members, and settings tabs", async () => {
     fetchMock.mockImplementation((url: string) => {
       const u = String(url);
+      if (/\/api\/administrator\/groups\/g1$/.test(u)) {
+        return Promise.resolve(jsonOk({ group: { id: "g1", organization_id: "o1" } }));
+      }
       if (u.includes("/api/administrator/roles")) {
         return Promise.resolve(
-          jsonOk({ items: [{ id: "r1", key: "app.viewer", name: "Viewer" }] }),
+          jsonOk({
+            items: [
+              {
+                id: "r1",
+                key: "app.viewer",
+                name: "Viewer",
+                organization_id: "o1",
+                organization_name: "Acme",
+              },
+            ],
+          }),
         );
       }
       if (u.includes("/members")) {

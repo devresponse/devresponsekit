@@ -1124,7 +1124,8 @@
       "en": "English",
       "fr": "French",
       "es": "Spanish",
-      "uk": "Ukrainian"
+      "uk": "Ukrainian",
+      "pt": "Portuguese"
     },
     "dateFormats": {
       "system": "System default",

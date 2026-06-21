@@ -39,7 +39,7 @@ Three ideas drive the product:
 - **Single Sign-On across applications** — sign in once and move between related apps on different subdomains.
 - **Machine API** — a versioned REST API with API keys and short-lived tokens so other systems can integrate securely.
 - **Audit logging** — a durable record of who did what, when, and with what outcome.
-- **Internationalization** — the entire experience ships in English, French, Spanish, and Ukrainian.
+- **Internationalization** — the entire experience ships in English, French, Spanish, Ukrainian, and Portuguese.
 - **Transactional email** — password resets and notifications, with an in-app outbox showing every message.
 - **Security hardening out of the box** — modern browser security headers, session controls, and optional error/performance monitoring.
 

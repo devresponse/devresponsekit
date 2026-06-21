@@ -13,6 +13,7 @@ const LOCALE_LABELS: Record<SupportedLocale, string> = {
   fr: "Français",
   es: "Español",
   uk: "Українська",
+  pt: "Português",
 };
 
 export interface LanguageMenuProps {

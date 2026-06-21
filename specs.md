@@ -78,7 +78,7 @@ The implementation LLM must not ask follow-up questions for the items below. Use
 ### 3.1 Default locale and supported locales
 
 ```ts
-export const locales = ["en", "fr", "es", "uk"] as const;
+export const locales = ["en", "fr", "es", "uk", "pt"] as const;
 export const defaultLocale = "en" as const;
 ```
 
@@ -792,7 +792,7 @@ NEXT_PUBLIC_APP_URL="http://localhost:3000"
 NEXT_PUBLIC_PRIMARY_HOST="localhost"
 NEXT_PUBLIC_PRODUCTION_HOST="app.devresponse.com"
 NEXT_PUBLIC_DEFAULT_LOCALE="en"
-NEXT_PUBLIC_SUPPORTED_LOCALES="en,fr,es,uk"
+NEXT_PUBLIC_SUPPORTED_LOCALES="en,fr,es,uk,pt"
 
 # Better Auth
 BETTER_AUTH_SECRET="replace-with-strong-random-secret"
@@ -1651,7 +1651,7 @@ Rules:
 Create `src/config/i18n-config.ts`.
 
 ```tsx
-export const locales = ["en", "fr", "es", "uk"] as const;
+export const locales = ["en", "fr", "es", "uk", "pt"] as const;
 export const defaultLocale = "en" as const;
 
 export type Locale = (typeof locales)[number];
@@ -2874,7 +2874,7 @@ Seed data:
    - `enterprise-analytics`, origin `https://analytics.devresponse.com`, audience `devresponse-app:enterprise-analytics`
 6. Local dev equivalents can use `http://localhost:3000` path-based simulation.
 7. Seed admin user from `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`.
-8. Seed translation files for English, French, Spanish, and Ukrainian.
+8. Seed translation files for English, French, Spanish, Ukrainian, and Portuguese.
 
 Seed admin may be auto-approved. All other self-registered users start pending approval.
 
@@ -3456,7 +3456,7 @@ The implementation is complete only when all items are true:
 47. SSO launch audits failures.
 48. Failed login attempts are audited.
 49. Local-only sign-out redirects to localized logged-out page.
-50. Locale routing works for `en`, `fr`, `es`, and `uk`.
+50. Locale routing works for `en`, `fr`, `es`, `uk`, and `pt`.
 51. Unknown locale returns not found.
 52. Locale switcher preserves safe path and query.
 53. Translated auth/shell/navigation labels exist.

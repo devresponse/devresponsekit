@@ -25,7 +25,7 @@ handoff.
   [docs/api-clients.md](docs/api-clients.md))
 - **Outbound email** — outbox-first, with pluggable Resend / Mailgun
   delivery and editable templates (see [docs/configuration.md](docs/configuration.md))
-- **next-intl** — localized routing (`en`, `fr`, `es`, `uk`)
+- **next-intl** — localized routing (`en`, `fr`, `es`, `uk`, `pt`)
 - **Tailwind CSS 4 + shadcn/ui** — design system primitives
 - **Vitest / Playwright / axe-core** — unit, component, integration,
   security, e2e, and accessibility test suites (e2e + a11y run in CI

@@ -196,12 +196,12 @@ Query parameters for `launch`: `applicationId` (required), `locale` (optional). 
 - API-key and OAuth-client secrets are returned **once** at creation/rotation and stored only as hashes. There is no endpoint to retrieve them again.
 - Never log or echo a plaintext credential; the audit log records metadata only.
 
-## 10. Gaps / TODO
+## 10. Source of truth & known gaps
 
-- `TODO:` Some routes were summarized from structure rather than line-by-line (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`). Confirm exact request/response shapes against the handlers or the generated `openapi.json`.
-- `TODO:` Document the exact `account.*` scope list and the supported `export` resources/formats. (The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json).)
-- Committed OpenAPI 3.1 specs ship for both surfaces — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`) — for client generation (see [Generating a client](./api-clients.md#1-the-v1-machine-api-client) and [Internal admin SDK](./api-clients.md#2-the-admin-console-sdk)). `TODO:` optionally host a rendered Swagger/Redoc page for browsing.
-- The cookie-session admin SDK is committed under [`sdk/admin/`](../sdk/admin/); the v1 client is generated on demand from `docs/openapi.json`.
+- The committed **OpenAPI 3.1 specs are authoritative** for exact request/response shapes — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`). They are regenerated from the handlers and **drift-checked in CI** (the "OpenAPI + admin SDK drift" job), so where this prose summarizes a route (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`), treat the spec as canonical.
+- The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json); the supported `export` resources/formats are described by the `/api/administrator/export/[resource]` operation in [`docs/openapi-admin.json`](./openapi-admin.json).
+- Client generation is documented in [Generating a client](./api-clients.md#1-the-v1-machine-api-client) and [Internal admin SDK](./api-clients.md#2-the-admin-console-sdk). The cookie-session admin SDK is committed under [`sdk/admin/`](../sdk/admin/); the v1 client is generated on demand from `docs/openapi.json`.
+- _Future enhancement (not yet shipped):_ a hosted Swagger/Redoc page for browsing the specs.
 
 ---
 

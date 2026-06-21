@@ -1,0 +1,82 @@
+# Observability
+
+_Audience: operators and on-call engineers. What signals the app emits today, how to
+correlate them during an incident, and what is deliberately still on the roadmap._
+
+---
+
+## 1. What ships today
+
+| Signal | Source | Notes |
+| --- | --- | --- |
+| **Structured logs** | `src/lib/observability/logger.server.ts` | Pino, JSON to stdout. Ships regardless of whether Sentry is configured — your platform's log drain is the primary sink. |
+| **Server-error logging** | `logServerError(...)` + `onRequestError` (`src/instrumentation.ts`) | Every uncaught 5xx is logged with its `x-request-id`; also forwarded to Sentry when enabled. |
+| **Request-id correlation** | `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) | Accepts a valid inbound `x-request-id` (UUID) or mints one. Echoed on every admin (`adminErrorResponse`) and RFC 7807 (`problemResponse`) error response. |
+| **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. |
+| **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
+| **Error monitoring (opt-in)** | `src/sentry.*.config.ts`, `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Events are scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process. |
+| **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the database is reachable, `503` otherwise. Wire both to your orchestrator probes (see [deployment.md](./deployment.md), §8). |
+| **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged (not swallowed) so a crashing worker is visible in the log stream. |
+
+## 2. Configuration
+
+All observability is **opt-in and env-driven**; a default build emits structured logs and
+nothing else. The full Sentry variable set lives in the Observability section of
+[configuration.md](./configuration.md). The essentials:
+
+- `NEXT_PUBLIC_SENTRY_DSN` — **presence enables** client + server monitoring and the
+  build-time plugin.
+- `SENTRY_DSN` — server DSN (defaults to the public DSN).
+- `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` — **build/CI only**, for source-map
+  upload. Never expose `SENTRY_AUTH_TOKEN` to the client.
+
+## 3. Redaction & scrubbing policy
+
+Two layers, both fail-safe (redact-by-default):
+
+- **Logs** — the Pino logger redacts any `password`, `token`, `secret`, `authorization`, or
+  `cookie` field (and their nested `*.` variants) to `[redacted]` before serialization —
+  covering session tokens, API-key secrets, and the Better Auth secret. Never log a
+  plaintext credential; the audit log records **metadata only**.
+- **Sentry** — `sentry-shared.ts` strips cookies, query strings, emails, bearer/API tokens,
+  and secret-like values from events. Reset URLs and other one-time tokens are never sent.
+
+When adding a field that could carry user data or a secret, extend the redaction list in the
+same change.
+
+## 4. Correlating an incident
+
+`x-request-id` is the join key across every surface:
+
+1. The client (or your edge/CDN) receives `x-request-id` on the error response
+   (admin envelope or RFC 7807 `problem+json`).
+2. Grep the **log stream** for that id to find the structured server log + stack.
+3. Query **`app_audit_events`** by the same id to see the actor, tenant, and outcome of the
+   action that triggered it.
+4. If Sentry is enabled, the event carries the id as a tag for a fourth view with breadcrumbs.
+
+If a caller supplies their own valid `x-request-id`, it is preserved end-to-end, so a
+client-side trace id flows straight into server logs and audit rows.
+
+## 5. Roadmap — not yet shipped
+
+The signals above cover **logs, errors, audit, and health**. The following are deliberately
+**not** implemented in 1.0 and are tracked as a post-1.0 observability epic:
+
+- **Metrics** — no metrics endpoint/client. Targets: request latency + status by route,
+  database latency, auth failures, rate-limit denials, outbox delivery, and audit-write
+  failures.
+- **Distributed tracing** — no OpenTelemetry spans / trace propagation across request → DB →
+  external provider.
+- **Dashboards & alerting** — no shipped dashboards or alert rules; wire your platform's
+  tooling to the log/Sentry streams in the interim.
+- **SLOs** — availability, latency, error-rate, auth-failure, and (if email is
+  production-critical) delivery-latency objectives are not yet defined.
+- **Incident runbook** — no in-repo production debugging / incident-response procedure.
+
+Until these land, incident detection relies on the log stream, `app_audit_events`, optional
+Sentry, and the health probes.
+
+---
+
+_Next: [Configuration](./configuration.md) · [Deployment](./deployment.md) · [Troubleshooting](./troubleshooting.md)_

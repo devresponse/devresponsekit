@@ -36,7 +36,7 @@ A production **`Dockerfile`** (multi-stage, non-root, built from the standalone 
 
 | Requirement | Value | Source |
 | --- | --- | --- |
-| Node.js | 22.x | CI (`.github/workflows/ci.yml`); no `.nvmrc`/`engines` pin (`TODO:` add one) |
+| Node.js | 22.x | CI (`.github/workflows/ci.yml`); pinned via `.nvmrc` + `package.json` `engines` (`node >=22`, `pnpm >=10`) |
 | pnpm | 10.33.2 | `package.json` → `packageManager` |
 | PostgreSQL | 17 (extensions `pgcrypto`/`pg_trgm` in `public`) | `docker-compose.yml` / CI service image |
 | DB schema | `auth` (default; `DB_SCHEMA`) — all tables; created by the migrate step | [Configuration](./configuration.md#database-postgresql) |
@@ -118,7 +118,7 @@ flowchart TD
     trigger["push / pull_request"] --> quality & browser & audit
     quality["quality: typecheck · lint · format · build · sharded tests + coverage gate"]
     browser["browser: build · migrate+seed · start · e2e · a11y"]
-    audit["audit: pnpm audit (non-blocking)"]
+    audit["audit: pnpm audit --audit-level high (hard gate)"]
     quality --> green{"all required checks green?"}
     browser --> green
     green -- yes --> merge["auto-merge to main"]
@@ -126,7 +126,7 @@ flowchart TD
 ```
 
 - Both `quality` and `browser` run against a **PostgreSQL 17 service container**; the `browser` job migrates, seeds, starts the server, then runs Playwright e2e + accessibility.
-- The `audit` job is non-blocking.
+- The `audit` job is a **hard gate**: `pnpm audit --audit-level high` fails CI on any high+ advisory unless it is allowlisted in `package.json` → `pnpm.auditConfig.ignoreGhsas` (rationale tracked in [SECURITY.md](../SECURITY.md)).
 
 **Production deploy (Vercel).** `.github/workflows/deploy.yml` promotes `main`
 to Vercel production and **applies migrations first**: it runs

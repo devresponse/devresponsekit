@@ -13,10 +13,11 @@ handoff.
   (ban, impersonation), and a server-only plugin that establishes the
   consumer-side session on SSO handoff
 - **PostgreSQL + Kysely** — typed SQL for app tables; Better Auth shares
-  the same `pg` pool. The **entire** application schema is a single
-  consolidated setup script (`0001-initial-schema.sql`) — one file, one
-  setup process, no further application migrations. The runner applies it
-  in a transaction and records it in `app_schema_migrations`
+  the same `pg` pool. The application schema starts from a consolidated
+  `0001-initial-schema.sql` baseline, with later changes shipped as
+  append-only numbered migrations (`0002-…` onward). The runner applies any
+  not-yet-recorded file in order, each in a transaction, recording it in
+  `app_schema_migrations`
 - **Machine API** — a versioned `/api/v1` REST surface authenticated by
   API keys (`drk_…`) or Ed25519 JWT access tokens, with a published
   JWKS document, OAuth client-credentials, and an OpenAPI spec. Ships
@@ -40,7 +41,7 @@ cp .env.example .env          # then edit secrets
 
 pnpm db:up                    # start PostgreSQL (docker compose)
 pnpm db:auth:migrate          # Better Auth (vendor) tables
-pnpm db:app:migrate           # complete application schema (single 0001-initial-schema.sql)
+pnpm db:app:migrate           # apply the app schema (0001 baseline + numbered migrations)
 pnpm db:seed                  # default org, baseline roles, local admin user
 
 pnpm dev                      # http://localhost:3000
@@ -122,6 +123,7 @@ The canonical, audience-organized documentation set lives in **[docs/](docs/READ
 - [docs/api.md](docs/api.md) — HTTP API surface, auth requirements, request/response, error model
 - [docs/api-clients.md](docs/api-clients.md) — typed clients/SDKs for the `/api/v1` surface and the committed admin SDK
 - [docs/testing.md](docs/testing.md) — test strategy, suites, coverage, manual QA checklist
+- [docs/observability.md](docs/observability.md) — logs, redaction, request-id correlation, audit, Sentry, health probes, and the roadmap
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common setup, build, runtime, and deployment failures and fixes
 - [docs/adr/](docs/adr/) — architecture decision records: [ADR-0001 three-tier access control](docs/adr/0001-three-tier-access-control.md), [ADR-0002 organization groups](docs/adr/0002-organization-groups.md)
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)

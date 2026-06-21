@@ -23,5 +23,17 @@ const THEME_INIT_SCRIPT = `(function(){try{var p=localStorage.getItem(${JSON.str
 )})||"system",t=p==="system"?(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):p,e=document.documentElement;e.classList.remove("light","dark");e.classList.add(t);e.style.colorScheme=t}catch(e){}})();`;
 
 export function ThemeScript({ nonce }: { nonce?: string }) {
-  return <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />;
+  // `suppressHydrationWarning`: browsers clear a script's `nonce` content
+  // attribute from the DOM after load (a CSP anti-exfiltration measure), so by
+  // the time React hydrates, the DOM's nonce reads "" while React's tree still
+  // carries the real value — a benign attribute-only mismatch React would
+  // otherwise flag. The script has already executed during HTML parse (with a
+  // valid nonce under the enforcing CSP), so its post-load nonce is moot.
+  return (
+    <script
+      nonce={nonce}
+      suppressHydrationWarning
+      dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+    />
+  );
 }

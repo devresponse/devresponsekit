@@ -123,17 +123,17 @@ export default defineConfig({
       // numbers MUST only ever be raised as coverage improves, until they
       // reach the spec minimums. See docs/security-test-coverage-plan.md.
       //
-      // Phases 1-5 of that plan lifted the global floor from 38/36 to the
-      // values below: the cross-tenant isolation matrix (Phase 1), the
-      // bulk/Better-Auth server helpers (Phase 2), the v1 machine-API
-      // surface (Phase 3), schema/input-validation (Phase 4), and the
-      // residual primitive branches (Phase 5). src/lib/admin is now ~92%
-      // line. Keep raising these toward the §29.2 spec minimums.
+      // Phases 1-5 of that plan lifted the global floor from 38/36; the
+      // Production-Readiness Phase-C work (keyset export, aggregate-sort,
+      // JWKS rotation, boundary validation, CSP, email locales) then pushed
+      // the ACTUALS to ~62 stmts / 57 branches / 59 funcs / 64 lines. This
+      // ratchet locks those gains into the floor (small headroom absorbs
+      // run-to-run variance). Keep raising toward the §29.2 spec minimums.
       thresholds: {
-        lines: 52,
-        statements: 51,
-        functions: 46,
-        branches: 48,
+        lines: 61,
+        statements: 60,
+        functions: 56,
+        branches: 54,
       },
     },
   },

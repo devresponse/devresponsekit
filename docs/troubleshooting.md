@@ -27,7 +27,7 @@ Enable Corepack so the pinned version is used: `corepack enable`, then `pnpm ins
 Use `pnpm install --frozen-lockfile` (as CI does). If the lockfile is genuinely out of date, update dependencies in a dedicated change.
 
 **Node version errors.**
-Use Node 22 (what CI runs). There is no `.nvmrc`/`engines` pin yet (`TODO:`), so set it via your version manager.
+Use Node 22 (what CI runs, and what `.nvmrc` + `package.json` `engines` pin). Point your version manager at `.nvmrc`.
 
 **Postgres won't start / port conflict.**
 `pnpm db:up` maps host port **5444** (not 5432). If 5444 is taken, stop the conflicting service or change the mapping in `docker-compose.yml` and `DATABASE_URL` together.

@@ -1,0 +1,17 @@
+# Trivy ignore file for the production image scan (.github/workflows/docker-scan.yml).
+#
+# Same philosophy as the `pnpm audit` allowlist in package.json / SECURITY.md:
+# mute ONLY findings that are not reachable in the shipped runtime, each with a
+# rationale and a review date. The image scan runs `--ignore-unfixed`, so
+# unfixable base-OS CVEs are already excluded; this file is for FIXABLE findings
+# that live in base-image tooling the runtime never invokes.
+#
+# The runner stage executes `node server.js` (the Next.js standalone server) as
+# an unprivileged user. The bundled `npm` CLI (and its own dependencies) ship in
+# the node base image but are never run in production.
+
+# picomatch ReDoS via crafted extglob patterns — bundled inside the base image's
+# npm CLI (/usr/local/lib/node_modules/npm/...). npm is not invoked at runtime,
+# and the app's own dependency tree is gated separately by `pnpm audit`.
+# Review by 2026-09-18 (drop when the node base image bumps its bundled npm).
+CVE-2026-33671

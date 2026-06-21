@@ -16,10 +16,11 @@
 # ─────────────────────────────────────────────────────────────────────
 # Stage 1 — builder: install all deps and produce the standalone bundle.
 # Debian "slim" (not Alpine) so native modules like `sharp` (Next image
-# optimization) use prebuilt glibc binaries. Pin to a digest in production
-# for full reproducibility (see docs/docker.md "Hardening").
+# optimization) use prebuilt glibc binaries. Digest-pinned for reproducibility
+# + supply-chain integrity; bump the tag AND digest together (see docs/docker.md
+# "Hardening"). Digest is the multi-arch index for `node:22-bookworm-slim`.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS builder
+FROM node:22-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2 AS builder
 
 ENV PNPM_HOME="/pnpm" \
     PATH="/pnpm:$PATH" \
@@ -47,7 +48,7 @@ RUN pnpm build
 # Stage 2 — runner: copy only the standalone server + static assets and
 # run as an unprivileged user.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS runner
+FROM node:22-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2 AS runner
 
 ENV NODE_ENV="production" \
     NEXT_TELEMETRY_DISABLED="1" \

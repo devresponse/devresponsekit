@@ -1,0 +1,1296 @@
+{
+  "common": {
+    "appName": "DevResponse Enterprise",
+    "signIn": "サインイン",
+    "signUp": "サインアップ",
+    "signOut": "サインアウト",
+    "email": "メールアドレス",
+    "password": "パスワード",
+    "submit": "送信",
+    "cancel": "キャンセル",
+    "loading": "読み込み中…",
+    "retry": "再試行",
+    "language": "言語",
+    "organization": "組織",
+    "compactMode": "コンパクトモード",
+    "openMenu": "メニューを開く",
+    "closeMenu": "メニューを閉じる",
+    "skipToMain": "メインコンテンツへスキップ",
+    "skipToNavigation": "ナビゲーションへスキップ",
+    "displayName": "名前",
+    "unexpectedError": "予期しないエラーが発生しました。もう一度お試しください。",
+    "dialogs": {
+      "notifyTitle": "お知らせ",
+      "ok": "OK",
+      "confirm": "確認",
+      "cancel": "キャンセル",
+      "close": "閉じる"
+    }
+  },
+  "auth": {
+    "signInTitle": "アカウントにサインイン",
+    "signUpTitle": "アカウントを作成",
+    "signInWithGoogle": "Google で続行",
+    "signInWithMicrosoft": "Microsoft で続行",
+    "signInWithGitHub": "GitHub で続行",
+    "or": "または",
+    "forgotPassword": "パスワードをお忘れですか？",
+    "noAccount": "アカウントをお持ちでないですか？",
+    "haveAccount": "すでにアカウントをお持ちですか？",
+    "createAccount": "アカウントを作成",
+    "loggedOutTitle": "サインアウトしました",
+    "loggedOutDescription": "続行するには、もう一度サインインしてください。",
+    "pendingApprovalTitle": "アカウントは承認待ちです",
+    "pendingApprovalDescription": "セキュアなページにアクセスするには、管理者がアカウントを承認する必要があります。",
+    "blockedTitle": "アカウントへのアクセスが制限されています",
+    "blockedDescription": "お使いのアカウントは現在、ブロック、停止、または無効化されています。管理者にお問い合わせください。",
+    "invalidCredentials": "メールアドレスまたはパスワードが正しくありません。",
+    "unexpectedError": "予期しないエラーが発生しました。もう一度お試しください。",
+    "forgotPasswordDescription": "アカウントのメールアドレスを入力してください。パスワードを再設定するためのリンクをお送りします。",
+    "sendResetLink": "再設定リンクを送信",
+    "resetEmailSent": "そのアドレスのアカウントが存在する場合、パスワード再設定リンクを送信します。",
+    "resetPasswordTitle": "新しいパスワードを設定",
+    "newPassword": "新しいパスワード",
+    "confirmPassword": "パスワードの確認",
+    "setNewPassword": "新しいパスワードを設定",
+    "passwordTooShort": "パスワードは8文字以上で入力してください。",
+    "passwordMismatch": "パスワードが一致しません。",
+    "resetTokenInvalid": "この再設定リンクは無効か、有効期限が切れています。",
+    "requestNewResetLink": "新しいリンクをリクエスト",
+    "resetPasswordDone": "パスワードを更新しました。"
+  },
+  "public": {
+    "hero": {
+      "eyebrow": "オープンソース · MIT · セルフホスト",
+      "title": "完全にあなたのものになる、エンタープライズ SaaS シェル。",
+      "subtitle": "設計段階からセキュア。選択としてのオープンソース。完全にあなたのものに。",
+      "screenshotAlt": "DevResponseKit の管理者コンソール。",
+      "primaryCta": "GitHub で無料で入手",
+      "secondaryCta": "始める",
+      "signInCta": "サインイン"
+    },
+    "stats": {
+      "items": [
+        {
+          "value": "958",
+          "label": "件の自動テスト"
+        },
+        {
+          "value": "$0",
+          "label": "の認証の限界コスト"
+        },
+        {
+          "value": "80+",
+          "label": "の管理コンソールページ"
+        },
+        {
+          "value": "3-tier",
+          "label": "のアクセス制御"
+        },
+        {
+          "value": "4",
+          "label": "つの言語"
+        }
+      ]
+    },
+    "features": {
+      "eyebrow": "B2B プラットフォームに必要なすべて",
+      "title": "個人向けキットが決して作らない、本番運用レイヤー。",
+      "subtitle": "フォークして、所有して、出荷する。DevResponseKit は、多くのチームが数週間かけて構築するマルチテナント基盤を組み上げます——すでにテスト済み、ドキュメント化済みです。",
+      "items": [
+        {
+          "title": "管理者コンソール",
+          "description": "ユーザー、ロール、30 キーの権限カタログ、組織、メンバーシップ、エンタープライズアプリ、メール、監査のための80以上のページ——サーバー側の検索、フィルタリング、一括操作、CSV エクスポートを備えています。"
+        },
+        {
+          "title": "3階層アクセス制御",
+          "description": "スーパー管理者、組織管理者、ユーザーの各階層を、単一の信頼できる情報源となるスコープのプリミティブの上に構築。スコープ外の照会は404を返すため、あるテナントが別のテナントの存在を知ることは決してありません。"
+        },
+        {
+          "title": "スコープ付きマシン API",
+          "description": "バージョン管理された /api/v1 では、SHA-256 でハッシュ化された API キーと、公開された JWKS に対して検証される Ed25519 JWT を使用します。資格情報がその所有者の権限を超えることは決してありません。"
+        },
+        {
+          "title": "サブドメイン間 SSO",
+          "description": "一度きり・60秒有効の nonce JWT により、ユーザーは再サインインすることなくアプリ間を移動できます——登録可能なオリジンの許可リストに支えられています。"
+        },
+        {
+          "title": "送信トレイ優先のメール",
+          "description": "すべてのメッセージは配信前に、検査可能で組織スコープの送信トレイに記録されます。プラグイン可能な Resend と Mailgun のプロバイダー、ロケールごとに編集可能なテンプレートを備えています。"
+        },
+        {
+          "title": "デフォルトでローカライズ",
+          "description": "4つのロケールに対応し、ユーザーごとの設定を永続化する next-intl——すべてのルート、メッセージ、メールテンプレートが訪問者の言語を尊重します。"
+        },
+        {
+          "title": "組み込みドキュメントビューア",
+          "description": "Markdown、Mermaid、Shiki を、XSS 対策済みでサニタイズ優先のパイプラインを通じてレンダリング——ドキュメントがアプリ内に同梱されます。"
+        },
+        {
+          "title": "語るのではなく、出荷されるセキュリティ",
+          "description": "HTTP セキュリティヘッダー、個人情報を除去した可観測性、タイミング攻撃に強いシークレット比較、そしていずれかのルートがテナントスコープを省略するとビルドを失敗させる CI テスト。"
+        }
+      ]
+    },
+    "why": {
+      "eyebrow": "DevResponseKit を選ぶ理由",
+      "title": "Clerk や WorkOS 級の ID 基盤を、限界コストゼロでセルフホスト。",
+      "subtitle": "組織、3階層 RBAC、SSO、API キー、監査はすべてオープンソースの Better Auth の上に構築されています——ユーザー単位、組織単位、SSO 接続単位の請求が成長とともに膨らむことはありません。",
+      "items": [
+        {
+          "title": "検証可能なマルチテナント分離",
+          "description": "テナント分離はビルドのゲートで強制されます。CI テストがすべての管理ルートをスキャンし、スコープのプリミティブを使わずにデータへアクセスするルートが一つでもあれば失敗します。分離は、信じるしかないものではなく、読んで実行できる保証になります。"
+        },
+        {
+          "title": "コードを所有し、データを所有する",
+          "description": "フォークして出荷できる、コピーして前進させるソースコード——フレームワークによるロックインも、席数単位のランタイム料金もありません。あなたが管理する PostgreSQL データベース上でセルフホストします。"
+        },
+        {
+          "title": "テスト済み、ドキュメント化済み",
+          "description": "ユニット、コンポーネント、統合、セキュリティ、エンドツーエンド、アクセシビリティの各スイートにわたる744件のテストに加え、アーキテクチャ決定記録と組み込みのドキュメントサイトを備えています。"
+        }
+      ]
+    },
+    "stack": {
+      "eyebrow": "チームがすでに使っているスタックの上に構築",
+      "title": "モダンで型安全、抽象化のオーバーヘッドなし。",
+      "items": [
+        "Next.js 16",
+        "React 19",
+        "TypeScript 5.9",
+        "PostgreSQL + Kysely",
+        "Better Auth",
+        "next-intl",
+        "Tailwind CSS 4",
+        "Vitest · Playwright · axe"
+      ]
+    },
+    "cta": {
+      "title": "フォークする。所有する。出荷する。",
+      "subtitle": "DevResponseKit は無料でオープンソースです。リポジトリをクローンすれば、セキュアでマルチテナント、ローカライズ済みの B2B プラットフォームを数分で稼働させられます。",
+      "primary": "GitHub で無料で入手",
+      "secondary": "アカウントを作成",
+      "repoLabel": "github.com/devresponse/devresponsekit"
+    },
+    "footer": {
+      "githubLink": "GitHub",
+      "rights": "MIT ライセンスのもとで無料かつオープンソース。"
+    }
+  },
+  "shell": {
+    "regions": {
+      "banner": "アプリケーションブランドバー",
+      "primaryNavigation": "メイン",
+      "workspaceNavigation": "ワークスペース",
+      "workspaceShell": "ワークスペースシェル",
+      "skipLinks": "スキップリンク",
+      "toggleSidebar": "サイドバーを切り替え"
+    },
+    "applications": "アプリケーション",
+    "dashboard": "ダッシュボード",
+    "workspace": "ワークスペース",
+    "settings": "設定",
+    "admin": "管理",
+    "users": "ユーザー",
+    "audit": "監査ログ",
+    "switchApplication": "アプリケーションを切り替え",
+    "loadingMenu": "メニューを読み込み中…",
+    "menuLoadError": "メニューの読み込みに失敗しました。",
+    "unauthorized": "このコンテンツを表示する権限がありません。",
+    "noApplications": "ご利用いただけるアプリケーションはまだありません。",
+    "showLeft": "左サイドバーを表示",
+    "hideLeft": "左サイドバーを非表示",
+    "showRight": "右サイドバーを表示",
+    "hideRight": "右サイドバーを非表示",
+    "showFooter": "フッターを表示",
+    "hideFooter": "フッターを非表示",
+    "skipToMain": "メインコンテンツへスキップ",
+    "skipToNavigation": "ナビゲーションへスキップ",
+    "account": "アカウント",
+    "documentation": "ドキュメント"
+  },
+  "administrator": {
+    "appTitle": "管理者",
+    "appDescription": "ユーザー、ロール、組織、監査アクティビティを管理します。",
+    "nav": {
+      "overview": "概要",
+      "identity": "ID",
+      "users": "ユーザー",
+      "sessions": "セッション",
+      "access": "アクセス制御",
+      "roles": "ロール",
+      "permissions": "権限",
+      "groups": "グループ",
+      "tenancy": "テナント",
+      "organizations": "組織",
+      "memberships": "メンバーシップ",
+      "apps": "アプリ",
+      "enterpriseApps": "エンタープライズアプリケーション",
+      "apis": "API",
+      "apiKeys": "API キー",
+      "activity": "アクティビティ",
+      "auditLog": "監査ログ",
+      "communication": "コミュニケーション",
+      "emailOutbox": "メール送信トレイ",
+      "emailTemplates": "メールテンプレート"
+    },
+    "groups": {
+      "title": "グループ",
+      "description": "組織内のコホートで、ロールをまとめてユーザーを集約します。",
+      "newButton": "新規グループ",
+      "deleteButton": "削除",
+      "memberCount": "{count, plural, =0 {メンバーなし} one {# 名のメンバー} other {# 名のメンバー}}",
+      "columns": {
+        "key": "キー",
+        "name": "名前",
+        "roleCount": "ロール",
+        "memberCount": "メンバー",
+        "createdAt": "作成日時"
+      },
+      "deleteDialog": {
+        "title": "グループを削除",
+        "description": "この操作により、グループとそのロールバンドルおよびメンバーシップが削除されます。メンバーは、直接割り当てられたロールはそのまま保持します。",
+        "confirm": "グループを削除"
+      },
+      "fields": {
+        "key": "キー",
+        "name": "名前",
+        "description": "説明"
+      },
+      "tabs": {
+        "roles": "ロール",
+        "members": "メンバー",
+        "settings": "設定"
+      },
+      "new": {
+        "title": "グループを作成",
+        "submit": "グループを作成",
+        "cancel": "キャンセル",
+        "errorToast": "グループを作成できませんでした。",
+        "organizationRequired": "このグループの組織を選択してください。"
+      },
+      "settings": {
+        "save": "変更を保存",
+        "saved": "保存しました。",
+        "errorToast": "変更を保存できませんでした。",
+        "keyReadOnly": "キーは作成後に変更できません。"
+      },
+      "rolesEditor": {
+        "available": "利用可能",
+        "assigned": "割り当て済み",
+        "searchAvailable": "利用可能なロールを検索",
+        "searchAssigned": "割り当て済みのロールを検索",
+        "add": "追加",
+        "remove": "削除",
+        "save": "変更を保存",
+        "saving": "保存中…",
+        "saved": "ロールを更新しました。",
+        "noResults": "一致するロールがありません。",
+        "errorToast": "ロールを更新できませんでした。"
+      },
+      "members": {
+        "columns": {
+          "email": "メールアドレス",
+          "name": "名前",
+          "joinedAt": "参加日時"
+        }
+      }
+    },
+    "organizationPicker": {
+      "label": "組織",
+      "global": "グローバル（すべての組織）",
+      "placeholder": "組織を選択…",
+      "loading": "読み込み中…",
+      "loadError": "組織を読み込めませんでした。",
+      "searchPlaceholder": "組織を検索…",
+      "noResults": "組織が見つかりませんでした。"
+    },
+    "overview": {
+      "title": "管理者概要",
+      "description": "左のナビゲーションから領域を選んで、プラットフォームの管理を始めます。",
+      "metrics": {
+        "users": "ユーザー",
+        "usersHint": "{active} 件がアクティブ · {pending} 件が承認待ち",
+        "organizations": "組織",
+        "roles": "ロール",
+        "permissions": "権限",
+        "enterpriseApps": "エンタープライズアプリケーション",
+        "enterpriseAppsHint": "{available} 件が利用可能",
+        "none": "表示できる指標の権限がまだありません。"
+      },
+      "recent": {
+        "registrationsTitle": "最新の登録",
+        "sessionsTitle": "最新のサインイン",
+        "auditTitle": "最新の監査イベント",
+        "organizationsTitle": "最新の組織",
+        "viewAll": "すべて表示",
+        "empty": "まだ何もありません。",
+        "columns": {
+          "user": "ユーザー",
+          "status": "ステータス",
+          "created": "作成日時",
+          "ip": "IP アドレス",
+          "signedIn": "サインイン日時",
+          "event": "イベント",
+          "outcome": "結果",
+          "when": "日時",
+          "name": "名前",
+          "slug": "スラッグ"
+        }
+      },
+      "insights": {
+        "title": "インサイト",
+        "description": "過去7日間のアクティビティ（アクセス可能な範囲に限定）。",
+        "empty": "グラフを作成するにはデータが不足しています。",
+        "table": {
+          "day": "日付",
+          "organization": "組織",
+          "count": "件数"
+        },
+        "mostActiveOrgs": {
+          "title": "最もアクティブな組織",
+          "subtitle": "過去 {days} 日間における組織ごとの新規サインアップ数"
+        },
+        "registrations": {
+          "title": "日次の登録数",
+          "system": "すべての組織にわたる新規ユーザー",
+          "org": "あなたの組織の新規メンバー"
+        },
+        "logins": {
+          "title": "日次のログイン数",
+          "system": "すべての組織にわたるサインイン",
+          "org": "あなたの組織のサインイン"
+        }
+      }
+    },
+    "users": {
+      "title": "ユーザー",
+      "newButton": "新規ユーザー",
+      "columns": {
+        "email": "メールアドレス",
+        "displayName": "名前",
+        "status": "ステータス",
+        "createdAt": "作成日時",
+        "organization": "組織"
+      },
+      "filters": {
+        "status": "ステータス",
+        "search": "ユーザーを検索"
+      },
+      "status": {
+        "active": "アクティブ",
+        "pending_approval": "承認待ち",
+        "blocked": "ブロック済み",
+        "suspended": "停止済み",
+        "deactivated": "無効化済み"
+      },
+      "tabs": {
+        "overview": "概要",
+        "roles": "ロール",
+        "memberships": "メンバーシップ",
+        "sessions": "セッション",
+        "audit": "監査"
+      },
+      "detail": {
+        "notFound": "ユーザーが見つかりません。",
+        "metaCreated": "{value} に作成",
+        "metaUpdated": "{value} に更新",
+        "betterAuthId": "Better Auth ユーザー ID",
+        "appUserId": "アプリユーザー ID",
+        "deactivated": "{value} に無効化",
+        "deactivatedBy": "{actor} により無効化",
+        "deactivatedReason": "理由：{reason}"
+      },
+      "fields": {
+        "email": "メールアドレス",
+        "displayName": "表示名",
+        "preferredLocale": "優先言語",
+        "password": "パスワード",
+        "role": "Better Auth ロール",
+        "initialAppStatus": "初期アプリケーションステータス",
+        "reason": "理由"
+      },
+      "new": {
+        "title": "ユーザーを作成",
+        "description": "Better Auth ユーザーと、それに対応するアプリケーションレコードを作成します。ユーザーは選択したアプリケーションステータスで作成されます。信頼されていないアカウントには管理者による承認を推奨します。",
+        "submit": "ユーザーを作成",
+        "cancel": "キャンセル",
+        "passwordHint": "8文字以上。このパスワードは Better Auth に転送され、ログに記録されることは決してありません。",
+        "successToast": "ユーザー {email} を作成しました。",
+        "errorToast": "ユーザーを作成できませんでした。"
+      },
+      "actions": {
+        "viewDetail": "表示",
+        "approve": "承認",
+        "block": "ブロック",
+        "suspend": "停止",
+        "reactivate": "再有効化",
+        "ban": "禁止",
+        "unban": "禁止を解除",
+        "setRole": "Better Auth ロールを設定",
+        "setPassword": "パスワードを設定",
+        "revokeSessions": "すべてのセッションを取り消し",
+        "softDelete": "削除（ソフト）",
+        "restore": "復元",
+        "impersonate": "代理ログイン",
+        "stopImpersonating": "代理ログインを終了",
+        "confirm": "確認",
+        "cancel": "キャンセル"
+      },
+      "bulk": {
+        "approve": "選択項目を承認",
+        "block": "選択項目をブロック",
+        "ban": "選択項目を禁止…",
+        "softDelete": "選択項目を削除（ソフト）…",
+        "reasonPrompt": "理由（監査ログに記録されます）：",
+        "confirmDelete": "選択したユーザーをソフト削除しますか？この操作により、Better Auth で禁止され、アプリケーションレコードが無効化されます。",
+        "successToast": "{succeeded} 名のユーザーに「{action}」を適用しました。",
+        "partialFailureToast": "{succeeded}/{attempted} 名のユーザーに「{action}」を適用しました。{failed} 件が失敗しました。",
+        "errorToast": "一括操作に失敗しました。",
+        "rateLimitedToast": "一括リクエストが多すぎます。しばらくしてからもう一度お試しください。"
+      },
+      "impersonation": {
+        "confirmTitle": "{email} として代理ログインしますか？",
+        "confirmDescription": "{email} としてサインインします。この操作は監査ログに記録されます。自分のセッションに戻るには、すべてのページに表示されるバナーの「代理ログインを終了」をクリックしてください。",
+        "confirmAck": "この操作が監査されることを理解しています。",
+        "startButton": "このユーザーとして代理ログイン",
+        "startToast": "{email} として代理ログイン中…",
+        "stopButton": "代理ログインを終了",
+        "stopToast": "自分のセッションに戻りました。",
+        "errorToast": "代理ログインを開始できませんでした。",
+        "selfError": "自分自身を代理ログインすることはできません。",
+        "bannerLabel": "{email} として代理ログインしています。",
+        "stopErrorToast": "代理ログインを終了できませんでした。もう一度お試しください。"
+      },
+      "dialogs": {
+        "ban": {
+          "title": "ユーザーを禁止",
+          "description": "禁止すると、そのユーザーはサインインできなくなります。理由は必須で、監査ログに記録されます。"
+        },
+        "softDelete": {
+          "title": "ユーザーを削除（ソフト）",
+          "description": "ソフト削除は、Better Auth でユーザーを禁止し、アプリケーションレコードを無効化済みとしてマークします。「復元」操作でこれを元に戻せます。"
+        },
+        "setPassword": {
+          "title": "パスワードを設定",
+          "description": "モードを選択してください。「新しいパスワードを設定」はユーザーのパスワードを直接上書きします。「再設定メールを送信」は Better Auth にパスワード再設定リンクをメール送信させます。",
+          "modeSet": "新しいパスワードを設定",
+          "modeReset": "再設定メールを送信"
+        },
+        "setRole": {
+          "title": "Better Auth ロールを設定",
+          "description": "これは認証レベルのロール（admin / user）であり、アプリケーションロールとは異なります。"
+        }
+      },
+      "sessions": {
+        "title": "アクティブなセッション",
+        "empty": "アクティブなセッションはありません。",
+        "revokeOne": "取り消し",
+        "revokeAll": "すべてのセッションを取り消し",
+        "expiresAt": "{value} に期限切れ",
+        "ipAddress": "IP",
+        "userAgent": "ユーザーエージェント"
+      },
+      "memberships": {
+        "columns": {
+          "organization": "組織",
+          "orgName": "名前",
+          "status": "ステータス",
+          "source": "ソース",
+          "joinedAt": "参加日時"
+        },
+        "removeButton": "削除",
+        "removeConfirm": "このメンバーシップを削除しますか？",
+        "removeError": "メンバーシップを削除できませんでした。"
+      },
+      "roles": {
+        "columns": {
+          "role": "ロール",
+          "key": "キー",
+          "organization": "組織",
+          "assigned": "割り当て日時"
+        }
+      }
+    },
+    "grid": {
+      "loading": "読み込み中…",
+      "empty": "現在のフィルターに一致する結果はありません。",
+      "error": "読み込みに失敗しました。もう一度お試しください。",
+      "retry": "再試行",
+      "previousPage": "前のページ",
+      "nextPage": "次のページ",
+      "pageOf": "{totalPages} ページ中 {page} ページ",
+      "rowsPerPage": "ページあたりの行数",
+      "totalRows": "{count, plural, one {# 行} other {# 行}}",
+      "search": "検索",
+      "sortAsc": "昇順で並べ替え",
+      "sortDesc": "降順で並べ替え",
+      "sortNone": "並べ替えなし",
+      "selectPage": "このページのすべてを選択",
+      "selectRow": "行を選択",
+      "selectionCount": "{count, plural, one {# 件を選択} other {# 件を選択}}",
+      "selectionAllMatching": "一致する {total, number} 行すべてを選択しました",
+      "selectAllMatching": "一致する {total, number} 行すべてを選択",
+      "clearSelection": "選択を解除",
+      "bulkActions": "一括操作",
+      "exportCsv": "CSV をエクスポート",
+      "searchPlaceholder": "検索…",
+      "filterAll": "すべて",
+      "filterBy": "{label} で絞り込み",
+      "clearFilters": "フィルターをクリア",
+      "optionLabels": {
+        "active": "アクティブ",
+        "pending_approval": "承認待ち",
+        "pending": "保留中",
+        "blocked": "ブロック済み",
+        "suspended": "停止済み",
+        "deactivated": "無効化済み",
+        "archived": "アーカイブ済み",
+        "available": "利用可能",
+        "disabled": "無効",
+        "revoked": "取り消し済み",
+        "global": "グローバル",
+        "org": "組織",
+        "true": "はい",
+        "false": "いいえ"
+      }
+    },
+    "errors": {
+      "forbidden": "このページを表示する権限がありません。",
+      "generic": "問題が発生しました。もう一度お試しください。",
+      "invalidBody": "送信されたデータが無効です。",
+      "emailTaken": "そのメールアドレスはすでに使用されています。",
+      "notFound": "リクエストされたリソースが見つかりませんでした。",
+      "authBackendFailed": "認証バックエンドがリクエストを拒否しました。",
+      "roleInUse": "このロールはまだ1人以上のユーザーに割り当てられているため、削除できません。",
+      "permissionInUse": "この権限はまだ1つ以上のロールに割り当てられているため、削除できません。",
+      "keyTaken": "そのキーはすでに使用されています。",
+      "slugTaken": "そのスラッグはすでに使用されています。",
+      "organizationNotEmpty": "この組織にはまだメンバーがいるため、削除できません。",
+      "organizationIsDefault": "デフォルトの組織は削除できません。",
+      "organizationInUse": "この組織にはまだロール、アプリケーション、または資格情報があるため、削除できません。",
+      "membershipExists": "このユーザーはすでに組織のメンバーです。",
+      "bindingExists": "このプロバイダーバインディングはすでに存在します。",
+      "idTaken": "その id はすでに使用されています。",
+      "invalidOrigin": "オリジンはパスを含まない HTTPS URL である必要があります。",
+      "applicationInUse": "このアプリケーションはまだ参照されているため、削除できません。",
+      "rateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。",
+      "exportTruncated": "エクスポートが最大行数の上限に達しました。フィルターを絞り込んで再エクスポートし、残りを取得してください。",
+      "originNotAllowed": "オリジンホストは SSO リダイレクトの許可リストに含まれていません。"
+    },
+    "roles": {
+      "title": "ロール",
+      "newButton": "新規ロール",
+      "duplicateButton": "複製",
+      "deleteButton": "削除",
+      "editButton": "編集",
+      "scope": {
+        "global": "グローバル",
+        "org": "組織"
+      },
+      "columns": {
+        "key": "キー",
+        "name": "名前",
+        "scope": "スコープ",
+        "organization": "組織",
+        "permissionCount": "権限",
+        "memberCount": "メンバー",
+        "createdAt": "作成日時"
+      },
+      "filters": {
+        "scope": "スコープ",
+        "organization": "組織",
+        "permission": "権限キー",
+        "search": "ロールを検索"
+      },
+      "tabs": {
+        "permissions": "権限",
+        "members": "メンバー",
+        "settings": "設定"
+      },
+      "fields": {
+        "key": "キー",
+        "name": "名前",
+        "description": "説明",
+        "scope": "スコープ",
+        "organization": "組織"
+      },
+      "new": {
+        "title": "ロールを作成",
+        "description": "新しいアプリケーションロールを作成します。プラットフォーム全体のロールには「グローバル」を選択するか、組織に割り当てます。キーは作成後に永続的になります。",
+        "submit": "ロールを作成",
+        "cancel": "キャンセル",
+        "successToast": "ロール {key} を作成しました。",
+        "errorToast": "ロールを作成できませんでした。"
+      },
+      "settings": {
+        "save": "変更を保存",
+        "saved": "保存しました。",
+        "errorToast": "変更を保存できませんでした。",
+        "keyReadOnly": "キーは作成後に変更できません。"
+      },
+      "permissionsEditor": {
+        "title": "権限を管理",
+        "available": "利用可能",
+        "assigned": "割り当て済み",
+        "searchAvailable": "利用可能な権限を検索",
+        "searchAssigned": "割り当て済みの権限を検索",
+        "add": "追加",
+        "remove": "削除",
+        "save": "変更を保存",
+        "saving": "保存中…",
+        "saved": "権限を更新しました。",
+        "noResults": "一致する権限がありません。",
+        "empty": "まだ権限が割り当てられていません。",
+        "errorToast": "権限を更新できませんでした。"
+      },
+      "members": {
+        "empty": "このロールを持つメンバーはまだいません。",
+        "revoke": "取り消し",
+        "revokeConfirm": "{email} からこのロールを取り消しますか？",
+        "errorToast": "ロールを取り消せませんでした。",
+        "columns": {
+          "email": "メールアドレス",
+          "name": "名前",
+          "organization": "組織",
+          "assignedAt": "割り当て日時"
+        }
+      },
+      "deleteDialog": {
+        "title": "ロールを削除",
+        "description": "削除すると、ロールとその権限の関連付けが削除されます。このロールはどのユーザーにも割り当てられていない必要があります。",
+        "confirm": "ロールを削除"
+      },
+      "duplicateConfirm": "このロールのコピーを作成しますか？",
+      "duplicateError": "ロールを複製できませんでした。",
+      "deleteError": "ロールを削除できませんでした。"
+    },
+    "permissions": {
+      "title": "権限",
+      "description": "アプリケーションロールが使用する権限キーのカタログ。",
+      "newButton": "新規権限",
+      "editButton": "編集",
+      "deleteButton": "削除",
+      "columns": {
+        "key": "キー",
+        "description": "説明",
+        "usedByRoleCount": "これを使用しているロール",
+        "actions": "操作"
+      },
+      "filters": {
+        "search": "権限を検索"
+      },
+      "fields": {
+        "key": "キー",
+        "description": "説明"
+      },
+      "new": {
+        "title": "権限を作成",
+        "description": "カタログに新しい権限キーを追加します。このキーはコードや監査行から参照されます。慎重に選んでください。",
+        "submit": "権限を作成",
+        "cancel": "キャンセル",
+        "errorToast": "権限を作成できませんでした。"
+      },
+      "edit": {
+        "title": "権限を編集",
+        "submit": "保存",
+        "cancel": "キャンセル",
+        "errorToast": "変更を保存できませんでした。"
+      },
+      "rolesUsing": {
+        "title": "この権限を使用しているロール",
+        "empty": "現在この権限を使用しているロールはありません。",
+        "viewRole": "ロールを表示"
+      },
+      "deleteDialog": {
+        "title": "権限を削除",
+        "description": "削除すると、その権限がカタログから削除されます。どのロールからも参照されていない必要があります。",
+        "confirm": "権限を削除"
+      },
+      "deleteError": "権限を削除できませんでした。"
+    },
+    "orgs": {
+      "title": "組織",
+      "newButton": "新規組織",
+      "deleteButton": "削除",
+      "defaultYes": "デフォルト",
+      "columns": {
+        "slug": "スラッグ",
+        "name": "名前",
+        "status": "ステータス",
+        "isDefault": "デフォルト",
+        "memberCount": "メンバー",
+        "createdAt": "作成日時"
+      },
+      "fields": {
+        "slug": "スラッグ",
+        "slugHelp": "小文字、数字、ハイフン。1～64文字。",
+        "name": "名前",
+        "status": "ステータス",
+        "isDefault": "デフォルトの組織に設定"
+      },
+      "tabs": {
+        "members": "メンバー",
+        "providers": "プロバイダー",
+        "settings": "設定"
+      },
+      "new": {
+        "title": "組織を作成",
+        "description": "新しい組織を追加します。スラッグは URL で使用され、簡単には変更できません。",
+        "submit": "組織を作成",
+        "cancel": "キャンセル",
+        "errorToast": "組織を作成できませんでした。"
+      },
+      "settings": {
+        "save": "変更を保存",
+        "saved": "組織を更新しました。",
+        "errorToast": "変更を保存できませんでした。",
+        "statusActive": "アクティブ",
+        "statusPending": "保留中",
+        "statusSuspended": "停止済み",
+        "statusArchived": "アーカイブ済み"
+      },
+      "members": {
+        "columns": {
+          "user": "ユーザー",
+          "status": "ステータス",
+          "source": "ソース",
+          "joinedAt": "参加日時"
+        },
+        "removeButton": "削除",
+        "removeConfirm": "このメンバーを組織から削除しますか？",
+        "removeError": "メンバーを削除できませんでした。"
+      },
+      "providers": {
+        "columns": {
+          "provider": "プロバイダー",
+          "key": "キー",
+          "displayName": "表示名",
+          "boundAt": "バインド日時"
+        },
+        "removeButton": "削除",
+        "removeConfirm": "このプロバイダーバインディングを削除しますか？",
+        "removeError": "バインディングを削除できませんでした。"
+      },
+      "deleteDialog": {
+        "title": "組織を削除",
+        "description": "削除すると、その組織が削除されます。組織は空である（メンバーがいない）必要があります。"
+      },
+      "deleteError": "組織を削除できませんでした。"
+    },
+    "memberships": {
+      "title": "メンバーシップ",
+      "columns": {
+        "organization": "組織",
+        "user": "ユーザー",
+        "status": "ステータス",
+        "source": "ソース",
+        "createdAt": "作成日時"
+      }
+    },
+    "enterpriseApps": {
+      "title": "エンタープライズアプリケーション",
+      "newButton": "新規アプリケーション",
+      "deleteButton": "削除",
+      "global": "グローバル",
+      "columns": {
+        "id": "ID",
+        "label": "ラベル",
+        "subdomain": "サブドメイン",
+        "status": "ステータス",
+        "organization": "組織",
+        "sortOrder": "並び順",
+        "createdAt": "作成日時"
+      },
+      "fields": {
+        "id": "ID",
+        "idHelp": "小文字、数字、ドット、アンダースコア、ハイフン。1～128文字。作成後は変更できません。",
+        "label": "ラベル",
+        "description": "説明",
+        "origin": "オリジン",
+        "originHelp": "パス、クエリ、フラグメントを含まない HTTPS URL である必要があります（例：https://docs.example.com）。",
+        "subdomain": "サブドメイン",
+        "subdomainHelp": "ホスト名として安全な DNS ラベル：小文字、数字、ハイフン、1～63文字。",
+        "ssoAudience": "SSO オーディエンス",
+        "status": "ステータス",
+        "sortOrder": "並び順",
+        "organization": "組織スコープ"
+      },
+      "status": {
+        "available": "利用可能",
+        "disabled": "無効"
+      },
+      "new": {
+        "title": "エンタープライズアプリケーションを作成",
+        "description": "新しいエンタープライズアプリケーションを登録します。ID は SSO ハンドオフレコードから参照されるため、作成後は永続的になります。",
+        "submit": "アプリケーションを作成",
+        "cancel": "キャンセル",
+        "errorToast": "アプリケーションを作成できませんでした。"
+      },
+      "settings": {
+        "save": "変更を保存",
+        "saved": "アプリケーションを更新しました。",
+        "errorToast": "変更を保存できませんでした。"
+      },
+      "deleteDialog": {
+        "title": "エンタープライズアプリケーションを削除",
+        "description": "削除すると、そのアプリケーションがカタログから削除されます。アプリケーションはどの SSO ハンドオフからも参照されていない必要があります。"
+      },
+      "deleteError": "アプリケーションを削除できませんでした。"
+    },
+    "apiKeys": {
+      "title": "API キー",
+      "description": "すべてのユーザーと組織にわたる、すべての API キーの一覧。スコープと使用状況を確認したり、キーをローテーションまたは取り消したり、ユーザーに代わって発行したりできます。シークレットがここに表示されることは決してありません——キーの作成時またはローテーション時にのみ表示されます。",
+      "newButton": "API キーを発行",
+      "never": "なし",
+      "noExpiry": "有効期限なし",
+      "scopeCount": "{count, plural, one {# 個のスコープ} other {# 個のスコープ}}",
+      "columns": {
+        "name": "名前",
+        "prefix": "プレフィックス",
+        "owner": "所有者",
+        "scopes": "スコープ",
+        "status": "ステータス",
+        "lastUsed": "最終使用",
+        "expires": "有効期限",
+        "created": "作成日時"
+      },
+      "filters": {
+        "search": "検索",
+        "searchPlaceholder": "名前、プレフィックス、または所有者のメールアドレス",
+        "status": "ステータス",
+        "any": "すべて"
+      },
+      "status": {
+        "active": "アクティブ",
+        "revoked": "取り消し済み"
+      },
+      "actions": {
+        "view": "表示",
+        "rotate": "ローテーション",
+        "revoke": "取り消し"
+      },
+      "revokeError": "キーを取り消せませんでした。",
+      "rotateError": "キーをローテーションできませんでした。",
+      "dialogs": {
+        "revoke": {
+          "title": "API キーを取り消し",
+          "description": "この操作により、キーは即座かつ永続的に無効になります。そのキーを使用しているクライアントは 401 応答を受け取り始めます。この操作は元に戻せません。"
+        },
+        "rotate": {
+          "title": "API キーをローテーション",
+          "description": "同じ所有者、スコープ、有効期限で新しいシークレットが発行され、現在のキーは取り消されます。新しいシークレットでクライアントを更新してください——古いキーは即座に動作しなくなります。"
+        }
+      },
+      "reveal": {
+        "title": "今すぐキーをコピー",
+        "description": "完全なシークレットが表示されるのはこの一度きりです。安全な場所に保管してください——二度と取得できません。紛失した場合は、キーをローテーションしてください。",
+        "copy": "コピー",
+        "copied": "コピーしました",
+        "done": "完了"
+      },
+      "detail": {
+        "loading": "読み込み中…",
+        "loadError": "キーを読み込めませんでした。",
+        "status": "ステータス",
+        "owner": "所有者",
+        "organization": "組織",
+        "created": "作成日時",
+        "createdBy": "作成者",
+        "lastUsed": "最終使用",
+        "lastUsedIp": "最終使用 IP",
+        "expires": "有効期限",
+        "revoked": "取り消し済み",
+        "revokedBy": "取り消した人",
+        "revokedReason": "取り消し理由",
+        "scopes": "スコープ",
+        "noScopes": "スコープなし——このキーはスコープ付きエンドポイントを一切呼び出せません。"
+      },
+      "fields": {
+        "name": "名前",
+        "namePlaceholder": "例：CI デプロイボット",
+        "owner": "所有者（アプリケーションユーザー ID）",
+        "ownerHelp": "キーが代理として動作するアプリケーションユーザー。「ユーザー」コンソールから ID をコピーしてください。キーがそのユーザー自身の権限を超えることは決してありません。",
+        "expiresInDays": "有効期限（日数）",
+        "expiresInDaysPlaceholder": "有効期限なしの場合は空欄のまま",
+        "expiresInDaysHelp": "任意。指定した日数が経過するとキーは動作しなくなります。有効期限を設けない場合は空欄のままにしてください。",
+        "scopes": "スコープ",
+        "scopesHelp": "このキーが使用できる権限を選択します。所有者が保持しているスコープのみ付与でき、それ以外は拒否されます。"
+      },
+      "new": {
+        "title": "API キーを発行",
+        "description": "ユーザーに代わって API キーを作成します。シークレットは作成後に一度だけ表示されます。",
+        "submit": "キーを発行",
+        "cancel": "キャンセル",
+        "errorToast": "キーを発行できませんでした。",
+        "invalidOwnerId": "有効なアプリケーションユーザー ID（UUID）を入力してください。",
+        "ownerNotFound": "そのアプリケーションユーザー ID のユーザーが見つかりませんでした。",
+        "ownerInactive": "そのユーザーはアクティブではないため、キーを発行できません。",
+        "invalidScope": "所有者は次のスコープを保持していません：{scopes}"
+      }
+    },
+    "audit": {
+      "title": "監査ログ",
+      "description": "管理者および認証イベントの読み取り専用のページ分割ビュー。各行をクリックすると、完全なメタデータ、IP アドレス、ユーザーエージェント、理由を含むパネルが開きます。",
+      "viewDetail": "表示",
+      "columns": {
+        "createdAt": "時刻",
+        "eventType": "イベントタイプ",
+        "outcome": "結果",
+        "actor": "実行者",
+        "target": "対象"
+      },
+      "filters": {
+        "eventType": "イベントタイプ",
+        "outcome": "結果",
+        "actor": "実行者（Better Auth ユーザー id）",
+        "actorPlaceholder": "Better Auth ユーザー id",
+        "any": "すべて"
+      },
+      "outcome": {
+        "success": "成功",
+        "error": "エラー",
+        "failure": "失敗",
+        "denied": "拒否"
+      },
+      "detail": {
+        "actor": "実行者",
+        "appUser": "アプリユーザー",
+        "organization": "組織",
+        "targetApplication": "対象アプリケーション",
+        "provider": "プロバイダー",
+        "email": "メールアドレス",
+        "ipAddress": "IP アドレス",
+        "userAgent": "ユーザーエージェント",
+        "reason": "理由",
+        "metadata": "メタデータ"
+      }
+    },
+    "email": {
+      "title": "メール送信トレイ",
+      "description": "すべての送信メールは、配信が試みられる前にここに記録されます——配信プロバイダーが構成されていない環境を含みます。",
+      "viewDetail": "表示",
+      "columns": {
+        "createdAt": "作成日時",
+        "to": "宛先",
+        "subject": "件名",
+        "template": "テンプレート",
+        "status": "ステータス"
+      },
+      "status": {
+        "pending": "保留中",
+        "sent": "送信済み",
+        "failed": "失敗",
+        "logged": "記録済み"
+      },
+      "filters": {
+        "status": "ステータス",
+        "template": "テンプレートキー",
+        "any": "すべて"
+      },
+      "test": {
+        "placeholder": "recipient@example.com",
+        "send": "テストメールを送信",
+        "error": "テストメールの送信に失敗しました。",
+        "result": {
+          "sent": "テストメールを送信しました。",
+          "failed": "配信に失敗しました——送信トレイの該当行を確認してください。",
+          "logged": "送信トレイに記録しました（配信プロバイダーが構成されていません）。"
+        }
+      },
+      "detail": {
+        "from": "送信元",
+        "to": "宛先",
+        "template": "テンプレート",
+        "provider": "プロバイダー",
+        "providerMessageId": "プロバイダーメッセージ id",
+        "createdAt": "作成日時",
+        "sentAt": "送信日時",
+        "relatedUser": "関連ユーザー",
+        "organization": "組織",
+        "error": "エラー",
+        "bodyText": "テキスト本文",
+        "bodyHtml": "HTML 本文"
+      },
+      "templates": {
+        "title": "メールテンプレート",
+        "description": "送信メールに使用される編集可能なテンプレート。テンプレートを削除したり壊したりしても、フローがブロックされることは決してありません——組み込みのデフォルトがフォールバックとして適用されます。",
+        "empty": "テンプレートが見つかりません。データベースマイグレーションを実行してデフォルトをシードしてください。",
+        "edit": "編集",
+        "editTitle": "メールテンプレートを編集",
+        "columns": {
+          "key": "キー",
+          "locale": "言語",
+          "subject": "件名",
+          "updatedAt": "更新日時"
+        },
+        "fields": {
+          "subject": "件名",
+          "bodyHtml": "HTML 本文",
+          "bodyText": "テキスト本文",
+          "bodyTextHint": "任意のプレーンテキストの代替。HTML のみ送信する場合は空欄のままにしてください。",
+          "description": "説明"
+        },
+        "variablesHint": "利用可能な変数：",
+        "save": "テンプレートを保存",
+        "cancel": "キャンセル",
+        "saveError": "テンプレートの保存に失敗しました。"
+      }
+    }
+  },
+  "errors": {
+    "application_in_use": "このアプリケーションは使用中のため、削除できません。",
+    "application_not_found": "アプリケーションが見つかりません。",
+    "auth_ban_failed": "認証サービスが禁止を拒否しました。",
+    "auth_create_failed": "認証サービスがユーザーの作成を拒否しました。",
+    "auth_forgot_password_failed": "パスワード再設定メールを送信できませんでした。",
+    "auth_impersonate_failed": "代理ログインを開始できませんでした。",
+    "auth_list_sessions_failed": "セッションを一覧表示できませんでした。",
+    "auth_revoke_all_failed": "すべてのセッションを取り消せませんでした。",
+    "auth_revoke_session_failed": "セッションを取り消せませんでした。",
+    "auth_set_password_failed": "パスワードを変更できませんでした。",
+    "auth_set_role_failed": "ユーザーロールを変更できませんでした。",
+    "auth_stop_impersonate_failed": "代理ログインを終了できませんでした。",
+    "auth_unban_failed": "認証サービスが禁止の解除を拒否しました。",
+    "binding_exists": "このバインディングはすでに存在します。",
+    "binding_not_found": "バインディングが見つかりません。",
+    "cannot_impersonate_self": "自分自身を代理ログインすることはできません。",
+    "email_taken": "このメールアドレスはすでに使用されています。",
+    "export_failed": "行を1つも送信する前にエクスポートが失敗しました。",
+    "filters_required_for_select_all": "すべてを選択するにはフィルターが必要です。",
+    "forbidden": "この操作を実行する権限がありません。",
+    "id_taken": "この識別子はすでに使用されています。",
+    "invalid_body": "リクエスト本文が無効です。",
+    "invalid_id": "指定された id は有効な UUID ではありません。",
+    "invalid_origin": "リクエストのオリジンは許可されていません。",
+    "invalid_session_id": "セッション id が無効です。",
+    "key_taken": "このキーはすでに使用されています。",
+    "membership_exists": "このメンバーシップはすでに存在します。",
+    "membership_not_found": "メンバーシップが見つかりません。",
+    "no_changes": "変更が指定されていません。",
+    "not_deactivated": "このユーザーは無効化されていません。",
+    "not_found": "見つかりません。",
+    "organization_not_found": "組織が見つかりません。",
+    "permission_in_use": "この権限は使用中です。",
+    "rate_limited": "リクエストが多すぎます。ペースを落としてください。",
+    "role_in_use": "このロールは使用中です。",
+    "role_not_found": "ロールが見つかりません。",
+    "slug_taken": "このスラッグはすでに使用されています。",
+    "soft_delete_failed": "ソフト削除に失敗しました。もう一度お試しください。",
+    "unauthenticated": "サインインが必要です。",
+    "unknown_resource": "不明なリソースです。",
+    "untrusted_origin": "リクエストのオリジンは信頼されていません。",
+    "user_not_found": "ユーザーが見つかりません。"
+  },
+  "account": {
+    "appTitle": "アカウント",
+    "save": "変更を保存",
+    "saved": "変更を保存しました。",
+    "sections": {
+      "overview": {
+        "title": "概要",
+        "description": "アカウント情報の概要。"
+      },
+      "profile": {
+        "title": "プロフィール",
+        "description": "あなたの名前と、アプリでの表示のされ方。"
+      },
+      "preferences": {
+        "title": "環境設定",
+        "description": "言語、タイムゾーン、書式。"
+      },
+      "security": {
+        "title": "セキュリティ",
+        "description": "パスワードとアクティブなセッション。"
+      },
+      "apiKeys": {
+        "title": "API キー",
+        "description": "アカウントへのプログラムによるアクセスのための個人用 API キーを作成・管理します。"
+      }
+    },
+    "fields": {
+      "name": "名前",
+      "displayName": "表示名",
+      "displayNameHint": "アプリ全体で表示されます。空欄の場合はあなたの名前が使用されます。",
+      "email": "メールアドレス",
+      "emailReadonlyHint": "メールアドレスを変更するには、管理者にお問い合わせください。",
+      "locale": "言語",
+      "timeZone": "タイムゾーン",
+      "system": "システムのデフォルト",
+      "dateFormat": "日付の書式",
+      "numberFormatLocale": "数値の書式"
+    },
+    "locales": {
+      "en": "英語",
+      "fr": "フランス語",
+      "es": "スペイン語",
+      "uk": "ウクライナ語",
+      "pt": "ポルトガル語",
+      "zh": "中国語（簡体字）",
+      "hi": "ヒンディー語",
+      "ja": "日本語"
+    },
+    "dateFormats": {
+      "system": "システムのデフォルト",
+      "iso8601": "ISO 8601 (2026-06-13)",
+      "us": "アメリカ (06/13/2026)",
+      "eu": "ヨーロッパ (13/06/2026)",
+      "long": "完全 (June 13, 2026)"
+    },
+    "status": {
+      "active": "アクティブ",
+      "pending_approval": "承認待ち",
+      "blocked": "ブロック済み",
+      "suspended": "停止済み",
+      "deactivated": "無効化済み"
+    },
+    "overview": {
+      "identity": "ID",
+      "status": "ステータス",
+      "memberSince": "登録日",
+      "memberships": "組織",
+      "noMemberships": "どの組織のメンバーでもありません。",
+      "roles": "ロール",
+      "noRoles": "ロールが割り当てられていません。",
+      "permissions": "権限",
+      "permissionsDescription": "アクティブな組織でのロールによって付与された、現在実行を許可されているすべての操作。",
+      "noPermissions": "アクティブな組織での権限がありません。"
+    },
+    "security": {
+      "passwordTitle": "パスワード",
+      "sessionsTitle": "アクティブなセッション",
+      "currentPassword": "現在のパスワード",
+      "newPassword": "新しいパスワード",
+      "confirmPassword": "新しいパスワードの確認",
+      "changePassword": "パスワードを変更",
+      "passwordChanged": "パスワードを変更しました。他のセッションはサインアウトされました。",
+      "sessionsDescription": "現在アカウントにサインインしているデバイス。",
+      "revokeOthers": "他のセッションをサインアウト",
+      "noSessions": "アクティブなセッションはありません。",
+      "expiresAt": "{value} に期限切れ",
+      "ipAddress": "IP",
+      "userAgent": "デバイス",
+      "revoke": "取り消し"
+    },
+    "errors": {
+      "nameRequired": "名前は必須です。",
+      "invalid": "フォームを確認してもう一度お試しください。",
+      "saveFailed": "変更の保存に失敗しました。もう一度お試しください。",
+      "passwordTooShort": "パスワードは8文字以上で入力してください。",
+      "passwordMismatch": "パスワードが一致しません。",
+      "passwordChangeFailed": "パスワードを変更できませんでした。現在のパスワードを確認してください。",
+      "sessionsLoadFailed": "セッションを読み込めませんでした。",
+      "sessionsRevokeFailed": "セッションを取り消せませんでした。"
+    },
+    "apiKeys": {
+      "listTitle": "あなたの API キー",
+      "empty": "API キーはまだありません。",
+      "loadError": "API キーを読み込めませんでした。",
+      "never": "なし",
+      "noExpiry": "有効期限なし",
+      "noScopes": "スコープなし",
+      "status": {
+        "active": "アクティブ",
+        "revoked": "取り消し済み"
+      },
+      "created": "{value} に作成",
+      "lastUsed": "{value} に最終使用",
+      "expires": "{value} に期限切れ",
+      "actions": {
+        "rotate": "ローテーション",
+        "revoke": "取り消し"
+      },
+      "rotateError": "キーをローテーションできませんでした。",
+      "revokeError": "キーを取り消せませんでした。",
+      "revokeConfirm": {
+        "title": "API キーを取り消し",
+        "description": "この操作により、キーは永続的に無効になります。そのキーを使用しているクライアントは即座に動作しなくなります。この操作は元に戻せません。"
+      },
+      "rotateConfirm": {
+        "title": "API キーをローテーション",
+        "description": "同じスコープと有効期限で新しいシークレットが発行され、このキーは取り消されます。新しいシークレットでクライアントを更新してください——古いキーは即座に動作しなくなります。"
+      },
+      "reveal": {
+        "title": "今すぐキーをコピー",
+        "description": "完全なシークレットが表示されるのはこの一度きりです。安全な場所に保管してください——二度と取得できません。紛失した場合は、キーをローテーションしてください。",
+        "copy": "コピー",
+        "copied": "コピーしました",
+        "done": "完了"
+      },
+      "create": {
+        "title": "新しいキーを作成",
+        "name": "名前",
+        "namePlaceholder": "例：私のノート PC の CLI",
+        "expiresInDays": "有効期限（日数）",
+        "expiresInDaysPlaceholder": "有効期限なしの場合は空欄のまま",
+        "expiresInDaysHelp": "任意。指定した日数が経過するとキーは動作しなくなります。",
+        "scopes": "スコープ",
+        "scopesHelp": "このキーが実行できる操作を選択します。キーがあなた自身の権限を超えることは決してありません。",
+        "noScopesAvailable": "付与できるスコープがありません。",
+        "submit": "キーを作成",
+        "nameRequired": "名前を入力してください。",
+        "error": "キーを作成できませんでした。",
+        "invalidScope": "次のスコープは付与できません：{scopes}"
+      }
+    }
+  },
+  "docs": {
+    "appTitle": "ドキュメント",
+    "index": {
+      "title": "ドキュメント",
+      "description": "プラットフォームのガイドやリファレンス資料を閲覧します。"
+    },
+    "emptyCatalog": "ご利用いただけるドキュメントはまだありません。",
+    "onThisPage": "このページの内容",
+    "lastUpdated": "最終更新：{date}",
+    "breadcrumbHome": "ドキュメント",
+    "readDocument": "読む",
+    "diagram": {
+      "expand": "図を全体表示に展開",
+      "title": "図 — 全体表示",
+      "zoomIn": "拡大",
+      "zoomOut": "縮小",
+      "reset": "ズームをリセット"
+    }
+  },
+  "errorBoundary": {
+    "title": "問題が発生しました",
+    "description": "このページのレンダリング中に予期しないエラーが発生しました。もう一度お試しいただくか、問題が解決しない場合は再読み込みしてください。",
+    "retry": "もう一度試す",
+    "supportId": "サポート ID"
+  },
+  "notFound": {
+    "title": "ページが見つかりません",
+    "description": "お探しのページは存在しないか、移動されました。",
+    "home": "ホームに戻る"
+  },
+  "validation": {
+    "required": "この項目は必須です。",
+    "email": "有効なメールアドレスを入力してください。",
+    "passwordMin": "パスワードは8文字以上で入力してください。",
+    "passwordMax": "パスワードは128文字以下で入力してください。",
+    "max": "この値は長すぎます。",
+    "requiredLegend": "は必須項目を示します",
+    "key": "使用できるのは、文字、数字、および記号 . _ - : のみです",
+    "slug": "小文字、数字、ハイフンを使用してください。",
+    "uuid": "識別子が無効です。",
+    "appId": "使用できるのは、小文字、数字、および記号 . _ - のみです",
+    "subdomain": "小文字、数字、ハイフンを使用してください。",
+    "ssoAudience": "使用できるのは、小文字、数字、および記号 . _ : - のみです",
+    "number": "有効な数値を入力してください。",
+    "passwordsMismatch": "パスワードが一致しません。",
+    "locale": "サポートされている言語を選択してください。",
+    "dateFormat": "有効な日付の書式を選択してください。"
+  },
+  "sso": {
+    "confirm": {
+      "title": "サインインの確認",
+      "body": "{email} としてサインインしようとしています。",
+      "continue": "続行",
+      "cancel": "キャンセル",
+      "invalidTitle": "サインインリンクが無効です",
+      "invalidBody": "このサインインリンクは無効か、有効期限が切れています。お越しになったアプリケーションから新しいものをリクエストしてください。",
+      "backToSignIn": "サインインに戻る"
+    }
+  }
+}

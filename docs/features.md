@@ -149,7 +149,7 @@ A versioned REST API under `/api/v1` lets other systems integrate. Callers authe
 
 ## 6. Internationalization
 
-The entire UI is available in **English (`en`)**, **French (`fr`)**, **Spanish (`es`)**, **Ukrainian (`uk`)**, **Portuguese (`pt`)**, **Simplified Chinese (`zh`)**, and **Hindi (`hi`)**. The active language is part of the URL (e.g. `/en/...`, `/hi/...`), users can switch via the language switcher, and their preference is remembered. Translation completeness is enforced by a test that requires every text key to exist in all seven languages.
+The entire UI is available in **English (`en`)**, **French (`fr`)**, **Spanish (`es`)**, **Ukrainian (`uk`)**, **Portuguese (`pt`)**, **Simplified Chinese (`zh`)**, **Hindi (`hi`)**, and **Japanese (`ja`)**. The active language is part of the URL (e.g. `/en/...`, `/ja/...`), users can switch via the language switcher, and their preference is remembered. Translation completeness is enforced by a test that requires every text key to exist in all eight languages.
 
 ## 7. Email
 

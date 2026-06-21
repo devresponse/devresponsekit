@@ -22,7 +22,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `NEXT_PUBLIC_PRIMARY_HOST` | no | `localhost` | Primary host label. |
 | `NEXT_PUBLIC_PRODUCTION_HOST` | no | `app.devresponse.com` | Production host; also seeds the SSO origin-suffix default. |
 | `NEXT_PUBLIC_DEFAULT_LOCALE` | no | `en` | Default UI language. |
-| `NEXT_PUBLIC_SUPPORTED_LOCALES` | no | `en,fr,es,uk,pt,zh,hi` | Enabled languages. |
+| `NEXT_PUBLIC_SUPPORTED_LOCALES` | no | `en,fr,es,uk,pt,zh,hi,ja` | Enabled languages. |
 
 ### Authentication (Better Auth)
 

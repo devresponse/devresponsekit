@@ -16,6 +16,7 @@ const LOCALE_LABELS: Record<SupportedLocale, string> = {
   pt: "Português",
   zh: "简体中文",
   hi: "हिन्दी",
+  ja: "日本語",
 };
 
 export interface LanguageMenuProps {

@@ -82,6 +82,30 @@ standalone trace (`output: "standalone"`) excludes all three from the runtime
 image. A **new** high/critical advisory that is *not* in this list fails CI by
 design, so the gate still catches anything unreviewed.
 
+### Cleared
+
+- `dompurify` (`GHSA-cmwh-pvxp-8882`, moderate — `ALLOWED_ATTR` pollution via
+  `setConfig`) reached the runtime via `mermaid` on the in-app docs renderer.
+  Pinned forward to the patched line with `pnpm.overrides` (`dompurify:
+  ^3.4.11`); `pnpm why dompurify` confirms a single resolved `3.4.11`, and the
+  mermaid render path stays defended by `securityLevel: "strict"` + server-side
+  `rehypeSanitize`.
+
+### Moderate / low transitive advisories (below the high gate)
+
+These are reported by `pnpm audit` but **do not block CI** (they are not
+high/critical) and are **not** runtime-exploitable. Tracked here so they are
+governed, not silent; drop a row when the upstream fix lands.
+
+| GHSA | Package | Severity | Reachability | 
+| --- | --- | --- | --- |
+| `GHSA-qx2v-qp2m-jg93` | `postcss` | Moderate | Via `next > postcss`. Next-managed; the app authors no untrusted CSS through it. Clears on a Next patch bump. |
+| `GHSA-q8mj-m7cp-5q26` | `qs` | Moderate | Via `supertest > superagent > qs` — a **devDependency** (test HTTP), not in the shipped bundle. |
+| `GHSA-v6wh-96g9-6wx3` | `vite` | Moderate | Via `vite-tsconfig-paths > vite` — dev-server `launch-editor` (Windows). Build/test tooling only. |
+| `GHSA-h67p-54hq-rp68` | `js-yaml` | Moderate | Via `@eslint/eslintrc` (dev) and `gray-matter` (docs frontmatter). The runtime path parses only repo-authored, trusted frontmatter — not attacker-supplied YAML. |
+| `GHSA-g7r4-m6w7-qqqr` | `esbuild` | Low | Via `vite-tsconfig-paths > vite > esbuild` — dev-server file read. Build/test tooling only. |
+| `GHSA-4x5r-pxfx-6jf8` | `@babel/core` | Low | Via `eslint-config-next > eslint-plugin-react-hooks > @babel/core` — lint tooling (dev). |
+
 ## Handling of secrets
 
 Never include real secrets, production credentials, or customer data in a

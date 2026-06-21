@@ -2,6 +2,7 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { getClientIp } from "@/lib/client-ip";
 import { logServerError } from "@/lib/observability/logger.server";
 
 /**
@@ -48,7 +49,10 @@ export interface AuditEventInput {
  */
 export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;
-  const ipForwarded = reqHeaders?.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+  // Trusted-hop client IP (the P2-4 helper), NOT the attacker-controlled
+  // leftmost X-Forwarded-For — so audit rows hold a forensically reliable
+  // address even when a client spoofs the header.
+  const ipAddress = reqHeaders ? getClientIp(reqHeaders) : null;
   const userAgent = reqHeaders?.get("user-agent") ?? null;
   const requestId = input.requestId ?? (input.request ? getOrCreateRequestId(input.request) : null);
 
@@ -81,7 +85,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
       target_application_id: input.targetApplicationId ?? null,
       provider: input.provider ?? null,
       email: input.email ?? null,
-      ip_address: ipForwarded,
+      ip_address: ipAddress,
       user_agent: userAgent,
       reason: input.reason ?? null,
       request_id: requestId,

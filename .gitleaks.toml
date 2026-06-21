@@ -11,22 +11,29 @@ useDefault = true
 [allowlist]
 description = "Build output, fixtures, archived docs, and documented local-only/CI dummy values — not real credentials."
 
-# Path-scoped allowances. Real secrets must never live in these locations;
-# they carry only generated artifacts or deliberate dummy values.
+# Path-scoped allowances for GENERATED artifacts only (no committed source).
+# NOTE: `tests/` is intentionally NOT blanket-allowlisted — a real secret
+# accidentally committed in a fixture must still be caught. Test fixtures use
+# documented throwaway values, allowlisted by the precise regexes below.
 paths = [
   '''(^|/)\.next/''',        # Next.js build output (generated, gitignored)
   '''(^|/)node_modules/''',
   '''(^|/)coverage/''',
   '''(^|/)test-results/''',
-  '''(^|/)tests/''',         # fixtures use throwaway `drk_` keys / fake secrets
   '''(^|/)\.env\.example$''',
 ]
 
-# Documented dummy values that appear in CI config / seed defaults / setup
-# docs. Belt-and-suspenders alongside the path rules above.
+# Documented dummy values that appear in tests, CI config, seed defaults, and
+# setup docs. These allow the KNOWN non-secrets while leaving the rest of the
+# tree (incl. fixtures) scanned, so a novel real credential still trips the gate.
 regexes = [
   '''ci-only-[a-z0-9-]+-not-for-production''',
   '''ChangeMe-LocalOnly-123!''',
   '''change-me-min-16-chars''',
   '''test-secret-test-secret-test-secret''',
+  # The app's OWN credential prefixes — API keys (`drk_live_`/`drk_test_`),
+  # OAuth client ids (`drkc_`), and client secrets (`drkcsec_`). Fixtures and
+  # docs use throwaway values in these formats; third-party secrets (AWS,
+  # GitHub, real private keys, …) are NOT in this family and stay scanned.
+  '''drk(_(live|test)_|c_|csec_)[A-Za-z0-9_-]+''',
 ]

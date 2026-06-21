@@ -1,0 +1,1293 @@
+{
+  "common": {
+    "appName": "DevResponse Enterprise",
+    "signIn": "Iniciar sessão",
+    "signUp": "Criar conta",
+    "signOut": "Terminar sessão",
+    "email": "E-mail",
+    "password": "Palavra-passe",
+    "submit": "Submeter",
+    "cancel": "Cancelar",
+    "loading": "A carregar…",
+    "retry": "Tentar novamente",
+    "language": "Idioma",
+    "organization": "Organização",
+    "compactMode": "Modo compacto",
+    "openMenu": "Abrir menu",
+    "closeMenu": "Fechar menu",
+    "skipToMain": "Ir para o conteúdo principal",
+    "skipToNavigation": "Ir para a navegação",
+    "displayName": "Nome",
+    "unexpectedError": "Ocorreu um erro inesperado. Tente novamente.",
+    "dialogs": {
+      "notifyTitle": "Aviso",
+      "ok": "OK",
+      "confirm": "Confirmar",
+      "cancel": "Cancelar",
+      "close": "Fechar"
+    }
+  },
+  "auth": {
+    "signInTitle": "Inicie sessão na sua conta",
+    "signUpTitle": "Crie a sua conta",
+    "signInWithGoogle": "Continuar com o Google",
+    "signInWithMicrosoft": "Continuar com a Microsoft",
+    "signInWithGitHub": "Continuar com o GitHub",
+    "or": "ou",
+    "forgotPassword": "Esqueceu-se da palavra-passe?",
+    "noAccount": "Não tem uma conta?",
+    "haveAccount": "Já tem uma conta?",
+    "createAccount": "Criar conta",
+    "loggedOutTitle": "A sua sessão foi terminada",
+    "loggedOutDescription": "Inicie sessão novamente para continuar.",
+    "pendingApprovalTitle": "A sua conta aguarda aprovação",
+    "pendingApprovalDescription": "Um administrador tem de aprovar a sua conta antes de poder aceder a páginas seguras.",
+    "blockedTitle": "O acesso à conta está restringido",
+    "blockedDescription": "A sua conta está atualmente bloqueada, suspensa ou desativada. Contacte o seu administrador.",
+    "invalidCredentials": "E-mail ou palavra-passe inválidos.",
+    "unexpectedError": "Ocorreu um erro inesperado. Tente novamente.",
+    "forgotPasswordDescription": "Introduza o e-mail da sua conta e enviar-lhe-emos uma ligação para repor a sua palavra-passe.",
+    "sendResetLink": "Enviar ligação de reposição",
+    "resetEmailSent": "Se existir uma conta para esse endereço, uma ligação de reposição da palavra-passe está a caminho.",
+    "resetPasswordTitle": "Escolha uma nova palavra-passe",
+    "newPassword": "Nova palavra-passe",
+    "confirmPassword": "Confirmar palavra-passe",
+    "setNewPassword": "Definir nova palavra-passe",
+    "passwordTooShort": "A palavra-passe tem de ter, pelo menos, 8 caracteres.",
+    "passwordMismatch": "As palavras-passe não coincidem.",
+    "resetTokenInvalid": "Esta ligação de reposição é inválida ou expirou.",
+    "requestNewResetLink": "Solicitar uma nova ligação",
+    "resetPasswordDone": "A sua palavra-passe foi atualizada."
+  },
+  "public": {
+    "hero": {
+      "eyebrow": "Código aberto · MIT · Autoalojado",
+      "title": "A shell de SaaS empresarial que é totalmente sua.",
+      "subtitle": "Segura por conceção. De código aberto por opção. Totalmente sua.",
+      "screenshotAlt": "A consola de administração do DevResponseKit.",
+      "primaryCta": "Obtenha-o gratuitamente no GitHub",
+      "secondaryCta": "Começar",
+      "signInCta": "Iniciar sessão"
+    },
+    "stats": {
+      "items": [
+        {
+          "value": "958",
+          "label": "testes automatizados"
+        },
+        {
+          "value": "$0",
+          "label": "custo marginal de autenticação"
+        },
+        {
+          "value": "80+",
+          "label": "páginas da consola de administração"
+        },
+        {
+          "value": "3 níveis",
+          "label": "controlo de acesso"
+        },
+        {
+          "value": "4",
+          "label": "idiomas"
+        }
+      ]
+    },
+    "features": {
+      "eyebrow": "Tudo o que uma plataforma B2B precisa",
+      "title": "A camada de produção que os kits independentes nunca constroem.",
+      "subtitle": "Faça o fork, torne-o seu, publique-o. O DevResponseKit reúne a base multi-inquilino que a maioria das equipas leva semanas a construir — já testada e documentada.",
+      "items": [
+        {
+          "title": "Consola de administração",
+          "description": "Mais de 80 páginas para utilizadores, funções, um catálogo de 30 permissões, organizações, adesões, aplicações empresariais, e-mail e auditoria — com pesquisa, filtragem, ações em massa e exportação para CSV do lado do servidor."
+        },
+        {
+          "title": "Controlo de acesso de três níveis",
+          "description": "Níveis de superadministrador, administrador de organização e utilizador construídos sobre primitivas de âmbito com uma única fonte de verdade. As consultas fora do âmbito devolvem 404, pelo que um inquilino nunca pode saber que existe outro."
+        },
+        {
+          "title": "API de máquina com âmbitos",
+          "description": "Uma /api/v1 com versão, com chaves de API com hash SHA-256 e JWT Ed25519 verificados contra um JWKS publicado. Uma credencial nunca pode exceder as permissões do seu proprietário."
+        },
+        {
+          "title": "SSO entre subdomínios",
+          "description": "JWT de utilização única com nonce de 60 segundos permitem aos utilizadores transitar entre as suas aplicações sem voltar a iniciar sessão — sustentados por uma lista de permissões de origens registáveis."
+        },
+        {
+          "title": "E-mail com caixa de saída em primeiro lugar",
+          "description": "Cada mensagem é registada numa caixa de saída inspecionável e delimitada por organização antes da entrega, com fornecedores Resend e Mailgun substituíveis e modelos editáveis por idioma."
+        },
+        {
+          "title": "Localizado por predefinição",
+          "description": "next-intl com quatro idiomas e uma preferência persistente por utilizador — cada rota, mensagem e modelo de e-mail respeita o idioma do visitante."
+        },
+        {
+          "title": "Visualizador de documentação integrado",
+          "description": "Markdown, Mermaid e Shiki renderizados através de um pipeline reforçado contra XSS que sanitiza primeiro — a sua documentação é incluída dentro da aplicação."
+        },
+        {
+          "title": "Segurança entregue, não apenas descrita",
+          "description": "Cabeçalhos de segurança HTTP, observabilidade com dados pessoais depurados, comparação de segredos em tempo constante e um teste de CI que faz falhar a compilação se alguma rota ignorar a delimitação por inquilino."
+        }
+      ]
+    },
+    "why": {
+      "eyebrow": "Porquê o DevResponseKit",
+      "title": "Identidade ao nível do Clerk e do WorkOS, autoalojada com custo marginal zero.",
+      "subtitle": "Organizações, RBAC de três níveis, SSO, chaves de API e auditoria são todos construídos sobre o Better Auth de código aberto — sem qualquer fatura por utilizador, por organização ou por ligação SSO a acumular-se à medida que cresce.",
+      "items": [
+        {
+          "title": "Isolamento multi-inquilino verificável",
+          "description": "A separação de inquilinos é imposta na barreira de compilação: um teste de CI analisa cada rota de administração e falha se alguma aceder a dados sem uma primitiva de âmbito. O isolamento torna-se uma garantia que pode ler e executar, em vez de aceitar por confiança."
+        },
+        {
+          "title": "Seja dono do código, seja dono dos dados",
+          "description": "Código-fonte para copiar e adaptar, que faz o fork e publica — sem dependência do framework nem taxas de execução por lugar. Autoalojado numa base de dados PostgreSQL que controla."
+        },
+        {
+          "title": "Testado e documentado",
+          "description": "744 testes em conjuntos unitários, de componentes, de integração, de segurança, ponta a ponta e de acessibilidade, além de registos de decisões de arquitetura e um site de documentação integrado."
+        }
+      ]
+    },
+    "stack": {
+      "eyebrow": "Construído sobre uma stack que a sua equipa já utiliza",
+      "title": "Moderno, com tipos seguros, sem sobrecarga de abstração.",
+      "items": [
+        "Next.js 16",
+        "React 19",
+        "TypeScript 5.9",
+        "PostgreSQL + Kysely",
+        "Better Auth",
+        "next-intl",
+        "Tailwind CSS 4",
+        "Vitest · Playwright · axe"
+      ]
+    },
+    "cta": {
+      "title": "Faça o fork. Torne-o seu. Publique-o.",
+      "subtitle": "O DevResponseKit é gratuito e de código aberto. Clone o repositório e tenha uma plataforma B2B segura, multi-inquilino e localizada a funcionar em minutos.",
+      "primary": "Obtenha-o gratuitamente no GitHub",
+      "secondary": "Criar uma conta",
+      "repoLabel": "github.com/devresponse/devresponsekit"
+    },
+    "footer": {
+      "githubLink": "GitHub",
+      "rights": "Gratuito e de código aberto sob a licença MIT."
+    }
+  },
+  "shell": {
+    "regions": {
+      "banner": "Barra de marca da aplicação",
+      "primaryNavigation": "Principal",
+      "workspaceNavigation": "Espaço de trabalho",
+      "workspaceShell": "Shell do espaço de trabalho",
+      "skipLinks": "Ligações de salto",
+      "toggleSidebar": "Alternar barra lateral"
+    },
+    "applications": "Aplicações",
+    "dashboard": "Painel",
+    "workspace": "Espaço de trabalho",
+    "settings": "Definições",
+    "admin": "Administração",
+    "users": "Utilizadores",
+    "audit": "Registo de auditoria",
+    "switchApplication": "Mudar de aplicação",
+    "loadingMenu": "A carregar menu…",
+    "menuLoadError": "Não foi possível carregar o menu.",
+    "unauthorized": "Não tem permissão para ver este conteúdo.",
+    "noApplications": "Ainda não há aplicações disponíveis para si.",
+    "showLeft": "Mostrar barra lateral esquerda",
+    "hideLeft": "Ocultar barra lateral esquerda",
+    "showRight": "Mostrar barra lateral direita",
+    "hideRight": "Ocultar barra lateral direita",
+    "showFooter": "Mostrar rodapé",
+    "hideFooter": "Ocultar rodapé",
+    "skipToMain": "Ir para o conteúdo principal",
+    "skipToNavigation": "Ir para a navegação",
+    "account": "Conta",
+    "documentation": "Documentação"
+  },
+  "administrator": {
+    "appTitle": "Administrador",
+    "appDescription": "Faça a gestão de utilizadores, funções, organizações e atividade de auditoria.",
+    "nav": {
+      "overview": "Visão geral",
+      "identity": "Identidade",
+      "users": "Utilizadores",
+      "sessions": "Sessões",
+      "access": "Acesso",
+      "roles": "Funções",
+      "permissions": "Permissões",
+      "groups": "Grupos",
+      "tenancy": "Inquilinato",
+      "organizations": "Organizações",
+      "memberships": "Adesões",
+      "apps": "Aplicações",
+      "enterpriseApps": "Aplicações empresariais",
+      "apis": "APIs",
+      "apiKeys": "Chaves de API",
+      "activity": "Atividade",
+      "auditLog": "Registo de auditoria",
+      "communication": "Comunicação",
+      "emailOutbox": "Caixa de saída de e-mail",
+      "emailTemplates": "Modelos de e-mail"
+    },
+    "groups": {
+      "title": "Grupos",
+      "description": "Coortes dentro de uma organização que agregam funções e reúnem utilizadores.",
+      "newButton": "Novo grupo",
+      "deleteButton": "Eliminar",
+      "memberCount": "{count, plural, =0 {Sem membros} one {# membro} other {# membros}}",
+      "columns": {
+        "key": "Chave",
+        "name": "Nome",
+        "roleCount": "Funções",
+        "memberCount": "Membros",
+        "createdAt": "Criado"
+      },
+      "deleteDialog": {
+        "title": "Eliminar grupo",
+        "description": "Isto remove o grupo e o respetivo conjunto de funções e adesões. Os membros mantêm quaisquer funções atribuídas diretamente.",
+        "confirm": "Eliminar grupo"
+      },
+      "fields": {
+        "key": "Chave",
+        "name": "Nome",
+        "description": "Descrição"
+      },
+      "tabs": {
+        "roles": "Funções",
+        "members": "Membros",
+        "settings": "Definições"
+      },
+      "new": {
+        "title": "Criar grupo",
+        "submit": "Criar grupo",
+        "cancel": "Cancelar",
+        "errorToast": "Não foi possível criar o grupo.",
+        "organizationRequired": "Selecione uma organização para este grupo."
+      },
+      "settings": {
+        "save": "Guardar alterações",
+        "saved": "Guardado.",
+        "errorToast": "Não foi possível guardar as alterações.",
+        "keyReadOnly": "A chave não pode ser alterada após a criação."
+      },
+      "rolesEditor": {
+        "available": "Disponíveis",
+        "assigned": "Atribuídas",
+        "searchAvailable": "Pesquisar funções disponíveis",
+        "searchAssigned": "Pesquisar funções atribuídas",
+        "add": "Adicionar",
+        "remove": "Remover",
+        "save": "Guardar alterações",
+        "saving": "A guardar…",
+        "saved": "Funções atualizadas.",
+        "noResults": "Não há funções correspondentes.",
+        "errorToast": "Não foi possível atualizar as funções."
+      },
+      "members": {
+        "columns": {
+          "email": "E-mail",
+          "name": "Nome",
+          "joinedAt": "Aderiu"
+        }
+      }
+    },
+    "organizationPicker": {
+      "label": "Organização",
+      "global": "Global (todas as organizações)",
+      "placeholder": "Selecione uma organização…",
+      "loading": "A carregar…",
+      "loadError": "Não foi possível carregar as organizações.",
+      "searchPlaceholder": "Pesquisar organizações…",
+      "noResults": "Não foram encontradas organizações."
+    },
+    "overview": {
+      "title": "Visão geral do administrador",
+      "description": "Escolha uma área na navegação à esquerda para começar a gerir a plataforma.",
+      "metrics": {
+        "users": "Utilizadores",
+        "usersHint": "{active} ativos · {pending} a aguardar aprovação",
+        "organizations": "Organizações",
+        "roles": "Funções",
+        "permissions": "Permissões",
+        "enterpriseApps": "Aplicações empresariais",
+        "enterpriseAppsHint": "{available} disponíveis",
+        "none": "Ainda não tem permissão para ver quaisquer métricas."
+      },
+      "recent": {
+        "registrationsTitle": "Registos mais recentes",
+        "sessionsTitle": "Inícios de sessão mais recentes",
+        "auditTitle": "Eventos de auditoria mais recentes",
+        "organizationsTitle": "Organizações mais recentes",
+        "viewAll": "Ver tudo",
+        "empty": "Ainda não há nada aqui.",
+        "columns": {
+          "user": "Utilizador",
+          "status": "Estado",
+          "created": "Criado",
+          "ip": "Endereço IP",
+          "signedIn": "Sessão iniciada",
+          "event": "Evento",
+          "outcome": "Resultado",
+          "when": "Quando",
+          "name": "Nome",
+          "slug": "Slug"
+        }
+      },
+      "insights": {
+        "title": "Análises",
+        "description": "Atividade dos últimos 7 dias, limitada ao que pode aceder.",
+        "empty": "Ainda não há dados suficientes para criar o gráfico.",
+        "table": {
+          "day": "Dia",
+          "organization": "Organização",
+          "count": "Contagem"
+        },
+        "mostActiveOrgs": {
+          "title": "Organizações mais ativas",
+          "subtitle": "Novos registos por organização nos últimos {days} dias"
+        },
+        "registrations": {
+          "title": "Registos diários",
+          "system": "Novos utilizadores em todas as organizações",
+          "org": "Novos membros na sua organização"
+        },
+        "logins": {
+          "title": "Inícios de sessão diários",
+          "system": "Inícios de sessão em todas as organizações",
+          "org": "Inícios de sessão na sua organização"
+        }
+      }
+    },
+    "users": {
+      "title": "Utilizadores",
+      "newButton": "Novo utilizador",
+      "columns": {
+        "email": "E-mail",
+        "displayName": "Nome",
+        "status": "Estado",
+        "createdAt": "Criado",
+        "organization": "Organização"
+      },
+      "filters": {
+        "status": "Estado",
+        "search": "Pesquisar utilizadores"
+      },
+      "status": {
+        "active": "Ativo",
+        "pending_approval": "A aguardar aprovação",
+        "blocked": "Bloqueado",
+        "suspended": "Suspenso",
+        "deactivated": "Desativado"
+      },
+      "tabs": {
+        "overview": "Visão geral",
+        "roles": "Funções",
+        "memberships": "Adesões",
+        "sessions": "Sessões",
+        "audit": "Auditoria"
+      },
+      "detail": {
+        "notFound": "Utilizador não encontrado.",
+        "metaCreated": "Criado {value}",
+        "metaUpdated": "Atualizado {value}",
+        "betterAuthId": "ID de utilizador do Better Auth",
+        "appUserId": "ID de utilizador da aplicação",
+        "deactivated": "Desativado {value}",
+        "deactivatedBy": "Desativado por {actor}",
+        "deactivatedReason": "Motivo: {reason}"
+      },
+      "fields": {
+        "email": "E-mail",
+        "displayName": "Nome a apresentar",
+        "preferredLocale": "Idioma preferido",
+        "password": "Palavra-passe",
+        "role": "Função do Better Auth",
+        "initialAppStatus": "Estado inicial na aplicação",
+        "reason": "Motivo"
+      },
+      "new": {
+        "title": "Criar utilizador",
+        "description": "Crie um utilizador do Better Auth e o registo correspondente na aplicação. O utilizador é criado com o estado de aplicação escolhido; recomenda-se a aprovação por um administrador para contas não fidedignas.",
+        "submit": "Criar utilizador",
+        "cancel": "Cancelar",
+        "passwordHint": "Mínimo de 8 caracteres. A palavra-passe é encaminhada para o Better Auth e nunca é registada.",
+        "successToast": "Utilizador {email} criado.",
+        "errorToast": "Não foi possível criar o utilizador."
+      },
+      "actions": {
+        "viewDetail": "Ver",
+        "approve": "Aprovar",
+        "block": "Bloquear",
+        "suspend": "Suspender",
+        "reactivate": "Reativar",
+        "ban": "Banir",
+        "unban": "Anular banimento",
+        "setRole": "Definir função do Better Auth",
+        "setPassword": "Definir palavra-passe",
+        "revokeSessions": "Revogar todas as sessões",
+        "softDelete": "Eliminar (suave)",
+        "restore": "Restaurar",
+        "impersonate": "Personificar",
+        "stopImpersonating": "Parar de personificar",
+        "confirm": "Confirmar",
+        "cancel": "Cancelar"
+      },
+      "bulk": {
+        "approve": "Aprovar selecionados",
+        "block": "Bloquear selecionados",
+        "ban": "Banir selecionados…",
+        "softDelete": "Eliminar selecionados (suave)…",
+        "reasonPrompt": "Motivo (registado no registo de auditoria):",
+        "confirmDelete": "Eliminar de forma suave os utilizadores selecionados? Isto bane-os no Better Auth e desativa o registo na aplicação.",
+        "successToast": "{action} aplicada a {succeeded} utilizador(es).",
+        "partialFailureToast": "{action} aplicada a {succeeded}/{attempted} utilizador(es); {failed} falharam.",
+        "errorToast": "A ação em massa falhou.",
+        "rateLimitedToast": "Demasiados pedidos em massa. Tente novamente dentro de momentos."
+      },
+      "impersonation": {
+        "confirmTitle": "Personificar {email}?",
+        "confirmDescription": "A sua sessão será iniciada como {email}. A ação é registada no registo de auditoria. Para regressar à sua própria sessão, clique em \"Parar de personificar\" na faixa que aparece em todas as páginas.",
+        "confirmAck": "Compreendo que isto será auditado.",
+        "startButton": "Personificar este utilizador",
+        "startToast": "A personificar {email}…",
+        "stopButton": "Parar de personificar",
+        "stopToast": "Regressou à sua própria sessão.",
+        "errorToast": "Não foi possível iniciar a personificação.",
+        "selfError": "Não se pode personificar a si próprio.",
+        "bannerLabel": "Está a personificar {email}.",
+        "stopErrorToast": "Não foi possível parar de personificar. Tente novamente."
+      },
+      "dialogs": {
+        "ban": {
+          "title": "Banir utilizador",
+          "description": "O banimento impede o utilizador de iniciar sessão. É obrigatório indicar um motivo, que é registado no registo de auditoria."
+        },
+        "softDelete": {
+          "title": "Eliminar utilizador (suave)",
+          "description": "A eliminação suave bane o utilizador no Better Auth e marca o registo na aplicação como desativado. A ação Restaurar reverte esta operação."
+        },
+        "setPassword": {
+          "title": "Definir palavra-passe",
+          "description": "Escolha um modo. \"Definir nova palavra-passe\" substitui diretamente a palavra-passe do utilizador. \"Enviar e-mail de reposição\" pede ao Better Auth que envie por e-mail uma ligação de reposição da palavra-passe.",
+          "modeSet": "Definir nova palavra-passe",
+          "modeReset": "Enviar e-mail de reposição"
+        },
+        "setRole": {
+          "title": "Definir função do Better Auth",
+          "description": "Esta é a função ao nível da autenticação (admin / user), distinta das funções da aplicação."
+        }
+      },
+      "sessions": {
+        "title": "Sessões ativas",
+        "empty": "Sem sessões ativas.",
+        "revokeOne": "Revogar",
+        "revokeAll": "Revogar todas as sessões",
+        "expiresAt": "Expira {value}",
+        "ipAddress": "IP",
+        "userAgent": "Agente de utilizador"
+      },
+      "memberships": {
+        "columns": {
+          "organization": "Organização",
+          "orgName": "Nome",
+          "status": "Estado",
+          "source": "Origem",
+          "joinedAt": "Aderiu"
+        },
+        "removeButton": "Remover",
+        "removeConfirm": "Remover esta adesão?",
+        "removeError": "Não foi possível remover a adesão."
+      },
+      "roles": {
+        "columns": {
+          "role": "Função",
+          "key": "Chave",
+          "organization": "Organização",
+          "assigned": "Atribuída"
+        }
+      }
+    },
+    "grid": {
+      "loading": "A carregar…",
+      "empty": "Nenhum resultado corresponde aos filtros atuais.",
+      "error": "Falha ao carregar. Tente novamente.",
+      "retry": "Tentar novamente",
+      "previousPage": "Página anterior",
+      "nextPage": "Página seguinte",
+      "pageOf": "Página {page} de {totalPages}",
+      "rowsPerPage": "Linhas por página",
+      "totalRows": "{count, plural, one {# linha} other {# linhas}}",
+      "search": "Pesquisar",
+      "sortAsc": "Ordenado de forma ascendente",
+      "sortDesc": "Ordenado de forma descendente",
+      "sortNone": "Não ordenado",
+      "selectPage": "Selecionar tudo nesta página",
+      "selectRow": "Selecionar linha",
+      "selectionCount": "{count, plural, one {# selecionado} other {# selecionados}}",
+      "selectionAllMatching": "Todas as {total, number} linhas correspondentes selecionadas",
+      "selectAllMatching": "Selecionar as {total, number} linhas correspondentes",
+      "clearSelection": "Limpar seleção",
+      "bulkActions": "Ações em massa",
+      "exportCsv": "Exportar CSV",
+      "searchPlaceholder": "Pesquisar…",
+      "filterAll": "Todos",
+      "filterBy": "Filtrar por {label}",
+      "clearFilters": "Limpar filtros",
+      "optionLabels": {
+        "active": "Ativo",
+        "pending_approval": "A aguardar aprovação",
+        "pending": "Pendente",
+        "blocked": "Bloqueado",
+        "suspended": "Suspenso",
+        "deactivated": "Desativado",
+        "archived": "Arquivado",
+        "available": "Disponível",
+        "disabled": "Desativado",
+        "revoked": "Revogado",
+        "global": "Global",
+        "org": "Organização",
+        "true": "Sim",
+        "false": "Não"
+      }
+    },
+    "errors": {
+      "forbidden": "Não tem permissão para ver esta página.",
+      "generic": "Algo correu mal. Tente novamente.",
+      "invalidBody": "Os dados submetidos são inválidos.",
+      "emailTaken": "Esse endereço de e-mail já está a ser utilizado.",
+      "notFound": "Não foi possível encontrar o recurso solicitado.",
+      "authBackendFailed": "O backend de autenticação rejeitou o pedido.",
+      "roleInUse": "Esta função ainda está atribuída a um ou mais utilizadores e não pode ser eliminada.",
+      "permissionInUse": "Esta permissão ainda está atribuída a uma ou mais funções e não pode ser eliminada.",
+      "keyTaken": "Essa chave já está a ser utilizada.",
+      "slugTaken": "Esse slug já está a ser utilizado.",
+      "organizationNotEmpty": "Esta organização ainda tem membros e não pode ser eliminada.",
+      "organizationIsDefault": "A organização predefinida não pode ser eliminada.",
+      "organizationInUse": "Esta organização ainda tem funções, aplicações ou credenciais e não pode ser eliminada.",
+      "membershipExists": "Este utilizador já é membro da organização.",
+      "bindingExists": "Esta associação de fornecedor já existe.",
+      "idTaken": "Esse id já está a ser utilizado.",
+      "invalidOrigin": "A origem tem de ser um URL HTTPS sem caminho.",
+      "applicationInUse": "Esta aplicação ainda está referenciada e não pode ser eliminada.",
+      "rateLimited": "Demasiados pedidos. Tente novamente dentro de momentos.",
+      "exportTruncated": "A exportação atingiu o limite máximo de linhas. Refine os filtros e exporte novamente para obter o restante.",
+      "originNotAllowed": "O anfitrião de origem não está na lista permitida para redirecionamentos de SSO."
+    },
+    "roles": {
+      "title": "Funções",
+      "newButton": "Nova função",
+      "duplicateButton": "Duplicar",
+      "deleteButton": "Eliminar",
+      "editButton": "Editar",
+      "scope": {
+        "global": "Global",
+        "org": "Organização"
+      },
+      "columns": {
+        "key": "Chave",
+        "name": "Nome",
+        "scope": "Âmbito",
+        "organization": "Organização",
+        "permissionCount": "Permissões",
+        "memberCount": "Membros",
+        "createdAt": "Criado"
+      },
+      "filters": {
+        "scope": "Âmbito",
+        "organization": "Organização",
+        "permission": "Chave de permissão",
+        "search": "Pesquisar funções"
+      },
+      "tabs": {
+        "permissions": "Permissões",
+        "members": "Membros",
+        "settings": "Definições"
+      },
+      "fields": {
+        "key": "Chave",
+        "name": "Nome",
+        "description": "Descrição",
+        "scope": "Âmbito",
+        "organization": "Organização"
+      },
+      "new": {
+        "title": "Criar função",
+        "description": "Crie uma nova função de aplicação. Escolha \"Global\" para uma função ao nível de toda a plataforma ou atribua-a a uma organização. A chave é permanente após a criação.",
+        "submit": "Criar função",
+        "cancel": "Cancelar",
+        "successToast": "Função {key} criada.",
+        "errorToast": "Não foi possível criar a função."
+      },
+      "settings": {
+        "save": "Guardar alterações",
+        "saved": "Guardado.",
+        "errorToast": "Não foi possível guardar as alterações.",
+        "keyReadOnly": "A chave não pode ser alterada após a criação."
+      },
+      "permissionsEditor": {
+        "title": "Gerir permissões",
+        "available": "Disponíveis",
+        "assigned": "Atribuídas",
+        "searchAvailable": "Pesquisar permissões disponíveis",
+        "searchAssigned": "Pesquisar permissões atribuídas",
+        "add": "Adicionar",
+        "remove": "Remover",
+        "save": "Guardar alterações",
+        "saving": "A guardar…",
+        "saved": "Permissões atualizadas.",
+        "noResults": "Não há permissões correspondentes.",
+        "empty": "Ainda não há permissões atribuídas.",
+        "errorToast": "Não foi possível atualizar as permissões."
+      },
+      "members": {
+        "empty": "Ainda nenhum membro tem esta função.",
+        "revoke": "Revogar",
+        "revokeConfirm": "Revogar esta função de {email}?",
+        "errorToast": "Não foi possível revogar a função.",
+        "columns": {
+          "email": "E-mail",
+          "name": "Nome",
+          "organization": "Organização",
+          "assignedAt": "Atribuída"
+        }
+      },
+      "deleteDialog": {
+        "title": "Eliminar função",
+        "description": "A eliminação remove a função e as respetivas associações de permissões. A função não pode estar atribuída a qualquer utilizador.",
+        "confirm": "Eliminar função"
+      },
+      "duplicateConfirm": "Criar uma cópia desta função?",
+      "duplicateError": "Não foi possível duplicar a função.",
+      "deleteError": "Não foi possível eliminar a função."
+    },
+    "permissions": {
+      "title": "Permissões",
+      "description": "O catálogo de chaves de permissão consumidas pelas funções de aplicação.",
+      "newButton": "Nova permissão",
+      "editButton": "Editar",
+      "deleteButton": "Eliminar",
+      "columns": {
+        "key": "Chave",
+        "description": "Descrição",
+        "usedByRoleCount": "Funções que a utilizam",
+        "actions": "Ações"
+      },
+      "filters": {
+        "search": "Pesquisar permissões"
+      },
+      "fields": {
+        "key": "Chave",
+        "description": "Descrição"
+      },
+      "new": {
+        "title": "Criar permissão",
+        "description": "Adicione uma nova chave de permissão ao catálogo. A chave é referenciada pelo código e pelos registos de auditoria; escolha com cuidado.",
+        "submit": "Criar permissão",
+        "cancel": "Cancelar",
+        "errorToast": "Não foi possível criar a permissão."
+      },
+      "edit": {
+        "title": "Editar permissão",
+        "submit": "Guardar",
+        "cancel": "Cancelar",
+        "errorToast": "Não foi possível guardar as alterações."
+      },
+      "rolesUsing": {
+        "title": "Funções que utilizam esta permissão",
+        "empty": "Atualmente, nenhuma função utiliza esta permissão.",
+        "viewRole": "Ver função"
+      },
+      "deleteDialog": {
+        "title": "Eliminar permissão",
+        "description": "A eliminação remove a permissão do catálogo. Não pode estar referenciada por qualquer função.",
+        "confirm": "Eliminar permissão"
+      },
+      "deleteError": "Não foi possível eliminar a permissão."
+    },
+    "orgs": {
+      "title": "Organizações",
+      "newButton": "Nova organização",
+      "deleteButton": "Eliminar",
+      "defaultYes": "Predefinida",
+      "columns": {
+        "slug": "Slug",
+        "name": "Nome",
+        "status": "Estado",
+        "isDefault": "Predefinida",
+        "memberCount": "Membros",
+        "createdAt": "Criado"
+      },
+      "fields": {
+        "slug": "Slug",
+        "slugHelp": "Letras minúsculas, números, hífenes. 1-64 caracteres.",
+        "name": "Nome",
+        "status": "Estado",
+        "isDefault": "Definir como organização predefinida"
+      },
+      "tabs": {
+        "members": "Membros",
+        "providers": "Fornecedores",
+        "settings": "Definições"
+      },
+      "new": {
+        "title": "Criar organização",
+        "description": "Adicione uma nova organização. O slug é utilizado nos URL e não pode ser facilmente alterado.",
+        "submit": "Criar organização",
+        "cancel": "Cancelar",
+        "errorToast": "Não foi possível criar a organização."
+      },
+      "settings": {
+        "save": "Guardar alterações",
+        "saved": "Organização atualizada.",
+        "errorToast": "Não foi possível guardar as alterações.",
+        "statusActive": "Ativa",
+        "statusPending": "Pendente",
+        "statusSuspended": "Suspensa",
+        "statusArchived": "Arquivada"
+      },
+      "members": {
+        "columns": {
+          "user": "Utilizador",
+          "status": "Estado",
+          "source": "Origem",
+          "joinedAt": "Aderiu"
+        },
+        "removeButton": "Remover",
+        "removeConfirm": "Remover este membro da organização?",
+        "removeError": "Não foi possível remover o membro."
+      },
+      "providers": {
+        "columns": {
+          "provider": "Fornecedor",
+          "key": "Chave",
+          "displayName": "Nome a apresentar",
+          "boundAt": "Associado"
+        },
+        "removeButton": "Remover",
+        "removeConfirm": "Remover esta associação de fornecedor?",
+        "removeError": "Não foi possível remover a associação."
+      },
+      "deleteDialog": {
+        "title": "Eliminar organização",
+        "description": "A eliminação remove a organização. A organização tem de estar vazia (sem membros)."
+      },
+      "deleteError": "Não foi possível eliminar a organização."
+    },
+    "memberships": {
+      "title": "Adesões",
+      "columns": {
+        "organization": "Organização",
+        "user": "Utilizador",
+        "status": "Estado",
+        "source": "Origem",
+        "createdAt": "Criado"
+      }
+    },
+    "enterpriseApps": {
+      "title": "Aplicações empresariais",
+      "newButton": "Nova aplicação",
+      "deleteButton": "Eliminar",
+      "global": "Global",
+      "columns": {
+        "id": "ID",
+        "label": "Etiqueta",
+        "subdomain": "Subdomínio",
+        "status": "Estado",
+        "organization": "Organização",
+        "sortOrder": "Ordem",
+        "createdAt": "Criado"
+      },
+      "fields": {
+        "id": "ID",
+        "idHelp": "Letras minúsculas, dígitos, ponto, sublinhado e hífen. 1–128 caracteres. Não pode ser alterado após a criação.",
+        "label": "Etiqueta",
+        "description": "Descrição",
+        "origin": "Origem",
+        "originHelp": "Tem de ser um URL HTTPS sem caminho, consulta ou fragmento (p. ex. https://docs.example.com).",
+        "subdomain": "Subdomínio",
+        "subdomainHelp": "Etiqueta DNS válida como anfitrião: letras minúsculas, dígitos e hífenes, 1–63 caracteres.",
+        "ssoAudience": "Audiência de SSO",
+        "status": "Estado",
+        "sortOrder": "Ordem",
+        "organization": "Âmbito da organização"
+      },
+      "status": {
+        "available": "Disponível",
+        "disabled": "Desativada"
+      },
+      "new": {
+        "title": "Criar aplicação empresarial",
+        "description": "Registe uma nova aplicação empresarial. O ID é permanente após a criação porque é referenciado pelos registos de transferência de SSO.",
+        "submit": "Criar aplicação",
+        "cancel": "Cancelar",
+        "errorToast": "Não foi possível criar a aplicação."
+      },
+      "settings": {
+        "save": "Guardar alterações",
+        "saved": "Aplicação atualizada.",
+        "errorToast": "Não foi possível guardar as alterações."
+      },
+      "deleteDialog": {
+        "title": "Eliminar aplicação empresarial",
+        "description": "A eliminação remove a aplicação do catálogo. A aplicação não pode estar referenciada por qualquer transferência de SSO."
+      },
+      "deleteError": "Não foi possível eliminar a aplicação."
+    },
+    "apiKeys": {
+      "title": "Chaves de API",
+      "description": "Inventário de todas as chaves de API de utilizadores e organizações. Inspecione âmbitos e utilização, rode ou revogue uma chave, ou emita uma em nome de um utilizador. Os segredos nunca são mostrados aqui — apenas quando uma chave é criada ou rodada.",
+      "newButton": "Emitir chave de API",
+      "never": "Nunca",
+      "noExpiry": "Sem expiração",
+      "scopeCount": "{count, plural, one {# âmbito} other {# âmbitos}}",
+      "columns": {
+        "name": "Nome",
+        "prefix": "Prefixo",
+        "owner": "Proprietário",
+        "scopes": "Âmbitos",
+        "status": "Estado",
+        "lastUsed": "Última utilização",
+        "expires": "Expira",
+        "created": "Criada"
+      },
+      "filters": {
+        "search": "Pesquisar",
+        "searchPlaceholder": "Nome, prefixo ou e-mail do proprietário",
+        "status": "Estado",
+        "any": "Qualquer"
+      },
+      "status": {
+        "active": "Ativa",
+        "revoked": "Revogada"
+      },
+      "actions": {
+        "view": "Ver",
+        "rotate": "Rodar",
+        "revoke": "Revogar"
+      },
+      "revokeError": "Não foi possível revogar a chave.",
+      "rotateError": "Não foi possível rodar a chave.",
+      "dialogs": {
+        "revoke": {
+          "title": "Revogar chave de API",
+          "description": "Isto invalida a chave imediata e permanentemente. Qualquer cliente que a utilize começará a receber respostas 401. Esta ação não pode ser anulada."
+        },
+        "rotate": {
+          "title": "Rodar chave de API",
+          "description": "É emitido um novo segredo com o mesmo proprietário, âmbitos e expiração, e a chave atual é revogada. Atualize o cliente com o novo segredo — o anterior deixa de funcionar de imediato."
+        }
+      },
+      "reveal": {
+        "title": "Copie a chave agora",
+        "description": "Esta é a única vez que o segredo completo é mostrado. Guarde-o num local seguro — não pode ser obtido novamente. Se o perder, rode a chave.",
+        "copy": "Copiar",
+        "copied": "Copiado",
+        "done": "Concluído"
+      },
+      "detail": {
+        "loading": "A carregar…",
+        "loadError": "Não foi possível carregar a chave.",
+        "status": "Estado",
+        "owner": "Proprietário",
+        "organization": "Organização",
+        "created": "Criada",
+        "createdBy": "Criada por",
+        "lastUsed": "Última utilização",
+        "lastUsedIp": "IP da última utilização",
+        "expires": "Expira",
+        "revoked": "Revogada",
+        "revokedBy": "Revogada por",
+        "revokedReason": "Motivo da revogação",
+        "scopes": "Âmbitos",
+        "noScopes": "Sem âmbitos — esta chave não pode chamar qualquer endpoint com âmbito."
+      },
+      "fields": {
+        "name": "Nome",
+        "namePlaceholder": "p. ex. bot de implementação de CI",
+        "owner": "Proprietário (ID de utilizador da aplicação)",
+        "ownerHelp": "O utilizador da aplicação em nome do qual a chave atua. Copie o ID a partir da consola de Utilizadores. A chave nunca pode exceder as permissões desse utilizador.",
+        "expiresInDays": "Expira em (dias)",
+        "expiresInDaysPlaceholder": "Deixe vazio para não expirar",
+        "expiresInDaysHelp": "Opcional. Após este número de dias, a chave deixa de funcionar. Deixe vazio para nunca expirar.",
+        "scopes": "Âmbitos",
+        "scopesHelp": "Selecione as permissões que esta chave pode utilizar. Só pode conceder âmbitos que o proprietário possua; os restantes são rejeitados."
+      },
+      "new": {
+        "title": "Emitir chave de API",
+        "description": "Crie uma chave de API em nome de um utilizador. O segredo é mostrado exatamente uma vez após a criação.",
+        "submit": "Emitir chave",
+        "cancel": "Cancelar",
+        "errorToast": "Não foi possível emitir a chave.",
+        "invalidOwnerId": "Introduza um ID de utilizador da aplicação válido (UUID).",
+        "ownerNotFound": "Não foi encontrado nenhum utilizador com esse ID de utilizador da aplicação.",
+        "ownerInactive": "Esse utilizador não está ativo e não lhe pode ser emitida uma chave.",
+        "invalidScope": "O proprietário não possui estes âmbitos: {scopes}"
+      }
+    },
+    "audit": {
+      "title": "Registo de auditoria",
+      "description": "Vista paginada e só de leitura dos eventos de administrador e de autenticação. Cada linha abre um painel com os metadados completos, endereço IP, agente de utilizador e motivo.",
+      "viewDetail": "Ver",
+      "columns": {
+        "createdAt": "Hora",
+        "eventType": "Tipo de evento",
+        "outcome": "Resultado",
+        "actor": "Ator",
+        "target": "Alvo"
+      },
+      "filters": {
+        "eventType": "Tipo de evento",
+        "outcome": "Resultado",
+        "actor": "Ator (id de utilizador do Better Auth)",
+        "actorPlaceholder": "id de utilizador do Better Auth",
+        "any": "Qualquer"
+      },
+      "outcome": {
+        "success": "Êxito",
+        "error": "Erro",
+        "failure": "Falha",
+        "denied": "Negado"
+      },
+      "detail": {
+        "actor": "Ator",
+        "appUser": "Utilizador da aplicação",
+        "organization": "Organização",
+        "targetApplication": "Aplicação de destino",
+        "provider": "Fornecedor",
+        "email": "E-mail",
+        "ipAddress": "Endereço IP",
+        "userAgent": "Agente de utilizador",
+        "reason": "Motivo",
+        "metadata": "Metadados"
+      }
+    },
+    "email": {
+      "title": "Caixa de saída de e-mail",
+      "description": "Cada e-mail enviado é registado aqui antes de qualquer tentativa de entrega — incluindo em ambientes sem um fornecedor de entrega configurado.",
+      "viewDetail": "Ver",
+      "columns": {
+        "createdAt": "Criado",
+        "to": "Para",
+        "subject": "Assunto",
+        "template": "Modelo",
+        "status": "Estado"
+      },
+      "status": {
+        "pending": "Pendente",
+        "sent": "Enviado",
+        "failed": "Falhou",
+        "logged": "Registado"
+      },
+      "filters": {
+        "status": "Estado",
+        "template": "Chave do modelo",
+        "any": "Qualquer"
+      },
+      "test": {
+        "placeholder": "destinatario@exemplo.com",
+        "send": "Enviar e-mail de teste",
+        "error": "O envio do e-mail de teste falhou.",
+        "result": {
+          "sent": "E-mail de teste enviado.",
+          "failed": "A entrega falhou — consulte a linha da caixa de saída.",
+          "logged": "Registado na caixa de saída (nenhum fornecedor de entrega configurado)."
+        }
+      },
+      "detail": {
+        "from": "De",
+        "to": "Para",
+        "template": "Modelo",
+        "provider": "Fornecedor",
+        "providerMessageId": "Id da mensagem do fornecedor",
+        "createdAt": "Criado",
+        "sentAt": "Enviado",
+        "relatedUser": "Utilizador relacionado",
+        "organization": "Organização",
+        "error": "Erro",
+        "bodyText": "Corpo de texto",
+        "bodyHtml": "Corpo HTML"
+      },
+      "templates": {
+        "title": "Modelos de e-mail",
+        "description": "Modelos editáveis utilizados para e-mail enviado. Eliminar ou corromper um modelo nunca pode bloquear um fluxo — as predefinições integradas aplicam-se como alternativa.",
+        "empty": "Não foram encontrados modelos. Execute as migrações da base de dados para semear as predefinições.",
+        "edit": "Editar",
+        "editTitle": "Editar modelo de e-mail",
+        "columns": {
+          "key": "Chave",
+          "locale": "Idioma",
+          "subject": "Assunto",
+          "updatedAt": "Atualizado"
+        },
+        "fields": {
+          "subject": "Assunto",
+          "bodyHtml": "Corpo HTML",
+          "bodyText": "Corpo de texto",
+          "bodyTextHint": "Alternativa de texto simples opcional. Deixe vazio para enviar apenas HTML.",
+          "description": "Descrição"
+        },
+        "variablesHint": "Variáveis disponíveis:",
+        "save": "Guardar modelo",
+        "cancel": "Cancelar",
+        "saveError": "A gravação do modelo falhou."
+      }
+    }
+  },
+  "errors": {
+    "application_in_use": "Esta aplicação está em utilização e não pode ser eliminada.",
+    "application_not_found": "Aplicação não encontrada.",
+    "auth_ban_failed": "O serviço de autenticação recusou o banimento.",
+    "auth_create_failed": "O serviço de autenticação recusou criar o utilizador.",
+    "auth_forgot_password_failed": "Não foi possível enviar o e-mail de reposição da palavra-passe.",
+    "auth_impersonate_failed": "Não foi possível iniciar a personificação.",
+    "auth_list_sessions_failed": "Não foi possível listar as sessões.",
+    "auth_revoke_all_failed": "Não foi possível revogar todas as sessões.",
+    "auth_revoke_session_failed": "Não foi possível revogar a sessão.",
+    "auth_set_password_failed": "Não foi possível alterar a palavra-passe.",
+    "auth_set_role_failed": "Não foi possível alterar a função do utilizador.",
+    "auth_stop_impersonate_failed": "Não foi possível parar a personificação.",
+    "auth_unban_failed": "O serviço de autenticação recusou levantar o banimento.",
+    "binding_exists": "Esta associação já existe.",
+    "binding_not_found": "Associação não encontrada.",
+    "cannot_impersonate_self": "Não se pode personificar a si próprio.",
+    "email_taken": "Este e-mail já está a ser utilizado.",
+    "export_failed": "A exportação falhou antes de qualquer linha poder ser enviada.",
+    "filters_required_for_select_all": "São necessários filtros ao selecionar tudo.",
+    "forbidden": "Não tem permissão para realizar esta ação.",
+    "id_taken": "Este identificador já está a ser utilizado.",
+    "invalid_body": "O corpo do pedido é inválido.",
+    "invalid_id": "O id fornecido não é um UUID válido.",
+    "invalid_origin": "A origem do pedido não é permitida.",
+    "invalid_session_id": "O id da sessão é inválido.",
+    "key_taken": "Esta chave já está a ser utilizada.",
+    "membership_exists": "Esta adesão já existe.",
+    "membership_not_found": "Adesão não encontrada.",
+    "no_changes": "Não foram fornecidas alterações.",
+    "not_deactivated": "O utilizador não está desativado.",
+    "not_found": "Não encontrado.",
+    "organization_not_found": "Organização não encontrada.",
+    "permission_in_use": "Esta permissão está em utilização.",
+    "rate_limited": "Demasiados pedidos. Abrande, por favor.",
+    "role_in_use": "Esta função está em utilização.",
+    "role_not_found": "Função não encontrada.",
+    "slug_taken": "Este slug já está a ser utilizado.",
+    "soft_delete_failed": "A eliminação suave falhou; tente novamente.",
+    "unauthenticated": "É necessário iniciar sessão.",
+    "unknown_resource": "Recurso desconhecido.",
+    "untrusted_origin": "A origem do pedido não é fidedigna.",
+    "user_not_found": "Utilizador não encontrado."
+  },
+  "account": {
+    "appTitle": "Conta",
+    "save": "Guardar alterações",
+    "saved": "As suas alterações foram guardadas.",
+    "sections": {
+      "overview": {
+        "title": "Visão geral",
+        "description": "Um resumo das informações da sua conta."
+      },
+      "profile": {
+        "title": "Perfil",
+        "description": "O seu nome e como aparece na aplicação."
+      },
+      "preferences": {
+        "title": "Preferências",
+        "description": "Idioma, fuso horário e formatação."
+      },
+      "security": {
+        "title": "Segurança",
+        "description": "Palavra-passe e sessões ativas."
+      },
+      "apiKeys": {
+        "title": "Chaves de API",
+        "description": "Crie e faça a gestão de chaves de API pessoais para acesso programático à sua conta."
+      }
+    },
+    "fields": {
+      "name": "Nome",
+      "displayName": "Nome a apresentar",
+      "displayNameHint": "Mostrado em toda a aplicação. Deixe vazio para utilizar o seu nome.",
+      "email": "E-mail",
+      "emailReadonlyHint": "Contacte um administrador para alterar o seu e-mail.",
+      "locale": "Idioma",
+      "timeZone": "Fuso horário",
+      "system": "Predefinição do sistema",
+      "dateFormat": "Formato de data",
+      "numberFormatLocale": "Formato de números"
+    },
+    "locales": {
+      "en": "Inglês",
+      "fr": "Francês",
+      "es": "Espanhol",
+      "uk": "Ucraniano",
+      "pt": "Português"
+    },
+    "dateFormats": {
+      "system": "Predefinição do sistema",
+      "iso8601": "ISO 8601 (2026-06-13)",
+      "us": "EUA (06/13/2026)",
+      "eu": "Europeu (13/06/2026)",
+      "long": "Longo (13 de junho de 2026)"
+    },
+    "status": {
+      "active": "Ativo",
+      "pending_approval": "A aguardar aprovação",
+      "blocked": "Bloqueado",
+      "suspended": "Suspenso",
+      "deactivated": "Desativado"
+    },
+    "overview": {
+      "identity": "Identidade",
+      "status": "Estado",
+      "memberSince": "Membro desde",
+      "memberships": "Organizações",
+      "noMemberships": "Não é membro de nenhuma organização.",
+      "roles": "Funções",
+      "noRoles": "Nenhuma função atribuída.",
+      "permissions": "Permissões",
+      "permissionsDescription": "Todas as ações que tem atualmente permissão para realizar, concedidas pelas suas funções na organização ativa.",
+      "noPermissions": "Não tem permissões na organização ativa."
+    },
+    "security": {
+      "passwordTitle": "Palavra-passe",
+      "sessionsTitle": "Sessões ativas",
+      "currentPassword": "Palavra-passe atual",
+      "newPassword": "Nova palavra-passe",
+      "confirmPassword": "Confirmar nova palavra-passe",
+      "changePassword": "Alterar palavra-passe",
+      "passwordChanged": "A sua palavra-passe foi alterada. As outras sessões foram terminadas.",
+      "sessionsDescription": "Dispositivos com sessão atualmente iniciada na sua conta.",
+      "revokeOthers": "Terminar outras sessões",
+      "noSessions": "Sem sessões ativas.",
+      "expiresAt": "Expira {value}",
+      "ipAddress": "IP",
+      "userAgent": "Dispositivo",
+      "revoke": "Revogar"
+    },
+    "errors": {
+      "nameRequired": "O nome é obrigatório.",
+      "invalid": "Verifique o formulário e tente novamente.",
+      "saveFailed": "A gravação das suas alterações falhou. Tente novamente.",
+      "passwordTooShort": "A palavra-passe tem de ter, pelo menos, 8 caracteres.",
+      "passwordMismatch": "As palavras-passe não coincidem.",
+      "passwordChangeFailed": "Não foi possível alterar a sua palavra-passe. Verifique a sua palavra-passe atual.",
+      "sessionsLoadFailed": "Não foi possível carregar as suas sessões.",
+      "sessionsRevokeFailed": "Não foi possível revogar a sessão."
+    },
+    "apiKeys": {
+      "listTitle": "As suas chaves de API",
+      "empty": "Ainda não tem chaves de API.",
+      "loadError": "Não foi possível carregar as suas chaves de API.",
+      "never": "Nunca",
+      "noExpiry": "Sem expiração",
+      "noScopes": "Sem âmbitos",
+      "status": {
+        "active": "Ativa",
+        "revoked": "Revogada"
+      },
+      "created": "Criada {value}",
+      "lastUsed": "Última utilização {value}",
+      "expires": "Expira {value}",
+      "actions": {
+        "rotate": "Rodar",
+        "revoke": "Revogar"
+      },
+      "rotateError": "Não foi possível rodar a chave.",
+      "revokeError": "Não foi possível revogar a chave.",
+      "revokeConfirm": {
+        "title": "Revogar chave de API",
+        "description": "Isto invalida a chave permanentemente. Qualquer cliente que a utilize deixa de funcionar de imediato. Esta ação não pode ser anulada."
+      },
+      "rotateConfirm": {
+        "title": "Rodar chave de API",
+        "description": "É emitido um novo segredo com os mesmos âmbitos e expiração, e esta chave é revogada. Atualize o seu cliente com o novo segredo — o anterior deixa de funcionar de imediato."
+      },
+      "reveal": {
+        "title": "Copie a sua chave agora",
+        "description": "Esta é a única vez que o segredo completo é mostrado. Guarde-o num local seguro — não pode ser obtido novamente. Se o perder, rode a chave.",
+        "copy": "Copiar",
+        "copied": "Copiado",
+        "done": "Concluído"
+      },
+      "create": {
+        "title": "Criar uma nova chave",
+        "name": "Nome",
+        "namePlaceholder": "p. ex. CLI do meu portátil",
+        "expiresInDays": "Expira em (dias)",
+        "expiresInDaysPlaceholder": "Deixe vazio para não expirar",
+        "expiresInDaysHelp": "Opcional. Após este número de dias, a chave deixa de funcionar.",
+        "scopes": "Âmbitos",
+        "scopesHelp": "Selecione o que esta chave pode fazer. Uma chave nunca pode exceder as suas próprias permissões.",
+        "noScopesAvailable": "Não há âmbitos disponíveis para conceder.",
+        "submit": "Criar chave",
+        "nameRequired": "Introduza um nome.",
+        "error": "Não foi possível criar a chave.",
+        "invalidScope": "Não pode conceder estes âmbitos: {scopes}"
+      }
+    }
+  },
+  "docs": {
+    "appTitle": "Documentação",
+    "index": {
+      "title": "Documentação",
+      "description": "Explore os guias e o material de referência da plataforma."
+    },
+    "emptyCatalog": "Ainda não há documentos disponíveis para si.",
+    "onThisPage": "Nesta página",
+    "lastUpdated": "Última atualização {date}",
+    "breadcrumbHome": "Documentação",
+    "readDocument": "Ler",
+    "diagram": {
+      "expand": "Expandir o diagrama para vista completa",
+      "title": "Diagrama — vista completa",
+      "zoomIn": "Aproximar",
+      "zoomOut": "Afastar",
+      "reset": "Repor zoom"
+    }
+  },
+  "errorBoundary": {
+    "title": "Algo correu mal",
+    "description": "Ocorreu um erro inesperado ao apresentar esta página. Pode tentar novamente ou recarregar se o problema persistir.",
+    "retry": "Tentar novamente",
+    "supportId": "ID de suporte"
+  },
+  "notFound": {
+    "title": "Página não encontrada",
+    "description": "A página que procura não existe ou foi movida.",
+    "home": "Voltar ao início"
+  },
+  "validation": {
+    "required": "Este campo é obrigatório.",
+    "email": "Introduza um endereço de e-mail válido.",
+    "passwordMin": "A palavra-passe tem de ter, pelo menos, 8 caracteres.",
+    "passwordMax": "A palavra-passe não pode ter mais de 128 caracteres.",
+    "max": "Este valor é demasiado longo.",
+    "requiredLegend": "indica um campo obrigatório",
+    "key": "Utilize apenas letras, números e os caracteres . _ - :",
+    "slug": "Utilize letras minúsculas, números e hífenes.",
+    "uuid": "Identificador inválido.",
+    "appId": "Utilize letras minúsculas, números e os caracteres . _ -",
+    "subdomain": "Utilize letras minúsculas, números e hífenes.",
+    "ssoAudience": "Utilize letras minúsculas, números e os caracteres . _ : -",
+    "number": "Introduza um número válido.",
+    "passwordsMismatch": "As palavras-passe não coincidem.",
+    "locale": "Escolha um idioma suportado.",
+    "dateFormat": "Escolha um formato de data válido."
+  },
+  "sso": {
+    "confirm": {
+      "title": "Confirmar início de sessão",
+      "body": "Está prestes a iniciar sessão como {email}.",
+      "continue": "Continuar",
+      "cancel": "Cancelar",
+      "invalidTitle": "Ligação de início de sessão inválida",
+      "invalidBody": "Esta ligação de início de sessão é inválida ou expirou. Solicite uma nova a partir da aplicação de onde veio.",
+      "backToSignIn": "Voltar ao início de sessão"
+    }
+  }
+}

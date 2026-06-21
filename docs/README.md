@@ -85,7 +85,7 @@ flowchart LR
 | Framework | Next.js 16 (App Router, React 19, Server Components by default) |
 | Authentication | Better Auth (email/password + Google/Microsoft/GitHub OAuth) |
 | Database | PostgreSQL 17 + Kysely (typed query builder) + `pg` pool |
-| Internationalization | next-intl — `en`, `fr`, `es`, `uk` |
+| Internationalization | next-intl — `en`, `fr`, `es`, `uk`, `pt` |
 | UI | Tailwind CSS 4 + shadcn/ui (Radix UI, cmdk) |
 | Validation | Zod 4 |
 | Observability | Sentry (`@sentry/nextjs`, opt-in) + Prometheus metrics (`prom-client`, opt-in) |

@@ -34,8 +34,9 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
 
 /**
  * Built-in defaults. Keep in sync with the seeded templates in the initial
- * schema `0001-initial-schema.sql` (the `en` rows) and
- * `0006-email-template-locales.sql` (the fr/es/uk rows).
+ * schema `0001-initial-schema.sql` (the `en` rows),
+ * `0006-email-template-locales.sql` (the fr/es/uk rows), and
+ * `0007-email-template-locales-pt.sql` (the pt rows).
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -94,6 +95,19 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
           "{{resetUrl}}\n\n" +
           "Якщо ви не надсилали цей запит, можете проігнорувати цей лист.",
       },
+      pt: {
+        subject: "Redefina a sua palavra-passe",
+        bodyHtml:
+          "<p>Olá {{name}},</p>" +
+          "<p>Recebemos um pedido para redefinir a sua palavra-passe. Clique na ligação abaixo para escolher uma nova. Esta ligação expira em breve.</p>" +
+          '<p><a href="{{resetUrl}}">Redefinir a sua palavra-passe</a></p>' +
+          "<p>Se não foi você que fez este pedido, pode ignorar este e-mail com segurança.</p>",
+        bodyText:
+          "Olá {{name}},\n\n" +
+          "Recebemos um pedido para redefinir a sua palavra-passe. Abra a ligação abaixo para escolher uma nova. Esta ligação expira em breve.\n\n" +
+          "{{resetUrl}}\n\n" +
+          "Se não foi você que fez este pedido, pode ignorar este e-mail com segurança.",
+      },
     },
   },
   {
@@ -134,6 +148,15 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
         bodyText:
           "Це тестовий лист, надісланий з робочого простору Email адміністратора {{appName}} користувачем {{sentBy}}.\n\n" +
           "Якщо ви це читаєте, надсилання вихідних листів працює.",
+      },
+      pt: {
+        subject: "E-mail de teste de {{appName}}",
+        bodyHtml:
+          "<p>Este é um e-mail de teste enviado a partir do espaço de Email do administrador de {{appName}} por {{sentBy}}.</p>" +
+          "<p>Se consegue ler isto, o envio de e-mails está a funcionar.</p>",
+        bodyText:
+          "Este é um e-mail de teste enviado a partir do espaço de Email do administrador de {{appName}} por {{sentBy}}.\n\n" +
+          "Se consegue ler isto, o envio de e-mails está a funcionar.",
       },
     },
   },

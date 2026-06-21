@@ -212,8 +212,8 @@ are dropped (no execution). Curated MDX-component rendering is a Phase-2 item.
 - **Navigation**: add a "Documentation" entry to `DEFAULT_SHELL_MENU` in
   `src/lib/navigation.server.ts` (icon `book-open`, `requiredPermissions:
   ["shell.view"]`); register the icon in `menu-icons.ts`; add the `shell`
-  message key in all four locales.
-- **i18n**: new `"docs"` namespace in `en/fr/es/uk.json` for chrome (titles,
+  message key in all five locales.
+- **i18n**: new `"docs"` namespace in `en/fr/es/uk/pt.json` for chrome (titles,
   empty/error states, "last updated", TOC heading). Document **body** content is
   not translated in Phase 1 (Phase-2 item).
 

@@ -3,6 +3,7 @@ import en from "@/messages/en.json";
 import fr from "@/messages/fr.json";
 import es from "@/messages/es.json";
 import uk from "@/messages/uk.json";
+import pt from "@/messages/pt.json";
 
 /**
  * Locale message-parity guard (a11y-6).
@@ -39,6 +40,7 @@ const LOCALES: Array<[string, unknown]> = [
   ["fr", fr],
   ["es", es],
   ["uk", uk],
+  ["pt", pt],
 ];
 const ITEM_GROUPS = ["stats", "features", "why", "stack"] as const;
 

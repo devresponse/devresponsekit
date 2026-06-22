@@ -1,3 +1,5 @@
+> **⚠️ HISTORICAL — original pre-build specification (V9).** Retained for reference and for the `specs.md §N` citations in source comments. NOT maintained; it describes the greenfield build plan and may not reflect the shipped 1.0 system. For current documentation see [docs/](docs/README.md) and [CHANGELOG.md](CHANGELOG.md).
+
 # Enterprise Next.js 16 Holy Grail Application Shell — Development Specification V9
 
 **Document status:** final standalone implementation specification.  

@@ -19,7 +19,7 @@ flowchart TB
 
     subgraph Next["Next.js 16 application"]
         direction TB
-        PROXY["Edge proxy — src/proxy.ts<br/>cookie sniff + locale routing (no DB)"]
+        PROXY["Edge proxy — src/proxy.ts<br/>cookie sniff + locale routing + CSP nonce (no DB)"]
         subgraph AppRouter["App Router"]
             LAYOUTS["Layouts & Server Components<br/>(secure) layout = authz boundary"]
             ADMINUI["Administrator console<br/>(secure)/app/administrator/**"]
@@ -55,7 +55,7 @@ flowchart TB
 | --- | --- | --- |
 | **Routing & pages** | `src/app/[locale]/**` | Localized UI: `(public)`, `(auth)`, `(secure)` route groups + the administrator console. Plus `src/app/(root)/**` for locale-independent entry. |
 | **HTTP API** | `src/app/api/**` | Route handlers: Better Auth catch-all, account self-service, navigation, SSO handoff, docs assets, and the versioned `/api/v1` machine API. |
-| **Edge proxy** | `src/proxy.ts` | Cheap pre-render redirect + locale routing. **Not** the authorization boundary. |
+| **Edge proxy** | `src/proxy.ts` | Cheap pre-render redirect + locale routing + per-request CSP-nonce minting (threaded into request/response headers). **Not** the authorization boundary; reads no database. |
 | **Authentication** | `src/lib/auth.ts` | Better Auth configuration (providers, plugins, session hooks). |
 | **Access context** | `src/lib/auth-status.ts` | `getUserAccessContext()` resolves a user's effective permissions; `decideSecureAccess()` is the pure allow/deny decision. |
 | **Authorization primitives** | `src/lib/admin/access-scope.server.ts` | `isSuperadmin`, `resolveOrgScope`, `canAccessOrg`, `canAccessUser` — the single source of truth for tenant boundaries. |
@@ -229,7 +229,7 @@ A credential's authority is the **intersection of its scopes and its owner's per
 
 ## 5. Data model
 
-PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The full schema is a single idempotent file, `src/db/migrations/0001-initial-schema.sql`; TypeScript types live in `src/db/schema/app-schema.ts`. See [DevOps Setup → Database](./devops-setup.md#3-database).
+PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The schema is provisioned by a **frozen baseline plus append-only forward migrations**: `src/db/migrations/0001-initial-schema.sql` is the consolidated, idempotent baseline (FROZEN — `CREATE … IF NOT EXISTS`, so re-running it never alters a provisioned database), and every change after it lands as a new numbered `NNNN-*.sql` file (`0002-…` onward). A lightweight runner (`src/db/migrations/run-migrations.ts`) records applied filenames in an `app_schema_migrations` ledger and applies each not-yet-recorded file, in lexical order, inside its own transaction — so a fresh database runs `0001` then the forward files in order, and a provisioned one applies only the new ones. (Better Auth's own `better-auth*` files are owned by its tooling and skipped by this runner.) TypeScript types live in `src/db/schema/app-schema.ts`. See [DevOps Setup → Database](./devops-setup.md#3-database).
 
 **Schema:** every table — the `app_*` tables **and** the Better Auth vendor tables — is deployed into one schema, **`auth`** by default, configurable via `DB_SCHEMA` (`src/db/schema-config.ts`). The schema is applied at the **connection level** via `search_path=<DB_SCHEMA>,public`, so all (unqualified) Kysely queries resolve to it with no per-query qualification; the shared extensions (`pgcrypto`, `pg_trgm`) stay in `public`. Setting a different `DB_SCHEMA` per deployment isolates applications by schema with no code changes. See [Configuration → `DB_SCHEMA`](./configuration.md#database-postgresql).
 
@@ -282,7 +282,7 @@ The application tables link to Better Auth's `user` table logically via `app_use
 | **Request correlation** | `request-id.server.ts` + audit + Sentry | One `x-request-id` ties a response, its audit rows, and any error event together. |
 | **Uniform list envelope** | `list-query.server.ts` | Admin/v1 list endpoints share pagination, sorting, filtering, and response shape. |
 | **Guard-returns-response** | `requireAdminPermission`, `requireAccountUser` | Guards return either a typed grant or a ready-to-send `NextResponse`, keeping handlers linear. |
-| **Single idempotent schema** | `0001-initial-schema.sql` | No migration drift; re-running is safe. |
+| **Frozen baseline + forward migrations** | `0001-initial-schema.sql` + `0002…` via `run-migrations.ts` | Idempotent baseline is frozen and safe to re-run; later changes are append-only numbered files applied once each and tracked in the `app_schema_migrations` ledger. |
 
 ---
 

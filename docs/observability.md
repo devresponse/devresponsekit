@@ -12,12 +12,18 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | **Structured logs** | `src/lib/observability/logger.server.ts` | Pino, JSON to stdout. Ships regardless of whether Sentry is configured — your platform's log drain is the primary sink. |
 | **Server-error logging** | `logServerError(...)` + `onRequestError` (`src/instrumentation.ts`) | Every uncaught 5xx is logged with its `x-request-id`; also forwarded to Sentry when enabled. |
 | **Request-id correlation** | `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) | Accepts a valid inbound `x-request-id` (UUID) or mints one. Echoed on every admin (`adminErrorResponse`) and RFC 7807 (`problemResponse`) error response. |
-| **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. |
+| **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. Append-only; retention is an ops concern — see the note below. |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
 | **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` business counter. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
 | **Error monitoring (opt-in)** | `src/sentry.*.config.ts`, `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Events are scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process. |
 | **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the database is reachable, `503` otherwise. Wire both to your orchestrator probes (see [deployment.md](./deployment.md), §8). |
 | **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged (not swallowed) so a crashing worker is visible in the log stream. |
+
+> **Retention is an ops concern.** `app_audit_events` and `app_outbox` grow
+> without bound. Schedule **`pnpm db:prune`** (`scripts/prune-retention.ts`) to
+> apply the configured windows (`AUDIT_RETENTION_DAYS`, default 365;
+> `OUTBOX_RETENTION_DAYS`, default 90) and prune expired token revocations — see
+> [DevOps Setup → Scheduled maintenance jobs](./devops-setup.md#scheduled-maintenance-jobs).
 
 ## 2. Configuration
 

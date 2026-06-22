@@ -16,13 +16,12 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 
 | Variable | Required | Default (example) | Controls |
 | --- | --- | --- | --- |
-| `NODE_ENV` | yes | `development` | Standard Node environment; `production` for deploys. |
+| `NODE_ENV` | No (defaults to development) | `development` | Standard Node environment; `production` for deploys. |
 | `NEXT_PUBLIC_APP_NAME` | no | `DevResponse Enterprise` | Display name in the UI. |
 | `NEXT_PUBLIC_APP_URL` | yes | `http://localhost:3000` | Public origin; trusted origin, inlined at build. |
-| `NEXT_PUBLIC_PRIMARY_HOST` | no | `localhost` | Primary host label. |
 | `NEXT_PUBLIC_PRODUCTION_HOST` | no | `app.devresponse.com` | Production host; also seeds the SSO origin-suffix default. |
-| `NEXT_PUBLIC_DEFAULT_LOCALE` | no | `en` | Default UI language. |
-| `NEXT_PUBLIC_SUPPORTED_LOCALES` | no | `en,fr,es,uk,pt,zh,hi,ja` | Enabled languages. |
+| `NEXT_PUBLIC_DEFAULT_LOCALE` | no | `en` | **Informational only — NOT read at runtime.** The canonical default lives in `src/config/i18n-config.ts`; editing this does not change behavior. |
+| `NEXT_PUBLIC_SUPPORTED_LOCALES` | no | `en,fr,es,uk,pt,zh,hi,ja` | **Informational only — NOT read at runtime.** The canonical locale list lives in `src/config/i18n-config.ts`; editing this does not change behavior. |
 
 ### Authentication (Better Auth)
 
@@ -42,6 +41,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `PGPOOL_MAX` | no | Max pool connections (default 10). |
 | `PG_CONNECT_TIMEOUT_MS` | no | Connection acquisition timeout (default 5000). |
 | `PG_STATEMENT_TIMEOUT_MS` | no | Per-statement server-side ceiling (default 30000). |
+| `PG_IDLE_IN_TX_TIMEOUT_MS` | no | Idle-in-transaction server-side ceiling (default 30000). |
 
 > **Schema & connection poolers:** the connection sets `search_path` via the libpq `options` field. A **transaction-pooling** pooler (PgBouncer transaction mode, some Supabase tiers) can drop session-level `options`. If you use one, set the schema as a server-side role default instead — `ALTER ROLE <app_role> SET search_path = auth, public;` — and run migrations/seeds/reset against the **direct** (non-pooled) endpoint.
 
@@ -55,12 +55,14 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 
 ### Single Sign-On handoff
 
+> **Required at boot for every deployment.** Despite the "SSO" name, `src/lib/env.ts` validates `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, and `SSO_HANDOFF_JWT_SECRET` **unconditionally** (`.min(1)` / `.min(16)`). The app **fails fast at boot** if any is missing — even on a deployment that never uses SSO. Set all four everywhere (placeholder values are fine when SSO is unused).
+
 | Variable | Required | Controls |
 | --- | --- | --- |
-| `SSO_HANDOFF_ISSUER` | yes (SSO) | `iss` claim of handoff tokens. |
-| `SSO_HANDOFF_AUDIENCE_PREFIX` | yes (SSO) | Audience is built as `<prefix>:<applicationId>`. |
-| `SSO_HANDOFF_APPLICATION_ID` | per receiver | This deployment's application id, so the audience check can't be spoofed via the Host header. |
-| `SSO_HANDOFF_JWT_SECRET` | **yes (SSO)** | HS256 signing secret. **Must differ** from `BETTER_AUTH_SECRET`. |
+| `SSO_HANDOFF_ISSUER` | **yes (at boot)** | `iss` claim of handoff tokens. |
+| `SSO_HANDOFF_AUDIENCE_PREFIX` | **yes (at boot)** | Audience is built as `<prefix>:<applicationId>`. |
+| `SSO_HANDOFF_APPLICATION_ID` | **yes (at boot)** | This deployment's application id, so the audience check can't be spoofed via the Host header. |
+| `SSO_HANDOFF_JWT_SECRET` | **yes (at boot)** | HS256 signing secret (≥16 chars). **Must differ** from `BETTER_AUTH_SECRET`. |
 | `SSO_HANDOFF_TTL_SECONDS` | no | Token lifetime (default 60; clamped to a small max). |
 | `SSO_ALLOWED_ORIGIN_SUFFIXES` | no | Comma-separated allow-list of host suffixes a registered app origin may use. Unset → derived from `NEXT_PUBLIC_PRODUCTION_HOST`. |
 
@@ -93,6 +95,8 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `API_JWT_AUDIENCE` | Expected `aud` (e.g. `devresponse-api`). |
 | `API_JWT_PRIVATE_KEY` | Ed25519 private JWK as a JSON string. **Required** when JWT enabled. |
 | `API_JWT_KID` | Key id (defaults to the JWK thumbprint). |
+| `API_JWT_PREVIOUS_PRIVATE_KEY` | Verify-only previous signing key (the prior `API_JWT_PRIVATE_KEY`) kept during a rotation overlap — its public half stays in JWKS so tokens minted before the rotation keep verifying until they expire. Never used to mint; remove once that window drains. |
+| `API_JWT_PREVIOUS_KID` | The previous key's `kid` — only needed when the deployment pins a fixed `API_JWT_KID` (otherwise the thumbprint matches automatically). |
 | `API_JWT_ACCESS_TTL_SECONDS` | Token lifetime (default 900, ≤3600). |
 
 Generate an Ed25519 JWK:
@@ -122,6 +126,7 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 | `NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE`, `…_ERROR_SAMPLE_RATE` | Session-replay sampling. |
 | `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | **Build/CI only** — source-map upload. Never expose `SENTRY_AUTH_TOKEN` to the client. |
 | `METRICS_TOKEN` | **Presence enables** the Prometheus scrape endpoint `GET /api/metrics`. The route **fails closed** when unset (401, nothing exposed). Scrapers present it as `Authorization: Bearer …`; compared in constant time. See [observability.md](./observability.md#5-metrics). |
+| `LOG_LEVEL` | Structured-logger level: `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` \| `silent`. Defaults to `info` (and to `silent` under `NODE_ENV=test`). |
 
 ### Docs viewer & test escape hatch
 
@@ -129,6 +134,14 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 | --- | --- |
 | `DOCS_SOURCE`, `DOCS_ROOT`, `DOCS_ALLOW_MDX_EXECUTION`, `DOCS_INTERNAL_VISIBLE` | In-app docs viewer (all optional; defaults serve the repo `docs/` read-only). |
 | `AUTH_RATE_LIMIT_DISABLED` | **Test only** — disables Better Auth's built-in sign-in rate limiter. Never set in production. |
+
+### Operations & data retention
+
+| Variable | Default | Controls |
+| --- | --- | --- |
+| `SHUTDOWN_TIMEOUT_MS` | 10000 | Graceful-shutdown drain budget (ms). On `SIGTERM`/`SIGINT` the pg pool is drained within this window so in-flight queries finish cleanly; a stuck query can never hang shutdown past it. |
+| `AUDIT_RETENTION_DAYS` | 365 | Retention window for `app_audit_events`, applied by `pnpm db:prune`. A compliance record, so the window is long. Set to `0` to disable that table's time-based prune. |
+| `OUTBOX_RETENTION_DAYS` | 90 | Retention window for terminal `app_outbox` rows (`sent`/`failed`/`logged`), applied by `pnpm db:prune`. `pending` rows (in-flight retries) are never pruned. Set to `0` to disable. |
 
 ## 3. Config files
 

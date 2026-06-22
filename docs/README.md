@@ -26,8 +26,11 @@ Onboard, understand the architecture, and start building.
 | [Developer Onboarding](./developer-onboarding.md) | Tooling, install, run, test, project structure, conventions, "how to add a feature" |
 | [API Reference](./api.md) | HTTP API surface, auth requirements, request/response examples, error model |
 | [API Clients & SDKs](./api-clients.md) | Authenticate, generate (or use) a typed client for the v1 API and the committed admin SDK |
-| [Form Validation Plan](./form-validation.md) | System-wide plan to standardize form validation on React Hook Form + Zod: required-field asterisks, error-border highlighting, shared schemas, accessibility |
+| [Admin Manager](./admin-manager.md) | Design spec for the administrator console: navigation, screens, permission gating, and the shared data-grid affordances |
+| [API Keys & Tokens Design](./design-api-keys-and-tokens.md) | Design spec for the machine-API credentials — scoped API keys and short-lived bearer tokens, issuance, rotation, and revocation |
+| [Form Validation](./form-validation.md) | Implemented form-validation reference: shared client/server Zod schemas → `useZodForm` → `Form*` primitives, required-field markers, error borders, localized messages, accessibility |
 | [Testing](./testing.md) | Test strategy, frameworks, how to run each suite, coverage, manual QA checklist |
+| [Security Test Coverage Plan](./security-test-coverage-plan.md) | The security-focused test inventory: what each suite asserts (authz, tenancy isolation, schema hardening) and where the gaps are |
 
 ### 🛠️ DevOps & Infrastructure
 Stand the system up from scratch and operate it.
@@ -37,6 +40,9 @@ Stand the system up from scratch and operate it.
 | [Configuration](./configuration.md) | Every environment variable, config files, secrets, local vs production |
 | [DevOps Setup](./devops-setup.md) | From-scratch infrastructure, provisioning, CI/CD, monitoring, backups, security, readiness checklist |
 | [Deployment](./deployment.md) | Build, artifacts, hosting model, container notes, release & post-deploy verification |
+| [Docker](./docker.md) | The container image and Compose setup — build, local stack, environment, healthcheck, and production notes |
+| [Observability](./observability.md) | Structured logging, Sentry error/performance monitoring, and the opt-in Prometheus metrics endpoint |
+| [Incident Response](./incident-response.md) | Operational runbook for diagnosing and responding to production incidents — triage, mitigation, and post-incident steps |
 | [Troubleshooting](./troubleshooting.md) | Common setup, build, runtime, and deployment failures and fixes |
 
 ---

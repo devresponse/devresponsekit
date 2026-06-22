@@ -56,7 +56,7 @@ A PR must pass all of these; run them locally before pushing:
 | Dependency audit (hard gate) | `pnpm audit --audit-level high` |
 
 CI additionally runs **CodeQL** and **gitleaks** secret scanning. `test:all`
-runs typecheck + lint + format check + coverage + e2e locally.
+runs typecheck + lint + format check + coverage + e2e + a11y locally.
 
 ## Testing expectations
 

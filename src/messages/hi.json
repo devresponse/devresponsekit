@@ -1084,7 +1084,8 @@
     "unauthenticated": "साइन इन आवश्यक है।",
     "unknown_resource": "अज्ञात संसाधन।",
     "untrusted_origin": "अनुरोध का मूल विश्वसनीय नहीं है।",
-    "user_not_found": "उपयोगकर्ता नहीं मिला।"
+    "user_not_found": "उपयोगकर्ता नहीं मिला।",
+    "not_impersonating": "रोकने के लिए कोई सक्रिय प्रतिरूपण सत्र नहीं है।"
   },
   "account": {
     "appTitle": "खाता",

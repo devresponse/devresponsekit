@@ -1084,7 +1084,8 @@
     "unauthenticated": "サインインが必要です。",
     "unknown_resource": "不明なリソースです。",
     "untrusted_origin": "リクエストのオリジンは信頼されていません。",
-    "user_not_found": "ユーザーが見つかりません。"
+    "user_not_found": "ユーザーが見つかりません。",
+    "not_impersonating": "終了できるアクティブな代理ログインセッションがありません。"
   },
   "account": {
     "appTitle": "アカウント",

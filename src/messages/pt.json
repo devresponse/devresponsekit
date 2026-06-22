@@ -1084,7 +1084,8 @@
     "unauthenticated": "É necessário iniciar sessão.",
     "unknown_resource": "Recurso desconhecido.",
     "untrusted_origin": "A origem do pedido não é fidedigna.",
-    "user_not_found": "Utilizador não encontrado."
+    "user_not_found": "Utilizador não encontrado.",
+    "not_impersonating": "Nenhuma sessão de personificação ativa para parar."
   },
   "account": {
     "appTitle": "Conta",

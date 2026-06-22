@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { isSupportedLocale } from "@/config/i18n-config";
 
 /**
  * Client half of {@link ImpersonationBanner} — the "Stop impersonating"
@@ -49,7 +50,11 @@ export function StopImpersonationButton({
       // strand the admin in the impersonated view. Surface the error and
       // let them retry instead.
       if (res.ok) {
-        window.location.assign("/");
+        // Reload into the secure app (not the public landing) so the restored
+        // admin lands back inside the shell. Locale = first path segment.
+        const seg = window.location.pathname.split("/")[1] ?? "";
+        const locale = isSupportedLocale(seg) ? seg : "en";
+        window.location.assign(`/${locale}/app/dashboard`);
         return;
       }
       setFailed(true);

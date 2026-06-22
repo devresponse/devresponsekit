@@ -26,6 +26,11 @@ const authUnban = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
+  // Lightweight stand-in for the real helper (which lives in the heavy
+  // auth-guard module): reads `session.session.impersonatedBy`.
+  getImpersonatorId: (
+    s: { session?: { impersonatedBy?: string | null; impersonated_by?: string | null } } | null,
+  ) => s?.session?.impersonatedBy ?? s?.session?.impersonated_by ?? null,
 }));
 vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
@@ -277,23 +282,48 @@ describe("DELETE /api/administrator/users/[id]/impersonate", () => {
   const importRoute = () => import("@/app/api/administrator/users/[id]/impersonate/route");
   const url = `http://test.local/api/administrator/users/${TARGET_ID}/impersonate`;
 
-  it("stops impersonation and audits success", async () => {
-    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
-    accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+  // Regression: while impersonating, the live session IS the target — usually
+  // a plain member with NO admin permission. Stop must NOT gate on the
+  // impersonated identity's permissions (that 403'd the admin and stranded
+  // them in the impersonated view). Authority comes from the session carrying
+  // `impersonatedBy`, and the action is audited against the ORIGINAL admin.
+  it("stops impersonation for a non-admin impersonated session, audited against the original actor", async () => {
+    sessionGetter.mockResolvedValue({
+      user: { id: "ba-target" }, // the impersonated member — no admin perms
+      session: { impersonatedBy: ACTOR_ID }, // stamped by Better Auth at start
+    });
     dbMock.mockResolvedValue(targetRow);
     authStopImpersonate.mockResolvedValue({ headers: new Headers() });
     const { DELETE } = await importRoute();
-    const res = await DELETE(makeRequest(url, { method: "DELETE" }), {
-      params: Promise.resolve({ id: TARGET_ID }),
-    });
+    const res = await DELETE(makeRequest(url, { method: "DELETE" }));
     expect(res.status).toBe(200);
     expect(authStopImpersonate).toHaveBeenCalled();
+    // Stop never consults the impersonated user's permissions.
+    expect(accessGetter).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.impersonation_stopped",
         outcome: "success",
+        actorBetterAuthUserId: ACTOR_ID,
       }),
     );
+  });
+
+  it("returns 400 not_impersonating when the session is not an impersonation session", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } }); // no impersonatedBy
+    const { DELETE } = await importRoute();
+    const res = await DELETE(makeRequest(url, { method: "DELETE" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("not_impersonating");
+    expect(authStopImpersonate).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when there is no session", async () => {
+    sessionGetter.mockResolvedValue(null);
+    const { DELETE } = await importRoute();
+    const res = await DELETE(makeRequest(url, { method: "DELETE" }));
+    expect(res.status).toBe(401);
+    expect(authStopImpersonate).not.toHaveBeenCalled();
   });
 });
 

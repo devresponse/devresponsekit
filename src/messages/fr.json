@@ -1084,7 +1084,8 @@
     "unauthenticated": "Connexion requise.",
     "unknown_resource": "Ressource inconnue.",
     "untrusted_origin": "L’origine de la requête n’est pas approuvée.",
-    "user_not_found": "Utilisateur introuvable."
+    "user_not_found": "Utilisateur introuvable.",
+    "not_impersonating": "Aucune session d’usurpation active à arrêter."
   },
   "account": {
     "appTitle": "Compte",

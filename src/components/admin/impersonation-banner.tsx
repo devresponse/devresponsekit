@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
-import { getCurrentSession } from "@/lib/auth-guard";
+import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { StopImpersonationButton } from "./impersonation-banner-client";
 
 /**
@@ -22,14 +22,10 @@ export async function ImpersonationBanner() {
   const session = await getCurrentSession();
   if (!session) return null;
 
-  // Better Auth attaches `impersonatedBy` to the session row when an
-  // admin has started impersonation. Older / different plugin versions
-  // may camelCase or snake_case the field — accept both shapes.
-  const sess = (session as unknown as { session?: Record<string, unknown> }).session;
-  const impersonatedBy =
-    (sess?.impersonatedBy as string | null | undefined) ??
-    (sess?.impersonated_by as string | null | undefined) ??
-    null;
+  // Better Auth attaches `impersonatedBy` to the session row when an admin
+  // has started impersonation; `getImpersonatorId` accepts the camel/snake
+  // field shapes different plugin versions emit (shared with the stop route).
+  const impersonatedBy = getImpersonatorId(session);
   if (!impersonatedBy) return null;
 
   const targetBetterAuthId = (session as unknown as { user: { id: string } }).user.id;

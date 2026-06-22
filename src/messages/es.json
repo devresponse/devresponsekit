@@ -1084,7 +1084,8 @@
     "unauthenticated": "Se requiere inicio de sesión.",
     "unknown_resource": "Recurso desconocido.",
     "untrusted_origin": "El origen no es de confianza.",
-    "user_not_found": "Usuario no encontrado."
+    "user_not_found": "Usuario no encontrado.",
+    "not_impersonating": "No hay ninguna sesión de suplantación activa que detener."
   },
   "account": {
     "appTitle": "Cuenta",

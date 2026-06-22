@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { db } from "@/db/database";
+import { auditEvent } from "@/lib/audit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -8,7 +10,10 @@ import {
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
+import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getUserAccessContext } from "@/lib/auth-status";
+import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 
@@ -113,47 +118,98 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 /**
  * DELETE /api/administrator/users/[id]/impersonate
  *
- * Ends the active impersonation session and restores the original
- * actor's cookies. The `[id]` is accepted for symmetry with the start
- * endpoint and used as the audit target; Better Auth itself derives
- * the impersonated user from the active cookie.
+ * Ends the active impersonation session and restores the original actor's
+ * cookies.
+ *
+ * Authorization is DELIBERATELY not `requireAdminPermission(...)`: while
+ * impersonating, the live session IS the target user — usually a plain member
+ * with NO admin permissions. Gating "stop" on the impersonated identity's
+ * permissions would 403 the admin and strand them in the impersonated view
+ * with no way back (the bug this fixes). Instead the authority to stop derives
+ * from the session BEING an impersonation session: Better Auth set
+ * `impersonatedBy` to the original admin at START — which DID pass the
+ * permission + privilege-escalation checks — and `stopImpersonating` only
+ * restores that admin's own session, so there is no escalation. (Stop must
+ * also keep working even if the admin's impersonate permission was revoked
+ * mid-session — they must always be able to return to their own account.)
+ *
+ * We still apply the Origin/CSRF guard + rate limit and audit with the ORIGINAL
+ * actor. The `[id]` segment is ignored — the impersonated identity (and the
+ * audit target) come from the live session, not the URL.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
-  const guard = await requireAdminPermission(request, "admin.users.impersonate");
-  if (isAdminPermissionDenial(guard)) return guard.response;
+export async function DELETE(request: NextRequest) {
+  const requestId = getOrCreateRequestId(request);
 
+  // §14 Origin/Referer defence on this cookie-authed mutation (the admin guard
+  // does this for permission-gated routes; replicated here since we bypass it).
+  const origin = checkTrustedOrigin(request);
+  if (!origin.ok) {
+    return adminErrorResponse("untrusted_origin", 403, request, { requestId });
+  }
+
+  const session = await getCurrentSession();
+  if (!session) {
+    return adminErrorResponse("unauthenticated", 401, request, { requestId });
+  }
+  const impersonatorId = getImpersonatorId(session);
+  if (!impersonatorId) {
+    // A real session, but not an impersonation one — nothing to stop.
+    return adminErrorResponse("not_impersonating", 400, request, { requestId });
+  }
+
+  // Rate-limit keyed on the original actor (the admin who started it).
   const limited = enforceRateLimit(
     "admin.users.impersonate",
-    guard.betterAuthUserId,
+    impersonatorId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
     request,
-    guard.requestId,
+    requestId,
   );
   if (limited) return limited;
 
-  const { id } = await ctx.params;
-  const target = await resolveTargetUser(id, guard.access);
-  if (isResolvedUserResponse(target)) return target;
+  // Best-effort: resolve the impersonated user's app row for audit attribution.
+  const impersonatedBetterAuthId = (session as unknown as { user: { id: string } }).user.id;
+  const targetRow = await db
+    .selectFrom("app_users")
+    .select(["id", "primary_email"])
+    .where("better_auth_user_id", "=", impersonatedBetterAuthId)
+    .executeTakeFirst();
 
+  // `auditEvent` directly (not `auditUserAction`) because the impersonated
+  // user's app row is best-effort here — stop must succeed even if it's
+  // missing, so `appUserId` is nullable; the original actor is the audited one.
   try {
     await stopBetterAuthImpersonating(request);
   } catch (err) {
-    await auditUserAction("admin.user.impersonation_stop_failed", "failure", {
-      request,
-      actorBetterAuthUserId: guard.betterAuthUserId,
-      appUserId: target.appUserId,
-      email: target.primaryEmail,
+    await auditEvent({
+      eventType: "admin.user.impersonation_stop_failed",
+      outcome: "failure",
+      actorBetterAuthUserId: impersonatorId,
+      appUserId: targetRow?.id ?? null,
+      email: targetRow?.primary_email ?? null,
       reason: "auth_stop_impersonate_failed",
-      metadata: { message: err instanceof Error ? err.message : "unknown" },
+      request,
+      requestId,
+      metadata: {
+        impersonatedBetterAuthUserId: impersonatedBetterAuthId,
+        message: err instanceof Error ? err.message : "unknown",
+      },
     });
-    return adminErrorResponse("auth_stop_impersonate_failed", 502, request, { cause: err });
+    return adminErrorResponse("auth_stop_impersonate_failed", 502, request, {
+      cause: err,
+      requestId,
+    });
   }
 
-  await auditUserAction("admin.user.impersonation_stopped", "success", {
+  await auditEvent({
+    eventType: "admin.user.impersonation_stopped",
+    outcome: "success",
+    actorBetterAuthUserId: impersonatorId,
+    appUserId: targetRow?.id ?? null,
+    email: targetRow?.primary_email ?? null,
     request,
-    actorBetterAuthUserId: guard.betterAuthUserId,
-    appUserId: target.appUserId,
-    email: target.primaryEmail,
+    requestId,
+    metadata: { impersonatedBetterAuthUserId: impersonatedBetterAuthId },
   });
 
   // As with the start endpoint, the restored actor cookies are delivered by

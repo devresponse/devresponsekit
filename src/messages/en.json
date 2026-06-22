@@ -1084,7 +1084,8 @@
     "unauthenticated": "Sign-in is required.",
     "unknown_resource": "Unknown resource.",
     "untrusted_origin": "The request origin is not trusted.",
-    "user_not_found": "User not found."
+    "user_not_found": "User not found.",
+    "not_impersonating": "No active impersonation session to stop."
   },
   "account": {
     "appTitle": "Account",

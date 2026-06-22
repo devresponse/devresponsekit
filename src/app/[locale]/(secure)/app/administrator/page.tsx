@@ -204,7 +204,8 @@ interface InsightChart {
  * descriptors. Only the series the caller is allowed to see are present on
  * `dashboardMetrics`, so this never re-decides visibility — it just shapes
  * what survived scoping. SUPERADMIN sees most-active-orgs (cross-org) plus
- * system registrations/logins; an org admin sees only their org's series.
+ * system registrations/logins and total audit-event volume; an org admin sees
+ * only their org's series (and never the audit-volume chart).
  */
 function buildInsights(
   dashboardMetrics: DashboardMetrics,
@@ -251,6 +252,19 @@ function buildInsights(
       categoryHeader: t("insights.table.day"),
       data: daySeries(dashboardMetrics.loginsDaily),
       fill: "var(--chart-3)",
+    });
+  }
+
+  // SUPERADMIN-only: present only when `selectDashboardMetrics` populated it
+  // (system scope), so this chart never renders for an org admin.
+  if (dashboardMetrics.auditEventsDaily) {
+    charts.push({
+      key: "auditEvents",
+      title: t("insights.auditEvents.title"),
+      subtitle: t("insights.auditEvents.system"),
+      categoryHeader: t("insights.table.day"),
+      data: daySeries(dashboardMetrics.auditEventsDaily),
+      fill: "var(--chart-4)",
     });
   }
 

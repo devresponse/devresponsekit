@@ -360,6 +360,10 @@
           "title": "Connexions quotidiennes",
           "system": "Connexions, toutes organisations confondues",
           "org": "Connexions dans votre organisation"
+        },
+        "auditEvents": {
+          "title": "Événements d'audit quotidiens",
+          "system": "Événements d'audit, toutes organisations confondues"
         }
       }
     },

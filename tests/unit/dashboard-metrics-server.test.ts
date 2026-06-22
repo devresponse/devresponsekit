@@ -18,6 +18,7 @@ import type * as MetricsServer from "@/lib/admin/metrics.server";
 const signupsPerOrg = vi.fn();
 const dailyRegistrations = vi.fn();
 const dailyLogins = vi.fn();
+const dailyAuditEvents = vi.fn();
 
 vi.mock("@/lib/admin/metrics.server", async (orig) => {
   const actual = await orig<typeof MetricsServer>();
@@ -26,6 +27,7 @@ vi.mock("@/lib/admin/metrics.server", async (orig) => {
     signupsPerOrg: (...a: unknown[]) => signupsPerOrg(...a),
     dailyRegistrations: (...a: unknown[]) => dailyRegistrations(...a),
     dailyLogins: (...a: unknown[]) => dailyLogins(...a),
+    dailyAuditEvents: (...a: unknown[]) => dailyAuditEvents(...a),
   };
 });
 
@@ -37,10 +39,11 @@ const access = (permissions: string[], organizationId: string | null) => ({
 });
 
 beforeEach(async () => {
-  for (const m of [signupsPerOrg, dailyRegistrations, dailyLogins]) m.mockReset();
+  for (const m of [signupsPerOrg, dailyRegistrations, dailyLogins, dailyAuditEvents]) m.mockReset();
   signupsPerOrg.mockResolvedValue([{ organizationId: "o-1", name: "Acme", count: 5 }]);
   dailyRegistrations.mockResolvedValue([{ date: "2026-06-17", count: 1 }]);
   dailyLogins.mockResolvedValue([{ date: "2026-06-17", count: 2 }]);
+  dailyAuditEvents.mockResolvedValue([{ date: "2026-06-17", count: 9 }]);
   ({ selectDashboardMetrics } = await import("@/lib/admin/dashboard-metrics.server"));
 });
 afterEach(() => vi.resetModules());
@@ -53,11 +56,13 @@ describe("selectDashboardMetrics", () => {
     expect(result.organizationId).toBeNull();
     expect(result.mostActiveOrgs).toHaveLength(1);
     expect(result.registrationsDaily).toBeDefined();
-    // The superuser marker implies every capability, so logins appear even
-    // without an explicit admin.audit.read entry in `permissions`.
+    // The superuser marker implies every capability, so logins + total audit
+    // volume appear even without an explicit admin.audit.read entry.
     expect(result.loginsDaily).toBeDefined();
+    expect(result.auditEventsDaily).toBeDefined();
     expect(dailyRegistrations).toHaveBeenCalledWith();
     expect(dailyLogins).toHaveBeenCalledWith();
+    expect(dailyAuditEvents).toHaveBeenCalledWith();
   });
 
   it("ORG ADMIN is confined to their org — never cross-org data", async () => {
@@ -71,6 +76,10 @@ describe("selectDashboardMetrics", () => {
     expect(dailyRegistrations).toHaveBeenCalledWith("org-7");
     expect(dailyLogins).toHaveBeenCalledWith("org-7");
     expect(signupsPerOrg).not.toHaveBeenCalled();
+    // Total audit volume is SUPERADMIN-only — an org admin never gets it, even
+    // holding admin.audit.read (which grants them the org-scoped logins series).
+    expect(result.auditEventsDaily).toBeUndefined();
+    expect(dailyAuditEvents).not.toHaveBeenCalled();
   });
 
   it("omits logins for an org admin without admin.audit.read", async () => {

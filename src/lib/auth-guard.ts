@@ -18,6 +18,29 @@ export async function getCurrentSession() {
 }
 
 /**
+ * The ORIGINAL actor's id when the current session is an impersonation
+ * session, else `null`. Better Auth's admin plugin stamps `impersonatedBy`
+ * onto the session row when an admin starts impersonating; different plugin
+ * versions camel- or snake-case the field, so accept both shapes.
+ *
+ * This is the authority to STOP impersonating: the impersonated identity is
+ * typically a plain member with no admin permissions, so the right to end the
+ * session derives from it being an impersonation session — not from the
+ * impersonated user's permissions.
+ */
+export function getImpersonatorId(
+  session: Awaited<ReturnType<typeof getCurrentSession>>,
+): string | null {
+  if (!session) return null;
+  const sess = (session as unknown as { session?: Record<string, unknown> }).session;
+  return (
+    (sess?.impersonatedBy as string | null | undefined) ??
+    (sess?.impersonated_by as string | null | undefined) ??
+    null
+  );
+}
+
+/**
  * Enforces secure access for localized browser routes.
  *
  * `proxy.ts` performs only an early cookie-based redirect; this helper is

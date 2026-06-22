@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useDialogs } from "@/components/ui/dialog-manager";
+import { isSupportedLocale } from "@/config/i18n-config";
 
 /**
  * Impersonate-user button for the user detail page (docs/admin-manager.md
@@ -29,10 +30,12 @@ import { useDialogs } from "@/components/ui/dialog-manager";
  *     before the destructive button enables; this is the
  *     "double-confirm" the spec requires for destructive admin
  *     actions. Without the tick the dialog cannot start the action.
- *   - On success we hard-reload to `/` so every cached client-side
- *     auth state (including the menu and any RSC caches) is rebuilt
- *     under the new impersonated identity. Soft routing via
- *     `router.push` would leave stale RSC fragments in place.
+ *   - On success we hard-reload into the secure app
+ *     (`/<locale>/app/dashboard`) so every cached client-side auth state
+ *     (the menu, any RSC caches) is rebuilt under the new impersonated
+ *     identity AND the admin lands inside the shell — where the "Stop
+ *     impersonating" banner is shown — rather than on the public landing
+ *     page. Soft routing via `router.push` would leave stale RSC fragments.
  *   - The endpoint is responsible for setting cookies; we never touch
  *     the cookie jar from JS.
  */
@@ -81,9 +84,13 @@ export function ImpersonateUserButton({
         });
         return;
       }
-      // Force a full reload so every layer (RSC, client auth state,
-      // navigation menu) re-renders under the impersonated identity.
-      window.location.assign("/");
+      // Land inside the secure shell as the impersonated user — where the
+      // "Stop impersonating" banner lives — not on the public landing page.
+      // A full reload rebuilds every layer (RSC, client auth state, nav menu)
+      // under the new identity. The active locale is the first path segment.
+      const seg = window.location.pathname.split("/")[1] ?? "";
+      const locale = isSupportedLocale(seg) ? seg : "en";
+      window.location.assign(`/${locale}/app/dashboard`);
     } finally {
       setBusy(false);
     }

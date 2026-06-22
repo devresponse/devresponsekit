@@ -1084,7 +1084,8 @@
     "unauthenticated": "需要登录。",
     "unknown_resource": "未知资源。",
     "untrusted_origin": "请求来源不受信任。",
-    "user_not_found": "未找到用户。"
+    "user_not_found": "未找到用户。",
+    "not_impersonating": "没有可停止的活动模拟登录会话。"
   },
   "account": {
     "appTitle": "账户",

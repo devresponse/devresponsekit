@@ -2,6 +2,7 @@ import "server-only";
 import { isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import {
   DEFAULT_WINDOW_DAYS,
+  dailyAuditEvents,
   dailyLogins,
   dailyRegistrations,
   signupsPerOrg,
@@ -16,13 +17,15 @@ import type { UserAccessContext } from "@/lib/auth-status";
  * and the server-rendered Administrator dashboard so the two surfaces can
  * never drift:
  *   - SUPERADMIN → most-active-orgs (cross-org) + system-wide daily
- *     registrations + system-wide daily logins.
+ *     registrations + system-wide daily logins + system-wide daily audit-event
+ *     volume (the last is SUPERADMIN-only — no org-scoped variant).
  *   - ORG ADMIN  → daily registrations + logins for THEIR active org only;
  *     never system-wide data and never another org's.
  *
  * Per-series visibility still follows the permission catalog: registrations
- * need `admin.users.read` and logins need `admin.audit.read` (a SUPERADMIN
- * holds every capability by the marker, so both are implied). The org
+ * need `admin.users.read`, and logins + total audit volume need
+ * `admin.audit.read` (a SUPERADMIN holds every capability by the marker, so all
+ * are implied). The org
  * boundary itself comes from {@link resolveOrgScope}, the single source of
  * truth for tenant scoping — a `null` scope yields an empty org payload, never
  * "all".
@@ -37,6 +40,12 @@ export interface DashboardMetrics {
   registrationsDaily?: DailyCount[];
   /** Daily logins (requires `admin.audit.read`). System or org per scope. */
   loginsDaily?: DailyCount[];
+  /**
+   * SUPERADMIN only: daily count of ALL audit events across every org
+   * (requires `admin.audit.read`, implied by the superuser marker). No
+   * org-scoped variant — org admins never receive this series.
+   */
+  auditEventsDaily?: DailyCount[];
 }
 
 type AccessLike = Pick<UserAccessContext, "permissions" | "organizationId">;
@@ -49,10 +58,14 @@ export async function selectDashboardMetrics(access: AccessLike): Promise<Dashbo
   const canSeeLogins = isSuperadmin(access) || access.permissions.includes("admin.audit.read");
 
   if (isSuperadmin(access)) {
-    const [mostActiveOrgs, registrationsDaily, loginsDaily] = await Promise.all([
+    const [mostActiveOrgs, registrationsDaily, loginsDaily, auditEventsDaily] = await Promise.all([
       signupsPerOrg(),
       canSeeRegistrations ? dailyRegistrations() : Promise.resolve(undefined),
       canSeeLogins ? dailyLogins() : Promise.resolve(undefined),
+      // Total audit volume is SUPERADMIN-only (no org-scoped variant) and is
+      // audit data, so it follows the same `admin.audit.read` capability as
+      // logins — implied here by the superuser marker.
+      canSeeLogins ? dailyAuditEvents() : Promise.resolve(undefined),
     ]);
     return {
       scope: "system",
@@ -61,6 +74,7 @@ export async function selectDashboardMetrics(access: AccessLike): Promise<Dashbo
       mostActiveOrgs,
       ...(registrationsDaily ? { registrationsDaily } : {}),
       ...(loginsDaily ? { loginsDaily } : {}),
+      ...(auditEventsDaily ? { auditEventsDaily } : {}),
     };
   }
 

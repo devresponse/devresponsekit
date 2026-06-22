@@ -360,6 +360,10 @@
           "title": "Inícios de sessão diários",
           "system": "Inícios de sessão em todas as organizações",
           "org": "Inícios de sessão na sua organização"
+        },
+        "auditEvents": {
+          "title": "Eventos de auditoria diários",
+          "system": "Eventos de auditoria em todas as organizações"
         }
       }
     },

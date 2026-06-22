@@ -139,6 +139,26 @@ export async function dailyLogins(
 }
 
 /**
+ * Daily count of ALL audit events across every organization over the window —
+ * total audit volume, NOT filtered by event type (unlike {@link dailyLogins}).
+ * System-wide only: there is no org-scoped variant, so the call site must keep
+ * this SUPERADMIN-only. Runs on the `app_audit_events (created_at)` index.
+ */
+export async function dailyAuditEvents(days: number = DEFAULT_WINDOW_DAYS): Promise<DailyCount[]> {
+  const since = windowStart(days);
+  const rows = await db
+    .selectFrom("app_audit_events")
+    .select([dayBucket("created_at").as("day"), COUNT.as("count")])
+    .where(sql<boolean>`created_at >= ${since}`)
+    .groupBy(dayBucket("created_at"))
+    .execute();
+  return fillSpine(
+    days,
+    rows.map((r) => ({ day: r.day, count: Number(r.count) })),
+  );
+}
+
+/**
  * Most active organizations by new signups (memberships created) in the
  * window — cross-org, so SUPERADMIN-only at the call site. Ties broken by
  * name for a stable order.

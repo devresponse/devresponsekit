@@ -103,6 +103,14 @@ describe("query functions (mapping + fill over a mocked db)", () => {
     expect((await m.dailyLogins("org-1")).find((d) => d.date === today)?.count).toBe(2);
   });
 
+  it("dailyAuditEvents returns a full system-wide 7-day series with numeric counts", async () => {
+    execute.mockResolvedValue([{ day: today, count: "8" }]); // pg may return count as string
+    const series = await m.dailyAuditEvents();
+    expect(series).toHaveLength(7);
+    expect(series.find((d) => d.date === today)?.count).toBe(8);
+    expect(series.every((d) => typeof d.count === "number")).toBe(true);
+  });
+
   it("signupsPerOrg maps rows to typed org counts", async () => {
     execute.mockResolvedValue([
       { organizationId: "o-1", name: "Acme", count: "9" },

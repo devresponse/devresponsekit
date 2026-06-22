@@ -15,6 +15,7 @@ const guardResult = vi.fn();
 const signupsPerOrg = vi.fn();
 const dailyRegistrations = vi.fn();
 const dailyLogins = vi.fn();
+const dailyAuditEvents = vi.fn();
 
 vi.mock("@/lib/admin/permissions.server", () => ({
   requireAdminPermission: async () => guardResult(),
@@ -27,6 +28,7 @@ vi.mock("@/lib/admin/metrics.server", async (orig) => {
     signupsPerOrg: (...a: unknown[]) => signupsPerOrg(...a),
     dailyRegistrations: (...a: unknown[]) => dailyRegistrations(...a),
     dailyLogins: (...a: unknown[]) => dailyLogins(...a),
+    dailyAuditEvents: (...a: unknown[]) => dailyAuditEvents(...a),
   };
 });
 
@@ -38,10 +40,12 @@ function access(permissions: string[], organizationId: string | null) {
 }
 
 beforeEach(async () => {
-  for (const m of [guardResult, signupsPerOrg, dailyRegistrations, dailyLogins]) m.mockReset();
+  for (const m of [guardResult, signupsPerOrg, dailyRegistrations, dailyLogins, dailyAuditEvents])
+    m.mockReset();
   signupsPerOrg.mockResolvedValue([{ organizationId: "o-1", name: "Acme", count: 5 }]);
   dailyRegistrations.mockResolvedValue([{ date: "2026-06-17", count: 1 }]);
   dailyLogins.mockResolvedValue([{ date: "2026-06-17", count: 2 }]);
+  dailyAuditEvents.mockResolvedValue([{ date: "2026-06-17", count: 9 }]);
   ({ GET } = await import("@/app/api/administrator/metrics/route"));
 });
 afterEach(() => vi.resetModules());
@@ -65,9 +69,11 @@ describe("GET /api/administrator/metrics", () => {
     expect(body.mostActiveOrgs).toHaveLength(1);
     expect(body.registrationsDaily).toBeDefined();
     expect(body.loginsDaily).toBeDefined();
+    expect(body.auditEventsDaily).toBeDefined();
     // System-wide → called with NO org id.
     expect(dailyRegistrations).toHaveBeenCalledWith();
     expect(dailyLogins).toHaveBeenCalledWith();
+    expect(dailyAuditEvents).toHaveBeenCalledWith();
   });
 
   it("ORG ADMIN gets only their org's series — never system data or most-active-orgs", async () => {
@@ -83,6 +89,9 @@ describe("GET /api/administrator/metrics", () => {
     expect(dailyRegistrations).toHaveBeenCalledWith("org-7");
     expect(dailyLogins).toHaveBeenCalledWith("org-7");
     expect(signupsPerOrg).not.toHaveBeenCalled();
+    // Total audit volume is SUPERADMIN-only — never served to an org admin.
+    expect(body.auditEventsDaily).toBeUndefined();
+    expect(dailyAuditEvents).not.toHaveBeenCalled();
   });
 
   it("omits logins for a caller without admin.audit.read", async () => {

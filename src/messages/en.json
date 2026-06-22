@@ -360,6 +360,10 @@
           "title": "Daily logins",
           "system": "Sign-ins across all organizations",
           "org": "Sign-ins in your organization"
+        },
+        "auditEvents": {
+          "title": "Daily audit events",
+          "system": "Audit events across all organizations"
         }
       }
     },

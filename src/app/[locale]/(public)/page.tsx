@@ -37,6 +37,22 @@ import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
  */
 const GITHUB_URL = "https://github.com/devresponse/devresponsekit";
 
+/**
+ * Locales that ship a localized hero screenshot (`/public/front1-<locale>.avif`,
+ * a 1200px-wide AVIF of the product in that language). A locale without its own
+ * capture falls back to English so the hero never 404s.
+ */
+const HERO_SCREENSHOT_LOCALES = new Set<SupportedLocale>([
+  "en",
+  "fr",
+  "es",
+  "uk",
+  "pt",
+  "zh",
+  "hi",
+  "ja",
+]);
+
 /** Per-feature icons, zipped with the localized feature list by index. */
 const FEATURE_ICONS = [
   LayoutDashboard,
@@ -70,6 +86,10 @@ function Landing({ locale }: { locale: SupportedLocale }) {
   const features = t.raw("features.items") as TitledItem[];
   const whyItems = t.raw("why.items") as TitledItem[];
   const stack = t.raw("stack.items") as string[];
+
+  // Locale-aware hero screenshot: the product shown in the active language.
+  const heroLocale = HERO_SCREENSHOT_LOCALES.has(locale) ? locale : "en";
+  const heroScreenshot = `/front1-${heroLocale}.avif`;
 
   return (
     <main className="flex flex-col">
@@ -123,12 +143,15 @@ function Landing({ locale }: { locale: SupportedLocale }) {
             />
             <div className="border-border bg-card overflow-hidden rounded-xl border shadow-2xl">
               <Image
-                src="/screen2.png"
+                src={heroScreenshot}
                 alt={t("hero.screenshotAlt")}
-                width={1446}
-                height={981}
+                width={1200}
+                height={970}
                 priority
-                sizes="(min-width: 1024px) 1024px, 100vw"
+                // Already an optimized 1200px-wide AVIF — serve it as-is instead
+                // of re-encoding (and softening the small UI text) through the
+                // image optimizer.
+                unoptimized
                 className="h-auto w-full"
               />
             </div>

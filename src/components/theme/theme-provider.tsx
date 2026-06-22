@@ -82,11 +82,10 @@ function applyResolvedTheme(resolved: ResolvedTheme): void {
 /**
  * ThemeProvider — in-house light/dark/system theme context.
  *
- * Replaces `next-themes`. The anti-flash `<script>` lives in the SERVER
- * {@link ThemeScript} (rendered into the SSR HTML, hydrated in place); React 19
- * warns about inline scripts *created on the client*, which is why
- * `next-themes`' client-rendered script tripped the warning. This provider owns
- * only the runtime context and renders no script.
+ * Replaces `next-themes`. The anti-flash script lives in {@link ThemeScript},
+ * which emits it as opaque `innerHTML` so React never reconciles (and, on every
+ * locale switch, re-creates) a `<script>` element — the path React 19 warns
+ * about. This provider owns only the runtime context and renders no script.
  *
  * Both inputs are read via `useSyncExternalStore` (server snapshots:
  * preference `"system"`, OS `light`) so there is no `setState`-in-effect and no

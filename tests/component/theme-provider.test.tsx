@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import userEvent from "@testing-library/user-event";
 import { ThemeProvider, useTheme } from "@/components/theme/theme-provider";
 import { ThemeScript } from "@/components/theme/theme-script";
 
 /**
  * Tests for the in-house theme provider that replaced `next-themes` (React 19
- * warns about inline `<script>`s created on the client; the anti-flash script
- * is now SERVER-rendered by {@link ThemeScript}, and this provider renders no
- * script — only the runtime context).
+ * warns about `<script>` elements it reconciles on the client; the anti-flash
+ * script is emitted as opaque `innerHTML` by {@link ThemeScript}, and this
+ * provider renders no script — only the runtime context).
  */
 function mockMatchMedia(prefersDark: boolean) {
   vi.stubGlobal(
@@ -40,18 +41,25 @@ function Consumer() {
 }
 
 describe("ThemeScript", () => {
-  it("renders a nonce-carrying inline anti-flash script", () => {
-    const { container } = render(<ThemeScript nonce="n0nce-abc" />);
-    const script = container.querySelector("script");
-    expect(script).not.toBeNull();
-    expect(script).toHaveAttribute("nonce", "n0nce-abc");
-    // The init logic reads the stored "theme", falls back to the OS preference,
-    // and stamps the class + color-scheme onto <html>.
-    const code = script!.innerHTML;
-    expect(code).toContain('"theme"');
-    expect(code).toContain("matchMedia");
-    expect(code).toContain("classList");
-    expect(code).toContain("colorScheme");
+  it("emits a nonce-carrying inline anti-flash script into the SSR HTML", () => {
+    // The server HTML is what matters: the script is emitted as a wrapper's
+    // innerHTML (opaque to React, so React never reconciles a <script> element
+    // and never trips the client re-create warning on a locale switch).
+    const html = renderToStaticMarkup(<ThemeScript nonce="n0nce-abc" />);
+    expect(html).toContain("<script");
+    expect(html).toContain('nonce="n0nce-abc"');
+    // Init logic: reads the stored "theme", falls back to the OS preference, and
+    // stamps the class + color-scheme onto <html>.
+    expect(html).toContain('"theme"');
+    expect(html).toContain("matchMedia");
+    expect(html).toContain("classList");
+    expect(html).toContain("colorScheme");
+  });
+
+  it("omits the nonce attribute when no nonce is provided", () => {
+    const html = renderToStaticMarkup(<ThemeScript />);
+    expect(html).toContain("<script");
+    expect(html).not.toContain("nonce=");
   });
 });
 

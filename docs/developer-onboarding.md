@@ -52,7 +52,7 @@ Sign in with the seeded admin (defaults from `.env`):
 - **Email:** `admin@devresponse.local`
 - **Password:** `ChangeMe-LocalOnly-123!`
 
-Want multi-tenant test data? Load the dev fixture (3 organizations × 7 users, all pre-approved):
+Want multi-tenant test data? Load the dev fixture — 3 organizations × 7 users (all pre-approved), plus 3 cross-org members (one account in all three orgs), two groups with members, and back-dated registrations + audit history so the dashboard charts and recent-activity feed are populated:
 
 ```bash
 pnpm db:seed:dev

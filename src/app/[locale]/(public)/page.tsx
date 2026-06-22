@@ -146,7 +146,7 @@ function Landing({ locale }: { locale: SupportedLocale }) {
                 src={heroScreenshot}
                 alt={t("hero.screenshotAlt")}
                 width={1200}
-                height={970}
+                height={1003}
                 priority
                 // Already an optimized 1200px-wide AVIF — serve it as-is instead
                 // of re-encoding (and softening the small UI text) through the

@@ -136,8 +136,7 @@ The limiter is in-process per instance, so the **supported 1.0 topology is a sin
 
 ## Known risks & missing information
 
-- **Hosting target is not defined in the repo** — choose Vercel vs. Node/container and document it (no app `Dockerfile` is provided). See [Deployment → Hosting model](./deployment.md#4-hosting-model).
-- **No Node version pin** (`.nvmrc`/`engines`) — only CI evidences Node 22.
+- **Hosting target is not pinned in the repo** — choose Vercel vs. Node/container and document it. A multi-stage production [`Dockerfile`](../Dockerfile) _is_ provided for the container path (see [docker.md](./docker.md)). See [Deployment → Hosting model](./deployment.md#4-hosting-model).
 - **In-memory rate limiting** — not shared across instances; the supported 1.0 topology is a single application instance (see [Deployment → Supported topology](./deployment.md#4-hosting-model)). A shared backend for horizontal scale is planned post-1.0.
 - **CSP is enforcing** (nonce-based, minted per request in `src/proxy.ts`). `script-src` allows only `'self' 'nonce-…' 'strict-dynamic'` — an injected inline `<script>` is blocked, not just reported. `style-src` deliberately keeps `'unsafe-inline'` (a nonce can't cover React's inline `style` attributes). Violations report to `/api/security/csp-report`.
 - **`pgvector`/`vector` extension** is enabled locally; confirm whether production actually needs it (`pg_trgm` definitely is required).

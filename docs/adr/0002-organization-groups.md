@@ -1,6 +1,6 @@
 # ADR-0002: Organization Groups (cohorts that bundle custom roles)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-15
 - **Deciders:** Platform engineering
 - **Relates to:** [ADR-0001 — Three-Tier Access Control](0001-three-tier-access-control.md)
@@ -62,9 +62,13 @@ Groups deliberately reuse, not reinvent, ADR-0001:
 
 ### Schema
 
-Three tables, appended to the single `0001-initial-schema.sql` (per the
-project's single-file convention; a fresh `pnpm db:reset:reload` provisions
-them). Conventions match the existing `app_*` tables.
+Three tables. Because groups landed before the `0001-initial-schema.sql`
+baseline was frozen, they live in that consolidated baseline file; a change of
+this kind today would instead ship as a new numbered forward migration
+(`NNNN-*.sql`) applied by `run-migrations.ts` and tracked in the
+`app_schema_migrations` ledger (see [Architecture → Data model](../architecture.md#5-data-model)).
+Either way a fresh `pnpm db:reset:reload` provisions them. Conventions match the
+existing `app_*` tables.
 
 ```sql
 -- A named cohort within ONE organization (no global groups).

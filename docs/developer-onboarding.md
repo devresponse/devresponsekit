@@ -74,6 +74,12 @@ pnpm format:check   # prettier --check  (use `pnpm format` to auto-fix)
 pnpm test:coverage  # vitest with the coverage ratchet
 ```
 
+The DB-backed suite runs against a real Postgres (set `DATABASE_TEST_URL`):
+
+```bash
+pnpm test:db        # vitest run --config vitest.db.config.ts
+```
+
 Slower, browser-based suites (also run in CI):
 
 ```bash
@@ -127,7 +133,7 @@ src/
 │   └── reset-database.ts           # destructive reset tooling
 ├── components/                     # shadcn/ui, app shell, data grid, navigation
 ├── i18n/                           # next-intl request config
-└── messages/                       # en.json, fr.json, es.json, uk.json
+└── messages/                       # en.json, fr.json, es.json, uk.json, pt.json, zh.json, hi.json, ja.json
 
 tests/                              # unit, component, integration, security, e2e, accessibility
 scripts/test-shards.mjs            # sharded vitest runner
@@ -157,7 +163,7 @@ docker/postgres/init/              # Postgres init SQL (extensions)
 - **Authorize through the primitives.** Never re-derive tenant scope inline — call `requireAdminPermission` / `resolveOrgScope` / `canAccessOrg`. An admin route that doesn't reference a scope primitive **fails the CI invariant test**.
 - **Rate-limit every admin mutation.** Each `POST`/`PATCH`/`DELETE` admin handler calls `enforceRateLimit(...)` right after the permission check (also enforced by an invariant test).
 - **Audit every mutation.** Use the `audit*Action` helpers; pass the request so the `x-request-id` is correlated.
-- **Internationalize all user-facing text.** Every leaf key must exist in **all four** locale files — a parity test enforces it. Add keys to `en.json` first, then `fr`/`es`/`uk`.
+- **Internationalize all user-facing text.** Every leaf key must exist in **all 8 locale files (en, fr, es, uk, pt, zh, hi, ja)** — a parity test enforces it. Add keys to `en.json` first, then the rest.
 - **Formatting & linting** are enforced by Prettier (with the Tailwind plugin) and ESLint (`eslint-config-next` + `typescript-eslint`). Run `pnpm format` before committing.
 - **Commit & PR hygiene** (from project memory): land each logically-complete change as its own PR; PRs auto-merge on green; don't pipe `pnpm build` through `head`/`Select -First` (it truncates and breaks the build log) — redirect to a file instead.
 
@@ -165,11 +171,11 @@ docker/postgres/init/              # Postgres init SQL (extensions)
 
 A typical admin feature (mirror an existing one such as Roles or Groups):
 
-1. **Schema** (if needed): add tables to `src/db/migrations/0001-initial-schema.sql` and types to `src/db/schema/app-schema.ts`.
+1. **Schema** (if needed): add a new numbered forward migration (`src/db/migrations/000N-….sql`) — `0001-initial-schema.sql` is **frozen/append-only**, never edit it — and add types to `src/db/schema/app-schema.ts`.
 2. **Permissions:** add keys to `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts` (they flow into the `admin.platform`/`superuser` roles automatically). Update the catalog-count test.
 3. **API:** add a route handler under `src/app/api/administrator/<feature>/...`. Use `requireAdminPermission`, `resolveOrgScope`/`canAccessOrg`, `enforceRateLimit`, Zod validation, the list-query helper, the error envelope, and an audit call.
 4. **UI:** add pages under `src/app/[locale]/(secure)/app/administrator/<feature>/` and a nav entry in `administrator-navigation.ts` with a `requires` permission. Reuse the shared `DataGrid` and form patterns.
-5. **i18n:** add strings to all four `src/messages/*.json` files.
+5. **i18n:** add strings to all 8 `src/messages/*.json` files (en, fr, es, uk, pt, zh, hi, ja).
 6. **Tests:** integration tests for the routes, component tests for client UI, and update the invariant/coverage tests as needed.
 7. **Docs:** update the relevant file in `/docs`.
 
@@ -191,7 +197,7 @@ A typical admin feature (mirror an existing one such as Roles or Groups):
 | App can't reach the database | Is `pnpm db:up` running? Is the port `5444` (not 5432)? Check `DATABASE_URL`. |
 | Boot error about a secret/JWK | `BETTER_AUTH_SECRET` / `SSO_HANDOFF_JWT_SECRET` unset, or `API_JWT_ENABLED=1` without `API_JWT_PRIVATE_KEY`. |
 | `403`/`404` on an admin call you expected to work | Tenant scope — a non-superadmin only sees their own org; out-of-scope resources return **404 by design**. |
-| Locale-parity test fails | A new text key is missing from one of `fr`/`es`/`uk`. Add it everywhere. |
+| Locale-parity test fails | A new text key is missing from one of the 8 locale files (en, fr, es, uk, pt, zh, hi, ja). Add it everywhere. |
 | Coverage gate fails but tests pass | New untested code dropped global coverage below the ratchet — add tests (the local sharded runner does **not** compute coverage; run `pnpm test:coverage`). |
 | Flaky/odd test failures with "not a function" | Run the **sharded** runner (`pnpm test`), not a single in-process Vitest run — see [Testing](./testing.md). |
 

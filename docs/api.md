@@ -96,7 +96,7 @@ Every response (success or error) carries an `x-request-id` header that matches 
 
 ## 5. Permission catalog
 
-The catalog has **35** `admin.*` keys plus the `superuser` marker and the user-level `shell.view` / `audit.view` markers (`src/lib/admin/permissions.ts`).
+The catalog (`ADMIN_PERMISSION_CATALOG`) has **35** `admin.*` keys (`src/lib/admin/permissions.ts`). The `superuser` marker and the `shell.view` / `audit.view` view markers are **not** in the catalog — they live only in the `SUPERUSER_PERMISSIONS` set the marker expands to.
 
 | Domain | Keys |
 | --- | --- |
@@ -159,10 +159,10 @@ curl "https://app.example.com/api/administrator/users?page=1&pageSize=25&q=acme&
 | `/api/v1/auth/token` | POST | API key or OAuth client credentials | Exchange long-lived credentials for a short-lived JWT |
 | `/api/v1/me` | GET | `account.read` | Caller identity, permissions, effective scopes |
 | `/api/v1/me/api-keys` | GET/POST | `account.read` / `account.apikeys.manage` | List / mint the caller's own keys (plaintext once) |
-| `/api/v1/me/api-keys/[id]` | GET/PATCH/DELETE; `…/rotate` | `account.apikeys.manage` | Manage the caller's own keys |
+| `/api/v1/me/api-keys/[id]` | DELETE; `…/rotate` | `account.apikeys.manage` | Revoke / rotate one of the caller's own keys |
 | `/api/v1/users` | GET/POST | `admin.users.read` / `.create` | User administration |
-| `/api/v1/users/[id]` | GET/PATCH/DELETE; `…/status` | `admin.users.*` | User administration |
-| `/api/v1/admin/api-keys` | GET; `…/[id]` GET/DELETE | `admin.apikeys.*` | API-key governance |
+| `/api/v1/users/[id]` | GET; `…/status` | `admin.users.*` | Read a user (mutation lives under `/api/administrator`) |
+| `/api/v1/admin/api-keys` | GET; `…/[id]` DELETE | `admin.apikeys.*` | API-key governance (list / revoke any key) |
 | `/api/v1/admin/oauth-clients` | GET/POST; `…/[id]` GET/PATCH/DELETE; `…/rotate-secret` | `admin.clients.*` | OAuth client (client-credentials) management |
 | `/api/v1/audit-events` | GET | `admin.audit.read` | Read the audit log |
 | `/api/v1/jwks.json` | GET | public | Public keys for verifying issued JWTs |
@@ -178,6 +178,7 @@ curl https://app.example.com/api/v1/me -H "Authorization: Bearer eyJ…"
 {
   "betterAuthUserId": "…", "appUserId": "…", "email": "svc@example.com",
   "status": "active", "organizationId": "…",
+  "authentication": { "kind": "api_key", "credentialId": "…" },
   "permissions": ["admin.users.read"], "grantedScopes": ["admin.users.read"], "effectiveScopes": ["admin.users.read"]
 }
 ```
@@ -200,6 +201,7 @@ Query parameters for `launch`: `applicationId` (required), `locale` (optional). 
 
 - The committed **OpenAPI 3.1 specs are authoritative** for exact request/response shapes — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`). They are regenerated from the handlers and **drift-checked in CI** (the "OpenAPI + admin SDK drift" job), so where this prose summarizes a route (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`), treat the spec as canonical.
 - The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json); the supported `export` resources/formats are described by the `/api/administrator/export/[resource]` operation in [`docs/openapi-admin.json`](./openapi-admin.json).
+- `GET /api/administrator/metrics` (the console home dashboard counts) exists as a route but is **intentionally excluded** from the admin OpenAPI spec — it backs the internal console UI and is not part of the generated SDK surface.
 - Client generation is documented in [Generating a client](./api-clients.md#1-the-v1-machine-api-client) and [Internal admin SDK](./api-clients.md#2-the-admin-console-sdk). The cookie-session admin SDK is committed under [`sdk/admin/`](../sdk/admin/); the v1 client is generated on demand from `docs/openapi.json`.
 - _Future enhancement (not yet shipped):_ a hosted Swagger/Redoc page for browsing the specs.
 

@@ -10,10 +10,11 @@ The suite is layered, with **security and tenant-isolation invariants treated as
 
 | Layer | Tool | Location | Focus |
 | --- | --- | --- | --- |
-| **Unit** | Vitest | `tests/unit` (~63 files) | Pure logic, guards, scope primitives, permission resolution, and **invariant tests** (route scope, rate-limit, locale parity, catalog count). |
-| **Component** | Vitest + Testing Library (jsdom) | `tests/component` (~28 files) | Client React components (grids, forms, comboboxes) rendered against real primitives. |
-| **Integration** | Vitest + mocked DB/auth | `tests/integration` (~34 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
-| **Security** | Vitest | `tests/security` (~12 files) | Cross-tenant isolation, privilege-escalation guards, secret handling. |
+| **Unit** | Vitest | `tests/unit` (~84 files) | Pure logic, guards, scope primitives, permission resolution, and **invariant tests** (route scope, rate-limit, locale parity, catalog count). |
+| **Component** | Vitest + Testing Library (jsdom) | `tests/component` (~45 files) | Client React components (grids, forms, comboboxes) rendered against real primitives. |
+| **Integration** | Vitest + mocked DB/auth | `tests/integration` (~38 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
+| **Security** | Vitest | `tests/security` (~13 files) | Cross-tenant isolation, privilege-escalation guards, secret handling. |
+| **DB-backed** | Vitest + real Postgres | `tests/db` (`pnpm test:db`) | Suites that run against a live Postgres (`vitest.db.config.ts`, needs `DATABASE_TEST_URL`). |
 | **E2E** | Playwright | `tests/e2e` (`.spec.ts`) | Full browser flows against a running, seeded app. |
 | **Accessibility** | Playwright + axe-core | `tests/accessibility` (`.spec.ts`) | WCAG checks on key screens. |
 | Shared helpers / setup | — | `tests/helpers`, `tests/setup` | Render harness, factories, jsdom polyfills. |
@@ -34,6 +35,7 @@ pnpm test:unit       # vitest run tests/unit
 pnpm test:component  # vitest run tests/component
 pnpm test:integration
 pnpm test:security
+pnpm test:db         # DB-backed suite vs a real Postgres (vitest.db.config.ts, needs DATABASE_TEST_URL)
 pnpm test:coverage   # full run WITH the coverage ratchet (what CI gates on)
 pnpm test:serial     # plain `vitest run` (no sharding) — for debugging only
 
@@ -48,7 +50,7 @@ pnpm test:all        # typecheck + lint + format:check + coverage + e2e + a11y
 Run a single file or test:
 
 ```bash
-pnpm exec vitest run tests/integration/groups.test.ts
+pnpm exec vitest run tests/integration/administrator-phase7.test.ts
 pnpm exec vitest run tests/unit/admin-permissions.test.ts -t "catalog"
 ```
 
@@ -67,10 +69,10 @@ pnpm exec vitest run tests/unit/admin-permissions.test.ts -t "catalog"
 
 | Metric | Threshold |
 | --- | --- |
-| Lines | 52% |
-| Statements | 51% |
-| Functions | 46% |
-| Branches | 48% |
+| Statements | 60% |
+| Branches | 54% |
+| Functions | 56% |
+| Lines | 61% |
 
 These are a **ratchet**: pinned just below the current measured values and meant to be **raised over time, never lowered**. A change that adds untested code and drops coverage below a floor fails CI even if every test passes — add tests to compensate.
 

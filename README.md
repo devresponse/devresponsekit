@@ -68,7 +68,7 @@ build, and deploying a fully functional instance — see the canonical docs in
 | `pnpm test`       | Vitest: unit + component + integration + security |
 | `pnpm test:e2e`   | Playwright end-to-end tests                       |
 | `pnpm test:a11y`  | Playwright + axe accessibility tests              |
-| `pnpm test:all`   | typecheck + lint + format check + coverage + e2e  |
+| `pnpm test:all`   | typecheck + lint + format check + coverage + e2e + a11y |
 | `pnpm db:codegen` | Regenerate Kysely types from the live schema      |
 | `pnpm db:seed:dev` | Optional dev/testing seed: 3 orgs × 7 users + cross-org members, groups & demo activity |
 | `pnpm db:reset`   | Dry run: list every table a reset would drop      |

@@ -100,13 +100,30 @@ warrant a comms channel and an owner before deep debugging.
   (it is append-only). Capture the relevant `request_id`s and IPs.
 - If a secret may be exposed, rotate it (`BETTER_AUTH_SECRET`,
   `SSO_HANDOFF_JWT_SECRET`, `API_JWT_PRIVATE_KEY`, provider keys) — rotating the
-  auth secret signs everyone out, which is acceptable under a breach.
+  auth secret signs everyone out, which is acceptable under a breach. Full
+  per-secret steps in [DevOps Setup → Secret rotation](./devops-setup.md#secret-rotation).
+- **`API_JWT_PRIVATE_KEY` (Ed25519 JWK) — dual-key rotation.** JWKS publishes
+  both the current and a previous public key, so existing tokens keep verifying
+  during the overlap:
+  1. Move the current key to `API_JWT_PREVIOUS_PRIVATE_KEY` (and
+     `API_JWT_PREVIOUS_KID` if you pin an explicit kid).
+  2. Mint a new key:
+     ```bash
+     node -e "import('jose').then(async (j) => { const { privateKey } = await j.generateKeyPair('EdDSA', { extractable: true }); process.stdout.write(JSON.stringify(await j.exportJWK(privateKey))) })"
+     ```
+     Set it as the new `API_JWT_PRIVATE_KEY` (+ new kid if pinned) and redeploy.
+  3. After the access-token TTL (`API_JWT_ACCESS_TTL_SECONDS`, ≤ 1h), drop
+     `API_JWT_PREVIOUS_PRIVATE_KEY`/`API_JWT_PREVIOUS_KID` and redeploy. Under an
+     active breach, skip the overlap — rotate the key and drop the previous one
+     immediately to invalidate leaked tokens at once.
 - Follow the private disclosure process in [SECURITY.md](../SECURITY.md).
 
 ## 5. Rollback
 
 Migrations are additive / backward-compatible by contract, so the **previous
-build is safe to re-promote against the current schema**.
+build is safe to re-promote against the current schema**. Roll back the **app
+build** and leave the additive migrations ahead — **never auto-down-migrate**
+(there are no down-migrations, and reverting schema risks data loss).
 
 - **Vercel:** promote the last-known-good deployment (Vercel dashboard → previous
   deployment → "Promote to Production", or `vercel rollback`). The deploy
@@ -114,8 +131,10 @@ build is safe to re-promote against the current schema**.
   promotion, so a rollback does not need a DB change.
 - **Container:** redeploy the previous image tag (the runtime image is
   digest-pinned; keep the prior tag available).
-- A migration that genuinely must be reverted is a separate forward migration —
+- A migration that genuinely must be reverted is a separate **forward** migration —
   never edit an applied one.
+- Bad **data** (vs. a bad deploy) is recovered via the provider's PITR / snapshot,
+  not by reverting schema — see [DevOps Setup → Backup & restore](./devops-setup.md#9-backup--restore).
 
 ## 6. After the incident
 

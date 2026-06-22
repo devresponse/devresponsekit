@@ -128,6 +128,8 @@ flowchart TD
 - Both `quality` and `browser` run against a **PostgreSQL 17 service container**; the `browser` job migrates, seeds, starts the server, then runs Playwright e2e + accessibility.
 - The `audit` job is a **hard gate**: `pnpm audit --audit-level high` fails CI on any high+ advisory unless it is allowlisted in `package.json` → `pnpm.auditConfig.ignoreGhsas` (rationale tracked in [SECURITY.md](../SECURITY.md)).
 
+**Security gates (separate workflows).** Three scanners run alongside CI on `push`/`pull_request` (plus a weekly schedule) and publish findings to the GitHub **Security tab**: **Trivy** image scan (`docker-scan.yml`, fails on fixable HIGH/CRITICAL image CVEs), **CodeQL** SAST (`codeql.yml`), and **gitleaks** secret scan (`secret-scan.yml`). See [DevOps Setup → Security gates](./devops-setup.md#security-gates-separate-workflows).
+
 **Production deploy (Vercel).** `.github/workflows/deploy.yml` promotes `main`
 to Vercel production and **applies migrations first**: it runs
 `pnpm db:app:migrate` against the **direct** (non-pooled)
@@ -152,6 +154,13 @@ frequently regardless of plan, schedule an external caller instead — e.g. a
 GitHub Actions `schedule:` workflow that `curl`s the endpoint with the
 `CRON_SECRET` bearer every few minutes. Also pin `regions` to your database's
 region.
+
+**Data-retention pruner (scheduled).** Separately, schedule `pnpm db:prune`
+(`scripts/prune-retention.ts`) — typically **daily** — to prune expired token
+revocations and apply the retention windows to `app_audit_events`
+(`AUDIT_RETENTION_DAYS`) and terminal `app_outbox` rows
+(`OUTBOX_RETENTION_DAYS`). It runs alongside the outbox drainer; see
+[DevOps Setup → Scheduled maintenance jobs](./devops-setup.md#scheduled-maintenance-jobs).
 
 See [DevOps Setup → Build pipeline](./devops-setup.md#5-build-pipeline-ci) and [Testing](./testing.md).
 

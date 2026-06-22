@@ -1,3 +1,5 @@
+> **⚠️ HISTORICAL SNAPSHOT** — point-in-time production-readiness review. Retained as an audit trail. Findings may have been resolved since; for current state see [CHANGELOG.md](CHANGELOG.md) and [docs/](docs/README.md).
+
 # devresponsekit — Production 1.0 Readiness, Review #2 (second pass)
 
 **Date:** 2026-06-18 · **Version reviewed:** 0.1.0 · **Branch:** main (`504e237`)

@@ -6,6 +6,8 @@ import { ShellContainer } from "@/components/app-shell/shell-container";
 import { ShellSkipLinks } from "@/components/app-shell/shell-skip-links";
 import { TopShellBar } from "@/components/app-shell/top-shell-bar";
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
+import { BrandLogo } from "@/components/brand/brand-logo";
+import { getBrand } from "@/config/brand";
 import { DialogManagerProvider } from "@/components/ui/dialog-manager";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/flexsidebar";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -65,7 +67,7 @@ export default async function SecureLayout({
   // resolves the strings and passes them to the (Server) shell components,
   // which cannot call useTranslations themselves.
   const tRegions = await getTranslations("shell.regions");
-  const tCommon = await getTranslations("common");
+  const brand = getBrand();
 
   return (
     <CompactDensityWrapper density="compact" className="h-screen">
@@ -73,11 +75,11 @@ export default async function SecureLayout({
         <ShellSkipLinks />
         <ShellContainer
           className="w-full"
-          ariaLabel={tCommon("appName")}
+          ariaLabel={brand.name}
           branding={
             <TopShellBar ariaLabel={tRegions("banner")}>
               <SidebarTrigger className="-ml-1" srLabel={tRegions("toggleSidebar")} />
-              <span className="text-sm font-semibold">DevResponse</span>
+              <BrandLogo compact className="text-sm font-semibold" />
               <div className="ml-auto flex items-center gap-2">
                 <ApplicationSwitcherSheet locale={safeLocale} />
                 {organizations.length > 1 && access.organizationId ? (

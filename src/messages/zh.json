@@ -1,6 +1,5 @@
 {
   "common": {
-    "appName": "DevResponse Enterprise",
     "signIn": "登录",
     "signUp": "注册",
     "signOut": "退出登录",

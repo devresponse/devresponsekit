@@ -5,9 +5,12 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
+import { getBrand } from "@/config/brand";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { ThemeScript } from "@/components/theme/theme-script";
 import type { ReactNode } from "react";
+
+const brand = getBrand();
 
 /**
  * Only supported locale segments are valid. Without this, dotted asset
@@ -18,12 +21,12 @@ export const dynamicParams = false;
 
 export const metadata: Metadata = {
   title: {
-    default: "DevResponse Enterprise",
-    template: "%s · DevResponse",
+    default: brand.name,
+    template: `%s · ${brand.shortName}`,
   },
   description: "Enterprise application shell.",
   icons: {
-    icon: "/favicon.png",
+    icon: brand.favicon,
   },
 };
 

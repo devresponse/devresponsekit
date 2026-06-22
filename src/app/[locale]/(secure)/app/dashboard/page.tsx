@@ -1,4 +1,5 @@
 import { useTranslations } from "next-intl";
+import { getBrand } from "@/config/brand";
 
 /**
  * Secure dashboard placeholder.
@@ -9,12 +10,11 @@ import { useTranslations } from "next-intl";
  */
 export default function DashboardPage() {
   const t = useTranslations("shell");
+  const brand = getBrand();
   return (
     <section className="space-y-4 p-6">
       <h1 className="text-xl font-semibold">{t("dashboard")}</h1>
-      <p className="text-muted-foreground text-sm">
-        Welcome to the secure DevResponse Enterprise shell.
-      </p>
+      <p className="text-muted-foreground text-sm">Welcome to the secure {brand.name} shell.</p>
     </section>
   );
 }

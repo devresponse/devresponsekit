@@ -70,7 +70,7 @@ build, and deploying a fully functional instance — see the canonical docs in
 | `pnpm test:a11y`  | Playwright + axe accessibility tests              |
 | `pnpm test:all`   | typecheck + lint + format check + coverage + e2e  |
 | `pnpm db:codegen` | Regenerate Kysely types from the live schema      |
-| `pnpm db:seed:dev` | Optional dev/testing seed: 3 orgs × 7 users      |
+| `pnpm db:seed:dev` | Optional dev/testing seed: 3 orgs × 7 users + cross-org members, groups & demo activity |
 | `pnpm db:reset`   | Dry run: list every table a reset would drop      |
 | `pnpm db:reset:reload` | Drop all tables, then re-run migrations + seed (local only) |
 | `pnpm db:app:migrate` | Apply the app schema migrations                  |

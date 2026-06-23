@@ -72,14 +72,13 @@ date** — when an upstream fix lands, drop the entry rather than let it linger.
 
 | GHSA | Package | Severity | Why it is not reachable in production | Review by |
 | --- | --- | --- | --- | --- |
-| `GHSA-hmw2-7cc7-3qxx` | `form-data` | Critical | Pulled only by `supertest` → `superagent`, a **devDependency** for HTTP assertions in tests. The shipped app makes outbound HTTP via `fetch`/`undici`, never `form-data`. | 2026-09-18 |
 | `GHSA-5xrq-8626-4rwp` | `vitest` | High | The **test runner** (`@vitest/coverage-v8`, dev). Never imported by the production runtime bundle. | 2026-09-18 |
 
-To re-verify reachability: `pnpm why <package>` shows each arrives only via
-test/build tooling (or a `better-auth` build-time transitive), and the Next.js
-standalone trace (`output: "standalone"`) excludes all three from the runtime
-image. A **new** high/critical advisory that is *not* in this list fails CI by
-design, so the gate still catches anything unreviewed.
+To re-verify reachability: `pnpm why vitest` shows it arrives only via the
+test runner (`@vitest/coverage-v8`), and the Next.js standalone trace
+(`output: "standalone"`) excludes it from the runtime image. A **new**
+high/critical advisory that is *not* in this list fails CI by design, so the
+gate still catches anything unreviewed.
 
 ### Cleared
 

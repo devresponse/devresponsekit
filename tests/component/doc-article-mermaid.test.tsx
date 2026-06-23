@@ -54,6 +54,39 @@ describe("DocArticle mermaid rendering", () => {
     expect(renderMock).toHaveBeenCalledTimes(1);
   });
 
+  it("sanitizes the rendered SVG before injecting it (strips scripts + handlers, keeps SVG)", async () => {
+    // Mermaid renders with securityLevel "strict", but DocArticle still runs the
+    // SVG through DOMPurify before innerHTML (defense in depth + the CodeQL
+    // js/xss-through-dom barrier). This proves both halves of that contract.
+    renderMock.mockResolvedValueOnce({
+      svg:
+        '<svg data-testid="diagram">' +
+        "<style>.node{fill:red}</style>" +
+        '<defs><marker id="arrow"><path d="M0 0"></path></marker></defs>' +
+        '<g class="node"><rect width="10" height="10"></rect><text><tspan>label</tspan></text></g>' +
+        "<script>globalThis.__xss = true</script>" +
+        '<g onclick="globalThis.__xss = true"><path d="M1 1"></path></g>' +
+        "</svg>",
+    });
+
+    const { container } = render(<DocArticle html={MERMAID_HTML} />);
+    await waitFor(() => {
+      expect(container.querySelector<HTMLElement>(".mermaid")?.dataset.rendered).toBe("true");
+    });
+    const mount = container.querySelector<HTMLElement>(".mermaid")!;
+
+    // Mermaid's SVG vocabulary survives the sanitizer...
+    expect(mount.querySelector('[data-testid="diagram"]')).not.toBeNull();
+    expect(mount.querySelector("style")?.textContent).toContain("fill:red");
+    expect(mount.querySelector("marker")).not.toBeNull();
+    expect(mount.querySelector("rect")).not.toBeNull();
+    expect(mount.querySelector("text tspan")?.textContent).toBe("label");
+    // ...but the injected <script> and inline handler are stripped.
+    expect(mount.querySelector("script")).toBeNull();
+    expect(mount.innerHTML.toLowerCase()).not.toContain("onclick");
+    expect(mount.innerHTML).not.toContain("__xss");
+  });
+
   it("makes the rendered diagram an accessible button", async () => {
     const { container } = render(<DocArticle html={MERMAID_HTML} />);
     await waitFor(() => {

@@ -7,6 +7,7 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { sendAppEmail } from "@/lib/email/send.server";
+import { getBrand } from "@/config/brand";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     templateKey: "test_email",
     organizationId,
     variables: {
-      appName: process.env.NEXT_PUBLIC_APP_NAME ?? "DevResponse",
+      appName: getBrand().name,
       sentBy: guard.betterAuthUserId,
     },
   });

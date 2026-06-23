@@ -4,6 +4,8 @@ import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { ShellContainer } from "@/components/app-shell/shell-container";
 import { ShellSkipLinks } from "@/components/app-shell/shell-skip-links";
 import { TopShellBar } from "@/components/app-shell/top-shell-bar";
+import { BrandLogo } from "@/components/brand/brand-logo";
+import { getBrand } from "@/config/brand";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import type { ReactNode } from "react";
 
@@ -34,19 +36,20 @@ export default async function PublicLayout({
   const { locale: rawLocale } = await params;
   const safeLocale: SupportedLocale = isSupportedLocale(rawLocale) ? rawLocale : "en";
   const tCommon = await getTranslations({ locale: safeLocale, namespace: "common" });
+  const brand = getBrand();
 
   return (
     <div className="min-h-screen">
       <ShellSkipLinks />
       <ShellContainer
-        ariaLabel="DevResponse public site"
+        ariaLabel={`${brand.shortName} public site`}
         leftVisible={false}
         rightVisible={false}
         footerVisible={false}
         branding={
           <TopShellBar>
             <LocaleLink href="/" locale={safeLocale} className="text-sm font-semibold">
-              {tCommon("appName")}
+              <BrandLogo />
             </LocaleLink>
             <div className="ml-auto flex items-center gap-2">
               <LocaleSwitcher current={safeLocale} />

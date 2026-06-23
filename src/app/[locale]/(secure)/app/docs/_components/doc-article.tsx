@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 import { useTheme } from "@/components/theme/theme-provider";
 import { useTranslations } from "next-intl";
 import { DiagramModal } from "./diagram-modal";
@@ -17,8 +18,9 @@ import { DiagramModal } from "./diagram-modal";
  * Mermaid blocks arrive as `<div class="mermaid">` mounts whose text is
  * the raw diagram source (the pipeline extracts ```mermaid fences before
  * the syntax highlighter). We lazily import Mermaid ONLY when such a mount
- * exists, render each to SVG with `securityLevel: "strict"`, re-render on
- * theme change, and fall back to source on error.
+ * exists, render each to SVG with `securityLevel: "strict"`, sanitize that SVG
+ * with DOMPurify before injecting it, re-render on theme change, and fall back
+ * to source on error.
  *
  * Each rendered diagram is then made interactive: clicking (or pressing
  * Enter/Space on) it opens {@link DiagramModal}, a full-view lightbox —
@@ -66,7 +68,12 @@ export function DocArticle({ html }: { html: string }) {
         try {
           const { svg } = await mermaid.render(`mmd-${i}-${source.length}`, source);
           if (cancelled) return;
-          el.innerHTML = svg;
+          // Defense in depth + the explicit sanitizer the CodeQL `js/xss-through-dom`
+          // flow requires (the diagram source is read from the DOM as text). Mermaid
+          // already renders with `securityLevel: "strict"`; the SVG profile keeps its
+          // element vocabulary (`<g>`, `<path>`, `<text>`, `<style>`, …) while stripping
+          // `<script>`, event handlers, and the like before this reaches the DOM.
+          el.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
           el.dataset.rendered = "true";
           // Expose the diagram as a button that opens the full view.
           el.setAttribute("role", "button");

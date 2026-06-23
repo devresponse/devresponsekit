@@ -88,6 +88,15 @@ gate still catches anything unreviewed.
   ^3.4.11`); `pnpm why dompurify` confirms a single resolved `3.4.11`, and the
   mermaid render path stays defended by `securityLevel: "strict"` + server-side
   `rehypeSanitize`.
+- `postcss`, `esbuild`, and `@babel/core` (Dependabot alerts #1/#3/#4) were
+  patched transitives held back by conservative parent pins — `next` pins
+  `postcss@8.4.31`, `vite` declares `esbuild@^0.27.0`, and several tools shared
+  `@babel/core@7.29.0`. Pinned forward with `pnpm.overrides` (`postcss:
+  ^8.5.10`, `esbuild: ^0.28.1`, `@babel/core: ^7.29.6`) to the patched lines.
+  Because the first two are forced *past* their parents' declared ranges, both
+  were validated end to end: `pnpm build` (Next.js + Tailwind exercise postcss)
+  and the full `pnpm test:coverage` (vitest is the only vite/esbuild consumer
+  here) both pass. `pnpm why <pkg>` confirms a single resolved version each.
 
 ### Moderate / low transitive advisories (below the high gate)
 
@@ -97,10 +106,7 @@ governed, not silent; drop a row when the upstream fix lands.
 
 | GHSA | Package | Severity | Reachability | 
 | --- | --- | --- | --- |
-| `GHSA-qx2v-qp2m-jg93` | `postcss` | Moderate | Via `next > postcss`. Next-managed; the app authors no untrusted CSS through it. Clears on a Next patch bump. |
-| `GHSA-h67p-54hq-rp68` | `js-yaml` | Moderate | Via `@eslint/eslintrc` (dev) and `gray-matter` (docs frontmatter). The runtime path parses only repo-authored, trusted frontmatter — not attacker-supplied YAML. |
-| `GHSA-g7r4-m6w7-qqqr` | `esbuild` | Low | Via `vite-tsconfig-paths > vite > esbuild` — dev-server file read. Build/test tooling only. |
-| `GHSA-4x5r-pxfx-6jf8` | `@babel/core` | Low | Via `eslint-config-next > eslint-plugin-react-hooks > @babel/core` — lint tooling (dev). |
+| `GHSA-h67p-54hq-rp68` | `js-yaml` | Moderate | **Dismissed — tolerable risk (Dependabot #5).** Via `gray-matter` (docs frontmatter, runtime) and `@eslint/eslintrc` (dev). The only patch is js-yaml **v4**, but `gray-matter` (unmaintained) pins `js-yaml@^3.13.1`, so it cannot be bumped without replacing gray-matter. The runtime path parses only repo-authored, trusted frontmatter — never attacker-supplied YAML. Revisit if gray-matter is ever replaced. |
 
 ## Handling of secrets
 

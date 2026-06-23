@@ -129,6 +129,7 @@
     "dotenv": "17.4.2",
     "eslint": "9.39.2",
     "eslint-config-next": "16.2.9",
+    "form-data": "^4.0.6",
     "jsdom": "29.1.1",
     "kysely-codegen": "0.20.0",
     "msw": "2.14.6",
@@ -158,8 +159,7 @@
     "auditConfig": {
       "//": "Allowlist for `pnpm audit --audit-level high` (BUILD-1). Each muted advisory is dev/build/test-only — see SECURITY.md ('Dependency advisory allowlist') for the per-GHSA package, reachability rationale, and review-by date. A NEW high/critical not listed here fails CI; drop entries when the upstream fix lands.",
       "ignoreGhsas": [
-        "GHSA-5xrq-8626-4rwp",
-        "GHSA-hmw2-7cc7-3qxx"
+        "GHSA-5xrq-8626-4rwp"
       ]
     }
   }

@@ -73,7 +73,6 @@ date** — when an upstream fix lands, drop the entry rather than let it linger.
 | GHSA | Package | Severity | Why it is not reachable in production | Review by |
 | --- | --- | --- | --- | --- |
 | `GHSA-hmw2-7cc7-3qxx` | `form-data` | Critical | Pulled only by `supertest` → `superagent`, a **devDependency** for HTTP assertions in tests. The shipped app makes outbound HTTP via `fetch`/`undici`, never `form-data`. | 2026-09-18 |
-| `GHSA-fx2h-pf6j-xcff` | `vite` | High | A build-time transitive of `vitest` / `vite-tsconfig-paths` (and of `better-auth`'s own tooling). The advisory is in Vite's **dev server**, which is never started in production — the app ships a Next.js standalone bundle, not Vite. | 2026-09-18 |
 | `GHSA-5xrq-8626-4rwp` | `vitest` | High | The **test runner** (`@vitest/coverage-v8`, dev). Never imported by the production runtime bundle. | 2026-09-18 |
 
 To re-verify reachability: `pnpm why <package>` shows each arrives only via

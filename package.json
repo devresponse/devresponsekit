@@ -141,6 +141,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "^8.61.1",
     "undici": "8.5.0",
+    "vite": "^7.3.5",
     "vite-tsconfig-paths": "6.1.1",
     "vitest": "4.1.9"
   },
@@ -158,8 +159,7 @@
       "//": "Allowlist for `pnpm audit --audit-level high` (BUILD-1). Each muted advisory is dev/build/test-only — see SECURITY.md ('Dependency advisory allowlist') for the per-GHSA package, reachability rationale, and review-by date. A NEW high/critical not listed here fails CI; drop entries when the upstream fix lands.",
       "ignoreGhsas": [
         "GHSA-5xrq-8626-4rwp",
-        "GHSA-hmw2-7cc7-3qxx",
-        "GHSA-fx2h-pf6j-xcff"
+        "GHSA-hmw2-7cc7-3qxx"
       ]
     }
   }

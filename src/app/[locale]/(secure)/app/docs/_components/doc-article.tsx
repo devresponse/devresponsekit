@@ -69,11 +69,18 @@ export function DocArticle({ html }: { html: string }) {
           const { svg } = await mermaid.render(`mmd-${i}-${source.length}`, source);
           if (cancelled) return;
           // Defense in depth + the explicit sanitizer the CodeQL `js/xss-through-dom`
-          // flow requires (the diagram source is read from the DOM as text). Mermaid
-          // already renders with `securityLevel: "strict"`; the SVG profile keeps its
-          // element vocabulary (`<g>`, `<path>`, `<text>`, `<style>`, …) while stripping
-          // `<script>`, event handlers, and the like before this reaches the DOM.
-          el.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+          // flow requires (the diagram source is read from the DOM as text). DOMPurify
+          // still strips `<script>`, event handlers, and `javascript:` URLs regardless.
+          // This config MIRRORS Mermaid's own internal SVG-sanitize config, so the pass
+          // is idempotent and never blanks diagram text: Mermaid renders node/edge labels
+          // as HTML inside `<foreignObject>`, which DOMPurify only keeps when that element
+          // is allowed AND marked an HTML integration point (its content stays HTML, not
+          // SVG). Dropping these — e.g. an `svg`-only profile — strips every label.
+          el.innerHTML = DOMPurify.sanitize(svg, {
+            ADD_TAGS: ["foreignobject"],
+            ADD_ATTR: ["dominant-baseline"],
+            HTML_INTEGRATION_POINTS: { foreignobject: true },
+          });
           el.dataset.rendered = "true";
           // Expose the diagram as a button that opens the full view.
           el.setAttribute("role", "button");

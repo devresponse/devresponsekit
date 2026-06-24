@@ -33,9 +33,9 @@ The whole point of this shape is the **migrate-first contract**: the new build o
 ## 2. Provision the Neon database
 
 1. Create a Neon **project** (Postgres 17 is fine). Pick a region close to Vercel's `iad1` (pinned in [`vercel.json`](../vercel.json)) — e.g. **AWS `us-east-1`/`us-east-2`** — to keep query latency low.
-2. Neon gives you **two connection strings for the same database** — you need both:
-   - **Pooled** (the host contains `-pooler`, e.g. `…-pooler.neon.tech`) → used at **runtime** as `DATABASE_URL`. Safe for serverless because every function instance shares Neon's connection pooler.
-   - **Direct / unpooled** (no `-pooler` in the host) → used for **migrations** as `PRODUCTION_DIRECT_DATABASE_URL`. DDL, advisory locks, and the per-connection `search_path` option used by the migrator **cannot** route through a transaction pooler.
+2. Neon gives you **two connection strings for the same database**:
+   - **Direct / unpooled** (no `-pooler` in the host) → migrations (`PRODUCTION_DIRECT_DATABASE_URL`) **and, by default, runtime** (`DATABASE_URL`) too. The app sets its schema via a per-connection `search_path` **startup parameter**, which a transaction pooler rejects (`08P01 unsupported startup parameter`) — along with the DDL + advisory locks the migrator needs.
+   - **Pooled** (the host contains `-pooler`, e.g. `…-pooler.neon.tech`) → preferred for serverless runtime **at scale**, but only after you make the app pooler-compatible: set `DB_SEARCH_PATH_VIA_OPTIONS=0` and run `ALTER ROLE <db_role> SET search_path = "auth", public;` so the schema still resolves without the rejected startup parameter (see [§12](#12-operations--gotchas)). Migrations still use the direct endpoint.
    - Keep `?sslmode=require` on both (Neon enforces TLS).
 3. **Extensions and schema are handled by the migrations** — you do **not** create them by hand. Migration `0001` creates the `pgcrypto` and `pg_trgm` extensions (in `public`) and every `app_*` table. All tables land in the schema named by `DB_SCHEMA` (default **`auth`**), applied at the connection level via `search_path`; extensions stay in `public` so every schema can resolve them.
 
@@ -112,7 +112,7 @@ Set these in **Vercel → Project → Settings → Environment Variables → Pro
 
 | Variable | Value |
 | --- | --- |
-| `DATABASE_URL` | Neon **pooled** URL (`…-pooler…?sslmode=require`) |
+| `DATABASE_URL` | Neon **direct/unpooled** URL (`…?sslmode=require`). To use the **pooled** endpoint instead, also set `DB_SEARCH_PATH_VIA_OPTIONS` (below) + run an `ALTER ROLE` — see [§12](#12-operations--gotchas) |
 | `BETTER_AUTH_SECRET` | strong random string, ≥ 16 chars |
 | `BETTER_AUTH_URL` | `https://<your-domain>` |
 | `SSO_HANDOFF_ISSUER` | `https://<your-domain>` |
@@ -131,7 +131,8 @@ Set these in **Vercel → Project → Settings → Environment Variables → Pro
 | `DB_SCHEMA` | `auth` (must match what you bootstrapped in §3) |
 | `ADMIN_TRUSTED_ORIGINS` | `https://<your-domain>` — trusted origin for admin mutations |
 | `CRON_SECRET` | long random string — **enables** the outbox-drain cron (see [§7](#7-the-outbox-drain-cron)); the endpoint **fails closed** without it |
-| `PGPOOL_MAX` | keep small on serverless (e.g. `3`–`5`); each function instance opens its own pool behind Neon's pooler |
+| `PGPOOL_MAX` | keep small on serverless (e.g. `3`–`5`); each function instance opens its own pool |
+| `DB_SEARCH_PATH_VIA_OPTIONS` | set to `0` **only if `DATABASE_URL` is a pooled endpoint** (Neon pooled / PgBouncer), and pair it with an `ALTER ROLE … SET search_path` — see [§12](#12-operations--gotchas). Leave unset for a direct endpoint |
 
 ### Optional features
 
@@ -229,9 +230,9 @@ For most teams the built-in workflow ([§0](#0-how-this-repo-deploys-read-this-f
 
 ## 12. Operations & gotchas
 
-- **Pooled vs direct, always.** Runtime → pooled `DATABASE_URL`; migrations → direct `PRODUCTION_DIRECT_DATABASE_URL`. Mixing them up surfaces as migrations hanging on advisory locks or `search_path` being lost under the pooler.
+- **Direct endpoint by default; pooled needs two changes.** The app sets `search_path` via a per-connection startup parameter, which a **transaction pooler rejects** (`08P01 unsupported startup parameter in options: search_path`) — so both migrations and runtime use the **direct/unpooled** endpoint by default. To run the runtime on the **pooled** endpoint (better for serverless concurrency), make the app pooler-compatible: (1) run `ALTER ROLE <db_role> SET search_path = "auth", public;` once against the database (a role default the pooler honors — `<db_role>` is the user in your connection string, e.g. Neon's `neondb_owner`), and (2) set `DB_SEARCH_PATH_VIA_OPTIONS=0` in Vercel so the app stops sending the rejected parameter. Migrations still use the direct endpoint.
 - **Schema changes** ship as new numbered files in `src/db/migrations/` (`0011-…`). CI applies them migrate-first on the next deploy; never edit an applied migration.
 - **Rollback.** Roll the app back by promoting a previous deployment in Vercel. Migrations are additive and have no down-migrations, so the older build runs safely against the newer schema (forward-compatible by design).
-- **Connection limits.** Neon caps concurrent connections (especially on the free tier). Keep `PGPOOL_MAX` small and always use the pooled endpoint at runtime.
+- **Connection limits.** Neon caps concurrent connections (especially on the free tier). On the **direct** endpoint keep `PGPOOL_MAX` small (e.g. `3`); if that's tight under serverless concurrency, move runtime to the **pooled** endpoint via the two steps above.
 - **Region.** `vercel.json` pins `iad1`; keep Neon in a nearby AWS region to minimize round-trips.
 - See [Troubleshooting](troubleshooting.md) and [DevOps Setup](devops-setup.md) for the platform-neutral operational details.

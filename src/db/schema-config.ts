@@ -40,20 +40,43 @@ function resolveSchema(): string {
 export const DB_SCHEMA = resolveSchema();
 
 /**
- * libpq `options` value applied to every pooled connection so unqualified
- * objects resolve to `DB_SCHEMA` first, then `public` (for shared extensions).
+ * libpq `options` value applied to every connection so unqualified objects
+ * resolve to `DB_SCHEMA` first, then `public` (for shared extensions).
  */
 export const SEARCH_PATH_OPTION = `-c search_path="${DB_SCHEMA}",public`;
 
 /**
- * Constructs a `pg` Pool whose every connection starts with the correct
- * `search_path`. Use this everywhere a Pool is created (app runtime,
- * migrations, seeds, reset) so the schema is configured in exactly one place.
+ * Whether to send `search_path` as a libpq startup parameter (the `options`
+ * field). ON by default — works on a direct endpoint and local Postgres.
+ *
+ * A TRANSACTION-POOLING endpoint (Neon's pooled host, PgBouncer, Supabase's
+ * pooler) REJECTS startup parameters — every connection fails with `08P01
+ * unsupported startup parameter in options: search_path`. To run the app
+ * against one, set `DB_SEARCH_PATH_VIA_OPTIONS=0` AND make the schema a
+ * server-side role default so unqualified objects still resolve to it:
+ *
+ *   ALTER ROLE <db_role> SET search_path = "<DB_SCHEMA>", public;
+ *
+ * Migrations/seeds/reset keep the option ON against the DIRECT endpoint (they
+ * need it, plus DDL + advisory locks the pooler also can't do), so leave the
+ * flag unset for those.
+ */
+export const SEARCH_PATH_VIA_OPTIONS = !/^(0|false|no|off)$/i.test(
+  (process.env.DB_SEARCH_PATH_VIA_OPTIONS ?? "").trim(),
+);
+
+/**
+ * Constructs a `pg` Pool whose every connection resolves to `DB_SCHEMA`. Use
+ * this everywhere a Pool is created (app runtime, migrations, seeds, reset) so
+ * the schema is configured in exactly one place.
  */
 export function createAppPool(extra: PoolConfig = {}): Pool {
   return new Pool({
     connectionString: process.env.DATABASE_URL,
-    options: SEARCH_PATH_OPTION,
+    // A transaction pooler rejects the `options` startup parameter, so omit it
+    // when DB_SEARCH_PATH_VIA_OPTIONS is off and rely on a role-level
+    // search_path instead (see SEARCH_PATH_VIA_OPTIONS above).
+    ...(SEARCH_PATH_VIA_OPTIONS ? { options: SEARCH_PATH_OPTION } : {}),
     ...extra,
   });
 }

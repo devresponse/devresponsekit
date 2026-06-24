@@ -45,30 +45,30 @@ The whole point of this shape is the **migrate-first contract**: the new build o
 
 > **This is the step CI does not do, and the most common first-deploy mistake.** The deploy workflow runs **only `db:app:migrate`**. The **Better Auth** tables (`user`, `session`, `account`, `verification`) and the baseline seed are **not** created by CI — you must run them **once** against a fresh database.
 
-From a machine with the repo checked out (your laptop, or a one-off CI job), pointed at the **direct** Neon endpoint:
+From a machine with the repo checked out (your laptop, or a one-off CI job), pointed at the **direct** Neon endpoint, **one command provisions everything**:
 
 ```bash
 pnpm install --frozen-lockfile
 
 export DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"  # DIRECT / unpooled
 export DB_SCHEMA="auth"
-
-# 1. Better Auth tables (user/session/account/verification). NOT run by CI.
-pnpm db:auth:migrate
-
-# 2. App schema — extensions + all app_* tables (0001 … 0010). CI re-runs this every deploy.
-pnpm db:app:migrate
-
-# 3. Baseline seed — default org, the admin.* permission catalog, baseline roles,
-#    and your first admin. Idempotent and production-safe.
 export SEED_ADMIN_EMAIL="you@example.com"
 export SEED_ADMIN_PASSWORD="<a strong password>"
-pnpm db:seed
+
+pnpm db:provision
 ```
+
+`pnpm db:provision` ([`src/db/provision.ts`](../src/db/provision.ts)) runs the full initial setup in order, fail-fast:
+
+1. **`db:auth:migrate`** — Better Auth tables (`user`/`session`/`account`/`verification`). **CI never runs this.**
+2. **`db:app:migrate`** — extensions (`pgcrypto`, `pg_trgm`) + the app schema (`0001 … 0010`). CI re-runs this on every deploy.
+3. **`db:seed`** — the default org, the `admin.*` permission catalog, baseline roles, and your first admin (from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`).
+
+(Prefer to run them yourself? The three steps still work as individual `pnpm` commands.)
 
 Notes:
 
-- `db:app:migrate` is **idempotent and ledgered** (it records applied files in `app_schema_migrations`), so re-running it — or letting CI run it on every deploy — only applies new migration files.
+- `db:provision` and every step it runs are **idempotent and ledgered** (applied migrations are recorded in `app_schema_migrations`), so re-running it — or letting CI re-run `db:app:migrate` on each deploy — only applies new work.
 - `db:seed` is safe to re-run (all writes are `on conflict do nothing`). It provisions your first admin from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`.
 - **Never** run `db:seed:dev` against production — it creates 21 accounts that all share one weak password and refuses to run under `NODE_ENV=production` unless explicitly forced.
 

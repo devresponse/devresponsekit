@@ -39,9 +39,7 @@ See [Configuration](./configuration.md) for the full variable list.
 
 ```bash
 pnpm db:up            # start PostgreSQL in Docker (host port 5444)
-pnpm db:auth:migrate  # create Better Auth tables (user/session/account/verification)
-pnpm db:app:migrate   # apply the app schema (0001-initial-schema.sql)
-pnpm db:seed          # seed default org, permission catalog, roles, apps, admin user
+pnpm db:provision     # one shot: Better Auth tables + app schema + seed (auth:migrate → app:migrate → seed)
 pnpm dev              # start the dev server → http://localhost:3000
 ```
 

@@ -35,15 +35,16 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 
 | Variable | Required | Controls |
 | --- | --- | --- |
-| `DATABASE_URL` | **yes** | Primary connection string. On serverless, use a **pooled** endpoint. Do **not** add `?schema=…` — it is ignored by `pg`/Kysely; the schema is set via `DB_SCHEMA` (below). |
+| `DATABASE_URL` | **yes** | Primary connection string. Use a **direct/unpooled** endpoint by default; a **pooled** endpoint additionally needs `DB_SEARCH_PATH_VIA_OPTIONS=0` + an `ALTER ROLE` (see the pooler note below). Do **not** add `?schema=…` — it is ignored by `pg`/Kysely; the schema is set via `DB_SCHEMA` (below). |
 | `DATABASE_TEST_URL` | for tests | Isolated test database connection. |
 | `DB_SCHEMA` | no | Schema **all** tables (app + Better Auth) are deployed into. Default `auth`. Applied at the connection level as `search_path=<DB_SCHEMA>,public`; extensions (`pgcrypto`, `pg_trgm`) stay shared in `public`. Set a different value per deployment to **isolate applications by schema**. Must be a plain SQL identifier. |
 | `PGPOOL_MAX` | no | Max pool connections (default 10). |
 | `PG_CONNECT_TIMEOUT_MS` | no | Connection acquisition timeout (default 5000). |
 | `PG_STATEMENT_TIMEOUT_MS` | no | Per-statement server-side ceiling (default 30000). |
 | `PG_IDLE_IN_TX_TIMEOUT_MS` | no | Idle-in-transaction server-side ceiling (default 30000). |
+| `DB_SEARCH_PATH_VIA_OPTIONS` | no | Whether to set `search_path` via the libpq `options` startup parameter (default **on**). Set to `0` only on a **transaction-pooling** endpoint, which rejects startup parameters — see the pooler note below. |
 
-> **Schema & connection poolers:** the connection sets `search_path` via the libpq `options` field. A **transaction-pooling** pooler (PgBouncer transaction mode, some Supabase tiers) can drop session-level `options`. If you use one, set the schema as a server-side role default instead — `ALTER ROLE <app_role> SET search_path = auth, public;` — and run migrations/seeds/reset against the **direct** (non-pooled) endpoint.
+> **Schema & connection poolers:** by default the connection sets `search_path` via the libpq `options` **startup parameter**. A **transaction-pooling** endpoint (Neon's pooled host, PgBouncer transaction mode, some Supabase tiers) **rejects startup parameters** — every connection fails with `08P01 unsupported startup parameter in options: search_path`. To run against one: **(1)** set the schema as a server-side role default the pooler honors — `ALTER ROLE <app_role> SET search_path = auth, public;` — and **(2)** set `DB_SEARCH_PATH_VIA_OPTIONS=0` so the app stops sending the rejected parameter. Migrations/seeds/reset always use the **direct** (non-pooled) endpoint (they need the parameter, plus DDL + advisory locks the pooler can't do).
 
 ### Social login (all optional — a provider activates only when both id and secret are set)
 
@@ -163,7 +164,7 @@ node -e "import('jose').then(async j => { const {privateKey}=await j.generateKey
 
 | Concern | Local | Production |
 | --- | --- | --- |
-| Database | Docker `pgvector/pgvector:pg17` on port 5444 | Managed PostgreSQL 17 with `pg_trgm`; pooled endpoint |
+| Database | Docker `pgvector/pgvector:pg17` on port 5444 | Managed PostgreSQL 17 with `pg_trgm`; direct endpoint (or pooled — see the pooler note above) |
 | DB schema | `auth` (default `DB_SCHEMA`) | `auth`, or a per-app value via `DB_SCHEMA`; extensions in `public` |
 | `NODE_ENV` | `development` | `production` |
 | Secrets | Placeholder values in `.env` | Real, rotated secrets from a secrets manager |
@@ -213,7 +214,7 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 - [ ] `RESEND_API_KEY` / `MAILGUN_API_KEY` — only if email enabled.
 - [ ] `SENTRY_AUTH_TOKEN` — build/CI only, never client-exposed.
 - [ ] `METRICS_TOKEN` — only if scraping `/api/metrics`; long random secret, scraper-side only.
-- [ ] `DATABASE_URL` — pooled endpoint on serverless.
+- [ ] `DATABASE_URL` — direct endpoint by default; a pooled endpoint also needs `DB_SEARCH_PATH_VIA_OPTIONS=0` + an `ALTER ROLE` (see the pooler note above).
 
 ---
 

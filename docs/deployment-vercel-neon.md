@@ -45,15 +45,32 @@ The whole point of this shape is the **migrate-first contract**: the new build o
 
 > **This is the step CI does not do, and the most common first-deploy mistake.** The deploy workflow runs **only `db:app:migrate`**. The **Better Auth** tables (`user`, `session`, `account`, `verification`) and the baseline seed are **not** created by CI — you must run them **once** against a fresh database.
 
-From a machine with the repo checked out (your laptop, or a one-off CI job), pointed at the **direct** Neon endpoint, **one command provisions everything**:
+This runs **on your own machine** (your laptop, or a one-off CI runner) and connects to the Neon database over the network — you do **not** run it on Neon itself, and it is **not** SQL you paste into Neon's console. You need the repo checked out plus **Node 22+ / pnpm 10+**, and the Neon **direct** (unpooled) connection string. **One command provisions everything:**
+
+**macOS / Linux / Git Bash:**
 
 ```bash
+cd /path/to/devresponsekit
 pnpm install --frozen-lockfile
 
 export DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"  # DIRECT / unpooled
 export DB_SCHEMA="auth"
 export SEED_ADMIN_EMAIL="you@example.com"
 export SEED_ADMIN_PASSWORD="<a strong password>"
+
+pnpm db:provision
+```
+
+**Windows PowerShell** (the `export` syntax above is bash — set the variables this way instead):
+
+```powershell
+cd C:\path\to\devresponsekit
+pnpm install --frozen-lockfile
+
+$env:DATABASE_URL        = "postgresql://USER:PASSWORD@ep-xxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"  # DIRECT / unpooled
+$env:DB_SCHEMA           = "auth"
+$env:SEED_ADMIN_EMAIL    = "you@example.com"
+$env:SEED_ADMIN_PASSWORD = "<a strong password>"
 
 pnpm db:provision
 ```

@@ -66,13 +66,32 @@ export const SEARCH_PATH_VIA_OPTIONS = !/^(0|false|no|off)$/i.test(
 );
 
 /**
+ * Normalizes a Postgres connection string's `sslmode` for forward
+ * compatibility with `pg` v9 / `pg-connection-string` v3.
+ *
+ * `pg-connection-string` currently treats `sslmode=prefer|require|verify-ca` as
+ * the strict `verify-full` (validate the cert chain + hostname) but emits a
+ * deprecation warning, because the next major adopts weaker libpq semantics for
+ * those modes. Rewriting them to the explicit `verify-full` keeps today's
+ * strict TLS behavior, silences the warning, and is stable across the change.
+ * Neon / Supabase / RDS connection strings all use `sslmode=require`, so this
+ * also makes the app robust to whatever a deployer pastes into `DATABASE_URL`.
+ */
+export function resolveDatabaseUrl(
+  url: string | undefined = process.env.DATABASE_URL,
+): string | undefined {
+  if (!url) return url;
+  return url.replace(/([?&]sslmode=)(?:prefer|require|verify-ca)(?=&|$)/gi, "$1verify-full");
+}
+
+/**
  * Constructs a `pg` Pool whose every connection resolves to `DB_SCHEMA`. Use
  * this everywhere a Pool is created (app runtime, migrations, seeds, reset) so
  * the schema is configured in exactly one place.
  */
 export function createAppPool(extra: PoolConfig = {}): Pool {
   return new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: resolveDatabaseUrl(),
     // A transaction pooler rejects the `options` startup parameter, so omit it
     // when DB_SEARCH_PATH_VIA_OPTIONS is off and rely on a role-level
     // search_path instead (see SEARCH_PATH_VIA_OPTIONS above).

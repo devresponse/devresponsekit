@@ -76,4 +76,36 @@ describe("schema-config", () => {
     expect(libpqOptions(pool)).toBeUndefined();
     await pool.end();
   });
+
+  it("normalizes sslmode prefer/require/verify-ca to verify-full (pg v9 forward-compat)", async () => {
+    const { resolveDatabaseUrl } = await import("@/db/schema-config");
+    // the deprecation-warned modes become the explicit, strict verify-full...
+    expect(resolveDatabaseUrl("postgres://h/db?sslmode=require")).toBe(
+      "postgres://h/db?sslmode=verify-full",
+    );
+    expect(resolveDatabaseUrl("postgres://h/db?sslmode=prefer")).toBe(
+      "postgres://h/db?sslmode=verify-full",
+    );
+    expect(resolveDatabaseUrl("postgres://h/db?sslmode=verify-ca")).toBe(
+      "postgres://h/db?sslmode=verify-full",
+    );
+    // ...keeping surrounding params and position intact...
+    expect(resolveDatabaseUrl("postgres://h/db?sslmode=require&application_name=x")).toBe(
+      "postgres://h/db?sslmode=verify-full&application_name=x",
+    );
+    expect(resolveDatabaseUrl("postgres://h/db?application_name=x&sslmode=require")).toBe(
+      "postgres://h/db?application_name=x&sslmode=verify-full",
+    );
+    // ...and leaving everything else (incl. local no-SSL URLs) untouched.
+    expect(resolveDatabaseUrl("postgres://h/db?sslmode=verify-full")).toBe(
+      "postgres://h/db?sslmode=verify-full",
+    );
+    expect(resolveDatabaseUrl("postgres://h/db?sslmode=disable")).toBe(
+      "postgres://h/db?sslmode=disable",
+    );
+    expect(resolveDatabaseUrl("postgres://u:p@localhost:5444/db")).toBe(
+      "postgres://u:p@localhost:5444/db",
+    );
+    expect(resolveDatabaseUrl("")).toBe("");
+  });
 });

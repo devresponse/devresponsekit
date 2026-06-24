@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { getMigrations } from "better-auth/db/migration";
+import { resolveDatabaseUrl } from "@/db/schema-config";
 
 /**
  * Better Auth schema generator (B4).
@@ -28,7 +29,7 @@ async function main() {
   const outFile = path.join(__dirname, "better-auth-schema.sql");
 
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: resolveDatabaseUrl(),
     options: `-c search_path="${SNAPSHOT_SCHEMA}",public`,
   });
 

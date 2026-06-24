@@ -20,6 +20,7 @@
     "db:app:migrate": "tsx src/db/migrations/run-migrations.ts",
     "db:seed": "tsx --conditions=react-server src/db/seeds/seed-local.ts",
     "db:seed:dev": "tsx --conditions=react-server src/db/seeds/dev-init.ts",
+    "db:provision": "tsx src/db/provision.ts",
     "db:reset": "tsx src/db/reset-database.ts",
     "db:reset:reload": "tsx src/db/reset-database.ts --yes --reload",
     "db:codegen": "kysely-codegen --out-file src/db/schema/generated.ts",

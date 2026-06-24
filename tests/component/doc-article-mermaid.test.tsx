@@ -54,16 +54,22 @@ describe("DocArticle mermaid rendering", () => {
     expect(renderMock).toHaveBeenCalledTimes(1);
   });
 
-  it("sanitizes the rendered SVG before injecting it (strips scripts + handlers, keeps SVG)", async () => {
+  it("sanitizes the rendered SVG but keeps Mermaid's output, incl. foreignObject labels", async () => {
     // Mermaid renders with securityLevel "strict", but DocArticle still runs the
     // SVG through DOMPurify before innerHTML (defense in depth + the CodeQL
-    // js/xss-through-dom barrier). This proves both halves of that contract.
+    // js/xss-through-dom barrier). The sanitizer must NOT blank diagram text:
+    // Mermaid puts node/edge labels in <foreignObject> HTML, so the config has to
+    // keep that while still stripping scripts/handlers.
     renderMock.mockResolvedValueOnce({
       svg:
         '<svg data-testid="diagram">' +
         "<style>.node{fill:red}</style>" +
         '<defs><marker id="arrow"><path d="M0 0"></path></marker></defs>' +
-        '<g class="node"><rect width="10" height="10"></rect><text><tspan>label</tspan></text></g>' +
+        '<g class="node"><rect width="10" height="10"></rect>' +
+        // Mermaid renders labels as HTML inside <foreignObject> (even in strict mode).
+        '<foreignObject width="80" height="20"><div xmlns="http://www.w3.org/1999/xhtml">' +
+        '<span class="nodeLabel"><p>Browser</p></span></div></foreignObject>' +
+        "</g>" +
         "<script>globalThis.__xss = true</script>" +
         '<g onclick="globalThis.__xss = true"><path d="M1 1"></path></g>' +
         "</svg>",
@@ -80,7 +86,10 @@ describe("DocArticle mermaid rendering", () => {
     expect(mount.querySelector("style")?.textContent).toContain("fill:red");
     expect(mount.querySelector("marker")).not.toBeNull();
     expect(mount.querySelector("rect")).not.toBeNull();
-    expect(mount.querySelector("text tspan")?.textContent).toBe("label");
+    // ...including the HTML node labels Mermaid renders inside <foreignObject>
+    // (the regression that previously blanked every diagram label).
+    expect(mount.querySelector("foreignObject")).not.toBeNull();
+    expect(mount.textContent).toContain("Browser");
     // ...but the injected <script> and inline handler are stripped.
     expect(mount.querySelector("script")).toBeNull();
     expect(mount.innerHTML.toLowerCase()).not.toContain("onclick");

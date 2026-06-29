@@ -35,10 +35,12 @@ export interface UserDetailJson {
 
 export function UserDetailTabs({
   user,
+  canAssignRoles,
   canUpdateMemberships,
   canReadAudit,
 }: {
   user: UserDetailJson;
+  canAssignRoles: boolean;
   canUpdateMemberships: boolean;
   canReadAudit: boolean;
 }) {
@@ -103,7 +105,7 @@ export function UserDetailTabs({
       </TabsContent>
 
       <TabsContent value="roles" className="mt-4">
-        <UserRolesPanel userId={user.id} />
+        <UserRolesPanel userId={user.id} canAssign={canAssignRoles} />
       </TabsContent>
       <TabsContent value="memberships" className="mt-4">
         <UserMembershipsPanel userId={user.id} canUpdate={canUpdateMemberships} />

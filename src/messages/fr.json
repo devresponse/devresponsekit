@@ -487,6 +487,17 @@
           "key": "Clé",
           "organization": "Organisation",
           "assigned": "Attribué"
+        },
+        "assignButton": "Attribuer un rôle",
+        "removeButton": "Retirer",
+        "removeConfirm": "Retirer cette attribution de rôle ?",
+        "removeError": "Impossible de retirer le rôle.",
+        "assignError": "Impossible d'attribuer le rôle.",
+        "dialog": {
+          "title": "Attribuer un rôle",
+          "description": "Choisissez un rôle à accorder à cet utilisateur — l'organisation provient du rôle.",
+          "cancel": "Annuler",
+          "submit": "Attribuer"
         }
       },
       "bulk": {
@@ -1039,6 +1050,14 @@
         "cancel": "Annuler",
         "saveError": "L'enregistrement du modèle a échoué."
       }
+    },
+    "rolePicker": {
+      "label": "Rôle",
+      "placeholder": "Sélectionner un rôle…",
+      "searchPlaceholder": "Rechercher des rôles…",
+      "noResults": "Aucun rôle trouvé.",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger les rôles."
     }
   },
   "errors": {

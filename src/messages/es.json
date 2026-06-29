@@ -487,6 +487,17 @@
           "key": "Clave",
           "organization": "Organización",
           "assigned": "Asignado"
+        },
+        "assignButton": "Asignar rol",
+        "removeButton": "Quitar",
+        "removeConfirm": "¿Quitar esta asignación de rol?",
+        "removeError": "No se pudo quitar el rol.",
+        "assignError": "No se pudo asignar el rol.",
+        "dialog": {
+          "title": "Asignar un rol",
+          "description": "Elige un rol para otorgar a este usuario: la organización proviene del rol.",
+          "cancel": "Cancelar",
+          "submit": "Asignar"
         }
       },
       "bulk": {
@@ -1039,6 +1050,14 @@
         "cancel": "Cancelar",
         "saveError": "No se pudo guardar la plantilla."
       }
+    },
+    "rolePicker": {
+      "label": "Rol",
+      "placeholder": "Selecciona un rol…",
+      "searchPlaceholder": "Buscar roles…",
+      "noResults": "No se encontraron roles.",
+      "loading": "Cargando…",
+      "loadError": "No se pudieron cargar los roles."
     }
   },
   "errors": {

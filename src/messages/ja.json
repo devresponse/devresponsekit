@@ -512,6 +512,17 @@
           "key": "キー",
           "organization": "組織",
           "assigned": "割り当て日時"
+        },
+        "assignButton": "ロールを割り当て",
+        "removeButton": "削除",
+        "removeConfirm": "このロール割り当てを削除しますか？",
+        "removeError": "ロールを削除できませんでした。",
+        "assignError": "ロールを割り当てできませんでした。",
+        "dialog": {
+          "title": "ロールを割り当て",
+          "description": "このユーザーに付与するロールを選択します。組織はロールから取得されます。",
+          "cancel": "キャンセル",
+          "submit": "割り当て"
         }
       }
     },
@@ -1039,6 +1050,14 @@
         "cancel": "キャンセル",
         "saveError": "テンプレートの保存に失敗しました。"
       }
+    },
+    "rolePicker": {
+      "label": "ロール",
+      "placeholder": "ロールを選択…",
+      "searchPlaceholder": "ロールを検索…",
+      "noResults": "ロールが見つかりません。",
+      "loading": "読み込み中…",
+      "loadError": "ロールを読み込めませんでした。"
     }
   },
   "errors": {

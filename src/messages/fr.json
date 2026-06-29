@@ -392,7 +392,8 @@
         "roles": "Rôles",
         "memberships": "Adhésions",
         "sessions": "Sessions",
-        "audit": "Audit"
+        "audit": "Audit",
+        "groups": "Groupes"
       },
       "detail": {
         "notFound": "Utilisateur introuvable.",
@@ -524,6 +525,22 @@
         "selfError": "Vous ne pouvez pas usurper votre propre identité.",
         "bannerLabel": "Vous usurpez l’identité de {email}.",
         "stopErrorToast": "Impossible d’arrêter l’usurpation. Réessayez."
+      },
+      "groups": {
+        "title": "Appartenances aux groupes",
+        "empty": "Cet utilisateur n'appartient à aucun groupe.",
+        "addButton": "Ajouter à un groupe",
+        "removeButton": "Retirer",
+        "removeConfirm": "Retirer cet utilisateur du groupe ?",
+        "removeError": "Impossible de retirer l'appartenance au groupe.",
+        "addError": "Impossible d'ajouter l'utilisateur au groupe.",
+        "loadError": "Impossible de charger les groupes.",
+        "dialog": {
+          "title": "Ajouter à un groupe",
+          "description": "Choisissez un groupe auquel ajouter cet utilisateur.",
+          "cancel": "Annuler",
+          "submit": "Ajouter"
+        }
       }
     },
     "grid": {
@@ -1058,6 +1075,14 @@
       "noResults": "Aucun rôle trouvé.",
       "loading": "Chargement…",
       "loadError": "Impossible de charger les rôles."
+    },
+    "groupPicker": {
+      "label": "Groupe",
+      "placeholder": "Sélectionner un groupe…",
+      "searchPlaceholder": "Rechercher des groupes…",
+      "noResults": "Aucun groupe trouvé.",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger les groupes."
     }
   },
   "errors": {

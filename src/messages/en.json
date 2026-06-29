@@ -392,7 +392,8 @@
         "roles": "Roles",
         "memberships": "Memberships",
         "sessions": "Sessions",
-        "audit": "Audit"
+        "audit": "Audit",
+        "groups": "Groups"
       },
       "detail": {
         "notFound": "User not found.",
@@ -523,6 +524,22 @@
           "description": "Pick a role to grant this user — the organization comes from the role.",
           "cancel": "Cancel",
           "submit": "Assign"
+        }
+      },
+      "groups": {
+        "title": "Group memberships",
+        "empty": "This user belongs to no groups.",
+        "addButton": "Add to group",
+        "removeButton": "Remove",
+        "removeConfirm": "Remove this user from the group?",
+        "removeError": "Couldn't remove the group membership.",
+        "addError": "Couldn't add the user to the group.",
+        "loadError": "Couldn't load groups.",
+        "dialog": {
+          "title": "Add to a group",
+          "description": "Pick a group to add this user to.",
+          "cancel": "Cancel",
+          "submit": "Add"
         }
       }
     },
@@ -1058,6 +1075,14 @@
       "noResults": "No roles found.",
       "loading": "Loading…",
       "loadError": "Couldn't load roles."
+    },
+    "groupPicker": {
+      "label": "Group",
+      "placeholder": "Select a group…",
+      "searchPlaceholder": "Search groups…",
+      "noResults": "No groups found.",
+      "loading": "Loading…",
+      "loadError": "Couldn't load groups."
     }
   },
   "errors": {

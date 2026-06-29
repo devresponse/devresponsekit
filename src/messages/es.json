@@ -392,7 +392,8 @@
         "roles": "Roles",
         "memberships": "Miembros",
         "sessions": "Sesiones",
-        "audit": "Auditoría"
+        "audit": "Auditoría",
+        "groups": "Grupos"
       },
       "detail": {
         "notFound": "Usuario no encontrado.",
@@ -524,6 +525,22 @@
         "selfError": "No puede suplantarse a sí mismo.",
         "bannerLabel": "Está suplantando a {email}.",
         "stopErrorToast": "No se pudo detener la suplantación. Inténtalo de nuevo."
+      },
+      "groups": {
+        "title": "Membresías de grupo",
+        "empty": "Este usuario no pertenece a ningún grupo.",
+        "addButton": "Añadir a grupo",
+        "removeButton": "Quitar",
+        "removeConfirm": "¿Quitar a este usuario del grupo?",
+        "removeError": "No se pudo quitar la membresía del grupo.",
+        "addError": "No se pudo añadir el usuario al grupo.",
+        "loadError": "No se pudieron cargar los grupos.",
+        "dialog": {
+          "title": "Añadir a un grupo",
+          "description": "Elige un grupo al que añadir este usuario.",
+          "cancel": "Cancelar",
+          "submit": "Añadir"
+        }
       }
     },
     "grid": {
@@ -1058,6 +1075,14 @@
       "noResults": "No se encontraron roles.",
       "loading": "Cargando…",
       "loadError": "No se pudieron cargar los roles."
+    },
+    "groupPicker": {
+      "label": "Grupo",
+      "placeholder": "Selecciona un grupo…",
+      "searchPlaceholder": "Buscar grupos…",
+      "noResults": "No se encontraron grupos.",
+      "loading": "Cargando…",
+      "loadError": "No se pudieron cargar los grupos."
     }
   },
   "errors": {

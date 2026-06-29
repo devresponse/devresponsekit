@@ -73,18 +73,24 @@ describe("loadApplicationsMenu", () => {
 
 describe("loadShellMenu", () => {
   it("filters items by the caller's permissions and prefixes hrefs with the locale", async () => {
-    const res = await mod.loadShellMenu(ACTIVE, "primary-sidebar", "fr");
+    // shell.view + admin.audit.read granted; admin.users.read NOT granted.
+    const res = await mod.loadShellMenu(
+      { ...ACTIVE, permissions: ["shell.view", "admin.audit.read"] },
+      "primary-sidebar",
+      "fr",
+    );
     expect(res.menuId).toBe("shell-menu:primary-sidebar");
     expect(res.locale).toBe("fr");
-    // shell.view + audit.view granted but admin.users.manage NOT granted
     const ids = res.items.map((i) => i.id);
     expect(ids).toContain("dashboard");
     expect(ids).toContain("workspace");
+    // Audit link gates on admin.audit.read (granted) → visible.
     expect(ids).toContain("admin-audit");
+    // Users link gates on admin.users.read (NOT granted) → hidden.
     expect(ids).not.toContain("admin-users");
-    // No admin.* permission granted, so the Administrator launcher
-    // entry must not be visible.
-    expect(ids).not.toContain("administrator");
+    // admin.audit.read IS an admin.* catalog permission, so the Administrator
+    // launcher (anyOf ANY_ADMIN_PERMISSION) correctly surfaces.
+    expect(ids).toContain("administrator");
     // hrefs are prefixed with the locale
     expect(res.items[0]!.href.startsWith("/fr/")).toBe(true);
     // every default shell item serves an icon NAME (resolved client-side
@@ -93,6 +99,55 @@ describe("loadShellMenu", () => {
       expect(item.icon, `item "${item.id}" is missing an icon name`).toBeTruthy();
     }
     expect(res.items.find((i) => i.id === "dashboard")!.icon).toBe("layout-dashboard");
+  });
+
+  it("shows no admin items to a shell-only (non-admin) caller", async () => {
+    const res = await mod.loadShellMenu(
+      { ...ACTIVE, permissions: ["shell.view"] },
+      "primary-sidebar",
+      "en",
+    );
+    const ids = res.items.map((i) => i.id);
+    expect(ids).toContain("dashboard");
+    expect(ids).not.toContain("admin-users");
+    expect(ids).not.toContain("admin-audit");
+    expect(ids).not.toContain("administrator");
+  });
+
+  it("gates the Users link on admin.users.read (not admin.users.manage) so the link matches the page guard", async () => {
+    // Regression (group-conferred admin role → 404): a principal that can
+    // MANAGE but not READ users must NOT see the Users link, because the page
+    // guard requires admin.users.read and would otherwise notFound().
+    const manageOnly = await mod.loadShellMenu(
+      { ...ACTIVE, permissions: ["shell.view", "admin.users.manage"] },
+      "primary-sidebar",
+      "en",
+    );
+    expect(manageOnly.items.map((i) => i.id)).not.toContain("admin-users");
+
+    const canRead = await mod.loadShellMenu(
+      { ...ACTIVE, permissions: ["shell.view", "admin.users.read"] },
+      "primary-sidebar",
+      "en",
+    );
+    expect(canRead.items.map((i) => i.id)).toContain("admin-users");
+  });
+
+  it("gates the Audit link on admin.audit.read (not the phantom audit.view)", async () => {
+    // Regression: audit.view is a legacy/base key the audit page never checks.
+    const phantomOnly = await mod.loadShellMenu(
+      { ...ACTIVE, permissions: ["shell.view", "audit.view"] },
+      "primary-sidebar",
+      "en",
+    );
+    expect(phantomOnly.items.map((i) => i.id)).not.toContain("admin-audit");
+
+    const canRead = await mod.loadShellMenu(
+      { ...ACTIVE, permissions: ["shell.view", "admin.audit.read"] },
+      "primary-sidebar",
+      "en",
+    );
+    expect(canRead.items.map((i) => i.id)).toContain("admin-audit");
   });
 
   it("returns no items when caller has no permissions", async () => {

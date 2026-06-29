@@ -73,7 +73,15 @@ async function main() {
 
     const roles: Array<[string, string, string[]]> = [
       ["member", "Member", ["shell.view"]],
-      ["admin", "Administrator", ["shell.view", "admin.users.manage", "audit.view"]],
+      // Canonical catalog keys: `admin.users.read` (view) + `admin.users.manage`
+      // (act) for the users area, `admin.audit.read` for the audit log. The old
+      // grant linked to those pages but couldn't open them (page guards require
+      // the `*.read` keys; `audit.view` is a phantom the pages never check).
+      [
+        "admin",
+        "Administrator",
+        ["shell.view", "admin.users.read", "admin.users.manage", "admin.audit.read"],
+      ],
       [
         "admin.platform",
         "Platform Administrator",

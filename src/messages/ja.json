@@ -292,6 +292,18 @@
           "email": "メールアドレス",
           "name": "名前",
           "joinedAt": "参加日時"
+        },
+        "addButton": "メンバーを追加",
+        "removeButton": "削除",
+        "removeConfirm": "このメンバーをグループから削除しますか？",
+        "removeError": "メンバーを削除できませんでした。",
+        "addError": "メンバーを追加できませんでした。",
+        "notEligible": "そのユーザーはこのグループの組織のアクティブなメンバーではありません。",
+        "dialog": {
+          "title": "メンバーを追加",
+          "description": "このグループに追加するユーザーを選択します。",
+          "cancel": "キャンセル",
+          "submit": "追加"
         }
       }
     },
@@ -1058,6 +1070,14 @@
       "noResults": "ロールが見つかりません。",
       "loading": "読み込み中…",
       "loadError": "ロールを読み込めませんでした。"
+    },
+    "userPicker": {
+      "label": "ユーザー",
+      "placeholder": "ユーザーを選択…",
+      "searchPlaceholder": "ユーザーを検索…",
+      "noResults": "ユーザーが見つかりません。",
+      "loading": "読み込み中…",
+      "loadError": "ユーザーを読み込めませんでした。"
     }
   },
   "errors": {

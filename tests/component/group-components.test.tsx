@@ -49,6 +49,7 @@ import { NewGroupForm } from "@/app/[locale]/(secure)/app/administrator/groups/n
 import { GroupSettingsForm } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-settings-form";
 import { GroupRolesEditor } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-roles-editor";
 import { GroupMembersGrid } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-members-grid";
+import { UserPicker } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_user-picker";
 import { GroupDetailTabs } from "@/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-detail-tabs";
 
 const fetchMock = vi.fn();
@@ -460,5 +461,117 @@ describe("GroupDetailTabs", () => {
     await user.click(screen.getByRole("tab", { name: "Settings" }));
     const keyField = (await screen.findByDisplayValue("engineering")) as HTMLInputElement;
     expect(keyField).toHaveAttribute("readonly");
+  });
+});
+
+describe("GroupMembersGrid (member management)", () => {
+  const member = {
+    app_user_id: "u1",
+    primary_email: "ada@example.com",
+    display_name: "Ada",
+    status: "active",
+    created_at: "2026-01-01T00:00:00Z",
+  };
+  const candidate = { id: "u2", primary_email: "bob@example.com", display_name: "Bob" };
+
+  function routeMembers(addedCount = 1) {
+    fetchMock.mockImplementation((url: string, init?: { method?: string }) => {
+      const u = String(url);
+      if (init?.method === "POST") return Promise.resolve(jsonOk({ ok: true, added: addedCount }));
+      if (init?.method === "DELETE") return Promise.resolve(jsonOk({ ok: true, removed: 1 }));
+      // User picker search — must be checked before the /members list route.
+      if (u.includes("/api/administrator/users"))
+        return Promise.resolve(jsonOk({ items: [candidate] }));
+      if (u.includes("/members")) return Promise.resolve(jsonOk({ items: [member], total: 1 }));
+      return Promise.resolve(jsonOk({ items: [], total: 0 }));
+    });
+  }
+
+  function postBody() {
+    const call = fetchMock.mock.calls.find(
+      (c) => (c[1] as { method?: string } | undefined)?.method === "POST",
+    );
+    return { url: call?.[0], body: JSON.parse((call?.[1] as { body: string }).body) };
+  }
+
+  it("shows no add/remove controls without admin.groups.assign", async () => {
+    routeMembers();
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign={false} />);
+    await screen.findByRole("link", { name: "ada@example.com" });
+    expect(screen.queryByRole("button", { name: "Add member" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+  });
+
+  it("adds a member, posting { appUserIds: [chosen] }", async () => {
+    routeMembers(1);
+    const user = userEvent.setup();
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign />);
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }));
+    await screen.findByText("Add a member"); // dialog open
+    await user.click(await screen.findByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: /bob@example.com/ }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(postBody().url).toContain("/api/administrator/groups/g1/members"));
+    expect(postBody().body).toEqual({ appUserIds: ["u2"] });
+  });
+
+  it("surfaces the not-eligible message when the server adds nobody", async () => {
+    routeMembers(0); // server dropped the pick (not an active org member)
+    const user = userEvent.setup();
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign />);
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }));
+    await screen.findByText("Add a member");
+    await user.click(await screen.findByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: /bob@example.com/ }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText(/isn't an active member/)).toBeInTheDocument();
+  });
+
+  it("removes a member via DELETE after the confirm resolves true", async () => {
+    routeMembers();
+    confirmMock.mockResolvedValue(true);
+    const user = userEvent.setup();
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign />);
+
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      const del = fetchMock.mock.calls.find(
+        (c) => (c[1] as { method?: string } | undefined)?.method === "DELETE",
+      );
+      expect(del?.[0]).toContain("/api/administrator/groups/g1/members");
+      expect(JSON.parse((del?.[1] as { body: string }).body)).toEqual({ appUserIds: ["u1"] });
+    });
+  });
+});
+
+describe("UserPicker", () => {
+  const ADA = { id: "u1", primary_email: "ada@example.com", display_name: "Ada" };
+
+  it("searches users server-side and reports the chosen user", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      expect(String(url)).toContain("/api/administrator/users");
+      return Promise.resolve(jsonOk({ items: [ADA] }));
+    });
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const { container } = renderWithIntl(<UserPicker value={null} onChange={onChange} />);
+
+    const trigger = container.querySelector("#user-picker")!;
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: /ada@example.com/ }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: "u1" }));
+  });
+
+  it("surfaces an error when the initial user load fails", async () => {
+    fetchMock.mockResolvedValue(jsonOk({}, 500));
+    renderWithIntl(<UserPicker value={null} onChange={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load users.");
   });
 });

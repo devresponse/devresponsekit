@@ -292,6 +292,18 @@
           "email": "E-mail",
           "name": "Nom",
           "joinedAt": "Rejoint"
+        },
+        "addButton": "Ajouter un membre",
+        "removeButton": "Retirer",
+        "removeConfirm": "Retirer ce membre du groupe ?",
+        "removeError": "Impossible de retirer le membre.",
+        "addError": "Impossible d'ajouter le membre.",
+        "notEligible": "Cet utilisateur n'est pas un membre actif de l'organisation de ce groupe.",
+        "dialog": {
+          "title": "Ajouter un membre",
+          "description": "Choisissez un utilisateur à ajouter à ce groupe.",
+          "cancel": "Annuler",
+          "submit": "Ajouter"
         }
       }
     },
@@ -1058,6 +1070,14 @@
       "noResults": "Aucun rôle trouvé.",
       "loading": "Chargement…",
       "loadError": "Impossible de charger les rôles."
+    },
+    "userPicker": {
+      "label": "Utilisateur",
+      "placeholder": "Sélectionner un utilisateur…",
+      "searchPlaceholder": "Rechercher des utilisateurs…",
+      "noResults": "Aucun utilisateur trouvé.",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger les utilisateurs."
     }
   },
   "errors": {

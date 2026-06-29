@@ -41,7 +41,7 @@ export function GroupDetailTabs({
       </TabsContent>
 
       <TabsContent value="members" className="mt-4">
-        <GroupMembersGrid groupId={group.id} />
+        <GroupMembersGrid groupId={group.id} canAssign={canAssign} />
       </TabsContent>
 
       <TabsContent value="settings" className="mt-4">

@@ -404,7 +404,8 @@
         "roles": "角色",
         "memberships": "成员关系",
         "sessions": "会话",
-        "audit": "审计"
+        "audit": "审计",
+        "groups": "群组"
       },
       "detail": {
         "notFound": "未找到用户。",
@@ -535,6 +536,22 @@
           "description": "选择要授予该用户的角色——组织取自该角色。",
           "cancel": "取消",
           "submit": "分配"
+        }
+      },
+      "groups": {
+        "title": "群组成员资格",
+        "empty": "该用户不属于任何群组。",
+        "addButton": "添加到群组",
+        "removeButton": "移除",
+        "removeConfirm": "将该用户从群组中移除？",
+        "removeError": "无法移除群组成员资格。",
+        "addError": "无法将用户添加到群组。",
+        "loadError": "无法加载群组。",
+        "dialog": {
+          "title": "添加到群组",
+          "description": "选择要将该用户添加到的群组。",
+          "cancel": "取消",
+          "submit": "添加"
         }
       }
     },
@@ -1078,6 +1095,14 @@
       "noResults": "未找到用户。",
       "loading": "加载中…",
       "loadError": "无法加载用户。"
+    },
+    "groupPicker": {
+      "label": "群组",
+      "placeholder": "选择群组…",
+      "searchPlaceholder": "搜索群组…",
+      "noResults": "未找到群组。",
+      "loading": "加载中…",
+      "loadError": "无法加载群组。"
     }
   },
   "errors": {

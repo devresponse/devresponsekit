@@ -512,6 +512,17 @@
           "key": "Key",
           "organization": "Organization",
           "assigned": "Assigned"
+        },
+        "assignButton": "Assign role",
+        "removeButton": "Remove",
+        "removeConfirm": "Remove this role assignment?",
+        "removeError": "Couldn't remove the role.",
+        "assignError": "Couldn't assign the role.",
+        "dialog": {
+          "title": "Assign a role",
+          "description": "Pick a role to grant this user — the organization comes from the role.",
+          "cancel": "Cancel",
+          "submit": "Assign"
         }
       }
     },
@@ -1039,6 +1050,14 @@
         "cancel": "Cancel",
         "saveError": "Saving the template failed."
       }
+    },
+    "rolePicker": {
+      "label": "Role",
+      "placeholder": "Select a role…",
+      "searchPlaceholder": "Search roles…",
+      "noResults": "No roles found.",
+      "loading": "Loading…",
+      "loadError": "Couldn't load roles."
     }
   },
   "errors": {

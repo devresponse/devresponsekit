@@ -72,6 +72,7 @@ export default async function AdministratorUserDetailPage({
 
   const t = await getTranslations({ locale, namespace: "administrator.users" });
 
+  const canAssignRoles = guard.access.permissions.includes("admin.roles.assign");
   const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
   const canImpersonate = guard.access.permissions.includes("admin.users.impersonate");
   const canReadAudit = guard.access.permissions.includes("admin.audit.read");
@@ -116,6 +117,7 @@ export default async function AdministratorUserDetailPage({
 
       <UserDetailTabs
         user={userJson}
+        canAssignRoles={canAssignRoles}
         canUpdateMemberships={canUpdateMemberships}
         canReadAudit={canReadAudit}
       />

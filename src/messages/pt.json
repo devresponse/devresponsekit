@@ -512,6 +512,17 @@
           "key": "Chave",
           "organization": "Organização",
           "assigned": "Atribuída"
+        },
+        "assignButton": "Atribuir função",
+        "removeButton": "Remover",
+        "removeConfirm": "Remover esta atribuição de função?",
+        "removeError": "Não foi possível remover a função.",
+        "assignError": "Não foi possível atribuir a função.",
+        "dialog": {
+          "title": "Atribuir uma função",
+          "description": "Escolha uma função para conceder a este usuário — a organização vem da função.",
+          "cancel": "Cancelar",
+          "submit": "Atribuir"
         }
       }
     },
@@ -1039,6 +1050,14 @@
         "cancel": "Cancelar",
         "saveError": "A gravação do modelo falhou."
       }
+    },
+    "rolePicker": {
+      "label": "Função",
+      "placeholder": "Selecione uma função…",
+      "searchPlaceholder": "Pesquisar funções…",
+      "noResults": "Nenhuma função encontrada.",
+      "loading": "Carregando…",
+      "loadError": "Não foi possível carregar as funções."
     }
   },
   "errors": {

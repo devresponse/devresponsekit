@@ -512,6 +512,17 @@
           "key": "键",
           "organization": "组织",
           "assigned": "分配时间"
+        },
+        "assignButton": "分配角色",
+        "removeButton": "移除",
+        "removeConfirm": "移除此角色分配？",
+        "removeError": "无法移除角色。",
+        "assignError": "无法分配角色。",
+        "dialog": {
+          "title": "分配角色",
+          "description": "选择要授予该用户的角色——组织取自该角色。",
+          "cancel": "取消",
+          "submit": "分配"
         }
       }
     },
@@ -1039,6 +1050,14 @@
         "cancel": "取消",
         "saveError": "保存模板失败。"
       }
+    },
+    "rolePicker": {
+      "label": "角色",
+      "placeholder": "选择角色…",
+      "searchPlaceholder": "搜索角色…",
+      "noResults": "未找到角色。",
+      "loading": "加载中…",
+      "loadError": "无法加载角色。"
     }
   },
   "errors": {

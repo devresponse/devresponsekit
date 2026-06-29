@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { UserSessionsPanel } from "./_user-sessions-panel";
 import { UserMembershipsPanel } from "./_user-memberships-panel";
 import { UserRolesPanel } from "./_user-roles-panel";
+import { UserGroupsPanel } from "./_user-groups-panel";
 import { UserAuditPanel } from "./_user-audit-panel";
 
 /**
@@ -36,11 +37,13 @@ export interface UserDetailJson {
 export function UserDetailTabs({
   user,
   canAssignRoles,
+  canManageGroups,
   canUpdateMemberships,
   canReadAudit,
 }: {
   user: UserDetailJson;
   canAssignRoles: boolean;
+  canManageGroups: boolean;
   canUpdateMemberships: boolean;
   canReadAudit: boolean;
 }) {
@@ -67,6 +70,7 @@ export function UserDetailTabs({
       <TabsList>
         <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
         <TabsTrigger value="roles">{t("tabs.roles")}</TabsTrigger>
+        <TabsTrigger value="groups">{t("tabs.groups")}</TabsTrigger>
         <TabsTrigger value="memberships">{t("tabs.memberships")}</TabsTrigger>
         <TabsTrigger value="sessions">{t("tabs.sessions")}</TabsTrigger>
         {canReadAudit ? <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger> : null}
@@ -106,6 +110,9 @@ export function UserDetailTabs({
 
       <TabsContent value="roles" className="mt-4">
         <UserRolesPanel userId={user.id} canAssign={canAssignRoles} />
+      </TabsContent>
+      <TabsContent value="groups" className="mt-4">
+        <UserGroupsPanel userId={user.id} canManage={canManageGroups} />
       </TabsContent>
       <TabsContent value="memberships" className="mt-4">
         <UserMembershipsPanel userId={user.id} canUpdate={canUpdateMemberships} />

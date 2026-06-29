@@ -392,7 +392,8 @@
         "roles": "Funções",
         "memberships": "Adesões",
         "sessions": "Sessões",
-        "audit": "Auditoria"
+        "audit": "Auditoria",
+        "groups": "Grupos"
       },
       "detail": {
         "notFound": "Utilizador não encontrado.",
@@ -523,6 +524,22 @@
           "description": "Escolha uma função para conceder a este usuário — a organização vem da função.",
           "cancel": "Cancelar",
           "submit": "Atribuir"
+        }
+      },
+      "groups": {
+        "title": "Associações de grupo",
+        "empty": "Este usuário não pertence a nenhum grupo.",
+        "addButton": "Adicionar ao grupo",
+        "removeButton": "Remover",
+        "removeConfirm": "Remover este usuário do grupo?",
+        "removeError": "Não foi possível remover a associação ao grupo.",
+        "addError": "Não foi possível adicionar o usuário ao grupo.",
+        "loadError": "Não foi possível carregar os grupos.",
+        "dialog": {
+          "title": "Adicionar a um grupo",
+          "description": "Escolha um grupo ao qual adicionar este usuário.",
+          "cancel": "Cancelar",
+          "submit": "Adicionar"
         }
       }
     },
@@ -1058,6 +1075,14 @@
       "noResults": "Nenhuma função encontrada.",
       "loading": "Carregando…",
       "loadError": "Não foi possível carregar as funções."
+    },
+    "groupPicker": {
+      "label": "Grupo",
+      "placeholder": "Selecione um grupo…",
+      "searchPlaceholder": "Pesquisar grupos…",
+      "noResults": "Nenhum grupo encontrado.",
+      "loading": "Carregando…",
+      "loadError": "Não foi possível carregar os grupos."
     }
   },
   "errors": {

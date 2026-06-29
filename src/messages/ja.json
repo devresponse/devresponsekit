@@ -392,7 +392,8 @@
         "roles": "ロール",
         "memberships": "メンバーシップ",
         "sessions": "セッション",
-        "audit": "監査"
+        "audit": "監査",
+        "groups": "グループ"
       },
       "detail": {
         "notFound": "ユーザーが見つかりません。",
@@ -523,6 +524,22 @@
           "description": "このユーザーに付与するロールを選択します。組織はロールから取得されます。",
           "cancel": "キャンセル",
           "submit": "割り当て"
+        }
+      },
+      "groups": {
+        "title": "グループメンバーシップ",
+        "empty": "このユーザーはどのグループにも属していません。",
+        "addButton": "グループに追加",
+        "removeButton": "削除",
+        "removeConfirm": "このユーザーをグループから削除しますか？",
+        "removeError": "グループメンバーシップを削除できませんでした。",
+        "addError": "ユーザーをグループに追加できませんでした。",
+        "loadError": "グループを読み込めませんでした。",
+        "dialog": {
+          "title": "グループに追加",
+          "description": "このユーザーを追加するグループを選択します。",
+          "cancel": "キャンセル",
+          "submit": "追加"
         }
       }
     },
@@ -1058,6 +1075,14 @@
       "noResults": "ロールが見つかりません。",
       "loading": "読み込み中…",
       "loadError": "ロールを読み込めませんでした。"
+    },
+    "groupPicker": {
+      "label": "グループ",
+      "placeholder": "グループを選択…",
+      "searchPlaceholder": "グループを検索…",
+      "noResults": "グループが見つかりません。",
+      "loading": "読み込み中…",
+      "loadError": "グループを読み込めませんでした。"
     }
   },
   "errors": {

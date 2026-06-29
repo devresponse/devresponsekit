@@ -292,6 +292,18 @@
           "email": "Email",
           "name": "Name",
           "joinedAt": "Joined"
+        },
+        "addButton": "Add member",
+        "removeButton": "Remove",
+        "removeConfirm": "Remove this member from the group?",
+        "removeError": "Couldn't remove the member.",
+        "addError": "Couldn't add the member.",
+        "notEligible": "That user isn't an active member of this group's organization.",
+        "dialog": {
+          "title": "Add a member",
+          "description": "Pick a user to add to this group.",
+          "cancel": "Cancel",
+          "submit": "Add"
         }
       }
     },
@@ -1058,6 +1070,14 @@
       "noResults": "No roles found.",
       "loading": "Loading…",
       "loadError": "Couldn't load roles."
+    },
+    "userPicker": {
+      "label": "User",
+      "placeholder": "Select a user…",
+      "searchPlaceholder": "Search users…",
+      "noResults": "No users found.",
+      "loading": "Loading…",
+      "loadError": "Couldn't load users."
     }
   },
   "errors": {

@@ -292,6 +292,18 @@
           "email": "E-mail",
           "name": "Nome",
           "joinedAt": "Aderiu"
+        },
+        "addButton": "Adicionar membro",
+        "removeButton": "Remover",
+        "removeConfirm": "Remover este membro do grupo?",
+        "removeError": "Não foi possível remover o membro.",
+        "addError": "Não foi possível adicionar o membro.",
+        "notEligible": "Esse usuário não é um membro ativo da organização deste grupo.",
+        "dialog": {
+          "title": "Adicionar um membro",
+          "description": "Escolha um usuário para adicionar a este grupo.",
+          "cancel": "Cancelar",
+          "submit": "Adicionar"
         }
       }
     },
@@ -1058,6 +1070,14 @@
       "noResults": "Nenhuma função encontrada.",
       "loading": "Carregando…",
       "loadError": "Não foi possível carregar as funções."
+    },
+    "userPicker": {
+      "label": "Usuário",
+      "placeholder": "Selecione um usuário…",
+      "searchPlaceholder": "Pesquisar usuários…",
+      "noResults": "Nenhum usuário encontrado.",
+      "loading": "Carregando…",
+      "loadError": "Não foi possível carregar os usuários."
     }
   },
   "errors": {

@@ -292,6 +292,18 @@
           "email": "电子邮箱",
           "name": "名称",
           "joinedAt": "加入时间"
+        },
+        "addButton": "添加成员",
+        "removeButton": "移除",
+        "removeConfirm": "将该成员从群组中移除？",
+        "removeError": "无法移除成员。",
+        "addError": "无法添加成员。",
+        "notEligible": "该用户不是此群组所属组织的活跃成员。",
+        "dialog": {
+          "title": "添加成员",
+          "description": "选择要添加到此群组的用户。",
+          "cancel": "取消",
+          "submit": "添加"
         }
       }
     },
@@ -1058,6 +1070,14 @@
       "noResults": "未找到角色。",
       "loading": "加载中…",
       "loadError": "无法加载角色。"
+    },
+    "userPicker": {
+      "label": "用户",
+      "placeholder": "选择用户…",
+      "searchPlaceholder": "搜索用户…",
+      "noResults": "未找到用户。",
+      "loading": "加载中…",
+      "loadError": "无法加载用户。"
     }
   },
   "errors": {

@@ -243,14 +243,21 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
     labelKey: "users",
     href: "/app/administrator/users",
     icon: "users",
-    requiredPermissions: ["admin.users.manage"],
+    // MUST match the destination page guard (admin/users/page.tsx →
+    // `admin.users.read`) and the administrator sidebar. Gating on a
+    // DIFFERENT key (e.g. `admin.users.manage`) surfaces a link the page then
+    // 404s — a role that can only *manage* but not *read* can't open the list.
+    requiredPermissions: ["admin.users.read"],
   },
   {
     id: "admin-audit",
     labelKey: "audit",
     href: "/app/administrator/audit",
     icon: "scroll-text",
-    requiredPermissions: ["audit.view"],
+    // MUST match the audit page guard (`admin.audit.read`). `audit.view` is a
+    // legacy/base key the page never checks, so gating on it produced a
+    // dead link for everyone except holders of that phantom grant.
+    requiredPermissions: ["admin.audit.read"],
   },
 ];
 

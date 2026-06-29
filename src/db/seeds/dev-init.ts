@@ -241,7 +241,12 @@ const ROLE_DEFS: ReadonlyArray<{ key: string; name: string; permissions: readonl
   {
     key: "admin",
     name: "Administrator",
-    permissions: ["shell.view", "admin.users.manage", "audit.view"],
+    // Canonical catalog keys: `admin.users.read` to VIEW the users area (the
+    // page + sidebar require it) and `admin.users.manage` to act on users;
+    // `admin.audit.read` to view the audit log. The old grant
+    // (`admin.users.manage` + the phantom `audit.view`) let the role link to
+    // those pages but never open them.
+    permissions: ["shell.view", "admin.users.read", "admin.users.manage", "admin.audit.read"],
   },
   {
     key: "admin.platform",

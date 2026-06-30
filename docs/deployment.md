@@ -1,191 +1,133 @@
 # Deployment
 
-_Audience: DevOps and release engineers. How the app builds, what it produces, how it ships, and how to verify a release._
+_Audience: DevOps and release engineers. How this repo ships to production, the one-time database bootstrap, and how to verify a release._
+
+This repo deploys to **Vercel** with a **Neon** serverless Postgres database via a **GitHub Actions** pipeline. For the full environment-variable catalog see [Configuration](./configuration.md); for the self-host/container path see [Docker](./docker.md).
 
 ---
 
-## 1. How the app is built
+## 1. How this repo deploys
 
-The app is a standard Next.js 16 build:
+The pipeline is **GitHub-Actions-driven and migrate-first** — it does **not** use Vercel's native "build on git push" integration. [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs on every push to `main` (or manual `workflow_dispatch`), gated behind a `production` GitHub Environment, and does, in order:
+
+1. `pnpm db:app:migrate` against the **direct (non-pooled)** Neon endpoint (`PRODUCTION_DIRECT_DATABASE_URL`).
+2. `vercel pull` → `vercel build --prod` → `vercel deploy --prebuilt --prod` — builds locally in CI and promotes the prebuilt output.
+
+The point of this shape is the **migrate-first contract**: the new build goes live only **after** migrations succeed, so the currently-live build always sees a schema it understands. If step 1 fails, nothing is promoted and production keeps running the previous deployment. This relies on migrations being additive/idempotent (see §5).
+
+**Two environment stores.** They are separate and serve different phases:
+
+| Store | Holds | Read by |
+| --- | --- | --- |
+| **GitHub Actions secrets** (the `production` environment) | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `PRODUCTION_DIRECT_DATABASE_URL` (optional var `DB_SCHEMA`) | the deploy pipeline |
+| **Vercel env** (Project → Settings → Environment Variables → Production) | runtime + build vars (`DATABASE_URL`, auth secrets, feature flags, `NEXT_PUBLIC_*`, …) | `vercel build` and the deployed functions at runtime |
+
+> **Do NOT also enable Vercel's native Git auto-deploy.** Connecting the repo for Vercel to build on push would **double-deploy and skip the migration step**. Leave the project unconnected to Git, or disable production auto-builds (Vercel → Project → Settings → Git) so this workflow is the sole path to production. The `output: "standalone"` setting in [`next.config.mjs`](../next.config.mjs) is for the Docker image only — Vercel ignores it; no action needed.
+
+---
+
+## 2. One-time database bootstrap
+
+CI runs **only `db:app:migrate`** on each deploy. The Better Auth tables (`user`, `session`, `account`, `verification`) and the baseline seed are **not** created by CI — you run them **once** against a fresh database. This is the most common first-deploy mistake.
+
+Run it from your own machine (laptop or a one-off runner) with the repo checked out, **Node 22+ / pnpm 10+**, and the Neon **direct (unpooled)** connection string — it connects over the network; it is not SQL you paste into Neon's console.
 
 ```bash
-pnpm install --frozen-lockfile   # exact dependency pins
-pnpm build                        # next build → .next/
-pnpm start                        # next start (serves the built app)
+pnpm install --frozen-lockfile
+
+# Windows PowerShell: use `$env:NAME = "value"` instead of `export`.
+export DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"  # DIRECT / unpooled
+export DB_SCHEMA="auth"
+export SEED_ADMIN_EMAIL="you@example.com"
+export SEED_ADMIN_PASSWORD="<a strong password>"
+
+pnpm db:provision
 ```
 
-Build characteristics (from `next.config.mjs` and `package.json`):
+`pnpm db:provision` ([`src/db/provision.ts`](../src/db/provision.ts)) runs the full setup in order, fail-fast:
 
-- **`output: "standalone"`** — the build also emits a self-contained server bundle (`.next/standalone`) used by the container image. `next start` against the conventional `.next/` output and serverless targets still work unchanged. See [docker.md](./docker.md).
-- **next-intl plugin** wires localized routing from `src/i18n/request.ts`.
-- **Sentry plugin is opt-in** — it only engages when `NEXT_PUBLIC_SENTRY_DSN` is set, and source-map *upload* additionally needs `SENTRY_AUTH_TOKEN` (+ `SENTRY_ORG`/`SENTRY_PROJECT`). Without a DSN the build is byte-for-byte unchanged.
-- **Security headers** are emitted for every route by the `headers()` config.
+1. **`db:auth:migrate`** — Better Auth tables (`user`/`session`/`account`/`verification`). **CI never runs this.**
+2. **`db:app:migrate`** — extensions (`pgcrypto`, `pg_trgm`, created in `public`) + the **core** app schema, then the **localized data** under `src/db/migrations/locales/`. **CI re-runs this on every deploy.**
+3. **`db:seed`** — the default org, the `admin.*` permission catalog, baseline roles, and your first admin (from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`).
 
-## 2. Artifacts
+Every step is **idempotent and ledgered** — applied migrations are recorded in `app_schema_migrations`, so re-running `db:provision` (or letting CI re-run `db:app:migrate`) only applies new work. All tables land in the schema named by `DB_SCHEMA` (default `auth`); extensions stay in `public` so every schema resolves them.
 
-| Artifact | Produced by | Notes |
-| --- | --- | --- |
-| `.next/` (incl. `.next/static/`) | `pnpm build` | The compiled application; served by `next start`. |
-| `public/` | source | Static assets served as-is. |
-| Coverage report | CI `quality` job | Uploaded as a CI artifact (7-day retention). |
-| Playwright traces | CI `browser` job | Uploaded on failure (7-day retention). |
+Notes:
 
-A production **`Dockerfile`** (multi-stage, non-root, built from the standalone output) and a **`.dockerignore`** are provided — build/run/deploy steps are documented in [docker.md](./docker.md). `docker-compose.yml` additionally defines **PostgreSQL** for local development.
-
-## 3. Runtime requirements
-
-| Requirement | Value | Source |
-| --- | --- | --- |
-| Node.js | 22.x | CI (`.github/workflows/ci.yml`); pinned via `.nvmrc` + `package.json` `engines` (`node >=22`, `pnpm >=10`) |
-| pnpm | 10.33.2 | `package.json` → `packageManager` |
-| PostgreSQL | 17 (extensions `pgcrypto`/`pg_trgm` in `public`) | `docker-compose.yml` / CI service image |
-| DB schema | `auth` (default; `DB_SCHEMA`) — all tables; created by the migrate step | [Configuration](./configuration.md#database-postgresql) |
-| Listens on | port 3000 (default `next start`) | Next.js default |
-| Needs at runtime | `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL` (+ SSO vars if used) | [Configuration](./configuration.md) |
-
-## 4. Hosting model
-
-The repository **does not pin a hosting target**. Two models are consistent with the code:
-
-| Model | Fit | Evidence / considerations |
-| --- | --- | --- |
-| **Serverless (e.g. Vercel)** | Natural for Next.js | `TRUSTED_PROXY_COUNT` defaults to 1 (a CDN/LB in front); `NEXT_PUBLIC_PRODUCTION_HOST` suggests a hosted origin. Use a **pooled** Postgres endpoint. |
-| **Node server / container** | Self-hosted | Build the provided [`Dockerfile`](../Dockerfile) (standalone, non-root) and run it behind a TLS-terminating reverse proxy; run migrations as a separate init step. Full instructions in [docker.md](./docker.md). |
-
-**Connection pool sizing (`PGPOOL_MAX`).** The runtime pool holds up to
-`PGPOOL_MAX` (default `10`) connections **per process**, so the database sees
-`PGPOOL_MAX × (number of running instances)` connections at peak:
-
-- **Serverless:** each warm function instance opens its own pool, so total
-  connections scale with concurrency. Set a **low** `PGPOOL_MAX` (e.g. `2`–`5`)
-  and point `DATABASE_URL` at a **pooled** endpoint (PgBouncer / your provider's
-  pooler), or you can exhaust `max_connections` under load.
-- **Node server / container:** size `PGPOOL_MAX` so
-  `PGPOOL_MAX × instances` stays comfortably under the database's
-  `max_connections`, leaving headroom for migrations and admin tools.
-
-A stalled transaction can no longer pin a connection indefinitely: the pool
-sets `idle_in_transaction_session_timeout` (default 30s, `PG_IDLE_IN_TX_TIMEOUT_MS`)
-alongside the per-statement `statement_timeout`.
-
-> `TODO:` Choose and document the production hosting target for your infrastructure. A container path is now provided (see below); the serverless path needs no extra packaging.
-
-### Supported topology for 1.0: a single application instance
-
-The abuse-mitigation **rate limiter** on admin mutations, bulk operations, and
-CSV export is **in-process** (`src/lib/admin/rate-limit.server.ts`) — its budget
-lives in the memory of one Node process. The **supported 1.0 deployment
-topology is therefore a single application instance** (one long-running
-container) behind your TLS-terminating proxy: in that topology the limit
-enforces one global, cluster-wide budget exactly as designed.
-
-Horizontal scaling still *runs* — nothing in the app requires a single instance
-to serve traffic, and all durable state is already external (PostgreSQL holds
-sessions, audit, outbox, and token revocations). But with more than one instance
-(multiple containers, or a serverless host where each invocation is a separate
-process) the rate limit degrades to **best-effort**: the budget is enforced per
-instance, so it effectively multiplies by the instance count and resets on each
-cold start. The limiter is an abuse guard layered on top of the real
-authorization checks, so this is a hardening regression, not an authz hole.
-
-For a hard, cluster-wide rate limit in 1.0, run a single instance. A shared
-(Redis/Postgres) rate-limit backend that lifts this constraint is planned
-post-1.0 — see
-[troubleshooting → rate limits across instances](./troubleshooting.md#deployment-issues).
-
-> "Single instance" refers only to the **application** tier. PostgreSQL is
-> external and unaffected — run it managed / HA / pooled as usual.
-
-## 5. Containerized deployment
-
-A production-ready, multi-stage **`Dockerfile`** is included: it builds from
-the Next.js standalone output, runs as an unprivileged user, and copies only
-the traced runtime bundle (`.next/standalone`), `.next/static`, `public/`,
-and `docs/`. Build/configure/run/deploy — including running migrations as a
-separate init step, the required env vars, a `docker compose` example, and
-hardening recommendations — are documented in **[docker.md](./docker.md)**.
-
-For local PostgreSQL, the provided `docker-compose.yml` runs
-`pgvector/pgvector:pg17` on host port 5444 with an init script that enables
-`vector` and `pg_trgm`.
-
-## 6. CI/CD pipeline
-
-CI is **`.github/workflows/ci.yml`** (push + pull_request). It validates quality and behavior but does **not** itself deploy.
-
-```mermaid
-flowchart TD
-    trigger["push / pull_request"] --> quality & browser & audit
-    quality["quality: typecheck · lint · format · build · sharded tests + coverage gate"]
-    browser["browser: build · migrate+seed · start · e2e · a11y"]
-    audit["audit: pnpm audit --audit-level high (hard gate)"]
-    quality --> green{"all required checks green?"}
-    browser --> green
-    green -- yes --> merge["auto-merge to main"]
-    merge --> deploy["Deploy step (external)"]
-```
-
-- Both `quality` and `browser` run against a **PostgreSQL 17 service container**; the `browser` job migrates, seeds, starts the server, then runs Playwright e2e + accessibility.
-- The `audit` job is a **hard gate**: `pnpm audit --audit-level high` fails CI on any high+ advisory unless it is allowlisted in `package.json` → `pnpm.auditConfig.ignoreGhsas` (rationale tracked in [SECURITY.md](../SECURITY.md)).
-
-**Security gates (separate workflows).** Three scanners run alongside CI on `push`/`pull_request` (plus a weekly schedule) and publish findings to the GitHub **Security tab**: **Trivy** image scan (`docker-scan.yml`, fails on fixable HIGH/CRITICAL image CVEs), **CodeQL** SAST (`codeql.yml`), and **gitleaks** secret scan (`secret-scan.yml`). See [DevOps Setup → Security gates](./devops-setup.md#security-gates-separate-workflows).
-
-**Production deploy (Vercel).** `.github/workflows/deploy.yml` promotes `main`
-to Vercel production and **applies migrations first**: it runs
-`pnpm db:app:migrate` against the **direct** (non-pooled)
-`PRODUCTION_DIRECT_DATABASE_URL` secret, then `vercel pull` → `vercel build
---prod` → `vercel deploy --prebuilt --prod`. Because migrations land before the
-new build promotes, the live build always sees a schema it understands (they
-are additive / idempotent by contract). Gated by a `production` GitHub
-Environment (required reviewers). **Disable Vercel's automatic Git production
-deploys** so this workflow is the sole path to production. Required secrets:
-`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
-`PRODUCTION_DIRECT_DATABASE_URL`.
-
-**Outbox drainer (serverless).** A serverless host has no process to run
-`pnpm outbox:drain`, so `vercel.json` declares a **Cron Job** that calls the
-secret-guarded `GET /api/internal/outbox-drain` (gated by `CRON_SECRET`) to
-retry queued emails. The committed `schedule` is **daily** (`0 8 * * *`)
-because Vercel's **Hobby** plan rejects sub-daily crons at deploy time; on
-**Pro/Enterprise** tighten it (e.g. `*/5 * * * *`) for timely retries. The
-drain is idempotent (rows are claimed in individual committed transactions), so
-a daily run safely chips away at any backlog over successive days. To drain
-frequently regardless of plan, schedule an external caller instead — e.g. a
-GitHub Actions `schedule:` workflow that `curl`s the endpoint with the
-`CRON_SECRET` bearer every few minutes. Also pin `regions` to your database's
-region.
-
-**Data-retention pruner (scheduled).** Separately, schedule `pnpm db:prune`
-(`scripts/prune-retention.ts`) — typically **daily** — to prune expired token
-revocations and apply the retention windows to `app_audit_events`
-(`AUDIT_RETENTION_DAYS`) and terminal `app_outbox` rows
-(`OUTBOX_RETENTION_DAYS`). It runs alongside the outbox drainer; see
-[DevOps Setup → Scheduled maintenance jobs](./devops-setup.md#scheduled-maintenance-jobs).
-
-See [DevOps Setup → Build pipeline](./devops-setup.md#5-build-pipeline-ci) and [Testing](./testing.md).
-
-## 7. Release checklist
-
-- [ ] `main` is green (all required checks).
-- [ ] Migrations applied to the target database **before** routing traffic to the new build.
-- [ ] Required env present in the target environment; secrets from a manager.
-- [ ] `BETTER_AUTH_URL` / `NEXT_PUBLIC_APP_URL` match the public origin.
-- [ ] Optional features intentionally on/off (email, OAuth, machine API, Sentry).
-- [ ] If Sentry is enabled: release tag set and source maps uploaded (`SENTRY_AUTH_TOKEN` in CI).
-- [ ] Rollback path confirmed (previous build available; DB PITR window known).
-
-## 8. Post-deployment verification
-
-1. **Health:** `GET /api/health` returns `200 {"status":"ok"}` (liveness) and `GET /api/health/ready` returns `200 {"status":"ready"}` when the database is reachable (`503 {"status":"unavailable"}` otherwise). Wire these to the orchestrator's liveness/readiness probes; both are unauthenticated and `no-store`.
-2. **Auth:** sign in with a known account; sessions persist; sign-out works.
-3. **Database:** an admin list (e.g. Users) loads — confirms DB connectivity and migrations.
-4. **Audit:** perform a small admin action and confirm a new `app_audit_events` row with a matching `x-request-id`.
-5. **SSO (if used):** complete one launch→consume handoff into a registered app.
-6. **Email (if enabled):** trigger a password reset and confirm an `app_outbox` row transitions to `sent`.
-7. **Machine API (if enabled):** mint a token at `/api/v1/auth/token` and call `/api/v1/me`.
-8. **Headers:** verify `Strict-Transport-Security` and `X-Frame-Options: DENY` on responses.
-9. **Monitoring (if enabled):** confirm events arrive in Sentry and source maps resolve.
+- **English-only install:** the localized migrations in `src/db/migrations/locales/` are applied by default. Set `DB_MIGRATE_LOCALES=0` (or `false`/`no`/`off`) to skip them — the non-English email-template rows are then absent and those recipients fall back to English. The core schema + English baseline always apply.
+- `db:seed` is safe to re-run (all writes are `on conflict do nothing`). In production, change the seeded admin password immediately or supply non-default `SEED_ADMIN_*` values.
+- **Never** run `db:seed:dev` against production — it creates 21 accounts sharing one weak password and refuses to run under `NODE_ENV=production` unless forced.
 
 ---
 
-_Next: [Testing](./testing.md) · [Troubleshooting](./troubleshooting.md)_
+## 3. Vercel project + environment
+
+1. From the repo root: `vercel link` (or import the repo in the dashboard). Framework preset: **Next.js**.
+2. Capture the identifiers from `.vercel/project.json` → GitHub secrets: `orgId` → `VERCEL_ORG_ID`, `projectId` → `VERCEL_PROJECT_ID`. Create a deploy token (Vercel Account Settings → Tokens) → `VERCEL_TOKEN`.
+3. In the repo, create the `production` GitHub Environment (Settings → Environments) and add the secrets above plus `PRODUCTION_DIRECT_DATABASE_URL` (Neon **direct/unpooled** URL). Optionally add required reviewers so each deploy needs approval.
+
+**Set runtime env in Vercel (Production).** [Configuration](./configuration.md) is the **authoritative** list of every variable (≈60); set it there. Validation is at **runtime, not build time** — a missing required var will not fail `next build`, it throws a 500 on the first request that needs it, so set everything before sending real traffic. The deployment-critical must-set production secrets:
+
+- `BETTER_AUTH_SECRET` — strong random string (≥ 16 chars).
+- `BETTER_AUTH_URL` — `https://<your-domain>` (also set `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_PRODUCTION_HOST` to the same origin/host).
+- `DATABASE_URL` — see the endpoint decision below.
+- The four `SSO_HANDOFF_*` vars — `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, `SSO_HANDOFF_JWT_SECRET` (a **second**, distinct strong secret). Required **even if you never use cross-app SSO** — they are validated at boot; set sane placeholders.
+
+`NODE_ENV=production` is set by Vercel automatically. The `NEXT_PUBLIC_*` values are inlined at build time, so changing a domain requires a **redeploy**.
+
+**`DATABASE_URL`: direct vs. pooled.** Neon gives two connection strings for the same database. By default point `DATABASE_URL` at the **direct/unpooled** endpoint (no `-pooler` in the host). To use the **pooled** endpoint (better serverless concurrency), make the app pooler-compatible first — see §5. Keep `?sslmode=require` on both. **Migrations always use the direct endpoint.**
+
+---
+
+## 4. Deploy + post-deploy verification
+
+Push to `main` (or run the workflow from the Actions tab). After it completes, verify:
+
+- [ ] `GET https://<domain>/` → the landing page returns **200**.
+- [ ] Sign in with the seed admin from §2; the session persists.
+- [ ] `GET https://<domain>/api/internal/outbox-drain` **without** the bearer header → **401** (confirms the cron endpoint is fail-closed).
+- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — core (`0001-initial-schema.sql` …) and, unless `DB_MIGRATE_LOCALES=0`, the localized ones (`locales/0001-…` …).
+- [ ] If Sentry is configured, trigger a test error and confirm it lands ([Observability](./observability.md)).
+- [ ] If `METRICS_TOKEN` is set, `GET /api/metrics` with `Authorization: Bearer <token>` returns Prometheus text.
+
+> **The outbox-drain cron.** [`vercel.json`](../vercel.json) declares one scheduled job hitting `GET /api/internal/outbox-drain` **daily at 08:00 UTC** to retry `pending` rows in `app_outbox` (the serverless substitute for a long-running drain worker). Vercel Cron calls it with `Authorization: Bearer <CRON_SECRET>`, so **set `CRON_SECRET` in Vercel env** or the route returns 401 and no mail is ever retried. Daily works on all Vercel plans (Hobby included); higher frequencies need Pro. `pnpm db:prune` (token-revocation + audit/outbox retention) is **not** scheduled in this repo — add a cron or external caller if you want it.
+
+---
+
+## 5. Operations & gotchas
+
+**Single application instance (1.0).** The abuse-mitigation **rate limiter** on admin mutations, bulk operations, and CSV export is **in-process** (`src/lib/admin/rate-limit.server.ts`) — its budget lives in one Node process's memory and **resets on restart**. With more than one instance (multiple containers, or serverless where each invocation is a separate process) the limit degrades to best-effort: it is enforced per instance and effectively multiplies by the instance count. The limiter layers on top of the real authorization checks, so this is a hardening regression, not an authz hole. For a hard, cluster-wide limit, run a single instance; a shared (Redis/Postgres) backend is planned post-1.0. (This applies only to the **application** tier — Postgres is external and unaffected.)
+
+**Direct endpoint by default; pooled needs two changes.** The app sets `search_path` via a per-connection startup parameter (`-c search_path=…`), which a **transaction pooler rejects** — every connection fails with `08P01 unsupported startup parameter in options: search_path` — along with the DDL + advisory locks the migrator needs. So both migrations and runtime use the **direct/unpooled** endpoint by default. To run the **runtime** on the **pooled** endpoint:
+
+1. Run `ALTER ROLE <db_role> SET search_path = "auth", public;` once against the database (a role default the pooler honors — `<db_role>` is the user in your connection string, e.g. Neon's `neondb_owner`).
+2. Set `DB_SEARCH_PATH_VIA_OPTIONS=0` in Vercel so the app stops sending the rejected parameter.
+
+Migrations still use the direct endpoint. Keep `PGPOOL_MAX` small on serverless (each function instance opens its own pool).
+
+**Schema changes** ship as new numbered files in `src/db/migrations/` — never edit an applied migration:
+
+- **Core** changes continue **monotonically** at `0011-…`. Numbers are never reused: `0006-0010` were relocated to `locales/` (its own `0001-…` sequence).
+- **Localized data** (non-English email templates, etc.) goes in `src/db/migrations/locales/`, applied unless `DB_MIGRATE_LOCALES=0`. Ledger ids are path-prefixed (`locales/<file>`) so they can never collide with a core filename.
+
+CI applies them migrate-first on the next deploy.
+
+**Rollback.** Roll the app back by **promoting a previous deployment** in Vercel (dashboard → previous deployment → "Promote to Production", or `vercel rollback`). Migrations are **forward-only** — additive, with **no down-migrations** — so the older build runs safely against the newer schema (forward-compatible by design). The deploy pipeline migrates *before* promoting, so a rollback needs no DB change. A migration that genuinely must be reverted is authored as a **new forward migration**. To recover lost *data* (not a bad deploy), use your provider's PITR/snapshot, not a schema revert.
+
+See [Troubleshooting](./troubleshooting.md) for operational issues.
+
+---
+
+## 6. Self-host / container
+
+A production-ready multi-stage `Dockerfile` (built from the Next.js standalone output, non-root) is provided. Build/configure/run, running migrations as a separate init step, required env, a `docker compose` example, and hardening are all in **[Docker](./docker.md)**.
+
+---
+
+## 7. CI
+
+CI is **[`.github/workflows/`](../.github/workflows/)** (source of truth). [`ci.yml`](../.github/workflows/ci.yml) runs on push + pull_request and validates quality and behavior — typecheck, lint, format, build, sharded tests + coverage gate, DB-backed integration tests, Playwright e2e + accessibility, a `pnpm audit` hard gate, SDK/schema/doc-link drift checks — but does **not** itself deploy. Separate workflows run Trivy, CodeQL, and gitleaks security scans. See [Testing](./testing.md).
+
+---
+
+_Next: [Configuration](./configuration.md) · [Docker](./docker.md) · [Troubleshooting](./troubleshooting.md)_

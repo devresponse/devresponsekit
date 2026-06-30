@@ -23,9 +23,9 @@ Related references:
 
 - [API Reference](./api.md) — the full HTTP surface, including the parallel
   machine API (`/api/v1`).
-- [ADR-0001 — Three-Tier Access Control](./adr/0001-three-tier-access-control.md)
+- [ADR-0001 — Three-Tier Access Control](./architecture.md#access-control-design-decisions)
   — the org-boundary model this console enforces.
-- [ADR-0002 — Organization Groups](./adr/0002-organization-groups.md) — the
+- [ADR-0002 — Organization Groups](./architecture.md#access-control-design-decisions) — the
   groups feature (§8.6).
 - [Security Policy](../SECURITY.md) — reporting, scope, and the threat areas
   this console touches.
@@ -252,7 +252,7 @@ matches every key under that prefix.
 
 `src/lib/admin/access-scope.server.ts` is the single source of truth for "which
 organization may this caller act on". See
-[ADR-0001](./adr/0001-three-tier-access-control.md) for the full rationale.
+[ADR-0001](./architecture.md#access-control-design-decisions) for the full rationale.
 
 | Tier | Identified by | Org boundary |
 | --- | --- | --- |
@@ -420,7 +420,7 @@ identical for every tenant.
 ### 8.6 Groups
 
 Org-scoped cohorts that bundle roles and collect users
-([ADR-0002](./adr/0002-organization-groups.md)). A user's effective roles =
+([ADR-0002](./architecture.md#access-control-design-decisions)). A user's effective roles =
 direct (`app_user_roles`) ∪ group-conferred. Groups grant **roles**, never
 permissions directly, so they add zero new authority primitives.
 

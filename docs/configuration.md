@@ -82,7 +82,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `EMAIL_FROM` | From address/name. |
 | `RESEND_API_KEY` | Resend API key (when provider = resend). |
 | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_BASE_URL` | Mailgun config (use `https://api.eu.mailgun.net` for EU). |
-| `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to `GET /api/internal/outbox-drain`, which retries `pending` outbox rows on a serverless host (no long-running `pnpm outbox:drain` process). The route **fails closed** when unset. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#6-cicd-pipeline). |
+| `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to `GET /api/internal/outbox-drain`, which retries `pending` outbox rows on a serverless host (no long-running `pnpm outbox:drain` process). The route **fails closed** when unset. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#7-ci). |
 
 ### Machine API credentials (both paths DARK by default)
 
@@ -218,4 +218,20 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 
 ---
 
-_Next: [DevOps Setup](./devops-setup.md) for a from-scratch stand-up, and [Deployment](./deployment.md) for build & release._
+## Variables read directly (not boot-validated)
+
+Most variables above are validated at boot by `src/lib/env.ts` — a missing or malformed **required** one fails the process immediately. A few operational knobs are instead read straight from `process.env` at the point of use, so a bad value fails (or falls back) only when that feature runs, not at boot:
+
+| Variable | Used by | If unset |
+| --- | --- | --- |
+| `CRON_SECRET` | `/api/internal/outbox-drain` | endpoint fails closed (401) |
+| `METRICS_TOKEN` | `/api/metrics` | endpoint fails closed (401) |
+| `LOG_LEVEL` | the Pino logger | defaults to `info` (`silent` under test) |
+| `AUDIT_RETENTION_DAYS` / `OUTBOX_RETENTION_DAYS` | `pnpm db:prune` | default 365 / 90; `0` disables |
+| `SHUTDOWN_TIMEOUT_MS` | graceful-shutdown drain | defaults to 10000 ms |
+| `DB_MIGRATE_LOCALES` | `pnpm db:app:migrate` | locale migrations applied unless `0`/`false`/`no`/`off` |
+| `SENTRY_*` / `NEXT_PUBLIC_SENTRY_*` | Sentry build + runtime | Sentry stays off unless a DSN is present (see [Observability](./observability.md)) |
+
+---
+
+_Next: [Deployment](./deployment.md) for build, release, and from-scratch stand-up._

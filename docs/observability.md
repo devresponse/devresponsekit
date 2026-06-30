@@ -23,7 +23,7 @@ correlate them during an incident, and what is deliberately still on the roadmap
 > without bound. Schedule **`pnpm db:prune`** (`scripts/prune-retention.ts`) to
 > apply the configured windows (`AUDIT_RETENTION_DAYS`, default 365;
 > `OUTBOX_RETENTION_DAYS`, default 90) and prune expired token revocations — see
-> [DevOps Setup → Scheduled maintenance jobs](./devops-setup.md#scheduled-maintenance-jobs).
+> [Deployment](./deployment.md).
 
 ## 2. Configuration
 
@@ -123,7 +123,7 @@ observability epic:
   production-critical) delivery-latency objectives are not yet defined.
 
 Until these land, incident detection relies on the log stream, `app_audit_events`, optional
-Sentry, and the health probes — see the [incident response runbook](./incident-response.md)
+Sentry, and the health probes — see the [troubleshooting runbook](./troubleshooting.md)
 for the triage flow and playbooks built on exactly those signals.
 
 ---

@@ -2,48 +2,41 @@
 
 > **DevResponseKit** is a production-grade, security-first **enterprise application shell** for multi-tenant B2B platforms — built on **Next.js 16**, **Better Auth**, **PostgreSQL + Kysely**, and **next-intl**. It ships organizations, three-tier RBAC, an admin console, a versioned machine API, cross-subdomain SSO, audit logging, and internationalization as an assembled, tested, documented foundation.
 
-This folder is the canonical documentation set. It is organized by **audience** so you can jump straight to what you need.
+This folder is the canonical documentation set, organized by **audience**.
 
 ---
 
 ## Pick your path
 
 ### 📣 Marketing & Business
-Understand what the product is, who it's for, and how to talk about it.
 
 | Document | What's inside |
 | --- | --- |
-| [Product Overview](./product-overview.md) | Value proposition, target customers, differentiators, use cases, suggested promo/landing/sales copy |
-| [Features](./features.md) | Plain-English feature catalog, user flows, roles & permissions |
+| [Product Overview](./product-overview.md) | Value proposition, target customers, the plain-English feature catalog, differentiators, and suggested promo/landing/sales copy |
 
 ### 👩‍💻 Developers
-Onboard, understand the architecture, and start building.
 
 | Document | What's inside |
 | --- | --- |
-| [Architecture](./architecture.md) | System design, modules, boundaries, data flow, auth/authz, diagrams |
-| [Architecture Decision Records](./adr/) | The load-bearing design decisions — [ADR-0001](./adr/0001-three-tier-access-control.md) three-tier access control, [ADR-0002](./adr/0002-organization-groups.md) organization groups |
+| [Architecture](./architecture.md) | System design, modules, boundaries, data flow, auth/authz, the data model — including the load-bearing **access-control decisions** (ADR-0001 three-tier access, ADR-0002 organization groups) |
 | [Developer Onboarding](./developer-onboarding.md) | Tooling, install, run, test, project structure, conventions, "how to add a feature" |
-| [API Reference](./api.md) | HTTP API surface, auth requirements, request/response examples, error model |
-| [API Clients & SDKs](./api-clients.md) | Authenticate, generate (or use) a typed client for the v1 API and the committed admin SDK |
-| [Admin Manager](./admin-manager.md) | Design spec for the administrator console: navigation, screens, permission gating, and the shared data-grid affordances |
-| [API Keys & Tokens Design](./design-api-keys-and-tokens.md) | Design spec for the machine-API credentials — scoped API keys and short-lived bearer tokens, issuance, rotation, and revocation |
-| [Form Validation](./form-validation.md) | Implemented form-validation reference: shared client/server Zod schemas → `useZodForm` → `Form*` primitives, required-field markers, error borders, localized messages, accessibility |
-| [Testing](./testing.md) | Test strategy, frameworks, how to run each suite, coverage, manual QA checklist |
-| [Security Test Coverage Plan](./security-test-coverage-plan.md) | The security-focused test inventory: what each suite asserts (authz, tenancy isolation, schema hardening) and where the gaps are |
+| [API Reference & Clients](./api.md) | The `/api/v1` machine API and admin console API — surface, authentication, error model, request/response examples, and the typed v1 + committed admin SDK clients |
+| [Admin Manager](./admin-manager.md) | Specification for the administrator console: navigation, screens, the guarded request pipeline, permission catalog, audit model |
+| [API Keys & Tokens Design](./design-api-keys-and-tokens.md) | Design of the machine credentials — scoped API keys and short-lived EdDSA JWT access tokens — issuance, rotation, revocation |
+| [Form Validation](./form-validation.md) | Shared client/server Zod schemas → `useZodForm` → `Form*` primitives, required markers, error borders, localized messages, accessibility |
+| [Testing](./testing.md) | Test strategy, the suites, how to run each, the coverage ratchet, the security-test coverage, and the manual QA checklist |
 
 ### 🛠️ DevOps & Infrastructure
-Stand the system up from scratch and operate it.
 
 | Document | What's inside |
 | --- | --- |
 | [Configuration](./configuration.md) | Every environment variable, config files, secrets, local vs production |
-| [DevOps Setup](./devops-setup.md) | From-scratch infrastructure, provisioning, CI/CD, monitoring, backups, security, readiness checklist |
-| [Deployment](./deployment.md) | Build, artifacts, hosting model, container notes, release & post-deploy verification |
-| [Docker](./docker.md) | The container image and Compose setup — build, local stack, environment, healthcheck, and production notes |
+| [Deployment](./deployment.md) | The migrate-first **Vercel + Neon** pipeline, one-time database provisioning, CI/CD, environment, and post-deploy verification |
+| [Docker](./docker.md) | The container image and Compose setup for self-hosting — build, local stack, healthcheck, production notes |
 | [Observability](./observability.md) | Structured logging, Sentry error/performance monitoring, and the opt-in Prometheus metrics endpoint |
-| [Incident Response](./incident-response.md) | Operational runbook for diagnosing and responding to production incidents — triage, mitigation, and post-incident steps |
-| [Troubleshooting](./troubleshooting.md) | Common setup, build, runtime, and deployment failures and fixes |
+| [Troubleshooting](./troubleshooting.md) | The incident-response runbook **and** common setup, build, runtime, and deployment failures and their fixes |
+
+> The HTTP API also ships machine-readable specs: [`openapi.json`](./openapi.json) (the `/api/v1` surface) and [`openapi-admin.json`](./openapi-admin.json) (the admin console API), both generated from code.
 
 ---
 

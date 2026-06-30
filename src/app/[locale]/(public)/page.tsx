@@ -25,7 +25,7 @@ import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
  * comfortable density, no secure menu API calls, no secure hydration.
  *
  * The page is a showcase for DevResponseKit itself — its copy is drawn
- * from `docs/competitive-analysis.md` and every string is localized via
+ * from `docs/product-overview.md` and every string is localized via
  * the `public` message namespace, so the whole page respects the active
  * locale. The brand bar (locale switcher + sign-in / sign-up) comes from
  * `(public)/layout.tsx`; this file renders the marketing sections.

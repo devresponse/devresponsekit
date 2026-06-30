@@ -10,7 +10,7 @@ visibility: internal
 
 _Audience: maintainers of the machine-credential subsystem. This is the canonical design doc for the credentials that authenticate the versioned `/api/v1` surface — API keys, OAuth2 client-credentials clients, and EdDSA JWT access tokens. The source under `src/lib/api-auth/**` is authoritative; section numbers here match the `design-api-keys-and-tokens.md §N` citations in those files._
 
-Companion docs: the human-readable endpoint list is [API Reference](./api.md), the integrator walkthrough is [API Clients & SDKs](./api-clients.md), the env vars are in [Configuration](./configuration.md#machine-api-credentials-both-paths-dark-by-default), and the secret-handling policy is in [SECURITY.md](../SECURITY.md#handling-of-secrets).
+Companion docs: the human-readable endpoint list and integrator walkthrough is [API Reference & Clients](./api.md), the env vars are in [Configuration](./configuration.md#machine-api-credentials-both-paths-dark-by-default), and the secret-handling policy is in [SECURITY.md](../SECURITY.md#handling-of-secrets).
 
 ---
 
@@ -256,7 +256,7 @@ Mirrors `requireAdminPermission` but speaks problem+json and exposes the resolve
 
 ## 9. Secret handling
 
-_Cross-reference: [SECURITY.md → Handling of secrets](../SECURITY.md#handling-of-secrets) and [API Reference §9](./api.md#9-secret-handling-notes)._
+_Cross-reference: [SECURITY.md → Handling of secrets](../SECURITY.md#handling-of-secrets) and [API Reference §9](./api.md#8-secret-handling-notes)._
 
 - API-key and OAuth-client secrets are returned **once** at creation/rotation and stored only as SHA-256 hashes. There is **no** endpoint to retrieve a secret again — losing it means rotating.
 - Never log or echo a plaintext credential. Audit events record metadata only (credential id / `jti` / `client_id`, scopes, grant type) — never the secret.
@@ -304,4 +304,4 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 
 ---
 
-_See also: [API Reference](./api.md) · [API Clients & SDKs](./api-clients.md) · [Configuration](./configuration.md) · [SECURITY.md](../SECURITY.md)._
+_See also: [API Reference & Clients](./api.md) · [Configuration](./configuration.md) · [SECURITY.md](../SECURITY.md)._

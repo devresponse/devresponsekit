@@ -1,6 +1,6 @@
--- 0007 — Seed pt (Portuguese) email templates.
+-- locales/0002 — Seed pt (Portuguese) email templates.
 --
--- Follows 0006 (fr/es/uk): 0001 seeded only the `en` rows for `password_reset`
+-- Follows locales/0001 (fr/es/uk): 0001 seeded only the `en` rows for `password_reset`
 -- and `test_email`. With Portuguese added to the supported locales
 -- (src/config/i18n-config.ts), a recipient with a `pt` `preferred_locale` would
 -- otherwise fall back to English (the `resolveTemplate` query returns the `en`

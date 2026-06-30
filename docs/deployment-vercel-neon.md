@@ -78,7 +78,7 @@ pnpm db:provision
 `pnpm db:provision` ([`src/db/provision.ts`](../src/db/provision.ts)) runs the full initial setup in order, fail-fast:
 
 1. **`db:auth:migrate`** — Better Auth tables (`user`/`session`/`account`/`verification`). **CI never runs this.**
-2. **`db:app:migrate`** — extensions (`pgcrypto`, `pg_trgm`) + the app schema (`0001 … 0010`). CI re-runs this on every deploy.
+2. **`db:app:migrate`** — extensions (`pgcrypto`, `pg_trgm`) + the **core** app schema (`0001-initial-schema.sql` … `0005-…`, English-only), then the **localized data** under `src/db/migrations/locales/` (non-English email templates). Locales are applied by default; set `DB_MIGRATE_LOCALES=0` for an English-only database. CI re-runs this on every deploy.
 3. **`db:seed`** — the default org, the `admin.*` permission catalog, baseline roles, and your first admin (from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`).
 
 (Prefer to run them yourself? The three steps still work as individual `pnpm` commands.)
@@ -88,6 +88,7 @@ Notes:
 - `db:provision` and every step it runs are **idempotent and ledgered** (applied migrations are recorded in `app_schema_migrations`), so re-running it — or letting CI re-run `db:app:migrate` on each deploy — only applies new work.
 - `db:seed` is safe to re-run (all writes are `on conflict do nothing`). It provisions your first admin from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`.
 - **Never** run `db:seed:dev` against production — it creates 21 accounts that all share one weak password and refuses to run under `NODE_ENV=production` unless explicitly forced.
+- **English-only install:** the localized migrations in `src/db/migrations/locales/` are applied by default. Set `DB_MIGRATE_LOCALES=0` (or `false`/`no`/`off`) to skip them — the non-English email-template rows are then absent and those recipients fall back to English. The core schema + English baseline (`0001 … 0005`) always apply.
 
 ---
 
@@ -209,7 +210,7 @@ If step 2 fails, the build is never promoted — production keeps running the pr
 - `GET https://<domain>/` → the landing page returns 200.
 - Sign in with the seed admin from §3.
 - `GET https://<domain>/api/internal/outbox-drain` **without** the bearer header → **401** (confirms the cron is fail-closed).
-- In Neon's SQL editor: tables exist in the `auth` schema, and `select id from auth.app_schema_migrations order by id` lists the applied migration files (`0001-initial-schema.sql` … `0010-…`).
+- In Neon's SQL editor: tables exist in the `auth` schema, and `select id from auth.app_schema_migrations order by id` lists the applied migration ids — core (`0001-initial-schema.sql` …) and, unless `DB_MIGRATE_LOCALES=0`, the localized ones (`locales/0001-…` …).
 - If Sentry is configured, trigger a test error and confirm it lands.
 - If `METRICS_TOKEN` is set, `GET /api/metrics` with `Authorization: Bearer <token>` returns Prometheus text.
 
@@ -231,7 +232,7 @@ For most teams the built-in workflow ([§0](#0-how-this-repo-deploys-read-this-f
 ## 12. Operations & gotchas
 
 - **Direct endpoint by default; pooled needs two changes.** The app sets `search_path` via a per-connection startup parameter, which a **transaction pooler rejects** (`08P01 unsupported startup parameter in options: search_path`) — so both migrations and runtime use the **direct/unpooled** endpoint by default. To run the runtime on the **pooled** endpoint (better for serverless concurrency), make the app pooler-compatible: (1) run `ALTER ROLE <db_role> SET search_path = "auth", public;` once against the database (a role default the pooler honors — `<db_role>` is the user in your connection string, e.g. Neon's `neondb_owner`), and (2) set `DB_SEARCH_PATH_VIA_OPTIONS=0` in Vercel so the app stops sending the rejected parameter. Migrations still use the direct endpoint.
-- **Schema changes** ship as new numbered files in `src/db/migrations/` (`0011-…`). CI applies them migrate-first on the next deploy; never edit an applied migration.
+- **Schema changes** ship as new numbered files in `src/db/migrations/`: core changes continue **monotonically** at `0011-…` (numbers are never reused — `0006-0010` were relocated to `locales/`), and localized data goes in `src/db/migrations/locales/` (its own `0001-…` sequence, applied unless `DB_MIGRATE_LOCALES=0`). CI applies them migrate-first on the next deploy; never edit an applied migration.
 - **Rollback.** Roll the app back by promoting a previous deployment in Vercel. Migrations are additive and have no down-migrations, so the older build runs safely against the newer schema (forward-compatible by design).
 - **Connection limits.** Neon caps concurrent connections (especially on the free tier). On the **direct** endpoint keep `PGPOOL_MAX` small (e.g. `3`); if that's tight under serverless concurrency, move runtime to the **pooled** endpoint via the two steps above.
 - **Region.** `vercel.json` pins `iad1`; keep Neon in a nearby AWS region to minimize round-trips.

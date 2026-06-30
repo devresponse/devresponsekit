@@ -1,4 +1,4 @@
--- 0006 — Seed fr / es / uk email templates (P3-8 / OUTBOX-2).
+-- locales/0001 — Seed fr / es / uk email templates (P3-8 / OUTBOX-2).
 --
 -- 0001 seeded only the `en` rows for `password_reset` and `test_email`, so a
 -- recipient with a fr/es/uk `preferred_locale` fell back to English (the

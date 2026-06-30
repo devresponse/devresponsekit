@@ -1,6 +1,6 @@
--- 0009 — Seed hi (Hindi) email templates.
+-- locales/0004 — Seed hi (Hindi) email templates.
 --
--- Follows 0008 (zh): 0001 seeded only the `en` rows for `password_reset` and
+-- Follows locales/0003 (zh): 0001 seeded only the `en` rows for `password_reset` and
 -- `test_email`. With Hindi added to the supported locales
 -- (src/config/i18n-config.ts), a recipient with a `hi` `preferred_locale` would
 -- otherwise fall back to English (the `resolveTemplate` query returns the `en`

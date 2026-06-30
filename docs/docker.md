@@ -207,7 +207,7 @@ volumes:
   application instance**, where the limit enforces one global budget;
   multi-instance still runs but the rate limit is best-effort until a shared
   (Redis/Postgres) backend lands post-1.0. See
-  [Deployment → Supported topology](deployment.md#4-hosting-model) and
+  [Deployment → Supported topology](deployment.md#5-operations--gotchas) and
   [troubleshooting.md](troubleshooting.md).
 - **Observability is opt-in.** Sentry only initializes when
   `NEXT_PUBLIC_SENTRY_DSN` is set; the image is unchanged otherwise. See

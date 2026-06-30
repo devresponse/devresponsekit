@@ -5,7 +5,7 @@ import type { UserAccessContext } from "@/lib/auth-status";
 
 /**
  * Three-tier access control — the core security context
- * (docs/adr/0001-three-tier-access-control.md).
+ * (docs/architecture.md — Access-control design decisions).
  *
  *   SUPERADMIN — holds the `superuser` marker; manages EVERY organization.
  *                Org scoping is bypassed.

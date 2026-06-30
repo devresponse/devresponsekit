@@ -18,7 +18,7 @@ guard. A non-browser caller must supply both.
 ```ts
 // Import path is illustrative — adjust it to wherever `sdk/admin` sits
 // relative to the importing file (this matches the examples in
-// docs/api-clients.md).
+// docs/api.md).
 import { Configuration, UsersApi, OrganizationsApi } from "../sdk/admin";
 
 const config = new Configuration({

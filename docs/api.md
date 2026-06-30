@@ -1,6 +1,11 @@
-# API Reference
+# API Reference & Clients
 
-_Audience: developers consuming or extending the HTTP API. The current route handlers under `src/app/api/**` are authoritative._
+_Audience: developers consuming, extending, or integrating with the HTTP API — from a browser, a script, another service, or any language. This page is the human-readable companion to the committed OpenAPI specs; the route handlers under `src/app/api/**` and `src/lib/api-auth/**` are authoritative. Where this prose and the code disagree, the code wins — fix the doc._
+
+Two related references carry the deeper detail this page links to rather than repeats:
+
+- **[Design: API Keys & Access Tokens](./design-api-keys-and-tokens.md)** — the canonical threat model, issuance, rotation, and revocation design for the machine-credential subsystem (`src/lib/api-auth/**`).
+- **[Administrator Console — Specification](./admin-manager.md)** — the canonical `/api/administrator` surface, including the **permission catalog** ([§6.1](./admin-manager.md#61-permission-catalog)). The catalog is **not** reproduced here.
 
 ---
 
@@ -19,54 +24,71 @@ _Audience: developers consuming or extending the HTTP API. The current route han
 
 All handlers are `dynamic = "force-dynamic"` (no caching of authorized data). Every mutating route runs a permission check, an origin/CSRF guard, a per-actor rate-limit, Zod validation, and an audit write.
 
-> **Authoritative machine spec:** the `/api/v1` surface is described by an OpenAPI 3.1 document — served live at **`GET /api/v1/openapi.json`** and committed as **[`docs/openapi.json`](./openapi.json)** for offline use. Both are produced by the same builder (`src/lib/api-auth/openapi.ts`), and a test keeps them in sync. Treat the spec as the source of truth for the `/api/v1` surface; this page is the human-readable companion.
+This page focuses on the two surfaces an external caller integrates with — the **machine API (`/api/v1`)** and the **admin console API (`/api/administrator`)** — plus the cross-cutting auth, envelope, and error model they share.
 
-### Clients & SDKs
+> **Authoritative machine spec:** both surfaces are described by OpenAPI 3.1 documents — the v1 spec is served live at **`GET /api/v1/openapi.json`** and both are committed for offline client generation: **[`docs/openapi.json`](./openapi.json)** (`/api/v1`) and **[`docs/openapi-admin.json`](./openapi-admin.json)** (`/api/administrator`). They are produced by the builders in `src/lib/api-auth/` (`openapi.ts`, `openapi-admin.ts`) — the same builders that power the live route and the committed SDK — and **drift-checked in CI** (`tests/unit/openapi-export.test.ts`), so a generated client never describes a different API than the running one. Treat the specs as the source of truth for exact request/response shapes; this page summarizes.
 
-Two surfaces, two client approaches:
+```mermaid
+flowchart TB
+    subgraph You["Your integration"]
+        V["v1 client (generated)"]
+        A["admin SDK (sdk/admin)"]
+    end
+    V -- "Authorization: Bearer drk_… / JWT" --> V1["/api/v1/*"]
+    A -- "Cookie + Origin header" --> ADM["/api/administrator/*"]
+    V1 & ADM --> APP["DevResponse app"]
+```
 
-- **v1 machine API** (`/api/v1`) — generate a typed client on demand from [`docs/openapi.json`](./openapi.json) (or the live `GET /api/v1/openapi.json`); authenticate with `Authorization: Bearer <api-key-or-jwt>`.
-- **Admin console API** (`/api/administrator`) — a **pre-generated, zero-dependency** TypeScript SDK is committed at [`sdk/admin/`](../sdk/admin/) (from [`docs/openapi-admin.json`](./openapi-admin.json)); authenticate with the session cookie + an `Origin` header on mutations. Regenerate with `pnpm sdk:admin:generate`.
+### List envelope & conventions
 
-Every operation has a stable `operationId` (`listUsers`, `createUser`, `issueToken`, …) so generated method names are predictable.
+List endpoints across both surfaces share one envelope and one set of query parameters:
 
-> **Full walkthrough — authentication, generating/using a client, pagination, errors, and troubleshooting for both surfaces — is in [API Clients & SDKs](./api-clients.md).**
+- **Envelope** — `{ items, page, pageSize, total }`, plus `sort` on the full list-query endpoints (users, audit). `pageSize` is clamped to 1–200.
+- **Query** — `page` (1-indexed), `pageSize`, `sort` (repeatable `field.asc` / `field.desc`, applied in order), `q` (case-insensitive search), and repeatable `filter[…]` exact-match filters.
+- **Tenant scoping** — an out-of-scope resource returns **404**, never 403, so existence is never leaked (see [Tenant scoping](#3-tenant-scoping)).
+- **Wire format** — list/detail endpoints return raw **snake_case** DB rows; create endpoints return small **camelCase** summaries. Both are modeled in the spec, so a generated client matches the wire format exactly.
 
 ## 2. Authentication
 
+There are two auth models. **Cookie session** gates the admin console and account endpoints; **bearer credentials** gate the machine API. The `/api/v1` surface accepts either.
+
 ### Cookie session (browser & admin console)
-Better Auth sets a session cookie on sign-in. The admin console and account endpoints require it. Cross-site mutations are additionally protected by an **origin guard** (the request's `Origin`/`Referer` must be a trusted origin).
+
+Better Auth sets a session cookie on sign-in. Cross-site mutations (`POST`/`PATCH`/`PUT`/`DELETE`) are additionally protected by an **origin guard**: the request's `Origin` (or `Referer`) must be a trusted origin. A non-browser caller of `/api/administrator/*` must therefore send **both** the session cookie and a matching `Origin` header.
 
 ### Bearer credentials (machine API)
-`/api/v1/**` accepts either credential in an `Authorization: Bearer …` header:
+
+`/api/v1/**` accepts either credential in an `Authorization: Bearer …` header. **Both paths are disabled by default** and enabled per environment (`API_KEYS_ENABLED`, `API_JWT_ENABLED` — see [Configuration](./configuration.md#machine-api-credentials-both-paths-dark-by-default)).
 
 | Type | Looks like | Enabled by | At rest |
 | --- | --- | --- | --- |
-| **API key** | `drk_live_xxx…` / `drk_test_xxx…` | `API_KEYS_ENABLED=1` | SHA-256 hash only |
+| **API key** | `drk_<env>_<rand>` (`drk_live_…` / `drk_test_…`) | `API_KEYS_ENABLED=1` | SHA-256 hash only |
 | **JWT access token** | `eyJ…` (EdDSA) | `API_JWT_ENABLED=1` + signing key | Stateless; verified via JWKS |
 
-Get a JWT by exchanging long-lived credentials at the token endpoint:
+An API key is `drk_<env>_<random>` (32 base62 chars, ~190 bits of entropy); only its SHA-256 hash is stored, and the plaintext is shown once. A JWT is a short-lived EdDSA token verified by signature against `GET /api/v1/jwks.json` — no server-side secret. Get one by exchanging a long-lived credential (an API key, or OAuth2 client-credentials) at the token endpoint:
 
 ```bash
 curl -X POST https://app.example.com/api/v1/auth/token \
   -H "Content-Type: application/json" \
   -d '{"grant_type":"api_key","api_key":"drk_live_xxxxxxxx","scope":"admin.users.read"}'
-```
-
-```json
-{ "access_token": "eyJ…", "token_type": "Bearer", "expires_in": 900, "scope": "admin.users.read" }
+# → { "access_token": "eyJ…", "token_type": "Bearer", "expires_in": 900, "scope": "admin.users.read" }
 ```
 
 Then call the API:
 
 ```bash
-curl https://app.example.com/api/v1/users \
-  -H "Authorization: Bearer eyJ…"
+curl https://app.example.com/api/v1/users -H "Authorization: Bearer eyJ…"
 ```
 
-**Authority rule:** a credential's effective access is the **intersection of its scopes and its owner's permissions**. A credential can never be minted with more authority than its creator holds (`src/lib/api-auth/scopes.ts`). Both credential paths are **disabled by default**.
+**Authority rule (the one invariant to remember):** a credential's effective access is the **intersection of its scopes and its owner's live permissions** (`src/lib/api-auth/scopes.ts`, enforced by `requireApiPermission` in `v1-guard.server.ts`). A credential can never be minted with more authority than its creator holds, and `GET /api/v1/me` reports the resulting `effectiveScopes`.
 
-## 3. Tenant scoping (applies to admin & v1 admin routes)
+Scopes **are** the permission vocabulary — every `admin.*` catalog key (see [`admin-manager.md` §6.1](./admin-manager.md#61-permission-catalog)) plus a small set of self-service `account.*` scopes (`account.read`, `account.profile.write`, `account.preferences.write`, `account.apikeys.manage`). A scope ending in `.*` (e.g. `admin.users.*`) matches every key under that prefix.
+
+> For the full threat model, secret storage, issuance, rotation, and revocation, see **[Design: API Keys & Access Tokens](./design-api-keys-and-tokens.md)**.
+
+## 3. Tenant scoping
+
+Applies to the admin console and the `admin.*` v1 routes:
 
 - **Super Admin** (holds `superuser`): all organizations.
 - **Org Admin** (holds `admin.*`, no `superuser`): their single organization only.
@@ -76,97 +98,41 @@ See [Architecture → Authorization](./architecture.md#authorization-the-three-t
 
 ## 4. Error model
 
+### Machine API (`/api/v1`)
+
+RFC 7807 `application/problem+json`:
+
+```json
+{ "type": "about:blank", "title": "Forbidden", "status": 403, "code": "forbidden", "detail": "…", "requestId": "5f3c…" }
+```
+
 ### Administrator routes
-JSON envelope with a stable machine code, an i18n message key, and the correlation id:
+
+A JSON envelope with a stable machine code, an i18n message key, and the correlation id (`AdminError`):
 
 ```json
 { "error": "forbidden", "message": "administrator.errors.forbidden", "requestId": "5f3c…" }
 ```
 
-Common statuses: `400` invalid body, `401` unauthenticated, `403` forbidden, `404` not found / out of scope, `409` conflict (e.g. duplicate key), `429` rate-limited (with `Retry-After`).
+Common statuses on both surfaces: `400` invalid body, `401` unauthenticated, `403` forbidden, `404` not found / out of scope, `409` conflict, `412` stale `If-Match` ETag (v1), `429` rate-limited (with `Retry-After`). Every response (success or error) carries an `x-request-id` header that matches the audit log.
 
-### Machine API (`/api/v1`)
-RFC 7807 `application/problem+json`:
-
-```json
-{ "type": "about:blank", "title": "Forbidden", "status": 403, "detail": "…", "requestId": "5f3c…" }
-```
-
-Every response (success or error) carries an `x-request-id` header that matches the audit log.
-
-## 5. Permission catalog
-
-The catalog (`ADMIN_PERMISSION_CATALOG`) has **35** `admin.*` keys (`src/lib/admin/permissions.ts`). The `superuser` marker and the `shell.view` / `audit.view` view markers are **not** in the catalog — they live only in the `SUPERUSER_PERMISSIONS` set the marker expands to.
-
-| Domain | Keys |
-| --- | --- |
-| **Users** | `admin.users.read`, `.create`, `.update`, `.delete`, `.manage`, `.ban`, `.sessions`, `.impersonate`, `.setRole`, `.setPassword` |
-| **Roles** | `admin.roles.read`, `.create`, `.update`, `.delete`, `.assign` |
-| **Groups** | `admin.groups.read`, `.create`, `.update`, `.delete`, `.assign` |
-| **Organizations** | `admin.orgs.read`, `.create`, `.update`, `.delete`, `.manage` |
-| **Permissions** | `admin.permissions.manage` |
-| **Enterprise apps** | `admin.apps.read`, `.manage` |
-| **API keys** | `admin.apikeys.read`, `.manage` |
-| **OAuth clients** | `admin.clients.read`, `.manage` |
-| **Audit** | `admin.audit.read` |
-| **Email** | `admin.email.read`, `.manage` |
-
-Machine API scopes use these same keys (plus `account.*` self-service scopes). A scope ending in `.*` (e.g. `admin.users.*`) matches every key under that prefix.
-
-## 6. Administrator endpoints (selected)
-
-All require a cookie session and the noted permission; mutations are rate-limited and audited. List endpoints share a uniform envelope: `{ items, page, pageSize, total }` with `page`, `pageSize`, `sort`, `q`, and `filter[…]` query parameters.
-
-| Resource | Methods & paths | Permissions |
-| --- | --- | --- |
-| Users | `GET/POST /api/administrator/users`; `GET/PATCH/DELETE …/[id]`; `…/[id]/status`, `/password`, `/role`, `/sessions`, `/ban`, `/unban`, `/restore`, `/impersonate`, `/memberships`, `/app-roles`, `/groups`; `POST …/users/bulk` | `admin.users.*` (per action) |
-| Roles | `GET/POST /api/administrator/roles`; `GET/PATCH/DELETE …/[id]`; `…/[id]/permissions`, `/members`, `/duplicate` | `admin.roles.*` |
-| Permissions | `GET/POST /api/administrator/permissions`; `…/[id]` | `admin.roles.read`, `admin.permissions.manage` |
-| Groups | `GET/POST /api/administrator/groups`; `GET/PATCH/DELETE …/[id]`; `…/[id]/roles`, `/members` | `admin.groups.*`, `admin.roles.assign` |
-| Organizations | `GET/POST /api/administrator/organizations`; `GET/PATCH/DELETE …/[id]`; `…/[id]/members`, `/provider-bindings` | `admin.orgs.*` |
-| API keys | `GET/POST /api/administrator/api-keys`; `GET/PATCH/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
-| Email | `GET /api/administrator/email/outbox`; `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
-| Audit | `GET /api/administrator/audit` | `admin.audit.read` |
-| Export | `GET /api/administrator/export/[resource]` | export permission |
-
-### Example — create a user
-
-```bash
-curl -X POST https://app.example.com/api/administrator/users \
-  -H "Content-Type: application/json" --cookie "<session>" \
-  -d '{"email":"new.user@example.com","password":"<temp>","name":"New User"}'
-```
-
-```json
-{ "ok": true, "id": "…", "better_auth_user_id": "…", "primary_email": "new.user@example.com", "status": "pending_approval" }
-```
-
-### Example — list with pagination & filter
-
-```bash
-curl "https://app.example.com/api/administrator/users?page=1&pageSize=25&q=acme&filter[status]=active" \
-  --cookie "<session>"
-```
-
-```json
-{ "items": [ { "id": "…", "primary_email": "…", "status": "active" } ], "page": 1, "pageSize": 25, "total": 42 }
-```
-
-## 7. Machine API (`/api/v1`)
+## 5. Machine API (`/api/v1`)
 
 | Endpoint | Methods | Auth (scope) | Purpose |
 | --- | --- | --- | --- |
 | `/api/v1/auth/token` | POST | API key or OAuth client credentials | Exchange long-lived credentials for a short-lived JWT |
 | `/api/v1/me` | GET | `account.read` | Caller identity, permissions, effective scopes |
-| `/api/v1/me/api-keys` | GET/POST | `account.read` / `account.apikeys.manage` | List / mint the caller's own keys (plaintext once) |
-| `/api/v1/me/api-keys/[id]` | DELETE; `…/rotate` | `account.apikeys.manage` | Revoke / rotate one of the caller's own keys |
-| `/api/v1/users` | GET/POST | `admin.users.read` / `.create` | User administration |
-| `/api/v1/users/[id]` | GET; `…/status` | `admin.users.*` | Read a user (mutation lives under `/api/administrator`) |
-| `/api/v1/admin/api-keys` | GET; `…/[id]` DELETE | `admin.apikeys.*` | API-key governance (list / revoke any key) |
-| `/api/v1/admin/oauth-clients` | GET/POST; `…/[id]` GET/PATCH/DELETE; `…/rotate-secret` | `admin.clients.*` | OAuth client (client-credentials) management |
+| `/api/v1/me/api-keys` | GET / POST | `account.read` / `account.apikeys.manage` | List / mint the caller's own keys (plaintext once) |
+| `/api/v1/me/api-keys/[id]` | DELETE; `…/rotate` POST | `account.apikeys.manage` | Revoke / rotate one of the caller's own keys |
+| `/api/v1/users` | GET / POST | `admin.users.read` / `.create` | User administration |
+| `/api/v1/users/[id]` | GET; `…/status` POST | `admin.users.read` / `.manage` | Read a user (emits a weak ETag); apply a status transition |
+| `/api/v1/admin/api-keys` | GET; `…/[id]` DELETE | `admin.apikeys.read` / `.manage` | API-key governance (list / revoke any key) |
+| `/api/v1/admin/oauth-clients` | GET / POST; `…/[id]` GET/PATCH/DELETE; `…/rotate-secret` POST | `admin.clients.read` / `.manage` | OAuth client (client-credentials) management |
 | `/api/v1/audit-events` | GET | `admin.audit.read` | Read the audit log |
 | `/api/v1/jwks.json` | GET | public | Public keys for verifying issued JWTs |
 | `/api/v1/openapi.json` | GET | public | OpenAPI 3.1 spec |
+
+The token endpoint accepts `grant_type` of `api_key` or `client_credentials`, with an optional `scope` to **down-scope** the token to a subset of the credential's scopes. Mutations are mutating-rate-limited per credential (the bucket keys on the credential id, so one noisy key can't exhaust the principal's whole budget).
 
 ### Example — who am I
 
@@ -177,13 +143,114 @@ curl https://app.example.com/api/v1/me -H "Authorization: Bearer eyJ…"
 ```json
 {
   "betterAuthUserId": "…", "appUserId": "…", "email": "svc@example.com",
-  "status": "active", "organizationId": "…",
+  "status": "active", "organizationId": "…", "preferredLocale": "en",
   "authentication": { "kind": "api_key", "credentialId": "…" },
   "permissions": ["admin.users.read"], "grantedScopes": ["admin.users.read"], "effectiveScopes": ["admin.users.read"]
 }
 ```
 
-## 8. SSO handoff endpoints
+### Generating & using a v1 client
+
+The v1 surface is designed for generated SDKs — use it for **anything outside the browser** (integrations, cron jobs, other services, or letting a user manage their own resources). Every operation has a stable `operationId` (`listUsers`, `createUser`, `issueToken`, …) so generated method names are predictable.
+
+```bash
+# 1. Get the spec — committed, so no running server is needed:
+#    docs/openapi.json   (…or fetch the live one)
+curl https://app.example.com/api/v1/openapi.json -o openapi.json
+
+# 2. Generate a client for your stack:
+npx openapi-typescript docs/openapi.json -o api.d.ts                 # TS types only
+npx @openapitools/openapi-generator-cli generate \                  # full typed client
+  -i docs/openapi.json -g typescript-fetch -o ./clients/v1
+npx @openapitools/openapi-generator-cli generate \                  # any other language
+  -i docs/openapi.json -g python -o ./clients/python
+```
+
+```ts
+// 3. Call it — authenticate with a bearer token (API key or JWT).
+import { Configuration, UsersApi } from "./clients/v1";
+
+const api = new UsersApi(
+  new Configuration({
+    basePath: "https://app.example.com/api/v1",
+    headers: { Authorization: `Bearer ${process.env.API_TOKEN}` },
+  }),
+);
+
+const page = await api.listUsers({ page: 1, pageSize: 25, q: "acme" });
+console.log(page.items, page.total);
+```
+
+## 6. Administrator API (`/api/administrator`) & the committed admin SDK
+
+This is the cookie-session console surface (users, roles, permissions, groups, organizations, memberships, enterprise apps, API keys, email, audit, CSV export). It is **internal tooling that mirrors the admin console — not a public/integration API**; prefer the v1 surface for integrations. All endpoints require a cookie session and the noted permission; mutations are rate-limited and audited.
+
+| Resource | Methods & paths | Permissions |
+| --- | --- | --- |
+| Users | `GET/POST /users`; `GET/PATCH/DELETE …/[id]`; `…/[id]/status`, `/password`, `/role`, `/sessions`, `/ban`, `/unban`, `/restore`, `/impersonate`, `/memberships`, `/app-roles`, `/groups`; `POST …/users/bulk` | `admin.users.*` (per action) |
+| Roles | `GET/POST /roles`; `GET/PATCH/DELETE …/[id]`; `…/[id]/permissions`, `/members`, `/duplicate` | `admin.roles.*` |
+| Permissions | `GET/POST /permissions`; `…/[id]` | `admin.roles.read`, `admin.permissions.manage` |
+| Groups | `GET/POST /groups`; `GET/PATCH/DELETE …/[id]`; `…/[id]/roles`, `/members` | `admin.groups.*`, `admin.roles.assign` |
+| Organizations | `GET/POST /organizations`; `GET/PATCH/DELETE …/[id]`; `…/[id]/members`, `/provider-bindings` | `admin.orgs.*` |
+| API keys | `GET/POST /api-keys`; `GET/PATCH/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
+| Email | `GET /email/outbox`; `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
+| Audit | `GET /audit` | `admin.audit.read` |
+| Export | `GET /export/[resource]` | export permission |
+
+> The exact permission per action and request/response shapes live in [`docs/openapi-admin.json`](./openapi-admin.json) and [`admin-manager.md`](./admin-manager.md). `GET /api/administrator/metrics` exists but is **intentionally excluded** from the spec/SDK — it backs the console home dashboard only.
+
+### The committed admin SDK
+
+Unlike the v1 client, the admin SDK is **already generated and committed** at [`sdk/admin/`](../sdk/admin/) (openapi-generator `typescript-fetch`, zero runtime dependencies — it uses the global `fetch`). Import it directly. Authenticate with the **session cookie**, plus an **`Origin` header on every mutation** (the CSRF guard); a non-browser caller must supply both.
+
+```ts
+import { Configuration, UsersApi, OrganizationsApi } from "../sdk/admin";
+
+// In the browser: cookies are sent automatically with credentials:"include".
+const browser = new Configuration({
+  basePath: "https://app.example.com/api/administrator",
+  credentials: "include",
+  headers: { Origin: "https://app.example.com" }, // required on mutations
+});
+
+// On the server: forward the session cookie + an Origin header explicitly.
+const server = new Configuration({
+  basePath: "https://app.example.com/api/administrator",
+  headers: {
+    Cookie: `better-auth.session_token=${sessionToken}`,
+    Origin: "https://app.example.com",
+  },
+});
+
+const users = new UsersApi(browser);
+const page = await users.listUsers({ page: 1, pageSize: 25, filterStatus: ["active"] });
+const created = await users.createUser({
+  createUserRequest: { email: "new.user@example.com", password: "<temp>", name: "New User" },
+});
+const orgs = await new OrganizationsApi(server).listOrganizations({ q: "acme" });
+```
+
+Failed requests reject with a `ResponseError` carrying the `AdminError` envelope (`message` is an i18n key). Regenerate after editing the admin API — a drift-guard test fails otherwise:
+
+```bash
+pnpm sdk:admin:typecheck   # type-check the committed client (sdk/admin/tsconfig.json)
+pnpm sdk:admin:generate    # re-export docs/openapi-admin.json + regenerate sdk/admin
+```
+
+> **Regenerating needs Java + network** (openapi-generator runs on a JVM, pinned in `openapitools.json`); the **committed** client itself has no dependencies. See [`sdk/admin/README.md`](../sdk/admin/README.md).
+
+### Which surface should I use?
+
+| If you're… | Use |
+| --- | --- |
+| Integrating from another service / script / language | **v1 machine API** (bearer auth, generate from `docs/openapi.json`) |
+| Letting a user manage *their own* resources programmatically | **v1 machine API** (`account.*` scopes, `/api/v1/me/*`) |
+| Building internal tooling that mirrors the admin console | **Admin SDK** (`sdk/admin/`, cookie + Origin) |
+| Unsure | **v1** — it's the supported integration surface; the admin SDK is an internal convenience |
+
+The two surfaces overlap (both can manage users) but differ in **auth** (bearer vs cookie+Origin) and **error format** (RFC 7807 vs `{ error, message, requestId }`).
+
+## 7. SSO handoff endpoints
 
 | Endpoint | Method | Auth | Purpose |
 | --- | --- | --- | --- |
@@ -192,19 +259,30 @@ curl https://app.example.com/api/v1/me -H "Authorization: Bearer eyJ…"
 
 Query parameters for `launch`: `applicationId` (required), `locale` (optional). The token is HS256, single-use, valid ≤60s, with an audience bound to the destination application. See [Architecture → SSO](./architecture.md#single-sign-on-handoff) and [Configuration](./configuration.md#single-sign-on-handoff).
 
-## 9. Secret-handling notes
+## 8. Secret-handling notes
 
 - API-key and OAuth-client secrets are returned **once** at creation/rotation and stored only as hashes. There is no endpoint to retrieve them again.
 - Never log or echo a plaintext credential; the audit log records metadata only.
 
-## 10. Source of truth & known gaps
+## 9. Troubleshooting
 
-- The committed **OpenAPI 3.1 specs are authoritative** for exact request/response shapes — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`). They are regenerated from the handlers and **drift-checked in CI** (the "OpenAPI + admin SDK drift" job), so where this prose summarizes a route (e.g. `/api/preferences/active-org`, `/api/navigation/shell-menu`, `/api/administrator/organizations/[id]/provider-bindings`, `/api/administrator/export/[resource]`), treat the spec as canonical.
-- The `account.*` scopes are enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json); the supported `export` resources/formats are described by the `/api/administrator/export/[resource]` operation in [`docs/openapi-admin.json`](./openapi-admin.json).
-- `GET /api/administrator/metrics` (the console home dashboard counts) exists as a route but is **intentionally excluded** from the admin OpenAPI spec — it backs the internal console UI and is not part of the generated SDK surface.
-- Client generation is documented in [Generating a client](./api-clients.md#1-the-v1-machine-api-client) and [Internal admin SDK](./api-clients.md#2-the-admin-console-sdk). The cookie-session admin SDK is committed under [`sdk/admin/`](../sdk/admin/); the v1 client is generated on demand from `docs/openapi.json`.
-- _Future enhancement (not yet shipped):_ a hosted Swagger/Redoc page for browsing the specs.
+| Symptom | Cause / fix |
+| --- | --- |
+| `401` from `/api/v1/*` | Missing/invalid bearer; or the path is disabled (`API_KEYS_ENABLED` / `API_JWT_ENABLED` are off by default). |
+| `403` with an unexpected scope error | The credential's scope doesn't cover the endpoint, **or** exceeds the owner's permissions (it's capped to the creator). |
+| `401`/`403` from `/api/administrator/*` | No session cookie, or (on a mutation) a missing/untrusted `Origin` header — add it (CSRF guard). |
+| `404` for a resource you know exists | Tenant scoping — an org admin can't see other orgs; out-of-scope is 404 by design. |
+| `412` from a v1 mutation | Stale `If-Match` ETag — re-`GET` the resource and retry with the fresh ETag. |
+| `429` | Rate-limited; respect the `Retry-After` header. |
+| Generated client types don't match responses | Regenerate from the current spec; list/detail endpoints return snake_case rows, create endpoints camelCase summaries (both modeled). |
+| `pnpm sdk:admin:generate` fails | It needs **Java** and network access (openapi-generator). The committed client doesn't. |
+
+## 10. Source of truth & keeping clients in sync
+
+- The committed **OpenAPI 3.1 specs are authoritative** for exact request/response shapes — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`). They are regenerated from the handlers and **drift-checked in CI**; the fix when a check fails is `pnpm openapi:export` (both specs) and, for the admin surface, `pnpm sdk:admin:generate`, then commit.
+- The `account.*` scopes are also enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json); the supported `export` resources/formats are described by the `/api/administrator/export/[resource]` operation in [`docs/openapi-admin.json`](./openapi-admin.json).
+- **Regenerate your downstream client** whenever the relevant spec changes — watch `docs/openapi.json` / `docs/openapi-admin.json`, or the `version` in the spec's `info`.
 
 ---
 
-_Next: [Configuration](./configuration.md) for the environment variables these endpoints depend on._
+_See also: [Design: API Keys & Access Tokens](./design-api-keys-and-tokens.md) · [Administrator Console — Specification](./admin-manager.md) · [Configuration](./configuration.md) for the environment variables these endpoints depend on._

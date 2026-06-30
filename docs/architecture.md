@@ -111,7 +111,7 @@ Better Auth uses the **same `pg` pool** as the app (`src/db/database.ts`) — th
 
 ### Authorization: the three-tier model
 
-Authorization is an **application-layer** concern layered on top of authentication (ADR-0001, see [`docs/adr/0001-three-tier-access-control.md`](./adr/0001-three-tier-access-control.md)).
+Authorization is an **application-layer** concern layered on top of authentication (the three-tier decision **ADR-0001**, documented in full under [Access-control design decisions](#access-control-design-decisions) below).
 
 ```mermaid
 flowchart TB
@@ -189,7 +189,7 @@ Administrator mutations pass through an in-memory **per-actor token bucket** (`s
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 / sec | Bulk operations |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 / sec | CSV export |
 
-The store is in-process (resets on restart). A distributed (e.g. Redis) backend is a noted follow-up — see `TODO` in [DevOps Setup](./devops-setup.md).
+The store is in-process (resets on restart). A distributed (e.g. Redis) backend is a noted follow-up — see `TODO` in [Deployment](./deployment.md).
 
 ### Single Sign-On handoff
 
@@ -227,9 +227,52 @@ The handoff JWT is symmetric (HS256) and signed with `SSO_HANDOFF_JWT_SECRET` �
 
 A credential's authority is the **intersection of its scopes and its owner's permissions** — a credential can never grant more than the person who created it (`src/lib/api-auth/scopes.ts`). Both paths are **off by default**.
 
+### Access-control design decisions
+
+Two load-bearing decisions are referenced throughout the code as **ADR-0001** (three-tier access control) and **ADR-0002** (organization groups). This section is their canonical home — the standalone ADR files have been retired into it.
+
+#### ADR-0001 — three tiers, one boundary module
+
+The `superuser` permission is a **marker**, not a capability: it was seeded but never checked until this decision made it **load-bearing** as the _sole_ explicit bypass of org scoping. The tier is derived from the marker's presence, so existing seed data keeps working:
+
+| Seed role | Tier | Identified by |
+| --- | --- | --- |
+| `superuser` | SUPERADMIN | holds the `superuser` marker → all orgs |
+| `admin.platform` | ORG ADMIN | full `admin.*`, no marker → its one org |
+| `admin` | ORG ADMIN (limited) | a subset of `admin.*` |
+| `member` | USER | `shell.view` only |
+
+Every tenant-scoped resource is filtered by the column that carries its tenant — API keys, OAuth clients, audit events, and memberships by `organization_id`; users by membership in the org. **Creating, renaming, or deleting an organization** (the tenant entity itself) is SUPERADMIN-only — an org admin manages the _contents_ of their org, not the org record. Three rules keep the boundary airtight:
+
+- An org admin **creating** a tenant resource has its `organization_id` **forced** to their org.
+- `[id]` mutations **re-fetch the row, run `canAccessOrg`, and 404 on miss _before_ mutating** — so an out-of-scope write is indistinguishable from a missing row and is never audited as a real action.
+- An org admin with **no active membership** resolves to `null` scope and is **denied** — provisioning order matters.
+
+#### ADR-0002 — groups bundle roles, never permissions
+
+A group is a first-class, **always org-scoped** cohort (`app_groups`, `organization_id NOT NULL` — there are no global groups) that collects users and bundles roles. A user's effective roles for the active org are the **union of direct (`app_user_roles`) and group-conferred (`app_group_memberships → app_group_roles`) roles**, resolved in one query in `getUserAccessContext`; permissions then expand from those roles exactly as before:
+
+```sql
+-- effective role ids = direct ∪ via-groups, both scoped to the ACTIVE org
+select role_id from app_user_roles
+ where app_user_id = :userId and organization_id = :activeOrgId
+union
+select gr.role_id from app_group_memberships gm
+  join app_groups g on g.id = gm.group_id
+  join app_group_roles gr on gr.group_id = g.id
+ where gm.app_user_id = :userId and g.organization_id = :activeOrgId;
+```
+
+The org filter on **both** branches is what keeps groups inside the ADR-0001 boundary. Two invariants make groups add **zero new authority**:
+
+- **Roles only, never permissions.** Groups reference `app_roles`, never `app_permissions` — the blast radius is "a different way to assign existing roles," not a new authority primitive.
+- **Privilege-escalation guard.** A group may bundle only roles its own org owns, and bundling a `superuser`-granting role is SUPERADMIN-only — identical to direct role assignment, so a group can never be a backdoor to broader authority than its manager holds.
+
+(Rejected alternatives: _roles-as-groups_ can't answer "who is in Marketing?" or re-point a cohort; _groups-grant-permissions-directly_ would duplicate the role→permission machinery and add a second authority primitive to secure; _nested groups_ are deferred — they'd need cycle detection.)
+
 ## 5. Data model
 
-PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The schema is provisioned by a **frozen baseline plus append-only forward migrations**: `src/db/migrations/0001-initial-schema.sql` is the consolidated, idempotent baseline (FROZEN — `CREATE … IF NOT EXISTS`, so re-running it never alters a provisioned database), and every change after it lands as a new numbered `NNNN-*.sql` file (`0002-…` onward). A lightweight runner (`src/db/migrations/run-migrations.ts`) records applied filenames in an `app_schema_migrations` ledger and applies each not-yet-recorded file, in lexical order, inside its own transaction — so a fresh database runs `0001` then the forward files in order, and a provisioned one applies only the new ones. (Better Auth's own `better-auth*` files are owned by its tooling and skipped by this runner.) TypeScript types live in `src/db/schema/app-schema.ts`. See [DevOps Setup → Database](./devops-setup.md#3-database).
+PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The schema is provisioned by a **frozen baseline plus append-only forward migrations**: `src/db/migrations/0001-initial-schema.sql` is the consolidated, idempotent baseline (FROZEN — `CREATE … IF NOT EXISTS`, so re-running it never alters a provisioned database), and every change after it lands as a new numbered `NNNN-*.sql` file (`0002-…` onward). A lightweight runner (`src/db/migrations/run-migrations.ts`) records applied filenames in an `app_schema_migrations` ledger and applies each not-yet-recorded file, in lexical order, inside its own transaction — so a fresh database runs `0001` then the forward files in order, and a provisioned one applies only the new ones. (Better Auth's own `better-auth*` files are owned by its tooling and skipped by this runner.) TypeScript types live in `src/db/schema/app-schema.ts`. See [Deployment](./deployment.md).
 
 **Schema:** every table — the `app_*` tables **and** the Better Auth vendor tables — is deployed into one schema, **`auth`** by default, configurable via `DB_SCHEMA` (`src/db/schema-config.ts`). The schema is applied at the **connection level** via `search_path=<DB_SCHEMA>,public`, so all (unqualified) Kysely queries resolve to it with no per-query qualification; the shared extensions (`pgcrypto`, `pg_trgm`) stay in `public`. Setting a different `DB_SCHEMA` per deployment isolates applications by schema with no code changes. See [Configuration → `DB_SCHEMA`](./configuration.md#database-postgresql).
 

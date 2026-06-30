@@ -21,8 +21,7 @@ handoff.
 - **Machine API** — a versioned `/api/v1` REST surface authenticated by
   API keys (`drk_…`) or Ed25519 JWT access tokens, with a published
   JWKS document, OAuth client-credentials, and an OpenAPI spec. Ships
-  disabled by default (see [docs/api.md](docs/api.md) and
-  [docs/api-clients.md](docs/api-clients.md))
+  disabled by default (see [docs/api.md](docs/api.md))
 - **Outbound email** — outbox-first, with pluggable Resend / Mailgun
   delivery and editable templates (see [docs/configuration.md](docs/configuration.md))
 - **next-intl** — localized routing (`en`, `fr`, `es`, `uk`, `pt`, `zh`, `hi`, `ja`)
@@ -112,20 +111,18 @@ tests/                                # unit / component / integration / securit
 The canonical, audience-organized documentation set lives in **[docs/](docs/README.md)** — start there. Direct links:
 
 - [docs/product-overview.md](docs/product-overview.md) — what it is, who it's for, value proposition
-- [docs/features.md](docs/features.md) — feature catalog, user flows, roles & permissions
+- [docs/product-overview.md](docs/product-overview.md) — product value, feature catalog, user flows, roles & permissions
 - [docs/architecture.md](docs/architecture.md) — system design, boundaries, auth/authz, data flow, diagrams
 - [docs/developer-onboarding.md](docs/developer-onboarding.md) — **start here as a developer**: install, run, test, structure, conventions
 - [docs/configuration.md](docs/configuration.md) — every environment variable, config files, secrets, local vs production
-- [docs/devops-setup.md](docs/devops-setup.md) — from-scratch infrastructure, provisioning, CI/CD, readiness checklist
+- [docs/deployment.md](docs/deployment.md) — deploy model, DB provisioning, CI/CD, post-deploy verification
 - [docs/deployment.md](docs/deployment.md) — build, artifacts, container, release & post-deploy verification
 - [docs/docker.md](docs/docker.md) — container build/run, env, and the migrations init step
-- [docs/api.md](docs/api.md) — HTTP API surface, auth requirements, request/response, error model
-- [docs/api-clients.md](docs/api-clients.md) — typed clients/SDKs for the `/api/v1` surface and the committed admin SDK
+- [docs/api.md](docs/api.md) — HTTP API surface, auth + error model, and typed clients/SDKs for the `/api/v1` surface and the committed admin SDK
 - [docs/testing.md](docs/testing.md) — test strategy, suites, coverage, manual QA checklist
 - [docs/observability.md](docs/observability.md) — logs, redaction, request-id correlation, audit, Sentry, metrics, health probes, and the roadmap
-- [docs/incident-response.md](docs/incident-response.md) — on-call runbook: severity, triage by signal, playbooks, rollback
+- [docs/troubleshooting.md](docs/troubleshooting.md) — incident runbook + common failures and fixes
 - [docs/troubleshooting.md](docs/troubleshooting.md) — common setup, build, runtime, and deployment failures and fixes
-- [docs/adr/](docs/adr/) — architecture decision records: [ADR-0001 three-tier access control](docs/adr/0001-three-tier-access-control.md), [ADR-0002 organization groups](docs/adr/0002-organization-groups.md)
 - [specs.md](specs.md) — application shell specification (incl. §35 email, §36 account, §37 machine API)
 
 ## Security model (summary)

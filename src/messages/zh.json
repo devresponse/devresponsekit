@@ -27,6 +27,12 @@
     }
   },
   "auth": {
+    "verifyEmailTitle": "验证您的电子邮件",
+    "verifyEmailDescription": "我们已向您的电子邮件地址发送了验证链接。请点击它以确认您的账户。验证后，管理员将审核您的访问权限。",
+    "verifyEmailResendPrompt": "没有收到？请输入您的电子邮件以发送新链接。",
+    "resendVerificationEmail": "重新发送验证邮件",
+    "verificationEmailSent": "如果您的地址仍需验证，新链接正在发送中。请查看您的收件箱。",
+    "emailNotVerified": "请在登录前验证您的电子邮件地址。请在收件箱中查看验证链接，或在下方重新发送。",
     "signInTitle": "登录您的账户",
     "signUpTitle": "创建您的账户",
     "signInWithGoogle": "使用 Google 继续",

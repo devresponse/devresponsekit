@@ -6,16 +6,24 @@ import { EmailPasswordLoginForm } from "@/components/auth/email-password-login-f
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 const signInEmail = vi.fn();
+const sendVerificationEmail = vi.fn();
 vi.mock("@/lib/auth-client", () => ({
   authClient: {
     signIn: {
       email: (...args: unknown[]) => signInEmail(...args),
     },
+    sendVerificationEmail: (...args: unknown[]) => sendVerificationEmail(...args),
   },
 }));
 
-beforeEach(() => signInEmail.mockReset());
-afterEach(() => signInEmail.mockReset());
+beforeEach(() => {
+  signInEmail.mockReset();
+  sendVerificationEmail.mockReset();
+});
+afterEach(() => {
+  signInEmail.mockReset();
+  sendVerificationEmail.mockReset();
+});
 
 describe("EmailPasswordLoginForm", () => {
   it("renders required fields and a loading-aware submit button", () => {
@@ -64,5 +72,23 @@ describe("EmailPasswordLoginForm", () => {
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/unexpected/i);
+  });
+
+  it("routes an unverified sign-in to the verify + resend prompt, not invalid-credentials (AUTH-4)", async () => {
+    signInEmail.mockResolvedValueOnce({ error: { code: "EMAIL_NOT_VERIFIED", status: 403 } });
+    const user = userEvent.setup();
+    renderWithIntl(<EmailPasswordLoginForm returnTo="/en/app/dashboard" />);
+
+    await user.type(screen.getByLabelText(/email/i), "ada@example.com");
+    await user.type(screen.getByLabelText(/password/i), "Password!1234");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    // Not the generic invalid-credentials alert — the verify + resend prompt
+    // renders, with the attempted address carried into the resend form.
+    expect(
+      await screen.findByRole("button", { name: /resend verification email/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/invalid email or password/i)).toBeNull();
+    expect(screen.getByLabelText(/email/i)).toHaveValue("ada@example.com");
   });
 });

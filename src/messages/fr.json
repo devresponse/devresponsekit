@@ -27,6 +27,12 @@
     }
   },
   "auth": {
+    "verifyEmailTitle": "Vérifiez votre e-mail",
+    "verifyEmailDescription": "Nous avons envoyé un lien de vérification à votre adresse e-mail. Cliquez dessus pour confirmer votre compte. Une fois vérifié, un administrateur examinera votre accès.",
+    "verifyEmailResendPrompt": "Vous ne l'avez pas reçu ? Saisissez votre e-mail pour envoyer un nouveau lien.",
+    "resendVerificationEmail": "Renvoyer l'e-mail de vérification",
+    "verificationEmailSent": "Si votre adresse doit encore être vérifiée, un nouveau lien est en route. Consultez votre boîte de réception.",
+    "emailNotVerified": "Veuillez vérifier votre adresse e-mail avant de vous connecter. Consultez votre boîte de réception pour le lien de vérification, ou renvoyez-le ci-dessous.",
     "signInTitle": "Connectez-vous à votre compte",
     "signUpTitle": "Créer votre compte",
     "signInWithGoogle": "Continuer avec Google",

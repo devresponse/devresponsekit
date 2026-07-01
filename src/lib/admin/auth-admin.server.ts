@@ -60,7 +60,12 @@ export async function createBetterAuthUser(
       password: params.password,
       name: params.name ?? params.email,
       role: params.role,
-      data: params.data,
+      // Programmatically-provisioned users (admin console + machine API) are
+      // created pre-verified: the caller is a trusted admin / API credential
+      // that vouches for the address, so they bypass the self-sign-up email
+      // verification gate (AUTH-4). Public self-registration still verifies.
+      // A caller may override by passing `data.emailVerified`.
+      data: { emailVerified: true, ...params.data },
     },
     headers: await actorHeaders(actor),
   } as Parameters<typeof auth.api.createUser>[0]);

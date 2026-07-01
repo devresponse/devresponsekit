@@ -18,17 +18,25 @@ import { useZodForm } from "@/lib/forms/use-zod-form";
 import { signUpSchema, type SignUpInput } from "@/lib/validation/auth";
 
 export interface EmailPasswordSignUpFormProps {
-  pendingApprovalHref: string;
+  /** Localized "check your inbox" page shown immediately after sign-up. */
+  verifyEmailHref: string;
+  /** Post-verification destination, carried as the Better Auth `callbackURL`. */
+  postVerifyHref: string;
 }
 
 /**
  * EmailPasswordSignUpForm
  *
  * Self-registration via Better Auth (React Hook Form + the shared
- * `signUpSchema`). On success the user is moved to the localized
- * pending-approval page immediately.
+ * `signUpSchema`). Email verification is required (AUTH-4): sign-up creates the
+ * account and emails a verification link but does NOT start a session, so on
+ * success the user is sent to the localized verify-email page. Clicking the
+ * emailed link verifies the address and lands them at `postVerifyHref`.
  */
-export function EmailPasswordSignUpForm({ pendingApprovalHref }: EmailPasswordSignUpFormProps) {
+export function EmailPasswordSignUpForm({
+  verifyEmailHref,
+  postVerifyHref,
+}: EmailPasswordSignUpFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
   const router = useRouter();
@@ -44,13 +52,13 @@ export function EmailPasswordSignUpForm({ pendingApprovalHref }: EmailPasswordSi
         email: values.email,
         password: values.password,
         name: values.name.trim(),
-        callbackURL: pendingApprovalHref,
+        callbackURL: postVerifyHref,
       });
       if (result.error) {
         form.setError("root", { type: "server", message: t("unexpectedError") });
         return;
       }
-      router.replace(pendingApprovalHref);
+      router.replace(verifyEmailHref);
     } catch {
       form.setError("root", { type: "server", message: t("unexpectedError") });
     }

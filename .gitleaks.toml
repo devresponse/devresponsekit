@@ -21,6 +21,12 @@ paths = [
   '''(^|/)coverage/''',
   '''(^|/)test-results/''',
   '''(^|/)\.env\.example$''',
+  # A GENERATED documentation export (UAT story rows), not application source:
+  # only synthetic test-script prose + story IDs. The default generic-api-key
+  # rule false-positives across its adjacent CSV rows (a prose keyword ending
+  # one row abutting the next row's high-entropy `UAT-*` id). The human-authored
+  # `.md` sources under docs/uat/ are NOT allowlisted and stay fully scanned.
+  '''(^|/)docs/uat/uat-stories\.csv$''',
 ]
 
 # Documented dummy values that appear in tests, CI config, seed defaults, and

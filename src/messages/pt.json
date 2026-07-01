@@ -27,6 +27,12 @@
     }
   },
   "auth": {
+    "verifyEmailTitle": "Confirme o seu e-mail",
+    "verifyEmailDescription": "Enviámos uma ligação de confirmação para o seu endereço de e-mail. Clique nela para confirmar a sua conta. Depois de confirmada, um administrador irá rever o seu acesso.",
+    "verifyEmailResendPrompt": "Não a recebeu? Introduza o seu e-mail para enviar uma nova ligação.",
+    "resendVerificationEmail": "Reenviar e-mail de confirmação",
+    "verificationEmailSent": "Se o seu endereço ainda precisar de confirmação, uma nova ligação está a caminho. Verifique a sua caixa de entrada.",
+    "emailNotVerified": "Confirme o seu endereço de e-mail antes de iniciar sessão. Verifique a sua caixa de entrada para a ligação de confirmação, ou reenvie-a abaixo.",
     "signInTitle": "Inicie sessão na sua conta",
     "signUpTitle": "Crie a sua conta",
     "signInWithGoogle": "Continuar com o Google",

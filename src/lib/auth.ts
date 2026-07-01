@@ -63,7 +63,11 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: false,
+    // AUTH-4: block sign-in until the email address is verified. New email/
+    // password sign-ups receive a verification link (see the `emailVerification`
+    // block below); OAuth identities arrive pre-verified from a trusted provider
+    // and are unaffected. Seed fixtures are marked verified by the seed script.
+    requireEmailVerification: true,
     // AUTH-2: revoke ALL of the user's sessions on a successful password
     // reset. A reset is the canonical "I think my account is compromised"
     // action, so it must also evict any attacker session — otherwise the
@@ -90,6 +94,27 @@ export const auth = betterAuth({
       });
     },
   } as NonNullable<BetterAuthOptions["emailAndPassword"]>,
+
+  // Email verification (AUTH-4). Better Auth sends the verification link on
+  // sign-up and, together with `requireEmailVerification` above, blocks sign-in
+  // until the address is confirmed. Delivery is outbox-first (specs.md §35),
+  // mirroring `sendResetPassword`; the lazy import keeps the email module out of
+  // the auth chain for tooling that only needs the instance shape. `url` is the
+  // Better Auth verification link, carrying the sign-up `callbackURL` as its
+  // post-verification destination.
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    sendVerificationEmail: async ({ user, url }) => {
+      const { sendAppEmail } = await import("@/lib/email/send.server");
+      await sendAppEmail({
+        to: user.email,
+        templateKey: "email_verification",
+        variables: { name: user.name || user.email, verifyUrl: url },
+        relatedBetterAuthUserId: user.id,
+      });
+    },
+  },
 
   socialProviders,
 

@@ -27,6 +27,12 @@
     }
   },
   "auth": {
+    "verifyEmailTitle": "Verify your email",
+    "verifyEmailDescription": "We've sent a verification link to your email address. Click it to confirm your account. Once verified, an administrator will review your access.",
+    "verifyEmailResendPrompt": "Didn't receive it? Enter your email to send a new link.",
+    "resendVerificationEmail": "Resend verification email",
+    "verificationEmailSent": "If your address still needs verifying, a new link is on its way. Check your inbox.",
+    "emailNotVerified": "Please verify your email address before signing in. Check your inbox for the verification link, or resend it below.",
     "signInTitle": "Sign in to your account",
     "signUpTitle": "Create your account",
     "signInWithGoogle": "Continue with Google",

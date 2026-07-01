@@ -33,13 +33,11 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
 }
 
 /**
- * Built-in defaults. Keep in sync with the seeded templates in the initial
- * schema `0001-initial-schema.sql` (the `en` rows),
- * `0006-email-template-locales.sql` (the fr/es/uk rows),
- * `0007-email-template-locales-pt.sql` (the pt rows),
- * `0008-email-template-locales-zh.sql` (the zh rows),
- * `0009-email-template-locales-hi.sql` (the hi rows), and
- * `0010-email-template-locales-ja.sql` (the ja rows).
+ * Built-in defaults. Keep in sync with the seeded rows in the SQL migrations:
+ * the `en` rows in `0001-initial-schema.sql` (password_reset, test_email) and
+ * `0006-email-verification-template.sql` (email_verification); the non-`en`
+ * rows in `locales/0001`–`0005` (fr/es/uk, pt, zh, hi, ja for the first two
+ * templates) and `locales/0006-email-verification-locales.sql`.
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -229,9 +227,118 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
       },
     },
   },
+  {
+    key: "email_verification",
+    subject: "Verify your email address",
+    bodyHtml:
+      "<p>Hi {{name}},</p>" +
+      "<p>Thanks for creating an account. Please confirm your email address by clicking the link below. This link expires shortly.</p>" +
+      '<p><a href="{{verifyUrl}}">Verify your email</a></p>' +
+      "<p>If you did not create an account, you can safely ignore this email.</p>",
+    bodyText:
+      "Hi {{name}},\n\n" +
+      "Thanks for creating an account. Open the link below to confirm your email address. This link expires shortly.\n\n" +
+      "{{verifyUrl}}\n\n" +
+      "If you did not create an account, you can safely ignore this email.",
+    description: "Sent at sign-up to confirm a new user's email address.",
+    variables: ["name", "verifyUrl"],
+    translations: {
+      fr: {
+        subject: "Vérifiez votre adresse e-mail",
+        bodyHtml:
+          "<p>Bonjour {{name}},</p>" +
+          "<p>Merci d'avoir créé un compte. Veuillez confirmer votre adresse e-mail en cliquant sur le lien ci-dessous. Ce lien expire bientôt.</p>" +
+          '<p><a href="{{verifyUrl}}">Vérifier votre e-mail</a></p>' +
+          "<p>Si vous n'avez pas créé de compte, vous pouvez ignorer cet e-mail.</p>",
+        bodyText:
+          "Bonjour {{name}},\n\n" +
+          "Merci d'avoir créé un compte. Ouvrez le lien ci-dessous pour confirmer votre adresse e-mail. Ce lien expire bientôt.\n\n" +
+          "{{verifyUrl}}\n\n" +
+          "Si vous n'avez pas créé de compte, vous pouvez ignorer cet e-mail.",
+      },
+      es: {
+        subject: "Verifica tu dirección de correo electrónico",
+        bodyHtml:
+          "<p>Hola {{name}},</p>" +
+          "<p>Gracias por crear una cuenta. Confirma tu dirección de correo electrónico haciendo clic en el enlace de abajo. Este enlace caduca pronto.</p>" +
+          '<p><a href="{{verifyUrl}}">Verificar tu correo</a></p>' +
+          "<p>Si no creaste una cuenta, puedes ignorar este correo de forma segura.</p>",
+        bodyText:
+          "Hola {{name}},\n\n" +
+          "Gracias por crear una cuenta. Abre el enlace de abajo para confirmar tu dirección de correo electrónico. Este enlace caduca pronto.\n\n" +
+          "{{verifyUrl}}\n\n" +
+          "Si no creaste una cuenta, puedes ignorar este correo de forma segura.",
+      },
+      uk: {
+        subject: "Підтвердьте свою електронну адресу",
+        bodyHtml:
+          "<p>Вітаємо, {{name}}!</p>" +
+          "<p>Дякуємо за створення облікового запису. Підтвердьте свою електронну адресу, натиснувши посилання нижче. Це посилання незабаром стане недійсним.</p>" +
+          '<p><a href="{{verifyUrl}}">Підтвердити електронну адресу</a></p>' +
+          "<p>Якщо ви не створювали обліковий запис, можете проігнорувати цей лист.</p>",
+        bodyText:
+          "Вітаємо, {{name}}!\n\n" +
+          "Дякуємо за створення облікового запису. Відкрийте посилання нижче, щоб підтвердити свою електронну адресу. Це посилання незабаром стане недійсним.\n\n" +
+          "{{verifyUrl}}\n\n" +
+          "Якщо ви не створювали обліковий запис, можете проігнорувати цей лист.",
+      },
+      pt: {
+        subject: "Confirme o seu endereço de e-mail",
+        bodyHtml:
+          "<p>Olá {{name}},</p>" +
+          "<p>Obrigado por criar uma conta. Confirme o seu endereço de e-mail clicando na ligação abaixo. Esta ligação expira em breve.</p>" +
+          '<p><a href="{{verifyUrl}}">Confirmar o seu e-mail</a></p>' +
+          "<p>Se não criou uma conta, pode ignorar este e-mail com segurança.</p>",
+        bodyText:
+          "Olá {{name}},\n\n" +
+          "Obrigado por criar uma conta. Abra a ligação abaixo para confirmar o seu endereço de e-mail. Esta ligação expira em breve.\n\n" +
+          "{{verifyUrl}}\n\n" +
+          "Se não criou uma conta, pode ignorar este e-mail com segurança.",
+      },
+      zh: {
+        subject: "验证您的电子邮件地址",
+        bodyHtml:
+          "<p>您好 {{name}}，</p>" +
+          "<p>感谢您创建账户。请点击下方链接确认您的电子邮件地址。此链接将很快失效。</p>" +
+          '<p><a href="{{verifyUrl}}">验证您的电子邮件</a></p>' +
+          "<p>如果您没有创建账户，您可以安全地忽略此邮件。</p>",
+        bodyText:
+          "您好 {{name}}，\n\n" +
+          "感谢您创建账户。请打开下方链接确认您的电子邮件地址。此链接将很快失效。\n\n" +
+          "{{verifyUrl}}\n\n" +
+          "如果您没有创建账户，您可以安全地忽略此邮件。",
+      },
+      hi: {
+        subject: "अपना ईमेल पता सत्यापित करें",
+        bodyHtml:
+          "<p>नमस्ते {{name}},</p>" +
+          "<p>खाता बनाने के लिए धन्यवाद। कृपया नीचे दिए गए लिंक पर क्लिक करके अपना ईमेल पता पुष्टि करें। यह लिंक शीघ्र ही समाप्त हो जाएगा।</p>" +
+          '<p><a href="{{verifyUrl}}">अपना ईमेल सत्यापित करें</a></p>' +
+          "<p>यदि आपने खाता नहीं बनाया है, तो आप इस ईमेल को सुरक्षित रूप से अनदेखा कर सकते हैं।</p>",
+        bodyText:
+          "नमस्ते {{name}},\n\n" +
+          "खाता बनाने के लिए धन्यवाद। अपना ईमेल पता पुष्टि करने के लिए नीचे दिया गया लिंक खोलें। यह लिंक शीघ्र ही समाप्त हो जाएगा।\n\n" +
+          "{{verifyUrl}}\n\n" +
+          "यदि आपने खाता नहीं बनाया है, तो आप इस ईमेल को सुरक्षित रूप से अनदेखा कर सकते हैं।",
+      },
+      ja: {
+        subject: "メールアドレスを確認してください",
+        bodyHtml:
+          "<p>{{name}} 様</p>" +
+          "<p>アカウントの作成ありがとうございます。下のリンクをクリックして、メールアドレスを確認してください。このリンクはまもなく無効になります。</p>" +
+          '<p><a href="{{verifyUrl}}">メールアドレスを確認する</a></p>' +
+          "<p>心当たりがない場合は、このメールを無視していただいて問題ありません。</p>",
+        bodyText:
+          "{{name}} 様\n\n" +
+          "アカウントの作成ありがとうございます。下のリンクを開いて、メールアドレスを確認してください。このリンクはまもなく無効になります。\n\n" +
+          "{{verifyUrl}}\n\n" +
+          "心当たりがない場合は、このメールを無視していただいて問題ありません。",
+      },
+    },
+  },
 ] as const;
 
-export type EmailTemplateKey = "password_reset" | "test_email";
+export type EmailTemplateKey = "password_reset" | "test_email" | "email_verification";
 
 /**
  * Returns the code-level default for `key`, with the requested `locale`'s

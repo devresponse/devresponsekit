@@ -388,6 +388,11 @@ async function ensureIdentity(
     console.log(`[dev-init]   + ${user.email}`);
   }
 
+  // Seed fixtures are created pre-verified. `requireEmailVerification` gates
+  // real sign-ups, but the dev fixture + the Playwright suite sign in directly
+  // and cannot complete an email round-trip. Reconcile on every run (idempotent).
+  await pool.query(`update "user" set "emailVerified" = true where id = $1`, [authUser.id]);
+
   // 2. Application profile — always reconcile to active; back-date created_at
   //    so the registrations chart shows a spread (deterministic ⇒ idempotent).
   const appUserId = (

@@ -250,6 +250,11 @@ async function seedDefaultAdminUser(pool: Pool, organizationId: string) {
     console.log(`[seed] created Better Auth admin user ${authUser.email}`);
   }
 
+  // The seeded admin is created pre-verified: `requireEmailVerification` gates
+  // real sign-ups, but this fixture (and the e2e suite) sign in directly and
+  // cannot complete an email round-trip. Reconcile on every run (idempotent).
+  await pool.query(`update "user" set "emailVerified" = true where id = $1`, [authUser.id]);
+
   const appUserId = (
     await pool.query<{ id: string }>(
       `insert into app_users

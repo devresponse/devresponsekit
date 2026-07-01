@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { ResendVerificationForm } from "@/components/auth/resend-verification-form";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -33,6 +36,10 @@ export function EmailPasswordLoginForm({ returnTo }: EmailPasswordLoginFormProps
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
 
+  // Set when Better Auth rejects sign-in with EMAIL_NOT_VERIFIED (AUTH-4).
+  // Swaps the form for a verify + resend prompt, pre-filled with the address.
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+
   const form = useZodForm<SignInInput>(signInSchema, {
     defaultValues: { email: "", password: "" },
   });
@@ -46,12 +53,32 @@ export function EmailPasswordLoginForm({ returnTo }: EmailPasswordLoginFormProps
         callbackURL: returnTo,
       });
       if (result.error) {
+        // EMAIL_NOT_VERIFIED (403) means the credentials were correct but the
+        // address is unverified — route to the resend prompt rather than the
+        // generic "invalid credentials", which would be misleading. Matched by
+        // code (not status) so a banned 403 still falls through to the default.
+        if ("code" in result.error && result.error.code === "EMAIL_NOT_VERIFIED") {
+          setUnverifiedEmail(values.email);
+          return;
+        }
         form.setError("root", { type: "server", message: t("invalidCredentials") });
       }
     } catch {
       form.setError("root", { type: "server", message: t("unexpectedError") });
     }
   };
+
+  if (unverifiedEmail) {
+    return (
+      <div className="space-y-4">
+        <Alert>
+          <AlertTitle>{t("verifyEmailTitle")}</AlertTitle>
+          <AlertDescription>{t("emailNotVerified")}</AlertDescription>
+        </Alert>
+        <ResendVerificationForm callbackUrl={returnTo} defaultEmail={unverifiedEmail} />
+      </div>
+    );
+  }
 
   const rootError = form.formState.errors.root?.message;
 

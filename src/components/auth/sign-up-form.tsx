@@ -14,10 +14,10 @@ export interface SignUpFormProps {
 /**
  * SignUpForm
  *
- * Mirror of `SignInForm` but for self-registration. The provisioning
- * service places all non-seed users into `pending_approval`; the secure
- * layout will redirect newly registered users to `/pending-approval`
- * automatically — there is no special-case handling required here.
+ * Mirror of `SignInForm` but for self-registration. Email verification is
+ * required (AUTH-4): after sign-up the user is sent to `/verify-email` to
+ * confirm their address; once verified they land in the app and the
+ * provisioning service places non-seed users into `pending_approval`.
  */
 export function SignUpForm({ locale, returnTo }: SignUpFormProps) {
   const t = useTranslations("auth");
@@ -29,7 +29,10 @@ export function SignUpForm({ locale, returnTo }: SignUpFormProps) {
         <CardDescription>{t("noAccount")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <EmailPasswordSignUpForm pendingApprovalHref={`/${locale}/pending-approval`} />
+        <EmailPasswordSignUpForm
+          verifyEmailHref={`/${locale}/verify-email`}
+          postVerifyHref={`/${locale}/app`}
+        />
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />
           <span className="text-muted-foreground text-xs uppercase">{t("or")}</span>

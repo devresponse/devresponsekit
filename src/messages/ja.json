@@ -27,6 +27,12 @@
     }
   },
   "auth": {
+    "verifyEmailTitle": "メールアドレスを確認",
+    "verifyEmailDescription": "確認リンクをメールアドレスに送信しました。リンクをクリックしてアカウントを確認してください。確認後、管理者がアクセス権を審査します。",
+    "verifyEmailResendPrompt": "届きませんでしたか？メールアドレスを入力して新しいリンクを送信してください。",
+    "resendVerificationEmail": "確認メールを再送信",
+    "verificationEmailSent": "アドレスの確認がまだ必要な場合は、新しいリンクを送信しています。受信トレイをご確認ください。",
+    "emailNotVerified": "サインインする前にメールアドレスを確認してください。受信トレイで確認リンクを確認するか、下から再送信してください。",
     "signInTitle": "アカウントにサインイン",
     "signUpTitle": "アカウントを作成",
     "signInWithGoogle": "Google で続行",

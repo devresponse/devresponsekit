@@ -4,6 +4,7 @@ import { screen } from "@testing-library/react";
 import { BlockedAccountPanel } from "@/components/auth/blocked-account-panel";
 import { LoggedOutPanel } from "@/components/auth/logged-out-panel";
 import { PendingApprovalPanel } from "@/components/auth/pending-approval-panel";
+import { VerifyEmailPanel } from "@/components/auth/verify-email-panel";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 describe("BlockedAccountPanel", () => {
@@ -26,6 +27,16 @@ describe("PendingApprovalPanel", () => {
     renderWithIntl(<PendingApprovalPanel locale="en" />);
     expect(screen.getAllByText(/pending approval/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
+  });
+});
+
+describe("VerifyEmailPanel", () => {
+  it("renders the localized verify title, guidance, and a resend affordance", () => {
+    renderWithIntl(<VerifyEmailPanel locale="en" />);
+    // Title appears twice (CardTitle + AlertTitle).
+    expect(screen.getAllByText(/verify your email/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/verification link/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /resend verification email/i })).toBeInTheDocument();
   });
 });
 

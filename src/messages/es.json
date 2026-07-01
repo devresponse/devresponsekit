@@ -27,6 +27,12 @@
     }
   },
   "auth": {
+    "verifyEmailTitle": "Verifica tu correo",
+    "verifyEmailDescription": "Hemos enviado un enlace de verificación a tu dirección de correo electrónico. Haz clic en él para confirmar tu cuenta. Una vez verificada, un administrador revisará tu acceso.",
+    "verifyEmailResendPrompt": "¿No lo recibiste? Introduce tu correo para enviar un nuevo enlace.",
+    "resendVerificationEmail": "Reenviar correo de verificación",
+    "verificationEmailSent": "Si tu dirección aún necesita verificación, un nuevo enlace está en camino. Revisa tu bandeja de entrada.",
+    "emailNotVerified": "Verifica tu dirección de correo electrónico antes de iniciar sesión. Revisa tu bandeja de entrada para el enlace de verificación, o reenvíalo abajo.",
     "signInTitle": "Inicia sesión en tu cuenta",
     "signUpTitle": "Crea tu cuenta",
     "signInWithGoogle": "Continuar con Google",

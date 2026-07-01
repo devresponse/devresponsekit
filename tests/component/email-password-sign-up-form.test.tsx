@@ -30,7 +30,9 @@ afterEach(() => {
 
 describe("EmailPasswordSignUpForm", () => {
   it("renders required fields with the expected autocomplete hints", () => {
-    renderWithIntl(<EmailPasswordSignUpForm pendingApprovalHref="/en/pending-approval" />);
+    renderWithIntl(
+      <EmailPasswordSignUpForm verifyEmailHref="/en/verify-email" postVerifyHref="/en/app" />,
+    );
     expect(screen.getByLabelText(/^name/i)).toHaveAttribute("autocomplete", "name");
     expect(screen.getByLabelText(/email/i)).toHaveAttribute("autocomplete", "email");
     expect(screen.getByLabelText(/password/i)).toHaveAttribute("autocomplete", "new-password");
@@ -39,7 +41,9 @@ describe("EmailPasswordSignUpForm", () => {
   it("submits credentials with the supplied callback URL", async () => {
     signUpEmail.mockResolvedValueOnce({ error: null });
     const user = userEvent.setup();
-    renderWithIntl(<EmailPasswordSignUpForm pendingApprovalHref="/en/pending-approval" />);
+    renderWithIntl(
+      <EmailPasswordSignUpForm verifyEmailHref="/en/verify-email" postVerifyHref="/en/app" />,
+    );
 
     await user.type(screen.getByLabelText(/^name/i), "Ada Lovelace");
     await user.type(screen.getByLabelText(/email/i), "ada@example.com");
@@ -50,15 +54,17 @@ describe("EmailPasswordSignUpForm", () => {
       email: "ada@example.com",
       password: "Password!1234",
       name: "Ada Lovelace",
-      callbackURL: "/en/pending-approval",
+      callbackURL: "/en/app",
     });
-    expect(replace).toHaveBeenCalledWith("/en/pending-approval");
+    expect(replace).toHaveBeenCalledWith("/en/verify-email");
   });
 
   it("renders the unexpectedError alert when sign-up fails", async () => {
     signUpEmail.mockResolvedValueOnce({ error: { code: "USER_ALREADY_EXISTS" } });
     const user = userEvent.setup();
-    renderWithIntl(<EmailPasswordSignUpForm pendingApprovalHref="/en/pending-approval" />);
+    renderWithIntl(
+      <EmailPasswordSignUpForm verifyEmailHref="/en/verify-email" postVerifyHref="/en/app" />,
+    );
 
     await user.type(screen.getByLabelText(/^name/i), "x");
     await user.type(screen.getByLabelText(/email/i), "x@example.com");

@@ -15,3 +15,12 @@
 # and the app's own dependency tree is gated separately by `pnpm audit`.
 # Review by 2026-09-18 (drop when the node base image bumps its bundled npm).
 CVE-2026-33671
+
+# sigstore certificateOIDs verification-constraint bypass (CVE-2026-48815, HIGH;
+# fixed in sigstore 4.1.1). Same class as CVE-2026-33671 above — bundled inside
+# the base image's npm CLI (/usr/local/lib/node_modules/npm/node_modules/sigstore/,
+# used by npm for package provenance). NOT in this app's dependency tree (absent
+# from pnpm-lock.yaml), and npm is never invoked in the production runtime
+# (`node server.js` only). The app's own deps are gated separately by `pnpm audit`.
+# Review by 2026-10-03 (drop when the node base image bumps its bundled npm).
+CVE-2026-48815

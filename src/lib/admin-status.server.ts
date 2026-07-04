@@ -53,8 +53,7 @@ export interface AdminStatusChangeInput {
 }
 
 export type AdminStatusChangeResult =
-  | { ok: true; status: AdminStatusChangeInput["newStatus"] }
-  | { ok: false; error: "not_found" };
+  { ok: true; status: AdminStatusChangeInput["newStatus"] } | { ok: false; error: "not_found" };
 
 export async function performAdminStatusChange(
   input: AdminStatusChangeInput,

@@ -32,8 +32,7 @@ function isFieldRequired(schema: unknown, name: string): boolean {
   if (!top) return false;
   const shape = (schema as { shape?: Record<string, unknown> }).shape;
   const field = shape?.[top] as
-    | { safeParse?: (value: unknown) => { success: boolean } }
-    | undefined;
+    { safeParse?: (value: unknown) => { success: boolean } } | undefined;
   if (!field || typeof field.safeParse !== "function") return false;
   return !field.safeParse(undefined).success;
 }

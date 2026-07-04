@@ -10,16 +10,17 @@ order: 10
 
 Executable, screen-by-screen User Acceptance Testing (UAT) stories for the
 **public** pages (`/`, `/about`, `/docs`, `/logged-out`) and the
-**authentication** flows (`/sign-in`, `/sign-up`, `/forgot-password`,
-`/reset-password`, `/pending-approval`, `/blocked`, `/sso/confirm`).
+**authentication** flows (`/sign-in`, `/sign-up`, `/verify-email`,
+`/forgot-password`, `/reset-password`, `/pending-approval`, `/blocked`,
+`/sso/confirm`).
 
 Every claim below is grounded in the code; the source file and line are cited
 inline. Where a claim could not be fully verified from code alone it is flagged
 `TODO: verify`.
 
 Story IDs follow `UAT-AUTH-<SCREEN>-Sn` so they map cleanly into a
-test-management tool. A condensed one-row-per-story export lives at
-`docs/uat/_csv/public-auth.csv`.
+test-management tool. A condensed one-row-per-story export (all areas) lives at
+`docs/uat/uat-stories.csv`.
 
 ---
 
@@ -52,7 +53,7 @@ test-management tool. A condensed one-row-per-story export lives at
   | Org Admin | `orgadmin@orga.local` | `DevPassword123!` | `admin.platform` |
   | Limited Admin | member of the ORG A **Engineering** group (`user1@orga.local`) | `DevPassword123!` | `admin` role via group (`src/db/seeds/dev-init.ts:142`) |
   | Superadmin | `superuser@orga.local` | `DevPassword123!` | `superuser` |
-  | Pending user | freshly self-signed-up account | (as chosen) | `pending_approval` (auto) |
+  | Pending user | a self-signed-up account, after verifying its email | (as chosen) | `pending_approval` (auto) |
   | Blocked user | an account an admin has blocked/suspended | (as set) | `blocked` / `suspended` / `deactivated` |
 
   > **Note on the Limited Admin persona.** The dev fixture does not seed a user
@@ -66,10 +67,13 @@ test-management tool. A condensed one-row-per-story export lives at
   restore state (`src/db/seeds/dev-init.ts:28`). To create a fresh Pending user,
   sign up with a new email; to create a Blocked user, have an admin block an
   existing account.
-- **Signing up creates a pending account.** Self-registration always lands the
-  new user in `pending_approval` (the sign-up form redirects straight to the
-  pending page — `src/components/auth/email-password-sign-up-form.tsx:53`) until
-  an administrator approves it.
+- **Signing up requires email verification, then approval.** Self-registration
+  emails a verification link and redirects the new user to `/<locale>/verify-email`
+  (`src/components/auth/email-password-sign-up-form.tsx:61`) — no session is
+  created yet. After they open the link they are auto-signed-in
+  (`autoSignInAfterVerification`, `src/lib/auth.ts:107`), provisioned as
+  `pending_approval`, and routed to the pending page until an administrator
+  approves them.
 
 ### Access model in one paragraph
 
@@ -83,7 +87,11 @@ signed-in user to `/pending-approval` (pending status or no active membership)
 or `/blocked` (blocked/suspended/deactivated) before any secure page renders.
 The auth pages themselves have **no session check** — an already-signed-in user
 who navigates to `/sign-in` still sees the form (verified: no `getSession` /
-`redirect` in any `(auth)` page).
+`redirect` in any `(auth)` page). Email/password sign-in additionally requires a
+**verified email** (`requireEmailVerification`, `src/lib/auth.ts:70`): an
+unverified account is rejected at sign-in and offered a resend prompt (see
+AUTH-VERIFY-EMAIL). OAuth logins and admin/API-provisioned accounts arrive
+pre-verified.
 
 ---
 
@@ -374,6 +382,19 @@ Negative & edge cases
     |---|---|---|
     | 1 | Open `/en/sign-in`, enter `user1@orga.local` + `wrong-pass` | Fields accept the input |
     | 2 | Click "Sign in" | An alert "Invalid email or password." appears; you stay on the sign-in page |
+- UAT-AUTH-SIGNIN-S4 (unverified email) — Given correct credentials for an account
+  whose email is not yet verified, when I submit, then instead of the generic
+  error the form is replaced by a "Verify your email" prompt with a **Resend**
+  button pre-filled with the address. Better Auth rejects the sign-in with
+  `EMAIL_NOT_VERIFIED`, detected by code — a banned 403 still falls through to the
+  generic message (`src/components/auth/email-password-login-form.tsx:60`, `:71-79`).
+  - UAT script:
+    | # | Step | Expected result |
+    |---|---|---|
+    | 1 | Sign up a fresh account but do NOT verify it; open `/en/sign-in` and enter that email + its password | Fields accept input |
+    | 2 | Click "Sign in" | The form is replaced by a "Verify your email" alert + a "Resend verification email" button, email pre-filled — NOT "Invalid email or password" |
+    | 3 | Click "Resend verification email" | A neutral confirmation appears; a fresh verification link is in the outbox |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
 - Empty required fields: submitting with an empty email shows "Enter a valid
   email address." (`validation.email`); empty password shows "This field is
   required." (`validation.required`) — both via `FormMessage`
@@ -407,8 +428,10 @@ namespaces; run in `uk`, confirm no raw keys and localized error text.
 
 - Route: `/sign-up`  ·  Example URL: `/en/sign-up`  ·  Code: `src/app/[locale]/(auth)/sign-up/page.tsx:6`
 - Purpose: Self-registration (name + email + password) plus the same three social
-  providers. On success the user is provisioned as `pending_approval` and sent
-  straight to the pending page.
+  providers. On success Better Auth creates the account, emails a verification
+  link, and the form redirects to the **verify-email** page — no session is
+  created yet (email verification is required, AUTH-4). Provisioning to
+  `pending_approval` happens on the first sign-in, after the address is verified.
 - Guard / who can access: None.
 - Access matrix: Visitor -> see: yes, act: yes · signed-in personas -> see: yes
   (no redirect away).
@@ -432,16 +455,18 @@ User stories
 - UAT-AUTH-SIGNUP-S1 — As a Visitor, I want to register a new account, so that I
   can request access to the app.
   - Acceptance criteria: Given a fresh email and a password of at least 8
-    characters, when I submit, then Better Auth creates the account and I am
-    redirected to `/<locale>/pending-approval`
-    (`src/components/auth/email-password-sign-up-form.tsx:43-53`).
+    characters, when I submit, then Better Auth creates the account, emails a
+    verification link, and I am redirected to `/<locale>/verify-email`
+    (`src/components/auth/email-password-sign-up-form.tsx:61`; the after-verify
+    `callbackURL` is `/<locale>/app`, `:55`). See AUTH-VERIFY-EMAIL for the
+    verify + resend flow.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Open `/en/sign-up` | Sign-up card: title "Create your account"; Name, Email, Password fields; "Create account" button; social buttons; a "Already have an account?" link |
     | 2 | Enter Name "Test User", a new email, and a password ≥ 8 chars | Fields accept input; no validation errors |
-    | 3 | Click "Create account" | The button shows "Loading…", then you are redirected to `/en/pending-approval` |
-    | 4 | Read the pending page | It states the account is pending administrator approval |
+    | 3 | Click "Create account" | The button shows "Loading…", then you are redirected to `/en/verify-email` |
+    | 4 | Read the verify-email page | It says a verification link was sent — check your inbox — with a Resend option (you are **not** signed in yet) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -472,6 +497,71 @@ Accessibility: three labelled controls; error alert is `role="alert"`;
 Create account -> social -> sign-in link.
 i18n: card title from `auth.signUpTitle`, labels from `common`, errors from
 `validation`; run in `uk`.
+
+### AUTH-VERIFY-EMAIL — Verify email
+
+- Route: `/verify-email`  ·  Example URL: `/en/verify-email`  ·  Code: `src/app/[locale]/(auth)/verify-email/page.tsx:12`
+- Purpose: The "check your inbox" landing shown immediately after an
+  email/password sign-up (AUTH-4). Email verification is required
+  (`requireEmailVerification`, `src/lib/auth.ts:70`): sign-up sends a verification
+  link (`sendVerificationEmail` / `sendOnSignUp`, `src/lib/auth.ts:105-108`) and
+  does not start a session until the address is confirmed. Renders
+  `VerifyEmailPanel` — an informational alert plus a **Resend** form; like the
+  pending panel it never mounts the secure shell
+  (`src/components/auth/verify-email-panel.tsx:25-40`).
+- Guard / who can access: None. It is where the sign-up form sends the user
+  (`src/components/auth/sign-up-form.tsx:33`,
+  `src/components/auth/email-password-sign-up-form.tsx:61`).
+- Access matrix: Visitor / just-signed-up user -> see: yes, act: yes (resend). No
+  persona is *routed* here by the shell; it is a post-sign-up destination.
+- Fields & controls (verified against `verify-email-panel.tsx` and
+  `src/components/auth/resend-verification-form.tsx`):
+  - Title "Verify your email" + guidance to check the inbox
+    (`auth.verifyEmailTitle` / `auth.verifyEmailDescription`).
+  - A Resend form: one Email input (`autoComplete="email"`, label `common.email`,
+    required) + a "Resend verification email" button (`auth.resendVerificationEmail`).
+  - Required-field legend.
+- Preconditions & test data: a just-signed-up (unverified) account. In dev there
+  is no live mail provider, so read the emailed link from the administrator Email
+  outbox — the row uses the `email_verification` template.
+
+User stories
+
+- UAT-AUTH-VERIFY-S1 — As a newly registered user, I want to be told to check my
+  inbox and confirm my address, so that I can activate my account.
+  - Acceptance criteria: Given I just submitted the sign-up form, when the page
+    loads, then I see the "Verify your email" panel telling me a link was sent,
+    with a Resend option; opening the emailed link verifies me and
+    (`autoSignInAfterVerification`, `src/lib/auth.ts:107`) signs me in, landing at
+    `/<locale>/app` (which routes a new, unapproved account on to pending-approval).
+  - UAT script:
+    | # | Step (what to do) | Expected result |
+    |---|---|---|
+    | 1 | Sign up with a fresh email at `/en/sign-up` | You are redirected to `/en/verify-email` |
+    | 2 | Read the panel | Card titled "Verify your email"; an alert saying a verification link was sent to your address; a Resend form below |
+    | 3 | Find the `email_verification` row for your address in the admin Email outbox and open its link | You are verified, auto-signed-in, and land in the app — then routed to `/en/pending-approval` (new accounts are unapproved) |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+
+Negative & edge cases
+
+- Resend (happy path): enter your address, click "Resend verification email"; a
+  neutral confirmation appears ("If your address still needs verifying, a new
+  link is on its way…", `auth.verificationEmailSent`) and a fresh
+  `email_verification` row lands in the outbox
+  (`src/components/auth/resend-verification-form.tsx:57`).
+- Anti-enumeration: resending for an unknown or already-verified address shows the
+  **same** neutral confirmation — the response never reveals whether the account
+  exists or its state (`src/components/auth/resend-verification-form.tsx:51-60`).
+  Only a network error surfaces the generic "unexpected error".
+- Empty / invalid email in the Resend form -> "Enter a valid email address."
+  (`validation.email`), via the shared `forgotPasswordSchema`.
+
+Accessibility: the guidance is an `Alert` with a titled region; the Resend
+control is a labelled email input + `<button>`; the confirmation is a live
+`role="status"`. Keyboard reaches the input then the button with a visible focus
+ring.
+i18n: title / description / button / confirmation from the `auth` namespace, the
+field label from `common`; run in `uk` and confirm no raw keys.
 
 ### AUTH-FORGOT — Forgot password
 
@@ -638,8 +728,9 @@ i18n: title, labels, and messages from `auth` / `validation`; run in `uk`.
 - Access matrix: Pending user -> see: yes, act: yes (sign out). Any other persona
   -> can view the page directly, but only a genuinely pending user is *routed*
   here by the shell.
-- Preconditions & test data: a freshly self-signed-up account (never approved),
-  e.g. sign up with a new email, then attempt to open `/en/app/dashboard`.
+- Preconditions & test data: a self-signed-up account that has **verified its
+  email** (so it can sign in) but has not been approved — sign up, open the
+  verification link (AUTH-VERIFY-EMAIL); you are then auto-signed-in and land here.
 
 User stories
 
@@ -651,7 +742,7 @@ User stories
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Sign up with a brand-new email at `/en/sign-up` | You are redirected to `/en/pending-approval` |
+    | 1 | Sign up with a brand-new email, then open the verification link from the outbox (AUTH-VERIFY-EMAIL) | After verifying you are auto-signed-in and, being unapproved, routed to `/en/pending-approval` |
     | 2 | Read the panel | Card + alert titled "Your account is pending approval"; body: "An administrator must approve your account before you can access secure pages." (`auth.pendingApprovalTitle` / `auth.pendingApprovalDescription`) |
     | 3 | Manually open `/en/app/dashboard` | You are redirected back to `/en/pending-approval` (the shell guard blocks pending users) |
     | 4 | Click "Sign out" | You are signed out and land on `/en/logged-out` |
@@ -843,8 +934,9 @@ are gated).
 - [x] AUTH-ABOUT — view + edge (un-localized body) + a11y/i18n
 - [x] AUTH-DOCS-PUBLIC — view + edge (un-localized body, distinct from `/app/docs`)
 - [x] AUTH-LOGGED-OUT — via-flow + direct-nav + local-only-signout edge
-- [x] AUTH-SIGNIN — happy + returnTo + wrong-password + validation + open-redirect + gate routing
-- [x] AUTH-SIGNUP — happy (-> pending) + short-password + duplicate-email + validation
+- [x] AUTH-SIGNIN — happy + returnTo + wrong-password + unverified→resend + validation + open-redirect + gate routing
+- [x] AUTH-SIGNUP — happy (-> verify-email) + short-password + duplicate-email + validation
+- [x] AUTH-VERIFY-EMAIL — check-inbox + resend + anti-enumeration + invalid-email
 - [x] AUTH-FORGOT — happy + anti-enumeration + invalid-email + transport error
 - [x] AUTH-RESET — happy + mismatch + no/invalid token + expired token + length
 - [x] AUTH-PENDING — routed-here + cannot-bypass + generic-copy

@@ -10,13 +10,13 @@ order: 5
 
 This is the **user-acceptance-testing (UAT) story set**: screen-by-screen user stories, each with a plain-language, numbered **test script a real (non-technical) tester can run**, plus a per-screen access matrix, negative/edge cases, accessibility, and i18n notes. It doubles as **living documentation** of every screen.
 
-Generated from the reusable prompt in [`GENERATION-PROMPT.md`](./GENERATION-PROMPT.md), validated against the code (every claim cites `file:line`). **153 stories** across 40+ screens plus 10 end-to-end journeys.
+Generated from the reusable prompt in [`GENERATION-PROMPT.md`](./GENERATION-PROMPT.md), validated against the code (every claim cites `file:line`). **155 stories** across 40+ screens plus 10 end-to-end journeys.
 
 ## The story documents
 
 | Area | Covers | Stories |
 | --- | --- | --- |
-| [Public & Auth](./public-auth.md) | landing, about, docs; sign-in/up, forgot/reset, pending/blocked, SSO confirm | 21 |
+| [Public & Auth](./public-auth.md) | landing, about, docs; sign-in/up, verify-email, forgot/reset, pending/blocked, SSO confirm | 23 |
 | [Account & secure shell](./account.md) | app entry, dashboard, workspace, account (+ profile/preferences/security/api-keys), docs viewer | 21 |
 | [Administrator: Users](./administrator-users.md) | console overview, users list/new/detail + its 6 tabs | 27 |
 | [Administrator: Roles, Groups & Permissions](./administrator-roles-groups-permissions.md) | roles, groups (+ tabs), the permission catalog | 28 |

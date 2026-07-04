@@ -12,12 +12,7 @@ export interface AdministratorNavigationItem {
 }
 
 export type AdministratorNavigationActionId =
-  | "new-user"
-  | "new-role"
-  | "new-group"
-  | "new-organization"
-  | "new-enterprise-app"
-  | "new-api-key";
+  "new-user" | "new-role" | "new-group" | "new-organization" | "new-enterprise-app" | "new-api-key";
 
 export interface AdministratorNavigationAction {
   id: AdministratorNavigationActionId;

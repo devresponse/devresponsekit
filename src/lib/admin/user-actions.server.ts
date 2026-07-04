@@ -18,14 +18,7 @@ import { performAdminStatusChange } from "@/lib/admin-status.server";
  * per-row outcomes without exception bubbling.
  */
 export type BulkUserAction =
-  | "approve"
-  | "block"
-  | "suspend"
-  | "reactivate"
-  | "ban"
-  | "unban"
-  | "soft_delete"
-  | "restore";
+  "approve" | "block" | "suspend" | "reactivate" | "ban" | "unban" | "soft_delete" | "restore";
 
 export interface BulkUserActor {
   betterAuthUserId: string;
@@ -68,8 +61,7 @@ export interface BulkUserOptions {
 }
 
 export type BulkUserOutcome =
-  | { ok: true; appUserId: string }
-  | { ok: false; appUserId: string; error: string };
+  { ok: true; appUserId: string } | { ok: false; appUserId: string; error: string };
 
 const STATUS_ACTION_MAP: Partial<
   Record<

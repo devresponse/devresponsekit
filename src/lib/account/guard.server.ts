@@ -37,8 +37,7 @@ export interface AccountActor {
 }
 
 export type AccountGuardResult =
-  | { ok: true; actor: AccountActor }
-  | { ok: false; response: NextResponse };
+  { ok: true; actor: AccountActor } | { ok: false; response: NextResponse };
 
 /**
  * @param requiredScope Account scope a BEARER credential must carry to be

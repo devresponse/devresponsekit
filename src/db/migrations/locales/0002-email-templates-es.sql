@@ -1,15 +1,15 @@
--- locales/0002 — Seed es (Spanish) email templates.
+-- locales/0002 — Seed es (Spanish) email templates (all non-en rows).
 --
--- Follows locales/0001 (fr). Core 0001-initial-schema.sql seeded only the `en`
--- rows for `password_reset` and `test_email`, so a recipient with an `es`
--- `preferred_locale` would otherwise fall back to English (the `resolveTemplate`
--- query returns the `en` row when the locale row is absent). Seed the localized
--- rows so those users get a Spanish email.
+-- The core migrations seed only the `en` base rows (0001-initial-schema.sql:
+-- password_reset + test_email; 0006-email-verification-template.sql;
+-- 0009-invitation-template.sql). A recipient whose `preferred_locale` is
+-- `es` otherwise falls back to English (`resolveTemplate` returns the `en`
+-- row when the locale row is absent). Seed every localized row here so those
+-- users get a Spanish email.
 --
--- Keep this copy in sync with `DEFAULT_EMAIL_TEMPLATES` in
--- `src/lib/email/templates.ts` (the code-level fallback). Idempotent via
--- `on conflict (key, locale) do nothing`, so it is safe on a DB where an admin
--- already authored a localized row.
+-- One file per locale — excludable as a group via DB_MIGRATE_LOCALES. Keep in
+-- sync with `DEFAULT_EMAIL_TEMPLATES` in `src/lib/email/templates.ts`.
+-- Idempotent via `on conflict (key, locale) do nothing`.
 
 insert into app_email_templates (key, locale, subject, body_html, body_text, description) values
   (
@@ -27,5 +27,21 @@ insert into app_email_templates (key, locale, subject, body_html, body_text, des
     '<p>Este es un correo de prueba enviado desde el espacio de Email del administrador de {{appName}} por {{sentBy}}.</p><p>Si puedes leer esto, el envío de correos salientes funciona.</p>',
     E'Este es un correo de prueba enviado desde el espacio de Email del administrador de {{appName}} por {{sentBy}}.\n\nSi puedes leer esto, el envío de correos salientes funciona.',
     'Test email — es translation. Variables: {{appName}}, {{sentBy}}.'
+  ),
+  (
+    'email_verification',
+    'es',
+    'Verifica tu dirección de correo electrónico',
+    '<p>Hola {{name}},</p><p>Gracias por crear una cuenta. Confirma tu dirección de correo electrónico haciendo clic en el enlace de abajo. Este enlace caduca pronto.</p><p><a href="{{verifyUrl}}">Verificar tu correo</a></p><p>Si no creaste una cuenta, puedes ignorar este correo de forma segura.</p>',
+    E'Hola {{name}},\n\nGracias por crear una cuenta. Abre el enlace de abajo para confirmar tu dirección de correo electrónico. Este enlace caduca pronto.\n\n{{verifyUrl}}\n\nSi no creaste una cuenta, puedes ignorar este correo de forma segura.',
+    'Email verification — es translation. Variables: {{name}}, {{verifyUrl}}.'
+  ),
+  (
+    'organization_invitation',
+    'es',
+    'Te han invitado a unirte a {{organizationName}}',
+    '<p>Hola,</p><p>{{inviterName}} te ha invitado a unirte a <strong>{{organizationName}}</strong>.</p><p><a href="{{acceptUrl}}">Aceptar la invitación</a></p><p>Esta invitación caduca en 7 días. Si no la esperabas, puedes ignorar este correo de forma segura.</p>',
+    E'Hola,\n\n{{inviterName}} te ha invitado a unirte a {{organizationName}}.\n\nAceptar la invitación:\n{{acceptUrl}}\n\nEsta invitación caduca en 7 días. Si no la esperabas, puedes ignorar este correo de forma segura.',
+    'Invitación para unirse a una organización. Variables: {{inviterName}}, {{organizationName}}, {{acceptUrl}}.'
   )
 on conflict (key, locale) do nothing;

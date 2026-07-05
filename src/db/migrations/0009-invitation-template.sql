@@ -1,8 +1,8 @@
 -- 0009 — Seed the `organization_invitation` email template (en base row).
 --
 -- Sent by the administrator invitations API (0008) through the outbox
--- (specs.md §35). The non-`en` rows live in
--- `locales/0009-invitation-locales.sql` (excludable via DB_MIGRATE_LOCALES).
+-- (specs.md §35). The non-`en` rows live in the per-locale
+-- `locales/NNNN-email-templates-<loc>.sql` files (excludable via DB_MIGRATE_LOCALES).
 --
 -- Keep in sync with `DEFAULT_EMAIL_TEMPLATES` in `src/lib/email/templates.ts`
 -- (the code-level fallback). Idempotent via `on conflict (key, locale) do

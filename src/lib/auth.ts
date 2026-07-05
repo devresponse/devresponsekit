@@ -67,6 +67,9 @@ export const auth = betterAuth({
     // password sign-ups receive a verification link (see the `emailVerification`
     // block below); OAuth identities arrive pre-verified from a trusted provider
     // and are unaffected. Seed fixtures are marked verified by the seed script.
+    // Per-org signup policy (0007): this global flag stays ON as the fail-closed
+    // baseline; an org that waives verification gets its sign-ups pre-verified
+    // by the `user.create.before` hook below, which satisfies this check.
     requireEmailVerification: true,
     // AUTH-2: revoke ALL of the user's sessions on a successful password
     // reset. A reset is the canonical "I think my account is compromised"
@@ -106,6 +109,13 @@ export const auth = betterAuth({
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
+      // Per-org signup policy (0007): the `user.create.before` hook below
+      // pre-verifies sign-ups whose organization waives verification, but
+      // `sendOnSignUp` fires unconditionally — skip the pointless (and
+      // confusing) verification email for an already-verified address.
+      if (user.emailVerified) {
+        return;
+      }
       const { sendAppEmail } = await import("@/lib/email/send.server");
       await sendAppEmail({
         to: user.email,
@@ -143,6 +153,33 @@ export const auth = betterAuth({
     // Auth, absent from `app_users`). This restores the pre-AUTH-4 behaviour.
     user: {
       create: {
+        // Per-org signup policy (0007): when the organization that will
+        // receive this sign-up waives email verification, pre-verify the
+        // identity AT CREATION. The global `requireEmailVerification: true`
+        // stays on (fail-closed) and passes naturally for these users; the
+        // client form then signs them in immediately (sign-up itself never
+        // starts a session while `requireEmailVerification` is set — see
+        // better-auth's sign-up route, which decides from static options).
+        // Scope: genuine email/password self-registrations only —
+        // `shouldProvisionSelfSignup` excludes OAuth callbacks (verification
+        // state belongs to the provider), admin/machine creation (which sets
+        // `emailVerified` explicitly), and suppressed seed runs.
+        before: async (user, context) => {
+          const { shouldProvisionSelfSignup } = await import("@/lib/auth-signup-provisioning");
+          if (!shouldProvisionSelfSignup(context)) {
+            return;
+          }
+          const { resolveSignupPolicy } = await import("@/lib/auth-policy.server");
+          const policy = await resolveSignupPolicy({
+            provider: "email",
+            email: user.email,
+            emailVerified: false,
+          });
+          if (policy.requireEmailVerification) {
+            return;
+          }
+          return { data: { emailVerified: true } };
+        },
         after: async (user, context) => {
           if (!context) {
             return;
@@ -208,11 +245,35 @@ export const auth = betterAuth({
 
           const existing = await db
             .selectFrom("app_users")
-            .select(["id"])
+            .select(["id", "status"])
             .where("better_auth_user_id", "=", authUser.id)
             .executeTakeFirst();
 
           if (existing) {
+            // Per-org signup policy (0007): a still-pending account may now
+            // qualify for activation — its org switched to `auto_active`, or
+            // the address is now verified and matches an auto-approve domain
+            // (the verify-email link lands here via autoSignInAfterVerification).
+            // Best-effort and fail-closed: on any error the user simply stays
+            // pending and sign-in itself is never blocked.
+            if (existing.status === "pending_approval") {
+              try {
+                const { reevaluatePendingActivation } =
+                  await import("@/lib/user-provisioning.server");
+                await reevaluatePendingActivation({
+                  betterAuthUserId: authUser.id,
+                  email: authUser.email,
+                  emailVerified: authUser.emailVerified,
+                  provider: getProvisioningProvider(context),
+                });
+              } catch (error) {
+                const { logServerError } = await import("@/lib/observability/logger.server");
+                logServerError("pending-activation re-evaluation failed", {
+                  err: error,
+                  betterAuthUserId: authUser.id,
+                });
+              }
+            }
             return;
           }
 

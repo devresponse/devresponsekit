@@ -2786,6 +2786,7 @@ auth.sign_up.email.success
 auth.sign_up.email.failure
 auth.account.linked
 auth.account.pending_approval
+auth.account.auto_activated
 auth.account.blocked_access
 auth.sign_out.local
 sso.launch.success

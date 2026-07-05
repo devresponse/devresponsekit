@@ -2787,6 +2787,7 @@ auth.sign_up.email.failure
 auth.account.linked
 auth.account.pending_approval
 auth.account.auto_activated
+auth.account.invitation_accepted
 auth.account.blocked_access
 auth.sign_out.local
 sso.launch.success
@@ -2797,6 +2798,9 @@ admin.user.approved
 admin.user.blocked
 admin.user.suspended
 admin.user.reactivated
+admin.organization.invitation_created
+admin.organization.invitation_revoked
+admin.organization.invitation_resent
 navigation.menu.denied
 i18n.locale.changed
 ```

@@ -62,7 +62,18 @@
     "passwordMismatch": "पासवर्ड मेल नहीं खाते।",
     "resetTokenInvalid": "यह रीसेट लिंक अमान्य है या इसकी समय-सीमा समाप्त हो गई है।",
     "requestNewResetLink": "एक नया लिंक अनुरोध करें",
-    "resetPasswordDone": "आपका पासवर्ड अपडेट कर दिया गया है।"
+    "resetPasswordDone": "आपका पासवर्ड अपडेट कर दिया गया है।",
+    "inviteInvalidTitle": "आमंत्रण उपलब्ध नहीं है",
+    "inviteInvalidDescription": "यह आमंत्रण लिंक अमान्य है या समाप्त हो गया है। अपने प्रशासक से नया भेजने के लिए कहें।",
+    "inviteTitle": "आपको आमंत्रित किया गया है",
+    "inviteGuestDescription": "आपको {organization} में शामिल होने के लिए आमंत्रित किया गया है। स्वीकार करने के लिए खाता बनाएँ या आमंत्रित ईमेल पते से साइन इन करें।",
+    "inviteSignIn": "स्वीकार करने के लिए साइन इन करें",
+    "inviteAcceptDescription": "{email} के रूप में {organization} में शामिल होने का आमंत्रण स्वीकार करें।",
+    "inviteAcceptButton": "आमंत्रण स्वीकार करें",
+    "inviteMismatchTitle": "दूसरा खाता आवश्यक है",
+    "inviteMismatchDescription": "यह आमंत्रण किसी अन्य ईमेल पते के लिए जारी किया गया था। साइन आउट करें, फिर आमंत्रित पते से साइन इन या पंजीकरण करें।",
+    "inviteError": "आमंत्रण स्वीकार नहीं किया जा सका। कृपया पुनः प्रयास करें।",
+    "inviteSignupBanner": "आप {organization} में शामिल हो रहे हैं। आमंत्रित ईमेल पते से अपना खाता बनाना पूरा करें।"
   },
   "public": {
     "hero": {

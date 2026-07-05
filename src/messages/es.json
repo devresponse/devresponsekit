@@ -62,7 +62,18 @@
     "passwordMismatch": "Las contraseñas no coinciden.",
     "resetTokenInvalid": "Este enlace de restablecimiento no es válido o ha caducado.",
     "requestNewResetLink": "Solicitar un nuevo enlace",
-    "resetPasswordDone": "Tu contraseña se ha actualizado."
+    "resetPasswordDone": "Tu contraseña se ha actualizado.",
+    "inviteInvalidTitle": "Invitación no disponible",
+    "inviteInvalidDescription": "Este enlace de invitación no es válido o ha caducado. Pide a tu administrador que envíe uno nuevo.",
+    "inviteTitle": "Te han invitado",
+    "inviteGuestDescription": "Te han invitado a unirte a {organization}. Crea una cuenta o inicia sesión con el correo invitado para aceptar.",
+    "inviteSignIn": "Iniciar sesión para aceptar",
+    "inviteAcceptDescription": "Acepta la invitación para unirte a {organization} como {email}.",
+    "inviteAcceptButton": "Aceptar invitación",
+    "inviteMismatchTitle": "Se necesita otra cuenta",
+    "inviteMismatchDescription": "Esta invitación se emitió para otra dirección de correo. Cierra sesión y luego inicia sesión o regístrate con la dirección invitada.",
+    "inviteError": "No se pudo aceptar la invitación. Inténtalo de nuevo.",
+    "inviteSignupBanner": "Te estás uniendo a {organization}. Termina de crear tu cuenta con el correo invitado."
   },
   "public": {
     "hero": {

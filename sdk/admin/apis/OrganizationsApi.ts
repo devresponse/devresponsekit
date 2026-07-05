@@ -19,9 +19,13 @@ import type {
   AddProviderBindingRequest,
   AdminError,
   AuthPolicyEnvelope,
+  CreateInvitationRequest,
   CreateOrganizationRequest,
   DeleteBindingsRequest,
   DeleteMembershipsRequest,
+  InvitationCreated,
+  InvitationList,
+  InvitationResent,
   KeyCreated,
   Ok,
   OkCount,
@@ -43,12 +47,20 @@ import {
     AdminErrorToJSON,
     AuthPolicyEnvelopeFromJSON,
     AuthPolicyEnvelopeToJSON,
+    CreateInvitationRequestFromJSON,
+    CreateInvitationRequestToJSON,
     CreateOrganizationRequestFromJSON,
     CreateOrganizationRequestToJSON,
     DeleteBindingsRequestFromJSON,
     DeleteBindingsRequestToJSON,
     DeleteMembershipsRequestFromJSON,
     DeleteMembershipsRequestToJSON,
+    InvitationCreatedFromJSON,
+    InvitationCreatedToJSON,
+    InvitationListFromJSON,
+    InvitationListToJSON,
+    InvitationResentFromJSON,
+    InvitationResentToJSON,
     KeyCreatedFromJSON,
     KeyCreatedToJSON,
     OkFromJSON,
@@ -87,6 +99,11 @@ export interface CreateOrganizationOperationRequest {
     createOrganizationRequest: CreateOrganizationRequest;
 }
 
+export interface CreateOrganizationInvitationRequest {
+    id: string;
+    createInvitationRequest: CreateInvitationRequest;
+}
+
 export interface DeleteOrganizationRequest {
     id: string;
 }
@@ -97,6 +114,15 @@ export interface GetOrganizationRequest {
 
 export interface GetOrganizationAuthSettingsRequest {
     id: string;
+}
+
+export interface ListOrganizationInvitationsRequest {
+    id: string;
+    page?: number;
+    pageSize?: number;
+    sort?: Array<string>;
+    q?: string;
+    filterStatus?: Array<string>;
 }
 
 export interface ListOrganizationMembersRequest {
@@ -135,8 +161,18 @@ export interface RemoveProviderBindingsRequest {
     deleteBindingsRequest: DeleteBindingsRequest;
 }
 
+export interface ResendOrganizationInvitationRequest {
+    id: string;
+    invitationId: string;
+}
+
 export interface ResetOrganizationAuthSettingsRequest {
     id: string;
+}
+
+export interface RevokeOrganizationInvitationRequest {
+    id: string;
+    invitationId: string;
 }
 
 export interface UpdateOrganizationOperationRequest {
@@ -286,6 +322,49 @@ export class OrganizationsApi extends runtime.BaseAPI {
     }
 
     /**
+     * Invite an email address into the organization (sends the accept link)
+     */
+    async createOrganizationInvitationRaw(requestParameters: CreateOrganizationInvitationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<InvitationCreated>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling createOrganizationInvitation().'
+            );
+        }
+
+        if (requestParameters['createInvitationRequest'] == null) {
+            throw new runtime.RequiredError(
+                'createInvitationRequest',
+                'Required parameter "createInvitationRequest" was null or undefined when calling createOrganizationInvitation().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+        const response = await this.request({
+            path: `/organizations/{id}/invitations`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+            body: CreateInvitationRequestToJSON(requestParameters['createInvitationRequest']),
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => InvitationCreatedFromJSON(jsonValue));
+    }
+
+    /**
+     * Invite an email address into the organization (sends the accept link)
+     */
+    async createOrganizationInvitation(requestParameters: CreateOrganizationInvitationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<InvitationCreated> {
+        const response = await this.createOrganizationInvitationRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
      * Delete an organization (superadmin only)
      */
     async deleteOrganizationRaw(requestParameters: DeleteOrganizationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Ok>> {
@@ -407,6 +486,59 @@ export class OrganizationsApi extends runtime.BaseAPI {
      */
     async getPlatformAuthSettings(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<AuthPolicyEnvelope> {
         const response = await this.getPlatformAuthSettingsRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * List an organization\'s invitations
+     */
+    async listOrganizationInvitationsRaw(requestParameters: ListOrganizationInvitationsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<InvitationList>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling listOrganizationInvitations().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters['page'] != null) {
+            queryParameters['page'] = requestParameters['page'];
+        }
+
+        if (requestParameters['pageSize'] != null) {
+            queryParameters['pageSize'] = requestParameters['pageSize'];
+        }
+
+        if (requestParameters['sort'] != null) {
+            queryParameters['sort'] = requestParameters['sort'];
+        }
+
+        if (requestParameters['q'] != null) {
+            queryParameters['q'] = requestParameters['q'];
+        }
+
+        if (requestParameters['filterStatus'] != null) {
+            queryParameters['filter[status]'] = requestParameters['filterStatus'];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/organizations/{id}/invitations`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => InvitationListFromJSON(jsonValue));
+    }
+
+    /**
+     * List an organization\'s invitations
+     */
+    async listOrganizationInvitations(requestParameters: ListOrganizationInvitationsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<InvitationList> {
+        const response = await this.listOrganizationInvitationsRaw(requestParameters, initOverrides);
         return await response.value();
     }
 
@@ -649,6 +781,46 @@ export class OrganizationsApi extends runtime.BaseAPI {
     }
 
     /**
+     * Rotate a pending invitation\'s token + expiry and re-send the email
+     */
+    async resendOrganizationInvitationRaw(requestParameters: ResendOrganizationInvitationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<InvitationResent>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling resendOrganizationInvitation().'
+            );
+        }
+
+        if (requestParameters['invitationId'] == null) {
+            throw new runtime.RequiredError(
+                'invitationId',
+                'Required parameter "invitationId" was null or undefined when calling resendOrganizationInvitation().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/organizations/{id}/invitations/{invitationId}/resend`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))).replace(`{${"invitationId"}}`, encodeURIComponent(String(requestParameters['invitationId']))),
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => InvitationResentFromJSON(jsonValue));
+    }
+
+    /**
+     * Rotate a pending invitation\'s token + expiry and re-send the email
+     */
+    async resendOrganizationInvitation(requestParameters: ResendOrganizationInvitationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<InvitationResent> {
+        const response = await this.resendOrganizationInvitationRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
      * Remove the signup-policy override (revert to the platform default)
      */
     async resetOrganizationAuthSettingsRaw(requestParameters: ResetOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Ok>> {
@@ -678,6 +850,46 @@ export class OrganizationsApi extends runtime.BaseAPI {
      */
     async resetOrganizationAuthSettings(requestParameters: ResetOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Ok> {
         const response = await this.resetOrganizationAuthSettingsRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Revoke a pending invitation (the accept link dies immediately)
+     */
+    async revokeOrganizationInvitationRaw(requestParameters: RevokeOrganizationInvitationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Ok>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling revokeOrganizationInvitation().'
+            );
+        }
+
+        if (requestParameters['invitationId'] == null) {
+            throw new runtime.RequiredError(
+                'invitationId',
+                'Required parameter "invitationId" was null or undefined when calling revokeOrganizationInvitation().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/organizations/{id}/invitations/{invitationId}`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))).replace(`{${"invitationId"}}`, encodeURIComponent(String(requestParameters['invitationId']))),
+            method: 'DELETE',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => OkFromJSON(jsonValue));
+    }
+
+    /**
+     * Revoke a pending invitation (the accept link dies immediately)
+     */
+    async revokeOrganizationInvitation(requestParameters: RevokeOrganizationInvitationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Ok> {
+        const response = await this.revokeOrganizationInvitationRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

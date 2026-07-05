@@ -771,6 +771,46 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           properties: { bindingIds: { type: "array", items: uuid(), minItems: 1 } },
           required: ["bindingIds"],
         },
+        // Organization invitations (0008). Token hashes are never exposed.
+        InvitationItem: {
+          type: "object",
+          properties: {
+            id: uuid(),
+            email: { type: "string" },
+            status: { type: "string", enum: ["pending", "accepted", "revoked", "expired"] },
+            role_id: { type: ["string", "null"], format: "uuid" },
+            role_name: nullableString(),
+            invited_by_display_name: nullableString(),
+            expires_at: dateTime(),
+            accepted_at: dateTime(true),
+            created_at: dateTime(),
+            updated_at: dateTime(),
+          },
+          required: ["id", "email", "status", "expires_at"],
+        },
+        InvitationList: listOf("InvitationItem"),
+        CreateInvitationRequest: {
+          type: "object",
+          properties: {
+            email: { type: "string", format: "email", maxLength: 320 },
+            roleId: {
+              type: ["string", "null"],
+              format: "uuid",
+              description: "Optional app role granted on acceptance; must belong to this org.",
+            },
+          },
+          required: ["email"],
+        },
+        InvitationCreated: {
+          type: "object",
+          properties: { ok: boolean(), id: uuid(), expiresAt: dateTime() },
+          required: ["ok", "id", "expiresAt"],
+        },
+        InvitationResent: {
+          type: "object",
+          properties: { ok: boolean(), expiresAt: dateTime() },
+          required: ["ok", "expiresAt"],
+        },
         // Signup policy (0007). Deliberately camelCase (not a raw row): the
         // response mirrors the PATCH request's field names exactly, since an
         // org row is a COMPLETE policy round-tripped through the form.
@@ -1708,6 +1748,41 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         },
       },
 
+      "/organizations/{id}/invitations": {
+        get: {
+          operationId: "listOrganizationInvitations",
+          tags: ["Organizations"],
+          summary: "List an organization's invitations",
+          parameters: [idParam(), ...listParams(["filter[status]"])],
+          responses: { "200": okResp("InvitationList"), ...readErrors() },
+        },
+        post: {
+          operationId: "createOrganizationInvitation",
+          tags: ["Organizations"],
+          summary: "Invite an email address into the organization (sends the accept link)",
+          parameters: [idParam()],
+          requestBody: { required: true, ...json(ref("CreateInvitationRequest")) },
+          responses: { "201": createdResp("InvitationCreated"), ...writeErrors() },
+        },
+      },
+      "/organizations/{id}/invitations/{invitationId}": {
+        delete: {
+          operationId: "revokeOrganizationInvitation",
+          tags: ["Organizations"],
+          summary: "Revoke a pending invitation (the accept link dies immediately)",
+          parameters: [idParam(), idParam("invitationId")],
+          responses: { "200": okResp(), ...writeErrors() },
+        },
+      },
+      "/organizations/{id}/invitations/{invitationId}/resend": {
+        post: {
+          operationId: "resendOrganizationInvitation",
+          tags: ["Organizations"],
+          summary: "Rotate a pending invitation's token + expiry and re-send the email",
+          parameters: [idParam(), idParam("invitationId")],
+          responses: { "200": okResp("InvitationResent"), ...writeErrors() },
+        },
+      },
       "/organizations/{id}/auth-settings": {
         get: {
           operationId: "getOrganizationAuthSettings",

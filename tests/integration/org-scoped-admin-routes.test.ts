@@ -8,6 +8,7 @@ import type * as MembersRoute from "@/app/api/administrator/organizations/[id]/m
 import type * as BindingsRoute from "@/app/api/administrator/organizations/[id]/provider-bindings/route";
 import type * as AuthSettingsRoute from "@/app/api/administrator/organizations/[id]/auth-settings/route";
 import type * as AuthDefaultsRoute from "@/app/api/administrator/auth-settings/defaults/route";
+import type * as OrgInvitationsRoute from "@/app/api/administrator/organizations/[id]/invitations/route";
 import type * as PermissionsRoute from "@/app/api/administrator/permissions/route";
 import type * as ExportRoute from "@/app/api/administrator/export/[resource]/route";
 import type * as OutboxRoute from "@/app/api/administrator/email/outbox/route";
@@ -108,6 +109,7 @@ let outboxGet: typeof OutboxRoute.GET;
 let authSettingsGet: typeof AuthSettingsRoute.GET;
 let authDefaultsGet: typeof AuthDefaultsRoute.GET;
 let authDefaultsPatch: typeof AuthDefaultsRoute.PATCH;
+let orgInvitationsGet: typeof OrgInvitationsRoute.GET;
 
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock, dbFirst]) m.mockReset();
@@ -126,6 +128,8 @@ beforeEach(async () => {
     await import("@/app/api/administrator/organizations/[id]/auth-settings/route"));
   ({ GET: authDefaultsGet, PATCH: authDefaultsPatch } =
     await import("@/app/api/administrator/auth-settings/defaults/route"));
+  ({ GET: orgInvitationsGet } =
+    await import("@/app/api/administrator/organizations/[id]/invitations/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -222,6 +226,22 @@ describe("0007 GET /organizations/[id]/auth-settings — org-b", () => {
   it("SUPERADMIN reaches org-b's signup policy", async () => {
     accessGetter.mockResolvedValue(superadmin(["admin.orgs.read"]));
     expect((await authSettingsGet(req(url), ctx)).status).toBe(200);
+  });
+});
+
+describe("0008 GET /organizations/[id]/invitations — org-b", () => {
+  const ctx = { params: Promise.resolve({ id: ORG_B }) };
+  const url = `http://test.local/api/administrator/organizations/${ORG_B}/invitations`;
+  beforeEach(() => dbFirst.mockResolvedValue({ id: ORG_B, slug: "org-b", name: "Org B" }));
+
+  it("ORG ADMIN of org-a gets 404 for org-b's invitations", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.orgs.read"]));
+    expect((await orgInvitationsGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("SUPERADMIN reaches org-b's invitations", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.read"]));
+    expect((await orgInvitationsGet(req(url), ctx)).status).toBe(200);
   });
 });
 

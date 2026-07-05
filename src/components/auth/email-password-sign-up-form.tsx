@@ -22,6 +22,14 @@ export interface EmailPasswordSignUpFormProps {
   verifyEmailHref: string;
   /** Post-verification destination, carried as the Better Auth `callbackURL`. */
   postVerifyHref: string;
+  /**
+   * Invitation secret riding the sign-up body (0008). The server pre-verifies
+   * the account when the token matches this email and places it active in
+   * the inviting organization.
+   */
+  invitationToken?: string;
+  /** The invited address; when set the email field is pre-filled and locked. */
+  invitedEmail?: string;
 }
 
 /**
@@ -46,24 +54,34 @@ export interface EmailPasswordSignUpFormProps {
 export function EmailPasswordSignUpForm({
   verifyEmailHref,
   postVerifyHref,
+  invitationToken,
+  invitedEmail,
 }: EmailPasswordSignUpFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
   const router = useRouter();
 
   const form = useZodForm<SignUpInput>(signUpSchema, {
-    defaultValues: { name: "", email: "", password: "" },
+    defaultValues: { name: "", email: invitedEmail ?? "", password: "" },
   });
 
   const onValid = async (values: SignUpInput) => {
     form.clearErrors("root");
     try {
-      const result = await authClient.signUp.email({
+      // The invitation token is an EXTRA body field: better-auth's sign-up
+      // schema accepts an open record and the server hooks read it from
+      // `context.body` (the same channel as `callbackURL`), so the client
+      // type is cast to admit it.
+      const payload = {
         email: values.email,
         password: values.password,
         name: values.name.trim(),
         callbackURL: postVerifyHref,
-      });
+        ...(invitationToken ? { invitationToken } : {}),
+      };
+      const result = await authClient.signUp.email(
+        payload as Parameters<typeof authClient.signUp.email>[0],
+      );
       if (result.error) {
         form.setError("root", { type: "server", message: t("unexpectedError") });
         return;
@@ -120,7 +138,7 @@ export function EmailPasswordSignUpForm({
             <FormItem>
               <FormLabel>{tCommon("email")}</FormLabel>
               <FormControl>
-                <Input type="email" autoComplete="email" {...field} />
+                <Input type="email" autoComplete="email" {...field} disabled={!!invitedEmail} />
               </FormControl>
               <FormMessage />
             </FormItem>

@@ -2,13 +2,22 @@ import { useTranslations } from "next-intl";
 import { EmailPasswordSignUpForm } from "@/components/auth/email-password-sign-up-form";
 import { SocialLoginButtons } from "@/components/auth/social-login-buttons";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { SupportedLocale } from "@/config/i18n-config";
 
+/** A LIVE invitation carried by `/sign-up?invite=<token>` (0008). */
+export interface SignUpInvitation {
+  token: string;
+  email: string;
+  organizationName: string;
+}
+
 export interface SignUpFormProps {
   locale: SupportedLocale;
   returnTo: string;
+  invitation?: SignUpInvitation | null;
 }
 
 /**
@@ -18,8 +27,13 @@ export interface SignUpFormProps {
  * required (AUTH-4): after sign-up the user is sent to `/verify-email` to
  * confirm their address; once verified they land in the app and the
  * provisioning service places non-seed users into `pending_approval`.
+ *
+ * With an `invitation` (0008) the email field is pre-filled and locked to
+ * the invited address and the token rides the sign-up body — the account is
+ * pre-verified (the token proves mailbox access) and lands active in the
+ * inviting organization.
  */
-export function SignUpForm({ locale, returnTo }: SignUpFormProps) {
+export function SignUpForm({ locale, returnTo, invitation }: SignUpFormProps) {
   const t = useTranslations("auth");
 
   return (
@@ -29,9 +43,18 @@ export function SignUpForm({ locale, returnTo }: SignUpFormProps) {
         <CardDescription>{t("noAccount")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {invitation ? (
+          <Alert>
+            <AlertDescription>
+              {t("inviteSignupBanner", { organization: invitation.organizationName })}
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <EmailPasswordSignUpForm
           verifyEmailHref={`/${locale}/verify-email`}
           postVerifyHref={`/${locale}/app`}
+          invitationToken={invitation?.token}
+          invitedEmail={invitation?.email}
         />
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />

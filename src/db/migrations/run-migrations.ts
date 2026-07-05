@@ -13,15 +13,17 @@ import { planMigrations, shouldIncludeLocales } from "./migration-plan";
  * (owned by Better Auth's own tooling) and tracking applied ids in an
  * `app_schema_migrations` table so each runs at most once:
  *
- *   1. CORE — every top-level `*.sql` (lexical). `0001-initial-schema.sql` is
- *      the consolidated baseline (every `app_*` table, index, and non-language
- *      baseline row — but NOT email templates, which live under `locales/`);
- *      `0002…` onward are append-only, idempotent schema changes. Core files
- *      are FROZEN and never renamed, so their ledger id (the bare filename) is
- *      stable and an existing database skips them. New core migrations continue
- *      MONOTONICALLY; the next is `0010-…`. Numbers are never reused — 0006 and
- *      0009 are RETIRED (their English email-template rows moved to
- *      `locales/0000-email-templates-en.sql`), so those gaps stay empty.
+ *   1. CORE — every top-level `*.sql` (lexical). Today that is the SINGLE
+ *      `0001-initial-schema.sql`: the consolidated baseline (every `app_*`
+ *      table, index, trigger, and non-language baseline row — but NOT email
+ *      templates, which live under `locales/`). The former standalone forward
+ *      migrations 0002–0005 / 0007 / 0008 were folded back into it, in order,
+ *      to keep the core setup one file / one transaction. Core is FROZEN and
+ *      never renamed, so its ledger id (the bare filename) is stable and an
+ *      existing database skips it. New core migrations continue MONOTONICALLY
+ *      as new `NNNN-*.sql` files; the next is `0010-…`. Numbers are never
+ *      reused — 0002–0009 have all been used (0006/0009 were the retired
+ *      email-template migrations; the rest are folded into 0001).
  *
  *   2. LOCALES — `locales/*.sql` (lexical): the email templates, one file per
  *      locale. `0000-email-templates-en.sql` is the English BASE and is ALWAYS

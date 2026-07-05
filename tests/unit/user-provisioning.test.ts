@@ -600,6 +600,56 @@ describe("reevaluatePendingActivation", () => {
     );
   });
 
+  it("activates across MULTIPLE orgs in one pass and lists them all in the audit", async () => {
+    stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
+    stubs.membershipList = () => [
+      { id: "m-a", organization_id: "org-a", source_provider: "email" },
+      { id: "m-b", organization_id: "org-b", source_provider: "email" },
+    ];
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-a",
+        require_email_verification: false,
+        signup_approval_mode: "auto_active",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      },
+      {
+        organization_id: "org-b",
+        require_email_verification: false,
+        signup_approval_mode: "auto_active",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      },
+    ];
+
+    await reevaluatePendingActivation({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: false,
+      provider: "email",
+    });
+
+    // Both memberships flip, then the user row once.
+    expect(updateCalls.map((c) => c.table)).toEqual([
+      "app_organization_memberships",
+      "app_organization_memberships",
+      "app_users",
+    ]);
+    // The event's top-level org is the first activated; metadata carries the
+    // full set so a multi-org activation isn't silently reduced to one.
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        organizationId: "org-a",
+        metadata: expect.objectContaining({
+          trigger: "sign_in_reevaluation",
+          activatedOrgIds: ["org-a", "org-b"],
+        }),
+      }),
+    );
+  });
+
   it("activates via a verified auto-approve domain (the post-verification sign-in path)", async () => {
     stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
     stubs.membershipList = () => [

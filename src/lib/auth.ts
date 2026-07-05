@@ -135,6 +135,54 @@ export const auth = betterAuth({
   },
 
   databaseHooks: {
+    // AUTH-5: provision the app_users row at SIGN-UP (email/password), so a
+    // self-registered account is visible in the admin Users list immediately —
+    // even before it verifies its email. With `requireEmailVerification` a new
+    // user gets NO session until they verify, so the `session.create` hook below
+    // would never run and the account would be a "ghost" (present in Better
+    // Auth, absent from `app_users`). This restores the pre-AUTH-4 behaviour.
+    user: {
+      create: {
+        after: async (user, context) => {
+          if (!context) {
+            return;
+          }
+          // Provision only the email/password self-registration endpoint:
+          //   - OAuth (`/callback/*`) gets a session immediately → the session
+          //     hook below covers it (unchanged).
+          //   - Admin / machine-API creation (`/admin/create-user`) provisions
+          //     `app_users` itself (POST /api/administrator/users, /api/v1/users).
+          //   - Seeds hit `/sign-up/email` too but provision themselves and
+          //     suppress this hook (see auth-signup-provisioning).
+          // `provisionUserFromAuth` is idempotent, so the session hook
+          // re-running after the user later verifies + signs in is a no-op.
+          const { shouldProvisionSelfSignup } = await import("@/lib/auth-signup-provisioning");
+          if (!shouldProvisionSelfSignup(context)) {
+            return;
+          }
+          const { provisionUserFromAuth } = await import("@/lib/user-provisioning.server");
+          try {
+            await provisionUserFromAuth({
+              betterAuthUserId: user.id,
+              email: user.email,
+              emailVerified: user.emailVerified,
+              displayName: user.name,
+              provider: getProvisioningProvider(context),
+              preferredLocale: getPreferredLocale(context),
+            });
+          } catch (error) {
+            // Best-effort: a provisioning hiccup must never fail the sign-up
+            // itself (the Better Auth user + verification email already exist).
+            // The idempotent session hook re-provisions on the first sign-in.
+            const { logServerError } = await import("@/lib/observability/logger.server");
+            logServerError("sign-up app-user provisioning failed", {
+              err: error,
+              betterAuthUserId: user.id,
+            });
+          }
+        },
+      },
+    },
     session: {
       create: {
         after: async (session, context) => {

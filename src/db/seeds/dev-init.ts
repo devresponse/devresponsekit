@@ -1,6 +1,7 @@
 import "dotenv/config";
 import type { Pool } from "pg";
 import { createAppPool, ensureSchema } from "@/db/schema-config";
+import { setSignupProvisioningSuppressed } from "@/lib/auth-signup-provisioning";
 import { ADMIN_PERMISSION_CATALOG, ANY_ADMIN_PERMISSION } from "@/lib/admin/permissions";
 
 /**
@@ -753,6 +754,10 @@ async function main() {
         "accounts. Set DEV_SEED_ALLOW_PROD=1 to override (not recommended).",
     );
   }
+  // The fixture provisions app_users + memberships itself, in specific orgs;
+  // stand the sign-up auto-provisioning hook down so signUpEmail doesn't also
+  // give each user a spurious default-org membership.
+  setSignupProvisioningSuppressed(true);
 
   const pool = createAppPool();
   try {

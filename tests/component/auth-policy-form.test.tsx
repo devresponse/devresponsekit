@@ -171,4 +171,22 @@ describe("AuthPolicyForm", () => {
       screen.queryByRole("button", { name: /reset to platform defaults/i }),
     ).not.toBeInTheDocument();
   });
+
+  it("labels an inherited invite_only policy correctly in the summary (0008)", () => {
+    renderWithIntl(
+      <AuthPolicyForm
+        endpoint={ENDPOINT}
+        scope="organization"
+        initialSettings={null}
+        platformDefaults={{
+          requireEmailVerification: true,
+          signupApprovalMode: "invite_only",
+          allowedAuthMethods: null,
+          autoApproveEmailDomains: null,
+        }}
+        canUpdate
+      />,
+    );
+    expect(screen.getByText("Invitation required")).toBeInTheDocument();
+  });
 });

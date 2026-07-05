@@ -636,7 +636,9 @@
       "applicationInUse": "此应用仍被引用，无法删除。",
       "rateLimited": "请求过多。请稍后重试。",
       "exportTruncated": "导出已达到最大行数上限。请细化筛选条件并重新导出以获取其余内容。",
-      "originNotAllowed": "源主机不在 SSO 重定向的允许列表中。"
+      "originNotAllowed": "源主机不在 SSO 重定向的允许列表中。",
+      "memberExists": "该地址已属于一名活跃成员。",
+      "invitationExists": "该地址已有待处理的邀请。"
     },
     "roles": {
       "title": "角色",
@@ -872,7 +874,33 @@
         "on": "必需",
         "off": "非必需",
         "allMethods": "所有方式",
-        "noDomains": "无"
+        "noDomains": "无",
+        "approvalModeInvite": "需要邀请"
+      },
+      "invitations": {
+        "title": "邀请",
+        "inviteButton": "邀请成员",
+        "dialogTitle": "邀请成员",
+        "dialogDescription": "发送包含一次性接受链接的邀请邮件。7 天后失效。",
+        "emailLabel": "电子邮件地址",
+        "roleLabel": "角色（可选）",
+        "noRole": "无角色",
+        "send": "发送邀请",
+        "sent": "邀请已发送。",
+        "sendError": "无法发送邀请。",
+        "resendButton": "重新发送",
+        "resent": "已使用新链接重新发送邀请。",
+        "resendError": "无法重新发送邀请。",
+        "revokeButton": "撤销",
+        "revokeConfirm": "撤销此邀请？",
+        "revokeError": "无法撤销邀请。",
+        "columns": {
+          "email": "电子邮件",
+          "status": "状态",
+          "role": "角色",
+          "invitedBy": "邀请人",
+          "expires": "到期"
+        }
       }
     },
     "memberships": {

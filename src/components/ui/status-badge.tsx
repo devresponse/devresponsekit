@@ -14,6 +14,7 @@ const VARIANT_BY_STATUS: Record<string, Variant> = {
   active: "default",
   available: "default",
   approved: "default",
+  accepted: "default",
   enabled: "default",
 
   // In-flight / awaiting action
@@ -25,6 +26,8 @@ const VARIANT_BY_STATUS: Record<string, Variant> = {
   // Terminal / blocking
   banned: "destructive",
   blocked: "destructive",
+  revoked: "destructive",
+  expired: "outline",
   suspended: "destructive",
   deactivated: "destructive",
   disabled: "destructive",

@@ -636,7 +636,9 @@
       "applicationInUse": "Cette application est encore référencée et ne peut pas être supprimée.",
       "rateLimited": "Trop de requêtes. Réessayez dans un instant.",
       "exportTruncated": "L’export a atteint la limite maximale de lignes. Affinez les filtres et relancez l’export pour obtenir le reste.",
-      "originNotAllowed": "L’hôte d’origine ne figure pas dans la liste autorisée pour les redirections SSO."
+      "originNotAllowed": "L’hôte d’origine ne figure pas dans la liste autorisée pour les redirections SSO.",
+      "memberExists": "Cette adresse appartient déjà à un membre actif.",
+      "invitationExists": "Une invitation en attente existe déjà pour cette adresse."
     },
     "roles": {
       "title": "Rôles",
@@ -872,7 +874,33 @@
         "on": "Requise",
         "off": "Non requise",
         "allMethods": "Toutes les méthodes",
-        "noDomains": "Aucun"
+        "noDomains": "Aucun",
+        "approvalModeInvite": "Invitation requise"
+      },
+      "invitations": {
+        "title": "Invitations",
+        "inviteButton": "Inviter un membre",
+        "dialogTitle": "Inviter un membre",
+        "dialogDescription": "Envoie un e-mail d'invitation avec un lien d'acceptation à usage unique. Il expire dans 7 jours.",
+        "emailLabel": "Adresse e-mail",
+        "roleLabel": "Rôle (facultatif)",
+        "noRole": "Aucun rôle",
+        "send": "Envoyer l'invitation",
+        "sent": "Invitation envoyée.",
+        "sendError": "Impossible d'envoyer l'invitation.",
+        "resendButton": "Renvoyer",
+        "resent": "Invitation renvoyée avec un nouveau lien.",
+        "resendError": "Impossible de renvoyer l'invitation.",
+        "revokeButton": "Révoquer",
+        "revokeConfirm": "Révoquer cette invitation ?",
+        "revokeError": "Impossible de révoquer l'invitation.",
+        "columns": {
+          "email": "E-mail",
+          "status": "Statut",
+          "role": "Rôle",
+          "invitedBy": "Invité par",
+          "expires": "Expire"
+        }
       }
     },
     "memberships": {

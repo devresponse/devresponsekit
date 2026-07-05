@@ -636,7 +636,9 @@
       "applicationInUse": "This application is still referenced and cannot be deleted.",
       "rateLimited": "Too many requests. Try again in a moment.",
       "exportTruncated": "Export hit the maximum row cap. Refine the filters and re-export to get the rest.",
-      "originNotAllowed": "Origin host is not in the allowed list for SSO redirects."
+      "originNotAllowed": "Origin host is not in the allowed list for SSO redirects.",
+      "memberExists": "This address already belongs to an active member.",
+      "invitationExists": "A pending invitation for this address already exists."
     },
     "roles": {
       "title": "Roles",
@@ -872,7 +874,33 @@
         "on": "Required",
         "off": "Not required",
         "allMethods": "All methods",
-        "noDomains": "None"
+        "noDomains": "None",
+        "approvalModeInvite": "Invitation required"
+      },
+      "invitations": {
+        "title": "Invitations",
+        "inviteButton": "Invite member",
+        "dialogTitle": "Invite a member",
+        "dialogDescription": "Sends an invitation email with a single-use accept link. It expires in 7 days.",
+        "emailLabel": "Email address",
+        "roleLabel": "Role (optional)",
+        "noRole": "No role",
+        "send": "Send invitation",
+        "sent": "Invitation sent.",
+        "sendError": "Could not send the invitation.",
+        "resendButton": "Resend",
+        "resent": "Invitation re-sent with a fresh link.",
+        "resendError": "Could not resend the invitation.",
+        "revokeButton": "Revoke",
+        "revokeConfirm": "Revoke this invitation?",
+        "revokeError": "Could not revoke the invitation.",
+        "columns": {
+          "email": "Email",
+          "status": "Status",
+          "role": "Role",
+          "invitedBy": "Invited by",
+          "expires": "Expires"
+        }
       }
     },
     "memberships": {

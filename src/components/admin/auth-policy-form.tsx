@@ -223,6 +223,7 @@ export function AuthPolicyForm({
                 <SelectContent>
                   <SelectItem value="admin_approval">{t("approvalModeAdmin")}</SelectItem>
                   <SelectItem value="auto_active">{t("approvalModeAuto")}</SelectItem>
+                  <SelectItem value="invite_only">{t("approvalModeInvite")}</SelectItem>
                 </SelectContent>
               </Select>
               <FormDescription>{t("approvalModeHelp")}</FormDescription>
@@ -363,7 +364,9 @@ function PolicySummary({ settings }: { settings: AuthPolicySettingsJson }) {
       <dd>
         {settings.signupApprovalMode === "auto_active"
           ? t("approvalModeAuto")
-          : t("approvalModeAdmin")}
+          : settings.signupApprovalMode === "invite_only"
+            ? t("approvalModeInvite")
+            : t("approvalModeAdmin")}
       </dd>
       <dt className="text-muted-foreground">{t("summaryMethods")}</dt>
       <dd>

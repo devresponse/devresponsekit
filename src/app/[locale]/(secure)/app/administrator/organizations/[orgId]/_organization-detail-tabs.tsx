@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AuthPolicyForm, type AuthPolicySettingsJson } from "@/components/admin/auth-policy-form";
+import { OrganizationInvitationsPanel } from "./_organization-invitations-panel";
 import { OrganizationMembersGrid } from "./_organization-members-grid";
 import { OrganizationProvidersGrid } from "./_organization-providers-grid";
 import { OrganizationSettingsForm } from "./_organization-settings-form";
@@ -46,7 +47,10 @@ export function OrganizationDetailTabs({
       </TabsList>
 
       <TabsContent value="members" className="mt-4">
-        <OrganizationMembersGrid orgId={org.id} canUpdate={canUpdate} />
+        <div className="space-y-6">
+          <OrganizationMembersGrid orgId={org.id} canUpdate={canUpdate} />
+          <OrganizationInvitationsPanel orgId={org.id} canUpdate={canUpdate} />
+        </div>
       </TabsContent>
 
       <TabsContent value="providers" className="mt-4">

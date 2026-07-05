@@ -41,10 +41,12 @@ vi.mock("@/lib/audit.server", () => ({
 vi.mock("@/lib/email/send.server", () => ({
   sendAppEmail: (...args: unknown[]) => sendEmailMock(...args),
 }));
+const sendInvitationEmailMock = vi.fn();
 vi.mock("@/lib/invitations.server", () => ({
   createInvitation: (...args: unknown[]) => createInvitationMock(...args),
   revokeInvitation: (...args: unknown[]) => revokeInvitationMock(...args),
   regenerateInvitationToken: (...args: unknown[]) => regenerateMock(...args),
+  sendInvitationEmail: (...args: unknown[]) => sendInvitationEmailMock(...args),
   buildInvitationAcceptUrl: (token: string) => `http://test.local/en/invite?token=${token}`,
 }));
 
@@ -88,7 +90,6 @@ const ROLE_ID = "c3d4e5f6-a7b8-4012-8def-123456789012";
 const BASE = `http://test.local/api/administrator/organizations/${ORG_ID}/invitations`;
 
 const ORG_ROW = { id: ORG_ID, slug: "test-org", name: "Test Org" };
-const INVITER_ROW = { display_name: "Admin Ada", primary_email: "ada@x.com" };
 
 function getReq(url: string): NextRequest {
   return { nextUrl: new URL(url), headers: new Headers() } as unknown as NextRequest;
@@ -137,12 +138,14 @@ beforeEach(async () => {
     createInvitationMock,
     revokeInvitationMock,
     regenerateMock,
+    sendInvitationEmailMock,
   ])
     m.mockReset();
   sessionGetter.mockResolvedValue({ user: { id: "ba-admin" } });
   selectFirst.mockResolvedValue(ORG_ROW);
   executeMock.mockResolvedValue([]);
   sendEmailMock.mockResolvedValue({ outboxId: "out-1", status: "logged" });
+  sendInvitationEmailMock.mockResolvedValue(undefined);
   createInvitationMock.mockResolvedValue({
     id: INVITATION_ID,
     plaintextToken: "tok-plain",
@@ -233,28 +236,22 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     expect(((await res.json()) as { error: string }).error).toBe("invitation_exists");
   });
 
-  it("creates, emails the accept link through the outbox, and audits", async () => {
+  it("creates, sends the invitation email, and audits", async () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
-    selectFirst
-      .mockResolvedValueOnce(ORG_ROW)
-      .mockResolvedValueOnce(undefined) // no active member
-      .mockResolvedValueOnce(INVITER_ROW);
+    // org load (shared helper), then the active-member check. The inviter
+    // lookup + render now live inside the mocked sendInvitationEmail.
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined); // no active member
     const res = await createPOST(jsonReq(BASE, { email: "Ada@Example.com " }), listCtx());
     expect(res.status).toBe(201);
     expect(createInvitationMock).toHaveBeenCalledWith(
       expect.objectContaining({ organizationId: ORG_ID, email: "ada@example.com" }),
     );
-    expect(sendEmailMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: "ada@example.com",
-        templateKey: "organization_invitation",
-        variables: expect.objectContaining({
-          inviterName: "Admin Ada",
-          organizationName: "Test Org",
-          acceptUrl: "http://test.local/en/invite?token=tok-plain",
-        }),
-      }),
-    );
+    expect(sendInvitationEmailMock).toHaveBeenCalledWith({
+      to: "ada@example.com",
+      organizationName: "Test Org",
+      inviterAppUserId: "admin-app-user",
+      plaintextToken: "tok-plain",
+    });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.organization.invitation_created",
@@ -293,22 +290,19 @@ describe("POST .../invitations/:invitationId/resend", () => {
 
   it("rotates the token, re-sends, and audits", async () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    // org load (shared helper), then the invitation lookup. The inviter
+    // lookup + render live inside the mocked sendInvitationEmail.
     selectFirst
       .mockResolvedValueOnce(ORG_ROW)
-      .mockResolvedValueOnce({ id: INVITATION_ID, email: "ada@example.com" })
-      .mockResolvedValueOnce(INVITER_ROW);
+      .mockResolvedValueOnce({ id: INVITATION_ID, email: "ada@example.com" });
     const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
     expect(res.status).toBe(200);
     expect(regenerateMock).toHaveBeenCalledWith({
       invitationId: INVITATION_ID,
       organizationId: ORG_ID,
     });
-    expect(sendEmailMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        variables: expect.objectContaining({
-          acceptUrl: "http://test.local/en/invite?token=tok-rotated",
-        }),
-      }),
+    expect(sendInvitationEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "ada@example.com", plaintextToken: "tok-rotated" }),
     );
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.organization.invitation_resent" }),

@@ -62,6 +62,38 @@ export function buildInvitationAcceptUrl(plaintextToken: string): string {
 }
 
 /**
+ * Sends the `organization_invitation` email (outbox-first, specs.md §35) for
+ * a freshly created or resent invitation — shared by the create and resend
+ * routes. Resolves the inviter's display name (falling back to their email,
+ * then a generic label so the template never renders blank) and renders the
+ * one-time accept link from the plaintext token.
+ */
+export async function sendInvitationEmail(input: {
+  to: string;
+  organizationName: string;
+  inviterAppUserId: string | null;
+  plaintextToken: string;
+}): Promise<void> {
+  const inviter = input.inviterAppUserId
+    ? await db
+        .selectFrom("app_users")
+        .select(["display_name", "primary_email"])
+        .where("id", "=", input.inviterAppUserId)
+        .executeTakeFirst()
+    : undefined;
+  const { sendAppEmail } = await import("@/lib/email/send.server");
+  await sendAppEmail({
+    to: input.to,
+    templateKey: "organization_invitation",
+    variables: {
+      inviterName: inviter?.display_name || inviter?.primary_email || "An administrator",
+      organizationName: input.organizationName,
+      acceptUrl: buildInvitationAcceptUrl(input.plaintextToken),
+    },
+  });
+}
+
+/**
  * Creates a pending invitation and returns the PLAINTEXT token exactly once
  * (the caller renders it into the accept URL and discards it). Throws the
  * underlying unique-violation when a pending invitation for (org, email)

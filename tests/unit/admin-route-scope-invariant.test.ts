@@ -36,6 +36,10 @@ const ADMIN_SCOPE_MARKERS = [
   "@/lib/admin/access-scope.server",
   // resolveTargetUser(id, access) embeds canAccessUser — scoped by contract.
   "resolveTargetUser",
+  // loadScopedOrg(request, orgId, access) embeds canAccessOrg (returning a 404
+  // for a foreign org) — the shared org-load helper the /organizations/[id]/*
+  // sub-routes derive their boundary from, scoped by contract.
+  "loadScopedOrg",
   // selectDashboardMetrics(access) derives system-vs-org scope from
   // access-scope.server (isSuperadmin / resolveOrgScope) by construction.
   "selectDashboardMetrics",

@@ -59,7 +59,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   const limited = enforceRateLimit(
-    "admin.auth-settings.defaults",
+    "admin.auth_settings.defaults",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
     request,

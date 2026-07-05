@@ -6,6 +6,7 @@ import {
   decideInitialStatus,
   findEmailDomainOrganization,
   getAuthPolicyForOrg,
+  isAuthMethod,
   type AuthMethod,
   type SignupDecisionReason,
   type SignupStatusDecision,
@@ -415,8 +416,4 @@ export async function reevaluatePendingActivation(input: {
       trigger: "sign_in_reevaluation",
     },
   });
-}
-
-function isAuthMethod(value: string | null): value is AuthMethod {
-  return value === "email" || value === "google" || value === "microsoft" || value === "github";
 }

@@ -781,7 +781,8 @@
       "tabs": {
         "members": "Members",
         "providers": "Providers",
-        "settings": "Settings"
+        "settings": "Settings",
+        "authentication": "Authentication"
       },
       "new": {
         "title": "Create organization",
@@ -825,7 +826,43 @@
         "title": "Delete organization",
         "description": "Deleting removes the organization. The organization must be empty (no members)."
       },
-      "deleteError": "Could not delete the organization."
+      "deleteError": "Could not delete the organization.",
+      "authPolicy": {
+        "description": "Control how new accounts sign up and become active for this organization.",
+        "platformTitle": "Platform sign-up defaults",
+        "platformDescription": "The sign-up policy inherited by every organization without its own override.",
+        "inheritBody": "This organization inherits the platform sign-up defaults.",
+        "customize": "Customize for this organization",
+        "cancel": "Cancel",
+        "requireVerification": "Require email verification",
+        "requireVerificationHelp": "Email and password sign-ups must confirm their address before signing in. Social sign-ins are already verified by their provider.",
+        "approvalMode": "Approval mode",
+        "approvalModeAdmin": "Administrator approval required",
+        "approvalModeAuto": "Active immediately",
+        "approvalModeHelp": "How a new account becomes active after registration.",
+        "openSignupWarning": "Anyone who registers will get immediate access without proving they own their email address.",
+        "restrictMethods": "Restrict sign-in methods",
+        "restrictMethodsHelp": "Sign-ups using unchecked methods wait for administrator approval.",
+        "methodEmail": "Email & password",
+        "methodGoogle": "Google",
+        "methodMicrosoft": "Microsoft",
+        "methodGithub": "GitHub",
+        "autoApproveDomains": "Auto-approve email domains",
+        "autoApproveDomainsHelp": "Verified addresses on these domains become active immediately, even when administrator approval is required. Separate domains with commas.",
+        "save": "Save policy",
+        "saved": "Sign-up policy updated.",
+        "reset": "Reset to platform defaults",
+        "resetDone": "Override removed — this organization now inherits the platform defaults.",
+        "errorToast": "Could not save the sign-up policy.",
+        "summaryVerification": "Email verification",
+        "summaryApproval": "Approval",
+        "summaryMethods": "Sign-in methods",
+        "summaryDomains": "Auto-approved domains",
+        "on": "Required",
+        "off": "Not required",
+        "allMethods": "All methods",
+        "noDomains": "None"
+      }
     },
     "memberships": {
       "title": "Memberships",
@@ -1354,7 +1391,8 @@
     "number": "Enter a valid number.",
     "passwordsMismatch": "Passwords do not match.",
     "locale": "Choose a supported language.",
-    "dateFormat": "Choose a valid date format."
+    "dateFormat": "Choose a valid date format.",
+    "domainList": "Enter valid domains separated by commas (for example acme.com)."
   },
   "sso": {
     "confirm": {

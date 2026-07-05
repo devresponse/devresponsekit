@@ -6,6 +6,8 @@ import type * as RoleByIdRoute from "@/app/api/administrator/roles/[id]/route";
 import type * as RolesListRoute from "@/app/api/administrator/roles/route";
 import type * as MembersRoute from "@/app/api/administrator/organizations/[id]/members/route";
 import type * as BindingsRoute from "@/app/api/administrator/organizations/[id]/provider-bindings/route";
+import type * as AuthSettingsRoute from "@/app/api/administrator/organizations/[id]/auth-settings/route";
+import type * as AuthDefaultsRoute from "@/app/api/administrator/auth-settings/defaults/route";
 import type * as PermissionsRoute from "@/app/api/administrator/permissions/route";
 import type * as ExportRoute from "@/app/api/administrator/export/[resource]/route";
 import type * as OutboxRoute from "@/app/api/administrator/email/outbox/route";
@@ -103,6 +105,9 @@ let bindingsGet: typeof BindingsRoute.GET;
 let permissionsPost: typeof PermissionsRoute.POST;
 let exportGet: typeof ExportRoute.GET;
 let outboxGet: typeof OutboxRoute.GET;
+let authSettingsGet: typeof AuthSettingsRoute.GET;
+let authDefaultsGet: typeof AuthDefaultsRoute.GET;
+let authDefaultsPatch: typeof AuthDefaultsRoute.PATCH;
 
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock, dbFirst]) m.mockReset();
@@ -117,6 +122,10 @@ beforeEach(async () => {
   ({ POST: permissionsPost } = await import("@/app/api/administrator/permissions/route"));
   ({ GET: exportGet } = await import("@/app/api/administrator/export/[resource]/route"));
   ({ GET: outboxGet } = await import("@/app/api/administrator/email/outbox/route"));
+  ({ GET: authSettingsGet } =
+    await import("@/app/api/administrator/organizations/[id]/auth-settings/route"));
+  ({ GET: authDefaultsGet, PATCH: authDefaultsPatch } =
+    await import("@/app/api/administrator/auth-settings/defaults/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -186,6 +195,71 @@ describe("P0-7 GET /roles (list) — null-scope admin", () => {
     const body = (await res.json()) as { items: unknown[]; total: number };
     expect(body.items).toHaveLength(0);
     expect(body.total).toBe(0);
+  });
+});
+
+describe("0007 GET /organizations/[id]/auth-settings — org-b", () => {
+  const ctx = { params: Promise.resolve({ id: ORG_B }) };
+  const url = `http://test.local/api/administrator/organizations/${ORG_B}/auth-settings`;
+  beforeEach(() => {
+    dbFirst.mockResolvedValue({
+      id: ORG_B,
+      slug: "org-b",
+      organization_id: ORG_B,
+      require_email_verification: true,
+      signup_approval_mode: "admin_approval",
+      allowed_auth_methods: null,
+      auto_approve_email_domains: null,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+  });
+
+  it("ORG ADMIN of org-a gets 404 for org-b's signup policy", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.orgs.read"]));
+    expect((await authSettingsGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("SUPERADMIN reaches org-b's signup policy", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.read"]));
+    expect((await authSettingsGet(req(url), ctx)).status).toBe(200);
+  });
+});
+
+describe("0007 /auth-settings/defaults — platform-global resource", () => {
+  const url = "http://test.local/api/administrator/auth-settings/defaults";
+
+  it("ORG ADMIN cannot read the platform defaults (403, superadmin-only)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.orgs.read", "admin.orgs.update"]));
+    expect((await authDefaultsGet(req(url))).status).toBe(403);
+  });
+
+  it("ORG ADMIN cannot write the platform defaults (403)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.orgs.update"]));
+    const res = await authDefaultsPatch(
+      req(url, {
+        method: "PATCH",
+        body: JSON.stringify({
+          requireEmailVerification: false,
+          signupApprovalMode: "auto_active",
+          allowedAuthMethods: null,
+          autoApproveEmailDomains: null,
+        }),
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("SUPERADMIN reads the platform defaults", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.read"]));
+    dbFirst.mockResolvedValue({
+      organization_id: null,
+      require_email_verification: true,
+      signup_approval_mode: "admin_approval",
+      allowed_auth_methods: null,
+      auto_approve_email_domains: null,
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    expect((await authDefaultsGet(req(url))).status).toBe(200);
   });
 });
 

@@ -27,6 +27,9 @@ models/AppRoleRef.ts
 models/AppUserIdsRequest.ts
 models/AuditEventItem.ts
 models/AuditEventList.ts
+models/AuthPolicyEffective.ts
+models/AuthPolicyEnvelope.ts
+models/AuthPolicySettings.ts
 models/BanRequest.ts
 models/BulkUserRequest.ts
 models/BulkUserRequestFilters.ts
@@ -96,6 +99,7 @@ models/SetRoleRequest.ts
 models/SetUserPassword200Response.ts
 models/SetUserPlatformRole200Response.ts
 models/SortSpec.ts
+models/UpdateAuthPolicyRequest.ts
 models/UpdateEmailTemplateRequest.ts
 models/UpdateEnterpriseAppRequest.ts
 models/UpdateGroupRequest.ts

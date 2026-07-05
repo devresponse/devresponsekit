@@ -18,6 +18,7 @@ import type {
   AddOrgMemberRequest,
   AddProviderBindingRequest,
   AdminError,
+  AuthPolicyEnvelope,
   CreateOrganizationRequest,
   DeleteBindingsRequest,
   DeleteMembershipsRequest,
@@ -29,6 +30,7 @@ import type {
   OrganizationDetail,
   OrganizationList,
   ProviderBindingList,
+  UpdateAuthPolicyRequest,
   UpdateMembershipsRequest,
   UpdateOrganizationRequest,
 } from '../models/index';
@@ -39,6 +41,8 @@ import {
     AddProviderBindingRequestToJSON,
     AdminErrorFromJSON,
     AdminErrorToJSON,
+    AuthPolicyEnvelopeFromJSON,
+    AuthPolicyEnvelopeToJSON,
     CreateOrganizationRequestFromJSON,
     CreateOrganizationRequestToJSON,
     DeleteBindingsRequestFromJSON,
@@ -61,6 +65,8 @@ import {
     OrganizationListToJSON,
     ProviderBindingListFromJSON,
     ProviderBindingListToJSON,
+    UpdateAuthPolicyRequestFromJSON,
+    UpdateAuthPolicyRequestToJSON,
     UpdateMembershipsRequestFromJSON,
     UpdateMembershipsRequestToJSON,
     UpdateOrganizationRequestFromJSON,
@@ -86,6 +92,10 @@ export interface DeleteOrganizationRequest {
 }
 
 export interface GetOrganizationRequest {
+    id: string;
+}
+
+export interface GetOrganizationAuthSettingsRequest {
     id: string;
 }
 
@@ -125,14 +135,27 @@ export interface RemoveProviderBindingsRequest {
     deleteBindingsRequest: DeleteBindingsRequest;
 }
 
+export interface ResetOrganizationAuthSettingsRequest {
+    id: string;
+}
+
 export interface UpdateOrganizationOperationRequest {
     id: string;
     updateOrganizationRequest: UpdateOrganizationRequest;
 }
 
+export interface UpdateOrganizationAuthSettingsRequest {
+    id: string;
+    updateAuthPolicyRequest: UpdateAuthPolicyRequest;
+}
+
 export interface UpdateOrganizationMembersRequest {
     id: string;
     updateMembershipsRequest: UpdateMembershipsRequest;
+}
+
+export interface UpdatePlatformAuthSettingsRequest {
+    updateAuthPolicyRequest: UpdateAuthPolicyRequest;
 }
 
 /**
@@ -325,6 +348,65 @@ export class OrganizationsApi extends runtime.BaseAPI {
      */
     async getOrganization(requestParameters: GetOrganizationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<OrganizationDetail> {
         const response = await this.getOrganizationRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Read an organization\'s signup policy (raw override + effective resolution)
+     */
+    async getOrganizationAuthSettingsRaw(requestParameters: GetOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<AuthPolicyEnvelope>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling getOrganizationAuthSettings().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/organizations/{id}/auth-settings`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => AuthPolicyEnvelopeFromJSON(jsonValue));
+    }
+
+    /**
+     * Read an organization\'s signup policy (raw override + effective resolution)
+     */
+    async getOrganizationAuthSettings(requestParameters: GetOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<AuthPolicyEnvelope> {
+        const response = await this.getOrganizationAuthSettingsRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Read the platform-default signup policy (superadmin only)
+     */
+    async getPlatformAuthSettingsRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<AuthPolicyEnvelope>> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/auth-settings/defaults`,
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => AuthPolicyEnvelopeFromJSON(jsonValue));
+    }
+
+    /**
+     * Read the platform-default signup policy (superadmin only)
+     */
+    async getPlatformAuthSettings(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<AuthPolicyEnvelope> {
+        const response = await this.getPlatformAuthSettingsRaw(initOverrides);
         return await response.value();
     }
 
@@ -567,6 +649,39 @@ export class OrganizationsApi extends runtime.BaseAPI {
     }
 
     /**
+     * Remove the signup-policy override (revert to the platform default)
+     */
+    async resetOrganizationAuthSettingsRaw(requestParameters: ResetOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Ok>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling resetOrganizationAuthSettings().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/organizations/{id}/auth-settings`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'DELETE',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => OkFromJSON(jsonValue));
+    }
+
+    /**
+     * Remove the signup-policy override (revert to the platform default)
+     */
+    async resetOrganizationAuthSettings(requestParameters: ResetOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Ok> {
+        const response = await this.resetOrganizationAuthSettingsRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
      * Update an organization (superadmin only)
      */
     async updateOrganizationRaw(requestParameters: UpdateOrganizationOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Ok>> {
@@ -610,6 +725,49 @@ export class OrganizationsApi extends runtime.BaseAPI {
     }
 
     /**
+     * Create or replace the organization\'s signup-policy override
+     */
+    async updateOrganizationAuthSettingsRaw(requestParameters: UpdateOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<AuthPolicyEnvelope>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling updateOrganizationAuthSettings().'
+            );
+        }
+
+        if (requestParameters['updateAuthPolicyRequest'] == null) {
+            throw new runtime.RequiredError(
+                'updateAuthPolicyRequest',
+                'Required parameter "updateAuthPolicyRequest" was null or undefined when calling updateOrganizationAuthSettings().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+        const response = await this.request({
+            path: `/organizations/{id}/auth-settings`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'PATCH',
+            headers: headerParameters,
+            query: queryParameters,
+            body: UpdateAuthPolicyRequestToJSON(requestParameters['updateAuthPolicyRequest']),
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => AuthPolicyEnvelopeFromJSON(jsonValue));
+    }
+
+    /**
+     * Create or replace the organization\'s signup-policy override
+     */
+    async updateOrganizationAuthSettings(requestParameters: UpdateOrganizationAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<AuthPolicyEnvelope> {
+        const response = await this.updateOrganizationAuthSettingsRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
      * Bulk-update member statuses
      */
     async updateOrganizationMembersRaw(requestParameters: UpdateOrganizationMembersRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<OkCount>> {
@@ -649,6 +807,42 @@ export class OrganizationsApi extends runtime.BaseAPI {
      */
     async updateOrganizationMembers(requestParameters: UpdateOrganizationMembersRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<OkCount> {
         const response = await this.updateOrganizationMembersRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Update the platform-default signup policy (superadmin only)
+     */
+    async updatePlatformAuthSettingsRaw(requestParameters: UpdatePlatformAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<AuthPolicyEnvelope>> {
+        if (requestParameters['updateAuthPolicyRequest'] == null) {
+            throw new runtime.RequiredError(
+                'updateAuthPolicyRequest',
+                'Required parameter "updateAuthPolicyRequest" was null or undefined when calling updatePlatformAuthSettings().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters['Content-Type'] = 'application/json';
+
+        const response = await this.request({
+            path: `/auth-settings/defaults`,
+            method: 'PATCH',
+            headers: headerParameters,
+            query: queryParameters,
+            body: UpdateAuthPolicyRequestToJSON(requestParameters['updateAuthPolicyRequest']),
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => AuthPolicyEnvelopeFromJSON(jsonValue));
+    }
+
+    /**
+     * Update the platform-default signup policy (superadmin only)
+     */
+    async updatePlatformAuthSettings(requestParameters: UpdatePlatformAuthSettingsRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<AuthPolicyEnvelope> {
+        const response = await this.updatePlatformAuthSettingsRaw(requestParameters, initOverrides);
         return await response.value();
     }
 

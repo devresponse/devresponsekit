@@ -2,11 +2,25 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { AdminError, loadOrgOrThrow } from "@/lib/admin/orgs.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
+import type { AuthPolicySettingsJson } from "@/components/admin/auth-policy-form";
 import { OrganizationDetailTabs } from "./_organization-detail-tabs";
+import type { OrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
+
+/** JSON-safe projection for the client tabs (drops updatedAt/organizationId). */
+function toAuthPolicyJson(row: OrgAuthSettingsRow | null): AuthPolicySettingsJson | null {
+  if (!row) return null;
+  return {
+    requireEmailVerification: row.requireEmailVerification,
+    signupApprovalMode: row.signupApprovalMode === "auto_active" ? "auto_active" : "admin_approval",
+    allowedAuthMethods: row.allowedAuthMethods as AuthPolicySettingsJson["allowedAuthMethods"],
+    autoApproveEmailDomains: row.autoApproveEmailDomains,
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +73,14 @@ export default async function AdministratorOrganizationDetailPage({
 
   const canUpdate = guard.access.permissions.includes("admin.orgs.update");
 
+  // Initial rows for the Authentication tab (0007): the org's override (null
+  // = inheriting) and the platform default it would inherit. Loaded here —
+  // AFTER the canAccessOrg gate above — so the client tab needs no fetch.
+  const [authSettings, platformAuthDefaults] = await Promise.all([
+    getOrgAuthSettingsRow(org.id),
+    getOrgAuthSettingsRow(null),
+  ]);
+
   return (
     <section className="space-y-4 p-6">
       <div className="flex items-center justify-between gap-4">
@@ -85,6 +107,8 @@ export default async function AdministratorOrganizationDetailPage({
           bindingCount: org.binding_count,
         }}
         canUpdate={canUpdate}
+        authSettings={toAuthPolicyJson(authSettings)}
+        platformAuthDefaults={toAuthPolicyJson(platformAuthDefaults)}
       />
     </section>
   );

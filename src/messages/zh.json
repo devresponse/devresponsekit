@@ -781,7 +781,8 @@
       "tabs": {
         "members": "成员",
         "providers": "提供商",
-        "settings": "设置"
+        "settings": "设置",
+        "authentication": "身份验证"
       },
       "new": {
         "title": "创建组织",
@@ -825,7 +826,43 @@
         "title": "删除组织",
         "description": "删除会移除该组织。该组织必须为空（无成员）。"
       },
-      "deleteError": "无法删除该组织。"
+      "deleteError": "无法删除该组织。",
+      "authPolicy": {
+        "description": "控制新账户在此组织中的注册和激活方式。",
+        "platformTitle": "平台注册默认设置",
+        "platformDescription": "所有未自行配置的组织都继承此注册策略。",
+        "inheritBody": "此组织继承平台的注册默认设置。",
+        "customize": "为此组织自定义",
+        "cancel": "取消",
+        "requireVerification": "要求电子邮件验证",
+        "requireVerificationHelp": "使用电子邮件和密码注册的用户必须先确认地址才能登录。社交登录已由其提供商验证。",
+        "approvalMode": "审批模式",
+        "approvalModeAdmin": "需要管理员审批",
+        "approvalModeAuto": "立即激活",
+        "approvalModeHelp": "新账户在注册后如何被激活。",
+        "openSignupWarning": "任何注册的人都将立即获得访问权限，而无需证明其拥有该电子邮件地址。",
+        "restrictMethods": "限制登录方式",
+        "restrictMethodsHelp": "通过未勾选方式注册的用户将等待管理员审批。",
+        "methodEmail": "电子邮件和密码",
+        "methodGoogle": "Google",
+        "methodMicrosoft": "Microsoft",
+        "methodGithub": "GitHub",
+        "autoApproveDomains": "自动批准的电子邮件域名",
+        "autoApproveDomainsHelp": "这些域名下经过验证的地址会立即激活，即使需要管理员审批。请用逗号分隔域名。",
+        "save": "保存策略",
+        "saved": "注册策略已更新。",
+        "reset": "恢复平台默认设置",
+        "resetDone": "已移除自定义配置——此组织现在继承平台默认设置。",
+        "errorToast": "无法保存注册策略。",
+        "summaryVerification": "电子邮件验证",
+        "summaryApproval": "审批",
+        "summaryMethods": "登录方式",
+        "summaryDomains": "自动批准的域名",
+        "on": "必需",
+        "off": "非必需",
+        "allMethods": "所有方式",
+        "noDomains": "无"
+      }
     },
     "memberships": {
       "title": "成员关系",
@@ -1354,7 +1391,8 @@
     "number": "请输入有效的数字。",
     "passwordsMismatch": "两次输入的密码不一致。",
     "locale": "请选择一种受支持的语言。",
-    "dateFormat": "请选择有效的日期格式。"
+    "dateFormat": "请选择有效的日期格式。",
+    "domainList": "请输入有效的域名，用逗号分隔（例如 acme.com）。"
   },
   "sso": {
     "confirm": {

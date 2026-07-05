@@ -56,12 +56,22 @@ export function SignUpForm({ locale, returnTo, invitation }: SignUpFormProps) {
           invitationToken={invitation?.token}
           invitedEmail={invitation?.email}
         />
-        <div className="flex items-center gap-3">
-          <Separator className="flex-1" />
-          <span className="text-muted-foreground text-xs uppercase">{t("or")}</span>
-          <Separator className="flex-1" />
-        </div>
-        <SocialLoginButtons returnTo={returnTo} />
+        {/* Social login is hidden on an invited sign-up (0008): the OAuth
+            path does NOT carry the invitation token, so a social sign-in
+            would silently drop it and land the invitee in pending_approval
+            instead of active in the inviting org. Invitations are email-
+            address-scoped and the emailed token already proves the mailbox,
+            so email/password is the intended path here. */}
+        {invitation ? null : (
+          <>
+            <div className="flex items-center gap-3">
+              <Separator className="flex-1" />
+              <span className="text-muted-foreground text-xs uppercase">{t("or")}</span>
+              <Separator className="flex-1" />
+            </div>
+            <SocialLoginButtons returnTo={returnTo} />
+          </>
+        )}
         <div className="text-sm">
           <LocaleLink
             href="/sign-in"

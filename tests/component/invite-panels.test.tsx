@@ -19,13 +19,18 @@ import { renderWithIntl } from "../helpers/render-with-intl";
 const fetchMock = vi.fn();
 const assignMock = vi.fn();
 
+let signOutProps: { locale?: string; redirectTo?: string } = {};
 vi.mock("@/components/auth/sign-out-button", () => ({
-  SignOutButton: () => <button type="button">Sign out</button>,
+  SignOutButton: (props: { locale?: string; redirectTo?: string }) => {
+    signOutProps = props;
+    return <button type="button">Sign out</button>;
+  },
 }));
 
 beforeEach(() => {
   fetchMock.mockReset();
   assignMock.mockReset();
+  signOutProps = {};
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("location", { ...window.location, assign: assignMock });
 });
@@ -57,9 +62,16 @@ describe("InviteGuestPanel", () => {
 
 describe("InviteMismatchPanel", () => {
   it("explains without echoing the invited address and offers sign-out", () => {
-    renderWithIntl(<InviteMismatchPanel locale="en" />);
+    renderWithIntl(<InviteMismatchPanel locale="en" token="tok-123" />);
     expect(screen.getByText(/issued for a different email address/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
+  });
+
+  it("points sign-out back at the invite page so the flow resumes (not a dead-end)", () => {
+    renderWithIntl(<InviteMismatchPanel locale="en" token="tok-123" />);
+    // Sign-out must carry a resume target back to /invite?token=… rather than
+    // defaulting to /logged-out and stranding the user.
+    expect(signOutProps.redirectTo).toBe("/en/invite?token=tok-123");
   });
 });
 

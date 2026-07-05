@@ -36,4 +36,24 @@ describe("SignUpForm", () => {
       "/fr/sign-in",
     );
   });
+
+  it("hides social login on an invited sign-up (OAuth would drop the token)", () => {
+    renderWithIntl(
+      <SignUpForm
+        locale="en"
+        returnTo="/en/app/dashboard"
+        invitation={{ token: "tok-123", email: "ada@acme.com", organizationName: "Acme" }}
+      />,
+    );
+    // The invite banner + email/password form are shown...
+    expect(screen.getByText(/joining Acme/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/email/i)).toHaveValue("ada@acme.com");
+    // ...but the social buttons (which don't carry the invitation) are gone.
+    expect(screen.queryByRole("button", { name: /continue with google/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /continue with microsoft/i }),
+    ).not.toBeInTheDocument();
+    // The "have an account? sign in" link stays — an existing user can sign in.
+    expect(screen.getByRole("link", { name: /already have an account/i })).toBeInTheDocument();
+  });
 });

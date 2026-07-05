@@ -62,4 +62,31 @@ describe("SignOutButton", () => {
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(navigatedTo).toBe("/fr/logged-out");
   });
+
+  it("redirects to an explicit redirectTo when provided (mid-flow resume)", async () => {
+    let navigatedTo = "";
+    Object.defineProperty(window, "location", {
+      value: {
+        ...originalLocation,
+        set href(value: string) {
+          navigatedTo = value;
+        },
+        get href() {
+          return navigatedTo;
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    signOut.mockImplementation(async (opts: { fetchOptions: { onSuccess: () => void } }) => {
+      opts.fetchOptions.onSuccess();
+    });
+
+    const user = userEvent.setup();
+    renderWithIntl(<SignOutButton locale="en" redirectTo="/en/invite?token=tok-123" />);
+    await user.click(screen.getByRole("button", { name: /sign out/i }));
+
+    expect(navigatedTo).toBe("/en/invite?token=tok-123");
+  });
 });

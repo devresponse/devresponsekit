@@ -1,6 +1,7 @@
--- locales/0005 — Seed ja (Japanese) email templates.
+-- locales/0007 — Seed ja (Japanese) email templates.
 --
--- Follows locales/0004 (hi): 0001 seeded only the `en` rows for `password_reset` and
+-- Follows locales/0006 (hi): core 0001-initial-schema.sql seeded only the `en`
+-- rows for `password_reset` and
 -- `test_email`. With Japanese added to the supported locales
 -- (src/config/i18n-config.ts), a recipient with a `ja` `preferred_locale` would
 -- otherwise fall back to English (the `resolveTemplate` query returns the `en`

@@ -1,4 +1,4 @@
--- locales/0007 — Non-English rows for the `organization_invitation` template
+-- locales/0009 — Non-English rows for the `organization_invitation` template
 -- (en base row: 0009-invitation-template.sql). Data-only and idempotent;
 -- excludable via DB_MIGRATE_LOCALES. Keep in sync with the `translations`
 -- block in `src/lib/email/templates.ts`.

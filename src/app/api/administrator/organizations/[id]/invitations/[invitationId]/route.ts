@@ -1,9 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { db } from "@/db/database";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { loadScopedOrg } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -38,21 +37,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (limited) return limited;
 
   const { id, invitationId } = await context.params;
-  if (!isUuid(id) || !isUuid(invitationId)) {
+  if (!isUuid(invitationId)) {
     return adminErrorResponse("invalid_id", 400, request);
   }
-  const org = await db
-    .selectFrom("app_organizations")
-    .select(["id", "slug"])
-    .where("id", "=", id)
-    .executeTakeFirst();
-  if (!org) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
-  // ADR-0001: foreign org → 404, never 403.
-  if (!canAccessOrg(guard.access, id)) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
+  const org = await loadScopedOrg(request, id, guard.access);
+  if (org instanceof NextResponse) return org;
 
   const revoked = await revokeInvitation({
     invitationId,

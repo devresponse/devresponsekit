@@ -2,7 +2,6 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -12,41 +11,16 @@ import {
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
+import { loadScopedOrg } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { isUuid } from "@/lib/admin/user-target.server";
-import { buildInvitationAcceptUrl, createInvitation } from "@/lib/invitations.server";
+import { createInvitation, sendInvitationEmail } from "@/lib/invitations.server";
 import { createInvitationSchema } from "@/lib/validation/invitations";
 
 export const dynamic = "force-dynamic";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
-}
-
-async function loadScopedOrg(
-  request: NextRequest,
-  context: RouteContext,
-  guard: { access: Parameters<typeof canAccessOrg>[0] },
-): Promise<{ id: string; slug: string; name: string } | NextResponse> {
-  const { id } = await context.params;
-  if (!isUuid(id)) {
-    return adminErrorResponse("invalid_id", 400, request);
-  }
-  const org = await db
-    .selectFrom("app_organizations")
-    .select(["id", "slug", "name"])
-    .where("id", "=", id)
-    .executeTakeFirst();
-  if (!org) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
-  // ADR-0001: org admins are confined to their own org; 404 (not 403) so a
-  // foreign org's existence is not confirmed. SUPERADMIN bypasses.
-  if (!canAccessOrg(guard.access, id)) {
-    return adminErrorResponse("organization_not_found", 404, request);
-  }
-  return org;
 }
 
 /**
@@ -62,7 +36,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const org = await loadScopedOrg(request, context, guard);
+  const { id } = await context.params;
+  const org = await loadScopedOrg(request, id, guard.access);
   if (org instanceof NextResponse) return org;
 
   const query = parseListQuery(request.nextUrl.searchParams, {
@@ -149,7 +124,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   );
   if (limited) return limited;
 
-  const org = await loadScopedOrg(request, context, guard);
+  const { id } = await context.params;
+  const org = await loadScopedOrg(request, id, guard.access);
   if (org instanceof NextResponse) return org;
 
   let json: unknown;
@@ -209,22 +185,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   // Outbox-first delivery (specs.md §35): the accept link exists only in
-  // this email; the DB holds the token's hash. Inviter display name falls
-  // back to their email so the template never renders blank.
-  const inviter = await db
-    .selectFrom("app_users")
-    .select(["display_name", "primary_email"])
-    .where("id", "=", guard.access.appUserId ?? "")
-    .executeTakeFirst();
-  const { sendAppEmail } = await import("@/lib/email/send.server");
-  await sendAppEmail({
+  // this email; the DB holds the token's hash.
+  await sendInvitationEmail({
     to: email,
-    templateKey: "organization_invitation",
-    variables: {
-      inviterName: inviter?.display_name || inviter?.primary_email || "An administrator",
-      organizationName: org.name,
-      acceptUrl: buildInvitationAcceptUrl(created.plaintextToken),
-    },
+    organizationName: org.name,
+    inviterAppUserId: guard.access.appUserId,
+    plaintextToken: created.plaintextToken,
   });
 
   await auditOrgAction("admin.organization.invitation_created", "success", {

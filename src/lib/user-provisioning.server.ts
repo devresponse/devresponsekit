@@ -11,6 +11,11 @@ import {
   type SignupStatusDecision,
 } from "@/lib/auth-policy.server";
 import {
+  consumeInvitation,
+  findValidInvitationByToken,
+  type InvitationRow,
+} from "@/lib/invitations.server";
+import {
   resolveProviderOrganization,
   type ProviderOrganizationInput,
 } from "@/lib/provider-organization-resolver";
@@ -25,6 +30,13 @@ export interface ProvisionUserInput {
   displayName?: string | null;
   preferredLocale?: string;
   isSeed?: boolean;
+  /**
+   * Single-use invitation secret that rode the sign-up request body (0008).
+   * When it resolves to a live invitation whose email matches, the sign-up
+   * lands in the INVITING organization as an active member and the
+   * invitation is consumed.
+   */
+  invitationToken?: string;
 }
 
 export interface ProvisionUserResult {
@@ -41,24 +53,27 @@ export interface ProvisionUserResult {
  *
  * Responsibilities:
  *   1. Create or update `app_users`.
- *   2. Resolve provider organization: provider metadata first, then the
+ *   2. Resolve the target organization: a live email-matching invitation
+ *      (0008) overrides everything; otherwise provider metadata, then the
  *      admin-curated email-domain mapping (0007), then the `default` org.
  *   3. Create an organization membership when missing.
  *   4. Initial statuses follow the organization's runtime-configurable
  *      signup policy (`app_organization_auth_settings`, 0007):
  *      `admin_approval` parks new accounts in `pending_approval` (the
- *      fail-closed default = pre-0007 behavior); `auto_active` and verified
- *      auto-approve-domain matches activate immediately. Existing rows
- *      ALWAYS keep their status — the only upgrade path is the explicit
- *      `reevaluatePendingActivation` below.
+ *      fail-closed default = pre-0007 behavior); a valid invitation,
+ *      `auto_active`, and verified auto-approve-domain matches activate
+ *      immediately; `invite_only` parks uninvited sign-ups. Existing rows
+ *      ALWAYS keep their status — the only upgrade paths are the explicit
+ *      `reevaluatePendingActivation` below and invitation consumption.
  *   5. Stores preferred locale when provided.
  *   6. Audit-logs provisioning and account-linking outcomes.
  *
  * Threat / contract:
  *   - This function MUST NOT grant secure access from arbitrary OAuth
- *     profile data. Activation happens only via (a) trusted seeds, or
- *     (b) the org's admin-configured policy — and the domain-based rule
- *     additionally requires the address to be VERIFIED.
+ *     profile data. Activation happens only via (a) trusted seeds,
+ *     (b) the org's admin-configured policy — the domain-based rule
+ *     additionally requires the address to be VERIFIED — or (c) a live
+ *     invitation whose email equals the authenticating email.
  *   - Email-based account linking is enforced by Better Auth's
  *     `accountLinking` configuration; this function only links
  *     application records, never auth credentials.
@@ -74,16 +89,46 @@ export async function provisionUserFromAuth(
     account: input.account,
   });
 
-  // 1. Find or create the target organization. Email/password sign-ups
-  // otherwise fall back to `default`; an admin-curated email-domain mapping
-  // (`app_provider_organizations` with provider = 'email') routes them to a
-  // specific organization first, so that org's signup policy governs its
-  // own domain's registrations end-to-end (0007).
+  // 0. Resolve an invitation riding the sign-up (0008). Only honored when
+  // the token is LIVE and its email equals the authenticating email — a
+  // forwarded link can never move the seat to another mailbox. Any failure
+  // degrades to the uninvited path (fail closed), never blocks the sign-up.
+  let invitation: InvitationRow | null = null;
+  if (input.invitationToken && !input.isSeed) {
+    try {
+      const candidate = await findValidInvitationByToken(input.invitationToken);
+      if (candidate && candidate.email === input.email.trim().toLowerCase()) {
+        invitation = candidate;
+      }
+    } catch (error) {
+      const { logServerError } = await import("@/lib/observability/logger.server");
+      logServerError("invitation lookup failed during provisioning; continuing uninvited", {
+        err: error,
+        betterAuthUserId: input.betterAuthUserId,
+      });
+    }
+  }
+
+  // 1. Find or create the target organization. An invitation overrides every
+  // other resolution — the sign-up lands in the INVITING org (that is the
+  // invitation's whole point). Otherwise: provider metadata, then the
+  // admin-curated email-domain mapping (`app_provider_organizations` with
+  // provider = 'email', 0007), then the `default` org.
   let organizationId: string | undefined;
-  let membershipOrgKey = resolution.providerOrganizationKey;
+  let membershipOrgKey: string | null = resolution.providerOrganizationKey;
   let emailDomainRouted = false;
 
-  if (input.provider === "email" && resolution.providerOrganizationKey === "default") {
+  if (invitation) {
+    organizationId = invitation.organizationId;
+    // No provider-org linkage for an invited placement.
+    membershipOrgKey = null;
+  }
+
+  if (
+    !organizationId &&
+    input.provider === "email" &&
+    resolution.providerOrganizationKey === "default"
+  ) {
     const mapped = await findEmailDomainOrganization(input.email);
     if (mapped) {
       organizationId = mapped.organizationId;
@@ -147,6 +192,7 @@ export async function provisionUserFromAuth(
       provider: input.provider,
       email: input.email,
       emailVerified: input.emailVerified,
+      hasValidInvitation: invitation !== null,
     });
     policySource = policy.source;
   }
@@ -219,6 +265,29 @@ export async function provisionUserFromAuth(
       })
       .execute();
     membershipStatus = decision.status;
+  }
+
+  // 4b. Consume the invitation now that the user + membership exist: flips
+  // it to accepted (race-guarded), grants the optional role, and emits
+  // `auth.account.invitation_accepted`. Best-effort by design — the seat is
+  // already correctly placed by the decision above, and a revoke racing the
+  // sign-up (the only realistic loser here) is still fully remediable by
+  // the admin acting on the user directly.
+  if (invitation) {
+    try {
+      await consumeInvitation({
+        invitation,
+        appUser: { id: appUserId, primaryEmail: input.email, status },
+        actorBetterAuthUserId: input.betterAuthUserId,
+        provider: input.provider,
+      });
+    } catch (error) {
+      const { logServerError } = await import("@/lib/observability/logger.server");
+      logServerError("invitation consume failed during provisioning", {
+        err: error,
+        betterAuthUserId: input.betterAuthUserId,
+      });
+    }
   }
 
   // 5. Audit the provisioning outcome.

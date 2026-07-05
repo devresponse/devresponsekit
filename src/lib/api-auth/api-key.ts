@@ -37,7 +37,11 @@ export function looksLikeApiKey(token: string): boolean {
   return token.startsWith(`${API_KEY_PRODUCT_PREFIX}_`);
 }
 
-function randomBase62(length: number): string {
+/**
+ * CSPRNG base62 secret. Exported for other single-use secrets that follow
+ * the same hash-at-rest model (organization invitations, 0008).
+ */
+export function randomBase62(length: number): string {
   // Rejection-free mapping: draw a byte per char and fold into 62. The
   // slight modulo bias over 256→62 is immaterial for a 190-bit secret.
   const bytes = new Uint8Array(length);

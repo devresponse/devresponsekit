@@ -169,6 +169,25 @@ export const auth = betterAuth({
           if (!shouldProvisionSelfSignup(context)) {
             return;
           }
+          // Invitation-backed sign-up (0008): presenting a live token for
+          // THIS email proves mailbox access — the token was delivered to
+          // that mailbox — so it carries the same weight as clicking a
+          // verification link. Pre-verify regardless of the org's
+          // verification policy. Any lookup failure falls through to the
+          // policy path below (fail closed to the normal flow).
+          const invitationToken = getInvitationToken(context);
+          if (invitationToken) {
+            try {
+              const { findValidInvitationByToken } = await import("@/lib/invitations.server");
+              const invitation = await findValidInvitationByToken(invitationToken);
+              if (invitation && invitation.email === user.email.trim().toLowerCase()) {
+                return { data: { emailVerified: true } };
+              }
+            } catch (error) {
+              const { logServerError } = await import("@/lib/observability/logger.server");
+              logServerError("invitation lookup failed in sign-up hook", { err: error });
+            }
+          }
           const { resolveSignupPolicy } = await import("@/lib/auth-policy.server");
           const policy = await resolveSignupPolicy({
             provider: "email",
@@ -206,6 +225,7 @@ export const auth = betterAuth({
               displayName: user.name,
               provider: getProvisioningProvider(context),
               preferredLocale: getPreferredLocale(context),
+              invitationToken: getInvitationToken(context),
             });
           } catch (error) {
             // Best-effort: a provisioning hiccup must never fail the sign-up
@@ -323,6 +343,21 @@ function getProvisioningProvider(
   if (path.includes("/callback/github")) return "github";
 
   return "email";
+}
+
+/**
+ * Extracts the invitation secret riding a sign-up request body (0008). The
+ * extra field flows through better-auth's sign-up schema (which accepts a
+ * record of additional fields) into `context.body`, same as `callbackURL`.
+ */
+function getInvitationToken(
+  context: GenericEndpointContext | null | undefined,
+): string | undefined {
+  const token =
+    context?.body && typeof context.body === "object" && "invitationToken" in context.body
+      ? (context.body as Record<string, unknown>).invitationToken
+      : undefined;
+  return typeof token === "string" && token.length > 0 ? token : undefined;
 }
 
 function getPreferredLocale(context: GenericEndpointContext): string | undefined {

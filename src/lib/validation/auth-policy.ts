@@ -14,7 +14,7 @@ import { z } from "zod";
  * the server module so they cannot drift.
  */
 export const AUTH_POLICY_METHODS = ["email", "google", "microsoft", "github"] as const;
-export const AUTH_POLICY_APPROVAL_MODES = ["admin_approval", "auto_active"] as const;
+export const AUTH_POLICY_APPROVAL_MODES = ["admin_approval", "auto_active", "invite_only"] as const;
 
 export type AuthPolicyMethod = (typeof AUTH_POLICY_METHODS)[number];
 export type AuthPolicyApprovalMode = (typeof AUTH_POLICY_APPROVAL_MODES)[number];

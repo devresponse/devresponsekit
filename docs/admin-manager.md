@@ -381,6 +381,8 @@ Manages the tenant entity and its memberships.
 | `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked` |
 | `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`) |
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` | IdP org links; `admin.organization.provider_bound` / `.provider_unbound` |
+| `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
+| `GET/PATCH /auth-settings/defaults` | `admin.orgs.read` / `.update` + **superadmin** | The platform-default sign-up policy (`organization_id IS NULL`); 403 for org admins; no DELETE (the baseline must always exist); `admin.platform.auth_policy_updated` |
 
 Creating, renaming, and deleting an **organization** is superadmin-only — an org
 admin manages the *contents* of their org, not the org record (ADR-0001).

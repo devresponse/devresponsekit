@@ -1236,7 +1236,9 @@
     "invitation_not_found": "Invitation introuvable.",
     "invitation_invalid": "Cette invitation est invalide ou a expiré.",
     "invitation_email_mismatch": "Cette invitation a été émise pour une autre adresse e-mail.",
-    "auth_settings_not_found": "Aucune configuration d'inscription à supprimer."
+    "auth_settings_not_found": "Aucune configuration d'inscription à supprimer.",
+    "not_provisioned": "Votre compte n'est pas encore entièrement configuré. Contactez un administrateur.",
+    "insufficient_scope": "Cette autorisation ne couvre pas cette action."
   },
   "account": {
     "appTitle": "Compte",

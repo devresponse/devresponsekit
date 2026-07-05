@@ -105,6 +105,13 @@ describe("PATCH /api/account/profile", () => {
     sessionGetter.mockResolvedValue(null);
     const res = await profilePATCH(makeReq({ name: "Ada" }, "PATCH"));
     expect(res.status).toBe(401);
+    // Item A: the account guard returns the shared first-party envelope
+    // (not a bare {error}), so it carries a localizable message key + a
+    // correlation id echoed in the x-request-id header — like every admin route.
+    const body = (await res.json()) as { error: string; message: string; requestId: string };
+    expect(body).toMatchObject({ error: "unauthenticated", message: "errors.unauthenticated" });
+    expect(body.requestId).toEqual(expect.any(String));
+    expect(res.headers.get("x-request-id")).toBe(body.requestId);
   });
 
   it("403 when not an active member", async () => {

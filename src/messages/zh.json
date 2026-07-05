@@ -1236,7 +1236,9 @@
     "invitation_not_found": "未找到邀请。",
     "invitation_invalid": "此邀请无效或已过期。",
     "invitation_email_mismatch": "此邀请是发给其他电子邮件地址的。",
-    "auth_settings_not_found": "没有可移除的注册策略覆盖。"
+    "auth_settings_not_found": "没有可移除的注册策略覆盖。",
+    "not_provisioned": "您的账户尚未完成设置。请联系管理员。",
+    "insufficient_scope": "此凭证无权执行该操作。"
   },
   "account": {
     "appTitle": "账户",

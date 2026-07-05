@@ -1,5 +1,6 @@
 import "server-only";
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest, type NextResponse } from "next/server";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { type UserAccessContext } from "@/lib/auth-status";
 import { decideSecureAccess } from "@/lib/auth-status";
@@ -50,44 +51,34 @@ export async function requireAccountUser(
 ): Promise<AccountGuardResult> {
   // CSRF origin guard applies only to ambient (cookie) credentials; a
   // bearer token cannot be attached cross-site (design §10.3).
+  // All failures use the shared first-party envelope (adminErrorResponse:
+  // `{ error, message: "errors.<code>", requestId }` + x-request-id), so the
+  // account/invitation surfaces answer identically to the admin one (P3-12) —
+  // no route hand-rolls a bare `{ error }`. Both origin-guard reasons collapse
+  // to the single cataloged `untrusted_origin` code.
   if (!hasBearerCredential(request.headers)) {
     const origin = checkTrustedOrigin(request);
     if (!origin.ok) {
-      return {
-        ok: false,
-        response: NextResponse.json(
-          { error: origin.reason ?? "untrusted_origin" },
-          { status: 403 },
-        ),
-      };
+      return { ok: false, response: adminErrorResponse("untrusted_origin", 403, request) };
     }
   }
 
   const caller = await resolveCaller(request);
   if (!caller) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "unauthenticated" }, { status: 401 }),
-    };
+    return { ok: false, response: adminErrorResponse("unauthenticated", 401, request) };
   }
 
   const { access } = caller;
   if (decideSecureAccess(access.status, access.membershipStatus) !== "allow") {
-    return { ok: false, response: NextResponse.json({ error: "forbidden" }, { status: 403 }) };
+    return { ok: false, response: adminErrorResponse("forbidden", 403, request) };
   }
   if (!access.appUserId) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "not_provisioned" }, { status: 403 }),
-    };
+    return { ok: false, response: adminErrorResponse("not_provisioned", 403, request) };
   }
   // Bearer credentials must carry the required account scope. Cookie
   // callers have `grantedScopes === null` and pass unconditionally.
   if (requiredScope && !scopesAuthorize(caller.grantedScopes, requiredScope)) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "insufficient_scope" }, { status: 403 }),
-    };
+    return { ok: false, response: adminErrorResponse("insufficient_scope", 403, request) };
   }
 
   return {

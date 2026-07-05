@@ -17,11 +17,11 @@ The suite is layered, with **security and tenant-isolation invariants treated as
 
 | Layer | Tool | Location | Focus |
 | --- | --- | --- | --- |
-| **Unit** | Vitest | `tests/unit` (~84 files) | Pure logic, guards, scope primitives, permission resolution, and **invariant tests** (route scope, rate-limit, locale parity, catalog count). |
-| **Component** | Vitest + Testing Library (jsdom) | `tests/component` (~47 files) | Client React components (grids, forms, comboboxes) rendered against real primitives. |
-| **Integration** | Vitest + mocked DB/auth | `tests/integration` (~38 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
+| **Unit** | Vitest | `tests/unit` (~88 files) | Pure logic, guards, scope primitives, permission resolution, and **invariant tests** (route scope, rate-limit, locale parity, catalog count). |
+| **Component** | Vitest + Testing Library (jsdom) | `tests/component` (~50 files) | Client React components (grids, forms, comboboxes) rendered against real primitives. |
+| **Integration** | Vitest + mocked DB/auth | `tests/integration` (~41 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
 | **Security** | Vitest | `tests/security` (~13 files) | Cross-tenant isolation, privilege-escalation guards, schema hardening, secret handling. See [§5](#5-security-suites). |
-| **DB-backed** | Vitest + real Postgres | `tests/db` (~6 suites, `pnpm test:db`) | Suites that run against a live Postgres (`vitest.db.config.ts`, needs `DATABASE_TEST_URL`). |
+| **DB-backed** | Vitest + real Postgres | `tests/db` (~8 suites, `pnpm test:db`) | Suites that run against a live Postgres (`vitest.db.config.ts`, needs `DATABASE_TEST_URL`). |
 | **E2E** | Playwright | `tests/e2e` (`.spec.ts`) | Full browser flows against a running, seeded app. |
 | **Accessibility** | Playwright + axe-core | `tests/accessibility` (`.spec.ts`) | WCAG checks on key screens. |
 | Shared helpers / setup | — | `tests/helpers`, `tests/setup` | Render harness, factories, jsdom polyfills. |
@@ -138,7 +138,9 @@ When you add a route, permission, or string, expect to update the corresponding 
 When automated coverage isn't enough (e.g. a visual or flow change), walk these:
 
 **Authentication**
-- [ ] Sign up → land on pending-approval; admin approves → can sign in.
+- [ ] Sign up (default policy) → verify-email screen → click link → pending-approval; admin approves → can access the app.
+- [ ] Invite a user (org Members tab) → open the emailed `/invite` link → create account → land **active** in the inviting org, no approval step.
+- [ ] Org **Authentication** tab: switch the policy (e.g. auto-active or invite-only) and confirm a new sign-up follows it.
 - [ ] Sign in / sign out; session persists across reload.
 - [ ] Forgot password → reset link → new password works.
 - [ ] Social login (if enabled) for each configured provider.

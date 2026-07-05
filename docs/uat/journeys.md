@@ -50,14 +50,15 @@ The `admin` role granted to the Limited Admin holds exactly `shell.view`, `admin
 - **Screens:** `/sign-up` to `/pending-approval` to (admin) Users list to (member) `/sign-in` to `/app/dashboard`.
 - **Personas:** a new **Visitor**/**Pending user**, then an **Org Admin** (`orgadmin@orga.local`) to approve.
 - **Preconditions:** app running and seeded; you can receive or invent a fresh email such as `newhire@example.com`; the Org Admin is signed in in a second browser/profile.
-- **Code:** sign-up form `src/components/auth/email-password-sign-up-form.tsx:43-48`; new users become `pending_approval` at `src/lib/user-provisioning.server.ts:134`; pending redirect `src/lib/auth-guard.ts:67-69`; approve action `src/lib/admin/user-actions.server.ts:84-88` (event `admin.user.approved`) requiring `admin.users.manage` (`src/lib/admin/user-actions.server.ts:404-405`); `/app` redirects to `/app/dashboard` (`src/app/[locale]/(secure)/app/page.tsx:8`).
+- **Note:** this journey follows the **platform-default** sign-up policy (verification + admin approval). An organization can configure a different policy on its **Authentication** tab (auto-active, invite-only, auto-approve domains), and an accepted invitation activates a user outright — see UAT-JOURNEY for invitations and [docs/auth-signup-policy.md](../auth-signup-policy.md).
+- **Code:** sign-up form `src/components/auth/email-password-sign-up-form.tsx`; the initial status is decided by the org's sign-up policy in `src/lib/user-provisioning.server.ts` (`decideInitialStatus`), defaulting to `pending_approval`; pending redirect `src/lib/auth-guard.ts:67-69`; approve action `src/lib/admin/user-actions.server.ts:84-88` (event `admin.user.approved`) requiring `admin.users.manage`; `/app` redirects to `/app/dashboard` (`src/app/[locale]/(secure)/app/page.tsx:8`).
 
 **Note (approve is a Users-list bulk action):** approval is performed from the **Users list** by selecting the pending row and choosing **Approve** (`src/app/[locale]/(secure)/app/administrator/users/_users-grid.tsx:195-200` → `POST /api/administrator/users/bulk`). The user **detail** page shows only a read-only status badge — there is no per-user approve button there (`src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:100-117`).
 
 | # | Step (what to do) | Expected result |
 |---|---|---|
 | 1 | As the Visitor, open `/en/sign-up`. | The sign-up form shows **Name**, **Email** and **Password** fields, each with a required marker. |
-| 2 | Enter a name, `newhire@example.com`, a strong password, then submit. | The account is created and the browser lands on `/en/pending-approval`. |
+| 2 | Enter a name, `newhire@example.com`, a strong password, then submit. | The account is created and the browser lands on `/en/verify-email` (default policy requires verification). Open the emailed link (or the outbox row in dev) to confirm; after verifying, the user signs in and — being unapproved — lands on `/en/pending-approval`. |
 | 3 | Read the pending-approval screen. | It shows a "waiting for approval" title and description and a sign-out control; no app navigation is available. |
 | 4 | In the address bar, try to open `/en/app/dashboard`. | You are redirected straight back to `/en/pending-approval` (the guard blocks a pending user). |
 | 5 | Switch to the **Org Admin** browser. Open the Administrator area, then **Users**. | The users grid lists members of ORG A, including `newhire@example.com` with a **Pending approval** status badge. |

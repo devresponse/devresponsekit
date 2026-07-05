@@ -15,6 +15,7 @@ Two related references carry the deeper detail this page links to rather than re
 | --- | --- | --- | --- |
 | Better Auth | `/api/auth/[...all]` | Better Auth (cookies) | Browser auth flows & OAuth callbacks |
 | Account self-service | `/api/account/*`, `/api/preferences/*` | Cookie session | The signed-in user |
+| Invitations | `/api/invitations/accept` | Cookie session | Signed-in invitees accepting an organization invitation |
 | Navigation | `/api/navigation/*` | Cookie session | The web UI |
 | SSO handoff | `/api/sso/launch`, `/api/sso/consume` | Cookie session / signed token | Cross-subdomain SSO |
 | Docs assets | `/api/docs/asset/[...path]` | Cookie session + `shell.view` | In-app docs viewer |
@@ -183,7 +184,7 @@ console.log(page.items, page.total);
 
 ## 6. Administrator API (`/api/administrator`) & the committed admin SDK
 
-This is the cookie-session console surface (users, roles, permissions, groups, organizations, memberships, enterprise apps, API keys, email, audit, CSV export). It is **internal tooling that mirrors the admin console — not a public/integration API**; prefer the v1 surface for integrations. All endpoints require a cookie session and the noted permission; mutations are rate-limited and audited.
+This is the cookie-session console surface (users, roles, permissions, groups, organizations, memberships, sign-up policy, invitations, enterprise apps, API keys, email, audit, CSV export). It is **internal tooling that mirrors the admin console — not a public/integration API**; prefer the v1 surface for integrations. All endpoints require a cookie session and the noted permission; mutations are rate-limited and audited.
 
 | Resource | Methods & paths | Permissions |
 | --- | --- | --- |
@@ -191,7 +192,8 @@ This is the cookie-session console surface (users, roles, permissions, groups, o
 | Roles | `GET/POST /roles`; `GET/PATCH/DELETE …/[id]`; `…/[id]/permissions`, `/members`, `/duplicate` | `admin.roles.*` |
 | Permissions | `GET/POST /permissions`; `…/[id]` | `admin.roles.read`, `admin.permissions.manage` |
 | Groups | `GET/POST /groups`; `GET/PATCH/DELETE …/[id]`; `…/[id]/roles`, `/members` | `admin.groups.*`, `admin.roles.assign` |
-| Organizations | `GET/POST /organizations`; `GET/PATCH/DELETE …/[id]`; `…/[id]/members`, `/provider-bindings` | `admin.orgs.*` |
+| Organizations | `GET/POST /organizations`; `GET/PATCH/DELETE …/[id]`; `…/[id]/members`, `/provider-bindings`, `/auth-settings`, `/invitations`, `/invitations/[invitationId]`, `/invitations/[invitationId]/resend` | `admin.orgs.*` |
+| Sign-up policy (platform) | `GET/PATCH /auth-settings/defaults` | `admin.orgs.*` + **superadmin** |
 | API keys | `GET/POST /api-keys`; `GET/PATCH/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
 | Email | `GET /email/outbox`; `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
 | Audit | `GET /audit` | `admin.audit.read` |

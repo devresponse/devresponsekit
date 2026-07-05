@@ -1230,7 +1230,13 @@
     "unknown_resource": "Ressource inconnue.",
     "untrusted_origin": "L’origine de la requête n’est pas approuvée.",
     "user_not_found": "Utilisateur introuvable.",
-    "not_impersonating": "Aucune session d’usurpation active à arrêter."
+    "not_impersonating": "Aucune session d’usurpation active à arrêter.",
+    "member_exists": "Cet e-mail appartient déjà à un membre actif.",
+    "invitation_exists": "Une invitation en attente pour cet e-mail existe déjà.",
+    "invitation_not_found": "Invitation introuvable.",
+    "invitation_invalid": "Cette invitation est invalide ou a expiré.",
+    "invitation_email_mismatch": "Cette invitation a été émise pour une autre adresse e-mail.",
+    "auth_settings_not_found": "Aucune configuration d'inscription à supprimer."
   },
   "account": {
     "appTitle": "Compte",
@@ -1431,7 +1437,8 @@
     "passwordsMismatch": "Les mots de passe ne correspondent pas.",
     "locale": "Choisissez une langue prise en charge.",
     "dateFormat": "Choisissez un format de date valide.",
-    "domainList": "Saisissez des domaines valides séparés par des virgules (par exemple acme.com)."
+    "domainList": "Saisissez des domaines valides séparés par des virgules (par exemple acme.com).",
+    "domainsNeedVerification": "Les domaines à approbation automatique nécessitent l'activation de la vérification de l'e-mail."
   },
   "sso": {
     "confirm": {

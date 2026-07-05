@@ -301,6 +301,22 @@ describe("decideInitialStatus", () => {
     ).toEqual({ status: "pending_approval", reason: "admin_approval" });
   });
 
+  it("does NOT domain-approve when verification is WAIVED, even if emailVerified is set (waiver fabricates the flag)", () => {
+    // The sign-up hook stamps emailVerified:true without proof when an org
+    // waives verification; the domain branch must not trust it. This is the
+    // regression guard for the security finding.
+    expect(
+      decideInitialStatus(
+        {
+          ...base,
+          requireEmailVerification: false,
+          autoApproveEmailDomains: ["example.com"],
+        },
+        { ...input, emailVerified: true },
+      ),
+    ).toEqual({ status: "pending_approval", reason: "admin_approval" });
+  });
+
   it("matches domains case-insensitively", () => {
     expect(
       decideInitialStatus(
@@ -321,13 +337,13 @@ describe("decideInitialStatus", () => {
     }
   });
 
-  it("a disallowed method parks even an INVITED signup", () => {
+  it("a valid invitation OVERRIDES the method allow-list (targeted grant beats the unsolicited-signup gate)", () => {
     expect(
       decideInitialStatus(
         { ...base, allowedAuthMethods: ["google"] },
         { ...input, hasValidInvitation: true },
       ),
-    ).toEqual({ status: "pending_approval", reason: "auth_method_not_allowed" });
+    ).toEqual({ status: "active", reason: "invitation" });
   });
 
   it("invite_only parks uninvited signups as invite_required", () => {

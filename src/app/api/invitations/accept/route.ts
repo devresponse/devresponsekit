@@ -36,7 +36,10 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const origin = checkTrustedOrigin(request);
   if (!origin.ok) {
-    return adminErrorResponse("invalid_origin", 403, request);
+    // Match the CSRF machine code used by the account + admin guards
+    // (`untrusted_origin`); `invalid_origin` is a distinct 400 used by
+    // enterprise-apps for a malformed origin field.
+    return adminErrorResponse(origin.reason ?? "untrusted_origin", 403, request);
   }
 
   const session = await getCurrentSession();

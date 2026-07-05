@@ -142,6 +142,11 @@ export type ConsumeInvitationResult =
  * role, and activates a still-pending user account. Shared by BOTH
  * acceptance paths — sign-up provisioning (the token rode the sign-up body)
  * and the explicit authenticated accept endpoint.
+ *
+ * Deliberately method-agnostic: an invitation is a targeted, admin-issued
+ * grant for one specific address and OVERRIDES the org's
+ * `allowed_auth_methods` gate on unsolicited sign-ups (decideInitialStatus
+ * ranks it the same way, so the sign-up and accept paths agree).
  */
 export async function consumeInvitation(input: {
   invitation: InvitationRow;

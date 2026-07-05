@@ -443,6 +443,48 @@ describe("provisionUserFromAuth", () => {
     );
   });
 
+  it("an invitation overrides the org's method allow-list (targeted grant, coherent with the accept endpoint)", async () => {
+    findInvitationMock.mockResolvedValue({
+      id: "inv-1",
+      organizationId: "org-strict",
+      organizationName: "Strict Org",
+      email: "ada@example.com",
+      roleId: null,
+      status: "pending",
+      expiresAt: new Date("2099-01-01T00:00:00Z"),
+    });
+    // The inviting org only allows google — but the invited email/password
+    // sign-up must still land active and consume the invitation.
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-strict",
+        require_email_verification: true,
+        signup_approval_mode: "admin_approval",
+        allowed_auth_methods: ["google"],
+        auto_approve_email_domains: null,
+      },
+    ];
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-inv-strict",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+      invitationToken: "tok-plain",
+    });
+
+    expect(result.organizationId).toBe("org-strict");
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
+    expect(consumeInvitationMock).toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        metadata: expect.objectContaining({ decisionReason: "invitation" }),
+      }),
+    );
+  });
+
   it("treats an email-mismatched invitation as uninvited (no consume, normal policy)", async () => {
     findInvitationMock.mockResolvedValue({
       id: "inv-1",

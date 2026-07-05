@@ -53,6 +53,32 @@ describe("authPolicySettingsSchema", () => {
     ).toBe(false);
   });
 
+  it("rejects auto-approve domains when verification is waived (security invariant)", () => {
+    expect(
+      authPolicySettingsSchema.safeParse({
+        ...valid,
+        requireEmailVerification: false,
+        autoApproveEmailDomains: ["acme.com"],
+      }).success,
+    ).toBe(false);
+    // Waived verification with NO domains is fine.
+    expect(
+      authPolicySettingsSchema.safeParse({
+        ...valid,
+        requireEmailVerification: false,
+        autoApproveEmailDomains: null,
+      }).success,
+    ).toBe(true);
+    // Domains WITH verification required is fine.
+    expect(
+      authPolicySettingsSchema.safeParse({
+        ...valid,
+        requireEmailVerification: true,
+        autoApproveEmailDomains: ["acme.com"],
+      }).success,
+    ).toBe(true);
+  });
+
   it("rejects malformed domains, bare TLDs, and partial bodies", () => {
     for (const domain of ["not a domain", "acme", "-x.com", "x-.com", "http://acme.com"]) {
       expect(

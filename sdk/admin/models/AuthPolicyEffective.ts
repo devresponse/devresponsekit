@@ -57,7 +57,8 @@ export interface AuthPolicyEffective {
  */
 export const AuthPolicyEffectiveSignupApprovalModeEnum = {
     AdminApproval: 'admin_approval',
-    AutoActive: 'auto_active'
+    AutoActive: 'auto_active',
+    InviteOnly: 'invite_only'
 } as const;
 export type AuthPolicyEffectiveSignupApprovalModeEnum = typeof AuthPolicyEffectiveSignupApprovalModeEnum[keyof typeof AuthPolicyEffectiveSignupApprovalModeEnum];
 

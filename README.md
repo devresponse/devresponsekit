@@ -46,7 +46,10 @@ pnpm dev                      # http://localhost:3000
 
 The seed creates a local admin (`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`
 from `.env`). New self-registered accounts start as `pending_approval`
-until an administrator approves them.
+until an administrator approves them — the platform default. Each
+organization's sign-up policy can instead auto-activate registrations,
+require invitations, or auto-approve verified email domains; see
+[docs/auth-signup-policy.md](docs/auth-signup-policy.md).
 
 For the complete path — prerequisites, configuration reference, production
 build, and deploying a fully functional instance — see the canonical docs in

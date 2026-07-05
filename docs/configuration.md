@@ -28,7 +28,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | Variable | Required | Controls |
 | --- | --- | --- |
 | `BETTER_AUTH_SECRET` | **yes** | Signing secret for sessions. Use ≥32 random bytes. Rotating it invalidates all sessions. |
-| `BETTER_AUTH_URL` | **yes** | Origin where `/api/auth/*` is reachable. Must match the browser origin. |
+| `BETTER_AUTH_URL` | **yes** | Origin where `/api/auth/*` is reachable. Must match the browser origin. Also the base origin baked into links in outbound emails — verification, password reset, and invitation accept links. |
 | `ADMIN_TRUSTED_ORIGINS` | no | Extra comma-separated trusted origins for Better Auth and the admin origin guard (the app's own origin is always trusted). |
 
 ### Database (PostgreSQL)

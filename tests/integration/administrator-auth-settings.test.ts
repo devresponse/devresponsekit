@@ -93,7 +93,9 @@ const DB_ROW = {
 };
 
 const VALID_BODY = {
-  requireEmailVerification: false,
+  // Domains require verification enabled (schema refine); keep this fixture a
+  // valid policy so the route-contract tests exercise the success path.
+  requireEmailVerification: true,
   signupApprovalMode: "auto_active",
   allowedAuthMethods: ["email", "google"],
   autoApproveEmailDomains: ["acme.com"],

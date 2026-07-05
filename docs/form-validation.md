@@ -65,6 +65,8 @@ imported by both the API route and the client form so the two can never drift:
 | `api-keys.ts` | admin new-API-key form + API-key route |
 | `account.ts` | account profile / preferences / security (password) forms |
 | `auth.ts` | sign-in, sign-up, forgot-password, reset-password forms |
+| `auth-policy.ts` | org **Authentication** tab + platform-defaults form + the auth-settings routes (0007) |
+| `invitations.ts` | invite-member dialog + invitations `POST` and `/api/invitations/accept` (0008) |
 
 Schemas are **message-agnostic**: each Zod issue carries a stable
 `validation.*` key (e.g. `z.email("email")`,

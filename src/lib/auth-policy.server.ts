@@ -134,8 +134,8 @@ function toPolicy(row: PolicyRow, source: OrgAuthPolicy["source"]): OrgAuthPolic
  * Admin-curated email-domain routing: an `app_provider_organizations` row
  * with `provider = 'email'` maps an email domain to an organization for
  * email/password signups (which otherwise land in the `default` org). Rows
- * are currently created out-of-band (SQL / a follow-up admin UI); absence
- * simply means "no routing".
+ * are managed on the organization's Providers tab (or the
+ * provider-bindings API); absence simply means "no routing".
  */
 export async function findEmailDomainOrganization(
   email: string,
@@ -223,12 +223,17 @@ export interface SignupStatusDecision {
  * Pure policy → initial-status decision for a NEW user/membership.
  *
  * Order matters:
- *   1. a disallowed auth method always parks the signup in
- *      `pending_approval` (visible to admins, never silently dropped) —
- *      even for invited or `auto_active` signups;
- *   2. a valid invitation activates immediately — the invitation IS the
- *      approval (0008); callers set `hasValidInvitation` only after the
- *      token and the email-match rule have been verified;
+ *   1. a valid invitation activates immediately — the invitation IS the
+ *      approval (0008), and as a targeted, admin-issued grant for one
+ *      specific address it OVERRIDES the org-level method allow-list
+ *      (which exists to gate unsolicited sign-ups; the explicit accept
+ *      endpoint is method-agnostic for the same reason, so ranking the
+ *      allow-list first would only produce an inconsistent two-step
+ *      bypass, not a real gate). Callers set `hasValidInvitation` only
+ *      after the token and the email-match rule have been verified;
+ *   2. a disallowed auth method parks the signup in `pending_approval`
+ *      (visible to admins, never silently dropped) — even under
+ *      `auto_active`;
  *   3. `auto_active` activates immediately;
  *   4. a VERIFIED email on an auto-approve domain activates immediately;
  *   5. `invite_only` parks everything else in `pending_approval`
@@ -244,11 +249,11 @@ export function decideInitialStatus(
     hasValidInvitation?: boolean;
   },
 ): SignupStatusDecision {
-  if (policy.allowedAuthMethods !== null && !policy.allowedAuthMethods.includes(input.provider)) {
-    return { status: "pending_approval", reason: "auth_method_not_allowed" };
-  }
   if (input.hasValidInvitation) {
     return { status: "active", reason: "invitation" };
+  }
+  if (policy.allowedAuthMethods !== null && !policy.allowedAuthMethods.includes(input.provider)) {
+    return { status: "pending_approval", reason: "auth_method_not_allowed" };
   }
   if (policy.signupApprovalMode === "auto_active") {
     return { status: "active", reason: "auto_active" };
@@ -256,6 +261,16 @@ export function decideInitialStatus(
   const domain = input.email.split("@")[1]?.trim().toLowerCase();
   if (
     input.emailVerified &&
+    // Domain auto-approval trusts `emailVerified` as PROOF the mailbox is
+    // owned — but when an org waives verification the sign-up hook stamps
+    // `emailVerified: true` WITHOUT any proof (auth.ts user.create.before).
+    // Requiring `requireEmailVerification` here means the flag can only be a
+    // genuine verification (a clicked link, re-evaluated at sign-in, or an
+    // OAuth provider assertion), never the waiver fabrication — so nobody can
+    // ride `anyone@acme.com` into an active membership by disabling
+    // verification. `authPolicySettingsSchema` also rejects that combination
+    // outright; this is the defense-in-depth backstop for legacy/raw rows.
+    policy.requireEmailVerification &&
     domain &&
     policy.autoApproveEmailDomains !== null &&
     policy.autoApproveEmailDomains.includes(domain)

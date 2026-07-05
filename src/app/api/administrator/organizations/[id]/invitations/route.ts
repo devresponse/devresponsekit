@@ -79,8 +79,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
     .leftJoin("app_users as u", "u.id", "i.invited_by")
     .where("i.organization_id", "=", org.id);
 
+  // `expired` is a derived status, not a stored one: a `pending` row past
+  // `expires_at` is dead (findValidInvitationByToken/consume reject it) but
+  // the column still reads `pending`. Compute the effective status so the
+  // grid badge and the `status` filter tell the truth.
   const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && statusFilter.length > 0) {
+  if (statusFilter === "expired") {
+    base = base.where("i.status", "=", "pending").where("i.expires_at", "<=", sql<Date>`now()`);
+  } else if (statusFilter === "pending") {
+    base = base.where("i.status", "=", "pending").where("i.expires_at", ">", sql<Date>`now()`);
+  } else if (typeof statusFilter === "string" && statusFilter.length > 0) {
     base = base.where("i.status", "=", statusFilter);
   }
   if (query.q) {
@@ -88,10 +96,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 
   const itemsQuery = applySortAndPagination(
-    base.select([
+    base.select((eb) => [
       "i.id",
       "i.email",
-      "i.status",
+      eb
+        .case()
+        .when(eb.and([eb("i.status", "=", "pending"), eb("i.expires_at", "<=", sql<Date>`now()`)]))
+        .then(sql.lit("expired"))
+        .else(eb.ref("i.status"))
+        .end()
+        .as("status"),
       "i.role_id",
       "r.name as role_name",
       "u.display_name as invited_by_display_name",

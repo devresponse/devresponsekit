@@ -11,6 +11,11 @@
  * `{ items, page, pageSize, total, sort }` envelope; mutations mostly return
  * `{ ok: true, … }`. Responses are raw snake_case rows.
  */
+import {
+  AUTH_POLICY_APPROVAL_MODES as AUTH_POLICY_APPROVAL_MODE_VALUES,
+  AUTH_POLICY_METHODS as AUTH_POLICY_METHOD_VALUES,
+} from "@/lib/validation/auth-policy";
+
 type Obj = Record<string, unknown>;
 
 const ref = (name: string): Obj => ({ $ref: `#/components/schemas/${name}` });
@@ -44,8 +49,12 @@ const listOf = (itemName: string): Obj => ({
 const USER_STATUS = ["active", "pending_approval", "blocked", "suspended", "deactivated"];
 const MEMBERSHIP_STATUS = ["active", "pending_approval", "blocked", "suspended"];
 const CREDENTIAL_STATUS = ["active", "revoked"];
-const AUTH_POLICY_METHODS = ["email", "google", "microsoft", "github"];
-const AUTH_POLICY_MODES = ["admin_approval", "auto_active"];
+// Sourced from the shared, client-safe validation module so the spec's
+// enums cannot drift from the schema + DB CHECK (they did: `invite_only`
+// was added in 0008 but missed here). Spread into a mutable array because
+// the OpenAPI builder treats these as plain JSON.
+const AUTH_POLICY_METHODS = [...AUTH_POLICY_METHOD_VALUES];
+const AUTH_POLICY_MODES = [...AUTH_POLICY_APPROVAL_MODE_VALUES];
 
 /** A path id parameter. */
 const idParam = (name = "id", format: "uuid" | "string" = "uuid"): Obj => ({

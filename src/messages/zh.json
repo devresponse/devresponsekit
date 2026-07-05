@@ -73,7 +73,8 @@
     "inviteMismatchTitle": "需要其他账户",
     "inviteMismatchDescription": "此邀请是发给其他电子邮件地址的。请退出登录，然后使用受邀地址登录或注册。",
     "inviteError": "无法接受邀请。请重试。",
-    "inviteSignupBanner": "您正在加入 {organization}。请使用受邀的电子邮件地址完成账户创建。"
+    "inviteSignupBanner": "您正在加入 {organization}。请使用受邀的电子邮件地址完成账户创建。",
+    "invitedEmailLocked": "已锁定为受邀的电子邮件地址。"
   },
   "public": {
     "hero": {
@@ -900,7 +901,10 @@
           "role": "角色",
           "invitedBy": "邀请人",
           "expires": "到期"
-        }
+        },
+        "resendConfirm": "重新发送此邀请？当前链接将失效。",
+        "rolesLoading": "正在加载角色…",
+        "rolesError": "无法加载角色——您仍可以在不指定角色的情况下发送邀请。"
       }
     },
     "memberships": {

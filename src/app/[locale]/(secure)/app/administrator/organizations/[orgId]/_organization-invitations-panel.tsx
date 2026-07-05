@@ -16,6 +16,7 @@ import { useDialogs } from "@/components/ui/dialog-manager";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -82,6 +83,8 @@ export function OrganizationInvitationsPanel({
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesError, setRolesError] = useState(false);
 
   const form = useZodForm<CreateInvitationInput>(createInvitationSchema, {
     defaultValues: { email: "", roleId: null },
@@ -89,19 +92,27 @@ export function OrganizationInvitationsPanel({
 
   const openDialog = useCallback(async () => {
     form.reset({ email: "", roleId: null });
+    setRoles([]);
+    setRolesError(false);
+    setRolesLoading(true);
     setDialogOpen(true);
-    // Best-effort role options; the dialog works without them.
+    // Best-effort role options; the dialog works without them, but surface a
+    // hint on failure so an empty dropdown doesn't read as "this org has none".
     try {
       const res = await fetch(
         `/api/administrator/roles?filter[organization]=${orgId}&pageSize=100`,
         { credentials: "same-origin" },
       );
-      if (res.ok) {
-        const body = (await res.json()) as { items: Array<{ id: string; name: string }> };
-        setRoles(body.items.map((r) => ({ id: r.id, name: r.name })));
+      if (!res.ok) {
+        setRolesError(true);
+        return;
       }
+      const body = (await res.json()) as { items: Array<{ id: string; name: string }> };
+      setRoles(body.items.map((r) => ({ id: r.id, name: r.name })));
     } catch {
-      setRoles([]);
+      setRolesError(true);
+    } finally {
+      setRolesLoading(false);
     }
   }, [form, orgId]);
 
@@ -136,7 +147,15 @@ export function OrganizationInvitationsPanel({
   };
 
   const onResend = useCallback(
-    async (invitationId: string) => {
+    async (invitationId: string, email: string) => {
+      // Resending ROTATES the token: the previously emailed link stops working.
+      // Confirm first so an accidental click can't silently invalidate a link
+      // the recipient may be about to use.
+      const ok = await dialogs.confirm({
+        title: t("resendConfirm"),
+        description: email,
+      });
+      if (!ok) return;
       setRowNotice(null);
       const res = await fetch(
         `/api/administrator/organizations/${orgId}/invitations/${invitationId}/resend`,
@@ -149,7 +168,7 @@ export function OrganizationInvitationsPanel({
       setRowNotice({ kind: "success", text: t("resent") });
       setReloadKey((k) => k + 1);
     },
-    [orgId, t],
+    [dialogs, orgId, t],
   );
 
   const onRevoke = useCallback(
@@ -222,7 +241,7 @@ export function OrganizationInvitationsPanel({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => onResend(row.original.id)}
+                      onClick={() => onResend(row.original.id, row.original.email)}
                     >
                       {t("resendButton")}
                     </Button>
@@ -321,6 +340,13 @@ export function OrganizationInvitationsPanel({
                         ))}
                       </SelectContent>
                     </Select>
+                    {rolesLoading ? (
+                      <FormDescription role="status">{t("rolesLoading")}</FormDescription>
+                    ) : rolesError ? (
+                      <FormDescription role="status" className="text-destructive">
+                        {t("rolesError")}
+                      </FormDescription>
+                    ) : null}
                     <FormMessage />
                   </FormItem>
                 )}

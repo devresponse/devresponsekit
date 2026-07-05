@@ -73,7 +73,8 @@
     "inviteMismatchTitle": "É necessária outra conta",
     "inviteMismatchDescription": "Este convite foi emitido para outro endereço de e-mail. Saia e depois entre ou registre-se com o endereço convidado.",
     "inviteError": "Não foi possível aceitar o convite. Tente novamente.",
-    "inviteSignupBanner": "Você está se juntando a {organization}. Conclua a criação da sua conta com o e-mail convidado."
+    "inviteSignupBanner": "Você está se juntando a {organization}. Conclua a criação da sua conta com o e-mail convidado.",
+    "invitedEmailLocked": "Fixado no endereço para o qual o seu convite foi enviado."
   },
   "public": {
     "hero": {
@@ -900,7 +901,10 @@
           "role": "Função",
           "invitedBy": "Convidado por",
           "expires": "Expira"
-        }
+        },
+        "resendConfirm": "Reenviar este convite? O link atual deixará de funcionar.",
+        "rolesLoading": "A carregar funções…",
+        "rolesError": "Não foi possível carregar as funções — pode convidar mesmo assim sem atribuir uma."
       }
     },
     "memberships": {

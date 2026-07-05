@@ -119,6 +119,9 @@ describe("EmailPasswordSignUpForm", () => {
     const email = screen.getByLabelText(/email/i);
     expect(email).toHaveValue("ada@acme.com");
     expect(email).toBeDisabled();
+    // A disabled field with no reason reads as broken — the locked hint
+    // explains WHY it can't be edited.
+    expect(screen.getByText(/locked to the address/i)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/^name/i), "Ada Lovelace");
     await user.type(screen.getByLabelText(/password/i), "Password!1234");

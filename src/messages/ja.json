@@ -73,7 +73,8 @@
     "inviteMismatchTitle": "別のアカウントが必要です",
     "inviteMismatchDescription": "この招待は別のメールアドレス宛てに発行されています。サインアウトしてから、招待されたアドレスでサインインまたは登録してください。",
     "inviteError": "招待を承諾できませんでした。もう一度お試しください。",
-    "inviteSignupBanner": "{organization} に参加しようとしています。招待されたメールアドレスでアカウント作成を完了してください。"
+    "inviteSignupBanner": "{organization} に参加しようとしています。招待されたメールアドレスでアカウント作成を完了してください。",
+    "invitedEmailLocked": "招待状が送信されたアドレスに固定されています。"
   },
   "public": {
     "hero": {
@@ -900,7 +901,10 @@
           "role": "ロール",
           "invitedBy": "招待者",
           "expires": "有効期限"
-        }
+        },
+        "resendConfirm": "この招待を再送しますか？現在のリンクは無効になります。",
+        "rolesLoading": "ロールを読み込んでいます…",
+        "rolesError": "ロールを読み込めませんでした。ロールを指定せずに招待することもできます。"
       }
     },
     "memberships": {

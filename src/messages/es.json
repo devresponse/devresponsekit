@@ -73,7 +73,8 @@
     "inviteMismatchTitle": "Se necesita otra cuenta",
     "inviteMismatchDescription": "Esta invitación se emitió para otra dirección de correo. Cierra sesión y luego inicia sesión o regístrate con la dirección invitada.",
     "inviteError": "No se pudo aceptar la invitación. Inténtalo de nuevo.",
-    "inviteSignupBanner": "Te estás uniendo a {organization}. Termina de crear tu cuenta con el correo invitado."
+    "inviteSignupBanner": "Te estás uniendo a {organization}. Termina de crear tu cuenta con el correo invitado.",
+    "invitedEmailLocked": "Bloqueado en la dirección a la que se envió tu invitación."
   },
   "public": {
     "hero": {
@@ -900,7 +901,10 @@
           "role": "Rol",
           "invitedBy": "Invitado por",
           "expires": "Caduca"
-        }
+        },
+        "resendConfirm": "¿Reenviar esta invitación? El enlace actual dejará de funcionar.",
+        "rolesLoading": "Cargando roles…",
+        "rolesError": "No se pudieron cargar los roles: aún puedes invitar sin asignar uno."
       }
     },
     "memberships": {

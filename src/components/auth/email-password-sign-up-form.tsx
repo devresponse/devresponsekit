@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -140,6 +141,7 @@ export function EmailPasswordSignUpForm({
               <FormControl>
                 <Input type="email" autoComplete="email" {...field} disabled={!!invitedEmail} />
               </FormControl>
+              {invitedEmail ? <FormDescription>{t("invitedEmailLocked")}</FormDescription> : null}
               <FormMessage />
             </FormItem>
           )}

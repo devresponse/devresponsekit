@@ -69,8 +69,12 @@ export function InviteGuestPanel({
 }
 
 /** Valid token but the session belongs to a DIFFERENT email address. */
-export function InviteMismatchPanel({ locale }: { locale: SupportedLocale }) {
+export function InviteMismatchPanel({ locale, token }: { locale: SupportedLocale; token: string }) {
   const t = useTranslations("auth");
+  // Resume the invite after signing out: land back on this invite page (no
+  // session → the guest panel), so the user can sign in or register with the
+  // invited address instead of dead-ending on /logged-out.
+  const resumeHref = `/${locale}/invite?token=${encodeURIComponent(token)}`;
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
@@ -81,7 +85,7 @@ export function InviteMismatchPanel({ locale }: { locale: SupportedLocale }) {
           <AlertTitle>{t("inviteMismatchTitle")}</AlertTitle>
           <AlertDescription>{t("inviteMismatchDescription")}</AlertDescription>
         </Alert>
-        <SignOutButton locale={locale} />
+        <SignOutButton locale={locale} redirectTo={resumeHref} />
       </CardContent>
     </Card>
   );

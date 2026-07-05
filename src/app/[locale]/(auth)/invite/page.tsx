@@ -53,7 +53,7 @@ export default async function InvitePage({
         />
       );
     } else if (session.user.email.trim().toLowerCase() !== invitation.email) {
-      panel = <InviteMismatchPanel locale={safeLocale} />;
+      panel = <InviteMismatchPanel locale={safeLocale} token={token} />;
     } else {
       panel = (
         <InviteAcceptPanel

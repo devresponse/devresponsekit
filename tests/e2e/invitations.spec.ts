@@ -41,7 +41,8 @@ test("invited user signs up via the emailed link and lands active in the app", a
   // Continue as the INVITEE: fresh session.
   await page.context().clearCookies();
   await page.goto(acceptUrl.pathname + acceptUrl.search);
-  await expect(page.getByText("You've been invited")).toBeVisible();
+  // Role-scoped: the guest panel's description also starts with this phrase.
+  await expect(page.getByRole("heading", { name: "You've been invited" })).toBeVisible();
 
   await page.getByRole("link", { name: "Create account" }).click();
   await expect(page.getByText(/finish creating your account/i)).toBeVisible();

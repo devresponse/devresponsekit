@@ -1,6 +1,7 @@
 import "dotenv/config";
 import type { Pool } from "pg";
 import { createAppPool, ensureSchema } from "@/db/schema-config";
+import { setSignupProvisioningSuppressed } from "@/lib/auth-signup-provisioning";
 import { ADMIN_PERMISSION_CATALOG } from "@/lib/admin/permissions";
 
 const LOCAL_ADMIN_NAME = "Local Admin";
@@ -20,6 +21,9 @@ async function main() {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required to seed the database");
   }
+  // The seed provisions app_users + memberships itself; stand the sign-up
+  // auto-provisioning hook down so signUpEmail below doesn't also run it.
+  setSignupProvisioningSuppressed(true);
   const pool = createAppPool();
   let inTransaction = false;
 

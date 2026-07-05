@@ -1,8 +1,7 @@
 -- locales/0001 — Seed fr (French) email templates (all non-en rows).
 --
--- The core migrations seed only the `en` base rows (0001-initial-schema.sql:
--- password_reset + test_email; 0006-email-verification-template.sql;
--- 0009-invitation-template.sql). A recipient whose `preferred_locale` is
+-- The English BASE rows live in `locales/0000-email-templates-en.sql`. A
+-- recipient whose `preferred_locale` is
 -- `fr` otherwise falls back to English (`resolveTemplate` returns the `en`
 -- row when the locale row is absent). Seed every localized row here so those
 -- users get a French email.

@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { planMigrations, shouldIncludeLocales } from "@/db/migrations/migration-plan";
+import {
+  ALWAYS_APPLIED_LOCALE,
+  planMigrations,
+  shouldIncludeLocales,
+} from "@/db/migrations/migration-plan";
 
 /**
  * Unit coverage for the pure migration planner. The runner (`run-migrations.ts`)
  * is a thin fs+db shell around these two functions, so pinning the ordering +
  * locale-inclusion + ledger-id rules here is the regression guard for the
- * "English-only core, optional locale" reorganization.
+ * "always-on English base + optional localized files" layout.
  */
 const CORE = [
   "0002-sso-nonce-expires-index.sql",
@@ -15,8 +19,13 @@ const CORE = [
   "run-migrations.ts", // the runner itself — not a .sql
   "migration-plan.ts",
 ];
-// Deliberately out of order — the planner must sort them.
-const LOCALES = ["0002-email-templates-es.sql", "0001-email-templates-fr.sql"];
+// Deliberately out of order — the planner must sort them. Includes the
+// always-on English base (`0000-…`) alongside two localized files.
+const LOCALES = [
+  "0002-email-templates-es.sql",
+  "0001-email-templates-fr.sql",
+  "0000-email-templates-en.sql",
+];
 
 describe("shouldIncludeLocales", () => {
   it("includes locales by default (unset/empty)", () => {
@@ -44,6 +53,7 @@ describe("planMigrations", () => {
     expect(plan.map((m) => m.id)).toEqual([
       "0001-initial-schema.sql",
       "0002-sso-nonce-expires-index.sql",
+      "locales/0000-email-templates-en.sql",
       "locales/0001-email-templates-fr.sql",
       "locales/0002-email-templates-es.sql",
     ]);
@@ -59,13 +69,28 @@ describe("planMigrations", () => {
     expect(locale.file).toBe("0001-email-templates-fr.sql");
   });
 
-  it("drops the locale pass entirely when excluded (English-only install)", () => {
+  it("keeps ONLY the always-on English base when locales are excluded", () => {
     const plan = planMigrations(CORE, LOCALES, false);
     expect(plan.map((m) => m.id)).toEqual([
       "0001-initial-schema.sql",
       "0002-sso-nonce-expires-index.sql",
+      "locales/0000-email-templates-en.sql",
     ]);
-    expect(plan.some((m) => m.subdir === "locales")).toBe(false);
+    // The English base (the fallback every locale resolves to) still lands…
+    expect(plan.some((m) => m.file === ALWAYS_APPLIED_LOCALE)).toBe(true);
+    // …but the localized files are skipped.
+    expect(plan.some((m) => m.id === "locales/0001-email-templates-fr.sql")).toBe(false);
+    expect(plan.some((m) => m.id === "locales/0002-email-templates-es.sql")).toBe(false);
+  });
+
+  it("always applies the English base in BOTH modes", () => {
+    for (const include of [true, false]) {
+      const plan = planMigrations(CORE, LOCALES, include);
+      const enBase = plan.filter((m) => m.file === ALWAYS_APPLIED_LOCALE);
+      expect(enBase).toHaveLength(1);
+      expect(enBase[0]!.id).toBe("locales/0000-email-templates-en.sql");
+      expect(enBase[0]!.subdir).toBe("locales");
+    }
   });
 
   it("never emits a Better-Auth-owned file as a core migration", () => {

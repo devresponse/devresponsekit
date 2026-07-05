@@ -14,18 +14,21 @@ import { planMigrations, shouldIncludeLocales } from "./migration-plan";
  * `app_schema_migrations` table so each runs at most once:
  *
  *   1. CORE — every top-level `*.sql` (lexical). `0001-initial-schema.sql` is
- *      the consolidated, English-only baseline (every `app_*` table, index,
- *      and non-language baseline row); `0002…` onward are append-only,
- *      idempotent schema changes. Core files are FROZEN and never renamed, so
- *      their ledger id (the bare filename) is stable and an existing database
- *      skips them. New core migrations continue MONOTONICALLY (`0001-…`
- *      through `0009-…` today; the next is `0010-…`); numbers are never
- *      reused within the core sequence.
+ *      the consolidated baseline (every `app_*` table, index, and non-language
+ *      baseline row — but NOT email templates, which live under `locales/`);
+ *      `0002…` onward are append-only, idempotent schema changes. Core files
+ *      are FROZEN and never renamed, so their ledger id (the bare filename) is
+ *      stable and an existing database skips them. New core migrations continue
+ *      MONOTONICALLY; the next is `0010-…`. Numbers are never reused — 0006 and
+ *      0009 are RETIRED (their English email-template rows moved to
+ *      `locales/0000-email-templates-en.sql`), so those gaps stay empty.
  *
- *   2. LOCALES — `locales/*.sql` (lexical), the localized DATA (non-English
- *      email templates, etc.). Included BY DEFAULT; set `DB_MIGRATE_LOCALES`
- *      to `0`/`false`/`no`/`off` to install an English-only database. Locale
- *      ids are ledgered as `locales/<file>`.
+ *   2. LOCALES — `locales/*.sql` (lexical): the email templates, one file per
+ *      locale. `0000-email-templates-en.sql` is the English BASE and is ALWAYS
+ *      applied (the fallback every locale resolves to); the localized files
+ *      (`0001-…`+) are included BY DEFAULT but skipped when `DB_MIGRATE_LOCALES`
+ *      is `0`/`false`/`no`/`off` (an English-only install). Locale ids are
+ *      ledgered as `locales/<file>`.
  *
  * Each not-yet-applied file runs inside its own transaction and is ledgered on
  * success. The planning/ordering logic lives in `migration-plan.ts` (pure +

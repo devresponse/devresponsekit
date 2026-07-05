@@ -1,94 +1,164 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { provisionUserFromAuth } from "@/lib/user-provisioning.server";
+import { provisionUserFromAuth, reevaluatePendingActivation } from "@/lib/user-provisioning.server";
 
 /**
- * Unit tests for `user-provisioning.server.ts > provisionUserFromAuth`.
+ * Unit tests for `user-provisioning.server.ts`.
  *
  * Verifies the documented contract:
- *   - new non-seed users start `pending_approval` with a matching
- *     pending membership and an `auth.account.pending_approval` audit;
- *   - seed users are activated immediately;
+ *   - initial statuses follow the org's runtime signup policy (0007): the
+ *     platform default parks new users in `pending_approval` (the pre-0007
+ *     behavior), `auto_active` and verified auto-approve-domain matches
+ *     activate immediately, and a disallowed auth method is parked
+ *     `pending_approval` even under `auto_active`;
+ *   - seed users are activated immediately WITHOUT reading policy;
  *   - existing users keep their current status (no privilege escalation
  *     from arbitrary OAuth profile data) and emit `auth.account.linked`;
  *   - a missing organization triggers an insert into
- *     `app_organizations` + `app_provider_organizations`.
+ *     `app_organizations` + `app_provider_organizations`;
+ *   - email/password sign-ups are routed to an admin-mapped org for their
+ *     email domain (`app_provider_organizations`, provider = 'email');
+ *   - `reevaluatePendingActivation` upgrades ONLY `pending_approval` rows,
+ *     and only when the CURRENT policy decides active.
  *
  * The Kysely query builder is stubbed per-table so each branch can be
- * exercised without a real database.
+ * exercised without a real database; insert/update payloads are captured so
+ * assertions cover what was WRITTEN, not just what the stubs return.
  */
 
 const auditMock = vi.fn();
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMock(...a) }));
 
+interface PolicyRow {
+  organization_id: string | null;
+  require_email_verification: boolean;
+  signup_approval_mode: string;
+  allowed_auth_methods: string[] | null;
+  auto_approve_email_domains: string[] | null;
+}
+
 interface Stubs {
   orgSelect: () => unknown;
   orgInsert?: unknown;
+  providerOrgSelect: () => unknown;
   providerOrgInsert?: unknown;
+  policyRows: () => PolicyRow[];
   userSelect: () => unknown;
   userInsert?: unknown;
-  userUpdate?: unknown;
   membershipSelect: () => unknown;
+  membershipList: () => unknown[];
   membershipInsert?: unknown;
 }
 
 let stubs: Stubs;
+let insertCalls: Array<{ table: string; values: Record<string, unknown> }>;
+let updateCalls: Array<{ table: string; values: Record<string, unknown> }>;
+
+interface Chain {
+  select: (...args: unknown[]) => Chain;
+  where: (...args: unknown[]) => Chain;
+  returning: (...args: unknown[]) => Chain;
+  onConflict: (...args: unknown[]) => Chain;
+  values: (v: Record<string, unknown>) => Chain;
+  set: (v: Record<string, unknown>) => Chain;
+  executeTakeFirst: () => Promise<unknown>;
+  executeTakeFirstOrThrow: () => Promise<unknown>;
+  execute: () => Promise<unknown>;
+}
+
+function makeChain(opts: {
+  table: string;
+  first?: () => unknown;
+  all?: () => unknown;
+  firstOrThrow?: () => unknown;
+  done?: () => unknown;
+  captureInsert?: boolean;
+  captureUpdate?: boolean;
+}): Chain {
+  let captured: Record<string, unknown> = {};
+  const chain: Chain = {
+    select: () => chain,
+    where: () => chain,
+    returning: () => chain,
+    onConflict: () => chain,
+    values: (v) => {
+      captured = v;
+      if (opts.captureInsert) insertCalls.push({ table: opts.table, values: v });
+      return chain;
+    },
+    set: (v) => {
+      captured = v;
+      return chain;
+    },
+    executeTakeFirst: () => Promise.resolve(opts.first?.()),
+    executeTakeFirstOrThrow: () => Promise.resolve(opts.firstOrThrow?.()),
+    execute: () => {
+      if (opts.captureUpdate) updateCalls.push({ table: opts.table, values: captured });
+      return Promise.resolve(opts.all ? opts.all() : opts.done?.());
+    },
+  };
+  return chain;
+}
 
 vi.mock("@/db/database", () => ({
   db: {
     selectFrom: (table: string) => {
       if (table === "app_organizations")
-        return { select: () => ({ where: () => ({ executeTakeFirst: stubs.orgSelect }) }) };
-      if (table === "app_users")
-        return { select: () => ({ where: () => ({ executeTakeFirst: stubs.userSelect }) }) };
+        return makeChain({ table, first: () => stubs.orgSelect() });
+      if (table === "app_provider_organizations")
+        return makeChain({ table, first: () => stubs.providerOrgSelect() });
+      if (table === "app_organization_auth_settings")
+        return makeChain({ table, all: () => stubs.policyRows() });
+      if (table === "app_users") return makeChain({ table, first: () => stubs.userSelect() });
       if (table === "app_organization_memberships")
-        return {
-          select: () => ({
-            where: () => ({ where: () => ({ executeTakeFirst: stubs.membershipSelect }) }),
-          }),
-        };
+        return makeChain({
+          table,
+          first: () => stubs.membershipSelect(),
+          all: () => stubs.membershipList(),
+        });
       throw new Error(`unmocked selectFrom: ${table}`);
     },
     insertInto: (table: string) => {
       if (table === "app_organizations")
-        return {
-          values: () => ({
-            returning: () => ({ executeTakeFirstOrThrow: () => stubs.orgInsert }),
-          }),
-        };
+        return makeChain({ table, captureInsert: true, firstOrThrow: () => stubs.orgInsert });
       if (table === "app_provider_organizations")
-        return {
-          values: () => ({ onConflict: () => ({ execute: () => stubs.providerOrgInsert }) }),
-        };
+        return makeChain({ table, captureInsert: true, done: () => stubs.providerOrgInsert });
       if (table === "app_users")
-        return {
-          values: () => ({
-            returning: () => ({ executeTakeFirstOrThrow: () => stubs.userInsert }),
-          }),
-        };
+        return makeChain({ table, captureInsert: true, firstOrThrow: () => stubs.userInsert });
       if (table === "app_organization_memberships")
-        return { values: () => ({ execute: () => stubs.membershipInsert }) };
+        return makeChain({ table, captureInsert: true, done: () => stubs.membershipInsert });
       throw new Error(`unmocked insertInto: ${table}`);
     },
-    updateTable: () => ({
-      set: () => ({ where: () => ({ execute: () => stubs.userUpdate }) }),
-    }),
+    updateTable: (table: string) => makeChain({ table, captureUpdate: true }),
   },
 }));
 
+const DEFAULT_POLICY_ROW: PolicyRow = {
+  organization_id: null,
+  require_email_verification: true,
+  signup_approval_mode: "admin_approval",
+  allowed_auth_methods: null,
+  auto_approve_email_domains: null,
+};
+
 beforeEach(() => {
   auditMock.mockReset();
+  insertCalls = [];
+  updateCalls = [];
   stubs = {
     orgSelect: () => Promise.resolve({ id: "org-default" }),
+    providerOrgSelect: () => Promise.resolve(undefined),
+    policyRows: () => [DEFAULT_POLICY_ROW],
     userSelect: () => Promise.resolve(undefined),
     userInsert: Promise.resolve({ id: "user-1", status: "pending_approval" }),
     membershipSelect: () => Promise.resolve(undefined),
+    membershipList: () => [],
     membershipInsert: Promise.resolve(undefined),
   };
 });
 afterEach(() => vi.resetModules());
 
 describe("provisionUserFromAuth", () => {
-  it("creates a new pending_approval user and pending membership for non-seed sign-ups", async () => {
+  it("creates a new pending_approval user and pending membership under the platform default", async () => {
     const result = await provisionUserFromAuth({
       betterAuthUserId: "ba-1",
       email: "ada@example.com",
@@ -102,16 +172,26 @@ describe("provisionUserFromAuth", () => {
       membershipStatus: "pending_approval",
       linkedExisting: false,
     });
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe(
+      "pending_approval",
+    );
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "auth.account.pending_approval",
         outcome: "success",
         provider: "google",
+        metadata: expect.objectContaining({
+          decisionReason: "admin_approval",
+          policySource: "platform_default",
+        }),
       }),
     );
   });
 
-  it("activates seed users immediately", async () => {
+  it("activates seed users immediately without reading policy", async () => {
+    stubs.policyRows = () => {
+      throw new Error("seeds must not read signup policy");
+    };
     stubs.userInsert = Promise.resolve({ id: "user-seed", status: "active" });
     const result = await provisionUserFromAuth({
       betterAuthUserId: "ba-seed",
@@ -122,11 +202,11 @@ describe("provisionUserFromAuth", () => {
     });
     expect(result.status).toBe("active");
     expect(result.membershipStatus).toBe("active");
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
   });
 
   it("preserves existing user status and emits auth.account.linked", async () => {
     stubs.userSelect = () => Promise.resolve({ id: "existing-1", status: "blocked" });
-    stubs.userUpdate = Promise.resolve(undefined);
     stubs.membershipSelect = () => Promise.resolve({ id: "m-1", status: "blocked" });
 
     const result = await provisionUserFromAuth({
@@ -148,7 +228,6 @@ describe("provisionUserFromAuth", () => {
     stubs.orgInsert = Promise.resolve({ id: "new-org" });
     stubs.providerOrgInsert = Promise.resolve(undefined);
 
-    const providerOrgInsertSpy = vi.spyOn(stubs, "providerOrgInsert", "get");
     // Microsoft tenants resolve to a tid-keyed organization, so this triggers
     // the "no existing org" branch.
     const result = await provisionUserFromAuth({
@@ -159,6 +238,263 @@ describe("provisionUserFromAuth", () => {
       profile: { tid: "tenant-123", name: "Contoso" },
     });
     expect(result.organizationId).toBe("new-org");
-    providerOrgInsertSpy.mockRestore();
+    expect(insertCalls.find((c) => c.table === "app_organizations")?.values.slug).toBe(
+      "tenant-123",
+    );
+  });
+
+  it("activates immediately when the org policy is auto_active", async () => {
+    stubs.policyRows = () => [
+      DEFAULT_POLICY_ROW,
+      {
+        organization_id: "org-default",
+        require_email_verification: false,
+        signup_approval_mode: "auto_active",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      },
+    ];
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-3",
+      email: "open@example.com",
+      emailVerified: false,
+      provider: "email",
+    });
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
+    expect(insertCalls.find((c) => c.table === "app_organization_memberships")?.values.status).toBe(
+      "active",
+    );
+    expect(result.membershipStatus).toBe("active");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        metadata: expect.objectContaining({
+          decisionReason: "auto_active",
+          policySource: "organization",
+        }),
+      }),
+    );
+  });
+
+  it("activates a VERIFIED email matching an auto-approve domain under admin_approval", async () => {
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: true,
+        signup_approval_mode: "admin_approval",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: ["example.com"],
+      },
+    ];
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+    await provisionUserFromAuth({
+      betterAuthUserId: "ba-4",
+      email: "grace@example.com",
+      emailVerified: true,
+      provider: "google",
+    });
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        metadata: expect.objectContaining({ decisionReason: "domain_auto_approved" }),
+      }),
+    );
+  });
+
+  it("keeps an UNVERIFIED auto-approve-domain email pending (no domain trust without proof)", async () => {
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: true,
+        signup_approval_mode: "admin_approval",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: ["example.com"],
+      },
+    ];
+    await provisionUserFromAuth({
+      betterAuthUserId: "ba-5",
+      email: "mallory@example.com",
+      emailVerified: false,
+      provider: "email",
+    });
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe(
+      "pending_approval",
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "auth.account.pending_approval" }),
+    );
+  });
+
+  it("parks a disallowed auth method in pending_approval even when the org is auto_active", async () => {
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: false,
+        signup_approval_mode: "auto_active",
+        allowed_auth_methods: ["google", "microsoft"],
+        auto_approve_email_domains: null,
+      },
+    ];
+    await provisionUserFromAuth({
+      betterAuthUserId: "ba-6",
+      email: "e@example.com",
+      emailVerified: true,
+      provider: "email",
+    });
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe(
+      "pending_approval",
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.pending_approval",
+        metadata: expect.objectContaining({ decisionReason: "auth_method_not_allowed" }),
+      }),
+    );
+  });
+
+  it("routes email sign-ups to the admin-mapped organization for their domain", async () => {
+    stubs.providerOrgSelect = () =>
+      Promise.resolve({ organization_id: "org-acme", provider_organization_key: "acme.com" });
+    stubs.policyRows = () => [DEFAULT_POLICY_ROW];
+    stubs.orgSelect = () => {
+      throw new Error("mapped sign-ups must not fall back to the slug lookup");
+    };
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-7",
+      email: "eve@acme.com",
+      emailVerified: false,
+      provider: "email",
+    });
+    expect(result.organizationId).toBe("org-acme");
+    expect(
+      insertCalls.find((c) => c.table === "app_organization_memberships")?.values,
+    ).toMatchObject({ organization_id: "org-acme", provider_organization_key: "acme.com" });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ emailDomainRouted: true }),
+      }),
+    );
+  });
+});
+
+describe("reevaluatePendingActivation", () => {
+  it("activates a pending user + membership when the org policy now says active", async () => {
+    stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
+    stubs.membershipList = () => [
+      { id: "m-1", organization_id: "org-default", source_provider: "email" },
+    ];
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: false,
+        signup_approval_mode: "auto_active",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      },
+    ];
+
+    await reevaluatePendingActivation({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: false,
+      provider: "email",
+    });
+
+    expect(updateCalls).toEqual([
+      expect.objectContaining({
+        table: "app_organization_memberships",
+        values: expect.objectContaining({ status: "active" }),
+      }),
+      expect.objectContaining({
+        table: "app_users",
+        values: expect.objectContaining({ status: "active" }),
+      }),
+    ]);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        metadata: expect.objectContaining({
+          trigger: "sign_in_reevaluation",
+          decisionReason: "auto_active",
+        }),
+      }),
+    );
+  });
+
+  it("activates via a verified auto-approve domain (the post-verification sign-in path)", async () => {
+    stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
+    stubs.membershipList = () => [
+      { id: "m-1", organization_id: "org-default", source_provider: "email" },
+    ];
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: true,
+        signup_approval_mode: "admin_approval",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: ["example.com"],
+      },
+    ];
+
+    await reevaluatePendingActivation({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+    });
+
+    expect(updateCalls.map((c) => c.table)).toEqual(["app_organization_memberships", "app_users"]);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ decisionReason: "domain_auto_approved" }),
+      }),
+    );
+  });
+
+  it("leaves a pending user untouched while policy still requires admin approval", async () => {
+    stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
+    stubs.membershipList = () => [
+      { id: "m-1", organization_id: "org-default", source_provider: "email" },
+    ];
+    // Domain rule present but the email is still unverified — no activation.
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: true,
+        signup_approval_mode: "admin_approval",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: ["example.com"],
+      },
+    ];
+
+    await reevaluatePendingActivation({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: false,
+      provider: "email",
+    });
+
+    expect(updateCalls).toEqual([]);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("never touches non-pending users (blocked stays blocked)", async () => {
+    stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "blocked" });
+    stubs.membershipList = () => {
+      throw new Error("must not query memberships for a non-pending user");
+    };
+
+    await reevaluatePendingActivation({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+    });
+
+    expect(updateCalls).toEqual([]);
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });

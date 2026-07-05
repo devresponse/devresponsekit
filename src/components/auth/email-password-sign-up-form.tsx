@@ -28,10 +28,20 @@ export interface EmailPasswordSignUpFormProps {
  * EmailPasswordSignUpForm
  *
  * Self-registration via Better Auth (React Hook Form + the shared
- * `signUpSchema`). Email verification is required (AUTH-4): sign-up creates the
- * account and emails a verification link but does NOT start a session, so on
- * success the user is sent to the localized verify-email page. Clicking the
- * emailed link verifies the address and lands them at `postVerifyHref`.
+ * `signUpSchema`). The workflow follows the organization's signup policy
+ * (app_organization_auth_settings, 0007):
+ *
+ *   - Verification required (the fail-closed default, AUTH-4): sign-up
+ *     creates the account and emails a verification link but does NOT start
+ *     a session, so on success the user is sent to the localized
+ *     verify-email page. Clicking the emailed link verifies the address and
+ *     lands them at `postVerifyHref`.
+ *   - Verification waived by the org: the server pre-verifies the account at
+ *     creation (visible as `user.emailVerified` in the sign-up response).
+ *     Sign-up still never starts a session while the global
+ *     `requireEmailVerification` baseline is on, so the form signs in
+ *     immediately with the just-submitted credentials; Better Auth then
+ *     redirects to `postVerifyHref` via its `callbackURL` handling.
  */
 export function EmailPasswordSignUpForm({
   verifyEmailHref,
@@ -56,6 +66,24 @@ export function EmailPasswordSignUpForm({
       });
       if (result.error) {
         form.setError("root", { type: "server", message: t("unexpectedError") });
+        return;
+      }
+      if (result.data?.user?.emailVerified) {
+        // The org's policy waived verification (the account arrived
+        // pre-verified), so sign in with the just-submitted credentials —
+        // Better Auth redirects to `callbackURL` on success. Only attempted
+        // when it is known to pass, so no stray verification email is ever
+        // triggered by a doomed sign-in.
+        const signInResult = await authClient.signIn.email({
+          email: values.email,
+          password: values.password,
+          callbackURL: postVerifyHref,
+        });
+        if (signInResult.error) {
+          // The account exists and is verified; the page's "have an
+          // account?" link offers manual sign-in as the recovery path.
+          form.setError("root", { type: "server", message: t("unexpectedError") });
+        }
         return;
       }
       router.replace(verifyEmailHref);

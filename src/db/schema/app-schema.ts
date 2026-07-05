@@ -34,6 +34,32 @@ export interface AppProviderOrganizationsTable {
   created_at: Generated<Timestamp>;
 }
 
+/**
+ * Runtime-configurable per-organization signup/authentication policy
+ * (migration 0007). The row with `organization_id = null` is the single
+ * platform default; an org row is a COMPLETE policy override (no per-field
+ * inheritance). For the two array columns NULL is a meaningful value —
+ * `allowed_auth_methods` NULL = every enabled method, and
+ * `auto_approve_email_domains` NULL = no domain auto-approval — while row
+ * absence means "inherit the platform default entirely". Resolution lives in
+ * `src/lib/auth-policy.server.ts`.
+ */
+export interface AppOrganizationAuthSettingsTable {
+  id: Generated<string>;
+  organization_id: string | null;
+  require_email_verification: boolean;
+  signup_approval_mode: string;
+  allowed_auth_methods: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
+  auto_approve_email_domains: ColumnType<
+    string[] | null,
+    string[] | null | undefined,
+    string[] | null
+  >;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface AppUsersTable {
   id: Generated<string>;
   better_auth_user_id: string;
@@ -272,6 +298,7 @@ export interface AppRevokedTokensTable {
 export interface AppDatabase {
   app_organizations: AppOrganizationsTable;
   app_provider_organizations: AppProviderOrganizationsTable;
+  app_organization_auth_settings: AppOrganizationAuthSettingsTable;
   app_users: AppUsersTable;
   app_organization_memberships: AppOrganizationMembershipsTable;
   app_roles: AppRolesTable;

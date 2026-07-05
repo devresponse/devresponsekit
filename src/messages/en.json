@@ -73,7 +73,8 @@
     "inviteMismatchTitle": "Different account needed",
     "inviteMismatchDescription": "This invitation was issued for a different email address. Sign out, then sign in or register with the invited address.",
     "inviteError": "Could not accept the invitation. Please try again.",
-    "inviteSignupBanner": "You're joining {organization}. Finish creating your account with the invited email address."
+    "inviteSignupBanner": "You're joining {organization}. Finish creating your account with the invited email address.",
+    "invitedEmailLocked": "Locked to the address your invitation was sent to."
   },
   "public": {
     "hero": {
@@ -900,7 +901,10 @@
           "role": "Role",
           "invitedBy": "Invited by",
           "expires": "Expires"
-        }
+        },
+        "resendConfirm": "Resend this invitation? The current link will stop working.",
+        "rolesLoading": "Loading roles…",
+        "rolesError": "Roles couldn't be loaded — you can still invite without one."
       }
     },
     "memberships": {

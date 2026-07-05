@@ -112,7 +112,7 @@ RFC 7807 `application/problem+json`:
 A JSON envelope with a stable machine code, an i18n message key, and the correlation id (`AdminError`):
 
 ```json
-{ "error": "forbidden", "message": "administrator.errors.forbidden", "requestId": "5f3c…" }
+{ "error": "forbidden", "message": "errors.forbidden", "requestId": "5f3c…" }
 ```
 
 Common statuses on both surfaces: `400` invalid body, `401` unauthenticated, `403` forbidden, `404` not found / out of scope, `409` conflict, `412` stale `If-Match` ETag (v1), `429` rate-limited (with `Retry-After`). Every response (success or error) carries an `x-request-id` header that matches the audit log.

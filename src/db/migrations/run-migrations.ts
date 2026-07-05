@@ -18,9 +18,9 @@ import { planMigrations, shouldIncludeLocales } from "./migration-plan";
  *      and non-language baseline row); `0002…` onward are append-only,
  *      idempotent schema changes. Core files are FROZEN and never renamed, so
  *      their ledger id (the bare filename) is stable and an existing database
- *      skips them. New core migrations continue MONOTONICALLY — the next is
- *      `0011-…` (0006–0010 were relocated to `locales/`; numbers are not
- *      reused).
+ *      skips them. New core migrations continue MONOTONICALLY (`0001-…`
+ *      through `0009-…` today; the next is `0010-…`); numbers are never
+ *      reused within the core sequence.
  *
  *   2. LOCALES — `locales/*.sql` (lexical), the localized DATA (non-English
  *      email templates, etc.). Included BY DEFAULT; set `DB_MIGRATE_LOCALES`

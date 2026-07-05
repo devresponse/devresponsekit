@@ -107,7 +107,7 @@ Migrations still use the direct endpoint. Keep `PGPOOL_MAX` small on serverless 
 
 **Schema changes** ship as new numbered files in `src/db/migrations/` — never edit an applied migration:
 
-- **Core** changes continue **monotonically** at `0011-…`. Numbers are never reused: `0006-0010` were relocated to `locales/` (its own `0001-…` sequence).
+- **Core** changes continue **monotonically** (`0001-…` through `0009-…` today; the next core migration is `0010-…`). Numbers are never reused within the core sequence.
 - **Localized data** (non-English email templates, etc.) goes in `src/db/migrations/locales/`, applied unless `DB_MIGRATE_LOCALES=0`. Ledger ids are path-prefixed (`locales/<file>`) so they can never collide with a core filename.
 
 CI applies them migrate-first on the next deploy.

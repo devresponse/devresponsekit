@@ -3697,7 +3697,8 @@ Under `/[locale]/app/administrator/email`:
 its credentials. With no provider set, every flow still works — emails
 are rendered and recorded as `logged`. Adding a provider = implement
 `EmailProvider`, wire the env, extend the `EMAIL_PROVIDER` enum. See
-[docs/setup-email.md](docs/setup-email.md) for the full integration guide.
+[docs/configuration.md](docs/configuration.md) for the email environment
+variables and provider setup.
 
 ---
 

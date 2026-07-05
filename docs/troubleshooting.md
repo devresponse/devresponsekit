@@ -105,7 +105,7 @@ warrant a comms channel and an owner before deep debugging.
   also increments `devresponsekit_rate_limit_denials_total{scope}` (unsampled).
 - The limiter is in-memory per instance (single-instance is the supported 1.0
   topology); a process restart resets buckets. A shared (Redis/Postgres) backend
-  is post-1.0 — see [deployment.md §4](./deployment.md#5-operations--gotchas).
+  is post-1.0 — see [deployment.md §5](./deployment.md#5-operations--gotchas).
 - CSP violations report to `POST /api/security/csp-report` (rate-limited +
   aggregated); a spike can indicate an injection attempt or a broken third-party
   asset.
@@ -139,7 +139,7 @@ build** and leave the additive migrations ahead — **never auto-down-migrate**
 
 - **Vercel:** promote the last-known-good deployment (dashboard → previous
   deployment → "Promote to Production", or `vercel rollback`). The deploy
-  pipeline ([deployment.md §6](./deployment.md#7-ci)) runs migrations
+  pipeline ([deployment.md §7](./deployment.md#7-ci)) runs migrations
   *before* promotion, so a rollback needs no DB change.
 - **Container:** redeploy the previous (digest-pinned) image tag; keep the prior
   tag available.
@@ -150,7 +150,7 @@ build** and leave the additive migrations ahead — **never auto-down-migrate**
 
 ## 6. After the incident
 
-- Confirm recovery against the [§8 post-deployment checklist](./deployment.md#4-deploy--post-deploy-verification)
+- Confirm recovery against the [§4 post-deployment checklist](./deployment.md#4-deploy--post-deploy-verification)
   (health, auth, a DB-backed admin list, an audit row with a matching `x-request-id`).
 - The audit log + the correlated `x-request-id`s are the post-incident record;
   write the timeline from them.
@@ -310,7 +310,7 @@ correctly from `X-Forwarded-For`.
 
 **Rate limits behave inconsistently across instances.** The limiter is in-process
 per instance, so the **supported 1.0 topology is a single application instance**
-(see [deployment.md §4](./deployment.md#5-operations--gotchas)). Multi-instance still
+(see [deployment.md §5](./deployment.md#5-operations--gotchas)). Multi-instance still
 runs, but the limit is best-effort per instance until a shared (Redis/Postgres)
 backend lands post-1.0.
 
@@ -323,7 +323,7 @@ backend lands post-1.0.
 
 - **In-memory rate limiting / metrics** — neither is shared across instances; the
   supported 1.0 topology is a single application instance. A shared backend for
-  horizontal scale is planned post-1.0 (see [deployment.md §4](./deployment.md#5-operations--gotchas)).
+  horizontal scale is planned post-1.0 (see [deployment.md §5](./deployment.md#5-operations--gotchas)).
 - **CSP is enforcing** (nonce-based, minted per request in `src/proxy.ts`).
   `script-src` allows only `'self' 'nonce-…' 'strict-dynamic'` — an injected
   inline `<script>` is blocked, not just reported. `style-src` keeps

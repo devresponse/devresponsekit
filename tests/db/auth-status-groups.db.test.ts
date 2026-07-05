@@ -245,7 +245,8 @@ describe("ADR-0002 effective-permission UNION (DB-backed)", () => {
   it("does NOT confer a role from a group that belongs to another org (ADR-0001 boundary)", async () => {
     const ctx = await inOrgA(ids.userBoundary.ba);
     expect(ctx.permissions).not.toContain(KEY.orgB);
-    // No orgA roles/groups either → no permissions leak through.
-    expect(ctx.permissions).toEqual([]);
+    // No orgA roles/groups grant anything, so the only permission present is
+    // the membership baseline (`shell.view`) — the orgB group never leaks in.
+    expect(ctx.permissions).toEqual(["shell.view"]);
   });
 });

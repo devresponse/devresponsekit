@@ -3,7 +3,11 @@ import { cache } from "react";
 import { db } from "@/db/database";
 import { readActiveOrgId } from "@/lib/active-org.server";
 import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
-import { SUPERADMIN_PERMISSION, SUPERUSER_PERMISSIONS } from "@/lib/admin/permissions";
+import {
+  SHELL_BASELINE_PERMISSION,
+  SUPERADMIN_PERMISSION,
+  SUPERUSER_PERMISSIONS,
+} from "@/lib/admin/permissions";
 
 /** Possible application-level user statuses. */
 export type AppUserStatus = "active" | "pending_approval" | "blocked" | "suspended" | "deactivated";
@@ -173,6 +177,11 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     }
   }
 
+  // Coerce once (fail-closed) — reused for the baseline grant below and the
+  // returned context.
+  const appStatus = toUserStatus(user.status);
+  const memberStatus = membership ? toMembershipStatus(membership.status) : null;
+
   let permissions: string[] = [];
   if (membership) {
     const orgId = membership.organization_id;
@@ -202,6 +211,21 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     permissions = [...new Set(rows.map((r) => r.key))];
   }
 
+  // Baseline: `shell.view` is IMPLIED by an active membership, not conferred by
+  // a role (the same invariant the account API guard and `decideSecureAccess`
+  // rely on). A self-registered member holds no role, so without this they
+  // resolve to an empty set and the server-filtered shell nav — Dashboard AND
+  // Account — is filtered to nothing. Granted exactly when secure access is
+  // allowed (active user + active membership); it is not an `admin.*`
+  // capability, so this never widens administrative authority. Superusers
+  // already carry it via SUPERUSER_PERMISSIONS.
+  if (
+    decideSecureAccess(appStatus, memberStatus) === "allow" &&
+    !permissions.includes(SHELL_BASELINE_PERMISSION)
+  ) {
+    permissions = [...permissions, SHELL_BASELINE_PERMISSION];
+  }
+
   // Global superuser: holding the `superuser` permission via a role in ANY
   // org the user is an active member of makes them a SUPERADMIN everywhere —
   // the active org must never downgrade it. Expand the marker to the FULL
@@ -223,9 +247,9 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
   return {
     appUserId: user.id,
     primaryEmail: user.primary_email,
-    status: toUserStatus(user.status),
+    status: appStatus,
     organizationId: membership?.organization_id ?? null,
-    membershipStatus: membership ? toMembershipStatus(membership.status) : null,
+    membershipStatus: memberStatus,
     preferredLocale: user.preferred_locale,
     permissions,
   };

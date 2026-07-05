@@ -44,6 +44,8 @@ const listOf = (itemName: string): Obj => ({
 const USER_STATUS = ["active", "pending_approval", "blocked", "suspended", "deactivated"];
 const MEMBERSHIP_STATUS = ["active", "pending_approval", "blocked", "suspended"];
 const CREDENTIAL_STATUS = ["active", "revoked"];
+const AUTH_POLICY_METHODS = ["email", "google", "microsoft", "github"];
+const AUTH_POLICY_MODES = ["admin_approval", "auto_active"];
 
 /** A path id parameter. */
 const idParam = (name = "id", format: "uuid" | "string" = "uuid"): Obj => ({
@@ -768,6 +770,83 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           type: "object",
           properties: { bindingIds: { type: "array", items: uuid(), minItems: 1 } },
           required: ["bindingIds"],
+        },
+        // Signup policy (0007). Deliberately camelCase (not a raw row): the
+        // response mirrors the PATCH request's field names exactly, since an
+        // org row is a COMPLETE policy round-tripped through the form.
+        AuthPolicySettings: {
+          type: ["object", "null"],
+          description:
+            "The raw policy override row; null when the organization inherits the platform default.",
+          properties: {
+            organizationId: { type: ["string", "null"], format: "uuid" },
+            requireEmailVerification: boolean(),
+            signupApprovalMode: { type: "string", enum: AUTH_POLICY_MODES },
+            allowedAuthMethods: {
+              type: ["array", "null"],
+              items: { type: "string", enum: AUTH_POLICY_METHODS },
+              description: "null = every enabled auth method is accepted.",
+            },
+            autoApproveEmailDomains: {
+              type: ["array", "null"],
+              items: { type: "string" },
+              description: "Lowercased domains; null = no domain auto-approval.",
+            },
+            updatedAt: dateTime(true),
+          },
+          required: ["requireEmailVerification", "signupApprovalMode"],
+        },
+        AuthPolicyEffective: {
+          type: "object",
+          description: "The resolved policy that actually governs sign-ups for this scope.",
+          properties: {
+            requireEmailVerification: boolean(),
+            signupApprovalMode: { type: "string", enum: AUTH_POLICY_MODES },
+            allowedAuthMethods: {
+              type: ["array", "null"],
+              items: { type: "string", enum: AUTH_POLICY_METHODS },
+            },
+            autoApproveEmailDomains: { type: ["array", "null"], items: { type: "string" } },
+            source: {
+              type: "string",
+              enum: ["organization", "platform_default", "fail_closed"],
+            },
+          },
+          required: ["requireEmailVerification", "signupApprovalMode", "source"],
+        },
+        AuthPolicyEnvelope: {
+          type: "object",
+          properties: {
+            ok: boolean(),
+            settings: ref("AuthPolicySettings"),
+            effective: ref("AuthPolicyEffective"),
+          },
+          required: ["ok"],
+        },
+        UpdateAuthPolicyRequest: {
+          type: "object",
+          description:
+            "A COMPLETE policy — there is no partial update; PATCH creates or replaces the row.",
+          properties: {
+            requireEmailVerification: boolean(),
+            signupApprovalMode: { type: "string", enum: AUTH_POLICY_MODES },
+            allowedAuthMethods: {
+              type: ["array", "null"],
+              items: { type: "string", enum: AUTH_POLICY_METHODS },
+              maxItems: 4,
+            },
+            autoApproveEmailDomains: {
+              type: ["array", "null"],
+              items: { type: "string", minLength: 1, maxLength: 255 },
+              maxItems: 50,
+            },
+          },
+          required: [
+            "requireEmailVerification",
+            "signupApprovalMode",
+            "allowedAuthMethods",
+            "autoApproveEmailDomains",
+          ],
         },
         GlobalMembershipItem: {
           type: "object",
@@ -1626,6 +1705,48 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           parameters: [idParam()],
           requestBody: { required: true, ...json(ref("DeleteBindingsRequest")) },
           responses: { "200": okResp("OkCount"), ...writeErrors() },
+        },
+      },
+
+      "/organizations/{id}/auth-settings": {
+        get: {
+          operationId: "getOrganizationAuthSettings",
+          tags: ["Organizations"],
+          summary: "Read an organization's signup policy (raw override + effective resolution)",
+          parameters: [idParam()],
+          responses: { "200": okResp("AuthPolicyEnvelope"), ...readErrors() },
+        },
+        patch: {
+          operationId: "updateOrganizationAuthSettings",
+          tags: ["Organizations"],
+          summary: "Create or replace the organization's signup-policy override",
+          parameters: [idParam()],
+          requestBody: { required: true, ...json(ref("UpdateAuthPolicyRequest")) },
+          responses: { "200": okResp("AuthPolicyEnvelope"), ...writeErrors() },
+        },
+        delete: {
+          operationId: "resetOrganizationAuthSettings",
+          tags: ["Organizations"],
+          summary: "Remove the signup-policy override (revert to the platform default)",
+          parameters: [idParam()],
+          responses: { "200": okResp(), ...writeErrors() },
+        },
+      },
+
+      // ---- Platform signup defaults (0007) --------------------------------
+      "/auth-settings/defaults": {
+        get: {
+          operationId: "getPlatformAuthSettings",
+          tags: ["Organizations"],
+          summary: "Read the platform-default signup policy (superadmin only)",
+          responses: { "200": okResp("AuthPolicyEnvelope"), "403": errRef("Forbidden") },
+        },
+        patch: {
+          operationId: "updatePlatformAuthSettings",
+          tags: ["Organizations"],
+          summary: "Update the platform-default signup policy (superadmin only)",
+          requestBody: { required: true, ...json(ref("UpdateAuthPolicyRequest")) },
+          responses: { "200": okResp("AuthPolicyEnvelope"), ...writeErrors() },
         },
       },
 

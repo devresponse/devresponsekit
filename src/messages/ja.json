@@ -781,7 +781,8 @@
       "tabs": {
         "members": "メンバー",
         "providers": "プロバイダー",
-        "settings": "設定"
+        "settings": "設定",
+        "authentication": "認証"
       },
       "new": {
         "title": "組織を作成",
@@ -825,7 +826,43 @@
         "title": "組織を削除",
         "description": "削除すると、その組織が削除されます。組織は空である（メンバーがいない）必要があります。"
       },
-      "deleteError": "組織を削除できませんでした。"
+      "deleteError": "組織を削除できませんでした。",
+      "authPolicy": {
+        "description": "この組織で新しいアカウントがどのように登録・有効化されるかを管理します。",
+        "platformTitle": "プラットフォームのサインアップ既定値",
+        "platformDescription": "独自の設定を持たないすべての組織が継承するサインアップポリシーです。",
+        "inheritBody": "この組織はプラットフォームのサインアップ既定値を継承しています。",
+        "customize": "この組織用にカスタマイズ",
+        "cancel": "キャンセル",
+        "requireVerification": "メール確認を必須にする",
+        "requireVerificationHelp": "メールとパスワードでのサインアップは、サインイン前にアドレスの確認が必要です。ソーシャルサインインはプロバイダーによって確認済みです。",
+        "approvalMode": "承認モード",
+        "approvalModeAdmin": "管理者の承認が必要",
+        "approvalModeAuto": "即時有効化",
+        "approvalModeHelp": "登録後に新しいアカウントが有効になる方法です。",
+        "openSignupWarning": "登録した人は、メールアドレスの所有を証明することなく即座にアクセスできるようになります。",
+        "restrictMethods": "サインイン方法を制限する",
+        "restrictMethodsHelp": "チェックされていない方法でのサインアップは管理者の承認待ちになります。",
+        "methodEmail": "メールとパスワード",
+        "methodGoogle": "Google",
+        "methodMicrosoft": "Microsoft",
+        "methodGithub": "GitHub",
+        "autoApproveDomains": "自動承認するメールドメイン",
+        "autoApproveDomainsHelp": "これらのドメインの確認済みアドレスは、管理者の承認が必要な場合でも即座に有効化されます。ドメインはカンマで区切ってください。",
+        "save": "ポリシーを保存",
+        "saved": "サインアップポリシーを更新しました。",
+        "reset": "プラットフォームの既定値に戻す",
+        "resetDone": "上書き設定を削除しました — この組織はプラットフォームの既定値を継承します。",
+        "errorToast": "サインアップポリシーを保存できませんでした。",
+        "summaryVerification": "メール確認",
+        "summaryApproval": "承認",
+        "summaryMethods": "サインイン方法",
+        "summaryDomains": "自動承認ドメイン",
+        "on": "必須",
+        "off": "不要",
+        "allMethods": "すべての方法",
+        "noDomains": "なし"
+      }
     },
     "memberships": {
       "title": "メンバーシップ",
@@ -1354,7 +1391,8 @@
     "number": "有効な数値を入力してください。",
     "passwordsMismatch": "パスワードが一致しません。",
     "locale": "サポートされている言語を選択してください。",
-    "dateFormat": "有効な日付の書式を選択してください。"
+    "dateFormat": "有効な日付の書式を選択してください。",
+    "domainList": "カンマで区切った有効なドメインを入力してください（例：acme.com）。"
   },
   "sso": {
     "confirm": {

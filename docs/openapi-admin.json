@@ -2137,6 +2137,189 @@
           "bindingIds"
         ]
       },
+      "AuthPolicySettings": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "description": "The raw policy override row; null when the organization inherits the platform default.",
+        "properties": {
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "requireEmailVerification": {
+            "type": "boolean"
+          },
+          "signupApprovalMode": {
+            "type": "string",
+            "enum": [
+              "admin_approval",
+              "auto_active"
+            ]
+          },
+          "allowedAuthMethods": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "email",
+                "google",
+                "microsoft",
+                "github"
+              ]
+            },
+            "description": "null = every enabled auth method is accepted."
+          },
+          "autoApproveEmailDomains": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Lowercased domains; null = no domain auto-approval."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "requireEmailVerification",
+          "signupApprovalMode"
+        ]
+      },
+      "AuthPolicyEffective": {
+        "type": "object",
+        "description": "The resolved policy that actually governs sign-ups for this scope.",
+        "properties": {
+          "requireEmailVerification": {
+            "type": "boolean"
+          },
+          "signupApprovalMode": {
+            "type": "string",
+            "enum": [
+              "admin_approval",
+              "auto_active"
+            ]
+          },
+          "allowedAuthMethods": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "email",
+                "google",
+                "microsoft",
+                "github"
+              ]
+            }
+          },
+          "autoApproveEmailDomains": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "platform_default",
+              "fail_closed"
+            ]
+          }
+        },
+        "required": [
+          "requireEmailVerification",
+          "signupApprovalMode",
+          "source"
+        ]
+      },
+      "AuthPolicyEnvelope": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AuthPolicySettings"
+          },
+          "effective": {
+            "$ref": "#/components/schemas/AuthPolicyEffective"
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "UpdateAuthPolicyRequest": {
+        "type": "object",
+        "description": "A COMPLETE policy — there is no partial update; PATCH creates or replaces the row.",
+        "properties": {
+          "requireEmailVerification": {
+            "type": "boolean"
+          },
+          "signupApprovalMode": {
+            "type": "string",
+            "enum": [
+              "admin_approval",
+              "auto_active"
+            ]
+          },
+          "allowedAuthMethods": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "email",
+                "google",
+                "microsoft",
+                "github"
+              ]
+            },
+            "maxItems": 4
+          },
+          "autoApproveEmailDomains": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "requireEmailVerification",
+          "signupApprovalMode",
+          "allowedAuthMethods",
+          "autoApproveEmailDomains"
+        ]
+      },
       "GlobalMembershipItem": {
         "type": "object",
         "properties": {
@@ -6637,6 +6820,215 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OkCount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/organizations/{id}/auth-settings": {
+      "get": {
+        "operationId": "getOrganizationAuthSettings",
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Read an organization's signup policy (raw override + effective resolution)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPolicyEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateOrganizationAuthSettings",
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Create or replace the organization's signup-policy override",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAuthPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPolicyEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "resetOrganizationAuthSettings",
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Remove the signup-policy override (revert to the platform default)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ok"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/auth-settings/defaults": {
+      "get": {
+        "operationId": "getPlatformAuthSettings",
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Read the platform-default signup policy (superadmin only)",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPolicyEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePlatformAuthSettings",
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Update the platform-default signup policy (superadmin only)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAuthPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPolicyEnvelope"
                 }
               }
             }

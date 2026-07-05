@@ -781,7 +781,8 @@
       "tabs": {
         "members": "Membros",
         "providers": "Fornecedores",
-        "settings": "Definições"
+        "settings": "Definições",
+        "authentication": "Autenticação"
       },
       "new": {
         "title": "Criar organização",
@@ -825,7 +826,43 @@
         "title": "Eliminar organização",
         "description": "A eliminação remove a organização. A organização tem de estar vazia (sem membros)."
       },
-      "deleteError": "Não foi possível eliminar a organização."
+      "deleteError": "Não foi possível eliminar a organização.",
+      "authPolicy": {
+        "description": "Controla como novas contas se registram e são ativadas nesta organização.",
+        "platformTitle": "Padrões de cadastro da plataforma",
+        "platformDescription": "A política de cadastro herdada por toda organização sem configuração própria.",
+        "inheritBody": "Esta organização herda os padrões de cadastro da plataforma.",
+        "customize": "Personalizar para esta organização",
+        "cancel": "Cancelar",
+        "requireVerification": "Exigir verificação de e-mail",
+        "requireVerificationHelp": "Cadastros com e-mail e senha precisam confirmar o endereço antes de entrar. Logins sociais já chegam verificados pelo provedor.",
+        "approvalMode": "Modo de aprovação",
+        "approvalModeAdmin": "Aprovação de administrador obrigatória",
+        "approvalModeAuto": "Ativo imediatamente",
+        "approvalModeHelp": "Como uma nova conta se torna ativa após o cadastro.",
+        "openSignupWarning": "Qualquer pessoa que se cadastrar terá acesso imediato sem comprovar que possui o endereço de e-mail.",
+        "restrictMethods": "Restringir métodos de login",
+        "restrictMethodsHelp": "Cadastros por métodos desmarcados aguardam aprovação de um administrador.",
+        "methodEmail": "E-mail e senha",
+        "methodGoogle": "Google",
+        "methodMicrosoft": "Microsoft",
+        "methodGithub": "GitHub",
+        "autoApproveDomains": "Domínios de e-mail aprovados automaticamente",
+        "autoApproveDomainsHelp": "Endereços verificados desses domínios são ativados imediatamente, mesmo quando a aprovação de administrador é obrigatória. Separe os domínios com vírgulas.",
+        "save": "Salvar política",
+        "saved": "Política de cadastro atualizada.",
+        "reset": "Restaurar padrões da plataforma",
+        "resetDone": "Configuração removida — esta organização agora herda os padrões da plataforma.",
+        "errorToast": "Não foi possível salvar a política de cadastro.",
+        "summaryVerification": "Verificação de e-mail",
+        "summaryApproval": "Aprovação",
+        "summaryMethods": "Métodos de login",
+        "summaryDomains": "Domínios auto-aprovados",
+        "on": "Obrigatória",
+        "off": "Não obrigatória",
+        "allMethods": "Todos os métodos",
+        "noDomains": "Nenhum"
+      }
     },
     "memberships": {
       "title": "Adesões",
@@ -1354,7 +1391,8 @@
     "number": "Introduza um número válido.",
     "passwordsMismatch": "As palavras-passe não coincidem.",
     "locale": "Escolha um idioma suportado.",
-    "dateFormat": "Escolha um formato de data válido."
+    "dateFormat": "Escolha um formato de data válido.",
+    "domainList": "Insira domínios válidos separados por vírgulas (por exemplo, acme.com)."
   },
   "sso": {
     "confirm": {

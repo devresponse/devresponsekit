@@ -1,8 +1,12 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { AuthPolicyForm, type AuthPolicySettingsJson } from "@/components/admin/auth-policy-form";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AdministratorOrganizationsGrid } from "./_organizations-grid";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +36,24 @@ export default async function AdministratorOrganizationsPage({
   const canCreate = guard.access.permissions.includes("admin.orgs.create");
   const canDelete = guard.access.permissions.includes("admin.orgs.delete");
 
+  // Platform sign-up defaults (0007): SUPERADMIN-only card — editing this row
+  // changes the signup workflow of every org without its own override.
+  const superadmin = isSuperadmin(guard.access);
+  const platformDefaults: AuthPolicySettingsJson | null = superadmin
+    ? await getOrgAuthSettingsRow(null).then((row) =>
+        row
+          ? {
+              requireEmailVerification: row.requireEmailVerification,
+              signupApprovalMode:
+                row.signupApprovalMode === "auto_active" ? "auto_active" : "admin_approval",
+              allowedAuthMethods:
+                row.allowedAuthMethods as AuthPolicySettingsJson["allowedAuthMethods"],
+              autoApproveEmailDomains: row.autoApproveEmailDomains,
+            }
+          : null,
+      )
+    : null;
+
   const t = await getTranslations({ locale, namespace: "administrator.orgs" });
 
   return (
@@ -50,6 +72,23 @@ export default async function AdministratorOrganizationsPage({
           ) : null
         }
       />
+
+      {superadmin ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("authPolicy.platformTitle")}</CardTitle>
+            <CardDescription>{t("authPolicy.platformDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AuthPolicyForm
+              endpoint="/api/administrator/auth-settings/defaults"
+              scope="platform"
+              initialSettings={platformDefaults}
+              canUpdate
+            />
+          </CardContent>
+        </Card>
+      ) : null}
     </section>
   );
 }

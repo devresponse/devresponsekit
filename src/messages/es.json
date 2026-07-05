@@ -781,7 +781,8 @@
       "tabs": {
         "members": "Miembros",
         "providers": "Proveedores",
-        "settings": "Configuración"
+        "settings": "Configuración",
+        "authentication": "Autenticación"
       },
       "new": {
         "title": "Crear organización",
@@ -825,7 +826,43 @@
         "title": "Eliminar organización",
         "description": "Al eliminar se quita la organización. La organización debe estar vacía (sin miembros)."
       },
-      "deleteError": "No se pudo eliminar la organización."
+      "deleteError": "No se pudo eliminar la organización.",
+      "authPolicy": {
+        "description": "Controla cómo se registran y activan las cuentas nuevas en esta organización.",
+        "platformTitle": "Valores de registro predeterminados de la plataforma",
+        "platformDescription": "La política de registro que hereda cada organización sin configuración propia.",
+        "inheritBody": "Esta organización hereda los valores de registro predeterminados de la plataforma.",
+        "customize": "Personalizar para esta organización",
+        "cancel": "Cancelar",
+        "requireVerification": "Exigir verificación de correo electrónico",
+        "requireVerificationHelp": "Los registros con correo y contraseña deben confirmar su dirección antes de iniciar sesión. Los inicios de sesión sociales ya están verificados por su proveedor.",
+        "approvalMode": "Modo de aprobación",
+        "approvalModeAdmin": "Se requiere aprobación de un administrador",
+        "approvalModeAuto": "Activo de inmediato",
+        "approvalModeHelp": "Cómo se activa una cuenta nueva después del registro.",
+        "openSignupWarning": "Cualquier persona que se registre obtendrá acceso inmediato sin demostrar que posee su dirección de correo.",
+        "restrictMethods": "Restringir métodos de inicio de sesión",
+        "restrictMethodsHelp": "Los registros con métodos no marcados esperan la aprobación de un administrador.",
+        "methodEmail": "Correo y contraseña",
+        "methodGoogle": "Google",
+        "methodMicrosoft": "Microsoft",
+        "methodGithub": "GitHub",
+        "autoApproveDomains": "Dominios de correo aprobados automáticamente",
+        "autoApproveDomainsHelp": "Las direcciones verificadas de estos dominios se activan de inmediato, incluso cuando se requiere aprobación de un administrador. Separe los dominios con comas.",
+        "save": "Guardar política",
+        "saved": "Política de registro actualizada.",
+        "reset": "Restablecer los valores de la plataforma",
+        "resetDone": "Configuración eliminada: esta organización ahora hereda los valores predeterminados de la plataforma.",
+        "errorToast": "No se pudo guardar la política de registro.",
+        "summaryVerification": "Verificación de correo",
+        "summaryApproval": "Aprobación",
+        "summaryMethods": "Métodos de inicio de sesión",
+        "summaryDomains": "Dominios aprobados automáticamente",
+        "on": "Requerida",
+        "off": "No requerida",
+        "allMethods": "Todos los métodos",
+        "noDomains": "Ninguno"
+      }
     },
     "memberships": {
       "title": "Membresías",
@@ -1354,7 +1391,8 @@
     "number": "Introduce un número válido.",
     "passwordsMismatch": "Las contraseñas no coinciden.",
     "locale": "Elige un idioma compatible.",
-    "dateFormat": "Elige un formato de fecha válido."
+    "dateFormat": "Elige un formato de fecha válido.",
+    "domainList": "Introduzca dominios válidos separados por comas (por ejemplo acme.com)."
   },
   "sso": {
     "confirm": {

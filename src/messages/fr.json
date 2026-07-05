@@ -781,7 +781,8 @@
       "tabs": {
         "members": "Membres",
         "providers": "Fournisseurs",
-        "settings": "Paramètres"
+        "settings": "Paramètres",
+        "authentication": "Authentification"
       },
       "new": {
         "title": "Créer une organisation",
@@ -825,7 +826,43 @@
         "title": "Supprimer l'organisation",
         "description": "La suppression retire l'organisation. L'organisation doit être vide (sans membres)."
       },
-      "deleteError": "Impossible de supprimer l'organisation."
+      "deleteError": "Impossible de supprimer l'organisation.",
+      "authPolicy": {
+        "description": "Contrôle la façon dont les nouveaux comptes s'inscrivent et deviennent actifs pour cette organisation.",
+        "platformTitle": "Paramètres d'inscription par défaut de la plateforme",
+        "platformDescription": "La politique d'inscription héritée par chaque organisation sans configuration propre.",
+        "inheritBody": "Cette organisation hérite des paramètres d'inscription par défaut de la plateforme.",
+        "customize": "Personnaliser pour cette organisation",
+        "cancel": "Annuler",
+        "requireVerification": "Exiger la vérification de l'e-mail",
+        "requireVerificationHelp": "Les inscriptions par e-mail et mot de passe doivent confirmer leur adresse avant de se connecter. Les connexions sociales sont déjà vérifiées par leur fournisseur.",
+        "approvalMode": "Mode d'approbation",
+        "approvalModeAdmin": "Approbation d'un administrateur requise",
+        "approvalModeAuto": "Actif immédiatement",
+        "approvalModeHelp": "Comment un nouveau compte devient actif après l'inscription.",
+        "openSignupWarning": "Toute personne qui s'inscrit obtiendra un accès immédiat sans prouver qu'elle possède son adresse e-mail.",
+        "restrictMethods": "Restreindre les méthodes de connexion",
+        "restrictMethodsHelp": "Les inscriptions via des méthodes non cochées attendent l'approbation d'un administrateur.",
+        "methodEmail": "E-mail et mot de passe",
+        "methodGoogle": "Google",
+        "methodMicrosoft": "Microsoft",
+        "methodGithub": "GitHub",
+        "autoApproveDomains": "Domaines d'e-mail auto-approuvés",
+        "autoApproveDomainsHelp": "Les adresses vérifiées de ces domaines deviennent actives immédiatement, même lorsque l'approbation d'un administrateur est requise. Séparez les domaines par des virgules.",
+        "save": "Enregistrer la politique",
+        "saved": "Politique d'inscription mise à jour.",
+        "reset": "Rétablir les valeurs par défaut de la plateforme",
+        "resetDone": "Configuration supprimée — cette organisation hérite désormais des valeurs par défaut de la plateforme.",
+        "errorToast": "Impossible d'enregistrer la politique d'inscription.",
+        "summaryVerification": "Vérification de l'e-mail",
+        "summaryApproval": "Approbation",
+        "summaryMethods": "Méthodes de connexion",
+        "summaryDomains": "Domaines auto-approuvés",
+        "on": "Requise",
+        "off": "Non requise",
+        "allMethods": "Toutes les méthodes",
+        "noDomains": "Aucun"
+      }
     },
     "memberships": {
       "title": "Adhésions",
@@ -1354,7 +1391,8 @@
     "number": "Saisissez un nombre valide.",
     "passwordsMismatch": "Les mots de passe ne correspondent pas.",
     "locale": "Choisissez une langue prise en charge.",
-    "dateFormat": "Choisissez un format de date valide."
+    "dateFormat": "Choisissez un format de date valide.",
+    "domainList": "Saisissez des domaines valides séparés par des virgules (par exemple acme.com)."
   },
   "sso": {
     "confirm": {

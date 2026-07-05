@@ -34,10 +34,12 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
 
 /**
  * Built-in defaults. Keep in sync with the seeded rows in the SQL migrations:
- * the `en` rows in `0001-initial-schema.sql` (password_reset, test_email) and
- * `0006-email-verification-template.sql` (email_verification); the non-`en`
+ * the `en` rows in `0001-initial-schema.sql` (password_reset, test_email),
+ * `0006-email-verification-template.sql` (email_verification), and
+ * `0009-invitation-template.sql` (organization_invitation); the non-`en`
  * rows in `locales/0001`–`0005` (fr/es/uk, pt, zh, hi, ja for the first two
- * templates) and `locales/0006-email-verification-locales.sql`.
+ * templates), `locales/0006-email-verification-locales.sql`, and
+ * `locales/0007-invitation-locales.sql`.
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {
@@ -336,9 +338,119 @@ export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
       },
     },
   },
+  {
+    key: "organization_invitation",
+    subject: "You're invited to join {{organizationName}}",
+    bodyHtml:
+      "<p>Hi,</p>" +
+      "<p>{{inviterName}} has invited you to join <strong>{{organizationName}}</strong>.</p>" +
+      '<p><a href="{{acceptUrl}}">Accept the invitation</a></p>' +
+      "<p>This invitation expires in 7 days. If you were not expecting it, you can safely ignore this email.</p>",
+    bodyText:
+      "Hi,\n\n" +
+      "{{inviterName}} has invited you to join {{organizationName}}.\n\n" +
+      "Accept the invitation:\n{{acceptUrl}}\n\n" +
+      "This invitation expires in 7 days. If you were not expecting it, you can safely ignore this email.",
+    description: "Sent when an administrator invites someone to an organization (0008).",
+    variables: ["inviterName", "organizationName", "acceptUrl"],
+    translations: {
+      fr: {
+        subject: "Vous êtes invité à rejoindre {{organizationName}}",
+        bodyHtml:
+          "<p>Bonjour,</p>" +
+          "<p>{{inviterName}} vous a invité à rejoindre <strong>{{organizationName}}</strong>.</p>" +
+          '<p><a href="{{acceptUrl}}">Accepter l’invitation</a></p>' +
+          "<p>Cette invitation expire dans 7 jours. Si vous ne l’attendiez pas, vous pouvez ignorer cet e-mail.</p>",
+        bodyText:
+          "Bonjour,\n\n" +
+          "{{inviterName}} vous a invité à rejoindre {{organizationName}}.\n\n" +
+          "Accepter l’invitation :\n{{acceptUrl}}\n\n" +
+          "Cette invitation expire dans 7 jours. Si vous ne l’attendiez pas, vous pouvez ignorer cet e-mail.",
+      },
+      es: {
+        subject: "Te han invitado a unirte a {{organizationName}}",
+        bodyHtml:
+          "<p>Hola,</p>" +
+          "<p>{{inviterName}} te ha invitado a unirte a <strong>{{organizationName}}</strong>.</p>" +
+          '<p><a href="{{acceptUrl}}">Aceptar la invitación</a></p>' +
+          "<p>Esta invitación caduca en 7 días. Si no la esperabas, puedes ignorar este correo de forma segura.</p>",
+        bodyText:
+          "Hola,\n\n" +
+          "{{inviterName}} te ha invitado a unirte a {{organizationName}}.\n\n" +
+          "Aceptar la invitación:\n{{acceptUrl}}\n\n" +
+          "Esta invitación caduca en 7 días. Si no la esperabas, puedes ignorar este correo de forma segura.",
+      },
+      uk: {
+        subject: "Вас запрошено приєднатися до {{organizationName}}",
+        bodyHtml:
+          "<p>Вітаємо!</p>" +
+          "<p>{{inviterName}} запрошує вас приєднатися до <strong>{{organizationName}}</strong>.</p>" +
+          '<p><a href="{{acceptUrl}}">Прийняти запрошення</a></p>' +
+          "<p>Це запрошення діє 7 днів. Якщо ви не очікували його, можете проігнорувати цей лист.</p>",
+        bodyText:
+          "Вітаємо!\n\n" +
+          "{{inviterName}} запрошує вас приєднатися до {{organizationName}}.\n\n" +
+          "Прийняти запрошення:\n{{acceptUrl}}\n\n" +
+          "Це запрошення діє 7 днів. Якщо ви не очікували його, можете проігнорувати цей лист.",
+      },
+      pt: {
+        subject: "Você foi convidado a juntar-se a {{organizationName}}",
+        bodyHtml:
+          "<p>Olá,</p>" +
+          "<p>{{inviterName}} convidou você para se juntar a <strong>{{organizationName}}</strong>.</p>" +
+          '<p><a href="{{acceptUrl}}">Aceitar o convite</a></p>' +
+          "<p>Este convite expira em 7 dias. Se você não o esperava, pode ignorar este e-mail com segurança.</p>",
+        bodyText:
+          "Olá,\n\n" +
+          "{{inviterName}} convidou você para se juntar a {{organizationName}}.\n\n" +
+          "Aceitar o convite:\n{{acceptUrl}}\n\n" +
+          "Este convite expira em 7 dias. Se você não o esperava, pode ignorar este e-mail com segurança.",
+      },
+      zh: {
+        subject: "邀请您加入 {{organizationName}}",
+        bodyHtml:
+          "<p>您好，</p>" +
+          "<p>{{inviterName}} 邀请您加入 <strong>{{organizationName}}</strong>。</p>" +
+          '<p><a href="{{acceptUrl}}">接受邀请</a></p>' +
+          "<p>此邀请将在 7 天后失效。如果您并未预期收到此邮件，可以安全地忽略它。</p>",
+        bodyText:
+          "您好，\n\n" +
+          "{{inviterName}} 邀请您加入 {{organizationName}}。\n\n" +
+          "接受邀请：\n{{acceptUrl}}\n\n" +
+          "此邀请将在 7 天后失效。如果您并未预期收到此邮件，可以安全地忽略它。",
+      },
+      hi: {
+        subject: "आपको {{organizationName}} में शामिल होने के लिए आमंत्रित किया गया है",
+        bodyHtml:
+          "<p>नमस्ते,</p>" +
+          "<p>{{inviterName}} ने आपको <strong>{{organizationName}}</strong> में शामिल होने के लिए आमंत्रित किया है।</p>" +
+          '<p><a href="{{acceptUrl}}">आमंत्रण स्वीकार करें</a></p>' +
+          "<p>यह आमंत्रण 7 दिनों में समाप्त हो जाएगा। यदि आपको इसकी अपेक्षा नहीं थी, तो आप इस ईमेल को सुरक्षित रूप से अनदेखा कर सकते हैं।</p>",
+        bodyText:
+          "नमस्ते,\n\n" +
+          "{{inviterName}} ने आपको {{organizationName}} में शामिल होने के लिए आमंत्रित किया है।\n\n" +
+          "आमंत्रण स्वीकार करें:\n{{acceptUrl}}\n\n" +
+          "यह आमंत्रण 7 दिनों में समाप्त हो जाएगा। यदि आपको इसकी अपेक्षा नहीं थी, तो आप इस ईमेल को सुरक्षित रूप से अनदेखा कर सकते हैं।",
+      },
+      ja: {
+        subject: "{{organizationName}} への招待",
+        bodyHtml:
+          "<p>こんにちは。</p>" +
+          "<p>{{inviterName}} があなたを <strong>{{organizationName}}</strong> に招待しました。</p>" +
+          '<p><a href="{{acceptUrl}}">招待を受け入れる</a></p>' +
+          "<p>この招待は 7 日後に無効になります。心当たりがない場合は、このメールを無視してください。</p>",
+        bodyText:
+          "こんにちは。\n\n" +
+          "{{inviterName}} があなたを {{organizationName}} に招待しました。\n\n" +
+          "招待を受け入れる：\n{{acceptUrl}}\n\n" +
+          "この招待は 7 日後に無効になります。心当たりがない場合は、このメールを無視してください。",
+      },
+    },
+  },
 ] as const;
 
-export type EmailTemplateKey = "password_reset" | "test_email" | "email_verification";
+export type EmailTemplateKey =
+  "password_reset" | "test_email" | "email_verification" | "organization_invitation";
 
 /**
  * Returns the code-level default for `key`, with the requested `locale`'s

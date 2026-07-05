@@ -141,6 +141,15 @@ describe("getAuthPolicyForOrg", () => {
     const policy = await getAuthPolicyForOrg("org-1");
     expect(policy.allowedAuthMethods).toEqual(["email"]);
   });
+
+  it("accepts the invite_only mode (0008) instead of failing closed", async () => {
+    stubs.policyRows = () => [
+      { ...DEFAULT_ROW, organization_id: "org-1", signup_approval_mode: "invite_only" },
+    ];
+    const policy = await getAuthPolicyForOrg("org-1");
+    expect(policy.signupApprovalMode).toBe("invite_only");
+    expect(policy.source).toBe("organization");
+  });
 });
 
 describe("findEmailDomainOrganization", () => {
@@ -297,6 +306,46 @@ describe("decideInitialStatus", () => {
       decideInitialStatus(
         { ...base, autoApproveEmailDomains: ["example.com"] },
         { ...input, email: "Ada@EXAMPLE.com", emailVerified: true },
+      ),
+    ).toEqual({ status: "active", reason: "domain_auto_approved" });
+  });
+
+  it("a valid invitation activates under every mode — the invitation IS the approval (0008)", () => {
+    for (const mode of ["admin_approval", "auto_active", "invite_only"] as const) {
+      expect(
+        decideInitialStatus(
+          { ...base, signupApprovalMode: mode },
+          { ...input, hasValidInvitation: true },
+        ),
+      ).toEqual({ status: "active", reason: "invitation" });
+    }
+  });
+
+  it("a disallowed method parks even an INVITED signup", () => {
+    expect(
+      decideInitialStatus(
+        { ...base, allowedAuthMethods: ["google"] },
+        { ...input, hasValidInvitation: true },
+      ),
+    ).toEqual({ status: "pending_approval", reason: "auth_method_not_allowed" });
+  });
+
+  it("invite_only parks uninvited signups as invite_required", () => {
+    expect(decideInitialStatus({ ...base, signupApprovalMode: "invite_only" }, input)).toEqual({
+      status: "pending_approval",
+      reason: "invite_required",
+    });
+  });
+
+  it("invite_only still honors a verified auto-approve domain", () => {
+    expect(
+      decideInitialStatus(
+        {
+          ...base,
+          signupApprovalMode: "invite_only",
+          autoApproveEmailDomains: ["example.com"],
+        },
+        { ...input, emailVerified: true },
       ),
     ).toEqual({ status: "active", reason: "domain_auto_approved" });
   });

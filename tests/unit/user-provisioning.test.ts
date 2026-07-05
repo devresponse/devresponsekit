@@ -28,6 +28,18 @@ import { provisionUserFromAuth, reevaluatePendingActivation } from "@/lib/user-p
 const auditMock = vi.fn();
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMock(...a) }));
 
+const findInvitationMock = vi.fn();
+const consumeInvitationMock = vi.fn();
+vi.mock("@/lib/invitations.server", () => ({
+  findValidInvitationByToken: (...a: unknown[]) => findInvitationMock(...a),
+  consumeInvitation: (...a: unknown[]) => consumeInvitationMock(...a),
+}));
+
+const logErrorMock = vi.fn();
+vi.mock("@/lib/observability/logger.server", () => ({
+  logServerError: (...a: unknown[]) => logErrorMock(...a),
+}));
+
 interface PolicyRow {
   organization_id: string | null;
   require_email_verification: boolean;
@@ -142,6 +154,11 @@ const DEFAULT_POLICY_ROW: PolicyRow = {
 
 beforeEach(() => {
   auditMock.mockReset();
+  findInvitationMock.mockReset();
+  findInvitationMock.mockResolvedValue(null);
+  consumeInvitationMock.mockReset();
+  consumeInvitationMock.mockResolvedValue({ consumed: true, roleGranted: false });
+  logErrorMock.mockReset();
   insertCalls = [];
   updateCalls = [];
   stubs = {
@@ -377,6 +394,123 @@ describe("provisionUserFromAuth", () => {
         metadata: expect.objectContaining({ emailDomainRouted: true }),
       }),
     );
+  });
+
+  it("places an INVITED signup active in the inviting org and consumes the invitation (0008)", async () => {
+    findInvitationMock.mockResolvedValue({
+      id: "inv-1",
+      organizationId: "org-invited",
+      organizationName: "Invited Org",
+      email: "ada@example.com",
+      roleId: null,
+      status: "pending",
+      expiresAt: new Date("2099-01-01T00:00:00Z"),
+    });
+    stubs.orgSelect = () => {
+      throw new Error("an invited signup must not resolve the org by slug");
+    };
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-inv",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+      invitationToken: "tok-plain",
+    });
+
+    expect(findInvitationMock).toHaveBeenCalledWith("tok-plain");
+    expect(result.organizationId).toBe("org-invited");
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
+    expect(
+      insertCalls.find((c) => c.table === "app_organization_memberships")?.values,
+    ).toMatchObject({
+      organization_id: "org-invited",
+      status: "active",
+      provider_organization_key: null,
+    });
+    expect(consumeInvitationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invitation: expect.objectContaining({ id: "inv-1" }),
+        appUser: expect.objectContaining({ id: "user-1", primaryEmail: "ada@example.com" }),
+      }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        metadata: expect.objectContaining({ decisionReason: "invitation" }),
+      }),
+    );
+  });
+
+  it("treats an email-mismatched invitation as uninvited (no consume, normal policy)", async () => {
+    findInvitationMock.mockResolvedValue({
+      id: "inv-1",
+      organizationId: "org-invited",
+      organizationName: "Invited Org",
+      email: "someone-else@example.com",
+      roleId: null,
+      status: "pending",
+      expiresAt: new Date("2099-01-01T00:00:00Z"),
+    });
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-mismatch",
+      email: "ada@example.com",
+      emailVerified: false,
+      provider: "email",
+      invitationToken: "tok-plain",
+    });
+
+    expect(result.organizationId).toBe("org-default");
+    expect(result.status).toBe("pending_approval");
+    expect(consumeInvitationMock).not.toHaveBeenCalled();
+  });
+
+  it("parks uninvited signups under invite_only with reason invite_required", async () => {
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: true,
+        signup_approval_mode: "invite_only",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      },
+    ];
+
+    await provisionUserFromAuth({
+      betterAuthUserId: "ba-uninvited",
+      email: "stranger@example.com",
+      emailVerified: false,
+      provider: "email",
+    });
+
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe(
+      "pending_approval",
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.pending_approval",
+        metadata: expect.objectContaining({ decisionReason: "invite_required" }),
+      }),
+    );
+  });
+
+  it("degrades to the uninvited path when the invitation lookup throws", async () => {
+    findInvitationMock.mockRejectedValue(new Error("db down"));
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-err",
+      email: "ada@example.com",
+      emailVerified: false,
+      provider: "email",
+      invitationToken: "tok-plain",
+    });
+
+    expect(result.status).toBe("pending_approval");
+    expect(result.organizationId).toBe("org-default");
+    expect(consumeInvitationMock).not.toHaveBeenCalled();
+    expect(logErrorMock).toHaveBeenCalled();
   });
 });
 

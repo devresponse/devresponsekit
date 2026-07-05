@@ -32,7 +32,13 @@ import {
  */
 
 export type AuthMethod = "email" | "google" | "microsoft" | "github";
-export type SignupApprovalMode = "admin_approval" | "auto_active";
+export type SignupApprovalMode = "admin_approval" | "auto_active" | "invite_only";
+
+const APPROVAL_MODES: readonly SignupApprovalMode[] = [
+  "admin_approval",
+  "auto_active",
+  "invite_only",
+];
 
 export interface OrgAuthPolicy {
   requireEmailVerification: boolean;
@@ -96,10 +102,14 @@ interface PolicyRow {
   auto_approve_email_domains: string[] | null;
 }
 
+function isApprovalMode(value: string): value is SignupApprovalMode {
+  return (APPROVAL_MODES as readonly string[]).includes(value);
+}
+
 function toPolicy(row: PolicyRow, source: OrgAuthPolicy["source"]): OrgAuthPolicy {
   // The mode is CHECK-constrained in the DB; an unknown value can only mean
   // schema drift or a bypassed write path — fail closed rather than guess.
-  if (row.signup_approval_mode !== "admin_approval" && row.signup_approval_mode !== "auto_active") {
+  if (!isApprovalMode(row.signup_approval_mode)) {
     return FAIL_CLOSED_AUTH_POLICY;
   }
   const methods =
@@ -197,7 +207,12 @@ export async function resolveSignupPolicy(
 }
 
 export type SignupDecisionReason =
-  "auth_method_not_allowed" | "auto_active" | "domain_auto_approved" | "admin_approval";
+  | "auth_method_not_allowed"
+  | "invitation"
+  | "auto_active"
+  | "domain_auto_approved"
+  | "invite_required"
+  | "admin_approval";
 
 export interface SignupStatusDecision {
   status: "active" | "pending_approval";
@@ -210,17 +225,30 @@ export interface SignupStatusDecision {
  * Order matters:
  *   1. a disallowed auth method always parks the signup in
  *      `pending_approval` (visible to admins, never silently dropped) —
- *      even when the org is otherwise `auto_active`;
- *   2. `auto_active` activates immediately;
- *   3. a VERIFIED email on an auto-approve domain activates immediately;
- *   4. everything else awaits admin approval.
+ *      even for invited or `auto_active` signups;
+ *   2. a valid invitation activates immediately — the invitation IS the
+ *      approval (0008); callers set `hasValidInvitation` only after the
+ *      token and the email-match rule have been verified;
+ *   3. `auto_active` activates immediately;
+ *   4. a VERIFIED email on an auto-approve domain activates immediately;
+ *   5. `invite_only` parks everything else in `pending_approval`
+ *      (`invite_required`) — uninvited signups are never silently dropped;
+ *   6. everything else awaits admin approval.
  */
 export function decideInitialStatus(
   policy: OrgAuthPolicy,
-  input: { provider: AuthMethod; email: string; emailVerified: boolean },
+  input: {
+    provider: AuthMethod;
+    email: string;
+    emailVerified: boolean;
+    hasValidInvitation?: boolean;
+  },
 ): SignupStatusDecision {
   if (policy.allowedAuthMethods !== null && !policy.allowedAuthMethods.includes(input.provider)) {
     return { status: "pending_approval", reason: "auth_method_not_allowed" };
+  }
+  if (input.hasValidInvitation) {
+    return { status: "active", reason: "invitation" };
   }
   if (policy.signupApprovalMode === "auto_active") {
     return { status: "active", reason: "auto_active" };
@@ -233,6 +261,9 @@ export function decideInitialStatus(
     policy.autoApproveEmailDomains.includes(domain)
   ) {
     return { status: "active", reason: "domain_auto_approved" };
+  }
+  if (policy.signupApprovalMode === "invite_only") {
+    return { status: "pending_approval", reason: "invite_required" };
   }
   return { status: "pending_approval", reason: "admin_approval" };
 }

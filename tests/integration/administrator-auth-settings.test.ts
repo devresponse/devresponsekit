@@ -227,6 +227,15 @@ describe("PATCH /api/administrator/organizations/:id/auth-settings", () => {
     expect(badDomain.status).toBe(400);
   });
 
+  it("accepts the invite_only approval mode (0008)", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    const res = await orgPATCH(
+      jsonReq(ORG_ENDPOINT, { ...VALID_BODY, signupApprovalMode: "invite_only" }),
+      ctx(),
+    );
+    expect(res.status).toBe(200);
+  });
+
   it("upserts the policy and audits admin.organization.auth_policy_updated", async () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
     const res = await orgPATCH(jsonReq(ORG_ENDPOINT, VALID_BODY), ctx());

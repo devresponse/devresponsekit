@@ -60,6 +60,31 @@ export interface AppOrganizationAuthSettingsTable {
   updated_at: Generated<Timestamp>;
 }
 
+/**
+ * Organization invitations (migration 0008). `token_hash` is the SHA-256 of
+ * the single-use accept secret — the plaintext exists only inside the
+ * invitation email. Status lifecycle: `pending` → `accepted` | `revoked`;
+ * a `pending` row past `expires_at` is treated as expired at read time
+ * (`expired` is reserved for explicit sweeps). One pending row per
+ * (organization, email) — enforced by a partial unique index.
+ */
+export interface AppOrganizationInvitationsTable {
+  id: Generated<string>;
+  organization_id: string;
+  email: string;
+  role_id: ColumnType<string | null, string | null | undefined, string | null>;
+  token_hash: string;
+  status: ColumnType<string, string | undefined, string>;
+  invited_by: ColumnType<string | null, string | null | undefined, string | null>;
+  expires_at: ColumnType<Date, Date | string, Date | string>;
+  accepted_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  accepted_app_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
+  revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface AppUsersTable {
   id: Generated<string>;
   better_auth_user_id: string;
@@ -299,6 +324,7 @@ export interface AppDatabase {
   app_organizations: AppOrganizationsTable;
   app_provider_organizations: AppProviderOrganizationsTable;
   app_organization_auth_settings: AppOrganizationAuthSettingsTable;
+  app_organization_invitations: AppOrganizationInvitationsTable;
   app_users: AppUsersTable;
   app_organization_memberships: AppOrganizationMembershipsTable;
   app_roles: AppRolesTable;

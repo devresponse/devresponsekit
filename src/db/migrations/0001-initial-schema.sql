@@ -492,26 +492,13 @@ where o.slug = 'default'
   and r.key = 'superuser'
 on conflict do nothing;
 
--- Default email templates. Keep keys + variables in sync with
--- `DEFAULT_EMAIL_TEMPLATES` in `src/lib/email/templates.ts`.
-insert into app_email_templates (key, locale, subject, body_html, body_text, description) values
-  (
-    'password_reset',
-    'en',
-    'Reset your password',
-    '<p>Hi {{name}},</p><p>We received a request to reset your password. Click the link below to choose a new one. This link expires shortly.</p><p><a href="{{resetUrl}}">Reset your password</a></p><p>If you did not request this, you can safely ignore this email.</p>',
-    E'Hi {{name}},\n\nWe received a request to reset your password. Open the link below to choose a new one. This link expires shortly.\n\n{{resetUrl}}\n\nIf you did not request this, you can safely ignore this email.',
-    'Sent for the forgot-password flow and the administrator "send reset email" action. Variables: {{name}}, {{resetUrl}}.'
-  ),
-  (
-    'test_email',
-    'en',
-    'Test email from {{appName}}',
-    '<p>This is a test email sent from the {{appName}} administrator Email workspace by {{sentBy}}.</p><p>If you can read this, outbound email delivery is working.</p>',
-    E'This is a test email sent from the {{appName}} administrator Email workspace by {{sentBy}}.\n\nIf you can read this, outbound email delivery is working.',
-    'Sent by the administrator "send test email" action. Variables: {{appName}}, {{sentBy}}.'
-  )
-on conflict (key, locale) do nothing;
+-- Email templates are NOT seeded here. Every email template — including the
+-- English base rows — lives with its locale under `locales/`: the en BASE rows
+-- in `locales/0000-email-templates-en.sql` (ALWAYS applied, even when
+-- DB_MIGRATE_LOCALES excludes the localized files) and the localized rows in
+-- `locales/0001-email-templates-<loc>.sql`+. This keeps every template for a
+-- given locale in exactly one file. See migration-plan.ts for the always-on
+-- 0000 handling.
 
 -- ---------------------------------------------------------------------------
 -- Default admin provisioning (backfill)

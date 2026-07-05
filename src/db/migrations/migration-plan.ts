@@ -25,10 +25,21 @@ export function shouldIncludeLocales(raw: string | undefined): boolean {
 }
 
 /**
+ * The one file under `locales/` that is ALWAYS applied, even when
+ * `includeLocales` is false: the English BASE email templates. English is the
+ * fallback every locale resolves to (`resolveTemplate` returns the `en` row
+ * when a localized row is absent), so even an English-only install
+ * (`DB_MIGRATE_LOCALES` off) needs it. It lives under `locales/` so every email
+ * template — en included — sits with its locale, but it is never truly optional.
+ */
+export const ALWAYS_APPLIED_LOCALE = "0000-email-templates-en.sql";
+
+/**
  * Builds the ordered apply-list: CORE migrations first (top-level `*.sql`,
  * excluding the Better-Auth-owned `better-auth*` files, lexical), then the
- * LOCALE migrations (`locales/*.sql`, lexical) — UNLESS `includeLocales` is
- * false, in which case the locale pass is skipped entirely.
+ * LOCALE migrations (`locales/*.sql`, lexical). When `includeLocales` is false
+ * the localized files are skipped — EXCEPT the always-on English base
+ * ({@link ALWAYS_APPLIED_LOCALE}), which is applied in EVERY install.
  *
  * Ledger ids:
  *   - core   → the bare filename (STABLE — core files are never renamed, so an
@@ -55,10 +66,12 @@ export function planMigrations(
     .sort()
     .map((file) => ({ id: file, subdir: "", file }));
 
-  if (!includeLocales) return core;
-
+  // The English base is applied in every install; the other locale files only
+  // when locales are included. `0000-…` sorts first, so the en fallback lands
+  // before any localized row.
   const locales: PlannedMigration[] = localeEntries
     .filter(isSql)
+    .filter((file) => includeLocales || file === ALWAYS_APPLIED_LOCALE)
     .slice()
     .sort()
     .map((file) => ({ id: `locales/${file}`, subdir: "locales", file }));

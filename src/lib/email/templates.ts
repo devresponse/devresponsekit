@@ -33,12 +33,11 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
 }
 
 /**
- * Built-in defaults. Keep in sync with the seeded rows in the SQL migrations:
- * the `en` rows in `0001-initial-schema.sql` (password_reset, test_email),
- * `0006-email-verification-template.sql` (email_verification), and
- * `0009-invitation-template.sql` (organization_invitation); the non-`en`
- * rows in `locales/0001`–`0007` — one file per locale (fr, es, uk, pt, zh, hi,
- * ja), each carrying ALL four templates for that locale.
+ * Built-in defaults. Keep in sync with the seeded rows in the SQL migrations,
+ * which now live entirely under `locales/` — one file per locale, each carrying
+ * all four templates for that locale: the `en` BASE in
+ * `locales/0000-email-templates-en.sql` (always applied) and the localized rows
+ * in `locales/0001`–`0007` (fr, es, uk, pt, zh, hi, ja).
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {

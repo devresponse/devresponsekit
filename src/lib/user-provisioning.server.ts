@@ -366,8 +366,12 @@ export async function reevaluatePendingActivation(input: {
     return;
   }
 
-  let activatedOrgId: string | null = null;
-  let activatedReason: SignupDecisionReason | null = null;
+  // A single sign-in can clear pending status across MORE than one org (a user
+  // pending in several). Record every org activated in this pass, not just the
+  // last, so the audit trail is complete; the first is the primary for the
+  // event's top-level organizationId.
+  const activatedOrgIds: string[] = [];
+  let primaryReason: SignupDecisionReason | null = null;
   for (const membership of memberships) {
     const policy = await getAuthPolicyForOrg(membership.organization_id);
     const decision = decideInitialStatus(policy, {
@@ -388,10 +392,10 @@ export async function reevaluatePendingActivation(input: {
       .where("id", "=", membership.id)
       .where("status", "=", "pending_approval")
       .execute();
-    activatedOrgId = membership.organization_id;
-    activatedReason = decision.reason;
+    activatedOrgIds.push(membership.organization_id);
+    primaryReason ??= decision.reason;
   }
-  if (!activatedOrgId) {
+  if (activatedOrgIds.length === 0) {
     return;
   }
 
@@ -407,13 +411,16 @@ export async function reevaluatePendingActivation(input: {
     outcome: "success",
     actorBetterAuthUserId: input.betterAuthUserId,
     appUserId: user.id,
-    organizationId: activatedOrgId,
+    organizationId: activatedOrgIds[0],
     provider: input.provider,
     email: input.email,
     metadata: {
       from: "pending_approval",
-      decisionReason: activatedReason,
+      decisionReason: primaryReason,
       trigger: "sign_in_reevaluation",
+      // Only meaningful when more than one org cleared at once; the common
+      // single-org case keeps the pre-existing metadata shape.
+      ...(activatedOrgIds.length > 1 ? { activatedOrgIds } : {}),
     },
   });
 }

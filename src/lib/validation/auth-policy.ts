@@ -37,6 +37,9 @@ export const EMAIL_DOMAIN_RE =
  * (every method parks in pending_approval).
  */
 /**
+ * Refinement predicate: is the (verification, domains) combination allowed?
+ * `true` when verification is on OR there are no auto-approve domains.
+ *
  * Domain auto-approval and waived verification are mutually exclusive: with
  * verification off, an email/password address is never proven, so a domain
  * rule would auto-activate anyone claiming that domain (the sign-up hook
@@ -45,7 +48,7 @@ export const EMAIL_DOMAIN_RE =
  * is "VERIFIED addresses only". Mirrored by the fail-closed guard in
  * `decideInitialStatus`.
  */
-function domainsRequireVerification(input: {
+function isDomainVerificationComboValid(input: {
   requireEmailVerification: boolean;
   autoApproveEmailDomains?: string[] | null;
 }): boolean {
@@ -63,7 +66,7 @@ export const authPolicySettingsSchema = z
       .nullable(),
   })
   .strict()
-  .refine(domainsRequireVerification, {
+  .refine(isDomainVerificationComboValid, {
     message: "domainsNeedVerification",
     path: ["autoApproveEmailDomains"],
   });
@@ -113,7 +116,7 @@ export const authPolicyFormSchema = z
   .strict()
   .refine(
     (v) =>
-      domainsRequireVerification({
+      isDomainVerificationComboValid({
         requireEmailVerification: v.requireEmailVerification,
         autoApproveEmailDomains: parseEmailDomainList(v.autoApproveEmailDomainsText).domains,
       }),

@@ -181,6 +181,9 @@ export function AuthPolicyForm({
   }
 
   const restrict = form.watch("restrictMethods");
+  // The most permissive combination: auto-activate everyone AND waive email
+  // proof, so anyone who submits the form gets immediate access. Gates the
+  // `openSignupWarning` callout below.
   const openSignup =
     form.watch("signupApprovalMode") === "auto_active" && !form.watch("requireEmailVerification");
   const rootError = form.formState.errors.root?.message;

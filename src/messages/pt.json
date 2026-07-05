@@ -636,7 +636,9 @@
       "applicationInUse": "Esta aplicação ainda está referenciada e não pode ser eliminada.",
       "rateLimited": "Demasiados pedidos. Tente novamente dentro de momentos.",
       "exportTruncated": "A exportação atingiu o limite máximo de linhas. Refine os filtros e exporte novamente para obter o restante.",
-      "originNotAllowed": "O anfitrião de origem não está na lista permitida para redirecionamentos de SSO."
+      "originNotAllowed": "O anfitrião de origem não está na lista permitida para redirecionamentos de SSO.",
+      "memberExists": "Este endereço já pertence a um membro ativo.",
+      "invitationExists": "Já existe um convite pendente para este endereço."
     },
     "roles": {
       "title": "Funções",
@@ -872,7 +874,33 @@
         "on": "Obrigatória",
         "off": "Não obrigatória",
         "allMethods": "Todos os métodos",
-        "noDomains": "Nenhum"
+        "noDomains": "Nenhum",
+        "approvalModeInvite": "Convite obrigatório"
+      },
+      "invitations": {
+        "title": "Convites",
+        "inviteButton": "Convidar membro",
+        "dialogTitle": "Convidar um membro",
+        "dialogDescription": "Envia um e-mail de convite com um link de aceitação de uso único. Expira em 7 dias.",
+        "emailLabel": "Endereço de e-mail",
+        "roleLabel": "Função (opcional)",
+        "noRole": "Sem função",
+        "send": "Enviar convite",
+        "sent": "Convite enviado.",
+        "sendError": "Não foi possível enviar o convite.",
+        "resendButton": "Reenviar",
+        "resent": "Convite reenviado com um novo link.",
+        "resendError": "Não foi possível reenviar o convite.",
+        "revokeButton": "Revogar",
+        "revokeConfirm": "Revogar este convite?",
+        "revokeError": "Não foi possível revogar o convite.",
+        "columns": {
+          "email": "E-mail",
+          "status": "Status",
+          "role": "Função",
+          "invitedBy": "Convidado por",
+          "expires": "Expira"
+        }
       }
     },
     "memberships": {

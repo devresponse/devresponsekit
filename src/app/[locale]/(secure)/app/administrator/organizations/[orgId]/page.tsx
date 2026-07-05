@@ -8,15 +8,25 @@ import { isUuid } from "@/lib/admin/user-target.server";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { AuthPolicySettingsJson } from "@/components/admin/auth-policy-form";
+import {
+  AUTH_POLICY_APPROVAL_MODES,
+  type AuthPolicyApprovalMode,
+} from "@/lib/validation/auth-policy";
 import { OrganizationDetailTabs } from "./_organization-detail-tabs";
 import type { OrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 
 /** JSON-safe projection for the client tabs (drops updatedAt/organizationId). */
 function toAuthPolicyJson(row: OrgAuthSettingsRow | null): AuthPolicySettingsJson | null {
   if (!row) return null;
+  // Pass every known mode through (a two-way ternary here once silently
+  // downgraded `invite_only` to admin approval in the editor); unknown
+  // values render as the strictest mode, matching the resolver's fail-closed.
+  const mode = (AUTH_POLICY_APPROVAL_MODES as readonly string[]).includes(row.signupApprovalMode)
+    ? (row.signupApprovalMode as AuthPolicyApprovalMode)
+    : "admin_approval";
   return {
     requireEmailVerification: row.requireEmailVerification,
-    signupApprovalMode: row.signupApprovalMode === "auto_active" ? "auto_active" : "admin_approval",
+    signupApprovalMode: mode,
     allowedAuthMethods: row.allowedAuthMethods as AuthPolicySettingsJson["allowedAuthMethods"],
     autoApproveEmailDomains: row.autoApproveEmailDomains,
   };

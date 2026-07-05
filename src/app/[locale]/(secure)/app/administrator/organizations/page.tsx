@@ -5,6 +5,10 @@ import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { AuthPolicyForm, type AuthPolicySettingsJson } from "@/components/admin/auth-policy-form";
+import {
+  AUTH_POLICY_APPROVAL_MODES,
+  type AuthPolicyApprovalMode,
+} from "@/lib/validation/auth-policy";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AdministratorOrganizationsGrid } from "./_organizations-grid";
@@ -44,8 +48,14 @@ export default async function AdministratorOrganizationsPage({
         row
           ? {
               requireEmailVerification: row.requireEmailVerification,
-              signupApprovalMode:
-                row.signupApprovalMode === "auto_active" ? "auto_active" : "admin_approval",
+              // Pass every known mode through (a two-way ternary here once
+              // silently downgraded `invite_only` in the editor); unknown
+              // values render as the strictest mode (fail-closed).
+              signupApprovalMode: (AUTH_POLICY_APPROVAL_MODES as readonly string[]).includes(
+                row.signupApprovalMode,
+              )
+                ? (row.signupApprovalMode as AuthPolicyApprovalMode)
+                : "admin_approval",
               allowedAuthMethods:
                 row.allowedAuthMethods as AuthPolicySettingsJson["allowedAuthMethods"],
               autoApproveEmailDomains: row.autoApproveEmailDomains,

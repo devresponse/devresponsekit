@@ -636,7 +636,9 @@
       "applicationInUse": "Esta aplicación todavía está referenciada y no se puede eliminar.",
       "rateLimited": "Demasiadas solicitudes. Inténtelo de nuevo en un momento.",
       "exportTruncated": "La exportación alcanzó el límite máximo de filas. Refine los filtros y vuelva a exportar para obtener el resto.",
-      "originNotAllowed": "El host de origen no está en la lista permitida para redirecciones SSO."
+      "originNotAllowed": "El host de origen no está en la lista permitida para redirecciones SSO.",
+      "memberExists": "Esta dirección ya pertenece a un miembro activo.",
+      "invitationExists": "Ya existe una invitación pendiente para esta dirección."
     },
     "roles": {
       "title": "Roles",
@@ -872,7 +874,33 @@
         "on": "Requerida",
         "off": "No requerida",
         "allMethods": "Todos los métodos",
-        "noDomains": "Ninguno"
+        "noDomains": "Ninguno",
+        "approvalModeInvite": "Se requiere invitación"
+      },
+      "invitations": {
+        "title": "Invitaciones",
+        "inviteButton": "Invitar miembro",
+        "dialogTitle": "Invitar a un miembro",
+        "dialogDescription": "Envía un correo de invitación con un enlace de aceptación de un solo uso. Caduca en 7 días.",
+        "emailLabel": "Correo electrónico",
+        "roleLabel": "Rol (opcional)",
+        "noRole": "Sin rol",
+        "send": "Enviar invitación",
+        "sent": "Invitación enviada.",
+        "sendError": "No se pudo enviar la invitación.",
+        "resendButton": "Reenviar",
+        "resent": "Invitación reenviada con un enlace nuevo.",
+        "resendError": "No se pudo reenviar la invitación.",
+        "revokeButton": "Revocar",
+        "revokeConfirm": "¿Revocar esta invitación?",
+        "revokeError": "No se pudo revocar la invitación.",
+        "columns": {
+          "email": "Correo",
+          "status": "Estado",
+          "role": "Rol",
+          "invitedBy": "Invitado por",
+          "expires": "Caduca"
+        }
       }
     },
     "memberships": {

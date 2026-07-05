@@ -636,7 +636,9 @@
       "applicationInUse": "このアプリケーションはまだ参照されているため、削除できません。",
       "rateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。",
       "exportTruncated": "エクスポートが最大行数の上限に達しました。フィルターを絞り込んで再エクスポートし、残りを取得してください。",
-      "originNotAllowed": "オリジンホストは SSO リダイレクトの許可リストに含まれていません。"
+      "originNotAllowed": "オリジンホストは SSO リダイレクトの許可リストに含まれていません。",
+      "memberExists": "このアドレスはすでにアクティブなメンバーのものです。",
+      "invitationExists": "このアドレス宛ての保留中の招待がすでに存在します。"
     },
     "roles": {
       "title": "ロール",
@@ -872,7 +874,33 @@
         "on": "必須",
         "off": "不要",
         "allMethods": "すべての方法",
-        "noDomains": "なし"
+        "noDomains": "なし",
+        "approvalModeInvite": "招待が必要"
+      },
+      "invitations": {
+        "title": "招待",
+        "inviteButton": "メンバーを招待",
+        "dialogTitle": "メンバーを招待",
+        "dialogDescription": "一回限りの承諾リンクを含む招待メールを送信します。7 日後に無効になります。",
+        "emailLabel": "メールアドレス",
+        "roleLabel": "ロール（任意）",
+        "noRole": "ロールなし",
+        "send": "招待を送信",
+        "sent": "招待を送信しました。",
+        "sendError": "招待を送信できませんでした。",
+        "resendButton": "再送信",
+        "resent": "新しいリンクで招待を再送信しました。",
+        "resendError": "招待を再送信できませんでした。",
+        "revokeButton": "取り消す",
+        "revokeConfirm": "この招待を取り消しますか？",
+        "revokeError": "招待を取り消せませんでした。",
+        "columns": {
+          "email": "メール",
+          "status": "ステータス",
+          "role": "ロール",
+          "invitedBy": "招待者",
+          "expires": "有効期限"
+        }
       }
     },
     "memberships": {

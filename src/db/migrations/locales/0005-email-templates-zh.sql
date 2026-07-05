@@ -1,17 +1,15 @@
--- locales/0005 — Seed zh (Simplified Chinese) email templates.
+-- locales/0005 — Seed zh (Simplified Chinese) email templates (all non-en rows).
 --
--- Follows locales/0004 (pt): core 0001-initial-schema.sql seeded only the `en`
--- rows for `password_reset` and
--- `test_email`. With Simplified Chinese added to the supported locales
--- (src/config/i18n-config.ts), a recipient with a `zh` `preferred_locale` would
--- otherwise fall back to English (the `resolveTemplate` query returns the `en`
--- row when the locale row is absent). Seed the localized rows so those users
--- get a Chinese email.
+-- The core migrations seed only the `en` base rows (0001-initial-schema.sql:
+-- password_reset + test_email; 0006-email-verification-template.sql;
+-- 0009-invitation-template.sql). A recipient whose `preferred_locale` is
+-- `zh` otherwise falls back to English (`resolveTemplate` returns the `en`
+-- row when the locale row is absent). Seed every localized row here so those
+-- users get a Simplified Chinese email.
 --
--- Keep this copy in sync with `DEFAULT_EMAIL_TEMPLATES` in
--- `src/lib/email/templates.ts` (the code-level fallback). Idempotent via
--- `on conflict (key, locale) do nothing`, so it is safe on a DB where an admin
--- already authored a localized row.
+-- One file per locale — excludable as a group via DB_MIGRATE_LOCALES. Keep in
+-- sync with `DEFAULT_EMAIL_TEMPLATES` in `src/lib/email/templates.ts`.
+-- Idempotent via `on conflict (key, locale) do nothing`.
 
 insert into app_email_templates (key, locale, subject, body_html, body_text, description) values
   (
@@ -29,5 +27,21 @@ insert into app_email_templates (key, locale, subject, body_html, body_text, des
     '<p>这是一封由 {{sentBy}} 从 {{appName}} 管理员邮件工作区发送的测试邮件。</p><p>如果您能看到此内容，说明出站邮件发送功能正常。</p>',
     E'这是一封由 {{sentBy}} 从 {{appName}} 管理员邮件工作区发送的测试邮件。\n\n如果您能看到此内容，说明出站邮件发送功能正常。',
     'Test email — zh translation. Variables: {{appName}}, {{sentBy}}.'
+  ),
+  (
+    'email_verification',
+    'zh',
+    '验证您的电子邮件地址',
+    '<p>您好 {{name}}，</p><p>感谢您创建账户。请点击下方链接确认您的电子邮件地址。此链接将很快失效。</p><p><a href="{{verifyUrl}}">验证您的电子邮件</a></p><p>如果您没有创建账户，您可以安全地忽略此邮件。</p>',
+    E'您好 {{name}}，\n\n感谢您创建账户。请打开下方链接确认您的电子邮件地址。此链接将很快失效。\n\n{{verifyUrl}}\n\n如果您没有创建账户，您可以安全地忽略此邮件。',
+    'Email verification — zh translation. Variables: {{name}}, {{verifyUrl}}.'
+  ),
+  (
+    'organization_invitation',
+    'zh',
+    '邀请您加入 {{organizationName}}',
+    '<p>您好，</p><p>{{inviterName}} 邀请您加入 <strong>{{organizationName}}</strong>。</p><p><a href="{{acceptUrl}}">接受邀请</a></p><p>此邀请将在 7 天后失效。如果您并未预期收到此邮件，可以安全地忽略它。</p>',
+    E'您好，\n\n{{inviterName}} 邀请您加入 {{organizationName}}。\n\n接受邀请：\n{{acceptUrl}}\n\n此邀请将在 7 天后失效。如果您并未预期收到此邮件，可以安全地忽略它。',
+    '邀请加入组织。变量：{{inviterName}}、{{organizationName}}、{{acceptUrl}}。'
   )
 on conflict (key, locale) do nothing;

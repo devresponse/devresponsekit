@@ -22,7 +22,7 @@ This folder is the canonical documentation set, organized by **audience**.
 | [Developer Onboarding](./developer-onboarding.md) | Tooling, install, run, test, project structure, conventions, "how to add a feature" |
 | [API Reference & Clients](./api.md) | The `/api/v1` machine API and admin console API — surface, authentication, error model, request/response examples, and the typed v1 + committed admin SDK clients |
 | [Admin Manager](./admin-manager.md) | Specification for the administrator console: navigation, screens, the guarded request pipeline, permission catalog, audit model |
-| [Sign-up Policy](./auth-signup-policy.md) | The runtime-configurable per-organization signup workflow — email verification, admin approval vs auto-activation, method allow-lists, auto-approve domains, resolution order |
+| [Sign-up Policy](./auth-signup-policy.md) | The runtime-configurable per-organization signup workflow — email verification, admin approval / auto-activation / invite-only, organization invitations, method allow-lists, auto-approve domains, resolution order |
 | [API Keys & Tokens Design](./design-api-keys-and-tokens.md) | Design of the machine credentials — scoped API keys and short-lived EdDSA JWT access tokens — issuance, rotation, revocation |
 | [Form Validation](./form-validation.md) | Shared client/server Zod schemas → `useZodForm` → `Form*` primitives, required markers, error borders, localized messages, accessibility |
 | [Testing](./testing.md) | Test strategy, the suites, how to run each, the coverage ratchet, the security-test coverage, and the manual QA checklist |

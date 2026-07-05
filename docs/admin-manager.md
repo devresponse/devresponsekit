@@ -383,6 +383,16 @@ Manages the tenant entity and its memberships.
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` | IdP org links; `admin.organization.provider_bound` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
 | `GET/PATCH /auth-settings/defaults` | `admin.orgs.read` / `.update` + **superadmin** | The platform-default sign-up policy (`organization_id IS NULL`); 403 for org admins; no DELETE (the baseline must always exist); `admin.platform.auth_policy_updated` |
+| `GET/POST …/[id]/invitations` | `admin.orgs.read` / `admin.orgs.update` | Organization invitations (0008): paginated list (token hashes never exposed) and create-with-email (outbox-first accept link; 409 `member_exists` / `invitation_exists`, 404 `role_not_found` for a cross-org role); `admin.organization.invitation_created` |
+| `DELETE …/[id]/invitations/[invitationId]` | `admin.orgs.update` | Revoke a pending invitation (the link dies immediately); `admin.organization.invitation_revoked` |
+| `POST …/[id]/invitations/[invitationId]/resend` | `admin.orgs.update` | Rotate the token + expiry in place and re-send (revives expired-pending); `admin.organization.invitation_resent` |
+
+Acceptance itself is NOT an administrator surface: invitees land on the public
+`/invite?token=…` page, and signed-in users accept via
+`POST /api/invitations/accept` (session required — deliberately **not** an
+active-membership guard, since activating pending users is the point; the
+session's email must equal the invited address). See
+[Sign-up Policy §6](./auth-signup-policy.md#6-invitations).
 
 Creating, renaming, and deleting an **organization** is superadmin-only — an org
 admin manages the *contents* of their org, not the org record (ADR-0001).

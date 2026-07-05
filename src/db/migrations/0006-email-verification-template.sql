@@ -4,7 +4,7 @@
 -- hook (src/lib/auth.ts) renders this template through the outbox (specs.md §35).
 -- 0001 seeded only `password_reset` and `test_email`; this adds the `en` base
 -- row for the new key. The non-`en` rows live in
--- `locales/0006-email-verification-locales.sql` (excludable via DB_MIGRATE_LOCALES).
+-- `locales/0008-email-verification-locales.sql` (excludable via DB_MIGRATE_LOCALES).
 --
 -- Keep in sync with `DEFAULT_EMAIL_TEMPLATES` in `src/lib/email/templates.ts`
 -- (the code-level fallback). Idempotent via `on conflict (key, locale) do nothing`,

@@ -15,7 +15,8 @@ const CORE = [
   "run-migrations.ts", // the runner itself — not a .sql
   "migration-plan.ts",
 ];
-const LOCALES = ["0002-email-templates-pt.sql", "0001-email-templates-fr-es-uk.sql"];
+// Deliberately out of order — the planner must sort them.
+const LOCALES = ["0002-email-templates-es.sql", "0001-email-templates-fr.sql"];
 
 describe("shouldIncludeLocales", () => {
   it("includes locales by default (unset/empty)", () => {
@@ -43,8 +44,8 @@ describe("planMigrations", () => {
     expect(plan.map((m) => m.id)).toEqual([
       "0001-initial-schema.sql",
       "0002-sso-nonce-expires-index.sql",
-      "locales/0001-email-templates-fr-es-uk.sql",
-      "locales/0002-email-templates-pt.sql",
+      "locales/0001-email-templates-fr.sql",
+      "locales/0002-email-templates-es.sql",
     ]);
   });
 
@@ -53,9 +54,9 @@ describe("planMigrations", () => {
     const core = plan.find((m) => m.id === "0001-initial-schema.sql")!;
     expect(core.subdir).toBe("");
     expect(core.file).toBe("0001-initial-schema.sql");
-    const locale = plan.find((m) => m.id === "locales/0001-email-templates-fr-es-uk.sql")!;
+    const locale = plan.find((m) => m.id === "locales/0001-email-templates-fr.sql")!;
     expect(locale.subdir).toBe("locales");
-    expect(locale.file).toBe("0001-email-templates-fr-es-uk.sql");
+    expect(locale.file).toBe("0001-email-templates-fr.sql");
   });
 
   it("drops the locale pass entirely when excluded (English-only install)", () => {

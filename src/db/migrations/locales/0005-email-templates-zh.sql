@@ -1,6 +1,7 @@
--- locales/0003 — Seed zh (Simplified Chinese) email templates.
+-- locales/0005 — Seed zh (Simplified Chinese) email templates.
 --
--- Follows locales/0002 (pt): 0001 seeded only the `en` rows for `password_reset` and
+-- Follows locales/0004 (pt): core 0001-initial-schema.sql seeded only the `en`
+-- rows for `password_reset` and
 -- `test_email`. With Simplified Chinese added to the supported locales
 -- (src/config/i18n-config.ts), a recipient with a `zh` `preferred_locale` would
 -- otherwise fall back to English (the `resolveTemplate` query returns the `en`

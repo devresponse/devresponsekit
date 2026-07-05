@@ -1,4 +1,4 @@
--- locales/0006 — Seed fr / es / uk / pt / zh / hi / ja `email_verification` rows.
+-- locales/0008 — Seed fr / es / uk / pt / zh / hi / ja `email_verification` rows.
 --
 -- Companion to the core `0006-email-verification-template.sql` (the `en` base).
 -- AUTH-4's sign-up verification email; a recipient whose `preferred_locale` is

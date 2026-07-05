@@ -37,9 +37,10 @@ export interface EmailTemplateDefinition extends LocalizedEmailContent {
  * the `en` rows in `0001-initial-schema.sql` (password_reset, test_email),
  * `0006-email-verification-template.sql` (email_verification), and
  * `0009-invitation-template.sql` (organization_invitation); the non-`en`
- * rows in `locales/0001`–`0005` (fr/es/uk, pt, zh, hi, ja for the first two
- * templates), `locales/0006-email-verification-locales.sql`, and
- * `locales/0007-invitation-locales.sql`.
+ * rows in `locales/0001`–`0007` (one file per locale for the first two
+ * templates: fr, es, uk, pt, zh, hi, ja),
+ * `locales/0008-email-verification-locales.sql`, and
+ * `locales/0009-invitation-locales.sql`.
  */
 export const DEFAULT_EMAIL_TEMPLATES: ReadonlyArray<EmailTemplateDefinition> = [
   {

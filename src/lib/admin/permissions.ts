@@ -67,6 +67,18 @@ export const ANY_ADMIN_PERMISSION: ReadonlyArray<string> = ADMIN_PERMISSION_CATA
 );
 
 /**
+ * The baseline "can use the secure shell" permission. It is NOT an `admin.*`
+ * capability and NOT conferred by a role in the general case — it is IMPLIED
+ * by an active organization membership (the same invariant `decideSecureAccess`
+ * and the account API guard rely on). `getUserAccessContext` grants it to every
+ * active member so the server-filtered shell nav (Dashboard, Account) and the
+ * user-level surfaces that gate on it are visible to a plain member who holds
+ * no role. Kept here, in the neutral shared module, so the runtime and the seed
+ * name it identically.
+ */
+export const SHELL_BASELINE_PERMISSION = "shell.view";
+
+/**
  * The marker permission that elevates a principal to SUPERADMIN — manages
  * EVERY organization; org scoping is bypassed (ADR-0001). `isSuperadmin`
  * checks for exactly this key. Defined in this neutral, non-`server-only`
@@ -83,7 +95,7 @@ export const SUPERADMIN_PERMISSION = "superuser";
  * catalog: a superuser's authority derives from the marker, not from grants.
  */
 export const SUPERUSER_PERMISSIONS: ReadonlyArray<string> = [
-  "shell.view",
+  SHELL_BASELINE_PERMISSION,
   "audit.view",
   SUPERADMIN_PERMISSION,
   ...ANY_ADMIN_PERMISSION,

@@ -161,7 +161,41 @@ describe("getUserAccessContext (DB-backed)", () => {
     rolesExecute.mockResolvedValue([{ key: "admin.users.read" }, { key: "admin.users.read" }]);
 
     const ctx = await getUserAccessContext("ba-1");
-    expect(ctx.permissions).toEqual(["admin.users.read"]);
+    // An active member always carries the baseline `shell.view` (implied by
+    // membership), in addition to whatever their roles grant.
+    expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
+  });
+
+  it("grants the baseline shell.view to an active member who holds NO role (self-registered member)", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-1", status: "active" });
+    // The exact self-registration case: an active membership, but no role or
+    // group grants anything — the union returns nothing.
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-1");
+    // Still gets shell.view so the shell nav (Dashboard, Account) is visible.
+    expect(ctx.permissions).toEqual(["shell.view"]);
+  });
+
+  it("does NOT grant shell.view when the membership is not active (pending member)", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-1", status: "pending_approval" });
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-1");
+    // secure access is not "allow" for a pending membership → no baseline.
+    expect(ctx.permissions).toEqual([]);
   });
 
   it("selects the org named by the active_org cookie (not the earliest)", async () => {
@@ -177,7 +211,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1");
     expect(ctx.organizationId).toBe("o-cookie");
-    expect(ctx.permissions).toEqual(["admin.users.read"]);
+    // An active member always carries the baseline `shell.view` (implied by
+    // membership), in addition to whatever their roles grant.
+    expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
     // The fallback (earliest-membership) query must NOT run when the cookie hits.
     expect(membershipTakeFirst).not.toHaveBeenCalled();
   });
@@ -233,7 +269,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1", { organizationId: "o-bound" });
     expect(ctx.organizationId).toBe("o-bound");
-    expect(ctx.permissions).toEqual(["admin.users.read"]);
+    // An active member always carries the baseline `shell.view` (implied by
+    // membership), in addition to whatever their roles grant.
+    expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
     expect(readActiveOrgId).not.toHaveBeenCalled();
     expect(membershipTakeFirst).not.toHaveBeenCalled();
   });

@@ -105,7 +105,7 @@ flowchart LR
 - **Email + password** (always on) and **Google / Microsoft / GitHub OAuth** (each enabled only when its client id *and* secret are present).
 - **Plugins:** the built-in `admin` plugin (ban / impersonate / session management), a server-only `ssoSession` plugin (subdomain SSO), and `nextCookies` (must be last).
 - **Sessions:** rolling ~8-hour sessions refreshed on activity. Trusted origins come from `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_URL`, and `ADMIN_TRUSTED_ORIGINS`.
-- **Provisioning hook:** on first login, an `app_users` row is provisioned and linked to the Better Auth user via `better_auth_user_id`.
+- **Provisioning hook:** on sign-up (email/password) or first login (OAuth), an `app_users` row is provisioned and linked to the Better Auth user via `better_auth_user_id`. The hooks resolve the target organization's runtime sign-up policy (0007) to decide the initial status and whether email verification is required; a live invitation (0008) activates the account in the inviting org. See [Sign-up Policy](./auth-signup-policy.md).
 
 Better Auth uses the **same `pg` pool** as the app (`src/db/database.ts`) — there is no separate ORM.
 
@@ -297,6 +297,7 @@ erDiagram
 | Domain | Tables |
 | --- | --- |
 | Identity & org | `app_users`, `app_organizations`, `app_organization_memberships`, `app_provider_organizations` |
+| Sign-up policy & invitations | `app_organization_auth_settings` (0007), `app_organization_invitations` (0008) |
 | RBAC | `app_roles`, `app_permissions`, `app_role_permissions`, `app_user_roles` |
 | Groups (ADR-0002) | `app_groups`, `app_group_roles`, `app_group_memberships` |
 | SSO / enterprise apps | `app_enterprise_applications`, `app_sso_handoff_nonces` |

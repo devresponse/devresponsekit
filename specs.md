@@ -53,8 +53,8 @@ These decisions are final.
 | Google | Allow Google accounts; do not restrict to a Google Workspace domain. |
 | Microsoft | Allow Microsoft Entra ID multi-tenant work/school accounts. |
 | GitHub | Do not restrict by GitHub organization/team membership. |
-| New user status | New non-seed users start as `pending_approval`. |
-| Admin approval | Required before secure app access. |
+| New user status | New non-seed users start as `pending_approval` under the platform-default sign-up policy; each organization's runtime policy (0007) can instead auto-activate, require invitations (0008), or auto-approve verified email domains. |
+| Admin approval | Required before secure app access under the default policy; invitations and policy-driven activation bypass the queue (docs/auth-signup-policy.md). |
 | Session duration | 8-hour rolling session, 15-minute update interval, no remember-me option. |
 | Route protection | Use both `proxy.ts` and `[locale]/(secure)/layout.tsx`. |
 | Post-login redirect | Use safe localized `returnTo` captured before sign-in. |
@@ -119,11 +119,11 @@ The secure application lives under the localized `/app` route:
 
 ### 3.4 Organization assignment
 
-On first sign-in/sign-up, assign the user to an organization using provider organization data when available. If not available, assign to the `default` organization.
+On first sign-in/sign-up, assign the user to an organization in this order: a live invitation (0008) overrides everything; then provider organization data when available; then an admin-curated email-domain binding (`app_provider_organizations` with provider `email`); otherwise the `default` organization.
 
 ### 3.5 Admin approval
 
-New non-seed accounts authenticate successfully but cannot access secure routes until approved. They are redirected to:
+Under the platform-default sign-up policy, new non-seed accounts authenticate successfully but cannot access secure routes until approved. An organization's runtime policy (0007) can instead activate them immediately (`auto_active`, a verified auto-approve domain, or an accepted invitation — see docs/auth-signup-policy.md). While pending, they are redirected to:
 
 ```text
 /[locale]/pending-approval
@@ -998,8 +998,13 @@ first-time setup, folding in the administrator indexes, audit
 provisioning, the email tables, **and** the machine-API credential tables
 (`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens`) and the four
 `admin.apikeys.*` / `admin.clients.*` permissions (see §37). The core-table
-DDL below is the heart of that file. There are no other application
-migration files and no further application migrations are required.
+DDL below is the heart of that file. `0001` is the frozen baseline; forward
+migrations are appended as numbered `NNNN-*.sql` files (through `0009` at
+time of writing — SSO/outbox/audit hardening, the per-organization sign-up
+policy `app_organization_auth_settings` (0007), and organization
+invitations `app_organization_invitations` (0008)) plus locale data under
+`migrations/locales/`. See the migration runner below and
+docs/auth-signup-policy.md.
 
 The runner `src/db/migrations/run-migrations.ts` stays multi-file capable
 (it applies every `NNNN-*.sql` in lexical order and records applied
@@ -1347,8 +1352,8 @@ export interface ProviderOrganizationResolution {
  * Resolves an application organization from provider metadata.
  *
  * Provider data is inconsistent across identity providers. This function
- * produces a deterministic organization key while keeping secure access
- * blocked until admin approval occurs.
+ * produces a deterministic organization key; the initial access decision
+ * is made downstream by the organization's runtime sign-up policy (0007).
  */
 export function resolveProviderOrganization(
   input: ProviderOrganizationInput,
@@ -1411,9 +1416,9 @@ Rules:
 1. Google accounts are allowed. If Google returns `hd`, use it; otherwise fallback to `default`.
 2. Microsoft uses tenant ID when available and supports multi-tenant work/school accounts.
 3. GitHub does not query or enforce organization/team membership.
-4. Email/password users start in `default`.
+4. Email/password users start in `default`, unless an admin-curated email-domain binding (provider `email`) or a live invitation (0008) routes them to a specific organization.
 5. Account linking by email requires verified email.
-6. Unverified or missing email creates pending approval state and grants no secure access.
+6. Initial statuses follow the organization's runtime sign-up policy (0007): the platform default parks unverified/uninvited accounts as `pending_approval` with no secure access, while `auto_active`, a verified auto-approve domain, or an accepted invitation activate immediately.
 
 ---
 
@@ -1424,9 +1429,9 @@ Create `src/lib/user-provisioning.server.ts`.
 Responsibilities:
 
 1. Create or update `app_users`.
-2. Resolve organization.
+2. Resolve organization (invitation → provider metadata → email-domain binding → `default`).
 3. Create organization membership.
-4. Set user and membership status to `pending_approval` for non-seed users.
+4. Set initial user and membership statuses from the organization's runtime sign-up policy (0007) for non-seed users — `pending_approval` under the platform default; active for `auto_active`, verified auto-approve domains, or a consumed invitation (0008).
 5. Preserve blocked/suspended/deactivated statuses.
 6. Store preferred locale when available.
 7. Audit provisioning and account-linking events.
@@ -1624,8 +1629,8 @@ Sign-up must:
 1. Allow email/password registration.
 2. Allow social registration through Google, Microsoft, and GitHub.
 3. Provision app user and membership records.
-4. Assign user to provider organization or `default`.
-5. Require admin approval for all non-seed users.
+4. Assign the user to an organization: invitation (0008) → provider organization → email-domain binding → `default`.
+5. Apply the organization's runtime sign-up policy (0007) — admin approval is the platform default; `auto_active`, verified auto-approve domains, and invitations activate immediately.
 6. Redirect to localized `/pending-approval` when approval is required.
 
 ---
@@ -2801,6 +2806,9 @@ admin.user.reactivated
 admin.organization.invitation_created
 admin.organization.invitation_revoked
 admin.organization.invitation_resent
+admin.organization.auth_policy_updated
+admin.organization.auth_policy_reset
+admin.platform.auth_policy_updated
 navigation.menu.denied
 i18n.locale.changed
 ```
@@ -2883,7 +2891,7 @@ Seed data:
 7. Seed admin user from `SEED_ADMIN_EMAIL` and `SEED_ADMIN_PASSWORD`.
 8. Seed translation files for English, French, Spanish, Ukrainian, Portuguese, Simplified Chinese, Hindi, and Japanese.
 
-Seed admin may be auto-approved. All other self-registered users start pending approval.
+Seed admin may be auto-approved. Other self-registered users start pending approval under the platform-default sign-up policy; an organization's runtime policy (0007) or an accepted invitation (0008) can activate them immediately.
 
 ---
 
@@ -2927,6 +2935,8 @@ Rules:
 ```text
 /en/sign-in
 /en/sign-up
+/en/verify-email
+/en/invite
 /en/forgot-password
 /en/reset-password
 /en/pending-approval
@@ -3448,7 +3458,7 @@ The implementation is complete only when all items are true:
 32. Microsoft multi-tenant work/school login is configured.
 33. GitHub login is configured without org/team restriction.
 34. Accounts link only by verified email.
-35. New non-seed users require admin approval.
+35. New non-seed users require admin approval under the platform-default sign-up policy; each organization's runtime policy (0007) or an accepted invitation (0008) may activate them immediately.
 36. Pending users cannot access secure routes.
 37. Blocked/suspended/deactivated users cannot access secure routes.
 38. Roles live in app tables.
@@ -3653,6 +3663,14 @@ The consolidated initial schema `0001-initial-schema.sql` includes:
   (`/api/administrator/email/test`) sends the `test_email` template
   through the full pipeline — the canonical way to verify provider
   configuration.
+- Email verification (AUTH-4) is wired through Better Auth's
+  `sendVerificationEmail` callback in `src/lib/auth.ts`, which calls
+  `sendAppEmail` with the `email_verification` template. Public page:
+  `/[locale]/verify-email`.
+- Organization invitations (0008) send the `organization_invitation`
+  template from the administrator invite/resend actions
+  (`/api/administrator/organizations/[id]/invitations` and `.../resend`);
+  the emailed accept link lands on the public `/[locale]/invite` page.
 
 ### 35.4 Administrator Email workspace
 

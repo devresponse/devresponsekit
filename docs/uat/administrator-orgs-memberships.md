@@ -193,12 +193,12 @@ i18n: in `uk`/`ja`, field labels, the slug help text, validation messages, and t
 
 ---
 
-### UAT-ADMIN-ORG-DETAIL — Organization detail (Members / Providers / Settings)
+### UAT-ADMIN-ORG-DETAIL — Organization detail (Members / Providers / Authentication / Settings)
 
 - Route: `/app/administrator/organizations/[orgId]`  ·  Example URL: `/en/app/administrator/organizations/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/[orgId]/page.tsx:27`
-- Purpose: Per-organization admin surface. Header shows name, slug, status badge, and a "default" badge. Three tabs: **Members** (paginated memberships, add/remove), **Providers** (provider bindings, bind/unbind), **Settings** (edit slug/name/status/default — Superadmin only).
-- Guard / who can access: `admin.orgs.read`; the `orgId` must be a valid UUID (else 404); and `canAccessOrg` must pass — a foreign org returns `notFound()` (404, **not** 403) so its existence is not leaked (`page.tsx:38,54`). The Settings fields are editable only when `canUpdate` (`admin.orgs.update`) is held (`page.tsx:60`); the write itself is still SUPERADMIN-only.
-- Access matrix: Visitor / Pending / Member / Limited Admin -> 404. Org Admin -> can view + manage Members/Providers for their own org; Settings fields are shown but a save returns 403; a foreign `orgId` returns 404. Superadmin -> full access to any org including Settings.
+- Purpose: Per-organization admin surface. Header shows name, slug, status badge, and a "default" badge. Four tabs: **Members** (paginated memberships, add/remove, plus the **invitations** panel — invite by email + optional role, resend, revoke), **Providers** (provider bindings, bind/unbind), **Authentication** (the per-org sign-up policy — email verification, approval mode incl. invite-only, allowed methods, auto-approve domains, 0007), **Settings** (edit slug/name/status/default — Superadmin only).
+- Guard / who can access: `admin.orgs.read`; the `orgId` must be a valid UUID (else 404); and `canAccessOrg` must pass — a foreign org returns `notFound()` (404, **not** 403) so its existence is not leaked (`page.tsx:38,54`). Invitations and the Authentication policy are editable when `canUpdate` (`admin.orgs.update`) is held; the Settings fields' write is still SUPERADMIN-only.
+- Access matrix: Visitor / Pending / Member / Limited Admin -> 404. Org Admin -> can view + manage Members/Invitations/Providers/Authentication for their own org; Settings fields are shown but a save returns 403; a foreign `orgId` returns 404. Superadmin -> full access to any org including Settings and the platform sign-up defaults.
 - Preconditions & test data: use an org UUID from the list. ORG A has members `user1..5@orga.local` plus cross-org `multi1..3@shared.local`. Member statuses: active / pending_approval / blocked / suspended (`members/route.ts:118`).
 
 User stories

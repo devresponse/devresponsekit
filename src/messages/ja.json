@@ -1230,7 +1230,13 @@
     "unknown_resource": "不明なリソースです。",
     "untrusted_origin": "リクエストのオリジンは信頼されていません。",
     "user_not_found": "ユーザーが見つかりません。",
-    "not_impersonating": "終了できるアクティブな代理ログインセッションがありません。"
+    "not_impersonating": "終了できるアクティブな代理ログインセッションがありません。",
+    "member_exists": "このメールはすでにアクティブなメンバーのものです。",
+    "invitation_exists": "このメール宛ての保留中の招待がすでに存在します。",
+    "invitation_not_found": "招待が見つかりません。",
+    "invitation_invalid": "この招待は無効か、有効期限が切れています。",
+    "invitation_email_mismatch": "この招待は別のメールアドレス宛てに発行されています。",
+    "auth_settings_not_found": "削除するサインアップポリシーの上書きがありません。"
   },
   "account": {
     "appTitle": "アカウント",
@@ -1431,7 +1437,8 @@
     "passwordsMismatch": "パスワードが一致しません。",
     "locale": "サポートされている言語を選択してください。",
     "dateFormat": "有効な日付の書式を選択してください。",
-    "domainList": "カンマで区切った有効なドメインを入力してください（例：acme.com）。"
+    "domainList": "カンマで区切った有効なドメインを入力してください（例：acme.com）。",
+    "domainsNeedVerification": "自動承認ドメインを使うにはメール確認を有効にする必要があります。"
   },
   "sso": {
     "confirm": {

@@ -1230,7 +1230,13 @@
     "unknown_resource": "Recurso desconocido.",
     "untrusted_origin": "El origen no es de confianza.",
     "user_not_found": "Usuario no encontrado.",
-    "not_impersonating": "No hay ninguna sesión de suplantación activa que detener."
+    "not_impersonating": "No hay ninguna sesión de suplantación activa que detener.",
+    "member_exists": "Este correo ya pertenece a un miembro activo.",
+    "invitation_exists": "Ya existe una invitación pendiente para este correo.",
+    "invitation_not_found": "Invitación no encontrada.",
+    "invitation_invalid": "Esta invitación no es válida o ha caducado.",
+    "invitation_email_mismatch": "Esta invitación se emitió para otra dirección de correo.",
+    "auth_settings_not_found": "No hay configuración de registro que eliminar."
   },
   "account": {
     "appTitle": "Cuenta",
@@ -1431,7 +1437,8 @@
     "passwordsMismatch": "Las contraseñas no coinciden.",
     "locale": "Elige un idioma compatible.",
     "dateFormat": "Elige un formato de fecha válido.",
-    "domainList": "Introduzca dominios válidos separados por comas (por ejemplo acme.com)."
+    "domainList": "Introduzca dominios válidos separados por comas (por ejemplo acme.com).",
+    "domainsNeedVerification": "Los dominios de aprobación automática requieren que la verificación de correo esté activada."
   },
   "sso": {
     "confirm": {

@@ -2317,7 +2317,8 @@
             "type": "string",
             "enum": [
               "admin_approval",
-              "auto_active"
+              "auto_active",
+              "invite_only"
             ]
           },
           "allowedAuthMethods": {
@@ -2370,7 +2371,8 @@
             "type": "string",
             "enum": [
               "admin_approval",
-              "auto_active"
+              "auto_active",
+              "invite_only"
             ]
           },
           "allowedAuthMethods": {
@@ -2440,7 +2442,8 @@
             "type": "string",
             "enum": [
               "admin_approval",
-              "auto_active"
+              "auto_active",
+              "invite_only"
             ]
           },
           "allowedAuthMethods": {

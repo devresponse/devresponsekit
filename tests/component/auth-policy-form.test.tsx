@@ -22,11 +22,14 @@ afterEach(() => {
 
 const ENDPOINT = "/api/administrator/organizations/org-1/auth-settings";
 
+// A valid open-signup override (auto-active, no verification). Domains are
+// null: verification-off + auto-approve-domains is a rejected combination
+// (the security refine), so this fixture must not encode it.
 const OVERRIDE = {
   requireEmailVerification: false,
   signupApprovalMode: "auto_active" as const,
   allowedAuthMethods: null,
-  autoApproveEmailDomains: ["acme.com"],
+  autoApproveEmailDomains: null,
 };
 
 describe("AuthPolicyForm", () => {

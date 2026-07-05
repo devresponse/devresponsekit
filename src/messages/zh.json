@@ -1230,7 +1230,13 @@
     "unknown_resource": "未知资源。",
     "untrusted_origin": "请求来源不受信任。",
     "user_not_found": "未找到用户。",
-    "not_impersonating": "没有可停止的活动模拟登录会话。"
+    "not_impersonating": "没有可停止的活动模拟登录会话。",
+    "member_exists": "该电子邮件已属于一名活跃成员。",
+    "invitation_exists": "该电子邮件已有待处理的邀请。",
+    "invitation_not_found": "未找到邀请。",
+    "invitation_invalid": "此邀请无效或已过期。",
+    "invitation_email_mismatch": "此邀请是发给其他电子邮件地址的。",
+    "auth_settings_not_found": "没有可移除的注册策略覆盖。"
   },
   "account": {
     "appTitle": "账户",
@@ -1431,7 +1437,8 @@
     "passwordsMismatch": "两次输入的密码不一致。",
     "locale": "请选择一种受支持的语言。",
     "dateFormat": "请选择有效的日期格式。",
-    "domainList": "请输入有效的域名，用逗号分隔（例如 acme.com）。"
+    "domainList": "请输入有效的域名，用逗号分隔（例如 acme.com）。",
+    "domainsNeedVerification": "自动批准的域名需要启用电子邮件验证。"
   },
   "sso": {
     "confirm": {

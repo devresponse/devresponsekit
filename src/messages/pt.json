@@ -1230,7 +1230,13 @@
     "unknown_resource": "Recurso desconhecido.",
     "untrusted_origin": "A origem do pedido não é fidedigna.",
     "user_not_found": "Utilizador não encontrado.",
-    "not_impersonating": "Nenhuma sessão de personificação ativa para parar."
+    "not_impersonating": "Nenhuma sessão de personificação ativa para parar.",
+    "member_exists": "Este e-mail já pertence a um membro ativo.",
+    "invitation_exists": "Já existe um convite pendente para este e-mail.",
+    "invitation_not_found": "Convite não encontrado.",
+    "invitation_invalid": "Este convite é inválido ou expirou.",
+    "invitation_email_mismatch": "Este convite foi emitido para outro endereço de e-mail.",
+    "auth_settings_not_found": "Nenhuma configuração de cadastro para remover."
   },
   "account": {
     "appTitle": "Conta",
@@ -1431,7 +1437,8 @@
     "passwordsMismatch": "As palavras-passe não coincidem.",
     "locale": "Escolha um idioma suportado.",
     "dateFormat": "Escolha um formato de data válido.",
-    "domainList": "Insira domínios válidos separados por vírgulas (por exemplo, acme.com)."
+    "domainList": "Insira domínios válidos separados por vírgulas (por exemplo, acme.com).",
+    "domainsNeedVerification": "Os domínios de aprovação automática exigem que a verificação de e-mail esteja ativada."
   },
   "sso": {
     "confirm": {

@@ -51,7 +51,8 @@ export interface UpdateAuthPolicyRequest {
  */
 export const UpdateAuthPolicyRequestSignupApprovalModeEnum = {
     AdminApproval: 'admin_approval',
-    AutoActive: 'auto_active'
+    AutoActive: 'auto_active',
+    InviteOnly: 'invite_only'
 } as const;
 export type UpdateAuthPolicyRequestSignupApprovalModeEnum = typeof UpdateAuthPolicyRequestSignupApprovalModeEnum[keyof typeof UpdateAuthPolicyRequestSignupApprovalModeEnum];
 

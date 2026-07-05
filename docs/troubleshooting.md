@@ -234,9 +234,13 @@ A build without these is unchanged — see [observability.md §2](./observabilit
 cookie is present. Confirm `BETTER_AUTH_URL` matches the origin you're browsing
 and that the session cookie is set (devtools → Application → Cookies).
 
-**Stuck on "pending approval".** Self-registered users start `pending_approval`.
-An admin must approve them (Administrator → Users), or seed an already-active
-account.
+**Stuck on "pending approval".** Under the platform-default sign-up policy,
+self-registered users start `pending_approval`; an admin must approve them
+(Administrator → Users), or seed an already-active account. Alternatively the
+organization's **Authentication** tab can switch to auto-active or auto-approve
+verified email domains (re-evaluated at the user's next sign-in), or you can
+**invite** the user — an accepted invitation activates the account outright. See
+[Sign-up Policy](./auth-signup-policy.md).
 
 **`403` / `404` on an admin action you expected to succeed.** Tenant scoping: a
 non-super-admin only sees their own organization, and **out-of-scope resources
@@ -248,7 +252,7 @@ bulk ops, or export). Respect the `Retry-After` header. The limiter is in-memory
 and resets on restart; across multiple instances it's best-effort.
 
 **Locale parity test or a missing translation.** Every text key must exist in all
-four locale files. Add the key to `en.json` first, then `fr`/`es`/`uk`.
+eight locale files. Add the key to `en.json` first, then `fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`.
 
 **Email not being delivered.** With no `EMAIL_PROVIDER`, messages are recorded as
 `logged` and never sent — expected in dev. Set a provider and its credentials to

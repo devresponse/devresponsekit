@@ -102,7 +102,7 @@ src/
 │   ├── (root)/                     # locale-independent entry (root layout, error)
 │   ├── [locale]/                   # everything localized lives here
 │   │   ├── (public)/               # marketing/landing, about, public docs
-│   │   ├── (auth)/                 # sign-in, sign-up, verify-email, reset, pending/blocked
+│   │   ├── (auth)/                 # sign-in, sign-up, verify-email, invite, reset, pending/blocked
 │   │   └── (secure)/               # authenticated app — authz boundary is here
 │   │       ├── layout.tsx          # loads access context + decideSecureAccess
 │   │       └── app/

@@ -1230,7 +1230,13 @@
     "unknown_resource": "Unknown resource.",
     "untrusted_origin": "The request origin is not trusted.",
     "user_not_found": "User not found.",
-    "not_impersonating": "No active impersonation session to stop."
+    "not_impersonating": "No active impersonation session to stop.",
+    "member_exists": "This email already belongs to an active member.",
+    "invitation_exists": "A pending invitation for this email already exists.",
+    "invitation_not_found": "Invitation not found.",
+    "invitation_invalid": "This invitation is invalid or has expired.",
+    "invitation_email_mismatch": "This invitation was issued for a different email address.",
+    "auth_settings_not_found": "No sign-up policy override to remove."
   },
   "account": {
     "appTitle": "Account",
@@ -1431,7 +1437,8 @@
     "passwordsMismatch": "Passwords do not match.",
     "locale": "Choose a supported language.",
     "dateFormat": "Choose a valid date format.",
-    "domainList": "Enter valid domains separated by commas (for example acme.com)."
+    "domainList": "Enter valid domains separated by commas (for example acme.com).",
+    "domainsNeedVerification": "Auto-approve domains require email verification to be enabled."
   },
   "sso": {
     "confirm": {

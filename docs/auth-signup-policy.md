@@ -21,8 +21,8 @@ Everything downstream (the `pending-approval` and `blocked` gates, `decideSecure
 | --- | --- | --- |
 | `requireEmailVerification` | **`true`** / `false` | Off ⇒ email/password sign-ups are pre-verified at creation and signed in immediately. Social sign-ins (Google, Microsoft, GitHub) arrive provider-verified and are unaffected. |
 | `signupApprovalMode` | **`admin_approval`** / `auto_active` / `invite_only` | `admin_approval`: new members start `pending_approval`. `auto_active`: new members are activated on provisioning. `invite_only`: uninvited sign-ups park in `pending_approval`; [invited](#6-invitations) ones activate. |
-| `allowedAuthMethods` | **`null`** (all) or a subset of `email`, `google`, `microsoft`, `github` | A sign-up via an excluded method still provisions but parks in `pending_approval` — visible to admins, never silently dropped. Applies even to invited or `auto_active` signups. |
-| `autoApproveEmailDomains` | **`null`** (none) or a domain list | **Verified** addresses on a listed domain activate immediately, even under `admin_approval` or `invite_only`. An unverified address never rides a domain match. |
+| `allowedAuthMethods` | **`null`** (all) or a subset of `email`, `google`, `microsoft`, `github` | A sign-up via an excluded method still provisions but parks in `pending_approval` — visible to admins, never silently dropped. Applies even under `auto_active`; a valid [invitation](#6-invitations) overrides it. |
+| `autoApproveEmailDomains` | **`null`** (none) or a domain list | **Verified** addresses on a listed domain activate immediately, even under `admin_approval` or `invite_only`. An unverified address never rides a domain match. Requires `requireEmailVerification = true` — the combination with verification waived is rejected (with it off, no address is proven, so a domain rule would auto-activate anyone claiming the domain). |
 
 ### Workflow matrix
 
@@ -35,7 +35,7 @@ Everything downstream (the `pending-approval` and `blocked` gates, `decideSecure
 | required | admin approval + auto-approve domain | Colleagues on the listed domain activate the moment they click the verification link; everyone else awaits approval |
 | any | invite-only | Invited users activate on acceptance; anyone else who registers parks in `pending_approval` (never rejected outright — admins keep visibility, and the signup endpoint gives no account-existence oracle) |
 
-A **valid invitation activates under every mode** — the invitation IS the approval. Only an org's `allowedAuthMethods` restriction outranks it.
+A **valid invitation activates under every mode and overrides the method allow-list** — the invitation IS the approval, and as a targeted, admin-issued grant for one specific address it is more specific than the org-level gate on unsolicited sign-ups.
 
 ## 3. Resolution order and fail-closed guarantees
 
@@ -92,10 +92,10 @@ Changes are audited with previous→next values: `admin.organization.auth_policy
 ## 8. Security notes
 
 - **Fail closed, always.** Absent or unreadable policy means verification + admin approval; an invitation lookup failure during sign-up degrades to the uninvited path, never blocks the registration and never activates.
-- **Domain auto-approval requires proof.** Only a VERIFIED address can activate via `autoApproveEmailDomains`, so claiming `ceo@acme.com` at registration grants nothing until the mailbox is proven.
+- **Domain auto-approval requires proof.** Only a VERIFIED address can activate via `autoApproveEmailDomains`, so claiming `ceo@acme.com` at registration grants nothing until the mailbox is proven. Because a waived-verification org marks sign-ups verified without proof, that combination is rejected at write time and the decision layer additionally refuses domain approval whenever verification is not required — defense in depth against an unproven address riding a domain into an active membership.
 - **Invitations are mailbox-bound.** Acceptance demands an exact email match, so a forwarded link cannot move the seat to another mailbox.
 - **`auto_active` without verification is open signup.** Anyone who registers gets access without proving mailbox ownership — the editor warns about this combination; choose it only for deliberately open organizations.
-- **Method restriction never hides accounts.** Excluded-method sign-ups are parked pending rather than rejected, so administrators can see and triage them — and the restriction outranks even a valid invitation.
+- **Method restriction never hides accounts.** Excluded-method sign-ups are parked pending rather than rejected, so administrators can see and triage them. A valid invitation overrides the restriction — inviting an address IS the sanction, and the explicit accept path is method-agnostic anyway, so a first-ranked allow-list would only be an inconsistent speed bump, not a gate.
 - **Programmatic creation is unaffected.** Seeds and the admin/machine-API user creation set verification and status explicitly.
 
 ## 9. Data model (reference)

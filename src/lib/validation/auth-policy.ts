@@ -36,6 +36,22 @@ export const EMAIL_DOMAIN_RE =
  * `allowedAuthMethods` is legal and means "no new sign-ups auto-place here"
  * (every method parks in pending_approval).
  */
+/**
+ * Domain auto-approval and waived verification are mutually exclusive: with
+ * verification off, an email/password address is never proven, so a domain
+ * rule would auto-activate anyone claiming that domain (the sign-up hook
+ * stamps `emailVerified: true` without proof). Reject the combination so an
+ * admin can't create it — the security guarantee behind `autoApproveEmailDomains`
+ * is "VERIFIED addresses only". Mirrored by the fail-closed guard in
+ * `decideInitialStatus`.
+ */
+function domainsRequireVerification(input: {
+  requireEmailVerification: boolean;
+  autoApproveEmailDomains?: string[] | null;
+}): boolean {
+  return input.requireEmailVerification || !input.autoApproveEmailDomains?.length;
+}
+
 export const authPolicySettingsSchema = z
   .object({
     requireEmailVerification: z.boolean(),
@@ -46,7 +62,11 @@ export const authPolicySettingsSchema = z
       .max(50, "max")
       .nullable(),
   })
-  .strict();
+  .strict()
+  .refine(domainsRequireVerification, {
+    message: "domainsNeedVerification",
+    path: ["autoApproveEmailDomains"],
+  });
 
 export type AuthPolicySettingsInput = z.input<typeof authPolicySettingsSchema>;
 
@@ -90,7 +110,15 @@ export const authPolicyFormSchema = z
       .max(2000, "max")
       .refine((v) => parseEmailDomainList(v).invalid.length === 0, "domainList"),
   })
-  .strict();
+  .strict()
+  .refine(
+    (v) =>
+      domainsRequireVerification({
+        requireEmailVerification: v.requireEmailVerification,
+        autoApproveEmailDomains: parseEmailDomainList(v.autoApproveEmailDomainsText).domains,
+      }),
+    { message: "domainsNeedVerification", path: ["autoApproveEmailDomainsText"] },
+  );
 
 export type AuthPolicyFormInput = z.input<typeof authPolicyFormSchema>;
 

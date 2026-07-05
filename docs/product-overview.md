@@ -50,7 +50,8 @@ mindmap
       Email + password
       Social login
       Password reset
-      Approval workflow
+      Configurable sign-up policy
+      Invitations
     Workspace
       Dashboard
       Account & preferences
@@ -76,9 +77,11 @@ mindmap
 
 Users sign in with **email and password** or, when configured, with **Google, Microsoft, or GitHub**. The sign-in and sign-up screens, password-reset flow, and account-status screens are all built in.
 
-A defining behavior: **authentication is not the same as authorization.** A self-registered user is created in a `pending_approval` state and cannot enter the secure workspace until an administrator approves them — supporting controlled onboarding for enterprise environments. Accounts that are blocked, suspended, or deactivated see a dedicated status screen.
+A defining behavior: **authentication is not the same as authorization**, and onboarding is **configurable per organization**. Under the platform default, a self-registered user is created in a `pending_approval` state and cannot enter the secure workspace until an administrator approves them. Each organization can instead run its own sign-up policy — instant activation, invitation-only, or auto-approval of verified email domains — and toggle whether email verification is required. Accounts that are blocked, suspended, or deactivated see a dedicated status screen.
 
-**Sign up and get approved:** a user registers at `/sign-up` (or via a social provider), lands on the pending-approval screen, an administrator approves the registration from the admin console, and the user's status becomes `active`.
+**Sign up and get approved:** a user registers at `/sign-up` (or via a social provider); under the default policy they first confirm their address on the verify-email screen, then land on the pending-approval screen until an administrator approves the registration and their status becomes `active`.
+
+**Get invited:** an administrator invites an email address into an organization; the invitee opens the emailed link at `/invite`, creates an account (or signs in), and joins the inviting organization **active** — no separate approval step.
 
 **Forgot password:** a user submits their email at `/forgot-password`; a reset email is rendered, recorded in the outbox, and (if a provider is configured) sent; the user opens the link and sets a new password.
 
@@ -99,7 +102,7 @@ The administrator workspace is organized into navigation groups. Every screen an
 | **Access** | Roles | Create roles and edit their permissions; see members |
 | **Access** | Permissions | Browse the permission catalog and the roles that use each permission |
 | **Access** | Groups | Create groups, bundle roles into them, and manage members |
-| **Tenancy** | Organizations | Create and manage organizations, members, and provider bindings |
+| **Tenancy** | Organizations | Create and manage organizations, members, invitations, provider bindings, and the per-organization sign-up/authentication policy |
 | **Tenancy** | Memberships | Browse user↔organization memberships and their roles |
 | **Apps** | Enterprise Apps | Register and manage applications that participate in SSO |
 | **APIs** | API Keys | Issue, rotate, and revoke API keys on behalf of users |
@@ -112,6 +115,8 @@ Common console affordances include server-side **pagination**, **search**, per-f
 
 - **Create an organization** (Super Admin) — enter a slug and name; the organization is immediately available and isolated.
 - **Create a user and approve them** — create with email and password (status starts `pending_approval`), then approve from the user's detail page or a bulk action.
+- **Invite a user into an organization** — from the organization's **Members** tab, enter an email and optional role; the invitee gets a single-use link and joins active on acceptance. Resend rotates the link; revoke cancels it.
+- **Set an organization's sign-up policy** — on the organization's **Authentication** tab, choose admin approval, instant activation, or invite-only; toggle email verification; and list auto-approved email domains. Superadmins edit the platform default from the Organizations page.
 - **Create a role and assign permissions** — name the role, then use the **permissions dual-list editor** to add permissions.
 - **Create a group and bundle roles** — a Super Admin chooses the target organization; an org admin's group is created in their own organization automatically. Add roles on the **Roles** tab and users on the **Members** tab; members inherit the group's roles.
 - **Issue an API key for a user** — select the owner and the scopes. The secret is shown **once** — copy it immediately. A key's scopes can never exceed the owner's own permissions.
@@ -245,7 +250,7 @@ What that means for the business:
 ### Sales / demo talking points
 
 1. **Open the admin console.** Show users, roles, permissions, and groups — "this is the access model your security team will ask about, and it's already here."
-2. **Create an organization and a user.** Demonstrate that a new tenant is fully isolated and that a new user starts in a controlled, pending state until approved.
+2. **Create an organization and a user.** Demonstrate that a new tenant is fully isolated and that a new user starts in a controlled, pending state until approved (the default policy — organizations can also auto-activate, go invite-only, or invite users in directly).
 3. **Build a role and a group.** Show how permissions compose into roles, roles bundle into groups, and groups assign access to many people at once.
 4. **Trigger an SSO handoff.** Sign in once and move to a connected app without re-authenticating.
 5. **Open the audit log.** "Every action you just saw is recorded — who, what, when, and the outcome."

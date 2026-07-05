@@ -103,6 +103,36 @@ describe("EmailPasswordSignUpForm", () => {
     expect(replace).not.toHaveBeenCalled();
   });
 
+  it("locks the invited email and threads the invitation token through the sign-up body", async () => {
+    signUpEmail.mockResolvedValueOnce({ error: null, data: { user: { emailVerified: true } } });
+    signInEmail.mockResolvedValueOnce({ error: null });
+    const user = userEvent.setup();
+    renderWithIntl(
+      <EmailPasswordSignUpForm
+        verifyEmailHref="/en/verify-email"
+        postVerifyHref="/en/app"
+        invitationToken="tok-123"
+        invitedEmail="ada@acme.com"
+      />,
+    );
+
+    const email = screen.getByLabelText(/email/i);
+    expect(email).toHaveValue("ada@acme.com");
+    expect(email).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/^name/i), "Ada Lovelace");
+    await user.type(screen.getByLabelText(/password/i), "Password!1234");
+    await user.click(screen.getByRole("button", { name: /create account/i }));
+
+    expect(signUpEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ email: "ada@acme.com", invitationToken: "tok-123" }),
+    );
+    // Invited sign-ups arrive pre-verified → immediate sign-in, no
+    // verify-email bounce.
+    expect(signInEmail).toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it("renders the unexpectedError alert when sign-up fails", async () => {
     signUpEmail.mockResolvedValueOnce({ error: { code: "USER_ALREADY_EXISTS" } });
     const user = userEvent.setup();

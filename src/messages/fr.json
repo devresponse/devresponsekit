@@ -62,7 +62,18 @@
     "passwordMismatch": "Les mots de passe ne correspondent pas.",
     "resetTokenInvalid": "Ce lien de réinitialisation est invalide ou a expiré.",
     "requestNewResetLink": "Demander un nouveau lien",
-    "resetPasswordDone": "Votre mot de passe a été mis à jour."
+    "resetPasswordDone": "Votre mot de passe a été mis à jour.",
+    "inviteInvalidTitle": "Invitation indisponible",
+    "inviteInvalidDescription": "Ce lien d'invitation est invalide ou a expiré. Demandez à votre administrateur d'en envoyer un nouveau.",
+    "inviteTitle": "Vous êtes invité",
+    "inviteGuestDescription": "Vous êtes invité à rejoindre {organization}. Créez un compte ou connectez-vous avec l'adresse e-mail invitée pour accepter.",
+    "inviteSignIn": "Se connecter pour accepter",
+    "inviteAcceptDescription": "Acceptez l'invitation à rejoindre {organization} en tant que {email}.",
+    "inviteAcceptButton": "Accepter l'invitation",
+    "inviteMismatchTitle": "Autre compte requis",
+    "inviteMismatchDescription": "Cette invitation a été émise pour une autre adresse e-mail. Déconnectez-vous, puis connectez-vous ou inscrivez-vous avec l'adresse invitée.",
+    "inviteError": "Impossible d'accepter l'invitation. Veuillez réessayer.",
+    "inviteSignupBanner": "Vous rejoignez {organization}. Terminez la création de votre compte avec l'adresse e-mail invitée."
   },
   "public": {
     "hero": {

@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import { db } from "@/db/database";
 import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
 import { auditEvent } from "@/lib/audit.server";
+import { getServerEnv } from "@/lib/env";
 
 /**
  * Organization invitations (migration 0008).
@@ -47,6 +48,17 @@ export interface InvitationRow {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+/**
+ * The accept link an invitation email carries. Built on BETTER_AUTH_URL —
+ * the same origin the verification-email links already use — and anchored
+ * to the default locale: the invitee's locale is unknown until they have an
+ * account, and the invite page itself is fully localized once they land.
+ */
+export function buildInvitationAcceptUrl(plaintextToken: string): string {
+  const base = getServerEnv().BETTER_AUTH_URL.replace(/\/$/, "");
+  return `${base}/en/invite?token=${encodeURIComponent(plaintextToken)}`;
 }
 
 /**

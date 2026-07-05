@@ -38,6 +38,7 @@ models/BulkUserResultResultsInner.ts
 models/CreateAdminApiKeyRequest.ts
 models/CreateEnterpriseAppRequest.ts
 models/CreateGroupRequest.ts
+models/CreateInvitationRequest.ts
 models/CreateOrganizationRequest.ts
 models/CreatePermissionRequest.ts
 models/CreateRoleRequest.ts
@@ -62,6 +63,10 @@ models/GroupRolesResult.ts
 models/GroupRolesRolesInner.ts
 models/IdCreated.ts
 models/IdsRequest.ts
+models/InvitationCreated.ts
+models/InvitationItem.ts
+models/InvitationList.ts
+models/InvitationResent.ts
 models/KeyCreated.ts
 models/MembershipList.ts
 models/MembershipListItem.ts

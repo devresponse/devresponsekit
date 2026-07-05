@@ -62,7 +62,18 @@
     "passwordMismatch": "パスワードが一致しません。",
     "resetTokenInvalid": "この再設定リンクは無効か、有効期限が切れています。",
     "requestNewResetLink": "新しいリンクをリクエスト",
-    "resetPasswordDone": "パスワードを更新しました。"
+    "resetPasswordDone": "パスワードを更新しました。",
+    "inviteInvalidTitle": "招待を利用できません",
+    "inviteInvalidDescription": "この招待リンクは無効か、有効期限が切れています。管理者に新しい招待の送信を依頼してください。",
+    "inviteTitle": "招待されています",
+    "inviteGuestDescription": "{organization} への招待が届いています。承諾するには、アカウントを作成するか、招待されたメールアドレスでサインインしてください。",
+    "inviteSignIn": "サインインして承諾",
+    "inviteAcceptDescription": "{email} として {organization} に参加する招待を承諾します。",
+    "inviteAcceptButton": "招待を承諾する",
+    "inviteMismatchTitle": "別のアカウントが必要です",
+    "inviteMismatchDescription": "この招待は別のメールアドレス宛てに発行されています。サインアウトしてから、招待されたアドレスでサインインまたは登録してください。",
+    "inviteError": "招待を承諾できませんでした。もう一度お試しください。",
+    "inviteSignupBanner": "{organization} に参加しようとしています。招待されたメールアドレスでアカウント作成を完了してください。"
   },
   "public": {
     "hero": {

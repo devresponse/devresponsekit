@@ -62,7 +62,18 @@
     "passwordMismatch": "As palavras-passe não coincidem.",
     "resetTokenInvalid": "Esta ligação de reposição é inválida ou expirou.",
     "requestNewResetLink": "Solicitar uma nova ligação",
-    "resetPasswordDone": "A sua palavra-passe foi atualizada."
+    "resetPasswordDone": "A sua palavra-passe foi atualizada.",
+    "inviteInvalidTitle": "Convite indisponível",
+    "inviteInvalidDescription": "Este link de convite é inválido ou expirou. Peça ao seu administrador para enviar um novo.",
+    "inviteTitle": "Você foi convidado",
+    "inviteGuestDescription": "Você foi convidado a juntar-se a {organization}. Crie uma conta ou entre com o e-mail convidado para aceitar.",
+    "inviteSignIn": "Entrar para aceitar",
+    "inviteAcceptDescription": "Aceite o convite para juntar-se a {organization} como {email}.",
+    "inviteAcceptButton": "Aceitar convite",
+    "inviteMismatchTitle": "É necessária outra conta",
+    "inviteMismatchDescription": "Este convite foi emitido para outro endereço de e-mail. Saia e depois entre ou registre-se com o endereço convidado.",
+    "inviteError": "Não foi possível aceitar o convite. Tente novamente.",
+    "inviteSignupBanner": "Você está se juntando a {organization}. Conclua a criação da sua conta com o e-mail convidado."
   },
   "public": {
     "hero": {

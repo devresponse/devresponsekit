@@ -62,7 +62,18 @@
     "passwordMismatch": "两次输入的密码不一致。",
     "resetTokenInvalid": "此重置链接无效或已过期。",
     "requestNewResetLink": "申请新链接",
-    "resetPasswordDone": "您的密码已更新。"
+    "resetPasswordDone": "您的密码已更新。",
+    "inviteInvalidTitle": "邀请不可用",
+    "inviteInvalidDescription": "此邀请链接无效或已过期。请让您的管理员重新发送。",
+    "inviteTitle": "您已被邀请",
+    "inviteGuestDescription": "您已被邀请加入 {organization}。请创建账户或使用受邀的电子邮件地址登录以接受邀请。",
+    "inviteSignIn": "登录以接受",
+    "inviteAcceptDescription": "接受邀请，以 {email} 的身份加入 {organization}。",
+    "inviteAcceptButton": "接受邀请",
+    "inviteMismatchTitle": "需要其他账户",
+    "inviteMismatchDescription": "此邀请是发给其他电子邮件地址的。请退出登录，然后使用受邀地址登录或注册。",
+    "inviteError": "无法接受邀请。请重试。",
+    "inviteSignupBanner": "您正在加入 {organization}。请使用受邀的电子邮件地址完成账户创建。"
   },
   "public": {
     "hero": {

@@ -62,7 +62,18 @@
     "passwordMismatch": "Passwords do not match.",
     "resetTokenInvalid": "This reset link is invalid or has expired.",
     "requestNewResetLink": "Request a new link",
-    "resetPasswordDone": "Your password has been updated."
+    "resetPasswordDone": "Your password has been updated.",
+    "inviteInvalidTitle": "Invitation not available",
+    "inviteInvalidDescription": "This invitation link is invalid or has expired. Ask your administrator to send a new one.",
+    "inviteTitle": "You've been invited",
+    "inviteGuestDescription": "You've been invited to join {organization}. Create an account or sign in with the invited email address to accept.",
+    "inviteSignIn": "Sign in to accept",
+    "inviteAcceptDescription": "Accept the invitation to join {organization} as {email}.",
+    "inviteAcceptButton": "Accept invitation",
+    "inviteMismatchTitle": "Different account needed",
+    "inviteMismatchDescription": "This invitation was issued for a different email address. Sign out, then sign in or register with the invited address.",
+    "inviteError": "Could not accept the invitation. Please try again.",
+    "inviteSignupBanner": "You're joining {organization}. Finish creating your account with the invited email address."
   },
   "public": {
     "hero": {

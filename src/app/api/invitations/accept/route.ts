@@ -36,10 +36,13 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const origin = checkTrustedOrigin(request);
   if (!origin.ok) {
-    // Match the CSRF machine code used by the account + admin guards
-    // (`untrusted_origin`); `invalid_origin` is a distinct 400 used by
-    // enterprise-apps for a malformed origin field.
-    return adminErrorResponse(origin.reason ?? "untrusted_origin", 403, request);
+    // Collapse both origin-guard reasons (`missing_origin` / `untrusted_origin`)
+    // to the single cataloged client code, exactly as the admin CSRF gate does
+    // (permissions.server.ts). Passing `origin.reason` through would let a
+    // `missing_origin` rejection emit the uncataloged i18n key
+    // `errors.missing_origin`. (`invalid_origin` is a distinct 400 used by
+    // enterprise-apps for a malformed origin field.)
+    return adminErrorResponse("untrusted_origin", 403, request);
   }
 
   const session = await getCurrentSession();

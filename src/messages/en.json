@@ -1236,7 +1236,9 @@
     "invitation_not_found": "Invitation not found.",
     "invitation_invalid": "This invitation is invalid or has expired.",
     "invitation_email_mismatch": "This invitation was issued for a different email address.",
-    "auth_settings_not_found": "No sign-up policy override to remove."
+    "auth_settings_not_found": "No sign-up policy override to remove.",
+    "not_provisioned": "Your account isn't fully set up yet. Contact an administrator.",
+    "insufficient_scope": "This credential isn't authorized for that action."
   },
   "account": {
     "appTitle": "Account",

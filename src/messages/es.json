@@ -1236,7 +1236,9 @@
     "invitation_not_found": "Invitación no encontrada.",
     "invitation_invalid": "Esta invitación no es válida o ha caducado.",
     "invitation_email_mismatch": "Esta invitación se emitió para otra dirección de correo.",
-    "auth_settings_not_found": "No hay configuración de registro que eliminar."
+    "auth_settings_not_found": "No hay configuración de registro que eliminar.",
+    "not_provisioned": "Tu cuenta aún no está completamente configurada. Contacta a un administrador.",
+    "insufficient_scope": "Esta credencial no está autorizada para esa acción."
   },
   "account": {
     "appTitle": "Cuenta",

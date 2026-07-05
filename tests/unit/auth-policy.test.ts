@@ -4,6 +4,7 @@ import {
   FAIL_CLOSED_AUTH_POLICY,
   findEmailDomainOrganization,
   getAuthPolicyForOrg,
+  isAuthMethod,
   resolveSignupPolicy,
   type OrgAuthPolicy,
 } from "@/lib/auth-policy.server";
@@ -364,5 +365,20 @@ describe("decideInitialStatus", () => {
         { ...input, emailVerified: true },
       ),
     ).toEqual({ status: "active", reason: "domain_auto_approved" });
+  });
+});
+
+describe("isAuthMethod (the single provider-narrowing predicate)", () => {
+  it("accepts every known provider", () => {
+    for (const m of ["email", "google", "microsoft", "github"]) {
+      expect(isAuthMethod(m)).toBe(true);
+    }
+  });
+
+  it("rejects unknown strings, null, and undefined (nullable columns narrow in one step)", () => {
+    expect(isAuthMethod("carrier-pigeon")).toBe(false);
+    expect(isAuthMethod("")).toBe(false);
+    expect(isAuthMethod(null)).toBe(false);
+    expect(isAuthMethod(undefined)).toBe(false);
   });
 });

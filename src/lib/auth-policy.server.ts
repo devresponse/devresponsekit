@@ -53,6 +53,17 @@ export interface OrgAuthPolicy {
 
 const AUTH_METHODS: readonly AuthMethod[] = ["email", "google", "microsoft", "github"];
 
+/**
+ * The single source of truth for "is this string one of our auth providers?".
+ * Used to sanitise stored `allowed_auth_methods` rows (unknown values are
+ * dropped rather than trusted) and to judge a membership's `source_provider`
+ * during re-evaluation. Accepts `null`/`undefined` so callers reading a
+ * nullable column can narrow in one step.
+ */
+export function isAuthMethod(value: string | null | undefined): value is AuthMethod {
+  return value != null && (AUTH_METHODS as readonly string[]).includes(value);
+}
+
 export const FAIL_CLOSED_AUTH_POLICY: OrgAuthPolicy = Object.freeze({
   requireEmailVerification: true,
   signupApprovalMode: "admin_approval",
@@ -113,11 +124,7 @@ function toPolicy(row: PolicyRow, source: OrgAuthPolicy["source"]): OrgAuthPolic
     return FAIL_CLOSED_AUTH_POLICY;
   }
   const methods =
-    row.allowed_auth_methods === null
-      ? null
-      : row.allowed_auth_methods.filter((m): m is AuthMethod =>
-          (AUTH_METHODS as readonly string[]).includes(m),
-        );
+    row.allowed_auth_methods === null ? null : row.allowed_auth_methods.filter(isAuthMethod);
   return {
     requireEmailVerification: row.require_email_verification,
     signupApprovalMode: row.signup_approval_mode,

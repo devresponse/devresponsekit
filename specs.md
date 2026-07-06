@@ -1481,6 +1481,8 @@ Requirements:
 
 `src/app/[locale]/(auth)/sign-in/page.tsx` renders `SignInForm`.
 
+An optional **organization scope** — `/sign-in/<org>` (path, `sign-in/[org]/page.tsx`) or `?org=<slug>` (query) — resolves an org by slug or id, brands the screen for it, pins the active org for an existing member after login, and carries the scope into sign-up. An unknown identifier renders the plain screen (no leak). See `auth-signup-policy.md` §7.
+
 `SignInForm` must include:
 
 1. Email/password form.

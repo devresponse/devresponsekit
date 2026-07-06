@@ -6,6 +6,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { SupportedLocale } from "@/config/i18n-config";
+import type { OrganizationRef } from "@/lib/org-lookup.server";
+import { buildActiveOrgApplyPath } from "@/lib/scoped-auth";
 import type { SocialProvider } from "@/lib/social-providers";
 
 /** A LIVE invitation carried by `/sign-up?invite=<token>` (0008). */
@@ -21,6 +23,14 @@ export interface SignUpFormProps {
   invitation?: SignUpInvitation | null;
   /** The configured social providers, from `enabledSocialProviders`. */
   socialProviders: readonly SocialProvider[];
+  /**
+   * The organization this sign-up is scoped to (`/sign-up?org=<slug>`), carried
+   * from a scoped sign-in's "create account" link. Brands the screen and
+   * threads the identifier into the sign-up body as `organizationHint`, so the
+   * new account is TARGETED at that org — still gated by the org's signup
+   * policy. Ignored when an `invitation` is present (the invitation's org wins).
+   */
+  organization?: OrganizationRef | null;
 }
 
 /**
@@ -35,15 +45,37 @@ export interface SignUpFormProps {
  * the invited address and the token rides the sign-up body — the account is
  * pre-verified (the token proves mailbox access) and lands active in the
  * inviting organization.
+ *
+ * With an `organization` (scoped sign-up, no invitation) the screen is branded
+ * for that org and the identifier rides the sign-up body so the new account
+ * targets it — subject to the org's signup policy.
  */
-export function SignUpForm({ locale, returnTo, invitation, socialProviders }: SignUpFormProps) {
+export function SignUpForm({
+  locale,
+  returnTo,
+  invitation,
+  socialProviders,
+  organization,
+}: SignUpFormProps) {
   const t = useTranslations("auth");
+
+  // An invitation's org is authoritative, so org scoping only applies to a
+  // non-invited sign-up.
+  const scopedOrg = invitation ? null : organization;
+  // Existing member choosing a social provider on the scoped screen lands with
+  // that org active (membership-checked); a brand-new social user routes by
+  // provider identity, since OAuth can't carry the sign-up-body hint.
+  const socialCallback = scopedOrg ? buildActiveOrgApplyPath(scopedOrg.slug, returnTo) : returnTo;
 
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
         <CardTitle>{t("signUpTitle")}</CardTitle>
-        <CardDescription>{t("noAccount")}</CardDescription>
+        <CardDescription>
+          {scopedOrg
+            ? t("createAccountForOrganization", { organization: scopedOrg.name })
+            : t("noAccount")}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {invitation ? (
@@ -58,6 +90,7 @@ export function SignUpForm({ locale, returnTo, invitation, socialProviders }: Si
           postVerifyHref={`/${locale}/app`}
           invitationToken={invitation?.token}
           invitedEmail={invitation?.email}
+          organizationHint={scopedOrg?.slug}
         />
         {/* Social login is hidden on an invited sign-up (0008): the OAuth
             path does NOT carry the invitation token, so a social sign-in
@@ -72,12 +105,12 @@ export function SignUpForm({ locale, returnTo, invitation, socialProviders }: Si
               <span className="text-muted-foreground text-xs uppercase">{t("or")}</span>
               <Separator className="flex-1" />
             </div>
-            <SocialLoginButtons returnTo={returnTo} providers={socialProviders} />
+            <SocialLoginButtons returnTo={socialCallback} providers={socialProviders} />
           </>
         )}
         <div className="text-sm">
           <LocaleLink
-            href="/sign-in"
+            href={scopedOrg ? { pathname: "/sign-in", query: { org: scopedOrg.slug } } : "/sign-in"}
             locale={locale}
             className="underline-offset-2 hover:underline"
           >

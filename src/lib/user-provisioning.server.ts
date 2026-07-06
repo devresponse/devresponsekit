@@ -16,6 +16,7 @@ import {
   findValidInvitationByToken,
   type InvitationRow,
 } from "@/lib/invitations.server";
+import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import {
   resolveProviderOrganization,
   type ProviderOrganizationInput,
@@ -38,6 +39,14 @@ export interface ProvisionUserInput {
    * invitation is consumed.
    */
   invitationToken?: string;
+  /**
+   * Organization-scoped sign-up hint from `/sign-in/<org>` / `?org=<slug>`
+   * (the identifier rides the sign-up body, like `invitationToken`). When it
+   * resolves to an existing ACTIVE org, the sign-up is TARGETED at that org —
+   * but the initial status is still decided by that org's signup policy, so a
+   * hint can never self-activate anyone. A live invitation overrides it.
+   */
+  organizationHint?: string;
 }
 
 export interface ProvisionUserResult {
@@ -123,6 +132,22 @@ export async function provisionUserFromAuth(
     organizationId = invitation.organizationId;
     // No provider-org linkage for an invited placement.
     membershipOrgKey = null;
+  }
+
+  // Organization-scoped sign-up (`/sign-in/<org>`, `?org=`): the visitor chose
+  // this org explicitly, so target it — ranked below an invitation (which is
+  // email-bound proof) but above provider/domain inference. Only an EXISTING
+  // active org counts; an unknown hint degrades to normal resolution and never
+  // spawns an org. Placement, not activation — `decideInitialStatus` on this
+  // org's policy still governs the initial status below.
+  let organizationHintApplied = false;
+  if (!organizationId && input.organizationHint && !input.isSeed) {
+    const hinted = await resolveOrganizationByIdentifier(input.organizationHint);
+    if (hinted) {
+      organizationId = hinted.id;
+      membershipOrgKey = null;
+      organizationHintApplied = true;
+    }
   }
 
   if (
@@ -308,6 +333,7 @@ export async function provisionUserFromAuth(
       confidence: resolution.confidence,
       providerOrganizationKey: membershipOrgKey,
       ...(emailDomainRouted ? { emailDomainRouted: true } : {}),
+      ...(organizationHintApplied ? { organizationHintApplied: true } : {}),
       ...(linkedExisting ? {} : { decisionReason: decision.reason, policySource }),
     },
   });

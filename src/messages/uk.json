@@ -43,6 +43,8 @@
     "noAccount": "Немає облікового запису?",
     "haveAccount": "Вже маєте обліковий запис?",
     "createAccount": "Створити обліковий запис",
+    "signInToOrganization": "Увійдіть до {organization}",
+    "createAccountForOrganization": "Створіть обліковий запис для {organization}",
     "loggedOutTitle": "Ви вийшли з облікового запису",
     "loggedOutDescription": "Увійдіть знову, щоб продовжити.",
     "pendingApprovalTitle": "Ваш обліковий запис очікує на схвалення",

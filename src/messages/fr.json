@@ -43,6 +43,8 @@
     "noAccount": "Vous n'avez pas de compte ?",
     "haveAccount": "Vous avez déjà un compte ?",
     "createAccount": "Créer un compte",
+    "signInToOrganization": "Connectez-vous à {organization}",
+    "createAccountForOrganization": "Créez votre compte pour {organization}",
     "loggedOutTitle": "Vous avez été déconnecté",
     "loggedOutDescription": "Reconnectez-vous pour continuer.",
     "pendingApprovalTitle": "Votre compte est en attente d'approbation",

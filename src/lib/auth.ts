@@ -246,6 +246,7 @@ export const auth = betterAuth({
               provider: getProvisioningProvider(context),
               preferredLocale: getPreferredLocale(context),
               invitationToken: getInvitationToken(context),
+              organizationHint: getSignupOrganizationHint(context),
             });
           } catch (error) {
             // Best-effort: a provisioning hiccup must never fail the sign-up
@@ -379,6 +380,22 @@ function getInvitationToken(
       ? (context.body as Record<string, unknown>).invitationToken
       : undefined;
   return typeof token === "string" && token.length > 0 ? token : undefined;
+}
+
+/**
+ * Extracts the organization-scoped sign-up hint riding a sign-up request body
+ * (`/sign-in/<org>`, `?org=<slug>`). Same channel as `invitationToken`: an
+ * extra field flowing through better-auth's sign-up schema into `context.body`.
+ * Placement only — provisioning still applies the target org's signup policy.
+ */
+function getSignupOrganizationHint(
+  context: GenericEndpointContext | null | undefined,
+): string | undefined {
+  const hint =
+    context?.body && typeof context.body === "object" && "organizationHint" in context.body
+      ? (context.body as Record<string, unknown>).organizationHint
+      : undefined;
+  return typeof hint === "string" && hint.length > 0 ? hint : undefined;
 }
 
 function getPreferredLocale(context: GenericEndpointContext): string | undefined {

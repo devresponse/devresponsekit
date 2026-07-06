@@ -3,6 +3,7 @@ import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { enabledSocialProviders } from "@/lib/auth";
 import { findValidInvitationByToken } from "@/lib/invitations.server";
+import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 export default async function SignUpPage({
@@ -35,6 +36,12 @@ export default async function SignUpPage({
     }
   }
 
+  // Organization-scoped sign-up via `?org=<slug|id>`, carried from a scoped
+  // sign-in's "create account" link. An invitation's org wins, so only resolve
+  // when there is no invitation. Unknown → null (plain screen, no leak).
+  const rawOrg = typeof sp.org === "string" ? sp.org : null;
+  const organization = !invitation && rawOrg ? await resolveOrganizationByIdentifier(rawOrg) : null;
+
   return (
     <main className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center gap-4 p-8">
       <div className="self-end">
@@ -45,6 +52,7 @@ export default async function SignUpPage({
         returnTo={returnTo}
         invitation={invitation}
         socialProviders={enabledSocialProviders}
+        organization={organization}
       />
     </main>
   );

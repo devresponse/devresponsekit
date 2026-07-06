@@ -43,6 +43,8 @@
     "noAccount": "Don't have an account?",
     "haveAccount": "Already have an account?",
     "createAccount": "Create account",
+    "signInToOrganization": "Sign in to {organization}",
+    "createAccountForOrganization": "Create your account for {organization}",
     "loggedOutTitle": "You have been signed out",
     "loggedOutDescription": "Sign in again to continue.",
     "pendingApprovalTitle": "Your account is pending approval",

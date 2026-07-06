@@ -58,6 +58,8 @@ The policy consulted is the policy of the organization the account will land in:
 
 An organization auto-created by a first OAuth sign-in has no policy row yet, so the platform default governs its first member.
 
+A visitor who arrives through an **organization-scoped sign-in** (`/sign-in/<org>` or `?org=`) targets that organization directly — ranked above provider/domain inference and below an invitation. See §7.
+
 ## 5. Activation re-evaluation at sign-in
 
 A still-pending account is re-evaluated against the **current** policy when it signs in, and activated when the policy now says active:
@@ -85,7 +87,25 @@ An administrator invites an email address into an organization (optionally with 
 
 Unknown, expired, revoked, and already-used tokens all get one generic "invalid or expired" answer, so nothing about organizations or invitees leaks to token guessers. Tokens are ~190-bit CSPRNG secrets stored only as SHA-256 hashes — the plaintext exists solely inside the email.
 
-## 7. Administering the policy
+## 7. Organization-scoped sign-in (`/sign-in/<org>`, `?org=<slug>`)
+
+A shared login screen can be pinned to one organization so members and new users land in the right place. Both forms resolve the same identifier — an organization **slug or id** — and are interchangeable:
+
+- **Path** — `/<locale>/sign-in/<org>` (e.g. `/en/sign-in/acme`).
+- **Query** — `/<locale>/sign-in?org=<slug>` (and the same on `/sign-up`).
+
+An unknown identifier renders the plain shared screen — no error, and no signal of whether an organization exists — so the segment is always safe to expose. Resolution matches **active** organizations only, and never creates one.
+
+What the scope does:
+
+- **Branding** — the screen reads "Sign in to _Org_".
+- **Existing members** — after authentication the active organization is pinned to the scoped org, via a membership-checked applicator (`GET /api/preferences/active-org/apply`). This covers **both** email and social sign-in, since both redirect through the post-auth `callbackURL`. A non-member falls through untouched to their own organization — the cookie is a selector among the caller's own memberships, never a grant.
+- **New users (email/password)** — the identifier rides the sign-up body as `organizationHint` (the same channel as an invitation token), so provisioning **targets** the scoped org. Placement only: the initial status is still decided by that org's signup policy (§3), so a hint can never self-activate anyone.
+- **New social users** route by provider identity (§4), not the URL hint — OAuth carries no sign-up body, matching the invitation model. The scope still pins the org for an existing social member.
+
+Precedence: a live **invitation** overrides the scope (§6). The scope is carried between screens — a scoped sign-in's _Create account_ link opens `/sign-up?org=<slug>`, and its _Have an account?_ counterpart points back to the scoped sign-in.
+
+## 8. Administering the policy
 
 - **Per organization** — Administrator → Organizations → *organization* → **Authentication** tab. An organization without an override shows the inherited platform defaults with a **Customize** button; **Reset to platform defaults** removes the override again. Requires `admin.orgs.update` (viewing requires `admin.orgs.read`).
 - **Platform defaults** — the **Platform sign-up defaults** card on the Organizations page, visible to superadmins only: editing it changes every organization without its own override.
@@ -93,7 +113,7 @@ Unknown, expired, revoked, and already-used tokens all get one generic "invalid 
 
 Changes are audited with previous→next values: `admin.organization.auth_policy_updated`, `admin.organization.auth_policy_reset`, `admin.platform.auth_policy_updated`. Provisioning decisions are audited too: a policy-activated account emits `auth.account.auto_activated` (with the decision reason), a parked one `auth.account.pending_approval`. Invitations add `admin.organization.invitation_created` / `.invitation_revoked` / `.invitation_resent` and `auth.account.invitation_accepted`.
 
-## 8. Security notes
+## 9. Security notes
 
 - **Fail closed, always.** Absent or unreadable policy means verification + admin approval; an invitation lookup failure during sign-up degrades to the uninvited path, never blocks the registration and never activates.
 - **Domain auto-approval requires proof.** Only a VERIFIED address can activate via `autoApproveEmailDomains`, so claiming `ceo@acme.com` at registration grants nothing until the mailbox is proven. Because a waived-verification org marks sign-ups verified without proof, that combination is rejected at write time and the decision layer additionally refuses domain approval whenever verification is not required — defense in depth against an unproven address riding a domain into an active membership.
@@ -101,8 +121,9 @@ Changes are audited with previous→next values: `admin.organization.auth_policy
 - **`auto_active` without verification is open signup.** Anyone who registers gets access without proving mailbox ownership — the editor warns about this combination; choose it only for deliberately open organizations.
 - **Method restriction never hides accounts.** Excluded-method sign-ups are parked pending rather than rejected, so administrators can see and triage them. A valid invitation overrides the restriction — inviting an address IS the sanction, and the explicit accept path is method-agnostic anyway, so a first-ranked allow-list would only be an inconsistent speed bump, not a gate.
 - **Programmatic creation is unaffected.** Seeds and the admin/machine-API user creation set verification and status explicitly.
+- **Scoped sign-in places, never grants.** `/sign-in/<org>` and `?org=` only _target_ an organization; activation still runs that org's policy, the active-org applicator is membership-checked (the cookie is a selector, not a grant), the hint never creates an organization, and an invitation always overrides it.
 
-## 9. Data model (reference)
+## 10. Data model (reference)
 
 `app_organization_auth_settings` — one row per organization plus one platform-default row (`organization_id IS NULL`, pinned unique by a partial index). `signup_approval_mode` and `allowed_auth_methods` are CHECK-constrained; rows are removed by `ON DELETE CASCADE` with their organization. Resolution and the pure status decision live in `src/lib/auth-policy.server.ts`; enforcement lives in the Better Auth hooks (`src/lib/auth.ts`) and `src/lib/user-provisioning.server.ts`.
 

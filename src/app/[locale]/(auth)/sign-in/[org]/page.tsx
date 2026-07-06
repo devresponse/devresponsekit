@@ -6,30 +6,27 @@ import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 /**
- * Localized sign-in page.
+ * Organization-scoped sign-in: `/sign-in/<org>` where `<org>` is a slug or id.
  *
- * Sanitizes `returnTo` server-side via `getSafeReturnTo` so the value
- * passed to Better Auth's `callbackURL` cannot trigger an open redirect.
- * The page belongs to the (auth) group so it never renders the secure
- * navigation shell.
+ * A shared login screen pinned to one organization — it brands the screen and,
+ * after login, pins the active org for an existing member (and carries the
+ * scope onto sign-up). Mirrors `/sign-in?org=<slug>`; both resolve through the
+ * same helper. An unknown identifier renders the plain sign-in screen (no
+ * error, no org-existence leak), so the segment is always safe.
  */
-export default async function SignInPage({
+export default async function ScopedSignInPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ locale: string }>;
+  params: Promise<{ locale: string; org: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { locale } = await params;
+  const { locale, org } = await params;
   const sp = await searchParams;
   const safeLocale: SupportedLocale = isSupportedLocale(locale) ? locale : "en";
   const rawReturn = typeof sp.returnTo === "string" ? sp.returnTo : null;
   const returnTo = getSafeReturnTo(rawReturn, safeLocale);
-
-  // Organization-scoped sign-in via `?org=<slug|id>`. Unknown → null, which
-  // renders the plain shared screen (no error, no org-existence leak).
-  const rawOrg = typeof sp.org === "string" ? sp.org : null;
-  const organization = rawOrg ? await resolveOrganizationByIdentifier(rawOrg) : null;
+  const organization = await resolveOrganizationByIdentifier(org);
 
   return (
     <main className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center gap-4 p-8">

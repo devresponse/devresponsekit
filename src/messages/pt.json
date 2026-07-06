@@ -43,6 +43,8 @@
     "noAccount": "Não tem uma conta?",
     "haveAccount": "Já tem uma conta?",
     "createAccount": "Criar conta",
+    "signInToOrganization": "Entre em {organization}",
+    "createAccountForOrganization": "Crie sua conta para {organization}",
     "loggedOutTitle": "A sua sessão foi terminada",
     "loggedOutDescription": "Inicie sessão novamente para continuar.",
     "pendingApprovalTitle": "A sua conta aguarda aprovação",

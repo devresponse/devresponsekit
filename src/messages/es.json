@@ -43,6 +43,8 @@
     "noAccount": "¿No tienes una cuenta?",
     "haveAccount": "¿Ya tienes una cuenta?",
     "createAccount": "Crear cuenta",
+    "signInToOrganization": "Inicia sesión en {organization}",
+    "createAccountForOrganization": "Crea tu cuenta para {organization}",
     "loggedOutTitle": "Has cerrado sesión",
     "loggedOutDescription": "Vuelve a iniciar sesión para continuar.",
     "pendingApprovalTitle": "Tu cuenta está pendiente de aprobación",

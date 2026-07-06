@@ -31,6 +31,13 @@ export interface EmailPasswordSignUpFormProps {
   invitationToken?: string;
   /** The invited address; when set the email field is pre-filled and locked. */
   invitedEmail?: string;
+  /**
+   * Organization-scoped sign-up identifier (`/sign-up?org=<slug>`). Rides the
+   * sign-up body as `organizationHint` — the same extra-field channel as
+   * `invitationToken` — so the server targets the account at that org (still
+   * gated by its signup policy). Ignored by the server when an invitation wins.
+   */
+  organizationHint?: string;
 }
 
 /**
@@ -57,6 +64,7 @@ export function EmailPasswordSignUpForm({
   postVerifyHref,
   invitationToken,
   invitedEmail,
+  organizationHint,
 }: EmailPasswordSignUpFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
@@ -86,6 +94,7 @@ export function EmailPasswordSignUpForm({
         name: values.name.trim(),
         callbackURL: `${verifyEmailHref}/confirmed`,
         ...(invitationToken ? { invitationToken } : {}),
+        ...(organizationHint ? { organizationHint } : {}),
       };
       const result = await authClient.signUp.email(
         payload as Parameters<typeof authClient.signUp.email>[0],

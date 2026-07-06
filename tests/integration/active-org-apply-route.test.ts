@@ -31,7 +31,7 @@ vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMoc
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 
-function req(org: string | null, next: string | null): NextRequest {
+function req(org: string | null, next: string | null, staleHint = false): NextRequest {
   const url = new URL("http://localhost:3000/api/preferences/active-org/apply");
   if (org !== null) url.searchParams.set("org", org);
   if (next !== null) url.searchParams.set("next", next);
@@ -40,6 +40,7 @@ function req(org: string | null, next: string | null): NextRequest {
     url: url.toString(),
     headers: new Headers(),
     method: "GET",
+    cookies: { has: (name: string) => (name === "org_signup_hint" ? staleHint : false) },
   } as unknown as NextRequest;
 }
 
@@ -105,6 +106,12 @@ describe("GET /api/preferences/active-org/apply", () => {
     expect(res.headers.get("location")).toBe("http://localhost:3000/en/app/workspace");
     expect(sessionGetter).not.toHaveBeenCalled();
     expect(res.cookies.get("active_org")).toBeUndefined();
+  });
+
+  it("retires a stale org_signup_hint cookie when one is present", async () => {
+    const res = await GET(req("acme", "/en/app/workspace", true));
+    // A deletion surfaces as an empty-value Set-Cookie.
+    expect(res.cookies.get("org_signup_hint")?.value).toBe("");
   });
 
   it("sanitizes an off-origin `next` to the safe default, even for a member", async () => {

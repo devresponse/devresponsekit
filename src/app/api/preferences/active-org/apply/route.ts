@@ -5,6 +5,7 @@ import { getCurrentSession } from "@/lib/auth-guard";
 import { getUserAccessContext } from "@/lib/auth-status";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
+import { ORG_SIGNUP_HINT_COOKIE } from "@/lib/scoped-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,13 @@ export async function GET(request: NextRequest) {
   const localeHint = nextParam?.split("/").filter(Boolean)[0];
   const safeNext = getSafeReturnTo(nextParam, localeHint);
   const redirect = NextResponse.redirect(new URL(safeNext, request.url));
+
+  // This applicator is the completion point of a scoped social flow: the
+  // provisioning hook has already read the hint, so retire the cookie here so
+  // it can't linger and misroute a later sign-up.
+  if (request.cookies.has(ORG_SIGNUP_HINT_COOKIE)) {
+    redirect.cookies.delete(ORG_SIGNUP_HINT_COOKIE);
+  }
 
   if (!orgParam) {
     return redirect;

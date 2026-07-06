@@ -4,12 +4,60 @@ import createIntlMiddleware from "next-intl/middleware";
 import { routing } from "@/i18n/routing";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { isLocalizedSecurePath } from "@/config/route-regions";
+import { ORG_SIGNUP_HINT_COOKIE } from "@/lib/scoped-auth";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
 function getLocaleFromPath(pathname: string): string {
   const locale = pathname.split("/")[1] ?? "";
   return isSupportedLocale(locale) ? locale : defaultLocale;
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Carries the organization scope of a sign-in/up page across the social OAuth
+ * round trip (which has no request body) via a short-lived cookie. Set on a
+ * scoped page (`/sign-in/<org>` or `?org=<slug>`), cleared on a plain one, so
+ * the hint always matches the page the visitor launches social sign-in from —
+ * the sign-in provisioning hook reads it for a brand-new social user. Placement
+ * only: provisioning still applies the target org's signup policy
+ * (auth-signup-policy.md §7). Never throws — a proxy exception breaks the page.
+ */
+function applyOrgSignupHint(request: NextRequest, response: NextResponse): void {
+  const segments = request.nextUrl.pathname.split("/").filter(Boolean);
+  if (!isSupportedLocale(segments[0])) {
+    return;
+  }
+  const page = segments[1];
+  if (page !== "sign-in" && page !== "sign-up") {
+    return;
+  }
+
+  // Path scope (`/sign-in/<org>`) or query scope (`?org=`); path wins.
+  const hint =
+    page === "sign-in" && segments[2]
+      ? safeDecode(segments[2])
+      : (request.nextUrl.searchParams.get("org") ?? "");
+
+  if (hint) {
+    response.cookies.set(ORG_SIGNUP_HINT_COOKIE, hint, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 600, // 10 min — a generous OAuth round-trip window
+    });
+  } else if (request.cookies.has(ORG_SIGNUP_HINT_COOKIE)) {
+    // Plain sign-in/up: drop any stale hint so the scope matches the page.
+    response.cookies.delete(ORG_SIGNUP_HINT_COOKIE);
+  }
 }
 
 /**
@@ -121,6 +169,7 @@ export function proxy(request: NextRequest) {
   requestHeaders.set("Content-Security-Policy", csp);
   const response = intlMiddleware(new NextRequest(request, { headers: requestHeaders }));
   response.headers.set("Content-Security-Policy", csp);
+  applyOrgSignupHint(request, response);
   return response;
 }
 

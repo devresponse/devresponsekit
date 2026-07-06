@@ -5,6 +5,7 @@ import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
 import { ssoSession } from "@/lib/auth-sso-session";
 import { getServerEnv } from "@/lib/env";
+import { ORG_SIGNUP_HINT_COOKIE, readCookieValue } from "@/lib/scoped-auth";
 import { SOCIAL_PROVIDERS, type SocialProvider } from "@/lib/social-providers";
 import { getTrustedOrigins } from "@/lib/trusted-origins";
 
@@ -321,6 +322,12 @@ export const auth = betterAuth({
 
           const { provisionUserFromAuth } = await import("@/lib/user-provisioning.server");
 
+          // This new-user branch is the SOCIAL sign-up path (email/password is
+          // provisioned earlier in `user.create.after`, so it is already an
+          // existing row by here). OAuth carries no sign-up body, so an
+          // organization-scoped social sign-up hands its hint across the round
+          // trip via the `org_signup_hint` cookie the proxy set on the scoped
+          // page. Placement only — provisioning still applies the org's policy.
           await provisionUserFromAuth({
             betterAuthUserId: authUser.id,
             email: authUser.email,
@@ -328,6 +335,10 @@ export const auth = betterAuth({
             displayName: authUser.name,
             provider: getProvisioningProvider(context),
             preferredLocale: getPreferredLocale(context),
+            organizationHint: readCookieValue(
+              context.request?.headers.get("cookie"),
+              ORG_SIGNUP_HINT_COOKIE,
+            ),
           });
         },
       },

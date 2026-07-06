@@ -136,6 +136,16 @@ jobs:
       # key is generated per run in the step below (never committed).
       API_JWT_ENABLED: "1"
       SSO_ALLOWED_ORIGIN_SUFFIXES: devresponse.com
+      # Social login: CI-only dummy credentials so all three provider buttons
+      # render (a provider activates only when BOTH its id and secret are set).
+      # The e2e only asserts the buttons are present — it never completes an
+      # OAuth round-trip — so these are never exchanged with a real provider.
+      GOOGLE_CLIENT_ID: ci-e2e-google-client-id
+      GOOGLE_CLIENT_SECRET: ci-e2e-google-client-secret
+      MICROSOFT_CLIENT_ID: ci-e2e-microsoft-client-id
+      MICROSOFT_CLIENT_SECRET: ci-e2e-microsoft-client-secret
+      GITHUB_CLIENT_ID: ci-e2e-github-client-id
+      GITHUB_CLIENT_SECRET: ci-e2e-github-client-secret
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

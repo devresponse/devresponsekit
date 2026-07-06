@@ -5,6 +5,7 @@ import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
 import { ssoSession } from "@/lib/auth-sso-session";
 import { getServerEnv } from "@/lib/env";
+import { SOCIAL_PROVIDERS, type SocialProvider } from "@/lib/social-providers";
 import { getTrustedOrigins } from "@/lib/trusted-origins";
 
 /**
@@ -45,6 +46,18 @@ if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
     clientSecret: env.GITHUB_CLIENT_SECRET,
   };
 }
+
+/**
+ * The social providers actually registered above — those with BOTH a client
+ * id and secret present — in canonical display order. The sign-in and sign-up
+ * pages read this so the UI only offers a provider whose OAuth flow can
+ * actually complete; a button for an unconfigured provider would fail on
+ * click. Derived from `socialProviders` so it can never drift from what Better
+ * Auth received.
+ */
+export const enabledSocialProviders: SocialProvider[] = SOCIAL_PROVIDERS.filter(
+  (provider) => provider in socialProviders,
+);
 
 export const auth = betterAuth({
   database: pgPool,

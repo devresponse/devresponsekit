@@ -1,6 +1,7 @@
 import { SignUpForm, type SignUpInvitation } from "@/components/auth/sign-up-form";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
+import { enabledSocialProviders } from "@/lib/auth";
 import { findValidInvitationByToken } from "@/lib/invitations.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
@@ -39,7 +40,12 @@ export default async function SignUpPage({
       <div className="self-end">
         <LocaleSwitcher current={safeLocale} />
       </div>
-      <SignUpForm locale={safeLocale} returnTo={returnTo} invitation={invitation} />
+      <SignUpForm
+        locale={safeLocale}
+        returnTo={returnTo}
+        invitation={invitation}
+        socialProviders={enabledSocialProviders}
+      />
     </main>
   );
 }

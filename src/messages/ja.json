@@ -43,6 +43,8 @@
     "noAccount": "アカウントをお持ちでないですか？",
     "haveAccount": "すでにアカウントをお持ちですか？",
     "createAccount": "アカウントを作成",
+    "signInToOrganization": "{organization} にサインイン",
+    "createAccountForOrganization": "{organization} のアカウントを作成",
     "loggedOutTitle": "サインアウトしました",
     "loggedOutDescription": "続行するには、もう一度サインインしてください。",
     "pendingApprovalTitle": "アカウントは承認待ちです",

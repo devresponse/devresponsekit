@@ -48,4 +48,19 @@ describe("SignInForm", () => {
       "/en/sign-up",
     );
   });
+
+  it("brands the screen and scopes the create-account link when organization-scoped", () => {
+    renderWithIntl(
+      <SignInForm
+        locale="en"
+        returnTo="/en/app/dashboard"
+        socialProviders={SOCIAL_PROVIDERS}
+        organization={{ id: "o-1", slug: "acme", name: "Acme" }}
+      />,
+    );
+    expect(screen.getByText(/sign in to acme/i)).toBeInTheDocument();
+    const createLink = screen.getByRole("link", { name: /create account/i });
+    expect(createLink.getAttribute("href")).toContain("/sign-up");
+    expect(createLink.getAttribute("href")).toContain("org=acme");
+  });
 });

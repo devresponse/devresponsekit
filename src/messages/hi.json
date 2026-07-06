@@ -43,6 +43,8 @@
     "noAccount": "खाता नहीं है?",
     "haveAccount": "पहले से ही एक खाता है?",
     "createAccount": "खाता बनाएँ",
+    "signInToOrganization": "{organization} में साइन इन करें",
+    "createAccountForOrganization": "{organization} के लिए अपना खाता बनाएँ",
     "loggedOutTitle": "आपको साइन आउट कर दिया गया है",
     "loggedOutDescription": "जारी रखने के लिए फिर से साइन इन करें।",
     "pendingApprovalTitle": "आपका खाता अनुमोदन के लिए लंबित है",

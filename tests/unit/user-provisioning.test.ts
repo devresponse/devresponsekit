@@ -35,6 +35,11 @@ vi.mock("@/lib/invitations.server", () => ({
   consumeInvitation: (...a: unknown[]) => consumeInvitationMock(...a),
 }));
 
+const resolveOrgMock = vi.fn();
+vi.mock("@/lib/org-lookup.server", () => ({
+  resolveOrganizationByIdentifier: (...a: unknown[]) => resolveOrgMock(...a),
+}));
+
 const logErrorMock = vi.fn();
 vi.mock("@/lib/observability/logger.server", () => ({
   logServerError: (...a: unknown[]) => logErrorMock(...a),
@@ -158,6 +163,8 @@ beforeEach(() => {
   findInvitationMock.mockResolvedValue(null);
   consumeInvitationMock.mockReset();
   consumeInvitationMock.mockResolvedValue({ consumed: true, roleGranted: false });
+  resolveOrgMock.mockReset();
+  resolveOrgMock.mockResolvedValue(null);
   logErrorMock.mockReset();
   insertCalls = [];
   updateCalls = [];
@@ -553,6 +560,121 @@ describe("provisionUserFromAuth", () => {
     expect(result.organizationId).toBe("org-default");
     expect(consumeInvitationMock).not.toHaveBeenCalled();
     expect(logErrorMock).toHaveBeenCalled();
+  });
+
+  it("targets the hinted org for a scoped sign-up (`?org=`); status still policy-gated", async () => {
+    resolveOrgMock.mockResolvedValue({ id: "org-hinted", slug: "acme", name: "Acme" });
+    // The hinted org runs auto_active, so the scoped sign-up lands active THERE
+    // (not the default org) — placement by hint, activation by the org's policy.
+    stubs.policyRows = () => [
+      DEFAULT_POLICY_ROW,
+      {
+        organization_id: "org-hinted",
+        require_email_verification: false,
+        signup_approval_mode: "auto_active",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      },
+    ];
+    stubs.orgSelect = () => {
+      throw new Error("a hinted sign-up must not resolve the org by slug");
+    };
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-hint",
+      email: "new@acme.com",
+      emailVerified: false,
+      provider: "email",
+      organizationHint: "acme",
+    });
+
+    expect(resolveOrgMock).toHaveBeenCalledWith("acme");
+    expect(result.organizationId).toBe("org-hinted");
+    expect(
+      insertCalls.find((c) => c.table === "app_organization_memberships")?.values,
+    ).toMatchObject({ organization_id: "org-hinted", provider_organization_key: null });
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ organizationHintApplied: true }),
+      }),
+    );
+  });
+
+  it("keeps a hinted sign-up pending when the hinted org requires admin approval", async () => {
+    resolveOrgMock.mockResolvedValue({ id: "org-hinted", slug: "acme", name: "Acme" });
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-hinted",
+        require_email_verification: true,
+        signup_approval_mode: "admin_approval",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      },
+    ];
+    stubs.orgSelect = () => {
+      throw new Error("a hinted sign-up must not resolve the org by slug");
+    };
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-hint2",
+      email: "new@acme.com",
+      emailVerified: true,
+      provider: "email",
+      organizationHint: "acme",
+    });
+
+    expect(result.organizationId).toBe("org-hinted");
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe(
+      "pending_approval",
+    );
+  });
+
+  it("falls through to normal resolution when the org hint does not resolve", async () => {
+    resolveOrgMock.mockResolvedValue(null); // unknown identifier
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-hint3",
+      email: "u@example.com",
+      emailVerified: true,
+      provider: "email",
+      organizationHint: "does-not-exist",
+    });
+
+    expect(resolveOrgMock).toHaveBeenCalledWith("does-not-exist");
+    expect(result.organizationId).toBe("org-default");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.not.objectContaining({ organizationHintApplied: true }),
+      }),
+    );
+  });
+
+  it("lets a live invitation override the org hint (email-bound proof wins; hint not consulted)", async () => {
+    findInvitationMock.mockResolvedValue({
+      id: "inv-1",
+      organizationId: "org-invited",
+      organizationName: "Invited Org",
+      email: "ada@example.com",
+      roleId: null,
+      status: "pending",
+      expiresAt: new Date("2099-01-01T00:00:00Z"),
+    });
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-both",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+      invitationToken: "tok-plain",
+      organizationHint: "acme",
+    });
+
+    expect(result.organizationId).toBe("org-invited");
+    // The invitation already fixed the org, so the hint branch is never reached.
+    expect(resolveOrgMock).not.toHaveBeenCalled();
   });
 });
 

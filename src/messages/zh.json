@@ -43,6 +43,8 @@
     "noAccount": "还没有账户？",
     "haveAccount": "已有账户？",
     "createAccount": "创建账户",
+    "signInToOrganization": "登录到 {organization}",
+    "createAccountForOrganization": "为 {organization} 创建您的账户",
     "loggedOutTitle": "您已退出登录",
     "loggedOutDescription": "请重新登录以继续。",
     "pendingApprovalTitle": "您的账户正在等待审批",

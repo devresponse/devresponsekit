@@ -69,4 +69,32 @@ describe("SignUpForm", () => {
     // The "have an account? sign in" link stays — an existing user can sign in.
     expect(screen.getByRole("link", { name: /already have an account/i })).toBeInTheDocument();
   });
+
+  it("brands the screen and scopes the sign-in link for an organization-scoped sign-up", () => {
+    renderWithIntl(
+      <SignUpForm
+        locale="en"
+        returnTo="/en/app/dashboard"
+        socialProviders={SOCIAL_PROVIDERS}
+        organization={{ id: "o-1", slug: "acme", name: "Acme" }}
+      />,
+    );
+    expect(screen.getByText(/create your account for acme/i)).toBeInTheDocument();
+    const signInLink = screen.getByRole("link", { name: /already have an account/i });
+    expect(signInLink.getAttribute("href")).toContain("org=acme");
+  });
+
+  it("ignores org scoping when an invitation is present (the invitation's org wins)", () => {
+    renderWithIntl(
+      <SignUpForm
+        locale="en"
+        returnTo="/en/app/dashboard"
+        socialProviders={SOCIAL_PROVIDERS}
+        organization={{ id: "o-1", slug: "acme", name: "Acme" }}
+        invitation={{ token: "t", email: "ada@acme.com", organizationName: "Acme Invited" }}
+      />,
+    );
+    expect(screen.getByText(/joining Acme Invited/i)).toBeInTheDocument();
+    expect(screen.queryByText(/create your account for acme/i)).toBeNull();
+  });
 });

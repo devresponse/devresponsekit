@@ -49,7 +49,7 @@ describe("SignInForm", () => {
     );
   });
 
-  it("brands the screen and scopes the create-account link when organization-scoped", () => {
+  it("brands the screen, keeps social buttons, and scopes the create-account link", () => {
     renderWithIntl(
       <SignInForm
         locale="en"
@@ -58,7 +58,11 @@ describe("SignInForm", () => {
         organization={{ id: "o-1", slug: "acme", name: "Acme" }}
       />,
     );
+    // Org branding and social sign-in coexist on the scoped screen.
     expect(screen.getByText(/sign in to acme/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue with google/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue with microsoft/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue with github/i })).toBeInTheDocument();
     const createLink = screen.getByRole("link", { name: /create account/i });
     expect(createLink.getAttribute("href")).toContain("/sign-up");
     expect(createLink.getAttribute("href")).toContain("org=acme");

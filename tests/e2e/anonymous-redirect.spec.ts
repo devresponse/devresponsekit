@@ -26,3 +26,19 @@ test("sign-in page renders email/password and all three social buttons (§29.8.2
   await expect(page.getByRole("button", { name: /continue with microsoft/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /continue with github/i })).toBeVisible();
 });
+
+test("organization-scoped sign-in brands the screen and keeps social login (§14.1)", async ({
+  page,
+}) => {
+  // The seed creates the `default` organization ("Default Organization"); the
+  // scoped screen brands for it AND still offers social sign-in, so a social
+  // sign-up on this URL lands in the right org.
+  await page.goto("/en/sign-in/default");
+  await expect(page.getByText(/sign in to default organization/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /continue with google/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /continue with microsoft/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /continue with github/i })).toBeVisible();
+  // An unknown org silently falls back to the plain screen (no branding).
+  await page.goto("/en/sign-in/no-such-org");
+  await expect(page.getByText(/sign in to no-such-org/i)).toHaveCount(0);
+});

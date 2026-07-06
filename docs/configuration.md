@@ -48,11 +48,46 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 
 ### Social login (all optional — a provider activates only when both id and secret are set)
 
+Google, Microsoft (Entra ID), and GitHub sign-in. Each provider is independent: it activates only when **both** its id and secret are present. Unlike SSO these are **not** boot-validated — a missing pair just leaves that provider inactive. The sign-in and sign-up pages always render all three buttons; a button only completes a sign-in once its provider is configured (an unconfigured one returns an error when clicked).
+
 | Variable | Controls |
 | --- | --- |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth. |
-| `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Microsoft Entra ID OAuth (multi-tenant). |
+| `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Microsoft Entra ID OAuth (multi-tenant work/school accounts). |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub OAuth. |
+
+> **Redirect / callback URL — register this in every provider's console.** The path is fixed by Better Auth; the origin is your **`BETTER_AUTH_URL`**:
+>
+> ```
+> <BETTER_AUTH_URL>/api/auth/callback/<provider>
+> ```
+>
+> `<provider>` is literally `google`, `microsoft`, or `github` — e.g. `http://localhost:3000/api/auth/callback/google` (local) or `https://app.example.com/api/auth/callback/google` (production). Register one callback per origin you run; add the local **and** production URLs. Values are read at boot — **restart** after changing them.
+
+#### Google — [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials
+
+1. Create or select a project, then configure the **OAuth consent screen**: user type _External_ for public sign-up, an app name and support email. The default `email` / `profile` / `openid` scopes are all this app needs. While the screen is in _Testing_ only listed test users can sign in — **Publish** it for general availability.
+2. **Create credentials → OAuth client ID → Web application**.
+3. Under **Authorized redirect URIs**, add `<BETTER_AUTH_URL>/api/auth/callback/google`.
+4. Copy **Client ID** → `GOOGLE_CLIENT_ID` and **Client secret** → `GOOGLE_CLIENT_SECRET`.
+
+#### Microsoft (Entra ID) — [Microsoft Entra admin center](https://entra.microsoft.com/) → App registrations
+
+Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school account can sign in; personal Microsoft accounts are excluded.
+
+1. **New registration.** Under **Supported account types** choose _Accounts in any organizational directory (multitenant)_.
+2. Add a **Redirect URI** of platform **Web** = `<BETTER_AUTH_URL>/api/auth/callback/microsoft` (during registration or later under **Authentication**).
+3. From the app's **Overview**, copy **Application (client) ID** → `MICROSOFT_CLIENT_ID`.
+4. **Certificates & secrets → New client secret** → copy the secret's **Value** (not its _Secret ID_) → `MICROSOFT_CLIENT_SECRET`. Client secrets **expire** — record the expiry and set a rotation reminder.
+
+#### GitHub — [Settings → Developer settings → OAuth Apps](https://github.com/settings/developers)
+
+1. **New OAuth App** (personal, or an organization's OAuth Apps for an org-owned one).
+2. **Homepage URL** = your `BETTER_AUTH_URL`; **Authorization callback URL** = `<BETTER_AUTH_URL>/api/auth/callback/github`.
+3. Copy **Client ID** → `GITHUB_CLIENT_ID`.
+4. **Generate a new client secret** → copy it immediately → `GITHUB_CLIENT_SECRET`. A GitHub OAuth App allows only **one** callback URL — use a separate app per environment.
+
+> **After sign-in.** A social sign-up still runs through the organization's signup policy — approval mode, allowed methods, and email-domain routing — exactly like an email sign-up. See [`auth-signup-policy.md`](auth-signup-policy.md).
 
 ### Single Sign-On handoff
 

@@ -998,13 +998,17 @@ first-time setup, folding in the administrator indexes, audit
 provisioning, the email tables, **and** the machine-API credential tables
 (`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens`) and the four
 `admin.apikeys.*` / `admin.clients.*` permissions (see §37). The core-table
-DDL below is the heart of that file. `0001` is the frozen baseline; forward
-migrations are appended as numbered `NNNN-*.sql` files (through `0009` at
-time of writing — SSO/outbox/audit hardening, the per-organization sign-up
-policy `app_organization_auth_settings` (0007), and organization
-invitations `app_organization_invitations` (0008)) plus locale data under
-`migrations/locales/`. See the migration runner below and
-docs/auth-signup-policy.md.
+DDL below is the heart of that file. `0001` is the frozen baseline. The
+earlier forward migrations `0002`–`0008` — SSO/outbox/audit hardening, the
+org-FK `ON DELETE SET NULL` swap, the per-organization sign-up policy
+`app_organization_auth_settings`, and organization invitations
+`app_organization_invitations` — have since been **folded back into `0001`**
+(each a "Folded in from …" section), so it is currently the only core file
+and the next forward migration continues at `0010`. Email templates are
+**not** in the core schema: they live as locale data under
+`migrations/locales/`, one file per locale, with the English base
+`locales/0000-email-templates-en.sql` always applied. See the migration
+runner below and docs/auth-signup-policy.md.
 
 The runner `src/db/migrations/run-migrations.ts` stays multi-file capable
 (it applies every `NNNN-*.sql` in lexical order and records applied

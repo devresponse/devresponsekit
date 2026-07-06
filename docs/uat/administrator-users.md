@@ -72,8 +72,9 @@ persona a tester must manually assign the `admin` role (and only that role) to a
 fresh user, e.g. via the Roles tab, or add an `admin`-only fixture user.
 
 **Reset:** `dev-init.ts` is idempotent (re-runnable). Audit rows are
-append-only (migration 0004), so a full reset means dropping/recreating the
-database, then re-migrating and re-seeding.
+append-only (enforced by the audit trigger in `0001-initial-schema.sql`), so a
+full reset means dropping/recreating the database, then re-migrating and
+re-seeding.
 
 ### The access model (why 404, not 403)
 

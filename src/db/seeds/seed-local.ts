@@ -75,23 +75,22 @@ async function main() {
     ).rows[0]?.id;
     if (!orgId) throw new Error("default org missing after insert");
 
-    // Default organization signup policy (0007): a new member is ACTIVE once
-    // they VERIFY their email — no explicit administrator-approval step. Email
-    // verification is still required (`require_email_verification = true`); it
-    // is the verification, not an admin, that approves the account.
+    // Platform sign-up defaults (0007): a new member is ACTIVE once they VERIFY
+    // their email — NO explicit administrator-approval step. This relaxes the
+    // migration's fail-closed baseline (verification + admin approval) to the
+    // friction-free "verify → active" flow this deployment ships as its default.
     //
-    // The platform-default row (`organization_id IS NULL`, seeded by
-    // 0001-initial-schema.sql) stays `admin_approval` as the fail-closed
-    // default for every OTHER organization; this org-scoped row applies the
-    // friction-free "verify → active" flow only to the public default org,
-    // where self-registrations land. `do nothing` so a later admin edit to the
-    // policy is preserved across re-seeds.
+    // It updates the PLATFORM-DEFAULT row (`organization_id IS NULL`, inserted by
+    // 0001-initial-schema.sql), which every organization without its own override
+    // inherits — including the default org where self-registrations land — so it
+    // is exactly what the "Platform sign-up defaults" admin panel shows.
+    // Verification stays required; the verification itself is the approval.
     await pool.query(
-      `insert into app_organization_auth_settings
-         (organization_id, require_email_verification, signup_approval_mode)
-       values ($1, true, 'auto_active')
-       on conflict (organization_id) do nothing`,
-      [orgId],
+      `update app_organization_auth_settings
+          set require_email_verification = true,
+              signup_approval_mode = 'auto_active',
+              updated_at = now()
+        where organization_id is null`,
     );
 
     const roles: Array<[string, string, string[]]> = [

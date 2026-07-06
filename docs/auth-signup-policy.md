@@ -69,7 +69,7 @@ This is the **only** automatic upgrade path, it only ever touches `pending_appro
 
 **Verification is a distinct step from sign-in.** Clicking the emailed verification link confirms the address but does **not** create a session (`autoSignInAfterVerification` is off) — it lands on a localized "email verified — proceed to sign in" confirmation page, and the user signs in explicitly. Activation (the re-evaluation above) therefore happens on that first post-verification sign-in, not on the link click itself.
 
-**The seeded `default` organization ships an `auto_active` override** (`require_email_verification = true` + `signup_approval_mode = auto_active`), so a self-registered user who verifies their email is active with **no administrator-approval step**. The platform-default row stays `admin_approval` (fail-closed) for every other/auto-created organization.
+**The seed sets the platform sign-up default to `auto_active`** (`require_email_verification = true` + `signup_approval_mode = auto_active`), so a self-registered user who verifies their email is active with **no administrator-approval step**. This is the row shown by the **Platform sign-up defaults** admin panel and is inherited by every organization without its own override (including the `default` org, where self-registrations land). The `0001-initial-schema.sql` migration still seeds this row **fail-closed** (`admin_approval`) as a defensive baseline; `db:seed` relaxes it to `auto_active` for this deployment.
 
 ## 6. Invitations
 

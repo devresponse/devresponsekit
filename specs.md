@@ -990,25 +990,22 @@ export const pgPool = pool;
 
 ### 10.3 Application core schema
 
-The **entire** application schema is a single consolidated setup script,
-`src/db/migrations/0001-initial-schema.sql` — one file, one setup
-process. It provisions every `app_*` table, index, and baseline row for a
-first-time setup, folding in the administrator indexes, audit
-`request_id`, soft-delete columns, the permission catalog + superuser
-provisioning, the email tables, **and** the machine-API credential tables
+The **entire** application schema is a single setup script,
+`src/db/migrations/0001-initial-schema.sql` — one file, one setup process. It
+provisions every `app_*` table, index, trigger, and baseline row for a
+first-time setup: the administrator indexes, audit `request_id`, soft-delete
+columns, the permission catalog + superuser provisioning, the SSO/outbox
+delivery infrastructure, the audit append-only trigger, the per-organization
+sign-up policy (`app_organization_auth_settings`), organization invitations
+(`app_organization_invitations`), **and** the machine-API credential tables
 (`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens`) and the four
 `admin.apikeys.*` / `admin.clients.*` permissions (see §37). The core-table
-DDL below is the heart of that file. `0001` is the frozen baseline. The
-earlier forward migrations `0002`–`0008` — SSO/outbox/audit hardening, the
-org-FK `ON DELETE SET NULL` swap, the per-organization sign-up policy
-`app_organization_auth_settings`, and organization invitations
-`app_organization_invitations` — have since been **folded back into `0001`**
-(each a "Folded in from …" section), so it is currently the only core file
-and the next forward migration continues at `0010`. Email templates are
-**not** in the core schema: they live as locale data under
-`migrations/locales/`, one file per locale, with the English base
-`locales/0000-email-templates-en.sql` always applied. See the migration
-runner below and docs/auth-signup-policy.md.
+DDL below is the heart of that file. `0001` is the frozen baseline and today
+the only core file; further schema changes are added as new numbered
+`NNNN-*.sql` files. Email templates are **not** in the core schema: they live
+as locale data under `migrations/locales/`, one file per locale, with the
+English base `locales/0000-email-templates-en.sql` always applied. See the
+migration runner below and docs/auth-signup-policy.md.
 
 The runner `src/db/migrations/run-migrations.ts` stays multi-file capable
 (it applies every `NNNN-*.sql` in lexical order and records applied
@@ -3620,7 +3617,7 @@ is configured. Delivery is delegated to a pluggable provider
 
 ### 35.1 Data model
 
-The consolidated initial schema `0001-initial-schema.sql` includes:
+The initial schema `0001-initial-schema.sql` includes:
 
 - `app_email_templates (key, locale, subject, body_html, body_text,
   description)` — editable templates, unique on `(key, locale)`. Seeded

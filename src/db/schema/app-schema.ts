@@ -35,8 +35,8 @@ export interface AppProviderOrganizationsTable {
 }
 
 /**
- * Runtime-configurable per-organization signup/authentication policy
- * (migration 0007). The row with `organization_id = null` is the single
+ * Runtime-configurable per-organization signup/authentication policy.
+ * The row with `organization_id = null` is the single
  * platform default; an org row is a COMPLETE policy override (no per-field
  * inheritance). For the two array columns NULL is a meaningful value —
  * `allowed_auth_methods` NULL = every enabled method, and
@@ -61,7 +61,7 @@ export interface AppOrganizationAuthSettingsTable {
 }
 
 /**
- * Organization invitations (migration 0008). `token_hash` is the SHA-256 of
+ * Organization invitations. `token_hash` is the SHA-256 of
  * the single-use accept secret — the plaintext exists only inside the
  * invitation email. Status lifecycle: `pending` → `accepted` | `revoked`;
  * a `pending` row past `expires_at` is treated as expired at read time
@@ -206,8 +206,8 @@ export interface AppAuditEventsTable {
   reason: string | null;
   /**
    * Correlation id (UUID) shared with the originating request's
-   * `x-request-id` response header. May be NULL on legacy rows written
-   * before the column existed (it predates the schema consolidation).
+   * `x-request-id` response header. May be NULL on older rows written
+   * before request-id correlation was recorded.
    */
   request_id: ColumnType<string | null, string | null | undefined, string | null>;
   metadata: Json;

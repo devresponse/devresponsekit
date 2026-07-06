@@ -6,10 +6,10 @@
 -- excludes the localized files (an English-only install still needs these). The
 -- runner special-cases this one filename; see run-migrations.ts / migration-plan.ts.
 --
--- Consolidates the en rows previously split across 0001-initial-schema.sql
--- (password_reset, test_email) and the former 0006-email-verification-template.sql
--- and 0009-invitation-template.sql. Idempotent via `on conflict (key, locale) do
--- nothing`. Keep in sync with `DEFAULT_EMAIL_TEMPLATES` in `src/lib/email/templates.ts`.
+-- Holds the `en` base row for every email template (password_reset, test_email,
+-- email_verification, organization_invitation). Idempotent via `on conflict
+-- (key, locale) do nothing`. Keep in sync with `DEFAULT_EMAIL_TEMPLATES` in
+-- `src/lib/email/templates.ts`.
 
 insert into app_email_templates (key, locale, subject, body_html, body_text, description) values
   (

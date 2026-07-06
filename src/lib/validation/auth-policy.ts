@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * Shared validation for the per-organization signup policy
- * (`app_organization_auth_settings`, migration 0007). Imported by BOTH the
+ * (`app_organization_auth_settings`). Imported by BOTH the
  * API routes (`/api/administrator/organizations/[id]/auth-settings`,
  * `/api/administrator/auth-settings/defaults`) and the client form so the
  * two enforce identical rules. Error messages are stable `validation.*`

@@ -24,8 +24,9 @@ import { ADMIN_PERMISSION_CATALOG, ANY_ADMIN_PERMISSION } from "@/lib/admin/perm
  *
  * It is **idempotent** — every write is `on conflict do nothing`/`do update`,
  * Better Auth users are created check-then-create, and the audit history is
- * guarded by a `metadata.seed` sentinel (audit rows are append-only — see
- * migration 0004 — so they can't be deleted and re-inserted). Safe to run
+ * guarded by a `metadata.seed` sentinel (audit rows are append-only — the
+ * audit trigger blocks UPDATE/DELETE — so they can't be deleted and
+ * re-inserted). Safe to run
  * repeatedly. It assumes the schema already exists (`pnpm db:auth:migrate` +
  * `pnpm db:app:migrate`); it does not create tables.
  *
@@ -630,7 +631,7 @@ interface AuditRow {
  * (attributed round-robin to seeded users) plus a spread of past actions.
  *
  * Idempotent via a `metadata.seed = 'dev-init'` sentinel: audit rows are
- * append-only (migration 0004 blocks UPDATE/DELETE), so we cannot delete and
+ * append-only (the audit trigger blocks UPDATE/DELETE), so we cannot delete and
  * re-insert — instead we skip entirely when seeded rows already exist.
  * Returns the number of rows inserted (0 if already seeded).
  */

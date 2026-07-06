@@ -207,7 +207,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     // provider bindings, enterprise apps, or API/OAuth credentials whose FKs
     // block the delete. Translate that FK violation into the documented 409
     // (DB-1) instead of letting it surface as a raw 500. Audit rows do NOT
-    // reach here — their FK is ON DELETE SET NULL (migration 0005).
+    // reach here — their FK is ON DELETE SET NULL.
     const message = err instanceof Error ? err.message : "unknown";
     if (/foreign key/i.test(message)) {
       await auditOrgAction("admin.organization.delete_blocked", "denied", {

@@ -549,9 +549,8 @@ keys, or raw passwords. Internal exception detail may go in `metadata` (e.g.
 
 ### 17. Audit posture (append-only + retention)
 
-The audit log is a tamper-evident compliance record. The consolidated
-`0001-initial-schema.sql` (see its "Folded in from 0004-audit-append-only.sql"
-section) installs a row-level `BEFORE UPDATE OR DELETE` trigger
+The audit log is a tamper-evident compliance record. `0001-initial-schema.sql`
+installs a row-level `BEFORE UPDATE OR DELETE` trigger
 (`app_audit_events_block_mutation`) that **raises on any UPDATE or DELETE** —
 the application database role cannot silently mutate or remove audit
 rows. INSERTs are unaffected.
@@ -690,4 +689,4 @@ contract as the matching list endpoint (§5.2). Supported resources: `users`,
 
 _Authoritative sources: `src/lib/admin/**` (helpers), `src/app/api/administrator/**`
 (handlers), `src/db/migrations/0001-initial-schema.sql` (audit posture — the
-folded-in audit append-only trigger), [`docs/openapi-admin.json`](./openapi-admin.json) (wire shapes)._
+audit append-only trigger), [`docs/openapi-admin.json`](./openapi-admin.json) (wire shapes)._

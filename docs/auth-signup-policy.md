@@ -6,7 +6,7 @@ _Audience: administrators and developers. How new accounts register and become a
 
 ## 1. Overview
 
-The signup workflow is **runtime-configurable per organization** and persisted in the database (`app_organization_auth_settings`, defined in `0001-initial-schema.sql` — the former migration `0007`, now folded into the baseline). Administrators choose, per organization, whether email verification is required and how a new account becomes active — no code change, environment variable, or restart involved.
+The signup workflow is **runtime-configurable per organization** and persisted in the database (`app_organization_auth_settings`, defined in `0001-initial-schema.sql`). Administrators choose, per organization, whether email verification is required and how a new account becomes active — no code change, environment variable, or restart involved.
 
 Two decisions are policy-driven:
 
@@ -42,7 +42,7 @@ A **valid invitation activates under every mode and overrides the method allow-l
 For any organization the effective policy resolves as:
 
 1. the organization's **own row** — a COMPLETE policy (there is no per-field inheritance);
-2. else the single **platform-default row** (`organization_id IS NULL`, seeded to verification + admin approval by the `app_organization_auth_settings` section of `0001-initial-schema.sql` — the former migration `0007`, now folded into the baseline);
+2. else the single **platform-default row** (`organization_id IS NULL`, seeded by the `app_organization_auth_settings` section of `0001-initial-schema.sql`);
 3. else hardcoded **fail-closed constants** equal to that same strict default.
 
 Every failure mode — missing rows, malformed values, a database error during signup-time resolution — degrades to the *strictest* policy, never a more permissive one. Policy reads happen at signup time (the verification decision) and at provisioning time (the activation decision), so edits apply to the next registration with no restart.

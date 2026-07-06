@@ -48,7 +48,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 
 ### Social login (all optional — a provider activates only when both id and secret are set)
 
-Google, Microsoft (Entra ID), and GitHub sign-in. Each provider is independent: it activates only when **both** its id and secret are present. Unlike SSO these are **not** boot-validated — a missing pair just leaves that provider inactive. The sign-in and sign-up pages always render all three buttons; a button only completes a sign-in once its provider is configured (an unconfigured one returns an error when clicked).
+Google, Microsoft (Entra ID), and GitHub sign-in. Each provider is independent: it activates only when **both** its id and secret are present. Unlike SSO these are **not** boot-validated — a missing pair just leaves that provider inactive. The sign-in and sign-up pages render a button only for each **configured** provider; when none are set the social section (and its "or" divider) is omitted entirely.
 
 | Variable | Controls |
 | --- | --- |

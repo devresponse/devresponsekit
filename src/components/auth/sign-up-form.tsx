@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { SupportedLocale } from "@/config/i18n-config";
+import type { SocialProvider } from "@/lib/social-providers";
 
 /** A LIVE invitation carried by `/sign-up?invite=<token>` (0008). */
 export interface SignUpInvitation {
@@ -18,6 +19,8 @@ export interface SignUpFormProps {
   locale: SupportedLocale;
   returnTo: string;
   invitation?: SignUpInvitation | null;
+  /** The configured social providers, from `enabledSocialProviders`. */
+  socialProviders: readonly SocialProvider[];
 }
 
 /**
@@ -33,7 +36,7 @@ export interface SignUpFormProps {
  * pre-verified (the token proves mailbox access) and lands active in the
  * inviting organization.
  */
-export function SignUpForm({ locale, returnTo, invitation }: SignUpFormProps) {
+export function SignUpForm({ locale, returnTo, invitation, socialProviders }: SignUpFormProps) {
   const t = useTranslations("auth");
 
   return (
@@ -62,14 +65,14 @@ export function SignUpForm({ locale, returnTo, invitation }: SignUpFormProps) {
             instead of active in the inviting org. Invitations are email-
             address-scoped and the emailed token already proves the mailbox,
             so email/password is the intended path here. */}
-        {invitation ? null : (
+        {invitation || socialProviders.length === 0 ? null : (
           <>
             <div className="flex items-center gap-3">
               <Separator className="flex-1" />
               <span className="text-muted-foreground text-xs uppercase">{t("or")}</span>
               <Separator className="flex-1" />
             </div>
-            <SocialLoginButtons returnTo={returnTo} />
+            <SocialLoginButtons returnTo={returnTo} providers={socialProviders} />
           </>
         )}
         <div className="text-sm">

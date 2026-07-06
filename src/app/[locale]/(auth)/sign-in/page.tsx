@@ -1,6 +1,7 @@
 import { SignInForm } from "@/components/auth/sign-in-form";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
+import { enabledSocialProviders } from "@/lib/auth";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 /**
@@ -29,7 +30,11 @@ export default async function SignInPage({
       <div className="self-end">
         <LocaleSwitcher current={safeLocale} />
       </div>
-      <SignInForm locale={safeLocale} returnTo={returnTo} />
+      <SignInForm
+        locale={safeLocale}
+        returnTo={returnTo}
+        socialProviders={enabledSocialProviders}
+      />
     </main>
   );
 }

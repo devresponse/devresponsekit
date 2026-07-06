@@ -3,6 +3,7 @@ import type * as NextNavigation from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { SignUpForm } from "@/components/auth/sign-up-form";
+import { SOCIAL_PROVIDERS } from "@/lib/social-providers";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 const replace = vi.fn();
@@ -21,7 +22,9 @@ describe("SignUpForm", () => {
   });
 
   it("renders the sign-up card with name/email/password and social buttons", () => {
-    renderWithIntl(<SignUpForm locale="en" returnTo="/en/app/dashboard" />);
+    renderWithIntl(
+      <SignUpForm locale="en" returnTo="/en/app/dashboard" socialProviders={SOCIAL_PROVIDERS} />,
+    );
     expect(screen.getByRole("heading", { name: /create your account/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/^name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
@@ -30,11 +33,19 @@ describe("SignUpForm", () => {
   });
 
   it("links back to sign-in", () => {
-    renderWithIntl(<SignUpForm locale="fr" returnTo="/fr/app/dashboard" />);
+    renderWithIntl(
+      <SignUpForm locale="fr" returnTo="/fr/app/dashboard" socialProviders={SOCIAL_PROVIDERS} />,
+    );
     expect(screen.getByRole("link", { name: /already have an account/i })).toHaveAttribute(
       "href",
       "/fr/sign-in",
     );
+  });
+
+  it("drops the social section when no provider is configured", () => {
+    renderWithIntl(<SignUpForm locale="en" returnTo="/en/app/dashboard" socialProviders={[]} />);
+    expect(screen.getByLabelText(/^name/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /continue with/i })).toBeNull();
   });
 
   it("hides social login on an invited sign-up (OAuth would drop the token)", () => {
@@ -42,13 +53,15 @@ describe("SignUpForm", () => {
       <SignUpForm
         locale="en"
         returnTo="/en/app/dashboard"
+        socialProviders={SOCIAL_PROVIDERS}
         invitation={{ token: "tok-123", email: "ada@acme.com", organizationName: "Acme" }}
       />,
     );
     // The invite banner + email/password form are shown...
     expect(screen.getByText(/joining Acme/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/email/i)).toHaveValue("ada@acme.com");
-    // ...but the social buttons (which don't carry the invitation) are gone.
+    // ...but the social buttons (which don't carry the invitation) are gone
+    // even though every provider is configured.
     expect(screen.queryByRole("button", { name: /continue with google/i })).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /continue with microsoft/i }),

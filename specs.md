@@ -1484,7 +1484,7 @@ Requirements:
 `SignInForm` must include:
 
 1. Email/password form.
-2. Google, Microsoft, and GitHub social buttons shown at the same time.
+2. Social buttons for the configured providers (Google, Microsoft, GitHub), shown alongside email/password. A provider appears only when both its client id and secret are set; when none are configured the social section (and its "or" divider) is omitted.
 3. Safe localized `returnTo`.
 4. shadcn-only UI components.
 5. Translated labels and error messages.
@@ -1495,44 +1495,51 @@ Requirements:
 
 Create `src/components/auth/social-login-buttons.tsx`.
 
+The rendered set is driven by `providers` — the configured providers the
+parent passes down from `enabledSocialProviders` (exported by `src/lib/auth.ts`,
+derived from the same both-id-and-secret check that builds Better Auth's
+`socialProviders`, so the two can't drift). The canonical provider list and
+`SocialProvider` type live in `src/lib/social-providers.ts` (pure data, shared
+by the server config and this client component). The component renders nothing
+when `providers` is empty, so no button starts an OAuth flow that can't
+complete.
+
 ```tsx
 "use client";
 
-import { Github } from "lucide-react";
+import { GithubIcon } from "@/components/icons/github-icon";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
+import type { SocialProvider } from "@/lib/social-providers";
 
 export interface SocialLoginButtonsProps {
   returnTo: string;
+  providers: readonly SocialProvider[];
 }
 
 /**
  * SocialLoginButtons
  *
- * Client component that starts OAuth sign-in with Better Auth.
- * The callbackURL must be a sanitized localized browser path.
+ * Client component that starts OAuth sign-in with Better Auth for each
+ * configured provider. The callbackURL must be a sanitized localized browser
+ * path. Labels are translated (`auth.signInWith*`); GitHub gets its brand icon.
  */
-export function SocialLoginButtons({ returnTo }: SocialLoginButtonsProps) {
-  async function signIn(provider: "google" | "microsoft" | "github") {
+export function SocialLoginButtons({ returnTo, providers }: SocialLoginButtonsProps) {
+  if (providers.length === 0) return null;
+
+  async function signIn(provider: SocialProvider) {
     // Better Auth owns the provider redirect and callback route.
-    await authClient.signIn.social({
-      provider,
-      callbackURL: returnTo,
-    });
+    await authClient.signIn.social({ provider, callbackURL: returnTo });
   }
 
   return (
     <div className="grid gap-2">
-      <Button type="button" variant="outline" onClick={() => signIn("google")}>
-        Continue with Google
-      </Button>
-      <Button type="button" variant="outline" onClick={() => signIn("microsoft")}>
-        Continue with Microsoft
-      </Button>
-      <Button type="button" variant="outline" onClick={() => signIn("github")}>
-        <Github className="mr-2 size-4" aria-hidden="true" />
-        Continue with GitHub
-      </Button>
+      {providers.map((provider) => (
+        <Button key={provider} type="button" variant="outline" onClick={() => signIn(provider)}>
+          {provider === "github" ? <GithubIcon className="mr-2 h-4 w-4" /> : null}
+          {/* t(`signInWith${Provider}`) */}
+        </Button>
+      ))}
     </div>
   );
 }
@@ -2948,7 +2955,7 @@ Rules:
 
 1. No secure shell navigation.
 2. shadcn-only UI.
-3. Social buttons for all three providers.
+3. Social buttons for the configured providers.
 4. Safe localized `returnTo`.
 5. Translated labels.
 6. Comfortable density.
@@ -3157,7 +3164,7 @@ Create tests for:
 Create Playwright tests for:
 
 1. Anonymous visit to `/en/app/dashboard` redirects to `/en/sign-in?returnTo=...`.
-2. Sign-in page renders email/password and all three social buttons.
+2. Sign-in page renders email/password and the configured social buttons.
 3. Pending user cannot access secure shell.
 4. Active user can access secure shell.
 5. App switcher opens from `TopShellBar`.

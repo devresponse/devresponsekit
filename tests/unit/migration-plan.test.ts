@@ -11,8 +11,11 @@ import {
  * locale-inclusion + ledger-id rules here is the regression guard for the
  * "always-on English base + optional localized files" layout.
  */
+// Real core is now the single consolidated `0001-initial-schema.sql`; the
+// `0010-…` entry is a hypothetical future forward migration, kept here so the
+// core-sort path stays covered. Deliberately out of order.
 const CORE = [
-  "0002-sso-nonce-expires-index.sql",
+  "0010-example-forward.sql",
   "0001-initial-schema.sql",
   "better-auth-schema.sql", // owned by Better Auth — must be skipped
   "locales", // the subdirectory entry returned by readdir — not a .sql
@@ -52,7 +55,7 @@ describe("planMigrations", () => {
     const plan = planMigrations(CORE, LOCALES, true);
     expect(plan.map((m) => m.id)).toEqual([
       "0001-initial-schema.sql",
-      "0002-sso-nonce-expires-index.sql",
+      "0010-example-forward.sql",
       "locales/0000-email-templates-en.sql",
       "locales/0001-email-templates-fr.sql",
       "locales/0002-email-templates-es.sql",
@@ -73,7 +76,7 @@ describe("planMigrations", () => {
     const plan = planMigrations(CORE, LOCALES, false);
     expect(plan.map((m) => m.id)).toEqual([
       "0001-initial-schema.sql",
-      "0002-sso-nonce-expires-index.sql",
+      "0010-example-forward.sql",
       "locales/0000-email-templates-en.sql",
     ]);
     // The English base (the fallback every locale resolves to) still lands…

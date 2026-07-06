@@ -6,19 +6,27 @@
 -- and baseline row needed for a first-time database setup — there is
 -- exactly ONE application schema file and ONE setup process. It is the
 -- consolidation of every incremental migration the project has ever had:
--- the original core/indexes/audit/superuser/email migrations AND the
--- later machine-API credentials (`app_api_keys`, `app_oauth_clients`,
--- `app_revoked_tokens`, the `admin.apikeys.*` / `admin.clients.*`
--- permissions), all folded into one authoritative definition.
+-- the original core/indexes/audit/superuser migrations, the machine-API
+-- credentials (`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens`,
+-- the `admin.apikeys.*` / `admin.clients.*` permissions), AND the former
+-- standalone forward migrations — the SSO nonce-expiry index (was 0002),
+-- the outbox retry lifecycle (0003), the audit append-only trigger (0004),
+-- the organization-FK ON DELETE SET NULL swap (0005), per-org auth settings
+-- (0007), and organization invitations (0008) — all folded into one
+-- authoritative definition, applied in their original order (see the
+-- "Folded in from …" section markers below).
 --
 -- A fresh database needs this file (plus the Better Auth vendor schema
 -- applied by `pnpm db:auth:migrate`, and `pnpm db:seed` for the local admin
--- user and baseline roles), followed by the forward migrations 0002+.
+-- user and baseline roles). Email templates are NOT here — they live under
+-- `locales/`, with the always-applied English base in
+-- `locales/0000-email-templates-en.sql`.
 --
 -- This file is FROZEN: never edit its DDL. `create … if not exists` is a
 -- no-op against an existing table, so changes here cannot alter a
 -- provisioned database. Append schema changes as new numbered `NNNN-*.sql`
--- files (see run-migrations.ts and 0002-sso-nonce-expires-index.sql).
+-- files (see run-migrations.ts). 0001–0009 are used/retired, so the next
+-- forward migration is 0010.
 --
 -- Scope note: the Better Auth tables (`user`, `session`, `account`,
 -- `verification`, …) are owned and created by Better Auth's own
@@ -637,3 +645,377 @@ begin
   raise notice '[initial-schema] provisioned admin@devresponse.local with admin + admin.platform + superuser roles on the default organization.';
 end
 $$;
+
+
+-- ===========================================================================
+-- Folded in from 0002-sso-nonce-expires-index.sql
+-- (was a separate forward migration; consolidated into this baseline to keep
+-- the core setup a single file / single transaction — applied in original order).
+-- ===========================================================================
+
+-- 0002-sso-nonce-expires-index.sql
+--
+-- FIRST forward migration after the consolidated 0001 baseline.
+--
+-- Convention (see run-migrations.ts): 0001 is now FROZEN — never edit its DDL.
+-- Schema changes land as new `NNNN-*.sql` files like this one; the runner
+-- applies any not-yet-applied file in lexical order inside a transaction and
+-- records it in `app_schema_migrations`, so each runs at most once and a
+-- fresh DB applies 0001 then 0002 in order. Files must be append-only and
+-- idempotent (`if not exists` / `on conflict do nothing`) so re-running the
+-- runner against a provisioned DB is a safe no-op.
+--
+-- This migration adds the index backing the SSO handoff-nonce expiry prune.
+-- Every SSO launch issues `delete from app_sso_handoff_nonces where
+-- expires_at < ...` (src/lib/sso.server.ts) on a hot auth path; without this
+-- index that prune sequentially scans the table. Runs on the runner's
+-- DB_SCHEMA search_path, matching 0001's conventions.
+create index if not exists idx_app_sso_handoff_nonces_expires_at
+  on app_sso_handoff_nonces (expires_at);
+
+
+-- ===========================================================================
+-- Folded in from 0003-outbox-retry.sql
+-- (was a separate forward migration; consolidated into this baseline to keep
+-- the core setup a single file / single transaction — applied in original order).
+-- ===========================================================================
+
+-- 0003-outbox-retry.sql
+--
+-- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
+-- idempotent.
+--
+-- Gives app_outbox a retry lifecycle so transient delivery failures are
+-- re-attempted instead of silently dropped (review D1). Statuses are unchanged
+-- ('pending' | 'sent' | 'failed' | 'logged'): a still-retryable row stays
+-- 'pending' with a future `next_attempt_at`; it only becomes terminal 'failed'
+-- once `attempts` hits the worker's cap. The outbox drainer
+-- (src/lib/email/outbox-worker.server.ts) claims due rows
+-- (status='pending' AND next_attempt_at <= now) FOR UPDATE SKIP LOCKED.
+alter table app_outbox add column if not exists attempts integer not null default 0;
+alter table app_outbox add column if not exists next_attempt_at timestamptz;
+alter table app_outbox add column if not exists last_attempt_at timestamptz;
+
+-- Claim index for the drainer: due pending rows, oldest-scheduled first. Partial
+-- on status so it stays small (sent/failed/logged rows are excluded).
+create index if not exists idx_app_outbox_due
+  on app_outbox (next_attempt_at)
+  where status = 'pending';
+
+
+-- ===========================================================================
+-- Folded in from 0004-audit-append-only.sql
+-- (was a separate forward migration; consolidated into this baseline to keep
+-- the core setup a single file / single transaction — applied in original order).
+-- ===========================================================================
+
+-- 0004-audit-append-only.sql
+--
+-- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
+-- idempotent.
+--
+-- B3: make app_audit_events tamper-evident. The audit log is a compliance
+-- record, so the application database role must not be able to silently UPDATE
+-- or DELETE rows. A row-level BEFORE trigger raises on any UPDATE/DELETE,
+-- enforcing append-only semantics at the database — independent of any
+-- application-layer discipline.
+--
+-- The ONE sanctioned exception is the D3 retention job
+-- (src/lib/retention.server.ts), which sets `app.audit_retention = 'on'` (via
+-- SET LOCAL, transaction-scoped) immediately before pruning rows older than the
+-- retention window. So aged rows can still be reaped, but only by that explicit
+-- path — a stray UPDATE or an ad-hoc DELETE is rejected. INSERTs are unaffected.
+-- The two changes are order-independent: until this trigger exists, the D3 flag
+-- is a harmless no-op.
+
+create or replace function app_audit_events_block_mutation()
+  returns trigger
+  language plpgsql
+as $$
+begin
+  -- Sanctioned retention deletes opt in via a transaction-local GUC. The
+  -- `true` makes current_setting return NULL (not error) when it is unset.
+  if tg_op = 'DELETE' and current_setting('app.audit_retention', true) = 'on' then
+    return old;
+  end if;
+  raise exception 'app_audit_events is append-only: % is not permitted', tg_op
+    using errcode = 'check_violation',
+          hint = 'Audit rows are immutable; aged rows are removed only by the retention job.';
+end;
+$$;
+
+drop trigger if exists trg_app_audit_events_append_only on app_audit_events;
+create trigger trg_app_audit_events_append_only
+  before update or delete on app_audit_events
+  for each row
+  execute function app_audit_events_block_mutation();
+
+
+-- ===========================================================================
+-- Folded in from 0005-organizations-fk-on-delete.sql
+-- (was a separate forward migration; consolidated into this baseline to keep
+-- the core setup a single file / single transaction — applied in original order).
+-- ===========================================================================
+
+-- 0005-organizations-fk-on-delete.sql
+--
+-- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
+-- idempotent.
+--
+-- DB-1: deleting an organization used to raise an *unhandled* foreign-key 500.
+-- Every org PATCH writes an `app_audit_events` row tagged with the org id, and
+-- that FK had no ON DELETE action (= NO ACTION = blocks), so a member-less,
+-- previously-edited org could never be deleted without a raw 500. The DELETE
+-- guards only check `app_organization_memberships`, never the audit/role/binding
+-- references.
+--
+-- The fix has two halves; the route change (FK violation -> 409
+-- `organization_in_use`, mirroring enterprise-apps) and this migration:
+--
+--   1. app_audit_events.organization_id -> ON DELETE SET NULL. Audit is a
+--      historical record: when its org is removed the event row must SURVIVE
+--      with a null tenant (the 0001 schema comment already documents this
+--      intent). This makes the common case — an org with only audit history —
+--      deletable instead of a 500.
+--
+--   2. Teach the 0004 append-only trigger to permit EXACTLY that SET NULL
+--      tombstone. The trigger (B3) rejects every UPDATE/DELETE on
+--      app_audit_events, which would otherwise turn the SET NULL cascade into a
+--      `check_violation` and re-break org deletion. The narrow exception below
+--      allows only an UPDATE that nulls organization_id with every other column
+--      byte-identical — so audit history survives org removal while the
+--      tamper-evidence guarantee on row CONTENT is fully preserved.
+--
+-- Every OTHER org reference (app_roles, app_user_roles, app_provider_organizations,
+-- app_enterprise_applications, app_api_keys, app_oauth_clients) intentionally
+-- keeps its default RESTRICT/NO ACTION behavior: an org that still owns those
+-- is genuinely "in use", so the DELETE raises a FK violation that the route now
+-- translates to a clean 409 instead of a 500. (app_groups already CASCADEs and
+-- app_outbox already SET NULLs per 0001.)
+
+-- 1. Permit the org-deletion tombstone in the append-only trigger.
+create or replace function app_audit_events_block_mutation()
+  returns trigger
+  language plpgsql
+as $$
+begin
+  -- Sanctioned retention deletes opt in via a transaction-local GUC. The
+  -- `true` makes current_setting return NULL (not error) when it is unset.
+  if tg_op = 'DELETE' and current_setting('app.audit_retention', true) = 'on' then
+    return old;
+  end if;
+  -- DB-1: an org DELETE fires `update app_audit_events set organization_id = null`
+  -- via the ON DELETE SET NULL cascade below. Permit ONLY that exact tombstone —
+  -- organization_id non-null -> null with EVERY other column unchanged — so the
+  -- historical row is preserved (just detached from the deleted tenant) without
+  -- opening any path to mutate audit content.
+  if tg_op = 'UPDATE'
+     and old.organization_id is not null
+     and new.organization_id is null
+     and (to_jsonb(new) - 'organization_id') = (to_jsonb(old) - 'organization_id') then
+    return new;
+  end if;
+  raise exception 'app_audit_events is append-only: % is not permitted', tg_op
+    using errcode = 'check_violation',
+          hint = 'Audit rows are immutable; aged rows are removed only by the retention job.';
+end;
+$$;
+
+-- 2. Flip app_audit_events.organization_id to ON DELETE SET NULL. The 0001 FK is
+-- inline/unnamed; find it by its target + column rather than guessing the
+-- autogenerated name, drop it, and re-add with a stable name + the SET NULL rule.
+do $$
+declare
+  cname text;
+begin
+  select con.conname into cname
+  from pg_constraint con
+  join pg_class rel on rel.oid = con.conrelid
+  where rel.relname = 'app_audit_events'
+    and con.contype = 'f'
+    and con.confrelid = 'app_organizations'::regclass
+    and (
+      select attname
+      from pg_attribute
+      where attrelid = con.conrelid and attnum = con.conkey[1]
+    ) = 'organization_id';
+  if cname is not null then
+    execute format('alter table app_audit_events drop constraint %I', cname);
+  end if;
+end $$;
+
+alter table app_audit_events
+  add constraint app_audit_events_organization_id_fkey
+  foreign key (organization_id) references app_organizations(id) on delete set null;
+
+
+-- ===========================================================================
+-- Folded in from 0007-organization-auth-settings.sql
+-- (was a separate forward migration; consolidated into this baseline to keep
+-- the core setup a single file / single transaction — applied in original order).
+-- ===========================================================================
+
+-- 0007-organization-auth-settings.sql
+--
+-- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
+-- idempotent.
+--
+-- Runtime-configurable per-organization signup/authentication policy. Until
+-- now the signup workflow was hardcoded in two places: email verification via
+-- `requireEmailVerification: true` (src/lib/auth.ts) and admin approval via
+-- the `pending_approval` literals in user-provisioning.server.ts. This table
+-- makes both decisions data-driven so different organizations can run
+-- different registration workflows:
+--
+--   require_email_verification  - email/password sign-ups must confirm their
+--                                  address before signing in (OAuth identities
+--                                  arrive provider-verified and are unaffected).
+--   signup_approval_mode         - 'admin_approval': new members start
+--                                  `pending_approval` until an administrator
+--                                  activates them (today's behavior).
+--                                  'auto_active': new members are activated
+--                                  immediately on provisioning.
+--   allowed_auth_methods         - NULL = every enabled method; otherwise the
+--                                  subset of {email,google,microsoft,github}
+--                                  this org accepts. A sign-up via an excluded
+--                                  method still provisions but is parked in
+--                                  `pending_approval` (never silently dropped).
+--   auto_approve_email_domains   - NULL = none; otherwise lowercased email
+--                                  domains whose VERIFIED addresses activate
+--                                  immediately even under 'admin_approval'.
+--                                  Only honored for verified emails, so an
+--                                  unproven address can never ride a domain
+--                                  into an active membership.
+--
+-- Resolution order (src/lib/auth-policy.server.ts): the org's row if present,
+-- else the single platform-default row (organization_id IS NULL), else
+-- fail-closed code constants equal to today's behavior. An org row is a
+-- COMPLETE policy - there is no per-field inheritance - which keeps the
+-- resolver and the admin UI trivially explainable.
+--
+-- ON DELETE CASCADE: a policy row is wholly owned by its organization and
+-- must never block org deletion (unlike roles/keys, which mean the org is
+-- genuinely "in use" and correctly RESTRICT - see 0005).
+
+create table if not exists app_organization_auth_settings (
+  id uuid primary key default gen_random_uuid(),
+  -- NULL = the platform-default row (exactly one, enforced below).
+  organization_id uuid unique references app_organizations(id) on delete cascade,
+  require_email_verification boolean not null,
+  signup_approval_mode text not null
+    check (signup_approval_mode in ('admin_approval', 'auto_active')),
+  allowed_auth_methods text[]
+    check (allowed_auth_methods <@ array['email', 'google', 'microsoft', 'github']::text[]),
+  auto_approve_email_domains text[],
+  -- Better Auth user id of the last editor (admin UI/API arrives in a
+  -- follow-up; seeds and migrations leave this NULL).
+  updated_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Postgres UNIQUE treats NULLs as distinct, so the column constraint above
+-- does not bound the platform-default row. This partial index pins it to
+-- exactly one.
+create unique index if not exists idx_app_org_auth_settings_platform_default
+  on app_organization_auth_settings ((true))
+  where organization_id is null;
+
+-- Seed the platform default to EXACTLY the previously hardcoded behavior
+-- (verification required + admin approval), so applying this migration
+-- changes nothing until an administrator edits a policy.
+insert into app_organization_auth_settings
+  (organization_id, require_email_verification, signup_approval_mode)
+select null, true, 'admin_approval'
+where not exists (
+  select 1 from app_organization_auth_settings where organization_id is null
+);
+
+
+-- ===========================================================================
+-- Folded in from 0008-organization-invitations.sql
+-- (was a separate forward migration; consolidated into this baseline to keep
+-- the core setup a single file / single transaction — applied in original order).
+-- ===========================================================================
+
+-- 0008-organization-invitations.sql
+--
+-- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
+-- idempotent.
+--
+-- Organization invitations: an administrator invites an email address into an
+-- organization (optionally with an app role); the invitee receives a
+-- single-use accept link. Accepting creates/activates the membership in the
+-- INVITING org — the invitation is the approval, so it bypasses the
+-- pending-approval queue. Composes with the 0007 signup policy via the new
+-- `invite_only` approval mode (below): uninvited sign-ups park in
+-- `pending_approval`, invited ones activate.
+--
+-- Token model (mirrors app_api_keys, src/lib/api-auth/api-key.ts): the
+-- plaintext is a 32-char base62 CSPRNG secret that exists only inside the
+-- invitation email; ONLY its SHA-256 hex is stored, unique-indexed for O(1)
+-- lookup. High-entropy secret ⇒ fast hash is correct (bcrypt/argon2 exist to
+-- slow low-entropy password guessing, which does not apply).
+--
+-- Status lifecycle: pending → accepted | revoked. `expired` is a terminal
+-- status value reserved for explicit sweeps; live code treats a `pending` row
+-- with `expires_at <= now()` as expired at READ time, so no sweeper is needed
+-- for correctness.
+
+create table if not exists app_organization_invitations (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references app_organizations(id) on delete cascade,
+  -- Invitee address, lowercased at write time. Acceptance requires the
+  -- account's email to equal this value (invitation-forwarding cannot
+  -- transfer the seat to another mailbox).
+  email text not null,
+  -- Optional app role granted on acceptance. Must belong to the same org
+  -- (route-enforced); if the role is deleted meanwhile the invitation
+  -- degrades to a plain membership (SET NULL).
+  role_id uuid references app_roles(id) on delete set null,
+  token_hash text not null unique,
+  status text not null default 'pending'
+    check (status in ('pending', 'accepted', 'revoked', 'expired')),
+  invited_by uuid references app_users(id) on delete set null,
+  expires_at timestamptz not null,
+  accepted_at timestamptz,
+  accepted_app_user_id uuid references app_users(id) on delete set null,
+  revoked_at timestamptz,
+  revoked_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- One PENDING invitation per (org, email): a resend rotates the existing
+-- row's token instead of stacking duplicates.
+create unique index if not exists idx_app_org_invitations_pending_unique
+  on app_organization_invitations (organization_id, email)
+  where status = 'pending';
+
+create index if not exists idx_app_org_invitations_org_status
+  on app_organization_invitations (organization_id, status);
+
+-- ---------------------------------------------------------------------------
+-- Extend the 0007 signup-policy approval modes with `invite_only`.
+-- The 0007 CHECK was inline (auto-named); find it by definition rather than
+-- guessing the generated name (same pattern as the 0005 FK swap), then
+-- re-add under a stable name with the third value.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  cname text;
+begin
+  select con.conname into cname
+  from pg_constraint con
+  join pg_class rel on rel.oid = con.conrelid
+  where rel.relname = 'app_organization_auth_settings'
+    and con.contype = 'c'
+    and pg_get_constraintdef(con.oid) like '%signup_approval_mode%';
+  if cname is not null then
+    execute format('alter table app_organization_auth_settings drop constraint %I', cname);
+  end if;
+end $$;
+
+alter table app_organization_auth_settings
+  add constraint app_organization_auth_settings_signup_approval_mode_check
+  check (signup_approval_mode in ('admin_approval', 'auto_active', 'invite_only'));

@@ -74,7 +74,10 @@
     "inviteMismatchDescription": "此邀请是发给其他电子邮件地址的。请退出登录，然后使用受邀地址登录或注册。",
     "inviteError": "无法接受邀请。请重试。",
     "inviteSignupBanner": "您正在加入 {organization}。请使用受邀的电子邮件地址完成账户创建。",
-    "invitedEmailLocked": "已锁定为受邀的电子邮件地址。"
+    "invitedEmailLocked": "已锁定为受邀的电子邮件地址。",
+    "emailVerifiedTitle": "邮箱已验证",
+    "emailVerifiedDescription": "您的邮箱地址已确认。现在可以登录您的账户。",
+    "proceedToLogin": "前往登录"
   },
   "public": {
     "hero": {

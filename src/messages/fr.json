@@ -74,7 +74,10 @@
     "inviteMismatchDescription": "Cette invitation a été émise pour une autre adresse e-mail. Déconnectez-vous, puis connectez-vous ou inscrivez-vous avec l'adresse invitée.",
     "inviteError": "Impossible d'accepter l'invitation. Veuillez réessayer.",
     "inviteSignupBanner": "Vous rejoignez {organization}. Terminez la création de votre compte avec l'adresse e-mail invitée.",
-    "invitedEmailLocked": "Verrouillé sur l'adresse à laquelle votre invitation a été envoyée."
+    "invitedEmailLocked": "Verrouillé sur l'adresse à laquelle votre invitation a été envoyée.",
+    "emailVerifiedTitle": "E-mail vérifié",
+    "emailVerifiedDescription": "Votre adresse e-mail a été confirmée. Vous pouvez maintenant vous connecter à votre compte.",
+    "proceedToLogin": "Continuer vers la connexion"
   },
   "public": {
     "hero": {

@@ -42,7 +42,7 @@ describe("EmailPasswordSignUpForm", () => {
     expect(screen.getByLabelText(/password/i)).toHaveAttribute("autocomplete", "new-password");
   });
 
-  it("submits credentials with the supplied callback URL", async () => {
+  it("submits credentials and points the verification link at the confirmation page", async () => {
     signUpEmail.mockResolvedValueOnce({ error: null });
     const user = userEvent.setup();
     renderWithIntl(
@@ -54,11 +54,13 @@ describe("EmailPasswordSignUpForm", () => {
     await user.type(screen.getByLabelText(/password/i), "Password!1234");
     await user.click(screen.getByRole("button", { name: /create account/i }));
 
+    // The verification link lands on the "email verified" confirmation page
+    // (autoSignInAfterVerification is off), NOT straight into the app.
     expect(signUpEmail).toHaveBeenCalledWith({
       email: "ada@example.com",
       password: "Password!1234",
       name: "Ada Lovelace",
-      callbackURL: "/en/app",
+      callbackURL: "/en/verify-email/confirmed",
     });
     expect(replace).toHaveBeenCalledWith("/en/verify-email");
   });

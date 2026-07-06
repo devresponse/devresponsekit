@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { BlockedAccountPanel } from "@/components/auth/blocked-account-panel";
+import { EmailVerifiedPanel } from "@/components/auth/email-verified-panel";
 import { LoggedOutPanel } from "@/components/auth/logged-out-panel";
 import { PendingApprovalPanel } from "@/components/auth/pending-approval-panel";
 import { VerifyEmailPanel } from "@/components/auth/verify-email-panel";
@@ -37,6 +38,17 @@ describe("VerifyEmailPanel", () => {
     expect(screen.getAllByText(/verify your email/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/verification link/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /resend verification email/i })).toBeInTheDocument();
+  });
+});
+
+describe("EmailVerifiedPanel", () => {
+  it("confirms the address is verified and links to sign in", () => {
+    renderWithIntl(<EmailVerifiedPanel locale="en" />);
+    // Title appears twice (CardTitle + AlertTitle).
+    expect(screen.getAllByText(/email verified/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/you can now sign in/i)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /proceed to sign in/i });
+    expect(link).toHaveAttribute("href", "/en/sign-in");
   });
 });
 

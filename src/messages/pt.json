@@ -74,7 +74,10 @@
     "inviteMismatchDescription": "Este convite foi emitido para outro endereço de e-mail. Saia e depois entre ou registre-se com o endereço convidado.",
     "inviteError": "Não foi possível aceitar o convite. Tente novamente.",
     "inviteSignupBanner": "Você está se juntando a {organization}. Conclua a criação da sua conta com o e-mail convidado.",
-    "invitedEmailLocked": "Fixado no endereço para o qual o seu convite foi enviado."
+    "invitedEmailLocked": "Fixado no endereço para o qual o seu convite foi enviado.",
+    "emailVerifiedTitle": "E-mail verificado",
+    "emailVerifiedDescription": "O seu endereço de e-mail foi confirmado. Já pode iniciar sessão na sua conta.",
+    "proceedToLogin": "Continuar para o início de sessão"
   },
   "public": {
     "hero": {

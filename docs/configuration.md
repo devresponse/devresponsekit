@@ -121,6 +121,69 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 
 ### Machine API credentials (both paths DARK by default)
 
+The machine API (`/api/v1`) is the bearer-authenticated surface for scripts, services, and integrations — as opposed to the cookie-session admin console. It offers **two independent credential paths**, and **both are off by default**. They are separate switches, not an either/or choice: enable whichever you need (or both). Until you do, `/api/v1` answers `401` to every credential — that dark-by-default posture is intentional.
+
+#### The two paths at a glance
+
+| | **API keys** | **JWT access tokens** |
+| --- | --- | --- |
+| Enable with | `API_KEYS_ENABLED=1` | `API_JWT_ENABLED=1` **and** a signing key |
+| Server-side setup | none beyond the switch | generate an Ed25519 signing key (below) |
+| The bearer looks like | `drk_live_…` (opaque) | `eyJ…` (a signed EdDSA JWT) |
+| Where the credential comes from | minted per-user **at runtime** (console / API) | **exchanged for** at `POST /api/v1/auth/token` |
+| Lifetime | long-lived (until revoked or its optional expiry) | short (default **900 s**, capped ≤ 1 h) |
+| How the server checks it | SHA-256 **hash lookup in the DB**, every request | **signature check** against the public JWKS — no DB hit |
+| Revoked by | deleting the key | `jti` denylist (until the token expires) |
+| Best for | the simplest setup: CLIs, cron, low-to-moderate volume | high-throughput services, third-party verifiers, or handing a short-lived down-scoped token to another process |
+
+Both paths resolve to the **same authority model**: a credential's effective access is the **intersection of its scopes and its owner's live permissions** — it can never exceed the authority of whoever created it. Enabling a path does not grant anyone new powers; it only opens a way to authenticate as an existing principal.
+
+#### Path 1 — API keys (the simple path)
+
+1. Set **`API_KEYS_ENABLED=1`**. That is the entire server-side setup — there is **no key material to generate**.
+2. **Mint a key.** This is the "key" for this path — a per-user credential created at runtime, *not* an environment variable:
+   - **Admin console** → your API keys → **create**, or
+   - `POST /api/v1/me/api-keys` (name + optional scopes/expiry).
+
+   The `drk_…` plaintext is shown **once** — only its SHA-256 hash is stored — so capture it immediately. Losing it means minting a new one.
+3. Use it directly as the bearer: `Authorization: Bearer drk_live_…`.
+
+`API_KEY_ENV_TAG` stamps the prefix (`drk_live_…` vs `drk_test_…`) so you can tell environments apart at a glance; `API_KEY_DEFAULT_TTL_DAYS` sets the console's default expiry (unset = never expire, and the UI warns you).
+
+#### Path 2 — JWT access tokens (the stateless path)
+
+1. Set **`API_JWT_ENABLED=1`** *and* provide **`API_JWT_PRIVATE_KEY`**. The app **fails to boot** if the switch is on without a key (validated in `src/lib/env.ts`), so you cannot half-enable it.
+2. **What the "signing key" is.** JWTs here are **EdDSA / Ed25519** — an *asymmetric* keypair, which is the crux of the difference from API keys:
+   - the **private** half (`API_JWT_PRIVATE_KEY`, an Ed25519 JWK JSON string) stays on the server and **signs** tokens;
+   - the **public** half is derived from it automatically and published at **`GET /api/v1/jwks.json`**, so any client or resource server verifies a token by its **signature alone** — no call back to this app. That statelessness is the entire reason to use JWTs.
+
+   (This keypair is deliberately separate from `SSO_HANDOFF_JWT_SECRET`, which is a symmetric HS256 secret for the subdomain handoff — a different mechanism with its own secret.)
+3. **Generate the signing key** — an Ed25519 private JWK, using `jose` (already a dependency):
+
+   ```bash
+   node -e "import('jose').then(async j => { const {privateKey}=await j.generateKeyPair('EdDSA',{extractable:true}); console.log(JSON.stringify(await j.exportJWK(privateKey))) })"
+   ```
+
+   Paste the printed JSON as `API_JWT_PRIVATE_KEY`. Treat it like any private key: never commit it, keep it in a secret store, and rely on the fact that only its public half ever leaves the server (via JWKS).
+4. **Getting a token.** Clients never hold the signing key. They exchange an existing credential at `POST /api/v1/auth/token`, which returns a short-lived JWT:
+   - `grant_type=api_key` validates a `drk_…` key — so this grant **also requires `API_KEYS_ENABLED=1`**;
+   - `grant_type=client_credentials` validates a registered OAuth client (`client_id` / `client_secret`).
+
+   A `scope` parameter can **down-scope** the token to a subset of the credential's scopes. Use the returned `access_token` as the bearer exactly like a `drk_…` key.
+
+`API_JWT_ISSUER` / `API_JWT_AUDIENCE` set the `iss` / `aud` claims; `API_JWT_KID` pins the key id (otherwise it is the JWK thumbprint, which changes automatically with the key); `API_JWT_ACCESS_TTL_SECONDS` sets the lifetime (≤ 3600). To **rotate with zero downtime**, move the current key to `API_JWT_PREVIOUS_PRIVATE_KEY` and set a new `API_JWT_PRIVATE_KEY`: both public halves stay in JWKS during the overlap, so tokens minted before the swap keep verifying until they expire — then drop the previous key.
+
+#### Which path should I enable?
+
+- **A CLI, a cron job, or a single backend at low-to-moderate volume** → **API keys only**. It is the simplest path, there is nothing to generate: set `API_KEYS_ENABLED=1` and mint a key.
+- **A high-throughput service, a third-party resource server that should verify tokens locally, or a need to hand a short-lived, down-scoped token to another process** → **also enable JWTs**. Signature verification via JWKS avoids a per-request DB lookup and lets verifiers you don't control validate tokens offline.
+- **Both** is a common, valid combination: the long-lived API key is the *root* credential a human manages, and callers exchange it for short-lived JWTs at `POST /api/v1/auth/token`. Remember the `api_key` grant needs **both** switches on.
+- **Neither** (the default) keeps `/api/v1` fully dark — the right choice until you actually have a machine consumer.
+
+**Verify after enabling:** `GET /api/v1/jwks.json` should return your public key rather than `{"keys":[]}` (the tell-tale sign the JWT path is off or missing its key), and `curl /api/v1/me -H "Authorization: Bearer <key>"` should return `200` with your identity and effective scopes. A `401` with a valid-looking key almost always means the relevant switch isn't set on that deployment.
+
+#### Full variable reference
+
 | Variable | Controls |
 | --- | --- |
 | `API_KEYS_ENABLED` | Enable API-key auth (`1`/`true`). |
@@ -135,11 +198,7 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 | `API_JWT_PREVIOUS_KID` | The previous key's `kid` — only needed when the deployment pins a fixed `API_JWT_KID` (otherwise the thumbprint matches automatically). |
 | `API_JWT_ACCESS_TTL_SECONDS` | Token lifetime (default 900, ≤3600). |
 
-Generate an Ed25519 JWK:
-
-```bash
-node -e "import('jose').then(async j => { const {privateKey}=await j.generateKeyPair('EdDSA',{extractable:true}); console.log(JSON.stringify(await j.exportJWK(privateKey))) })"
-```
+For the request/response shapes and the scope catalog see [api.md](./api.md); for the full credential design (minting, `jti` revocation, key rotation) see [design-api-keys-and-tokens.md](./design-api-keys-and-tokens.md).
 
 ### Seeding
 

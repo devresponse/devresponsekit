@@ -55,9 +55,13 @@ Failed requests reject with a `ResponseError`; the body is the admin error envel
 
 ## What's covered
 
-The full `/api/administrator` surface (users, roles, permissions, groups, organizations,
+The `/api/administrator` surface (users, roles, permissions, groups, organizations,
 memberships, enterprise apps, API keys, email, audit, CSV export) — one `…Api` class per
 resource group, with typed models under `models/`.
+
+`GET /api/administrator/metrics` is the one route **intentionally excluded** — it backs the
+console home dashboard only (role-scoped, UI-shaped), so there is no `MetricsApi`. See
+[`docs/api.md`](../../docs/api.md).
 
 ## Type-checking
 

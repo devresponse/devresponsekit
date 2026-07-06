@@ -74,7 +74,10 @@
     "inviteMismatchDescription": "この招待は別のメールアドレス宛てに発行されています。サインアウトしてから、招待されたアドレスでサインインまたは登録してください。",
     "inviteError": "招待を承諾できませんでした。もう一度お試しください。",
     "inviteSignupBanner": "{organization} に参加しようとしています。招待されたメールアドレスでアカウント作成を完了してください。",
-    "invitedEmailLocked": "招待状が送信されたアドレスに固定されています。"
+    "invitedEmailLocked": "招待状が送信されたアドレスに固定されています。",
+    "emailVerifiedTitle": "メールを確認しました",
+    "emailVerifiedDescription": "メールアドレスが確認されました。アカウントにサインインできます。",
+    "proceedToLogin": "サインインへ進む"
   },
   "public": {
     "hero": {

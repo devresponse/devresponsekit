@@ -74,7 +74,10 @@
     "inviteMismatchDescription": "This invitation was issued for a different email address. Sign out, then sign in or register with the invited address.",
     "inviteError": "Could not accept the invitation. Please try again.",
     "inviteSignupBanner": "You're joining {organization}. Finish creating your account with the invited email address.",
-    "invitedEmailLocked": "Locked to the address your invitation was sent to."
+    "invitedEmailLocked": "Locked to the address your invitation was sent to.",
+    "emailVerifiedTitle": "Email verified",
+    "emailVerifiedDescription": "Your email address has been confirmed. You can now sign in to your account.",
+    "proceedToLogin": "Proceed to sign in"
   },
   "public": {
     "hero": {

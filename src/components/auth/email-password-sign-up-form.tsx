@@ -73,11 +73,18 @@ export function EmailPasswordSignUpForm({
       // schema accepts an open record and the server hooks read it from
       // `context.body` (the same channel as `callbackURL`), so the client
       // type is cast to admit it.
+      //
+      // `callbackURL` is the verification link's post-confirm destination: the
+      // "email verified — proceed to login" page (a sub-route of the
+      // verify-email screen). `autoSignInAfterVerification` is off (auth.ts), so
+      // the freshly-verified user lands there WITHOUT a session and logs in
+      // explicitly. The pre-verified branch below signs in and uses
+      // `postVerifyHref` (the app) instead.
       const payload = {
         email: values.email,
         password: values.password,
         name: values.name.trim(),
-        callbackURL: postVerifyHref,
+        callbackURL: `${verifyEmailHref}/confirmed`,
         ...(invitationToken ? { invitationToken } : {}),
       };
       const result = await authClient.signUp.email(

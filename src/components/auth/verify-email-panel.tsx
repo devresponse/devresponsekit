@@ -18,9 +18,11 @@ export interface VerifyEmailPanelProps {
  * affordance for a lost or expired link. Like `PendingApprovalPanel`, it MUST
  * NOT render the secure shell or call any secure menu APIs.
  *
- * The verification link, once clicked, verifies the address and (via
- * `autoSignInAfterVerification`) lands the user at `/{locale}/app`, which routes
- * them onward — a new user to pending-approval, an approved one to the shell.
+ * The verification link, once clicked, confirms the address and — because
+ * `autoSignInAfterVerification` is off — lands the user on the localized
+ * "email verified" confirmation page (`/{locale}/verify-email/confirmed`) with
+ * an explicit "proceed to login" step, rather than dropping them onto a secure
+ * page. The resend link below carries the same confirmation destination.
  */
 export function VerifyEmailPanel({ locale, className }: VerifyEmailPanelProps) {
   const t = useTranslations("auth");
@@ -35,7 +37,7 @@ export function VerifyEmailPanel({ locale, className }: VerifyEmailPanelProps) {
           <AlertDescription>{t("verifyEmailDescription")}</AlertDescription>
         </Alert>
         <p className="text-muted-foreground text-sm">{t("verifyEmailResendPrompt")}</p>
-        <ResendVerificationForm callbackUrl={`/${locale}/app`} />
+        <ResendVerificationForm callbackUrl={`/${locale}/verify-email/confirmed`} />
       </CardContent>
     </Card>
   );

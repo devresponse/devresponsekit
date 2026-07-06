@@ -32,7 +32,7 @@ Everything downstream (the `pending-approval` and `blocked` gates, `decideSecure
 | required | auto-active | Registration → verify email → immediately active |
 | waived | admin approval | Registration → signed in at once → pending page → admin approves |
 | waived | auto-active | Open signup: registration → immediately active (the editor shows a warning for this combination) |
-| required | admin approval + auto-approve domain | Colleagues on the listed domain activate the moment they click the verification link; everyone else awaits approval |
+| required | admin approval + auto-approve domain | Colleagues on the listed domain activate on their first sign-in right after confirming their email; everyone else awaits approval |
 | any | invite-only | Invited users activate on acceptance; anyone else who registers parks in `pending_approval` (never rejected outright — admins keep visibility, and the signup endpoint gives no account-existence oracle) |
 
 A **valid invitation activates under every mode and overrides the method allow-list** — the invitation IS the approval, and as a targeted, admin-issued grant for one specific address it is more specific than the org-level gate on unsolicited sign-ups.
@@ -62,10 +62,14 @@ An organization auto-created by a first OAuth sign-in has no policy row yet, so 
 
 A still-pending account is re-evaluated against the **current** policy when it signs in, and activated when the policy now says active:
 
-- the account's email is now verified and matches an auto-approve domain (this is how a "verify + approve-by-domain" org activates its members the moment they click the verification link), or
+- the account's email is now verified and matches an auto-approve domain (this is how a "verify + approve-by-domain" org activates its members right after they confirm their email and sign in), or
 - the organization has switched to `auto_active` (a brand-new registration would be active anyway, so keeping the old row pending protects nothing and only clutters the approval queue).
 
 This is the **only** automatic upgrade path, it only ever touches `pending_approval` rows, and a concurrent admin action wins. `blocked`, `suspended`, and `deactivated` are explicit administrator denials and are never changed by policy.
+
+**Verification is a distinct step from sign-in.** Clicking the emailed verification link confirms the address but does **not** create a session (`autoSignInAfterVerification` is off) — it lands on a localized "email verified — proceed to sign in" confirmation page, and the user signs in explicitly. Activation (the re-evaluation above) therefore happens on that first post-verification sign-in, not on the link click itself.
+
+**The seeded `default` organization ships an `auto_active` override** (`require_email_verification = true` + `signup_approval_mode = auto_active`), so a self-registered user who verifies their email is active with **no administrator-approval step**. The platform-default row stays `admin_approval` (fail-closed) for every other/auto-created organization.
 
 ## 6. Invitations
 

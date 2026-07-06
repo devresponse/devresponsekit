@@ -105,9 +105,16 @@ export const auth = betterAuth({
   // the auth chain for tooling that only needs the instance shape. `url` is the
   // Better Auth verification link, carrying the sign-up `callbackURL` as its
   // post-verification destination.
+  //
+  // `autoSignInAfterVerification: false` — clicking the link confirms the
+  // address but does NOT create a session; the link's `callbackURL` points at
+  // the localized "email verified" confirmation page (verify-email/confirmed),
+  // which then offers an explicit "proceed to login" step. This keeps
+  // verification and sign-in as distinct, legible steps instead of dropping a
+  // freshly-verified user straight onto a secure page.
   emailVerification: {
     sendOnSignUp: true,
-    autoSignInAfterVerification: true,
+    autoSignInAfterVerification: false,
     sendVerificationEmail: async ({ user, url }) => {
       // Per-org signup policy (0007): the `user.create.before` hook below
       // pre-verifies sign-ups whose organization waives verification, but
@@ -273,7 +280,8 @@ export const auth = betterAuth({
             // Per-org signup policy (0007): a still-pending account may now
             // qualify for activation — its org switched to `auto_active`, or
             // the address is now verified and matches an auto-approve domain
-            // (the verify-email link lands here via autoSignInAfterVerification).
+            // (a user who just confirmed their email re-signs-in here, since
+            // verification no longer auto-creates a session).
             // Best-effort and fail-closed: on any error the user simply stays
             // pending and sign-in itself is never blocked.
             if (existing.status === "pending_approval") {

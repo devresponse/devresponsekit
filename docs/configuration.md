@@ -229,7 +229,7 @@ Most variables above are validated at boot by `src/lib/env.ts` — a missing or 
 | `LOG_LEVEL` | the Pino logger | defaults to `info` (`silent` under test) |
 | `AUDIT_RETENTION_DAYS` / `OUTBOX_RETENTION_DAYS` | `pnpm db:prune` | default 365 / 90; `0` disables |
 | `SHUTDOWN_TIMEOUT_MS` | graceful-shutdown drain | defaults to 10000 ms |
-| `DB_MIGRATE_LOCALES` | `pnpm db:app:migrate` | locale migrations applied unless `0`/`false`/`no`/`off` |
+| `DB_MIGRATE_LOCALES` | `pnpm db:app:migrate` | localized email-template migrations applied unless `0`/`false`/`no`/`off` (the English base `locales/0000-email-templates-en.sql` is always applied) |
 | `SENTRY_*` / `NEXT_PUBLIC_SENTRY_*` | Sentry build + runtime | Sentry stays off unless a DSN is present (see [Observability](./observability.md)) |
 
 ---

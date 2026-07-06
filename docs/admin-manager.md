@@ -559,8 +559,9 @@ rows. INSERTs are unaffected.
 The single sanctioned exception is the **retention job**
 (`src/lib/retention.server.ts`), which sets the transaction-local GUC
 `app.audit_retention = 'on'` immediately before pruning rows older than the
-retention window; the trigger permits a DELETE only under that flag. (Migration
-`0005` extends the trigger to also permit the org-deletion `SET NULL` tombstone.)
+retention window; the trigger permits a DELETE only under that flag. (The
+folded-in `0005` section also extends the trigger to permit the org-deletion
+`SET NULL` tombstone.)
 Append-only enforcement therefore lives in the database, independent of any
 application-layer discipline.
 

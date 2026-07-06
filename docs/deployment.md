@@ -54,9 +54,9 @@ Every step is **idempotent and ledgered** — applied migrations are recorded in
 
 Notes:
 
-- **English-only install:** the localized migrations in `src/db/migrations/locales/` are applied by default. Set `DB_MIGRATE_LOCALES=0` (or `false`/`no`/`off`) to skip them — the non-English email-template rows are then absent and those recipients fall back to English. The core schema + English baseline always apply.
+- **English-only install:** the email templates live under `src/db/migrations/locales/`, one file per locale, applied by default. Set `DB_MIGRATE_LOCALES=0` (or `false`/`no`/`off`) to skip the **localized** files — the non-English email-template rows are then absent and those recipients fall back to English. The core schema and the English base (`locales/0000-email-templates-en.sql`, always applied) install regardless, so an English-only database still has every template.
 - `db:seed` is safe to re-run (all writes are `on conflict do nothing`). In production, change the seeded admin password immediately or supply non-default `SEED_ADMIN_*` values.
-- **Never** run `db:seed:dev` against production — it creates 21 accounts sharing one weak password and refuses to run under `NODE_ENV=production` unless forced.
+- **Never** run `db:seed:dev` against production — it creates 24 accounts (21 org-scoped + 3 cross-org members) sharing one weak password and refuses to run under `NODE_ENV=production` unless forced.
 
 ---
 
@@ -86,7 +86,7 @@ Push to `main` (or run the workflow from the Actions tab). After it completes, v
 - [ ] `GET https://<domain>/` → the landing page returns **200**.
 - [ ] Sign in with the seed admin from §2; the session persists.
 - [ ] `GET https://<domain>/api/internal/outbox-drain` **without** the bearer header → **401** (confirms the cron endpoint is fail-closed).
-- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — core (`0001-initial-schema.sql` …) and, unless `DB_MIGRATE_LOCALES=0`, the localized ones (`locales/0001-…` …).
+- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `0001-initial-schema.sql`, the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
 - [ ] If Sentry is configured, trigger a test error and confirm it lands ([Observability](./observability.md)).
 - [ ] If `METRICS_TOKEN` is set, `GET /api/metrics` with `Authorization: Bearer <token>` returns Prometheus text.
 
@@ -108,7 +108,7 @@ Migrations still use the direct endpoint. Keep `PGPOOL_MAX` small on serverless 
 **Schema changes** ship as new numbered files in `src/db/migrations/` — never edit an applied migration:
 
 - **Core** changes continue **monotonically** (`0001-…` through `0009-…` today; the next core migration is `0010-…`). Numbers are never reused within the core sequence.
-- **Localized data** (non-English email templates, etc.) goes in `src/db/migrations/locales/`, applied unless `DB_MIGRATE_LOCALES=0`. Ledger ids are path-prefixed (`locales/<file>`) so they can never collide with a core filename.
+- **Email templates** — one file per locale — go in `src/db/migrations/locales/`. The English base `locales/0000-email-templates-en.sql` is ALWAYS applied (the fallback every locale resolves to); the localized files (`locales/0001-…`+) apply unless `DB_MIGRATE_LOCALES=0`. Ledger ids are path-prefixed (`locales/<file>`) so they can never collide with a core filename.
 
 CI applies them migrate-first on the next deploy.
 

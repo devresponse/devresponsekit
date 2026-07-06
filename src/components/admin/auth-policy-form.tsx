@@ -33,7 +33,7 @@ import { useZodForm } from "@/lib/forms/use-zod-form";
 
 /**
  * JSON-safe view of a signup-policy row, passed from RSC pages
- * (docs/admin-manager.md; migration 0007).
+ * (docs/admin-manager.md).
  */
 export interface AuthPolicySettingsJson {
   requireEmailVerification: boolean;

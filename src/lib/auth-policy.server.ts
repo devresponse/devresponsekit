@@ -6,7 +6,7 @@ import {
 } from "@/lib/provider-organization-resolver";
 
 /**
- * Runtime-configurable signup/authentication policy (migration 0007).
+ * Runtime-configurable signup/authentication policy.
  *
  * Replaces the two previously hardcoded workflow decisions — mandatory email
  * verification (auth.ts) and mandatory admin approval (user-provisioning) —

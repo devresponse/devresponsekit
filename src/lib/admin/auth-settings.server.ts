@@ -4,7 +4,7 @@ import { db } from "@/db/database";
 import type { AuthPolicySettingsInput } from "@/lib/validation/auth-policy";
 
 /**
- * Admin accessors for `app_organization_auth_settings` (migration 0007) —
+ * Admin accessors for `app_organization_auth_settings` —
  * the per-organization signup policy. Shared by the administrator API
  * routes AND the org-detail RSC page (which loads initial values directly,
  * per the admin architecture).

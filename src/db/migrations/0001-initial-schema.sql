@@ -3,18 +3,14 @@
 -- COMPLETE initial application database schema.
 --
 -- This single script provisions EVERY application-owned table, index,
--- and baseline row needed for a first-time database setup — there is
--- exactly ONE application schema file and ONE setup process. It is the
--- consolidation of every incremental migration the project has ever had:
--- the original core/indexes/audit/superuser migrations, the machine-API
--- credentials (`app_api_keys`, `app_oauth_clients`, `app_revoked_tokens`,
--- the `admin.apikeys.*` / `admin.clients.*` permissions), AND the former
--- standalone forward migrations — the SSO nonce-expiry index (was 0002),
--- the outbox retry lifecycle (0003), the audit append-only trigger (0004),
--- the organization-FK ON DELETE SET NULL swap (0005), per-org auth settings
--- (0007), and organization invitations (0008) — all folded into one
--- authoritative definition, applied in their original order (see the
--- "Folded in from …" section markers below).
+-- trigger, and baseline row needed for a first-time database setup — there is
+-- exactly ONE application schema file and ONE setup process. It covers the
+-- tenancy / identity / RBAC tables and their indexes; the audit log and its
+-- append-only trigger; the SSO handoff-nonce and outbox delivery
+-- infrastructure; the per-organization signup/auth settings; organization
+-- invitations; the machine-API credentials (`app_api_keys`, `app_oauth_clients`,
+-- `app_revoked_tokens`, the `admin.apikeys.*` / `admin.clients.*` permissions);
+-- and the baseline permission catalog + superuser provisioning.
 --
 -- A fresh database needs this file (plus the Better Auth vendor schema
 -- applied by `pnpm db:auth:migrate`, and `pnpm db:seed` for the local admin
@@ -25,8 +21,7 @@
 -- This file is FROZEN: never edit its DDL. `create … if not exists` is a
 -- no-op against an existing table, so changes here cannot alter a
 -- provisioned database. Append schema changes as new numbered `NNNN-*.sql`
--- files (see run-migrations.ts). 0001–0009 are used/retired, so the next
--- forward migration is 0010.
+-- files (see run-migrations.ts).
 --
 -- Scope note: the Better Auth tables (`user`, `session`, `account`,
 -- `verification`, …) are owned and created by Better Auth's own
@@ -647,43 +642,21 @@ end
 $$;
 
 
--- ===========================================================================
--- Folded in from 0002-sso-nonce-expires-index.sql
--- (was a separate forward migration; consolidated into this baseline to keep
--- the core setup a single file / single transaction — applied in original order).
--- ===========================================================================
-
--- 0002-sso-nonce-expires-index.sql
+-- ---------------------------------------------------------------------------
+-- SSO handoff-nonce expiry index
+-- ---------------------------------------------------------------------------
 --
--- FIRST forward migration after the consolidated 0001 baseline.
---
--- Convention (see run-migrations.ts): 0001 is now FROZEN — never edit its DDL.
--- Schema changes land as new `NNNN-*.sql` files like this one; the runner
--- applies any not-yet-applied file in lexical order inside a transaction and
--- records it in `app_schema_migrations`, so each runs at most once and a
--- fresh DB applies 0001 then 0002 in order. Files must be append-only and
--- idempotent (`if not exists` / `on conflict do nothing`) so re-running the
--- runner against a provisioned DB is a safe no-op.
---
--- This migration adds the index backing the SSO handoff-nonce expiry prune.
--- Every SSO launch issues `delete from app_sso_handoff_nonces where
--- expires_at < ...` (src/lib/sso.server.ts) on a hot auth path; without this
--- index that prune sequentially scans the table. Runs on the runner's
--- DB_SCHEMA search_path, matching 0001's conventions.
+-- Backs the SSO handoff-nonce expiry prune: every SSO launch issues
+-- `delete from app_sso_handoff_nonces where expires_at < ...`
+-- (src/lib/sso.server.ts) on a hot auth path; without this index that prune
+-- sequentially scans the table.
 create index if not exists idx_app_sso_handoff_nonces_expires_at
   on app_sso_handoff_nonces (expires_at);
 
 
--- ===========================================================================
--- Folded in from 0003-outbox-retry.sql
--- (was a separate forward migration; consolidated into this baseline to keep
--- the core setup a single file / single transaction — applied in original order).
--- ===========================================================================
-
--- 0003-outbox-retry.sql
---
--- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
--- idempotent.
+-- ---------------------------------------------------------------------------
+-- Outbox retry lifecycle
+-- ---------------------------------------------------------------------------
 --
 -- Gives app_outbox a retry lifecycle so transient delivery failures are
 -- re-attempted instead of silently dropped (review D1). Statuses are unchanged
@@ -703,16 +676,9 @@ create index if not exists idx_app_outbox_due
   where status = 'pending';
 
 
--- ===========================================================================
--- Folded in from 0004-audit-append-only.sql
--- (was a separate forward migration; consolidated into this baseline to keep
--- the core setup a single file / single transaction — applied in original order).
--- ===========================================================================
-
--- 0004-audit-append-only.sql
---
--- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
--- idempotent.
+-- ---------------------------------------------------------------------------
+-- Audit log: append-only enforcement
+-- ---------------------------------------------------------------------------
 --
 -- B3: make app_audit_events tamper-evident. The audit log is a compliance
 -- record, so the application database role must not be able to silently UPDATE
@@ -751,16 +717,9 @@ create trigger trg_app_audit_events_append_only
   execute function app_audit_events_block_mutation();
 
 
--- ===========================================================================
--- Folded in from 0005-organizations-fk-on-delete.sql
--- (was a separate forward migration; consolidated into this baseline to keep
--- the core setup a single file / single transaction — applied in original order).
--- ===========================================================================
-
--- 0005-organizations-fk-on-delete.sql
---
--- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
--- idempotent.
+-- ---------------------------------------------------------------------------
+-- Organization deletion: audit-tombstone FK (ON DELETE SET NULL)
+-- ---------------------------------------------------------------------------
 --
 -- DB-1: deleting an organization used to raise an *unhandled* foreign-key 500.
 -- Every org PATCH writes an `app_audit_events` row tagged with the org id, and
@@ -770,15 +729,15 @@ create trigger trg_app_audit_events_append_only
 -- references.
 --
 -- The fix has two halves; the route change (FK violation -> 409
--- `organization_in_use`, mirroring enterprise-apps) and this migration:
+-- `organization_in_use`, mirroring enterprise-apps) and this schema section:
 --
 --   1. app_audit_events.organization_id -> ON DELETE SET NULL. Audit is a
 --      historical record: when its org is removed the event row must SURVIVE
---      with a null tenant (the 0001 schema comment already documents this
+--      with a null tenant (the column comment above already documents this
 --      intent). This makes the common case — an org with only audit history —
 --      deletable instead of a 500.
 --
---   2. Teach the 0004 append-only trigger to permit EXACTLY that SET NULL
+--   2. Teach the append-only trigger to permit EXACTLY that SET NULL
 --      tombstone. The trigger (B3) rejects every UPDATE/DELETE on
 --      app_audit_events, which would otherwise turn the SET NULL cascade into a
 --      `check_violation` and re-break org deletion. The narrow exception below
@@ -791,7 +750,7 @@ create trigger trg_app_audit_events_append_only
 -- keeps its default RESTRICT/NO ACTION behavior: an org that still owns those
 -- is genuinely "in use", so the DELETE raises a FK violation that the route now
 -- translates to a clean 409 instead of a 500. (app_groups already CASCADEs and
--- app_outbox already SET NULLs per 0001.)
+-- app_outbox already SET NULLs, both defined above.)
 
 -- 1. Permit the org-deletion tombstone in the append-only trigger.
 create or replace function app_audit_events_block_mutation()
@@ -821,8 +780,8 @@ begin
 end;
 $$;
 
--- 2. Flip app_audit_events.organization_id to ON DELETE SET NULL. The 0001 FK is
--- inline/unnamed; find it by its target + column rather than guessing the
+-- 2. Flip app_audit_events.organization_id to ON DELETE SET NULL. The FK created
+-- with the table above is inline/unnamed; find it by its target + column rather than guessing the
 -- autogenerated name, drop it, and re-add with a stable name + the SET NULL rule.
 do $$
 declare
@@ -849,16 +808,9 @@ alter table app_audit_events
   foreign key (organization_id) references app_organizations(id) on delete set null;
 
 
--- ===========================================================================
--- Folded in from 0007-organization-auth-settings.sql
--- (was a separate forward migration; consolidated into this baseline to keep
--- the core setup a single file / single transaction — applied in original order).
--- ===========================================================================
-
--- 0007-organization-auth-settings.sql
---
--- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
--- idempotent.
+-- ---------------------------------------------------------------------------
+-- Per-organization signup / auth settings
+-- ---------------------------------------------------------------------------
 --
 -- Runtime-configurable per-organization signup/authentication policy. Until
 -- now the signup workflow was hardcoded in two places: email verification via
@@ -932,22 +884,15 @@ where not exists (
 );
 
 
--- ===========================================================================
--- Folded in from 0008-organization-invitations.sql
--- (was a separate forward migration; consolidated into this baseline to keep
--- the core setup a single file / single transaction — applied in original order).
--- ===========================================================================
-
--- 0008-organization-invitations.sql
---
--- Forward migration (see run-migrations.ts; 0001 is frozen). Append-only and
--- idempotent.
+-- ---------------------------------------------------------------------------
+-- Organization invitations
+-- ---------------------------------------------------------------------------
 --
 -- Organization invitations: an administrator invites an email address into an
 -- organization (optionally with an app role); the invitee receives a
 -- single-use accept link. Accepting creates/activates the membership in the
 -- INVITING org — the invitation is the approval, so it bypasses the
--- pending-approval queue. Composes with the 0007 signup policy via the new
+-- pending-approval queue. Composes with the signup policy via the new
 -- `invite_only` approval mode (below): uninvited sign-ups park in
 -- `pending_approval`, invited ones activate.
 --
@@ -996,10 +941,11 @@ create index if not exists idx_app_org_invitations_org_status
   on app_organization_invitations (organization_id, status);
 
 -- ---------------------------------------------------------------------------
--- Extend the 0007 signup-policy approval modes with `invite_only`.
--- The 0007 CHECK was inline (auto-named); find it by definition rather than
--- guessing the generated name (same pattern as the 0005 FK swap), then
--- re-add under a stable name with the third value.
+-- Extend the signup-policy approval modes with `invite_only`.
+-- The `signup_approval_mode` CHECK created with the table above is inline
+-- (auto-named); find it by definition rather than guessing the generated name
+-- (the same technique as the audit-tombstone FK swap earlier), then re-add
+-- under a stable name with the third value.
 -- ---------------------------------------------------------------------------
 do $$
 declare

@@ -13,9 +13,9 @@ handoff.
   (ban, impersonation), and a server-only plugin that establishes the
   consumer-side session on SSO handoff
 - **PostgreSQL + Kysely** — typed SQL for app tables; Better Auth shares
-  the same `pg` pool. The application schema starts from a consolidated
+  the same `pg` pool. The application schema starts from the frozen
   `0001-initial-schema.sql` baseline, with later changes shipped as
-  append-only numbered migrations (`0002-…` onward). The runner applies any
+  append-only numbered migrations (`NNNN-*.sql`). The runner applies any
   not-yet-recorded file in order, each in a transaction, recording it in
   `app_schema_migrations`
 - **Machine API** — a versioned `/api/v1` REST surface authenticated by

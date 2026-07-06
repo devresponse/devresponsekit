@@ -6,7 +6,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { getServerEnv } from "@/lib/env";
 
 /**
- * Organization invitations (migration 0008).
+ * Organization invitations.
  *
  * An administrator invites an email address into an organization; the
  * invitee receives a single-use accept link. Accepting creates/activates the

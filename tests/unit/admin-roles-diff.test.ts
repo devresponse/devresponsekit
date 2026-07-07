@@ -4,7 +4,7 @@ import { diffPermissions as diffClient } from "@/lib/admin/roles.client";
 
 /**
  * Unit tests for the pure `diffPermissions` helper used by the dual-list
- * editor (docs/admin-manager.md §8.6) and the role-permissions API
+ * editor (docs/admin-manager.md §8.4) and the role-permissions API
  * handlers' audit metadata.
  *
  * The helper has TWO copies — one in the server-only module

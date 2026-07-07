@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Unit tests for the Administrator overview query layer
- * (docs/admin-manager.md §8.1). The DB is stubbed; we pin:
+ * (docs/admin-manager.md §8.0). The DB is stubbed; we pin:
  *   - status-grouped counts roll up into total/active/pending slices,
  *   - pg's string counts are normalized to numbers,
  *   - excluded slices are never queried (permission-driven `include`).

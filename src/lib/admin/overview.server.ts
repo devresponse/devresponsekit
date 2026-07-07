@@ -4,7 +4,8 @@ import type { OrgScope } from "@/lib/admin/access-scope.server";
 import { toDate } from "@/lib/db-types";
 
 /**
- * Query layer for the Administrator overview dashboard.
+ * Query layer for the Administrator overview dashboard
+ * (docs/admin-manager.md §8.0).
  *
  * Pure data access — no permission checks, no formatting, no i18n.
  * The page maps the caller's permissions to the `include` flags and
@@ -161,7 +162,7 @@ export async function getAdministratorOverviewMetrics(
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Recent activity (the dashboard's second tier)                             */
+/*  Recent activity (the dashboard's third tier)                              */
 /* -------------------------------------------------------------------------- */
 
 const ACTIVITY_LIMIT = 10;

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/enterprise-apps/new
  *
  * Server entry for the create-application form (docs/admin-manager.md
- * §8.10, Phase 6). Gated on `admin.apps.manage`.
+ * §8.7). Gated on `admin.apps.manage`.
  */
 export default async function AdministratorNewEnterpriseAppPage({
   params,

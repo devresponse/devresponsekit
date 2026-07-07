@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/api-keys/new
  *
  * Server entry for the issue-on-behalf form (docs/admin-manager.md
- * §8.12). Gated on `admin.apikeys.manage`. The scope catalog is passed
+ * §8.8). Gated on `admin.apikeys.manage`. The scope catalog is passed
  * down from the server so the client never imports the `server-only`
  * permission graph; the server route re-validates every scope against
  * the OWNER's authority regardless.

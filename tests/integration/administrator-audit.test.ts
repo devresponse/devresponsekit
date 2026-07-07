@@ -5,7 +5,7 @@ import type * as AuditRouteModule from "@/app/api/administrator/audit/route";
 
 /**
  * Integration tests for the audit endpoint (docs/admin-manager.md
- * Phase 6 test plan, §8.11). The DB layer is stubbed — these tests
+ * §8.10). The DB layer is stubbed — these tests
  * pin the handler contract: permission gate, list envelope, and the
  * default sort applied when the caller doesn't specify one.
  */

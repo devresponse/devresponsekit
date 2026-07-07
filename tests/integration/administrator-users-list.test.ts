@@ -5,7 +5,7 @@ import type * as UsersRouteModule from "@/app/api/administrator/users/route";
 
 /**
  * Integration tests for `GET /api/administrator/users` per
- * docs/admin-manager.md §5.1, §5.3 and §17 (test plan).
+ * docs/admin-manager.md §5.1, §7 and §12.
  *
  * The DB layer is stubbed — these tests pin the *handler contract*:
  * permission gate, response envelope, pageSize clamp, and the audit

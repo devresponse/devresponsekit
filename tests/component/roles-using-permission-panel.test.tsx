@@ -5,7 +5,7 @@ import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
  * Component tests for the "Roles using this permission" panel
- * (docs/admin-manager.md §8.7).
+ * (docs/admin-manager.md §8.5).
  *
  * Regression: the panel used to send the filter as `filter.permission`
  * (dot syntax), which `parseListQuery` silently drops — the endpoint

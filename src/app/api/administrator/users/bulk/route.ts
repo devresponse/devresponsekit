@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * POST /api/administrator/users/bulk
  *
  * Apply a single action to a batch of users (docs/admin-manager.md
- * §19 Phase 7, §8.2 bulk actions, §20.1 #15).
+ * §13, §19, §20.1).
  *
  * Body shape:
  * ```

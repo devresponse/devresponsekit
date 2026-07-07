@@ -140,7 +140,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
 export async function DELETE(request: NextRequest) {
   const requestId = getOrCreateRequestId(request);
 
-  // §14 Origin/Referer defence on this cookie-authed mutation (the admin guard
+  // §4 Origin/Referer defence on this cookie-authed mutation (the admin guard
   // does this for permission-gated routes; replicated here since we bypass it).
   const origin = checkTrustedOrigin(request);
   if (!origin.ok) {

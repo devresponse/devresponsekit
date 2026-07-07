@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/enterprise-apps/[appId]
  *
  * Server entry for the enterprise application detail (docs/admin-manager.md
- * §8.10, Phase 6).
+ * §8.7).
  *
  * The application id is a stable text primary key referenced by SSO
  * handoff nonces, so it is read-only here. All other mutable fields can

@@ -5,7 +5,7 @@ import type * as UsersRouteModule from "@/app/api/administrator/users/route";
 
 /**
  * Security tests for `/api/administrator/users` (docs/admin-manager.md
- * §14 + §17 test plan / "security" layer). Focused on the
+ * §4 + §12). Focused on the
  * authorization and audit boundary — verifies no path through the
  * handler can leak data without the right permission.
  */

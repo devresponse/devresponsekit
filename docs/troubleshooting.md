@@ -1,3 +1,10 @@
+---
+title: Troubleshooting
+description: An incident runbook plus a catalog of common setup, build, runtime, and deploy fixes.
+group: General
+order: 110
+---
+
 # Troubleshooting & incident response
 
 _Audience: all technical users and on-call engineers. Two halves: an **incident

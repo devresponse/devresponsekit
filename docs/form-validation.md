@@ -1,3 +1,10 @@
+---
+title: Form Validation
+description: The shared Zod and React Hook Form pattern behind every admin, account, and auth form.
+group: General
+order: 90
+---
+
 # Form Validation
 
 > Status: **implemented** (shipped in `1.0.0`). Every form in the app — admin,

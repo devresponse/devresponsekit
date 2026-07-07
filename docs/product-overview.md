@@ -1,3 +1,10 @@
+---
+title: Product Overview
+description: What the product is, who it's for, the plain-English feature catalog, and promo copy.
+group: General
+order: 20
+---
+
 # Product Overview
 
 _Audience: marketing, sales, product, and business stakeholders. No engineering background required. This is the single marketing-facing overview — it covers what the product is, who it's for, the plain-English feature catalog, how it stands apart, and ready-to-use promotional copy._

@@ -1,3 +1,10 @@
+---
+title: Sign-up Policy
+description: How new accounts register and activate, configurable per organization at runtime.
+group: General
+order: 80
+---
+
 # Sign-up Policy (per-organization authentication workflow)
 
 _Audience: administrators and developers. How new accounts register and become active, how to configure a different workflow per organization at runtime, and the guarantees behind each option._

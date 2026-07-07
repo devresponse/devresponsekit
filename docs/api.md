@@ -1,3 +1,10 @@
+---
+title: "API Reference & Clients"
+description: The human-readable companion to the committed OpenAPI specs and generated clients.
+group: General
+order: 70
+---
+
 # API Reference & Clients
 
 _Audience: developers consuming, extending, or integrating with the HTTP API — from a browser, a script, another service, or any language. This page is the human-readable companion to the committed OpenAPI specs; the route handlers under `src/app/api/**` and `src/lib/api-auth/**` are authoritative. Where this prose and the code disagree, the code wins — fix the doc._

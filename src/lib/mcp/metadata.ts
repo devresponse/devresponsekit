@@ -66,14 +66,17 @@ export interface AuthorizationServerMetadata {
   token_endpoint_auth_methods_supported: string[];
   scopes_supported: string[];
   response_types_supported: string[];
+  /** RFC 7591 DCR endpoint — present only when self-registration is enabled. */
+  registration_endpoint?: string;
 }
 
 export function buildAuthorizationServerMetadata(
   baseUrl: string,
   issuer: string,
+  options?: { registrationEndpoint?: boolean },
 ): AuthorizationServerMetadata {
   const base = trimTrailingSlash(baseUrl);
-  return {
+  const metadata: AuthorizationServerMetadata = {
     issuer: trimTrailingSlash(issuer),
     token_endpoint: `${base}/api/v1/auth/token`,
     jwks_uri: `${base}/api/v1/jwks.json`,
@@ -85,4 +88,8 @@ export function buildAuthorizationServerMetadata(
     // No authorization-code / implicit flow yet (Phase 5) → no response types.
     response_types_supported: [],
   };
+  if (options?.registrationEndpoint) {
+    metadata.registration_endpoint = `${base}/api/mcp/register`;
+  }
+  return metadata;
 }

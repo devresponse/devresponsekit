@@ -214,6 +214,10 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | Variable | Controls |
 | --- | --- |
 | `MCP_ENABLED` | Enable the `/api/mcp` Model Context Protocol endpoint (`1`/`true`). **Dark by default.** It authenticates with the same bearer credential as the machine API, so it also needs `API_KEYS_ENABLED` / `API_JWT_ENABLED`. See [design-mcp-agent-gateway.md](./design-mcp-agent-gateway.md). |
+| `MCP_REGISTRATION_ENABLED` | Enable `POST /api/mcp/register` — RFC 7591 agent self-registration (`1`/`true`). **Dark by default.** |
+| `MCP_REGISTRATION_MODE` | `approval` (default — new agents park pending admin activation) or `open` (active but scopeless). |
+| `MCP_REGISTRATION_DEFAULT_ORG` | Target org slug/id used when a registration request omits `organization`. |
+| `MCP_REGISTRATION_MAX_PER_ORG` | Max active OAuth clients per org before registration is refused (`0` = unlimited; default `50`). |
 
 ### Seeding
 

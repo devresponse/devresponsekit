@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 const env = vi.hoisted(() => ({
   MCP_ENABLED: true,
+  MCP_REGISTRATION_ENABLED: false,
   BETTER_AUTH_URL: "https://app.example.com",
   API_JWT_ISSUER: undefined as string | undefined,
 }));
@@ -18,6 +19,7 @@ import { GET as authServerGet } from "@/app/.well-known/oauth-authorization-serv
 
 beforeEach(() => {
   env.MCP_ENABLED = true;
+  env.MCP_REGISTRATION_ENABLED = false;
   env.API_JWT_ISSUER = undefined;
 });
 
@@ -49,5 +51,13 @@ describe("MCP discovery routes", () => {
     env.API_JWT_ISSUER = "https://issuer.example";
     const body = await (await authServerGet()).json();
     expect(body.issuer).toBe("https://issuer.example");
+  });
+
+  it("advertises the registration endpoint only when self-registration is enabled", async () => {
+    expect((await (await authServerGet()).json()).registration_endpoint).toBeUndefined();
+    env.MCP_REGISTRATION_ENABLED = true;
+    expect((await (await authServerGet()).json()).registration_endpoint).toBe(
+      "https://app.example.com/api/mcp/register",
+    );
   });
 });

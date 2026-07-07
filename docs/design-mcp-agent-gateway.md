@@ -145,7 +145,7 @@ The core self-registration flow (§4), shipped behind `MCP_REGISTRATION_ENABLED`
 - **Abuse controls.** Two-layer rate limit + a per-org quota (`MCP_REGISTRATION_MAX_PER_ORG`, 0 = unlimited) + active-org-only resolution + audit (`mcp.client.registered`).
 - **Discovery.** `/.well-known/oauth-authorization-server` advertises `registration_endpoint` when registration is enabled.
 
-An admin grants scopes (and, in approval mode, activates the account) via the existing OAuth-client + user admin surfaces — a richer agent-lifecycle console is Phase 4. Generated tools remain Phase 3.
+An admin grants scopes (and, in approval mode, activates the account) via the existing OAuth-client + user admin surfaces — a richer agent-lifecycle console arrives in Phase 4 (§12). Generated tools arrive in Phase 3 (§11).
 
 Layout: `src/lib/mcp/registration.ts` (pure schema + response) + `src/lib/mcp/registration.server.ts` (provisioning) + `src/app/api/mcp/register/route.ts`.
 

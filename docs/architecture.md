@@ -61,7 +61,7 @@ flowchart TB
 | Area | Location | Responsibility |
 | --- | --- | --- |
 | **Routing & pages** | `src/app/[locale]/**` | Localized UI: `(public)`, `(auth)`, `(secure)` route groups + the administrator console. Plus `src/app/(root)/**` for locale-independent entry. |
-| **HTTP API** | `src/app/api/**` | Route handlers: Better Auth catch-all, account self-service, navigation, SSO handoff, docs assets, and the versioned `/api/v1` machine API. |
+| **HTTP API** | `src/app/api/**` | Route handlers: Better Auth catch-all, account self-service, navigation, SSO handoff, docs assets, the versioned `/api/v1` machine API, and the `/api/mcp` agent gateway. |
 | **Edge proxy** | `src/proxy.ts` | Cheap pre-render redirect + locale routing + per-request CSP-nonce minting (threaded into request/response headers). **Not** the authorization boundary; reads no database. |
 | **Authentication** | `src/lib/auth.ts` | Better Auth configuration (providers, plugins, session hooks). |
 | **Access context** | `src/lib/auth-status.ts` | `getUserAccessContext()` resolves a user's effective permissions; `decideSecureAccess()` is the pure allow/deny decision. |

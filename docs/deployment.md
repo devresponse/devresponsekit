@@ -1,3 +1,10 @@
+---
+title: Deployment
+description: How the repo ships to production on Vercel and Neon, the DB bootstrap, and release checks.
+group: General
+order: 60
+---
+
 # Deployment
 
 _Audience: DevOps and release engineers. How this repo ships to production, the one-time database bootstrap, and how to verify a release._

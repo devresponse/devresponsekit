@@ -1,3 +1,10 @@
+---
+title: Docker
+description: Build and run the production multi-stage container from Next.js standalone output.
+group: General
+order: 65
+---
+
 # Running devresponsekit in Docker
 
 The repository ships a production **`Dockerfile`** (multi-stage) and a

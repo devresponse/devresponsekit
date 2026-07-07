@@ -1,3 +1,10 @@
+---
+title: Architecture
+description: How the system is structured, where the boundaries are, and how a request flows through.
+group: General
+order: 30
+---
+
 # Architecture
 
 _Audience: developers and technical leads. How the system is structured, where the boundaries are, and how a request flows through it._

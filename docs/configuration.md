@@ -1,3 +1,10 @@
+---
+title: Configuration
+description: Every environment variable, the config files, and how local differs from production.
+group: General
+order: 50
+---
+
 # Configuration
 
 _Audience: developers and DevOps. Every environment variable, the config files, and how local differs from production. The authoritative template is [`.env.example`](../.env.example)._

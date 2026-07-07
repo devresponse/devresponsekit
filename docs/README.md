@@ -1,3 +1,10 @@
+---
+title: Introduction
+description: What DevResponseKit is and how this documentation set is organized by audience.
+group: General
+order: 10
+---
+
 # DevResponseKit Documentation
 
 > **DevResponseKit** is a production-grade, security-first **enterprise application shell** for multi-tenant B2B platforms — built on **Next.js 16**, **Better Auth**, **PostgreSQL + Kysely**, and **next-intl**. It ships organizations, three-tier RBAC, an admin console, a versioned machine API, cross-subdomain SSO, audit logging, and internationalization as an assembled, tested, documented foundation.

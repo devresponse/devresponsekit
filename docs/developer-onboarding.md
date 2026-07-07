@@ -1,3 +1,10 @@
+---
+title: Developer Onboarding
+description: Get the app running, learn the codebase layout, and ship your first change.
+group: General
+order: 40
+---
+
 # Developer Onboarding
 
 _Audience: developers joining the codebase. Get it running, learn the layout, and ship your first change._

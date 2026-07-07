@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardTitle } from "@/components/ui/card";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
 import { getVisibleGroupedCatalog } from "@/lib/docs/catalog.server";
@@ -25,7 +25,7 @@ export default async function DocsIndexPage({ params }: { params: Promise<{ loca
   const t = await getTranslations({ locale, namespace: "docs" });
 
   return (
-    <section className="mx-auto w-full max-w-5xl space-y-6 p-6">
+    <section className="mx-auto w-full max-w-5xl space-y-6 p-4 sm:p-6">
       <div className="space-y-1">
         <h1 className="text-lg font-semibold">{t("index.title")}</h1>
         <p className="text-muted-foreground text-sm">{t("index.description")}</p>
@@ -47,14 +47,12 @@ export default async function DocsIndexPage({ params }: { params: Promise<{ loca
                   locale={locale}
                   className="focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none"
                 >
-                  <Card className="hover:border-primary/40 h-full transition-colors">
-                    <CardHeader>
-                      <CardTitle className="text-sm font-medium">{item.title}</CardTitle>
-                    </CardHeader>
+                  <Card className="hover:border-primary/40 hover:bg-muted/40 flex h-full flex-col gap-1.5 p-4 transition-colors">
+                    <CardTitle className="text-sm font-medium">{item.title}</CardTitle>
                     {item.description ? (
-                      <CardContent>
-                        <p className="text-muted-foreground text-sm">{item.description}</p>
-                      </CardContent>
+                      <p className="text-muted-foreground line-clamp-2 text-sm leading-snug">
+                        {item.description}
+                      </p>
                     ) : null}
                   </Card>
                 </LocaleLink>

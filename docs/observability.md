@@ -1,3 +1,10 @@
+---
+title: Observability
+description: What signals the app emits, how to correlate them in an incident, and what's on the roadmap.
+group: General
+order: 100
+---
+
 # Observability
 
 _Audience: operators and on-call engineers. What signals the app emits today, how to

@@ -848,6 +848,14 @@ EMAIL_FROM="DevResponse <no-reply@localhost>"
 # API_JWT_KID=""                     # optional; defaults to JWK thumbprint
 # API_JWT_ACCESS_TTL_SECONDS="900"   # <= 3600
 
+# MCP agent gateway (§37.4). DARK by default; reuses the machine-API bearer
+# credential, so it also needs API_KEYS_ENABLED and/or API_JWT_ENABLED.
+# MCP_ENABLED="1"
+# MCP_REGISTRATION_ENABLED="1"              # RFC 7591 agent self-registration
+# MCP_REGISTRATION_MODE="approval"          # "approval" (park pending) | "open" (active, scopeless)
+# MCP_REGISTRATION_DEFAULT_ORG="default"    # org used when a request omits `organization`
+# MCP_REGISTRATION_MAX_PER_ORG="50"         # active clients per org; 0 = unlimited
+
 # Test/CI only — disables Better Auth's rate limiter. Never in production.
 # AUTH_RATE_LIMIT_DISABLED="1"
 
@@ -3769,7 +3777,7 @@ A versioned, non-localized REST API for machine clients (CLIs, scripts,
 service integrations), authenticated by machine credentials instead of
 session cookies. It ships **disabled by default** — the two paths are
 gated by `API_KEYS_ENABLED` and `API_JWT_ENABLED` (§8) — and is fully
-documented in [docs/api-and-cli-guide.md](docs/api-and-cli-guide.md) and
+documented in [docs/api.md](docs/api.md) and
 [docs/design-api-keys-and-tokens.md](docs/design-api-keys-and-tokens.md).
 
 ### 37.1 Credentials & auth
@@ -3820,6 +3828,23 @@ Scope strings are the 30 `admin.*` catalog keys plus four account scopes
 
 Errors use `application/problem+json` (`type`, `title`, `status`, `code`,
 optional `detail`, `requestId`) from `src/lib/api-auth/problem.ts`.
+
+### 37.4 MCP agent gateway (`/api/mcp`)
+
+An MCP (Model Context Protocol) adapter fronting this surface for AI agents,
+shipped **dark by default** (`MCP_ENABLED`; §8) and fully specified in
+[docs/design-mcp-agent-gateway.md](docs/design-mcp-agent-gateway.md).
+`POST /api/mcp` is a stateless Streamable-HTTP JSON-RPC 2.0 endpoint whose tools
+are **generated from the OpenAPI document** — each scoped `/api/v1` operation
+becomes one tool, dispatched through the same `permission ∩ scope` guard, so MCP
+can never exceed the machine API's authority. Agents may **self-register** at
+`POST /api/mcp/register` (RFC 7591, gated by `MCP_REGISTRATION_ENABLED`), which
+provisions a machine service account + a **zero-scope** OAuth client; an admin
+then approves and grants scopes from the Administrator → Agents console
+([docs/admin-manager.md](docs/admin-manager.md) §8.13). OAuth 2.1 discovery is
+served at `/.well-known/oauth-protected-resource` (RFC 9728) and
+`/.well-known/oauth-authorization-server` (RFC 8414). Layout: `src/lib/mcp/**` +
+`src/app/api/mcp/**` + `src/app/.well-known/**`.
 
 ---
 

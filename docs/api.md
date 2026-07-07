@@ -28,7 +28,8 @@ Two related references carry the deeper detail this page links to rather than re
 | Docs assets | `/api/docs/asset/[...path]` | Cookie session + `shell.view` | In-app docs viewer |
 | Administrator | `/api/administrator/*` | **Cookie session** + `admin.*` permission | The admin console |
 | Machine API (v1) | `/api/v1/*` | **Bearer** (API key or JWT) or cookie | Integrations & the user's own self-service |
-| Discovery | `/api/v1/openapi.json`, `/api/v1/jwks.json` | Public | Tooling |
+| MCP agent gateway | `/api/mcp`, `/api/mcp/register` | **Bearer** (API key or JWT); registration public | AI agents (Model Context Protocol) — dark by default |
+| Discovery | `/api/v1/openapi.json`, `/api/v1/jwks.json`, `/.well-known/oauth-*` | Public | Tooling · MCP / OAuth clients |
 
 All handlers are `dynamic = "force-dynamic"` (no caching of authorized data). Every mutating route runs a permission check, an origin/CSRF guard, a per-actor rate-limit, Zod validation, and an audit write.
 
@@ -203,6 +204,7 @@ This is the cookie-session console surface (users, roles, permissions, groups, o
 | Sign-up policy (platform) | `GET/PATCH /auth-settings/defaults` | `admin.orgs.*` + **superadmin** |
 | API keys | `GET/POST /api-keys`; `GET/PATCH/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
 | Email | `GET /email/outbox`; `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
+| MCP agents | `GET /mcp-agents`; `POST …/[id]/approve`; `PATCH`/`DELETE …/[id]` | `admin.clients.read` / `admin.clients.manage` |
 | Audit | `GET /audit` | `admin.audit.read` |
 | Export | `GET /export/[resource]` | export permission |
 
@@ -291,6 +293,26 @@ Query parameters for `launch`: `applicationId` (required), `locale` (optional). 
 - The committed **OpenAPI 3.1 specs are authoritative** for exact request/response shapes — [`docs/openapi.json`](./openapi.json) (`/api/v1`) and [`docs/openapi-admin.json`](./openapi-admin.json) (`/api/administrator`). They are regenerated from the handlers and **drift-checked in CI**; the fix when a check fails is `pnpm openapi:export` (both specs) and, for the admin surface, `pnpm sdk:admin:generate`, then commit.
 - The `account.*` scopes are also enumerated in `x-account-scopes` of [`docs/openapi.json`](./openapi.json); the supported `export` resources/formats are described by the `/api/administrator/export/[resource]` operation in [`docs/openapi-admin.json`](./openapi-admin.json).
 - **Regenerate your downstream client** whenever the relevant spec changes — watch `docs/openapi.json` / `docs/openapi-admin.json`, or the `version` in the spec's `info`.
+
+## 11. MCP agent gateway (Model Context Protocol)
+
+_Dark by default (`MCP_ENABLED`), like the machine API it fronts. Flags: [Configuration → AI agent gateway (MCP)](./configuration.md#ai-agent-gateway-mcp). Full design: [Design: MCP Agent Gateway](./design-mcp-agent-gateway.md)._
+
+`/api/mcp` exposes the v1 machine API to AI agents over the **Model Context Protocol** — a stateless **Streamable HTTP** JSON-RPC 2.0 endpoint. It is a translation layer, not a second API: every tool call funnels through the same `permission ∩ scope` guard as `/api/v1`, so the MCP surface can never exceed the machine API's authority.
+
+| Endpoint | Method | Auth | Purpose |
+| --- | --- | --- | --- |
+| `/api/mcp` | POST | **Bearer** (API key or client-credentials JWT) | JSON-RPC: `initialize`, `tools/list`, `tools/call`, `ping` |
+| `/api/mcp` | GET | — | `405` — no server-initiated stream |
+| `/api/mcp/register` | POST | Public (rate-limited) | RFC 7591 agent self-registration; gated by `MCP_REGISTRATION_ENABLED` |
+| `/.well-known/oauth-protected-resource` | GET | Public | RFC 9728 protected-resource metadata |
+| `/.well-known/oauth-authorization-server` | GET | Public | RFC 8414 authorization-server metadata |
+
+- **Bearer-only.** A cookie session is rejected (it is not an audience-bound OAuth token). An unauthenticated call returns `401` with `WWW-Authenticate: Bearer …, resource_metadata="…/.well-known/oauth-protected-resource"`, so a compliant client auto-discovers the token endpoint (`/api/v1/auth/token`) and JWKS.
+- **Tools are generated from the OpenAPI spec.** Each scoped `/api/v1` operation becomes one MCP tool (~18 today), carrying its required scope; a new scoped endpoint becomes a tool for free. `issueToken`, `getJwks`, and `getOpenApi` are excluded.
+- **Self-registration is safe by construction.** A newly registered agent gets a machine service account + a **zero-scope** OAuth client. In `approval` mode (default) it cannot mint a token until an admin activates it; in `open` mode it is active but every tool `403`s until scopes are granted. Admins approve, scope, and revoke agents from **Administrator → Agents** ([Admin Manager §8.13](./admin-manager.md#813-mcp-agents)).
+
+The MCP surface is **not** modeled in the OpenAPI specs (it is JSON-RPC, not REST) — the [design doc](./design-mcp-agent-gateway.md) is authoritative.
 
 ---
 

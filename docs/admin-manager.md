@@ -531,6 +531,30 @@ a grid, with per-row drill-in to the event metadata.
 | `GET/PUT /email/templates/[id]` | `.read` / `admin.email.manage` | Inspect / edit template content; `admin.email.template_updated` |
 | `POST /email/test` | `admin.email.manage` | Send a test email through the outbox pipeline; `admin.email.test_sent` |
 
+### 8.13 MCP agents
+
+The lifecycle console for **self-registered AI agents** (the [MCP agent
+gateway](./design-mcp-agent-gateway.md)). An agent is not a new entity — it is
+an existing service `app_user` + `mcp` membership + `app_oauth_clients` row — so
+this area is a read plus three actions over that surface, org-scoped. Rendered
+at `/app/administrator/agents`; nav-gated on `admin.clients.read`.
+
+| Method & path | Permission | Notes / audit |
+| --- | --- | --- |
+| `GET /mcp-agents` | `admin.clients.read` | List agents in scope (client id, service-account + client status, scope ceiling) |
+| `POST /mcp-agents/[id]/approve` | `admin.clients.manage` | Activate a `pending_approval` service account so it can mint tokens (idempotent); `admin.mcp_agent.approved` |
+| `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority (`422` on over-grant); `admin.mcp_agent.scopes_updated` |
+| `DELETE /mcp-agents/[id]` | `admin.clients.manage` | Revoke the client (idempotent — leaves the service account for the audit trail); `admin.mcp_agent.revoked` |
+
+Scopes are a **ceiling**, not a grant: per the `permission ∩ scope` invariant a
+granted scope is usable only where the service account _also_ holds the matching
+permission — assign the service user a role via §8.1 (Users) to make it
+effective. The `POST /api/mcp/register` endpoint that creates these agents is
+public, lives on the machine surface (audit `mcp.client.registered`), and is
+dark unless `MCP_REGISTRATION_ENABLED` — see [Configuration → AI agent gateway
+(MCP)](./configuration.md#ai-agent-gateway-mcp) and
+[api.md §11](./api.md#11-mcp-agent-gateway-model-context-protocol).
+
 ---
 
 ## 10. URL as state
@@ -576,7 +600,8 @@ keys, or raw passwords. Internal exception detail may go in `metadata` (e.g.
 **Event-type naming.** Per-area, dotted, past-tense for outcomes — for example
 `admin.user.created`, `admin.role.permissions_changed`,
 `admin.organization.deleted`, `admin.api_key.created`,
-`admin.user.impersonation_started`. The pipeline itself writes
+`admin.mcp_agent.approved`, `admin.user.impersonation_started`. The pipeline
+itself writes
 `administrator.access.denied` and `administrator.rate_limited`.
 
 ### 12.1 Audit posture (append-only + retention)

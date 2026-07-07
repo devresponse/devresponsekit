@@ -254,7 +254,8 @@
       "auditLog": "Журнал аудиту",
       "communication": "Комунікація",
       "emailOutbox": "Вихідні листи",
-      "emailTemplates": "Шаблони листів"
+      "emailTemplates": "Шаблони листів",
+      "agents": "Agents"
     },
     "groups": {
       "title": "Групи",
@@ -1194,6 +1195,25 @@
       "noResults": "Груп не знайдено.",
       "loading": "Завантаження…",
       "loadError": "Не вдалося завантажити групи."
+    },
+    "agents": {
+      "title": "MCP agents",
+      "description": "AI agents that self-registered through the Model Context Protocol. Approve pending agents, set their scope ceiling, or revoke access.",
+      "empty": "No MCP agents have registered yet.",
+      "colName": "Agent",
+      "colStatus": "Status",
+      "colScopes": "Scopes",
+      "colActions": "Actions",
+      "statusActive": "Active",
+      "statusPending": "Pending approval",
+      "statusRevoked": "Revoked",
+      "noScopes": "None",
+      "approve": "Approve",
+      "setScopes": "Set scopes",
+      "revoke": "Revoke",
+      "confirmRevoke": "Revoke this agent's access? This cannot be undone.",
+      "scopesPrompt": "Comma-separated scopes (the client ceiling). The agent's service account must also hold each permission for a scope to take effect.",
+      "actionFailed": "The action could not be completed. Check your permissions and try again."
     }
   },
   "errors": {

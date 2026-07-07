@@ -1,6 +1,7 @@
 import {
   AppWindow,
   BookOpen,
+  Bot,
   Briefcase,
   Building2,
   Circle,
@@ -46,6 +47,7 @@ export const MENU_ICONS: Record<string, LucideIcon> = {
   "building-2": Building2,
   "users-round": UsersRound,
   "app-window": AppWindow,
+  bot: Bot,
   mail: Mail,
   "mail-open": MailOpen,
   // Account (self-service) workspace.

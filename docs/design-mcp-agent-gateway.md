@@ -158,4 +158,20 @@ The two hard-coded Phase 0 tools are replaced by **every scoped `/api/v1` operat
 
 This yields ~18 tools (users + status, own & admin API keys, OAuth-clients CRUD + secret rotation, audit) with **zero per-tool code** — the surface tracks the spec automatically. `token` and the discovery documents are intentionally not tools.
 
-Layout: `src/lib/mcp/openapi-tools.ts` (pure deriver) + `src/lib/mcp/tools.server.ts` (dispatch). Next: Phase 4 — the agent-lifecycle admin console (approve / grant-scopes / revoke).
+Layout: `src/lib/mcp/openapi-tools.ts` (pure deriver) + `src/lib/mcp/tools.server.ts` (dispatch).
+
+## 12. Phase 4 (implemented) — the agent-lifecycle admin console
+
+The self-registration loop is now operable from the Administrator console. A new **Agents** area (`/app/administrator/agents`, nav-gated on `admin.clients.read`) lists every self-registered agent in the caller's org scope — each identified by joining its OAuth client to its `mcp`-sourced service membership — with its client id, service-account + client status, and scope ceiling. `admin.clients.manage` holders get three actions, each a cookie-session admin route (org-scoped, rate-limited, audited):
+
+- **Approve** — `POST /api/administrator/mcp-agents/{id}/approve` activates a pending agent's service account so it can mint tokens.
+- **Set scopes** — `PATCH /api/administrator/mcp-agents/{id}` sets the client's scope ceiling (validated against the admin's own authority). Per the intersection rule, a granted scope is only usable where the service account also holds the matching permission — grant the service user a role via the Users console to make it effective.
+- **Revoke** — `DELETE /api/administrator/mcp-agents/{id}` revokes the client (idempotent), immediately stopping it.
+
+No new tables — an agent is the existing `app_users` + membership + `app_oauth_clients`; the console is a read plus three actions composed over the mechanics Phases 2–3 established.
+
+Layout: `src/lib/mcp/agents.server.ts` (list + activate) + `src/app/api/administrator/mcp-agents/**` (routes) + `src/app/[locale]/(secure)/app/administrator/agents/**` (page + table).
+
+---
+
+**Roadmap complete.** Phases 0–4 ship a working, dark-by-default MCP agent gateway: discover → self-register (gated) → approve + scope in the console → authenticate (client-credentials) → operate across the full generated tool surface — every call re-checking `permission ∩ scope`, rate-limited, and audited.

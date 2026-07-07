@@ -95,9 +95,7 @@ describe("RolesUsingPermissionPanel", () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ items: [] }) });
     renderPanel();
 
-    expect(
-      await screen.findByText("No roles currently use this permission."),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("No roles currently use this permission.")).toBeInTheDocument();
   });
 
   it("shows an error message when the request fails", async () => {

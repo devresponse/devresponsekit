@@ -11,7 +11,7 @@ import { UserDetailTabs } from "./_user-detail-tabs";
 export const dynamic = "force-dynamic";
 
 /**
- * Administrator → User detail page (docs/admin-manager.md §8.4).
+ * Administrator → User detail page (docs/admin-manager.md §8.1).
  *
  * RSC that:
  *   1. Validates the caller holds `admin.users.read` (route guard).

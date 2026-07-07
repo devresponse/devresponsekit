@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/app/administrator/roles/new
  *
- * Server entry for the create-role form (docs/admin-manager.md §8.5).
+ * Server entry for the create-role form (docs/admin-manager.md §8.4).
  * Gated on `admin.roles.create`.
  *
  * A SUPERADMIN may create a Global role or scope it to any org (the picker

@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
  *
  * Creates a new Better Auth user (via the admin plugin) and persists
  * the corresponding `app_users` row in a single transaction. Per
- * docs/admin-manager.md §4 + §8.3:
+ * docs/admin-manager.md §4 + §8.1:
  *
  *   - Caller MUST hold `admin.users.create`.
  *   - Body validated with Zod (`.strict()` — unknown keys rejected).

@@ -22,7 +22,7 @@ const USER_STATUSES = [
 
 /**
  * Client-side users grid for the Administrator workspace
- * (docs/admin-manager.md §8.2).
+ * (docs/admin-manager.md §8.1).
  *
  * Phase 2 wired the foundation columns (email, name, status, created).
  * Phase 3 layered on the navigation affordance: the email cell links

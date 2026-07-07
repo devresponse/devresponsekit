@@ -10,7 +10,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../../_components/grid/data-grid";
 
 /**
- * Memberships tab for the user detail (docs/admin-manager.md §19).
+ * Memberships tab for the user detail (docs/admin-manager.md §8.1).
  *
  * Shows all organization memberships for a specific user.
  */

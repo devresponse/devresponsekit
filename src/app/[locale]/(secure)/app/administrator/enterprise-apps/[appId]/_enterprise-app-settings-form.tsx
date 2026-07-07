@@ -24,7 +24,7 @@ import {
 } from "@/lib/validation/enterprise-apps";
 
 /**
- * Enterprise application settings form (docs/admin-manager.md §8.10;
+ * Enterprise application settings form (docs/admin-manager.md §8.7;
  * docs/form-validation.md). React Hook Form + the shared
  * `enterpriseAppSettingsSchema`. The `id` is immutable (not editable here).
  * Read-only when the caller lacks `admin.apps.manage`.

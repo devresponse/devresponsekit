@@ -4,7 +4,7 @@ import { db } from "@/db/database";
 
 /**
  * Shared server module for the Organizations & Memberships endpoints
- * (docs/admin-manager.md §19, Phase 5).
+ * (docs/admin-manager.md §8.2).
  *
  * Centralizes the operations every organization handler needs so the
  * route handlers stay declarative and the Phase-5 contract (the

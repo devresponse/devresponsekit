@@ -18,7 +18,7 @@ import { DataGrid } from "../_components/grid/data-grid";
 import { useGridState } from "../_components/grid/use-grid-state";
 
 /**
- * Client-side audit explorer (docs/admin-manager.md §8.11, Phase 6).
+ * Client-side audit explorer (docs/admin-manager.md §8.11).
  *
  * Read-only paginated grid over `app_audit_events`. Filters are kept
  * narrow on purpose — the spec lists `event_type`, `outcome`, `actor`,

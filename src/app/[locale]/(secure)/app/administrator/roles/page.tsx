@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/app/administrator/roles
  *
- * Server entry point for the roles list (docs/admin-manager.md §8.5).
+ * Server entry point for the roles list (docs/admin-manager.md §8.4).
  * Re-validates the caller holds `admin.roles.read` (defence-in-depth on
  * top of the layout) and renders the client `DataGrid` which fetches
  * `/api/administrator/roles` for paginated data.

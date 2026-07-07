@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 
 /**
  * Grid row selection state with two distinct modes
- * (docs/admin-manager.md §7.1, §7.2 — "select all matching"):
+ * (docs/admin-manager.md §7.1, §13 — "select all matching"):
  *
  *   - "page"       — explicit per-row selection on the current page.
  *                    The default mode the user starts in.

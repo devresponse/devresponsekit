@@ -18,7 +18,7 @@ import { useZodForm } from "@/lib/forms/use-zod-form";
 import { roleSettingsSchema, type RoleSettingsInput } from "@/lib/validation/roles";
 
 /**
- * Settings tab for the role detail (docs/admin-manager.md §8.6;
+ * Settings tab for the role detail (docs/admin-manager.md §8.4;
  * docs/form-validation.md). React Hook Form + the shared `roleSettingsSchema`
  * (a `name`-required view of the route's partial PATCH contract).
  *

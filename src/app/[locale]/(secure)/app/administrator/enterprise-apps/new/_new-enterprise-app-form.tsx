@@ -21,7 +21,7 @@ import {
 } from "@/lib/validation/enterprise-apps";
 
 /**
- * Client-side new enterprise application form (docs/admin-manager.md §8.10;
+ * Client-side new enterprise application form (docs/admin-manager.md §8.7;
  * docs/form-validation.md). React Hook Form + the shared
  * `createEnterpriseAppSchema` (same schema the API route enforces):
  * schema-derived required markers, field-level errors with a red border.

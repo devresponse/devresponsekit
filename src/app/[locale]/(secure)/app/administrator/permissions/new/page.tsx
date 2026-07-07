@@ -6,7 +6,7 @@ import { NewPermissionForm } from "./_new-permission-form";
 export const dynamic = "force-dynamic";
 
 /**
- * Administrator → New permission page (docs/admin-manager.md §8.7).
+ * Administrator → New permission page (docs/admin-manager.md §8.5).
  *
  * RSC entry point that gates on `admin.permissions.manage` and renders
  * a client-side form (`NewPermissionForm`), following the same

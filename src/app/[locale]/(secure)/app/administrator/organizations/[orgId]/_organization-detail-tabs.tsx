@@ -9,7 +9,7 @@ import { OrganizationProvidersGrid } from "./_organization-providers-grid";
 import { OrganizationSettingsForm } from "./_organization-settings-form";
 
 /**
- * Client-side tab container for the organization detail (docs/admin-manager.md §19).
+ * Client-side tab container for the organization detail (docs/admin-manager.md §8.2).
  *
  * Each tab owns its own data fetch; the Authentication tab receives its
  * initial policy rows from the server page (0007).

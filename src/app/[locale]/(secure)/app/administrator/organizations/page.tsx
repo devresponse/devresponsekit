@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/app/administrator/organizations
  *
- * Server entry point for the organizations list (docs/admin-manager.md §19).
+ * Server entry point for the organizations list (docs/admin-manager.md §8.2).
  * Re-validates the caller holds `admin.orgs.read` (defence-in-depth on
  * top of the layout) and renders the client `DataGrid` which fetches
  * `/api/administrator/organizations` for paginated data.

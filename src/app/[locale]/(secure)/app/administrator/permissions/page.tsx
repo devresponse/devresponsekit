@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/app/administrator/permissions
  *
- * Permission-catalog management view (docs/admin-manager.md §8.7).
+ * Permission-catalog management view (docs/admin-manager.md §8.5).
  * Visible to anyone with `admin.roles.read`; mutating endpoints are
  * additionally gated on `admin.permissions.manage` and the create /
  * edit / delete buttons hide themselves when the caller lacks it.

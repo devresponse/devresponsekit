@@ -22,7 +22,7 @@ import {
 } from "@/lib/validation/organizations";
 
 /**
- * Client-side new-organization form (docs/admin-manager.md §19;
+ * Client-side new-organization form (docs/admin-manager.md §8.2;
  * docs/form-validation.md). React Hook Form + the shared
  * `createOrganizationSchema` (same schema the API route enforces): required
  * markers on slug/name, field-level errors with a red border, and a 409

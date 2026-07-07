@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/app/administrator/organizations/new
  *
- * Server entry for the create-organization form (docs/admin-manager.md §19).
+ * Server entry for the create-organization form (docs/admin-manager.md §8.2).
  * Gated on `admin.orgs.create`.
  */
 export default async function AdministratorNewOrganizationPage({

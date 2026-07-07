@@ -6,7 +6,7 @@ import { NewUserForm } from "./_new-user-form";
 export const dynamic = "force-dynamic";
 
 /**
- * Administrator → New user page (docs/admin-manager.md §8.3).
+ * Administrator → New user page (docs/admin-manager.md §8.1).
  *
  * RSC entry point that gates on `admin.users.create` and renders a
  * client-side form (`NewUserForm`). The form `POST`s to

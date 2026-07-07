@@ -8,7 +8,7 @@ import { useDialogs } from "@/components/ui/dialog-manager";
 import { DataGrid } from "../../_components/grid/data-grid";
 
 /**
- * Providers tab for the organization detail (docs/admin-manager.md §19).
+ * Providers tab for the organization detail (docs/admin-manager.md §8.2).
  *
  * Shows the provider bindings (e.g., GitHub orgs) linked to this organization.
  */

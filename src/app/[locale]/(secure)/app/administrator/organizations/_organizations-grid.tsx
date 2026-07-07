@@ -15,7 +15,7 @@ import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/
 const ORG_STATUSES = ["active", "pending", "suspended", "archived"] as const;
 
 /**
- * Client-side organizations grid (docs/admin-manager.md §19).
+ * Client-side organizations grid (docs/admin-manager.md §8.2).
  *
  * Mirrors the structure of the roles grid: the `slug` cell is the
  * navigation affordance into the org-detail page, and per-row "Delete"

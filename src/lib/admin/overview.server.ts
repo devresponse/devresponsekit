@@ -4,8 +4,7 @@ import type { OrgScope } from "@/lib/admin/access-scope.server";
 import { toDate } from "@/lib/db-types";
 
 /**
- * Query layer for the Administrator overview dashboard
- * (docs/admin-manager.md §8.1).
+ * Query layer for the Administrator overview dashboard.
  *
  * Pure data access — no permission checks, no formatting, no i18n.
  * The page maps the caller's permissions to the `include` flags and

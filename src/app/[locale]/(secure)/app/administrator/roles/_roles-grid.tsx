@@ -15,7 +15,7 @@ import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/
 const ROLE_SCOPES = ["global", "org"] as const;
 
 /**
- * Client-side roles grid (docs/admin-manager.md §8.5).
+ * Client-side roles grid (docs/admin-manager.md §8.4).
  *
  * Mirrors the structure of the users grid: the `key` cell is the
  * navigation affordance into the role-detail page, and per-row "Delete"

@@ -23,7 +23,7 @@ import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
 const API_KEY_STATUSES = ["active", "revoked"] as const;
 
 /**
- * Client-side API-key governance grid (docs/admin-manager.md §8.12).
+ * Client-side API-key governance grid (docs/admin-manager.md §8.8).
  *
  * Read-only admins (`admin.apikeys.read`) get the full inventory with a
  * status + owner filter toolbar and a per-row detail `Sheet`. Admins

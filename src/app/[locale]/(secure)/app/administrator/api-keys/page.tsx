@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/api-keys
  *
  * Server entry point for the API-key governance console
- * (docs/admin-manager.md §8.12). Read-only callers need
+ * (docs/admin-manager.md §8.8). Read-only callers need
  * `admin.apikeys.read`; the revoke / rotate / issue actions are gated
  * client-side on `admin.apikeys.manage` (and re-checked on every API
  * route), so a read-only admin sees the inventory without the

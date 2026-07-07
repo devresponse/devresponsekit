@@ -2,7 +2,7 @@ import "server-only";
 
 /**
  * Server-only re-export shim for the enterprise-apps validators
- * (docs/admin-manager.md §8.10, Phase 6).
+ * (docs/admin-manager.md §8.7).
  *
  * The actual rules live in `./enterprise-apps` so the client form
  * bundles can consume them. Server modules import from here so the

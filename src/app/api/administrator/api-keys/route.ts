@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Administrator API-key governance console
- * (docs/admin-manager.md §8.12).
+ * (docs/admin-manager.md §8.8).
  *
  * This is the cookie-session, permission-gated counterpart to the
  * machine `/api/v1/admin/api-keys` surface: it powers the Administrator

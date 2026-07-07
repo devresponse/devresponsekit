@@ -10,7 +10,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../../_components/grid/data-grid";
 
 /**
- * Members tab for the organization detail (docs/admin-manager.md §19).
+ * Members tab for the organization detail (docs/admin-manager.md §8.2).
  *
  * Reuses the shared `DataGrid` so URL-state, pagination and a11y
  * behave identically. Each row's user is a link into the user-detail

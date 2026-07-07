@@ -29,7 +29,7 @@ import {
 } from "@/lib/validation/organizations";
 
 /**
- * Settings tab for the organization detail (docs/admin-manager.md §19;
+ * Settings tab for the organization detail (docs/admin-manager.md §8.2;
  * docs/form-validation.md). React Hook Form + the shared
  * `organizationSettingsSchema`. Edits slug, name, status, and the default flag.
  */

@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/app/administrator/organizations/[orgId]
  *
- * Server entry for the organization detail (docs/admin-manager.md §19).
+ * Server entry for the organization detail (docs/admin-manager.md §8.2).
  *
  * Loads the organization + its counts via the shared `loadOrgOrThrow`
  * helper so the members, providers tables render the right counts on

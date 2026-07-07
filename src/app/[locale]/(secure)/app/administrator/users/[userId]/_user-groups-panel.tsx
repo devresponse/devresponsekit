@@ -16,7 +16,7 @@ import {
 import { GroupPicker, type GroupOption } from "./_group-picker";
 
 /**
- * Groups tab for the user detail (docs/admin-manager.md §8.4, ADR-0002).
+ * Groups tab for the user detail (docs/admin-manager.md §8.1, ADR-0002).
  *
  * Lists the groups the user belongs to (`GET …/users/[id]/groups`, scoped to
  * the caller's org). With `admin.groups.assign` the operator can add the user

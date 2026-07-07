@@ -12,7 +12,7 @@ import { DataGrid } from "../_components/grid/data-grid";
 import { RolesUsingPermissionPanel } from "./_roles-using-sheet";
 
 /**
- * Permissions catalog grid (docs/admin-manager.md §8.7).
+ * Permissions catalog grid (docs/admin-manager.md §8.5).
  *
  * Creation follows the standard new-record pattern (`permissions/new`
  * page; the page supplies the link via `headerActions`). Inline edit

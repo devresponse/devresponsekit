@@ -21,7 +21,7 @@ import { useZodForm } from "@/lib/forms/use-zod-form";
 import { createApiKeySchema, type CreateApiKeyInput } from "@/lib/validation/api-keys";
 
 /**
- * Issue-an-API-key-on-behalf-of-a-user form (docs/admin-manager.md §8.12;
+ * Issue-an-API-key-on-behalf-of-a-user form (docs/admin-manager.md §8.8;
  * docs/form-validation.md). React Hook Form + the shared `createApiKeySchema`
  * (same schema the API route enforces): schema-derived required markers,
  * field-level errors with a red border.

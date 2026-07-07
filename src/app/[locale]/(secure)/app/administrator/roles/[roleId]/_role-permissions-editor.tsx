@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { diffPermissions } from "@/lib/admin/roles.client";
 
 /**
- * Dual-list permissions editor (docs/admin-manager.md §8.6).
+ * Dual-list permissions editor (docs/admin-manager.md §8.4).
  *
  * Left column = available permissions (full catalog minus assigned).
  * Right column = currently assigned. Multi-select on either side; the

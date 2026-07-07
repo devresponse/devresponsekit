@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 /**
  * /[locale]/app/administrator/roles/[roleId]
  *
- * Server entry for the role detail (docs/admin-manager.md §8.6).
+ * Server entry for the role detail (docs/admin-manager.md §8.4).
  *
  * Loads the role + its permission keys via the shared
  * `loadRoleOrThrow` helper so the dual-list editor renders the

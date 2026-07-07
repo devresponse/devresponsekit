@@ -3,7 +3,7 @@
 import { AdministratorAuditGrid } from "../../audit/_audit-grid";
 
 /**
- * Audit tab for the user detail (docs/admin-manager.md §8.4).
+ * Audit tab for the user detail (docs/admin-manager.md §8.1).
  *
  * Reuses the shared audit grid pointed at the per-user audit endpoint, which
  * scopes rows to this user's `app_user_id` (and to the caller's org per

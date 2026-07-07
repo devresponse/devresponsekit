@@ -8,7 +8,7 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 
 /**
  * "Roles using this permission" panel rendered inside the catalog Sheet
- * (docs/admin-manager.md §8.7).
+ * (docs/admin-manager.md §8.5).
  *
  * Reads the existing `/api/administrator/roles` endpoint with the
  * `permission` filter — there's no need for a dedicated reverse-lookup

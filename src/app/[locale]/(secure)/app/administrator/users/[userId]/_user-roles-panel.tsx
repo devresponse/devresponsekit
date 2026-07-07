@@ -18,7 +18,7 @@ import { DataGrid } from "../../_components/grid/data-grid";
 import { RolePicker, type RoleOption } from "./_role-picker";
 
 /**
- * Roles tab for the user detail (docs/admin-manager.md §8.4).
+ * Roles tab for the user detail (docs/admin-manager.md §8.1).
  *
  * Lists the application ROLE ASSIGNMENTS a user holds, scoped per ADR-0001 by
  * the `/roles` endpoint. With `admin.roles.assign` the operator can also assign

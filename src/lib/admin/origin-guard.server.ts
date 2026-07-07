@@ -3,8 +3,9 @@ import { getTrustedOrigins, parseOrigin } from "@/lib/trusted-origins";
 
 /**
  * CSRF defence-in-depth for administrator mutations
- * (docs/admin-manager.md §14): "mutation endpoints additionally require
- * an `Origin`/`Referer` header that matches a `trustedOrigins` entry."
+ * (docs/admin-manager.md §4): for unsafe methods on ambient (cookie)
+ * credentials, `checkTrustedOrigin` requires an `Origin`/`Referer`
+ * header that matches a `trustedOrigins` entry.
  *
  * Better Auth's same-site cookie already blocks the most common
  * cross-site form submission, but a misconfigured browser, a CORS

@@ -12,7 +12,7 @@ import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/
 const MEMBERSHIP_STATUSES = ["active", "pending_approval", "blocked", "suspended"] as const;
 
 /**
- * Client-side memberships grid (docs/admin-manager.md §19).
+ * Client-side memberships grid (docs/admin-manager.md §8.3).
  *
  * Cross-org search for memberships with links to both user and org details.
  */

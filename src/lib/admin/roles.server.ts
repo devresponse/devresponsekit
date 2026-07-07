@@ -4,7 +4,7 @@ import { db } from "@/db/database";
 
 /**
  * Shared server module for the Roles & Permissions endpoints
- * (docs/admin-manager.md §19, Phase 4).
+ * (docs/admin-manager.md §8.4).
  *
  * Centralizes the three operations every roles handler needs so the
  * route handlers stay declarative and the Phase-4 contract (the

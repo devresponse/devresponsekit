@@ -14,8 +14,7 @@ import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/
 const APP_STATUSES = ["available", "disabled"] as const;
 
 /**
- * Client-side enterprise applications grid (docs/admin-manager.md §8.10,
- * Phase 6).
+ * Client-side enterprise applications grid (docs/admin-manager.md §8.7).
  *
  * Mirrors the structure of the organizations grid: the `id` cell is the
  * navigation affordance into the app-detail page, and per-row "Delete"

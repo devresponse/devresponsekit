@@ -1,113 +1,98 @@
 import "server-only";
-import { NextRequest } from "next/server";
-import { GET as meRouteGet } from "@/app/api/v1/me/route";
-import { GET as usersRouteGet } from "@/app/api/v1/users/route";
+import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
+import { getServerEnv } from "@/lib/env";
+import { deriveMcpTools, type GeneratedTool } from "./openapi-tools";
 import { type McpToolDefinition, type McpToolResult, textResult } from "./protocol";
 
 /**
- * Phase 0 tool registry (design docs/design-mcp-agent-gateway.md §8). Each
- * tool is a thin proxy to the corresponding `/api/v1` route handler,
- * forwarding the caller's bearer credential — so authorization,
- * org-scoping, and projections are identical to the raw machine API, with
- * zero duplication. Read-only for now.
+ * The MCP tool surface (Phase 3, design docs/design-mcp-agent-gateway.md
+ * §11). Tools are DERIVED from the OpenAPI document at load time — one per
+ * scoped `/api/v1` operation — and each dispatches by calling the v1 API
+ * with the caller's own bearer credential forwarded, so authorization,
+ * org-scoping, and projections stay identical to the raw API. The gateway
+ * is a client of the API it fronts.
  */
 
-type V1Handler = (request: NextRequest) => Promise<Response>;
+const GENERATED: GeneratedTool[] = deriveMcpTools(buildOpenApiDocument("https://mcp.internal"));
 
 export interface McpTool extends McpToolDefinition {
-  run(request: NextRequest, args: Record<string, unknown>): Promise<McpToolResult>;
+  run(request: { headers: Headers }, args: Record<string, unknown>): Promise<McpToolResult>;
 }
 
-const INTERNAL_ORIGIN = "https://mcp.internal";
+const TOOLS: McpTool[] = GENERATED.map((tool) => ({
+  name: tool.name,
+  title: tool.title,
+  description: tool.description,
+  inputSchema: tool.inputSchema,
+  annotations: { readOnlyHint: tool.readOnly, openWorldHint: false },
+  run: (request, args) => dispatch(tool, request, args),
+}));
 
-/** Forwards to a v1 GET handler and renders its JSON as an MCP tool result. */
-async function proxyGet(
-  request: NextRequest,
-  handler: V1Handler,
-  path: string,
-  query?: Record<string, string | number | undefined>,
+async function dispatch(
+  tool: GeneratedTool,
+  request: { headers: Headers },
+  args: Record<string, unknown>,
 ): Promise<McpToolResult> {
-  const url = new URL(path, INTERNAL_ORIGIN);
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
+  const base = getServerEnv().BETTER_AUTH_URL.replace(/\/+$/, "");
+  const path = tool.path.replace(/\{(\w+)\}/g, (_full, name: string) =>
+    encodeURIComponent(String(args[name] ?? "")),
+  );
+  const url = new URL(`${base}/api/v1${path}`);
+  for (const name of tool.queryParams) {
+    const value = args[name];
+    if (value !== undefined && value !== "") url.searchParams.set(name, String(value));
+  }
+
+  const headers: Record<string, string> = {};
+  const auth = request.headers.get("authorization");
+  if (auth) headers.authorization = auth;
+
+  let body: string | undefined;
+  if (tool.bodyProps.length > 0) {
+    const payload: Record<string, unknown> = {};
+    for (const name of tool.bodyProps) if (args[name] !== undefined) payload[name] = args[name];
+    if (Object.keys(payload).length > 0) {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify(payload);
     }
   }
-  const headers = new Headers();
-  const auth = request.headers.get("authorization");
-  if (auth) headers.set("authorization", auth);
 
-  const response = await handler(new NextRequest(url, { headers }));
-  const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    const problem = (body ?? {}) as { detail?: string; title?: string };
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), { method: tool.method, headers, body });
+  } catch (error) {
     return textResult(
-      `Request failed (HTTP ${response.status}): ${problem.detail ?? problem.title ?? "error"}`,
+      `Could not reach the API: ${error instanceof Error ? error.message : String(error)}`,
       true,
     );
   }
-  return textResult(JSON.stringify(body, null, 2));
+
+  const text = await response.text();
+  if (!response.ok) {
+    const problem = safeParse(text);
+    return textResult(
+      `Request failed (HTTP ${response.status}): ${problem?.detail ?? problem?.title ?? text.slice(0, 300)}`,
+      true,
+    );
+  }
+  return textResult(text.length > 0 ? text : "{}");
 }
 
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+function safeParse(text: string): { detail?: string; title?: string } | null {
+  try {
+    return JSON.parse(text) as { detail?: string; title?: string };
+  } catch {
+    return null;
+  }
 }
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-export const MCP_TOOLS: McpTool[] = [
-  {
-    name: "whoami",
-    title: "Who am I",
-    description:
-      "Return the calling credential's identity, permissions, and effective scopes (GET /api/v1/me). Requires the account.read scope.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-    run: (request) => proxyGet(request, meRouteGet, "/api/v1/me"),
-  },
-  {
-    name: "users_list",
-    title: "List users",
-    description:
-      "List users the credential may see, scoped to its organization (GET /api/v1/users). Requires the admin.users.read scope.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        q: { type: "string", description: "Search primary email or display name." },
-        status: {
-          type: "string",
-          description:
-            "Filter by status: active, pending_approval, blocked, suspended, or deactivated.",
-        },
-        page: { type: "integer", minimum: 1, description: "1-based page number (default 1)." },
-        page_size: {
-          type: "integer",
-          minimum: 1,
-          maximum: 200,
-          description: "Items per page (max 200, default 25).",
-        },
-      },
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-    run: (request, args) =>
-      proxyGet(request, usersRouteGet, "/api/v1/users", {
-        q: optionalString(args.q),
-        "filter[status]": optionalString(args.status),
-        page: optionalNumber(args.page),
-        pageSize: optionalNumber(args.page_size),
-      }),
-  },
-];
 
 export function findTool(name: string): McpTool | undefined {
-  return MCP_TOOLS.find((tool) => tool.name === name);
+  return TOOLS.find((tool) => tool.name === name);
 }
 
 /** Public tool definitions for `tools/list` (without the `run` closure). */
 export function toolDefinitions(): McpToolDefinition[] {
-  return MCP_TOOLS.map((tool) => ({
+  return TOOLS.map((tool) => ({
     name: tool.name,
     title: tool.title,
     description: tool.description,

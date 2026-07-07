@@ -254,7 +254,8 @@
       "auditLog": "Journal d'audit",
       "communication": "Communication",
       "emailOutbox": "Boîte d'envoi",
-      "emailTemplates": "Modèles d'e-mail"
+      "emailTemplates": "Modèles d'e-mail",
+      "agents": "Agents"
     },
     "groups": {
       "title": "Groupes",
@@ -1194,6 +1195,25 @@
       "noResults": "Aucun groupe trouvé.",
       "loading": "Chargement…",
       "loadError": "Impossible de charger les groupes."
+    },
+    "agents": {
+      "title": "MCP agents",
+      "description": "AI agents that self-registered through the Model Context Protocol. Approve pending agents, set their scope ceiling, or revoke access.",
+      "empty": "No MCP agents have registered yet.",
+      "colName": "Agent",
+      "colStatus": "Status",
+      "colScopes": "Scopes",
+      "colActions": "Actions",
+      "statusActive": "Active",
+      "statusPending": "Pending approval",
+      "statusRevoked": "Revoked",
+      "noScopes": "None",
+      "approve": "Approve",
+      "setScopes": "Set scopes",
+      "revoke": "Revoke",
+      "confirmRevoke": "Revoke this agent's access? This cannot be undone.",
+      "scopesPrompt": "Comma-separated scopes (the client ceiling). The agent's service account must also hold each permission for a scope to take effect.",
+      "actionFailed": "The action could not be completed. Check your permissions and try again."
     }
   },
   "errors": {

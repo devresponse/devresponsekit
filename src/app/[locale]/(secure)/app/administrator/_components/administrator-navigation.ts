@@ -166,6 +166,13 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         icon: "key-square",
         requires: ["admin.apikeys.read"],
       },
+      {
+        id: "agents",
+        href: "/app/administrator/agents",
+        labelKey: "agents",
+        icon: "bot",
+        requires: ["admin.clients.read"],
+      },
     ],
     actions: [
       {

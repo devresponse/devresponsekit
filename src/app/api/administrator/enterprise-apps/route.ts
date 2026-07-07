@@ -132,8 +132,8 @@ export async function GET(request: NextRequest) {
  *   - id: text, app id (lowercase, hyphens/dots/underscores)
  *   - label: text, human-readable label
  *   - description: optional text
- *   - origin: HTTPS origin (scheme + authority only, §8.10)
- *   - subdomain: hostname-safe DNS label (§8.10)
+ *   - origin: HTTPS origin (scheme + authority only, §8.7)
+ *   - subdomain: hostname-safe DNS label (§8.7)
  *   - sso_audience: text
  *   - status: "available" | "disabled" (default "available")
  *   - sort_order: integer (default 100)

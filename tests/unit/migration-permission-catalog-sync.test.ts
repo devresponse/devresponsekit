@@ -1,10 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  ADMIN_PERMISSION_CATALOG,
-  SUPERADMIN_PERMISSION,
-} from "@/lib/admin/permissions";
+import { ADMIN_PERMISSION_CATALOG, SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
 
 /**
  * Drift guard between the CORE migrations' baseline `app_permissions` seed and

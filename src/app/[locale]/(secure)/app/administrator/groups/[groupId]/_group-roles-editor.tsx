@@ -80,7 +80,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
         // scoping is required because of the pageSize cap — a client-only filter
         // could miss the group's roles if other orgs' filled the first page.
         const rolesRes = await fetch(
-          `/api/administrator/roles?organization=${groupOrgId}&pageSize=200`,
+          `/api/administrator/roles?filter[organization]=${groupOrgId}&pageSize=200`,
           { credentials: "same-origin" },
         );
         if (!rolesRes.ok) {
@@ -124,9 +124,10 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
     const q = availableQ.trim().toLowerCase();
     return (
       catalog
-        // Only the group's own org is assignable. The fetch is already scoped to
-        // it; this is a belt-and-suspenders guard so a foreign-org role can never
-        // slip into the list (and then fail on save).
+        // Only the group's own org is assignable. The fetch is server-scoped via
+        // `filter[organization]` (parseListQuery silently drops any other param
+        // shape); this client-side guard is defense-in-depth so a foreign-org
+        // role can never slip into the list (and then fail on save).
         .filter((r) => r.organization_id === orgId)
         .filter((r) => !assignedSet.has(r.id))
         .filter((r) => (q ? r.key.toLowerCase().includes(q) : true))

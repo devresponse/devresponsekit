@@ -31,6 +31,7 @@ This folder is the canonical documentation set, organized by **audience**.
 | [Admin Manager](./admin-manager.md) | Specification for the administrator console: navigation, screens, the guarded request pipeline, permission catalog, audit model |
 | [Sign-up Policy](./auth-signup-policy.md) | The runtime-configurable per-organization signup workflow — email verification, admin approval / auto-activation / invite-only, organization invitations, method allow-lists, auto-approve domains, resolution order |
 | [API Keys & Tokens Design](./design-api-keys-and-tokens.md) | Design of the machine credentials — scoped API keys and short-lived EdDSA JWT access tokens — issuance, rotation, revocation |
+| [Satellite Apps Design](./design-satellite-apps.md) | Standing up lightweight, SSO-delegated apps on the shell (subdomain deployment) — the auth models (handoff vs. shared `auth` schema), what to strip, and the fork playbook |
 | [Form Validation](./form-validation.md) | Shared client/server Zod schemas → `useZodForm` → `Form*` primitives, required markers, error borders, localized messages, accessibility |
 | [Testing](./testing.md) | Test strategy, the suites, how to run each, the coverage ratchet, the security-test coverage, and the manual QA checklist |
 

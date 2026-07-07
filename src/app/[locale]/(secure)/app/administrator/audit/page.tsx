@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/audit
  *
  * Server entry point for the audit explorer (docs/admin-manager.md
- * §8.11, Phase 6). Read-only — caller MUST hold `admin.audit.read`.
+ * §8.11). Read-only — caller MUST hold `admin.audit.read`.
  *
  * The page itself is a thin wrapper around the client `AdministratorAuditGrid`
  * which fetches `/api/administrator/audit` and renders a paginated grid

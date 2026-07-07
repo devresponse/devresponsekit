@@ -337,10 +337,12 @@ describe("GroupRolesEditor", () => {
 
     // Available column populated from the catalog once the fetches resolve.
     expect(await screen.findByText(/Available/)).toBeInTheDocument();
-    // The catalog fetch is scoped to the group's org.
+    // The catalog fetch is scoped to the group's org, using the bracket
+    // filter syntax parseListQuery actually parses (a bare `organization=`
+    // param would be silently dropped, returning an unfiltered list).
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/administrator/roles?organization=o1"),
+        expect.stringContaining("/api/administrator/roles?filter[organization]=o1"),
         expect.objectContaining({ credentials: "same-origin" }),
       ),
     );

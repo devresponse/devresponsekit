@@ -123,3 +123,14 @@ The first increment, shipped behind `MCP_ENABLED` (off by default):
   Insufficient scope surfaces as an MCP tool error result, not a transport failure.
 
 Phase 0 deliberately excludes self-registration, OAuth discovery metadata, and generated tools — those are Phases 1–3. It exists to prove the transport + auth wiring end to end.
+
+## 9. Phase 1 (implemented) — OAuth 2.1 discovery + audience binding
+
+Turns `/api/mcp` into a standards-shaped OAuth 2.1 **protected resource** so a compliant MCP client can discover how to authenticate — all pointing at endpoints that already exist:
+
+- **Protected-resource metadata** — `GET /.well-known/oauth-protected-resource` (RFC 9728) advertises the resource identifier (`<base>/api/mcp`), its authorization server, the scope catalog (`API_SCOPE_CATALOG`), and `bearer_methods_supported`.
+- **Authorization-server metadata** — `GET /.well-known/oauth-authorization-server` (RFC 8414) points at the existing token endpoint (`/api/v1/auth/token`) and JWKS (`/api/v1/jwks.json`) and advertises the `client_credentials` grant. The app is both resource server and authorization server, so discovery just names endpoints that already exist. Both docs are public but **DARK unless `MCP_ENABLED`**.
+- **Discovery hook** — the `/api/mcp` `401` now returns `WWW-Authenticate: Bearer …, resource_metadata="…/.well-known/oauth-protected-resource"` (RFC 9728 §5.1), so a compliant client auto-discovers the AS and obtains a token.
+- **Audience-bound, bearer-only** — MCP now requires a **bearer** credential (API key or JWT); a cookie session is rejected (it is not an audience-bound OAuth token). JWTs are validated against the deployment audience (`API_JWT_AUDIENCE`, default `devresponse-api`) by `verifyAccessToken`. Per-resource token narrowing (RFC 8707 `resource` indicators, a distinct `aud` per resource) is a Phase 2 refinement.
+
+Layout: `src/lib/mcp/metadata.ts` (pure builders) + `src/app/.well-known/oauth-protected-resource/route.ts` + `src/app/.well-known/oauth-authorization-server/route.ts`. Still excluded: self-registration (DCR) and generated tools — Phases 2–3.

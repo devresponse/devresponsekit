@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
  * these exercise the transport contract: the dark-by-default gate, the
  * auth 401, JSON-RPC method routing, and tool proxying + error mapping.
  */
-const env = vi.hoisted(() => ({ MCP_ENABLED: true }));
+const env = vi.hoisted(() => ({ MCP_ENABLED: true, BETTER_AUTH_URL: "https://app.example.com" }));
 const resolveCaller = vi.fn();
 const meGet = vi.fn();
 const usersGet = vi.fn();
@@ -38,7 +38,9 @@ function jsonResponse(status: number, body: unknown): Response {
 
 beforeEach(() => {
   env.MCP_ENABLED = true;
-  resolveCaller.mockReset().mockResolvedValue({ kind: "api_key", betterAuthUserId: "u1" });
+  resolveCaller
+    .mockReset()
+    .mockResolvedValue({ kind: "api_key", betterAuthUserId: "u1", isBearer: true });
   meGet.mockReset();
   usersGet.mockReset();
 });
@@ -62,11 +64,19 @@ describe("/api/mcp (Phase 0)", () => {
     expect(resolveCaller).not.toHaveBeenCalled();
   });
 
-  it("401s an unauthenticated request with WWW-Authenticate", async () => {
+  it("401s an unauthenticated request with WWW-Authenticate + resource_metadata", async () => {
     resolveCaller.mockResolvedValue(null);
     const res = await POST(post({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }));
     expect(res.status).toBe(401);
-    expect(res.headers.get("WWW-Authenticate")).toContain("Bearer");
+    const wwwAuth = res.headers.get("WWW-Authenticate") ?? "";
+    expect(wwwAuth).toContain("Bearer");
+    expect(wwwAuth).toContain("resource_metadata=");
+  });
+
+  it("rejects a cookie session — MCP requires a bearer credential", async () => {
+    resolveCaller.mockResolvedValue({ kind: "session", betterAuthUserId: "u1", isBearer: false });
+    const res = await POST(post({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
+    expect(res.status).toBe(401);
   });
 
   it("handles initialize", async () => {

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { resolveCaller } from "@/lib/api-auth/resolve-caller.server";
 import { getServerEnv } from "@/lib/env";
 import { handleMcpRequest } from "@/lib/mcp/dispatch.server";
+import { mcpWwwAuthenticate } from "@/lib/mcp/metadata";
 import {
   type JsonRpcResponse,
   RPC_INVALID_REQUEST,
@@ -24,7 +25,8 @@ export const dynamic = "force-dynamic";
  * `WWW-Authenticate` (the hook Phase 1's OAuth discovery builds on).
  */
 export async function POST(request: NextRequest): Promise<Response> {
-  if (!getServerEnv().MCP_ENABLED) return notFound();
+  const env = getServerEnv();
+  if (!env.MCP_ENABLED) return notFound();
 
   let payload: unknown;
   try {
@@ -44,12 +46,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Notifications carry no data access and receive no response.
   if (isNotification(payload)) return new Response(null, { status: 202 });
 
-  // Protected resource: authenticate every request. The 401 is what an MCP
-  // client's OAuth machinery keys off in Phase 1.
+  // Protected resource: require a BEARER credential (API key / JWT). A cookie
+  // session is not an audience-bound OAuth token, so it is rejected here even
+  // though it authenticates elsewhere. The 401 points at the protected-resource
+  // metadata (RFC 9728 §5.1) so a client can discover the authorization server.
   const caller = await resolveCaller(request);
-  if (!caller) {
+  if (!caller || !caller.isBearer) {
     return jsonRpc(rpcError(payload.id ?? null, RPC_UNAUTHORIZED, "Unauthorized"), 401, {
-      "WWW-Authenticate": 'Bearer realm="devresponse-mcp"',
+      "WWW-Authenticate": mcpWwwAuthenticate(env.BETTER_AUTH_URL),
     });
   }
 

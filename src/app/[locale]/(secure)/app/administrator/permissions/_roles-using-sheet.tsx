@@ -35,8 +35,6 @@ export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: st
     (async () => {
       try {
         const url = new URL("/api/administrator/roles", window.location.origin);
-        // Bracket syntax is required — parseListQuery only recognises
-        // `filter[name]=` keys and silently ignores everything else.
         url.searchParams.set("filter[permission]", permissionKey);
         url.searchParams.set("pageSize", "200");
         const res = await fetch(url.toString(), { credentials: "same-origin" });

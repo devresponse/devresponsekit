@@ -1,0 +1,42 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildRegistrationResponse,
+  registrationRequestSchema,
+  statusForMode,
+} from "@/lib/mcp/registration";
+
+/** Pure coverage for the RFC 7591 registration schema + response builder. */
+describe("MCP registration (pure)", () => {
+  it("maps the policy mode to the initial account status", () => {
+    expect(statusForMode("approval")).toBe("pending_approval");
+    expect(statusForMode("open")).toBe("active");
+  });
+
+  it("requires a client_name and tolerates extra RFC 7591 fields", () => {
+    expect(registrationRequestSchema.safeParse({}).success).toBe(false);
+    expect(registrationRequestSchema.safeParse({ client_name: "" }).success).toBe(false);
+    const ok = registrationRequestSchema.safeParse({
+      client_name: "My Agent",
+      organization: "acme",
+      grant_types: ["client_credentials"],
+      redirect_uris: [],
+      something_extra: true,
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it("builds a scopeless client-credentials registration response", () => {
+    const r = buildRegistrationResponse({
+      clientId: "drkc_x",
+      clientSecret: "drkcsec_y",
+      clientName: "My Agent",
+      issuedAt: 1_700_000_000,
+    });
+    expect(r.client_id).toBe("drkc_x");
+    expect(r.client_secret).toBe("drkcsec_y");
+    expect(r.scope).toBe(""); // ZERO scopes until an admin grants
+    expect(r.grant_types).toEqual(["client_credentials"]);
+    expect(r.token_endpoint_auth_method).toBe("client_secret_post");
+    expect(r.client_secret_expires_at).toBe(0);
+  });
+});

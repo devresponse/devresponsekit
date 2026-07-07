@@ -15,6 +15,7 @@ export async function GET(): Promise<Response> {
   const body = buildAuthorizationServerMetadata(
     env.BETTER_AUTH_URL,
     env.API_JWT_ISSUER ?? env.BETTER_AUTH_URL,
+    { registrationEndpoint: env.MCP_REGISTRATION_ENABLED },
   );
   return new Response(JSON.stringify(body), {
     status: 200,

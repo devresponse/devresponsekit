@@ -43,4 +43,12 @@ describe("MCP discovery metadata", () => {
       'resource_metadata="https://app.example.com/.well-known/oauth-protected-resource"',
     );
   });
+
+  it("includes the registration endpoint only when self-registration is enabled", () => {
+    expect(buildAuthorizationServerMetadata(BASE, BASE).registration_endpoint).toBeUndefined();
+    expect(
+      buildAuthorizationServerMetadata(BASE, BASE, { registrationEndpoint: true })
+        .registration_endpoint,
+    ).toBe("https://app.example.com/api/mcp/register");
+  });
 });

@@ -162,6 +162,22 @@ const serverEnvSchema = z
       .string()
       .optional()
       .transform((value) => value === "1" || value === "true"),
+    /** Master switch for the `/api/mcp/register` self-registration endpoint (RFC 7591). DARK by default. */
+    MCP_REGISTRATION_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
+    /**
+     * `approval` (default): a self-registered agent's service account is
+     * `pending_approval` and cannot mint a token until an admin activates it.
+     * `open`: the account is active immediately but the client still holds
+     * ZERO scopes, so every tool 403s until an admin grants scopes.
+     */
+    MCP_REGISTRATION_MODE: z.enum(["approval", "open"]).default("approval"),
+    /** Target org slug/id used when a registration request omits `organization`. */
+    MCP_REGISTRATION_DEFAULT_ORG: z.string().optional(),
+    /** Max active OAuth clients per org before registration is refused (0 = unlimited). */
+    MCP_REGISTRATION_MAX_PER_ORG: z.coerce.number().int().nonnegative().default(50),
     SEED_ADMIN_EMAIL: z.string().email().optional(),
     SEED_ADMIN_PASSWORD: z.string().optional(),
     SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),

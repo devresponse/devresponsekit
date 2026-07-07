@@ -134,3 +134,17 @@ Turns `/api/mcp` into a standards-shaped OAuth 2.1 **protected resource** so a c
 - **Audience-bound, bearer-only** — MCP now requires a **bearer** credential (API key or JWT); a cookie session is rejected (it is not an audience-bound OAuth token). JWTs are validated against the deployment audience (`API_JWT_AUDIENCE`, default `devresponse-api`) by `verifyAccessToken`. Per-resource token narrowing (RFC 8707 `resource` indicators, a distinct `aud` per resource) is a Phase 2 refinement.
 
 Layout: `src/lib/mcp/metadata.ts` (pure builders) + `src/app/.well-known/oauth-protected-resource/route.ts` + `src/app/.well-known/oauth-authorization-server/route.ts`. Still excluded: self-registration (DCR) and generated tools — Phases 2–3.
+
+## 10. Phase 2 (implemented) — agent self-registration (DCR)
+
+The core self-registration flow (§4), shipped behind `MCP_REGISTRATION_ENABLED` (off by default):
+
+- **`POST /api/mcp/register`** (RFC 7591 Dynamic Client Registration) — public and rate-limited (a per-IP bucket + a deployment-wide floor). Accepts standard client metadata plus an `organization` extension naming the target tenant (falls back to `MCP_REGISTRATION_DEFAULT_ORG`); only active orgs resolve. It **provisions a machine service account + a ZERO-SCOPE OAuth client** bound to it, and returns the `client_id` / `client_secret` once, RFC 7591-shaped.
+- **Safe by construction.** `MCP_REGISTRATION_MODE=approval` (default) parks the service account `pending_approval` — it cannot even mint a token until an admin activates it (the existing issuance gate). `open` mode activates it immediately, but the client is scopeless, so every tool 403s until an admin grants scopes (`permission ∩ scope = ∅`). Either way the dangerous default — auto-granted power — is unreachable.
+- **The machine principal.** A self-registered agent authenticates only via client-credentials, so it gets NO login account: a namespaced `better_auth_user_id` is synthesized (no FK; `isBetterAuthUserBanned` treats an unknown id as not-banned) alongside an `app_users` row, an org membership, and the zero-scope client. It surfaces in the admin user list (identifiable by its `@agents.mcp.invalid` email and `mcp` membership source) and is revocable there.
+- **Abuse controls.** Two-layer rate limit + a per-org quota (`MCP_REGISTRATION_MAX_PER_ORG`, 0 = unlimited) + active-org-only resolution + audit (`mcp.client.registered`).
+- **Discovery.** `/.well-known/oauth-authorization-server` advertises `registration_endpoint` when registration is enabled.
+
+An admin grants scopes (and, in approval mode, activates the account) via the existing OAuth-client + user admin surfaces — a richer agent-lifecycle console is Phase 4. Generated tools remain Phase 3.
+
+Layout: `src/lib/mcp/registration.ts` (pure schema + response) + `src/lib/mcp/registration.server.ts` (provisioning) + `src/app/api/mcp/register/route.ts`.

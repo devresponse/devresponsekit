@@ -207,6 +207,12 @@ Both paths resolve to the **same authority model**: a credential's effective acc
 
 For the request/response shapes and the scope catalog see [api.md](./api.md); for the full credential design (minting, `jti` revocation, key rotation) see [design-api-keys-and-tokens.md](./design-api-keys-and-tokens.md).
 
+### AI agent gateway (MCP)
+
+| Variable | Controls |
+| --- | --- |
+| `MCP_ENABLED` | Enable the `/api/mcp` Model Context Protocol endpoint (`1`/`true`). **Dark by default.** It authenticates with the same bearer credential as the machine API, so it also needs `API_KEYS_ENABLED` / `API_JWT_ENABLED`. See [design-mcp-agent-gateway.md](./design-mcp-agent-gateway.md). |
+
 ### Seeding
 
 | Variable | Controls |

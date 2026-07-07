@@ -149,6 +149,19 @@ const serverEnvSchema = z
     API_JWT_PREVIOUS_KID: z.string().optional(),
     /** Access-token lifetime in seconds (≤ 1 hour). */
     API_JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().max(3600).default(900),
+    /* ----------------------------------------------------------------- */
+    /*  MCP agent gateway (design docs/design-mcp-agent-gateway.md)      */
+    /* ----------------------------------------------------------------- */
+    /**
+     * Master switch for the `/api/mcp` Model Context Protocol endpoint.
+     * DARK by default. The endpoint authenticates with the same bearer
+     * credential the machine API accepts, so it is only usable where
+     * API_KEYS_ENABLED / API_JWT_ENABLED are also on.
+     */
+    MCP_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
     SEED_ADMIN_EMAIL: z.string().email().optional(),
     SEED_ADMIN_PASSWORD: z.string().optional(),
     SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),

@@ -1228,7 +1228,11 @@ export const auth = betterAuth({
   account: {
     accountLinking: {
       enabled: true,
-      trustedProviders: ["google", "microsoft", "github"],
+      // MUST stay empty: Better Auth exempts listed providers from the
+      // incoming profile's emailVerified requirement, which would violate
+      // "link accounts by matching verified email only" (see the never-do
+      // list) and enable nOAuth-style takeover via multi-tenant Microsoft.
+      trustedProviders: [],
       allowDifferentEmails: false,
       allowUnlinkingAll: false,
     },

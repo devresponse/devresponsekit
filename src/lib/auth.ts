@@ -79,8 +79,9 @@ export const auth = betterAuth({
     enabled: true,
     // AUTH-4: block sign-in until the email address is verified. New email/
     // password sign-ups receive a verification link (see the `emailVerification`
-    // block below); OAuth identities arrive pre-verified from a trusted provider
-    // and are unaffected. Seed fixtures are marked verified by the seed script.
+    // block below); OAuth identities carry the provider's own emailVerified
+    // assertion and are unaffected. Seed fixtures are marked verified by the
+    // seed script.
     // Per-org signup policy (0007): this global flag stays ON as the fail-closed
     // baseline; an org that waives verification gets its sign-ups pre-verified
     // by the `user.create.before` hook below, which satisfies this check.
@@ -152,9 +153,25 @@ export const auth = betterAuth({
   account: {
     accountLinking: {
       enabled: true,
-      // Only link accounts when the verified email matches; never link by
-      // unverified email, since the alternate provider could lie about it.
-      trustedProviders: ["google", "microsoft", "github"],
+      // Link accounts ONLY when the incoming provider profile asserts a
+      // VERIFIED email matching the local account (specs.md §2 "Account
+      // linking" / never-do list "Do not link accounts by unverified email").
+      //
+      // `trustedProviders` must stay EMPTY: listing a provider does not
+      // restrict linking to it — it EXEMPTS that provider from the incoming
+      // profile's `emailVerified` requirement (better-auth 1.6.23,
+      // oauth2/link-account.mjs and api/routes/callback.mjs both waive the
+      // check for trusted providers). With Microsoft configured multi-tenant
+      // (`tenantId: "organizations"`), trusting it would let any Entra tenant
+      // admin mint a user with an arbitrary unverified `email` attribute and
+      // implicitly link into a matching verified local account — the "nOAuth"
+      // account takeover. Google/GitHub sign-ins still link fine because those
+      // providers report `emailVerified: true` for verified addresses; Entra
+      // sign-ins link only when the token carries a verified-email signal
+      // (e.g. the `email_verified` / verified-primary-email optional claims).
+      // The LOCAL account's email must also be verified
+      // (`requireLocalEmailVerified` defaults to true).
+      trustedProviders: [],
       allowDifferentEmails: false,
     },
   },

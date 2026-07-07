@@ -96,6 +96,8 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 
 > **After sign-in.** A social sign-up still runs through the organization's signup policy — approval mode, allowed methods, and email-domain routing — exactly like an email sign-up. See [`auth-signup-policy.md`](auth-signup-policy.md).
 
+> **Account linking requires a VERIFIED provider email.** When a social sign-in matches an existing local account by email, the accounts are linked only if the provider asserts the address is **verified** (`trustedProviders` is deliberately empty — no provider is exempt from this check, which blocks nOAuth-style takeover via attacker-controlled Entra tenants). Google and GitHub report verification for normal accounts, so linking just works. Entra ID often **omits** the `email_verified` claim, in which case a Microsoft sign-in cannot link into an existing email/password account and is rejected; the user can keep signing in with their password, and a tenant that needs Microsoft linking should emit a verified-email optional claim (e.g. `email_verified` / `verified_primary_email`).
+
 ### Single Sign-On handoff
 
 > **Required at boot for every deployment.** Despite the "SSO" name, `src/lib/env.ts` validates `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, and `SSO_HANDOFF_JWT_SECRET` **unconditionally** (`.min(1)` / `.min(16)`). The app **fails fast at boot** if any is missing — even on a deployment that never uses SSO. Set all four everywhere (placeholder values are fine when SSO is unused).

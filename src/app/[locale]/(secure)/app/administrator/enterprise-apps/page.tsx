@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * /[locale]/app/administrator/enterprise-apps
  *
  * Server entry point for the enterprise applications list (docs/admin-manager.md
- * §8.10, Phase 6). Re-validates the caller holds `admin.apps.read`
+ * §8.7). Re-validates the caller holds `admin.apps.read`
  * (defence-in-depth on top of the layout) and renders the client
  * `DataGrid` which fetches `/api/administrator/enterprise-apps`.
  *

@@ -23,7 +23,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * GET /api/administrator/users/[id]/app-roles
  *
  * Returns the application-role assignments carried by the target
- * user (the User detail "Roles" tab from §8.4 consumes this). Each
+ * user (the User detail "Roles" tab from §8.1 consumes this). Each
  * row is one `app_user_roles` entry joined with the role + org so
  * the UI doesn't need a second round-trip per row.
  *

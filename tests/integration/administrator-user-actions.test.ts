@@ -4,8 +4,8 @@ import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 
 /**
- * Integration tests for the Phase 3 user-mutation endpoints under
- * `/api/administrator/users/[id]/*` (docs/admin-manager.md §5.2 + §17).
+ * Integration tests for the user-mutation endpoints under
+ * `/api/administrator/users/[id]/*` (docs/admin-manager.md §4, §8.1, §12).
  *
  * These tests pin the cross-cutting *handler contract*: permission gate
  * (401 / 403 + audit on missing permission), input validation and the

@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * GET /api/administrator/permissions
  *
  * Paginated read of `app_permissions` enriched with a
- * `usedByRoleCount` aggregate so the catalog grid (§8.7) can render
+ * `usedByRoleCount` aggregate so the catalog grid (§8.5) can render
  * the "Roles using this" column without N+1 queries.
  *
  * Caller MUST hold `admin.roles.read` (the catalog is informational

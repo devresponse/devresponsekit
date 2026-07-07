@@ -20,7 +20,7 @@ import { OverviewListCard, type OverviewListCardProps } from "./_components/over
 export const dynamic = "force-dynamic";
 
 /**
- * Administrator overview dashboard.
+ * Administrator overview dashboard (docs/admin-manager.md §8.0).
  *
  * Composition only: the query layer (`overview.server.ts`) counts, the
  * `MetricCard` displays, and this page maps permissions → metric

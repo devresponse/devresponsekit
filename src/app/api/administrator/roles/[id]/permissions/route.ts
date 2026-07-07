@@ -20,7 +20,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Returns the permission keys currently attached to a role. Caller MUST
  * hold `admin.roles.read` (the canonical "read role detail"
  * permission). The shape `{ permissions: string[] }` matches what the
- * dual-list editor (§8.6) consumes.
+ * dual-list editor (§8.4) consumes.
  */
 export async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.read");

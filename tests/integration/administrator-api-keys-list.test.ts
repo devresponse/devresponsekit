@@ -5,7 +5,7 @@ import type * as ApiKeysRouteModule from "@/app/api/administrator/api-keys/route
 
 /**
  * Integration tests for `GET /api/administrator/api-keys`
- * (docs/admin-manager.md §8.12). The DB layer is stubbed — these tests
+ * (docs/admin-manager.md §8.8). The DB layer is stubbed — these tests
  * pin the *handler contract*: the `admin.apikeys.read` gate, the
  * standard list envelope, the pageSize clamp, and the audit write on a
  * denied attempt. Mirrors the users-list contract test.

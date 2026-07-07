@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
  * GET /api/administrator/export/<resource>
  *
  * Streams a CSV export of one of the Administrator list resources
- * (docs/admin-manager.md §5.2, §19 Phase 7, §20.1 #14). Uses the same
+ * (docs/admin-manager.md §5.2, §19, §20.1). Uses the same
  * filter / sort / `q` query-string contract as the matching list
  * endpoint so "Export current view" produces the exact same rows the
  * grid is showing.
@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic";
  *   - Caller MUST hold the resource's `read` permission. 403 + denied
  *     audit on missing permission.
  *   - The export is hard-capped at {@link MAX_EXPORT_ROWS} (100k) per
- *     §20.1 #14 to bound memory and prevent a single export from
+ *     §20.1 to bound memory and prevent a single export from
  *     pinning the DB. When the cap is hit we still return the rows read so
  *     far and append a `# export_truncated: <limit>` sentinel line to the
  *     CSV body. Truncation can't be a header — it is only known mid-stream,
@@ -55,7 +55,7 @@ export const dynamic = "force-dynamic";
  *   - A `admin.export.completed` (or `_failed`) audit row is written
  *     so platform ops can answer "who exported the user list at 11:42".
  */
-// Hard row cap for a single export (§20.1 #14). Operator-tunable via
+// Hard row cap for a single export (§20.1). Operator-tunable via
 // ADMIN_EXPORT_MAX_ROWS; defaults to 100k. Read at module load.
 const MAX_EXPORT_ROWS = Number(process.env.ADMIN_EXPORT_MAX_ROWS) || 100_000;
 const PAGE_SIZE = 1_000;

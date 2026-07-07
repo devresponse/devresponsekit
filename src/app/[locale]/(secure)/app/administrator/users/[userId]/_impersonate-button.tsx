@@ -20,7 +20,7 @@ import { isSupportedLocale } from "@/config/i18n-config";
 
 /**
  * Impersonate-user button for the user detail page (docs/admin-manager.md
- * §19 Phase 7, §13 row actions).
+ * §19, §7.1 row actions).
  *
  * Threat / contract:
  *   - Renders only when the parent has confirmed the caller holds

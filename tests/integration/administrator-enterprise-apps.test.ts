@@ -6,7 +6,7 @@ import type * as AppByIdRouteModule from "@/app/api/administrator/enterprise-app
 
 /**
  * Integration tests for the enterprise-apps endpoints (docs/admin-manager.md
- * Phase 6 test plan, §8.10). The DB layer is stubbed — these tests pin
+ * §8.7). The DB layer is stubbed — these tests pin
  * the handler contract: permission gates, response envelopes, and the
  * canonical `id_taken` 409 / `application_in_use` 409 / `invalid_origin`
  * 400 machine codes.

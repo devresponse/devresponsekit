@@ -86,7 +86,7 @@ export async function requireAdminPermission(
   const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
   const requestId = getOrCreateRequestId(request);
 
-  // §14 — Origin/Referer defence-in-depth on unsafe methods. CSRF only
+  // §4 — Origin/Referer defence-in-depth on unsafe methods. CSRF only
   // applies to AMBIENT credentials (cookies); a bearer token cannot be
   // attached by an attacker's page, so the origin guard is skipped for
   // bearer callers (design §10.3). Performed BEFORE caller resolution so

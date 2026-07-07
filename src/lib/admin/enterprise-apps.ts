@@ -1,6 +1,6 @@
 /**
  * Validators for the enterprise-apps endpoints (docs/admin-manager.md
- * §8.10, Phase 6).
+ * §8.7).
  *
  * Extracted to a non-`server-only` module so it can be imported by both
  * the runtime route handlers (`enterprise-apps.server.ts`) AND by the
@@ -34,7 +34,7 @@ export const SSO_AUDIENCE_RE = /^[a-z0-9](?:[a-z0-9._:-]{0,199})$/;
 
 /**
  * Returns true when `value` is a syntactically valid HTTPS origin per
- * §8.10. We require the URL to parse, the protocol to be `https:`,
+ * §8.7. We require the URL to parse, the protocol to be `https:`,
  * and the value to NOT carry a path/search/hash component — origins
  * by definition are scheme + authority only.
  */

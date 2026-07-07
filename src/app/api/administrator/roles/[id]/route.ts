@@ -49,7 +49,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * PATCH /api/administrator/roles/[id]
  *
  * Partial update of name / description. The `key` is intentionally
- * read-only after creation (mirrors §8.6 — "Settings" tab) so audit
+ * read-only after creation (mirrors §8.4 — "Settings" tab) so audit
  * trails referencing it stay valid.
  */
 export async function PATCH(request: NextRequest, ctx: RouteContext) {

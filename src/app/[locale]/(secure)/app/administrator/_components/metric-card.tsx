@@ -6,8 +6,8 @@ import { getMenuIcon } from "@/components/navigation/menu-icons";
 /**
  * MetricCard
  *
- * Presentational KPI card for the Administrator overview.
- * Pure display — receives an already
+ * Presentational KPI card for the Administrator overview
+ * (docs/admin-manager.md §8.0). Pure display — receives an already
  * formatted-ready value and localized strings; data access lives in
  * `src/lib/admin/overview.server.ts`.
  *

@@ -17,7 +17,11 @@ disagree, the code wins — fix the doc._
 
 Source comments across the codebase cite this document by section (for example
 `docs/admin-manager.md §12`). The numbered sections below are stable anchors for
-those citations.
+those citations. Numbering is therefore intentionally **gappy**: when a section
+is removed its number is retired, never reused, so a stale citation can dangle
+but can never silently point at the wrong content. Do not renumber existing
+sections; new sections take a fresh number (or a sub-number of the section they
+belong to).
 
 Related references:
 
@@ -107,7 +111,7 @@ The pipeline, in order:
 1. **Mint / adopt a request id.** `getOrCreateRequestId` honours an inbound
    `x-request-id` or generates one. It flows onto the response header and every
    audit row this request writes (§5.1, §12).
-2. **Origin / CSRF guard (§14).** For unsafe methods on **ambient (cookie)**
+2. **Origin / CSRF guard.** For unsafe methods on **ambient (cookie)**
    credentials, `checkTrustedOrigin` requires a trusted `Origin`/`Referer`.
    Bearer callers skip this (a token cannot be attached by an attacker's page).
    The check runs **before** caller resolution so an unauthenticated cross-origin
@@ -122,7 +126,7 @@ The pipeline, in order:
 5. **Permission + scope check.** The caller must hold the required permission
    **and**, for bearer credentials, the credential's scopes must authorize it
    (`scopesAuthorize` — scopes ⊆ permissions; a key can never out-scope its
-   owner). A **superadmin** (§3) passes any admin permission regardless of the
+   owner). A **superadmin** (§6) passes any admin permission regardless of the
    active org, but a bearer credential they own is still bounded by its scopes.
    A miss audits `administrator.access.denied` (`denied`) and returns **403**.
 
@@ -241,7 +245,7 @@ by the layout's "any admin" gate.
 | | `admin.clients.manage` | Create, rotate, and revoke OAuth clients |
 
 The `superuser` marker is defined as `SUPERADMIN_PERMISSION`. It is **load-
-bearing**: holding it is the *only* thing that bypasses org scoping (§3), checked
+bearing**: holding it is the *only* thing that bypasses org scoping (§6), checked
 explicitly via `isSuperadmin` rather than inferred from "happens to hold every
 key". A superuser's authority derives from the marker, so the seeded `superuser`
 role no longer enumerates the whole catalog (`SUPERUSER_PERMISSIONS` expands it
@@ -347,6 +351,34 @@ mutations are rate-limited (§2.5) and audited (§12). Out-of-scope `[id]` acces
 returns 404 (§6.2). The committed
 [`docs/openapi-admin.json`](./openapi-admin.json) is canonical for exact
 request/response shapes.
+
+### 8.0 Overview dashboard
+
+The workspace landing page (`administrator/page.tsx`) — a read-only,
+permission-gated summary in three tiers:
+
+1. **Metric cards** (`_components/metric-card.tsx`) — counts for users
+   (total / active / pending), organizations, roles, permissions, and
+   enterprise apps. Each card is gated on the matching `admin.*.read`
+   permission: a card the caller cannot read is hidden entirely **and its
+   query never runs**, mirroring the sidebar's gating model (§2.3).
+2. **Insight charts** (`_components/metric-bar-chart.tsx`) — most-active
+   orgs, daily registrations / logins, and (superadmin-only) audit-event
+   volume. Series visibility and scoping are decided server-side by
+   `selectDashboardMetrics` (`src/lib/admin/dashboard-metrics.server.ts`),
+   shared with `GET /api/administrator/metrics` so the charts and the API
+   can never show different data to the same caller.
+3. **Recent activity** (`_components/overview-list-card.tsx`) — the latest
+   10 registrations, sign-in sessions, audit events, and organizations,
+   each gated on its area's read permission. Sessions carry IP addresses,
+   so that list gates on `admin.users.sessions`, not the broader
+   `admin.users.read`.
+
+Data access lives in `src/lib/admin/overview.server.ts` (pure counting, no
+permission checks); the page owns the permissions → slice mapping. Every
+slice is bounded by `resolveOrgScope` (ADR-0001): superadmin → system-wide,
+org admin → their org only, and a `null` scope renders an empty dashboard
+rather than leaking cross-tenant data.
 
 ### 8.1 Users
 
@@ -547,7 +579,7 @@ keys, or raw passwords. Internal exception detail may go in `metadata` (e.g.
 `admin.user.impersonation_started`. The pipeline itself writes
 `administrator.access.denied` and `administrator.rate_limited`.
 
-### 17. Audit posture (append-only + retention)
+### 12.1 Audit posture (append-only + retention)
 
 The audit log is a tamper-evident compliance record. `0001-initial-schema.sql`
 installs a row-level `BEFORE UPDATE OR DELETE` trigger

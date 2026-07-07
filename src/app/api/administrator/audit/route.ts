@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 /**
  * Returns true when the value is a parsed range filter (`from` / `to`).
  * Range filters are produced by `parseListQuery` for `filter[name][from]`
- * / `filter[name][to]` query-string syntax (§5.1).
+ * / `filter[name][to]` query-string syntax (§7).
  */
 function isRangeFilter(value: FilterValue | undefined): value is { from?: string; to?: string } {
   return (
@@ -43,7 +43,7 @@ function parseIsoDate(value: string | undefined): Date | null {
  * GET /api/administrator/audit
  *
  * Read-only paginated view of `app_audit_events` (docs/admin-manager.md
- * §8.11). Supports the standard `ListResponse` envelope plus the audit-
+ * §8.10). Supports the standard `ListResponse` envelope plus the audit-
  * explorer filters:
  *
  *   - `filter[event_type]` — single string match

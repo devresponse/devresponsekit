@@ -9,7 +9,7 @@ import {
 
 /**
  * Unit tests for the enterprise-apps validator helpers
- * (docs/admin-manager.md §8.10, Phase 6). The route handlers and the
+ * (docs/admin-manager.md §8.7). The route handlers and the
  * client form both consume these helpers, so pinning the rules here
  * means a regression in either layer surfaces immediately.
  */

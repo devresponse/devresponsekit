@@ -3,7 +3,7 @@ import { signInAsSeedAdmin } from "./helpers/admin-auth";
 
 /**
  * E2E — the Administrator overview dashboard (docs/admin-manager.md
- * §8.1) renders both tiers for the seeded platform admin: the five
+ * §8.0) renders for the seeded platform admin: the five
  * permission-gated metric cards and the four recent-activity tables.
  */
 test.beforeEach(async ({ page }) => {

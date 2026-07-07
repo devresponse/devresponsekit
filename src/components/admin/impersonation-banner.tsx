@@ -5,7 +5,7 @@ import { StopImpersonationButton } from "./impersonation-banner-client";
 
 /**
  * Global "you are impersonating X" banner (docs/admin-manager.md
- * §19 Phase 7, §17 audit posture).
+ * §19, §12.1 audit posture).
  *
  * Server component: reads the active session and the original actor's
  * email (best effort) so the banner shows "you are impersonating

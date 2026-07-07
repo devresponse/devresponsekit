@@ -14,7 +14,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
  * OverviewListCard
  *
  * Presentational "recent activity" table for the Administrator
- * overview's second tier. Pure display —
+ * overview's third tier (docs/admin-manager.md §8.0). Pure display —
  * receives localized strings and pre-built cells; data access lives in
  * `src/lib/admin/overview.server.ts` and composition in the page.
  *

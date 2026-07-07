@@ -7,8 +7,8 @@ import type * as MembersRouteModule from "@/app/api/administrator/organizations/
 import type * as ProvidersRouteModule from "@/app/api/administrator/organizations/[id]/provider-bindings/route";
 
 /**
- * Security tests for the Phase-5 organization endpoints (docs/admin-manager.md
- * §14 + §17). Pin the authorization boundary: every mutating verb must be
+ * Security tests for the organization endpoints (docs/admin-manager.md
+ * §4 + §12). Pin the authorization boundary: every mutating verb must be
  * gated by the right permission AND every probing call must be audited
  * with `outcome=denied` so ops can detect privilege escalation attempts.
  */

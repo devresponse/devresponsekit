@@ -35,7 +35,7 @@ export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: st
     (async () => {
       try {
         const url = new URL("/api/administrator/roles", window.location.origin);
-        url.searchParams.set("filter.permission", permissionKey);
+        url.searchParams.set("filter[permission]", permissionKey);
         url.searchParams.set("pageSize", "200");
         const res = await fetch(url.toString(), { credentials: "same-origin" });
         if (!res.ok) {

@@ -148,3 +148,14 @@ The core self-registration flow (§4), shipped behind `MCP_REGISTRATION_ENABLED`
 An admin grants scopes (and, in approval mode, activates the account) via the existing OAuth-client + user admin surfaces — a richer agent-lifecycle console is Phase 4. Generated tools remain Phase 3.
 
 Layout: `src/lib/mcp/registration.ts` (pure schema + response) + `src/lib/mcp/registration.server.ts` (provisioning) + `src/app/api/mcp/register/route.ts`.
+
+## 11. Phase 3 (implemented) — the generated tool surface
+
+The two hard-coded Phase 0 tools are replaced by **every scoped `/api/v1` operation, derived from the OpenAPI document** (`buildOpenApiDocument`) at load time — the same single source of truth that drives the served spec, `docs/openapi.json`, and the generated clients. A new scoped endpoint becomes an MCP tool for free.
+
+- **Derivation** (`src/lib/mcp/openapi-tools.ts`, pure) — one tool per operation: `name` = `operationId`, the description carries the summary + its required scope, and an `inputSchema` is assembled from the path params (`{id}` → required), the query params (resolving `$ref`s), and the request-body schema's properties. Public/special operations (`issueToken`, `getJwks`, `getOpenApi` — marked `security: []`) are excluded; only scoped operations become tools, and `readOnlyHint` is set for `GET`s.
+- **Dispatch** (`src/lib/mcp/tools.server.ts`) — a tool call invokes the v1 API with the **caller's own bearer credential forwarded**, so authorization, org-scoping, rate limits, and projections stay identical to the raw API; a v1 `problem+json` becomes an MCP tool error result. The gateway is a client of the API it fronts.
+
+This yields ~18 tools (users + status, own & admin API keys, OAuth-clients CRUD + secret rotation, audit) with **zero per-tool code** — the surface tracks the spec automatically. `token` and the discovery documents are intentionally not tools.
+
+Layout: `src/lib/mcp/openapi-tools.ts` (pure deriver) + `src/lib/mcp/tools.server.ts` (dispatch). Next: Phase 4 — the agent-lifecycle admin console (approve / grant-scopes / revoke).

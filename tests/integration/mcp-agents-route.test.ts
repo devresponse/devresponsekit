@@ -33,7 +33,10 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
   enforceRateLimit: () => null,
   DEFAULT_ADMIN_MUTATION_LIMIT: {},
 }));
-vi.mock("@/lib/admin/access-scope.server", () => ({ canAccessOrg: () => true }));
+vi.mock("@/lib/admin/access-scope.server", () => ({
+  canAccessOrg: () => true,
+  resolveOrgScope: () => ({ kind: "all" }),
+}));
 vi.mock("@/lib/admin/errors.server", () => ({
   adminErrorResponse: (code: string, status: number) =>
     new Response(JSON.stringify({ error: code }), { status }),

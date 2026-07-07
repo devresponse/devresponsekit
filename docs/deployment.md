@@ -93,7 +93,7 @@ Push to `main` (or run the workflow from the Actions tab). After it completes, v
 - [ ] `GET https://<domain>/` → the landing page returns **200**.
 - [ ] Sign in with the seed admin from §2; the session persists.
 - [ ] `GET https://<domain>/api/internal/outbox-drain` **without** the bearer header → **401** (confirms the cron endpoint is fail-closed).
-- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `0001-initial-schema.sql`, the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
+- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `000N-*.sql` files (`0001-initial-schema.sql`, `0002-admin-groups-permissions.sql`, …), the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
 - [ ] If Sentry is configured, trigger a test error and confirm it lands ([Observability](./observability.md)).
 - [ ] If `METRICS_TOKEN` is set, `GET /api/metrics` with `Authorization: Bearer <token>` returns Prometheus text.
 

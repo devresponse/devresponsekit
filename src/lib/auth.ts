@@ -286,6 +286,25 @@ export const auth = betterAuth({
             return;
           }
 
+          // Impersonation creates a session for the TARGET via the admin
+          // plugin's `impersonateUser`, which stamps `impersonatedBy` on the
+          // new session row. That is NOT a login by the target, so this hook
+          // must skip both effects below: (1) recording a login attributed to
+          // a user who never signed in — polluting the daily-logins metric and
+          // the auth audit trail used to review impersonation itself — and
+          // (2) re-evaluating (and possibly auto-activating) a pending target
+          // as a side effect of an admin merely impersonating them.
+          // Impersonation is audited separately by the impersonate route. Field
+          // name mirrors getImpersonatorId (accept camel/snake for plugin
+          // version drift). (audit #15)
+          const impersonated = session as {
+            impersonatedBy?: unknown;
+            impersonated_by?: unknown;
+          };
+          if (impersonated.impersonatedBy ?? impersonated.impersonated_by) {
+            return;
+          }
+
           const authUser = await context.context.internalAdapter.findUserById(session.userId);
           if (!authUser) {
             return;

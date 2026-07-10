@@ -19,8 +19,14 @@ name: Deploy (production)
 #       DDL + advisory locks must not go through a transaction pooler.
 # Optional repository variable: DB_SCHEMA (defaults to `auth`).
 
+# Gated on CI (audit #19): promote ONLY a commit that passed the full CI run,
+# instead of firing on every push to main before tests finish (a red PR could
+# otherwise migrate prod + ship). `workflow_dispatch` stays for manual /
+# rollback deploys.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -34,6 +40,9 @@ jobs:
     name: Migrate prod DB, then promote to Vercel production
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # A workflow_run fires on CI failure too, so only proceed when the
+    # triggering CI run SUCCEEDED. A manual dispatch always proceeds.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     # Gate behind a GitHub Environment for required reviewers + scoped secrets
     # (docs/deployment.md §6). Remove `environment:` for unattended deploys.
     environment: production
@@ -45,6 +54,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Deploy the EXACT commit CI validated. A `workflow_run` event
+          # otherwise checks out the default branch's HEAD, which may have moved
+          # past the commit that passed CI; a manual dispatch uses its own ref.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         # Version comes from the packageManager field in package.json.

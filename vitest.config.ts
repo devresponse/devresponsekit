@@ -180,6 +180,28 @@ export default defineConfig({
           functions: 65,
           branches: 85,
         },
+        // Credential codec + key/client stores (test-depth ratchet, branch
+        // gap-close). Branch coverage was the whole point here — api-key.ts
+        // 50→100, oauth-clients.server.ts 70→100, api-keys.server.ts 79→100 —
+        // so these are pinned AT 100 (not a few points below): the tests are
+        // fully deterministic (pure crypto + mocked-DB builders, no async
+        // timing in the counted paths), and any new untested line/branch in a
+        // module that mints/verifies machine credentials must fail CI, forcing
+        // a test rather than silently sliding back. Raise the source, add the
+        // test — never lower the floor.
+        "**/api-auth/api-key.ts": { lines: 100, statements: 100, functions: 100, branches: 100 },
+        "**/api-auth/api-keys.server.ts": {
+          lines: 100,
+          statements: 100,
+          functions: 100,
+          branches: 100,
+        },
+        "**/api-auth/oauth-clients.server.ts": {
+          lines: 100,
+          statements: 100,
+          functions: 100,
+          branches: 100,
+        },
         "**/lib/auth-policy.server.ts": { lines: 90, statements: 90, functions: 85, branches: 82 },
         "**/lib/jwt-handoff.server.ts": { lines: 92, statements: 92, functions: 90, branches: 88 },
         "**/lib/auth-signup-provisioning.ts": {

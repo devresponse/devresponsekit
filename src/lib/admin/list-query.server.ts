@@ -46,6 +46,25 @@ export interface ParseListQueryOptions {
 
 const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_MAX_PAGE_SIZE = 200;
+/** Hard cap on the free-text `q` length — bounds pattern size / scan cost. */
+const MAX_Q_LENGTH = 200;
+
+/**
+ * Escapes LIKE/ILIKE metacharacters in a user-supplied search term and wraps
+ * it for a substring ("contains") match: `%<escaped>%`.
+ *
+ * Without escaping, a `%` or `_` in `q` is a wildcard — so a search for
+ * `50%` matches every row, and `a_b` matches `axb`; both silently return the
+ * wrong results. Postgres LIKE/ILIKE uses `\` as the DEFAULT escape character
+ * and every call site passes this through a BIND PARAMETER (never string
+ * interpolation), so escaping `\`, `%`, and `_` here is sufficient — no
+ * explicit `ESCAPE` clause is required. Use everywhere a caller would
+ * otherwise write `` `%${query.q}%` ``.
+ */
+export function likeContains(term: string): string {
+  const escaped = term.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+  return `%${escaped}%`;
+}
 
 /**
  * Parses a `URLSearchParams` (or the iterable yielded by
@@ -88,7 +107,7 @@ export function parseListQuery(params: URLSearchParams, options: ParseListQueryO
   }
   const finalSort = sort.length > 0 ? sort : (options.defaultSort ?? []);
 
-  const qRaw = params.get("q")?.trim() ?? "";
+  const qRaw = (params.get("q")?.trim() ?? "").slice(0, MAX_Q_LENGTH);
   const q = qRaw.length > 0 ? qRaw : null;
 
   const filters: Record<string, FilterValue> = {};

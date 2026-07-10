@@ -6,6 +6,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) => eb.or([eb("r.key", "ilike", like), eb("r.name", "ilike", like)]));
   }
 

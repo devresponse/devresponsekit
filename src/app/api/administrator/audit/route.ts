@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -134,7 +135,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([
         eb("e.event_type", "ilike", like),

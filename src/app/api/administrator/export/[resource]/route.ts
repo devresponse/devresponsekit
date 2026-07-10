@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   applyKeyset,
   buildKeysetSort,
   keysetCursorFrom,
@@ -417,7 +418,7 @@ function buildUsersExporter(query: ListQuery, scope: OrgScope | null): Exporter 
         if (cleaned.length > 0) q = q.where("status", "in", cleaned);
       }
       if (query.q) {
-        const like = `%${query.q}%`;
+        const like = likeContains(query.q);
         q = q.where((eb) =>
           eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
         );
@@ -496,7 +497,7 @@ function buildAuditExporter(query: ListQuery, scope: OrgScope | null): Exporter 
         if (to) q = q.where(sql<boolean>`e.created_at <= ${to}`);
       }
       if (query.q) {
-        const like = `%${query.q}%`;
+        const like = likeContains(query.q);
         q = q.where((eb) =>
           eb.or([
             eb("e.event_type", "ilike", like),
@@ -561,7 +562,7 @@ function buildOrganizationsExporter(query: ListQuery, scope: OrgScope | null): E
       if (isDefault === "true") q = q.where("is_default", "=", true);
       else if (isDefault === "false") q = q.where("is_default", "=", false);
       if (query.q) {
-        const like = `%${query.q}%`;
+        const like = likeContains(query.q);
         q = q.where((eb) => eb.or([eb("slug", "ilike", like), eb("name", "ilike", like)]));
       }
       const seek = buildKeysetSort(query.sort);
@@ -602,7 +603,7 @@ function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       if (scopeFilter === "global") q = q.where("organization_id", "is", null);
       else if (scopeFilter === "org") q = q.where("organization_id", "is not", null);
       if (query.q) {
-        const like = `%${query.q}%`;
+        const like = likeContains(query.q);
         q = q.where((eb) => eb.or([eb("key", "ilike", like), eb("name", "ilike", like)]));
       }
       const seek = buildKeysetSort(query.sort);
@@ -637,7 +638,7 @@ function buildPermissionsExporter(query: ListQuery, scope: OrgScope | null): Exp
       if (!scope) return { rows: [], cursor: null };
       let q = db.selectFrom("app_permissions");
       if (query.q) {
-        const like = `%${query.q}%`;
+        const like = likeContains(query.q);
         q = q.where((eb) => eb.or([eb("key", "ilike", like), eb("description", "ilike", like)]));
       }
       // The catalog has a single canonical order (by `key`); it ignores the
@@ -722,7 +723,7 @@ function buildEnterpriseAppsExporter(query: ListQuery, scope: OrgScope | null): 
       const orgId = query.filters.organization_id;
       if (typeof orgId === "string") q = q.where("a.organization_id", "=", orgId);
       if (query.q) {
-        const like = `%${query.q}%`;
+        const like = likeContains(query.q);
         q = q.where((eb) => eb.or([eb("a.id", "ilike", like), eb("a.label", "ilike", like)]));
       }
       const seek = buildKeysetSort(query.sort);

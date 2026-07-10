@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { createUserSchema } from "@/lib/validation/users";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
     );

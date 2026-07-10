@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     base = base.where("i.status", "=", statusFilter);
   }
   if (query.q) {
-    base = base.where("i.email", "ilike", `%${query.q}%`);
+    base = base.where("i.email", "ilike", likeContains(query.q));
   }
 
   const itemsQuery = applySortAndPagination(

@@ -6,6 +6,7 @@ import { db } from "@/db/database";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
 
   let base = db.selectFrom("app_permissions as p");
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([eb("p.key", "ilike", like), eb("p.description", "ilike", like)]),
     );

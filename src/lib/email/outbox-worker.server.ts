@@ -13,9 +13,16 @@ import { getConfiguredEmailProvider } from "./providers.server";
  * those rows on a schedule until they succeed or exhaust {@link OUTBOX_MAX_ATTEMPTS}.
  *
  * Concurrency-safe: each row is claimed in its own short transaction with
- * `FOR UPDATE SKIP LOCKED`, so multiple drainers (or instances) never
- * double-send, and a slow provider call only ever holds ONE row's lock.
- * Invoke from a scheduler / init job (e.g. `pnpm outbox:drain`).
+ * `FOR UPDATE SKIP LOCKED`, so multiple drainers (or instances) never claim the
+ * same row at once, and a slow provider call only ever holds ONE row's lock.
+ *
+ * Delivery is at-least-once, not exactly-once: the provider call runs inside
+ * the claim transaction, so a crash after a successful send but before the
+ * `sent` UPDATE commits leaves the row `pending` and it is re-attempted. To
+ * make that effectively-once, each send carries a stable `idempotencyKey` (the
+ * outbox row id) so the provider dedupes the retry (audit #11) — Resend
+ * natively; Mailgun best-effort (see providers.server.ts). Invoke from a
+ * scheduler / init job (e.g. `pnpm outbox:drain`).
  */
 
 /** Max delivery attempts before a row is marked terminally `failed`. */
@@ -98,6 +105,9 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
           subject: row.subject,
           html: row.body_html,
           text: row.body_text ?? undefined,
+          // Stable per-row key → the provider dedupes a re-attempt of a send
+          // that actually reached it before we recorded `sent` (#11).
+          idempotencyKey: `outbox-${row.id}`,
         });
         await trx
           .updateTable("app_outbox")

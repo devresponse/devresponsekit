@@ -28,8 +28,10 @@ const state: {
         description: string | null;
       }
     | undefined;
+  whereCols: string[];
 } = {
   role: undefined,
+  whereCols: [],
 };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
@@ -65,6 +67,7 @@ function makeChain(table: string): unknown {
         if (prop === "executeTakeFirstOrThrow") return async () => firstFor("trx");
         if (prop === "execute") return async () => execFor(table);
         return (...args: unknown[]) => {
+          if (prop === "where" && typeof args[0] === "string") state.whereCols.push(args[0]);
           const cb = args[0];
           if (typeof cb === "function") {
             try {
@@ -127,6 +130,7 @@ let duplicatePOST: typeof DuplicateRoute.POST;
 
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
+  state.whereCols = [];
   state.role = {
     id: ROLE,
     organization_id: ORG_A,
@@ -255,6 +259,17 @@ describe("roles/[id]/members — org scoping", () => {
 
     accessGetter.mockResolvedValue(superadmin(["admin.roles.read"]));
     expect((await membersGET(req("members"), ctx)).status).toBe(200);
+  });
+
+  it("confines an ORG ADMIN's feed to ur.organization_id but not a SUPERADMIN's (audit #26)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.read"]));
+    await membersGET(req("members"), ctx);
+    expect(state.whereCols).toContain("ur.organization_id");
+
+    state.whereCols = [];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.read"]));
+    await membersGET(req("members"), ctx);
+    expect(state.whereCols).not.toContain("ur.organization_id");
   });
 });
 

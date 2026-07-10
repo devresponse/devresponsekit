@@ -3,6 +3,7 @@ import {
   deriveApiKeyPrefix,
   generateApiKey,
   hashApiKey,
+  hashSecret,
   looksLikeApiKey,
 } from "@/lib/api-auth/api-key";
 
@@ -40,6 +41,16 @@ describe("api-key codec", () => {
     expect(deriveApiKeyPrefix(plaintext)).toBe(prefix);
   });
 
+  it("falls back to the first 12 chars for a malformed key (< 3 parts)", () => {
+    // No underscores → a single part → the split-based derivation can't apply,
+    // so we return a safe, bounded display slice (first 12 chars) not a throw.
+    expect(deriveApiKeyPrefix("thisisalongstringwithnounderscores")).toBe("thisisalongs");
+    // Only two parts (product_tag, no random segment) is still malformed.
+    expect(deriveApiKeyPrefix("drk_live")).toBe("drk_live");
+    // A short single-part string is returned verbatim (slice is a no-op).
+    expect(deriveApiKeyPrefix("short")).toBe("short");
+  });
+
   it("hashes deterministically and differs per key", async () => {
     const k = generateApiKey("live").plaintext;
     const h1 = await hashApiKey(k);
@@ -48,5 +59,14 @@ describe("api-key codec", () => {
     expect(h1).toMatch(/^[0-9a-f]{64}$/);
     const other = await hashApiKey(generateApiKey("live").plaintext);
     expect(other).not.toBe(h1);
+  });
+
+  it("hashSecret is SHA-256, identical to hashApiKey for the same input", async () => {
+    // hashSecret is the general-purpose alias used for OAuth client secrets;
+    // it must produce exactly the same digest as hashApiKey (same algorithm).
+    const secret = "cs_live_some_oauth_client_secret_value";
+    const viaSecret = await hashSecret(secret);
+    expect(viaSecret).toMatch(/^[0-9a-f]{64}$/);
+    expect(viaSecret).toBe(await hashApiKey(secret));
   });
 });

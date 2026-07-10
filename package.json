@@ -37,6 +37,7 @@
     "test:db": "vitest run --config vitest.db.config.ts",
     "test:security": "vitest run tests/security",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run",
     "test:e2e": "playwright test --config=playwright.config.ts tests/e2e",
     "test:a11y": "playwright test --config=playwright.config.ts tests/accessibility",
     "test:all": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:coverage && pnpm test:e2e && pnpm test:a11y"
@@ -117,6 +118,8 @@
     "@axe-core/playwright": "4.12.1",
     "@eslint/eslintrc": "^3.3.5",
     "@playwright/test": "1.61.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@tailwindcss/postcss": "4.3.2",
     "@tailwindcss/typography": "^0.5.20",
     "@testing-library/jest-dom": "6.9.1",

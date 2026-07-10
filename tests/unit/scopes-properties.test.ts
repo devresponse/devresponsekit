@@ -3,6 +3,7 @@ import fc from "fast-check";
 import {
   API_SCOPE_CATALOG,
   isKnownScope,
+  isWildcardScope,
   normalizeScopes,
   scopeMatches,
   scopesAuthorize,
@@ -104,5 +105,30 @@ describe("permission ∩ scope algebra (properties)", () => {
         }
       }),
     );
+  });
+
+  // Negative cases — the properties above assert what IS grantable/known; these
+  // pin what is NOT, killing mutants that make the classifiers always-true.
+  it("rejects an unknown scope as not-known and not-grantable", () => {
+    expect(isKnownScope("totally.made.up.scope")).toBe(false);
+    expect(ungrantableScopes(["admin.users.read"], ["totally.made.up.scope"])).toEqual([
+      "totally.made.up.scope",
+    ]);
+    // Even a null (full-authority) grant cannot confer an UNKNOWN scope.
+    expect(ungrantableScopesForCaller([], null, ["totally.made.up.scope"])).toEqual([
+      "totally.made.up.scope",
+    ]);
+  });
+
+  it("does not treat a concrete (non-`.*`) key as a wildcard", () => {
+    expect(isWildcardScope("admin.users.read")).toBe(false);
+    expect(isWildcardScope("admin.users.*")).toBe(true);
+    // A concrete grant matches ONLY itself, never a sibling under its prefix.
+    expect(scopeMatches("admin.users.read", "admin.users.delete")).toBe(false);
+  });
+
+  it("`*` sugar authorizes everything but a prefix wildcard does not", () => {
+    expect(scopesAuthorize(["*"], "admin.orgs.delete")).toBe(true);
+    expect(scopesAuthorize(["admin.users.*"], "admin.orgs.delete")).toBe(false);
   });
 });

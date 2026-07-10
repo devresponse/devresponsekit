@@ -10,9 +10,13 @@ import { sql, type SelectQueryBuilder, type SqlBool } from "kysely";
  *   - Each endpoint would otherwise re-implement page/pageSize/sort/q
  *     parsing — diverging quickly and missing edge cases (negative
  *     offsets, NaN page sizes, unknown sort fields).
- *   - Centralizing the parser ensures we always reject unknown sort
- *     fields and filters rather than silently ignoring them, which is
- *     what an attacker would probe for.
+ *   - Centralizing the parser ensures unknown sort fields and filters are
+ *     consistently DROPPED — allow-listed against the caller's
+ *     `allowedSortFields` / `allowedFilters` and never passed through to the
+ *     query. It does NOT 400 on an unknown key: an attacker probing arbitrary
+ *     columns gets a safe empty result, not an ORDER-BY/WHERE injection or an
+ *     error oracle. (audit #7 — the prior "reject" wording overstated this;
+ *     the behavior is a silent allow-list drop, as each option's doc notes.)
  */
 
 export interface SortSpec {

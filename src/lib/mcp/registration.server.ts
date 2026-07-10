@@ -71,13 +71,33 @@ export async function provisionMcpAgent(
   return { appUserId: appUser.id, betterAuthUserId, client };
 }
 
-/** Count of active OAuth clients bound to an org — the coarse per-org quota. */
+/**
+ * Count of SANCTIONED OAuth clients bound to an org — the coarse per-org
+ * self-registration quota. Only an active client whose bound service account
+ * holds an ACTIVE membership in the org counts (P1-2).
+ *
+ * A self-registered agent awaiting approval has a `pending_approval` membership
+ * (and cannot mint a usable token), so it must NOT consume a quota slot —
+ * otherwise an unauthenticated attacker could fill an org's quota with junk
+ * pending registrations and permanently block legitimate self-registration.
+ * `EXISTS` (not a join) keeps the count immune to duplicate membership rows.
+ */
 export async function countActiveOauthClientsForOrg(organizationId: string): Promise<number> {
   const row = await db
-    .selectFrom("app_oauth_clients")
+    .selectFrom("app_oauth_clients as c")
     .select(sql<string>`count(*)`.as("count"))
-    .where("organization_id", "=", organizationId)
-    .where("status", "=", "active")
+    .where("c.organization_id", "=", organizationId)
+    .where("c.status", "=", "active")
+    .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom("app_organization_memberships as m")
+          .select("m.id")
+          .whereRef("m.app_user_id", "=", "c.app_user_id")
+          .where("m.organization_id", "=", organizationId)
+          .where("m.status", "=", "active"),
+      ),
+    )
     .executeTakeFirst();
   return Number(row?.count ?? 0);
 }

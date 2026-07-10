@@ -134,6 +134,29 @@ export default defineConfig({
         statements: 60,
         functions: 56,
         branches: 54,
+        // Per-file floors for the security-load-bearing modules (audit #18):
+        // pinned a few points below current actuals so THESE specifically can
+        // never silently regress, independent of the global ratchet. Raise as
+        // coverage improves.
+        "**/api-auth/v1-guard.server.ts": {
+          lines: 95,
+          statements: 95,
+          functions: 95,
+          branches: 78,
+        },
+        "**/api-auth/scopes.ts": { lines: 95, statements: 95, functions: 95, branches: 95 },
+        "**/admin/access-scope.server.ts": {
+          lines: 88,
+          statements: 90,
+          functions: 82,
+          branches: 90,
+        },
+        "**/admin/origin-guard.server.ts": {
+          lines: 48,
+          statements: 48,
+          functions: 90,
+          branches: 38,
+        },
       },
     },
   },

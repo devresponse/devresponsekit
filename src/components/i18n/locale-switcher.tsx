@@ -9,19 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { locales, type SupportedLocale } from "@/config/i18n-config";
+import { locales, LOCALE_LABELS, type SupportedLocale } from "@/config/i18n-config";
 import { useTranslations } from "next-intl";
-
-const LOCALE_LABELS: Record<SupportedLocale, string> = {
-  en: "English",
-  fr: "Français",
-  es: "Español",
-  uk: "Українська",
-  pt: "Português",
-  zh: "简体中文",
-  hi: "हिन्दी",
-  ja: "日本語",
-};
 
 export interface LocaleSwitcherProps {
   current: SupportedLocale;

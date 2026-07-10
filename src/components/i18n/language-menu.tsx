@@ -6,18 +6,7 @@ import { Globe } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { usePathname, useRouter } from "@/i18n/navigation";
-import { locales, type SupportedLocale } from "@/config/i18n-config";
-
-const LOCALE_LABELS: Record<SupportedLocale, string> = {
-  en: "English",
-  fr: "Français",
-  es: "Español",
-  uk: "Українська",
-  pt: "Português",
-  zh: "简体中文",
-  hi: "हिन्दी",
-  ja: "日本語",
-};
+import { locales, LOCALE_LABELS, type SupportedLocale } from "@/config/i18n-config";
 
 export interface LanguageMenuProps {
   current: SupportedLocale;

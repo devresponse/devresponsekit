@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { RequiredLegend } from "@/components/ui/required-legend";
 import { useZodForm } from "@/lib/forms/use-zod-form";
 import { createUserSchema, type CreateUserInput } from "@/lib/validation/users";
+import { locales, LOCALE_LABELS } from "@/config/i18n-config";
 
 /**
  * Client-side new-user form (plan §8.3; docs/form-validation.md).
@@ -27,8 +28,6 @@ import { createUserSchema, type CreateUserInput } from "@/lib/validation/users";
  * field-level message, and server-only failures (409 email taken) map back
  * onto the offending field rather than a generic banner.
  */
-const VALID_LOCALES = ["en", "es", "fr", "uk"] as const;
-
 const SELECT_CLASS =
   "border-input bg-background aria-invalid:border-destructive h-9 w-full rounded-md border px-2 text-sm";
 
@@ -189,9 +188,9 @@ export function NewUserForm({ locale }: { locale: string }) {
                 <FormLabel>{t("fields.preferredLocale")}</FormLabel>
                 <FormControl>
                   <select className={SELECT_CLASS} {...field} value={field.value ?? "en"}>
-                    {VALID_LOCALES.map((l) => (
+                    {locales.map((l) => (
                       <option key={l} value={l}>
-                        {l}
+                        {LOCALE_LABELS[l]}
                       </option>
                     ))}
                   </select>

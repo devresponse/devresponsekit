@@ -161,11 +161,12 @@ services:
     ports: ["3000:3000"]
     environment:
       DATABASE_URL: postgres://app:app@db:5432/app
-      BETTER_AUTH_SECRET: change-me-min-16-chars
+      BETTER_AUTH_SECRET: change-me-to-a-random-32char-min-secret
       BETTER_AUTH_URL: http://localhost:3000
       SSO_HANDOFF_ISSUER: devresponse
       SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
-      SSO_HANDOFF_JWT_SECRET: change-me-min-16-chars
+      # Min 32 chars AND different from BETTER_AUTH_SECRET (openssl rand -base64 32)
+      SSO_HANDOFF_JWT_SECRET: change-me-to-a-DIFFERENT-random-secret
 
 volumes:
   dbdata:

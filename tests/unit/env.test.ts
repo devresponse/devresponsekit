@@ -12,7 +12,7 @@ describe("getServerEnv", () => {
   it("returns a parsed env object with defaults applied", () => {
     const env = getServerEnv();
     expect(env.NODE_ENV).toBe("test");
-    expect(env.BETTER_AUTH_SECRET.length).toBeGreaterThanOrEqual(16);
+    expect(env.BETTER_AUTH_SECRET.length).toBeGreaterThanOrEqual(32);
     expect(env.SSO_HANDOFF_TTL_SECONDS).toBeGreaterThan(0);
     expect(env.SEED_DEFAULT_ORGANIZATION_SLUG).toBe("default");
   });
@@ -66,6 +66,7 @@ const TOUCHED_KEYS = [
   "SKIP_ENV_VALIDATION",
   "NEXT_PHASE",
   "BETTER_AUTH_SECRET",
+  "SSO_HANDOFF_JWT_SECRET",
   "PGPOOL_MAX",
 ] as const;
 
@@ -164,6 +165,57 @@ describe("SKIP_ENV_VALIDATION build-phase escape (OPS-6)", () => {
     });
     try {
       expect(() => mod.getServerEnv()).not.toThrow();
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("signing-secret hygiene (audit #12/#22)", () => {
+  const VALID = "a".repeat(40);
+  const VALID2 = "b".repeat(40);
+
+  it("rejects a BETTER_AUTH_SECRET shorter than 32 chars", async () => {
+    const { mod, restore } = await loadEnvWith({ BETTER_AUTH_SECRET: "short-secret" });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/BETTER_AUTH_SECRET/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("rejects reusing one value for both signing secrets", async () => {
+    const { mod, restore } = await loadEnvWith({
+      BETTER_AUTH_SECRET: VALID,
+      SSO_HANDOFF_JWT_SECRET: VALID,
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/SSO_HANDOFF_JWT_SECRET/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("accepts distinct >=32-char secrets", async () => {
+    const { mod, restore } = await loadEnvWith({
+      BETTER_AUTH_SECRET: VALID,
+      SSO_HANDOFF_JWT_SECRET: VALID2,
+    });
+    try {
+      expect(() => mod.getServerEnv()).not.toThrow();
+    } finally {
+      restore();
+    }
+  });
+
+  it("refuses the .env.example placeholder secret in production", async () => {
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "replace-with-strong-random-secret",
+      SSO_HANDOFF_JWT_SECRET: VALID2,
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/BETTER_AUTH_SECRET/);
     } finally {
       restore();
     }

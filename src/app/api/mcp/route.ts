@@ -50,6 +50,18 @@ export async function POST(request: NextRequest): Promise<Response> {
   // session is not an audience-bound OAuth token, so it is rejected here even
   // though it authenticates elsewhere. The 401 points at the protected-resource
   // metadata (RFC 9728 §5.1) so a client can discover the authorization server.
+  //
+  // KNOWN GAP (audit #25, deferred): this accepts ANY valid bearer credential;
+  // it does NOT yet verify the token's audience is the MCP resource (RFC 8707
+  // resource indicators). It is not a live escalation — every token is already
+  // bounded by permission ∩ scope, so an over-broad-audience token can do no
+  // more here than its scopes allow — but a token minted purely for the general
+  // v1 API can also drive the gateway. A faithful fix is a COORDINATED, breaking
+  // change (mintAccessToken/verifyAccessToken use one shared API_JWT_AUDIENCE):
+  // the token endpoint must accept `resource=<mcp>` and mint an MCP-audience
+  // token, THEN this route must reject tokens lacking that audience — which
+  // rejects every currently-issued MCP token until clients migrate. Tracked as
+  // an RFC 8707 rollout, not a drive-by change, to avoid breaking MCP auth.
   const caller = await resolveCaller(request);
   if (!caller || !caller.isBearer) {
     return jsonRpc(rpcError(payload.id ?? null, RPC_UNAUTHORIZED, "Unauthorized"), 401, {

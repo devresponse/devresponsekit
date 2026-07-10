@@ -41,4 +41,22 @@ describe("logServerError", () => {
     expect(obj.err).toBeUndefined();
     expect(obj).toMatchObject({ requestId: "r", eventType: "x.y", outcome: "error" });
   });
+
+  it("redacts emails and tokens in the error message/stack (audit #20)", () => {
+    logServerError("boom", {
+      err: new Error("resend 4xx for a@b.com using drk_live_ABC123 token"),
+    });
+    const [obj] = errorCalls[0] as [Record<string, unknown>];
+    const err = obj.err as { message: string };
+    expect(err.message).not.toContain("a@b.com");
+    expect(err.message).not.toContain("drk_live_ABC123");
+    expect(err.message).toContain("[redacted-email]");
+    expect(err.message).toContain("[redacted-token]");
+  });
+
+  it("redacts a non-Error thrown value too", () => {
+    logServerError("weird", { err: "token drk_live_XYZ leaked" });
+    const [obj] = errorCalls[0] as [Record<string, unknown>];
+    expect((obj.err as { value: string }).value).toBe("token [redacted-token] leaked");
+  });
 });

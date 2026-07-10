@@ -2,6 +2,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { captureServerError } from "@/lib/observability/server";
+import { logServerError } from "@/lib/observability/logger.server";
 
 /**
  * Standard administrator error envelope (docs/admin-manager.md §5.1,
@@ -48,8 +49,16 @@ export function adminErrorResponse(
   options: AdminErrorOptions = {},
 ): NextResponse {
   const requestId = options.requestId ?? getOrCreateRequestId(request);
-  if (status >= 500 && options.cause !== undefined) {
-    captureServerError(options.cause, { requestId, status });
+  if (status >= 500) {
+    // OPS-OBS-2: mirror the v1 `problemResponse` twin — every admin 5xx must
+    // reach the always-on stdout stream, not just Sentry, or a default (no-DSN)
+    // deploy is blind to its own 500s. Sentry capture stays gated on a cause
+    // (D4); the structured log fires for ALL 5xx and serializes the cause when
+    // present. (audit #9)
+    if (options.cause !== undefined) {
+      captureServerError(options.cause, { requestId, status });
+    }
+    logServerError(`admin.${code}`, { requestId, status, code, err: options.cause });
   }
   const body = {
     error: code,

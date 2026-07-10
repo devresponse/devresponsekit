@@ -157,6 +157,38 @@ export default defineConfig({
           functions: 95,
           branches: 95,
         },
+        // Credential resolution + session-auth surfaces (test-depth ratchet).
+        // Floors sit a few points below measured actuals (resolve-caller /
+        // ban-status / jwt are 100%); a regression in the code that decides
+        // "who is this caller and can they act" fails CI on its own.
+        "**/api-auth/resolve-caller.server.ts": {
+          lines: 95,
+          statements: 95,
+          functions: 95,
+          branches: 95,
+        },
+        "**/api-auth/ban-status.server.ts": {
+          lines: 95,
+          statements: 95,
+          functions: 95,
+          branches: 95,
+        },
+        "**/api-auth/jwt.server.ts": { lines: 95, statements: 95, functions: 90, branches: 88 },
+        "**/api-auth/revocation.server.ts": {
+          lines: 80,
+          statements: 80,
+          functions: 65,
+          branches: 85,
+        },
+        "**/lib/auth-policy.server.ts": { lines: 90, statements: 90, functions: 85, branches: 82 },
+        "**/lib/jwt-handoff.server.ts": { lines: 92, statements: 92, functions: 90, branches: 88 },
+        "**/lib/auth-signup-provisioning.ts": {
+          lines: 90,
+          statements: 90,
+          functions: 88,
+          branches: 85,
+        },
+        "**/lib/sso.server.ts": { lines: 88, statements: 88, functions: 90, branches: 78 },
       },
     },
   },

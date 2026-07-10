@@ -68,6 +68,14 @@ describe("readBearerToken / hasBearerCredential", () => {
     expect(mod.hasBearerCredential(new Headers({ authorization: "Bearer t" }))).toBe(true);
     expect(mod.hasBearerCredential(new Headers())).toBe(false);
   });
+
+  it("returns null for a non-Bearer or empty-token Authorization header", () => {
+    // Not a Bearer scheme → no match.
+    expect(mod.readBearerToken(new Headers({ authorization: "Basic dXNlcjpwdw==" }))).toBeNull();
+    // `Bearer` with only whitespace after it → the (.+) capture is empty → null.
+    expect(mod.readBearerToken(new Headers({ authorization: "Bearer    " }))).toBeNull();
+    expect(mod.hasBearerCredential(new Headers({ authorization: "Bearer   " }))).toBe(false);
+  });
 });
 
 describe("resolveCaller — cookie path", () => {

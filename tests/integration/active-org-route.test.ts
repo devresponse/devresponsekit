@@ -12,7 +12,11 @@ const accessGetter = vi.fn();
 const hasMembership = vi.fn();
 const auditMock = vi.fn();
 
-vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
+vi.mock("@/lib/auth-guard", () => ({
+  getCurrentSession: () => sessionGetter(),
+  getImpersonatorId: (s: unknown) =>
+    (s as { session?: { impersonatedBy?: string | null } } | null)?.session?.impersonatedBy ?? null,
+}));
 vi.mock("@/lib/auth-status", () => ({
   getUserAccessContext: (id: string) => accessGetter(id),
   decideSecureAccess: (status: string) =>
@@ -90,5 +94,21 @@ describe("POST /api/preferences/active-org", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "account.active_organization.changed" }),
     );
+  });
+
+  it("returns 403 and does NOT switch tenant while impersonating (P0-1)", async () => {
+    // The impersonated session carries `impersonatedBy`; even though the
+    // impersonated user is an active member of the target org, the switch must
+    // be refused so an impersonation cannot pivot into another tenant.
+    sessionGetter.mockResolvedValue({
+      user: { id: "ba-1" },
+      session: { impersonatedBy: "admin-9" },
+    });
+    hasMembership.mockResolvedValue(true);
+    const res = await POST(req({ organizationId: ORG_ID }));
+    expect(res.status).toBe(403);
+    expect(res.cookies.get("active_org")).toBeUndefined();
+    expect(hasMembership).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });

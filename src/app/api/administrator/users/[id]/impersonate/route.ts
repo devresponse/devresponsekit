@@ -68,6 +68,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // any permission they don't already hold (e.g. an org admin assuming a
   // SUPERADMIN, or a more-privileged peer). SUPERADMIN already holds every
   // power, so the subset check is moot for them and is skipped.
+  //
+  // This evaluates the target in a SINGLE org (the actor's active_org). That is
+  // sound only because an impersonated session is tenant-confined: POST/GET
+  // `/api/preferences/active-org(/apply)` refuse to change active_org while
+  // `impersonatedBy` is set, so the impersonated session can only ever act in
+  // the org checked here. Without that confinement a target who is a plain
+  // member locally but an admin in another tenant could be impersonated and
+  // then switched into that tenant (P0-1) — do not relax the pin without also
+  // widening this guard to the union of the target's memberships.
   if (!isSuperadmin(guard.access)) {
     const targetAccess = await getUserAccessContext(target.betterAuthUserId);
     const actorPermissions = new Set(guard.access.permissions);

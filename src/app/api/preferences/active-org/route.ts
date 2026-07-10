@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
-import { getCurrentSession } from "@/lib/auth-guard";
+import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { ACTIVE_ORG_COOKIE, userHasActiveMembership } from "@/lib/active-org.server";
 
@@ -25,6 +25,17 @@ export async function POST(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  }
+
+  // An impersonated session must never change tenant. The impersonation
+  // escalation guard (POST /api/administrator/users/[id]/impersonate) validates
+  // the target's permissions only in the org active when impersonation STARTED;
+  // were the impersonated session then free to switch active_org, a
+  // non-superadmin actor could pivot into a tenant the guard never checked and
+  // wield the target's admin.* permissions there — a cross-tenant privilege
+  // escalation. Confine the impersonated session to its starting org. (P0-1)
+  if (getImpersonatorId(session)) {
+    return NextResponse.json({ error: "forbidden_while_impersonating" }, { status: 403 });
   }
 
   const access = await getUserAccessContext(session.user.id);

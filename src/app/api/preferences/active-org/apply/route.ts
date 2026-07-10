@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { ACTIVE_ORG_COOKIE, userHasActiveMembership } from "@/lib/active-org.server";
-import { getCurrentSession } from "@/lib/auth-guard";
+import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { getUserAccessContext } from "@/lib/auth-status";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
@@ -51,6 +51,12 @@ export async function GET(request: NextRequest) {
 
   const session = await getCurrentSession();
   if (!session) {
+    return redirect;
+  }
+  // Never re-pin the active org for an impersonated session — degrade to a
+  // plain redirect so an impersonated session cannot change tenant. Mirrors the
+  // guard on POST /api/preferences/active-org (P0-1).
+  if (getImpersonatorId(session)) {
     return redirect;
   }
   const access = await getUserAccessContext(session.user.id);

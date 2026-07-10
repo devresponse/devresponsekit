@@ -16,7 +16,11 @@ const hasMembership = vi.fn();
 const resolveOrg = vi.fn();
 const auditMock = vi.fn();
 
-vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
+vi.mock("@/lib/auth-guard", () => ({
+  getCurrentSession: () => sessionGetter(),
+  getImpersonatorId: (s: unknown) =>
+    (s as { session?: { impersonatedBy?: string | null } } | null)?.session?.impersonatedBy ?? null,
+}));
 vi.mock("@/lib/auth-status", () => ({
   getUserAccessContext: (id: string) => accessGetter(id),
 }));
@@ -99,6 +103,19 @@ describe("GET /api/preferences/active-org/apply", () => {
     const res = await GET(req("acme", "/en/app/workspace"));
     expect(res.cookies.get("active_org")).toBeUndefined();
     expect(resolveOrg).not.toHaveBeenCalled();
+  });
+
+  it("redirects without a cookie (no tenant change) while impersonating (P0-1)", async () => {
+    sessionGetter.mockResolvedValue({
+      user: { id: "ba-1" },
+      session: { impersonatedBy: "admin-9" },
+    });
+    const res = await GET(req("acme", "/en/app/workspace"));
+    expect(res.headers.get("location")).toBe("http://localhost:3000/en/app/workspace");
+    expect(res.cookies.get("active_org")).toBeUndefined();
+    expect(accessGetter).not.toHaveBeenCalled();
+    expect(resolveOrg).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("returns early (no session lookup) when no org is given", async () => {

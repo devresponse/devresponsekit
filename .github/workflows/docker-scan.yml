@@ -1,7 +1,9 @@
 name: Docker image scan
 
 # Builds the production image from the (digest-pinned) Dockerfile and scans it
-# with Trivy, failing on FIXABLE high/critical vulnerabilities. This complements
+# with Trivy, failing on FIXABLE high/critical vulnerabilities. The `trivy` job
+# is a REQUIRED status check on `main` (branch protection), so a fixable
+# high/critical blocks the merge — keep it in the required set. This complements
 # `pnpm audit` (which gates the JS dependency tree): the image scan covers the
 # base OS layer and anything baked into the runtime image. Unfixable base-OS
 # CVEs are excluded (`--ignore-unfixed`); accepted, non-runtime-reachable

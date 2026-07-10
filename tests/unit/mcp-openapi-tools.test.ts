@@ -55,3 +55,31 @@ describe("deriveMcpTools (from the real OpenAPI document)", () => {
     expect(byName("listUsers")!.description).toContain("admin.users.read");
   });
 });
+
+describe("deriveMcpTools — unsupported body shapes fail loudly (audit #16)", () => {
+  it("throws for a composed (allOf) request body rather than yielding an unusable tool", () => {
+    const doc = {
+      paths: {
+        "/things": {
+          post: {
+            operationId: "createThing",
+            summary: "Create a thing",
+            security: [{ bearerAuth: ["admin.things.create"] }],
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: { allOf: [{ $ref: "#/components/schemas/Thing" }] },
+                },
+              },
+            },
+            responses: {},
+          },
+        },
+      },
+      components: {
+        schemas: { Thing: { type: "object", properties: { name: { type: "string" } } } },
+      },
+    };
+    expect(() => deriveMcpTools(doc)).toThrow(/could not be flattened|createThing/);
+  });
+});

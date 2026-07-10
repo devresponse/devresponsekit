@@ -126,11 +126,24 @@ function buildTool(
             properties?: Record<string, Record<string, unknown>>;
             required?: string[];
           });
-    for (const [name, propSchema] of Object.entries(schema?.properties ?? {})) {
+    // Only FLAT object bodies are supported. A composed (allOf/oneOf/anyOf) or
+    // otherwise unresolvable body yields no `properties`, which would silently
+    // produce a tool an agent cannot call (its body params never appear in
+    // inputSchema). Fail LOUDLY at derive time — this runs at module load and is
+    // exercised by the mcp-openapi-tools test, so an unsupported body shape is
+    // caught in CI, not at agent runtime. (audit #16)
+    if (!schema || typeof schema.properties !== "object") {
+      throw new Error(
+        `MCP tool derivation: operation "${op.operationId}" declares a request body whose ` +
+          `schema could not be flattened to properties (composed/nested bodies are unsupported). ` +
+          `Flatten the schema or extend buildTool to resolve it.`,
+      );
+    }
+    for (const [name, propSchema] of Object.entries(schema.properties)) {
       bodyProps.push(name);
       properties[name] = propSchema;
     }
-    for (const name of schema?.required ?? []) required.add(name);
+    for (const name of schema.required ?? []) required.add(name);
   }
 
   const scope = op.security?.[0]?.bearerAuth?.[0];

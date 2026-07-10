@@ -3,7 +3,10 @@ name: CodeQL
 # Static application security testing (BUILD-1). Runs CodeQL's
 # security-extended query suite over the TypeScript/JavaScript source and
 # publishes findings to the repo's Security tab (code scanning). JS/TS needs no
-# build step — CodeQL extracts directly from source.
+# build step — CodeQL extracts directly from source. The `Analyze
+# (javascript-typescript)` job is a REQUIRED status check on `main` (branch
+# protection), so a security-extended finding blocks the merge — keep it in the
+# required set.
 #
 # Note: code scanning (SARIF) requires GitHub Advanced Security on private
 # repos; it is free for public repos.

@@ -210,8 +210,10 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # HARD GATE (BUILD-1). A high or critical advisory fails this job and
-    # blocks the merge. The known dev/build-only advisories are pinned in an
+    # HARD GATE (BUILD-1). A high or critical advisory fails this job. Enforced
+    # as a REQUIRED status check on `main` (branch protection), so the failure
+    # actually blocks the merge — do not drop it from the required set. The
+    # known dev/build-only advisories are pinned in an
     # explicit allowlist (package.json -> pnpm.auditConfig.ignoreGhsas), so a
     # NEW high+ that nobody has reviewed is what trips the gate — not the
     # existing, triaged backlog. Prune the allowlist as upstream fixes land.
@@ -241,8 +243,10 @@ jobs:
     # BUILD-2: the OpenAPI spec (docs/openapi*.json) and the admin SDK
     # (sdk/admin) are GENERATED artifacts. Regenerate them from source and fail
     # if anything changed — so a new or edited admin route can never ship with
-    # a stale spec or SDK. Deterministic: the generator version is pinned in
-    # openapitools.json (7.12.0) and .gitattributes normalizes output to LF.
+    # a stale spec or SDK. A REQUIRED status check on `main` (branch
+    # protection), so drift blocks the merge. Deterministic: the generator
+    # version is pinned in openapitools.json (7.12.0) and .gitattributes
+    # normalizes output to LF.
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -308,8 +312,10 @@ jobs:
     # B4: src/db/migrations/better-auth-schema.sql is a GENERATED snapshot of
     # the Better Auth identity DDL that `pnpm db:auth:migrate` applies at deploy.
     # Regenerate it and fail if it differs from the committed file — so a
-    # better-auth upgrade that silently changes the vendor schema is caught here
-    # (and is the cue to re-check the hand-typed Kysely mirrors in app-schema.ts).
+    # better-auth upgrade that silently changes the vendor schema is caught here.
+    # A REQUIRED status check on `main` (branch protection), so vendor-schema
+    # drift blocks the merge (and is the cue to re-check the hand-typed Kysely
+    # mirrors in app-schema.ts).
     # The generator compiles against a throwaway, freshly-empty schema, so its
     # output is deterministic regardless of the service DB's state.
     services:

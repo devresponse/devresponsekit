@@ -1,5 +1,6 @@
 import "server-only";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
+import { getClientIp } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { deriveMcpTools, type GeneratedTool } from "./openapi-tools";
 import { type McpToolDefinition, type McpToolResult, textResult } from "./protocol";
@@ -46,6 +47,14 @@ async function dispatch(
   const headers: Record<string, string> = {};
   const auth = request.headers.get("authorization");
   if (auth) headers.authorization = auth;
+
+  // Forward the AGENT's resolved client IP so the v1 route audits and
+  // rate-limits against it, not the gateway's own address (audit #14). We
+  // resolve it here (honoring TRUSTED_PROXY_COUNT at the MCP boundary) and pass
+  // it as `x-forwarded-for` — the same trusted channel v1's getClientIp reads —
+  // rather than a bespoke header an external v1 caller could spoof.
+  const clientIp = getClientIp(request.headers);
+  if (clientIp) headers["x-forwarded-for"] = clientIp;
 
   let body: string | undefined;
   if (tool.bodyProps.length > 0) {

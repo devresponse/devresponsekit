@@ -15,6 +15,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 import {
   permissionKeysForGroup,
+  conferrablePermissions,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -137,9 +138,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // non-SUPERADMIN may only add members to a group whose conferred permissions
   // are a subset of their own. Mirrors the role-attach guard in
   // groups/[id]/roles; checked per-group, so it covers the whole batch.
-  if (!isSuperadmin(guard.access)) {
+  // A bearer credential is bounded by its scopes, not just its owner's
+  // permissions, and never takes the SUPERADMIN fast-path (P1-1).
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForGroup(group.id);
-    const unheld = unheldPermissionKeys(guard.access.permissions, conferred);
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheld = unheldPermissionKeys(conferrable, conferred);
     if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 

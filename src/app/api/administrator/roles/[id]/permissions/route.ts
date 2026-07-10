@@ -7,7 +7,10 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
-import { unheldPermissionKeys } from "@/lib/admin/grantable-permissions.server";
+import {
+  conferrablePermissions,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -132,9 +135,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // permission keys they themselves currently hold. Otherwise an org admin
   // could grant a role authority they lack — including the `superuser` marker
   // (subsumed here, since it is never in a non-superadmin's held set) — and
-  // then assign that role to themselves.
-  if (!isSuperadmin(guard.access)) {
-    const unheld = unheldPermissionKeys(guard.access.permissions, parsed.data.ids);
+  // then assign that role to themselves. A bearer credential is bounded by its
+  // scopes, not just its owner's permissions, and never takes the SUPERADMIN
+  // fast-path (P1-1).
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheld = unheldPermissionKeys(conferrable, parsed.data.ids);
     if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 

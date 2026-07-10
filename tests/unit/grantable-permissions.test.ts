@@ -52,6 +52,43 @@ describe("unheldPermissionKeys", () => {
   });
 });
 
+describe("conferrablePermissions (P1-1 bearer scope bound)", () => {
+  const held = ["admin.roles.update", "admin.roles.assign", "admin.users.delete", "superuser"];
+
+  it("returns the full held set for a cookie session (null scopes)", () => {
+    expect(mod.conferrablePermissions(held, null)).toEqual(held);
+  });
+
+  it("filters a bearer credential's held set to its granted scopes", () => {
+    expect(mod.conferrablePermissions(held, ["admin.roles.update", "admin.roles.assign"])).toEqual([
+      "admin.roles.update",
+      "admin.roles.assign",
+    ]);
+  });
+
+  it("honors wildcard scopes but never authorizes the superuser marker", () => {
+    expect(mod.conferrablePermissions(held, ["admin.roles.*"])).toEqual([
+      "admin.roles.update",
+      "admin.roles.assign",
+    ]);
+  });
+
+  it("a scoped bearer key cannot confer a permission outside its scopes (even if the owner holds it)", () => {
+    // Owner holds admin.users.delete, but the key is scoped only to role editing.
+    const conferrable = mod.conferrablePermissions(held, [
+      "admin.roles.update",
+      "admin.roles.assign",
+    ]);
+    expect(mod.unheldPermissionKeys(conferrable, ["admin.users.delete"])).toEqual([
+      "admin.users.delete",
+    ]);
+  });
+
+  it("returns [] for a bearer credential with no scopes", () => {
+    expect(mod.conferrablePermissions(held, [])).toEqual([]);
+  });
+});
+
 describe("permissionKeysForRoles", () => {
   it("short-circuits to [] for no role ids (no DB query)", async () => {
     expect(await mod.permissionKeysForRoles([])).toEqual([]);

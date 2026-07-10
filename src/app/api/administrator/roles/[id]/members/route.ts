@@ -12,7 +12,7 @@ import {
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -62,6 +62,16 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .innerJoin("app_users as u", "u.id", "ur.app_user_id")
     .leftJoin("app_organizations as o", "o.id", "ur.organization_id")
     .where("ur.role_id", "=", id);
+
+  // ADR-0001 defense-in-depth (audit #26): confine an ORG ADMIN's feed to
+  // assignment rows in their own org, exactly as users/[id]/roles does — so an
+  // anomalous `ur.organization_id` can never surface a foreign-org assignment.
+  // SUPERADMIN (scope.kind === "all") sees every org, as they must for a global
+  // role's members. The role itself was already org-gated by canAccessOrg above.
+  const scope = resolveOrgScope(guard.access);
+  if (scope && scope.kind === "org") {
+    base = base.where("ur.organization_id", "=", scope.organizationId);
+  }
 
   if (query.q) {
     const like = likeContains(query.q);

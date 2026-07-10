@@ -162,6 +162,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
   const input = parsed.data;
 
+  // Intentional asymmetry with users/[id]/memberships (audit #23): that route
+  // is user-centric and gates on canAccessUser; this one is ORG-CENTRIC. The
+  // actor holds admin.orgs.update AND canAccessOrg(this org) — i.e. they
+  // administer the target org — so enrolling a member is a core org-management
+  // capability and is deliberately NOT gated on separately "seeing" the user.
+  // Consent-based self-enrollment for brand-new users goes through invitations;
+  // this direct-add is the admin counterpart. Membership only ever grants
+  // access to an org the actor already controls, and the target UUID is
+  // unguessable, so there is no cross-tenant or enumeration exposure.
   const user = await db
     .selectFrom("app_users")
     .select(["id"])

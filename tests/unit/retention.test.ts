@@ -10,9 +10,14 @@ import type * as RetentionModule from "@/lib/retention.server";
  */
 const state = vi.hoisted(() => ({
   auditDeleted: 0n as bigint,
+  // When set, each audit DELETE batch shifts one value off this queue — so a
+  // multi-batch backlog can be simulated. Falls back to `auditDeleted`.
+  auditBatches: null as bigint[] | null,
   outboxDeleted: 0n as bigint,
+  outboxUpdated: 0n as bigint,
   revoked: 0,
   outboxWhere: [] as unknown[][],
+  outboxSetWhere: [] as unknown[][],
   rawQueries: [] as string[],
 }));
 
@@ -22,9 +27,25 @@ function deleteChain(table: string) {
       if (table === "app_outbox") state.outboxWhere.push(args);
       return chain;
     },
-    executeTakeFirst: async () => ({
-      numDeletedRows: table === "app_audit_events" ? state.auditDeleted : state.outboxDeleted,
-    }),
+    executeTakeFirst: async () => {
+      if (table === "app_audit_events") {
+        const n = state.auditBatches ? (state.auditBatches.shift() ?? 0n) : state.auditDeleted;
+        return { numDeletedRows: n };
+      }
+      return { numDeletedRows: state.outboxDeleted };
+    },
+  };
+  return chain;
+}
+
+function updateChain() {
+  const chain = {
+    set: () => chain,
+    where: (...args: unknown[]) => {
+      state.outboxSetWhere.push(args);
+      return chain;
+    },
+    executeTakeFirst: async () => ({ numUpdatedRows: state.outboxUpdated }),
   };
   return chain;
 }
@@ -40,6 +61,7 @@ const trx = {
 vi.mock("@/db/database", () => ({
   db: {
     deleteFrom: (t: string) => deleteChain(t),
+    updateTable: () => updateChain(),
     transaction: () => ({
       execute: async (cb: (t: typeof trx) => Promise<unknown>) => cb(trx),
     }),
@@ -54,9 +76,12 @@ let mod: typeof RetentionModule;
 
 beforeEach(async () => {
   state.auditDeleted = 0n;
+  state.auditBatches = null;
   state.outboxDeleted = 0n;
+  state.outboxUpdated = 0n;
   state.revoked = 0;
   state.outboxWhere = [];
+  state.outboxSetWhere = [];
   state.rawQueries = [];
   mod = await import("@/lib/retention.server");
 });
@@ -64,6 +89,7 @@ afterEach(() => {
   vi.resetModules();
   delete process.env.AUDIT_RETENTION_DAYS;
   delete process.env.OUTBOX_RETENTION_DAYS;
+  delete process.env.OUTBOX_MAX_PENDING_DAYS;
 });
 
 describe("retentionDays", () => {
@@ -90,6 +116,25 @@ describe("pruneAuditEvents", () => {
     expect(await mod.pruneAuditEvents(30)).toBe(4);
     expect(state.rawQueries.some((q) => q.includes("app.audit_retention"))).toBe(true);
   });
+  it("deletes in batches until a short batch, summing the total (audit #21)", async () => {
+    // batchSize 2: two full batches then a short one → loop stops, total = 5.
+    state.auditBatches = [2n, 2n, 1n];
+    expect(await mod.pruneAuditEvents(30, 2)).toBe(5);
+    // Three DELETE batches, each its own tx that set the retention flag.
+    expect(state.rawQueries.filter((q) => q.includes("app.audit_retention"))).toHaveLength(3);
+  });
+});
+
+describe("failStalePendingOutbox (audit #10)", () => {
+  it("is a no-op for a 0-day window", async () => {
+    expect(await mod.failStalePendingOutbox(0)).toBe(0);
+    expect(state.outboxSetWhere).toHaveLength(0);
+  });
+  it("fails only pending rows and returns the updated count", async () => {
+    state.outboxUpdated = 3n;
+    expect(await mod.failStalePendingOutbox(7)).toBe(3);
+    expect(state.outboxSetWhere).toContainEqual(["status", "=", "pending"]);
+  });
 });
 
 describe("pruneOutbox", () => {
@@ -105,12 +150,19 @@ describe("pruneOutbox", () => {
 });
 
 describe("pruneAll", () => {
-  it("runs all three prunes with the env-configured windows", async () => {
+  it("runs every prune/sweep with the env-configured windows", async () => {
     process.env.AUDIT_RETENTION_DAYS = "30";
     process.env.OUTBOX_RETENTION_DAYS = "10";
+    process.env.OUTBOX_MAX_PENDING_DAYS = "7";
     state.revoked = 2;
     state.auditDeleted = 4n;
     state.outboxDeleted = 7n;
-    expect(await mod.pruneAll()).toEqual({ revocations: 2, auditEvents: 4, outbox: 7 });
+    state.outboxUpdated = 1n;
+    expect(await mod.pruneAll()).toEqual({
+      revocations: 2,
+      auditEvents: 4,
+      outbox: 7,
+      staleOutboxFailed: 1,
+    });
   });
 });

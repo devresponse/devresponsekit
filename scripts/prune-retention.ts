@@ -17,7 +17,7 @@ import { pgPool } from "@/db/database";
 async function main(): Promise<void> {
   const result = await pruneAll();
   console.log(
-    `[retention] revocations=${result.revocations} audit=${result.auditEvents} outbox=${result.outbox}`,
+    `[retention] revocations=${result.revocations} audit=${result.auditEvents} outbox=${result.outbox} staleOutboxFailed=${result.staleOutboxFailed}`,
   );
 }
 

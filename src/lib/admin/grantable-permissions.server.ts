@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
+import { scopesAuthorize } from "@/lib/api-auth/scopes";
 
 /**
  * Privilege-escalation guard helpers (AUTHZ-3).
@@ -15,6 +16,14 @@ import { db } from "@/db/database";
  * (403) when {@link unheldPermissionKeys} is non-empty for a non-SUPERADMIN.
  * A SUPERADMIN's held set is the full catalog, so the check is a no-op for
  * them — callers gate on `isSuperadmin(access)` first.
+ *
+ * BEARER CREDENTIALS (P1-1): `access.permissions` is the OWNER's full held
+ * set. A credential's authority is that set INTERSECTED WITH ITS SCOPES, so
+ * call sites must confer against {@link conferrablePermissions}, not the raw
+ * held set, and must NOT skip the guard just because the owner is a superuser
+ * (a superuser-owned but narrowly-scoped key confers only within its scopes).
+ * The `isSuperadmin` fast-path stays valid only for cookie sessions
+ * (`grantedScopes === null`), which carry the human's full authority.
  *
  * This mirrors the credential-scope guard `ungrantableScopes`
  * (`src/lib/api-auth/scopes.ts`): a credential can never out-scope its minter,
@@ -63,4 +72,23 @@ export function unheldPermissionKeys(
 ): string[] {
   const held = new Set(heldPermissions);
   return [...new Set(requestedKeys)].filter((key) => !held.has(key));
+}
+
+/**
+ * Pure: the permissions the acting credential may actually CONFER (P1-1).
+ *
+ *   - Cookie session (`grantedScopes === null`): the full held set — the
+ *     human's authority, unchanged.
+ *   - Bearer credential: the held permissions the credential's scopes
+ *     authorize, so a narrowly-scoped key can never confer authority beyond
+ *     its scopes even when its owner (or a superuser owner) holds more.
+ *
+ * Feed the result to {@link unheldPermissionKeys} in place of the raw held set.
+ */
+export function conferrablePermissions(
+  heldPermissions: ReadonlyArray<string>,
+  grantedScopes: ReadonlyArray<string> | null,
+): string[] {
+  if (grantedScopes === null) return [...heldPermissions];
+  return heldPermissions.filter((key) => scopesAuthorize(grantedScopes, key));
 }

@@ -9,6 +9,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import {
   permissionKeysForRoles,
+  conferrablePermissions,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
@@ -145,9 +146,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // role whose conferred permissions are a subset of their own — otherwise
   // they could grant a user (including themselves) authority they lack. This
   // subsumes the old `superuser`-marker-only check.
-  if (!isSuperadmin(guard.access)) {
+  // A bearer credential is bounded by its scopes, not just its owner's
+  // permissions, and never takes the SUPERADMIN fast-path (P1-1).
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForRoles([role.id]);
-    const unheld = unheldPermissionKeys(guard.access.permissions, conferred);
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheld = unheldPermissionKeys(conferrable, conferred);
     if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 

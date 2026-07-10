@@ -1,5 +1,6 @@
 import "server-only";
 import pino, { type Logger } from "pino";
+import { redactText } from "@/lib/observability/sentry-shared";
 
 /**
  * Always-on structured server logger (OBSERVABILITY-2).
@@ -44,11 +45,25 @@ export const logger: Logger = pino({
   },
 });
 
-/** Serializes an unknown thrown value into a safe, structured shape. */
+/**
+ * Serializes an unknown thrown value into a safe, structured shape. The
+ * free-text fields (message / stack / stringified value) are run through
+ * {@link redactText} — the SAME scrubber the Sentry sink applies to
+ * `event.exception.values[].value` — so an email or a minted token that landed
+ * in an exception message (e.g. `resend 4xx: … a@b.com … drk_live_…`) never
+ * reaches the always-on stdout stream either. pino's `redact` only masks known
+ * structured field PATHS, not free text inside a message/stack. (audit #20)
+ */
 function serializeError(err: unknown): Record<string, unknown> | undefined {
   if (err === undefined) return undefined;
-  if (err instanceof Error) return { name: err.name, message: err.message, stack: err.stack };
-  return { value: String(err) };
+  if (err instanceof Error) {
+    return {
+      name: err.name,
+      message: redactText(err.message),
+      stack: err.stack ? redactText(err.stack) : undefined,
+    };
+  }
+  return { value: redactText(String(err)) };
 }
 
 export interface ServerErrorFields {

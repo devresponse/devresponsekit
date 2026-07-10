@@ -167,6 +167,9 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
       subject,
       html: bodyHtml,
       text: bodyText ?? undefined,
+      // Same key as the worker's retries (the outbox row id), so a retry after
+      // this inline send crashed post-delivery is deduped provider-side (#11).
+      idempotencyKey: `outbox-${inserted.id}`,
     });
     const now = new Date();
     await db

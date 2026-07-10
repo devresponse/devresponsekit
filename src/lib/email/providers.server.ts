@@ -20,6 +20,16 @@ export interface OutboundEmail {
   subject: string;
   html: string;
   text?: string;
+  /**
+   * Stable per-email key (the outbox row id) used to make delivery
+   * effectively-once despite the at-least-once outbox (audit #11). The worker
+   * holds no lock across the provider call, so a crash after a successful send
+   * but before the row is marked `sent` re-attempts the SAME row — this key
+   * lets the provider dedupe that retry. Resend honors it natively via
+   * `Idempotency-Key`; Mailgun has no idempotency API, so it only rides as a
+   * stable `Message-Id` (best-effort — Mailgun stays at-least-once).
+   */
+  idempotencyKey?: string;
 }
 
 export interface EmailDeliveryResult {
@@ -51,6 +61,9 @@ function createResendProvider(apiKey: string): EmailProvider {
         headers: {
           authorization: `Bearer ${apiKey}`,
           "content-type": "application/json",
+          // Effectively-once delivery: Resend dedupes retries carrying the same
+          // key within a 24h window (audit #11).
+          ...(email.idempotencyKey ? { "Idempotency-Key": email.idempotencyKey } : {}),
         },
         body: JSON.stringify({
           from: email.from,
@@ -80,6 +93,10 @@ function createMailgunProvider(apiKey: string, domain: string, baseUrl: string):
       form.set("subject", email.subject);
       form.set("html", email.html);
       if (email.text) form.set("text", email.text);
+      // Mailgun has no idempotency-key API. Ride the stable key as a fixed
+      // Message-Id so a re-sent duplicate at least shares an id downstream
+      // (best-effort; Mailgun delivery stays at-least-once — audit #11).
+      if (email.idempotencyKey) form.set("h:Message-Id", `<${email.idempotencyKey}@${domain}>`);
 
       const res = await fetch(`${baseUrl}/v3/${domain}/messages`, {
         method: "POST",

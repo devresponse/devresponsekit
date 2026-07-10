@@ -135,6 +135,14 @@ describe("drainOutbox", () => {
     });
   });
 
+  it("passes a stable per-row idempotency key to the provider (#11)", async () => {
+    const deliver = vi.fn().mockResolvedValue({ providerMessageId: "m1" });
+    state.provider = { id: "resend", deliver };
+    state.dueRow = row(0); // row id "o1"
+    await drainOutbox(10);
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey: "outbox-o1" }));
+  });
+
   it("keeps a row `pending` with backoff when delivery fails below the cap", async () => {
     state.provider = { id: "resend", deliver: vi.fn().mockRejectedValue(new Error("boom")) };
     state.dueRow = row(0);

@@ -17,7 +17,11 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { createApiKey } from "@/lib/api-auth/api-keys.server";
-import { normalizeScopes, ungrantableScopes } from "@/lib/api-auth/scopes";
+import {
+  normalizeScopes,
+  ungrantableScopes,
+  ungrantableScopesForCaller,
+} from "@/lib/api-auth/scopes";
 import { getServerEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -145,9 +149,16 @@ export async function GET(request: NextRequest) {
  *
  * Threat / contract:
  *   - The owner must exist and have an `active` access decision.
- *   - The requested scopes are validated against the OWNER's authority
- *     ({@link ungrantableScopes}) — never the admin's — so an
- *     admin-minted key can never out-scope the user who will wield it.
+ *   - The requested scopes are validated against BOTH bounds:
+ *     - the OWNER's authority ({@link ungrantableScopes}), so an
+ *       admin-minted key can never out-scope the user who will wield it;
+ *     - AND the acting admin's own grantable authority
+ *       ({@link ungrantableScopesForCaller}), so an `admin.apikeys.manage`
+ *       holder cannot mint an on-behalf key carrying a more-privileged
+ *       co-member's (or a superuser owner's) permissions and escalate past
+ *       their own authority by pocketing the plaintext. Mirrors the actor
+ *       bound already enforced on /api/v1/admin/oauth-clients and
+ *       /api/v1/me/api-keys.
  *   - Unknown scopes are rejected.
  */
 
@@ -202,11 +213,33 @@ export async function POST(request: NextRequest) {
   }
 
   const scopes = normalizeScopes(input.scopes);
-  const ungrantable = ungrantableScopes(ownerAccess.permissions, scopes);
-  if (ungrantable.length > 0) {
+
+  // Bound 1 — the minted key authenticates AS the owner, so it must never
+  // carry a scope the owner does not hold (a key can't out-scope its wielder).
+  const ownerUngrantable = ungrantableScopes(ownerAccess.permissions, scopes);
+  if (ownerUngrantable.length > 0) {
     return adminErrorResponse("invalid_scope", 422, request, {
       requestId: guard.requestId,
-      extra: { ungrantableScopes: ungrantable },
+      extra: { ungrantableScopes: ownerUngrantable },
+    });
+  }
+
+  // Bound 2 — the acting admin may only confer scopes they can grant
+  // themselves. Without this, an `admin.apikeys.manage` holder could mint an
+  // on-behalf key carrying a more-privileged co-member's authority (up to a
+  // superuser owner's) and wield the returned plaintext, escalating past
+  // their own permissions. For a cookie admin `grantedScopes` is null (full
+  // user authority); a superadmin holds every permission so this is a no-op
+  // for them.
+  const actorUngrantable = ungrantableScopesForCaller(
+    guard.access.permissions,
+    guard.grantedScopes,
+    scopes,
+  );
+  if (actorUngrantable.length > 0) {
+    return adminErrorResponse("invalid_scope", 422, request, {
+      requestId: guard.requestId,
+      extra: { ungrantableScopes: actorUngrantable },
     });
   }
 

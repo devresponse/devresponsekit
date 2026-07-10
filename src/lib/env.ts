@@ -16,10 +16,20 @@ import { z } from "zod";
 if (typeof window !== "undefined") {
   throw new Error("env.ts must never be imported from client-side code");
 }
+/**
+ * The obvious signing-secret placeholders shipped in `.env.example`. A
+ * deployment that copies the example file without replacing them must fail
+ * closed in production rather than boot on a publicly-known secret. (audit #12)
+ */
+const EXAMPLE_SECRET_PLACEHOLDERS: ReadonlySet<string> = new Set([
+  "replace-with-strong-random-secret",
+  "replace-with-a-different-strong-random-secret",
+]);
+
 const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-    BETTER_AUTH_SECRET: z.string().min(16, "BETTER_AUTH_SECRET must be at least 16 chars"),
+    BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET must be at least 32 chars"),
     BETTER_AUTH_URL: z.url(),
     DATABASE_URL: z.string().min(1),
     DATABASE_TEST_URL: z.string().optional(),
@@ -60,7 +70,7 @@ const serverEnvSchema = z
     GITHUB_CLIENT_SECRET: z.string().optional().default(""),
     SSO_HANDOFF_ISSUER: z.string().min(1),
     SSO_HANDOFF_AUDIENCE_PREFIX: z.string().min(1),
-    SSO_HANDOFF_JWT_SECRET: z.string().min(16, "SSO_HANDOFF_JWT_SECRET must be at least 16 chars"),
+    SSO_HANDOFF_JWT_SECRET: z.string().min(32, "SSO_HANDOFF_JWT_SECRET must be at least 32 chars"),
     SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
     /**
      * Identifier of THIS deployment when consuming SSO handoffs. Required (not
@@ -242,6 +252,32 @@ const serverEnvSchema = z
           "must not be enabled in a production deployment (it disables sign-in rate limiting); permitted only outside production or in CI",
       });
     }
+    // Signing-secret hygiene (audit #12/#22). BETTER_AUTH_SECRET signs sessions
+    // and SSO_HANDOFF_JWT_SECRET signs the SSO handoff JWT — two distinct trust
+    // domains. Reusing one value for both collapses them, so require they
+    // differ. (This may reject an existing deployment that reused a secret —
+    // that is the intended prompt to split them.)
+    if (env.BETTER_AUTH_SECRET === env.SSO_HANDOFF_JWT_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SSO_HANDOFF_JWT_SECRET"],
+        message: "must differ from BETTER_AUTH_SECRET (they sign distinct trust domains)",
+      });
+    }
+    // And a production deployment must never boot on a publicly-known
+    // .env.example placeholder — an env copied but not edited fails closed.
+    if (env.NODE_ENV === "production") {
+      for (const key of ["BETTER_AUTH_SECRET", "SSO_HANDOFF_JWT_SECRET"] as const) {
+        if (EXAMPLE_SECRET_PLACEHOLDERS.has(env[key])) {
+          ctx.addIssue({
+            code: "custom",
+            path: [key],
+            message:
+              "must not use the .env.example placeholder in production — generate a real random secret (openssl rand -base64 32)",
+          });
+        }
+      }
+    }
   });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -289,13 +325,16 @@ function isBuildPhase(): boolean {
 function buildPhasePlaceholders(): ServerEnv {
   return serverEnvSchema.parse({
     NODE_ENV: "production",
-    BETTER_AUTH_SECRET: "build-placeholder-secret-0000",
+    // ≥32 chars and DISTINCT from each other so they satisfy the tightened
+    // min-length + must-differ rules; discarded after build-time page-data
+    // collection (never a running-server secret).
+    BETTER_AUTH_SECRET: "build-phase-placeholder-better-auth-secret",
     BETTER_AUTH_URL: "http://localhost:3000",
     DATABASE_URL: "postgresql://build:build@localhost:5432/build",
     SSO_HANDOFF_ISSUER: "build-placeholder",
     SSO_HANDOFF_AUDIENCE_PREFIX: "build-placeholder",
     SSO_HANDOFF_APPLICATION_ID: "build-placeholder",
-    SSO_HANDOFF_JWT_SECRET: "build-placeholder-secret-0000",
+    SSO_HANDOFF_JWT_SECRET: "build-phase-placeholder-sso-handoff-secret",
   });
 }
 

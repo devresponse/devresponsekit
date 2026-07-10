@@ -7,6 +7,7 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { createEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
 import { isAllowedEnterpriseOrigin, isHttpsOrigin } from "@/lib/admin/enterprise-apps.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([
         eb("a.id", "ilike", like),

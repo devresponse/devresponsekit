@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
     if (cleaned.length > 0) base = base.where("status", "in", cleaned);
   }
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
     );

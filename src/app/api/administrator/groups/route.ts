@@ -6,6 +6,7 @@ import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   parseListQuery,
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
     base = base.where("g.organization_id", "=", orgFilter);
   }
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) => eb.or([eb("g.key", "ilike", like), eb("g.name", "ilike", like)]));
   }
 

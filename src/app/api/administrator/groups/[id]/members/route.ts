@@ -6,6 +6,7 @@ import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   parseListQuery,
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .innerJoin("app_users as u", "u.id", "gm.app_user_id")
     .where("gm.group_id", "=", id);
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([eb("u.primary_email", "ilike", like), eb("u.display_name", "ilike", like)]),
     );

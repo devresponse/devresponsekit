@@ -6,6 +6,7 @@ import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { likeContains } from "@/lib/admin/list-query.server";
 import { DEFAULT_ADMIN_BULK_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import {
@@ -170,7 +171,7 @@ export async function POST(request: NextRequest) {
       if (cleaned.length > 0) q = q.where("status", "in", cleaned);
     }
     if (parsed.data.filters.q) {
-      const like = `%${parsed.data.filters.q}%`;
+      const like = likeContains(parsed.data.filters.q);
       q = q.where((eb) =>
         eb.or([eb("primary_email", "ilike", like), eb("display_name", "ilike", like)]),
       );

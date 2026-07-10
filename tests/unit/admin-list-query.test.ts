@@ -3,6 +3,7 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  likeContains,
   offsetFor,
   parseListQuery,
 } from "@/lib/admin/list-query.server";
@@ -50,6 +51,12 @@ describe("parseListQuery", () => {
     });
     expect(q.page).toBe(1);
     expect(q.pageSize).toBe(25);
+  });
+
+  it("caps the free-text q at 200 chars", () => {
+    const long = "a".repeat(500);
+    const q = parseListQuery(p(`q=${long}`), { allowedSortFields: [] });
+    expect(q.q).toHaveLength(200);
   });
 
   it("drops unknown sort fields and parses asc/desc", () => {
@@ -203,5 +210,23 @@ describe("applySortAndPagination", () => {
     expect(ops.find((o) => o.kind === "limit")?.arg).toBe(10);
     expect(ops.find((o) => o.kind === "offset")?.arg).toBe(10);
     expect(ops.filter((o) => o.kind === "orderBy")).toHaveLength(1);
+  });
+});
+
+describe("likeContains (LIKE metacharacter escaping)", () => {
+  it("wraps a plain term for a substring match", () => {
+    expect(likeContains("alice")).toBe("%alice%");
+  });
+
+  it("escapes %, _ and backslash so they match literally", () => {
+    expect(likeContains("50%")).toBe("%50\\%%");
+    expect(likeContains("a_b")).toBe("%a\\_b%");
+    expect(likeContains("back\\slash")).toBe("%back\\\\slash%");
+  });
+
+  it("escapes a term that is entirely wildcards (no match-all leak)", () => {
+    // Without escaping this would be `%%%` — matching every row.
+    expect(likeContains("%")).toBe("%\\%%");
+    expect(likeContains("%_%")).toBe("%\\%\\_\\%%");
   });
 });

@@ -7,6 +7,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   buildListResponse,
   executeListWithTotal,
   offsetFor,
@@ -99,7 +100,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([
         eb("k.name", "ilike", like),

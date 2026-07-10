@@ -4,6 +4,7 @@ import { sql } from "kysely";
 import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
+  likeContains,
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .where("ur.role_id", "=", id);
 
   if (query.q) {
-    const like = `%${query.q}%`;
+    const like = likeContains(query.q);
     base = base.where((eb) =>
       eb.or([eb("u.primary_email", "ilike", like), eb("u.display_name", "ilike", like)]),
     );

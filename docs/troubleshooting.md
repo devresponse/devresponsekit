@@ -267,7 +267,8 @@ deliver; check `app_outbox` for `failed` rows and the recorded error (see the
 incident playbook in Part 1 §4 for the serverless drain cron).
 
 **SSO handoff fails.**
-- The token is single-use and valid ≤60s — a reused or expired token is rejected.
+- The token is single-use and valid ≤60s (the signer clamps any larger
+  `SSO_HANDOFF_TTL_SECONDS` down to 60) — a reused or expired token is rejected.
 - `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, and `SSO_HANDOFF_JWT_SECRET`
   must match between hub and receiver; the receiver's `SSO_HANDOFF_APPLICATION_ID`
   must match the audience.

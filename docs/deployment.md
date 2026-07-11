@@ -15,7 +15,7 @@ This repo deploys to **Vercel** with a **Neon** serverless Postgres database via
 
 ## 1. How this repo deploys
 
-The pipeline is **GitHub-Actions-driven and migrate-first** — it does **not** use Vercel's native "build on git push" integration. [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs on every push to `main` (or manual `workflow_dispatch`), gated behind a `production` GitHub Environment, and does, in order:
+The pipeline is **GitHub-Actions-driven, CI-gated, and migrate-first** — it does **not** use Vercel's native "build on git push" integration. [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs when the **CI workflow completes successfully for `main`** (`workflow_run` trigger — a failed CI run never deploys), or on manual `workflow_dispatch`, gated behind a `production` GitHub Environment, and does, in order:
 
 1. `pnpm db:app:migrate` against the **direct (non-pooled)** Neon endpoint (`PRODUCTION_DIRECT_DATABASE_URL`).
 2. `vercel pull` → `vercel build --prod` → `vercel deploy --prebuilt --prod` — builds locally in CI and promotes the prebuilt output.
@@ -75,7 +75,7 @@ Notes:
 
 **Set runtime env in Vercel (Production).** [Configuration](./configuration.md) is the **authoritative** list of every variable (≈60); set it there. Validation is at **runtime, not build time** — a missing required var will not fail `next build`, it throws a 500 on the first request that needs it, so set everything before sending real traffic. The deployment-critical must-set production secrets:
 
-- `BETTER_AUTH_SECRET` — strong random string (≥ 16 chars).
+- `BETTER_AUTH_SECRET` — strong random string (≥ 32 chars).
 - `BETTER_AUTH_URL` — `https://<your-domain>` (also set `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_PRODUCTION_HOST` to the same origin/host).
 - `DATABASE_URL` — see the endpoint decision below.
 - The four `SSO_HANDOFF_*` vars — `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, `SSO_HANDOFF_JWT_SECRET` (a **second**, distinct strong secret). Required **even if you never use cross-app SSO** — they are validated at boot; set sane placeholders.
@@ -133,7 +133,7 @@ A production-ready multi-stage `Dockerfile` (built from the Next.js standalone o
 
 ## 7. CI
 
-CI is **[`.github/workflows/`](../.github/workflows/)** (source of truth). [`ci.yml`](../.github/workflows/ci.yml) runs on push + pull_request and validates quality and behavior — typecheck, lint, format, build, sharded tests + coverage gate, DB-backed integration tests, Playwright e2e + accessibility, a `pnpm audit` hard gate, SDK/schema/doc-link drift checks — but does **not** itself deploy. Separate workflows run Trivy, CodeQL, and gitleaks security scans. See [Testing](./testing.md).
+CI is **[`.github/workflows/`](../.github/workflows/)** (source of truth). [`ci.yml`](../.github/workflows/ci.yml) runs on push + pull_request and validates quality and behavior — typecheck, lint, format, build, tests + coverage gate, DB-backed integration tests, Playwright e2e + accessibility, a `pnpm audit` hard gate, SDK/schema/doc-link drift checks — but does **not** itself deploy: [`deploy.yml`](../.github/workflows/deploy.yml) fires only after this workflow **succeeds** on `main` (§1). Separate workflows run Trivy, CodeQL, gitleaks, and an advisory Stryker mutation-testing pass on the security core (`mutation.yml`). See [Testing](./testing.md).
 
 ---
 

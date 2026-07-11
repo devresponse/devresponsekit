@@ -22,9 +22,11 @@ the full handoff spec in [`specs.md` §22](../specs.md), and the companion
 credential/gateway designs in [Design: API Keys & Access Tokens](./design-api-keys-and-tokens.md)
 and [Design: MCP Agent Gateway](./design-mcp-agent-gateway.md).
 
-> **Status: design / not yet built.** `devresponseapps` does not exist yet. This
-> doc records the target shape and the load-bearing decisions so the fork can be
-> executed (or re-evaluated) deliberately.
+> **Status: built.** The `devresponseapps` repository now exists and implements
+> all three auth options as separate apps (`app-standalone` = A, `app-handoff` = B,
+> `app-shared` = C). This doc remains the design + decision record; the
+> as-built, step-by-step walkthrough is the
+> [Satellite Apps — Integration Guide](./integration-satellite-apps.md).
 
 ---
 

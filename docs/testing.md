@@ -17,11 +17,11 @@ The suite is layered, with **security and tenant-isolation invariants treated as
 
 | Layer | Tool | Location | Focus |
 | --- | --- | --- | --- |
-| **Unit** | Vitest | `tests/unit` (~88 files) | Pure logic, guards, scope primitives, permission resolution, and **invariant tests** (route scope, rate-limit, locale parity, catalog count). |
-| **Component** | Vitest + Testing Library (jsdom) | `tests/component` (~50 files) | Client React components (grids, forms, comboboxes) rendered against real primitives. |
-| **Integration** | Vitest + mocked DB/auth | `tests/integration` (~41 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
-| **Security** | Vitest | `tests/security` (~13 files) | Cross-tenant isolation, privilege-escalation guards, schema hardening, secret handling. See [§5](#5-security-suites). |
-| **DB-backed** | Vitest + real Postgres | `tests/db` (~8 suites, `pnpm test:db`) | Suites that run against a live Postgres (`vitest.db.config.ts`, needs `DATABASE_TEST_URL`). |
+| **Unit** | Vitest | `tests/unit` (~105 files) | Pure logic, guards, scope primitives, permission resolution, and **invariant tests** (route scope, rate-limit, locale parity, catalog count). |
+| **Component** | Vitest + Testing Library (jsdom) | `tests/component` (~51 files) | Client React components (grids, forms, comboboxes) rendered against real primitives. |
+| **Integration** | Vitest + mocked DB/auth | `tests/integration` (~50 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
+| **Security** | Vitest | `tests/security` (~14 files) | Cross-tenant isolation, privilege-escalation guards, schema hardening, secret handling — including **property/fuzz tests** (fast-check) over the permission algebra and injection surfaces. See [§5](#5-security-suites). |
+| **DB-backed** | Vitest + real Postgres | `tests/db` (~10 suites, `pnpm test:db`) | Suites that run against a live Postgres (`vitest.db.config.ts`, needs `DATABASE_TEST_URL`). |
 | **E2E** | Playwright | `tests/e2e` (`.spec.ts`) | Full browser flows against a running, seeded app. |
 | **Accessibility** | Playwright + axe-core | `tests/accessibility` (`.spec.ts`) | WCAG checks on key screens. |
 | Shared helpers / setup | — | `tests/helpers`, `tests/setup` | Render harness, factories, jsdom polyfills. |
@@ -34,6 +34,8 @@ Vitest unit/component/integration/security tests **mock** the database and auth 
 - **Testing Library** (`@testing-library/react`, `user-event`, `jest-dom`) for component tests in **jsdom**.
 - **Playwright** + **axe-core** for browser e2e and accessibility.
 - **MSW** and **supertest** are available for HTTP mocking/assertions.
+- **fast-check** — property-based/fuzz testing, used in the security suites (permission algebra, credential codec, injection surfaces).
+- **Stryker** — mutation testing on the security core (`pnpm test:mutation`); runs as an **advisory** CI workflow ([`mutation.yml`](../.github/workflows/mutation.yml)) that proves the security tests actually assert (not just execute). Its sandbox (`.stryker-tmp/`) is gitignored.
 
 ## 3. Running tests
 
@@ -47,6 +49,7 @@ pnpm test:security
 pnpm test:db         # DB-backed suite vs a real Postgres (vitest.db.config.ts, needs DATABASE_TEST_URL)
 pnpm test:coverage   # full run WITH the coverage ratchet (what CI gates on)
 pnpm test:serial     # plain `vitest run` (no sharding) — for debugging only
+pnpm test:mutation   # Stryker mutation testing on the security core (slow; advisory in CI)
 
 # Browser suites (need browsers + a running, seeded app)
 pnpm test:e2e        # Playwright e2e

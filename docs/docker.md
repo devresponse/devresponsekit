@@ -68,16 +68,17 @@ container fails fast instead of serving broken auth.
 
 | Variable | Notes |
 | --- | --- |
-| `BETTER_AUTH_SECRET` | ≥ 16 chars; signs sessions. Use a unique random value per environment. |
+| `BETTER_AUTH_SECRET` | ≥ 32 chars; signs sessions. Use a unique random value per environment. |
 | `BETTER_AUTH_URL` | The app's public base URL, e.g. `https://app.example.com`. |
 | `DATABASE_URL` | Postgres connection string. |
 | `SSO_HANDOFF_ISSUER` | SSO handoff issuer id. |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | SSO handoff audience prefix. |
-| `SSO_HANDOFF_JWT_SECRET` | ≥ 16 chars; independent of `BETTER_AUTH_SECRET`. |
+| `SSO_HANDOFF_APPLICATION_ID` | This deployment's application id (required at boot even if SSO is unused). |
+| `SSO_HANDOFF_JWT_SECRET` | ≥ 32 chars; independent of `BETTER_AUTH_SECRET`. |
 
 Common optional variables: `DB_SCHEMA` (default `auth`),
 `NEXT_PUBLIC_APP_URL`, `ADMIN_TRUSTED_ORIGINS`, the `EMAIL_*` provider keys,
-the `API_*` machine-credential switches, `SSO_HANDOFF_APPLICATION_ID`, and
+the `API_*` machine-credential switches, and
 `DOCS_*`. The full, authoritative list with defaults and purpose is in
 [`.env.example`](../.env.example) and [configuration.md](configuration.md).
 
@@ -90,6 +91,7 @@ BETTER_AUTH_URL=https://app.example.com
 DATABASE_URL=postgres://app:***@db:5432/app
 SSO_HANDOFF_ISSUER=devresponse
 SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app
+SSO_HANDOFF_APPLICATION_ID=main
 SSO_HANDOFF_JWT_SECRET=...
 ```
 

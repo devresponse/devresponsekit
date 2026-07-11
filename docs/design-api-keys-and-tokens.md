@@ -196,6 +196,8 @@ _Source: `src/lib/api-auth/revocation.server.ts`._
 
 Access tokens are stateless, so killing one before its natural `exp` means recording its `jti` in `app_revoked_tokens`; the resolver rejects any token whose `jti` is present (`isJtiRevoked`). `revokeJti(jti, expiresAt, reason?)` is idempotent (`on conflict do nothing`) and **opportunistically prunes** expired rows on every write — it is the table's only writer, so this keeps the table bounded to live revocations without a scheduled job (D3); the scheduled `pnpm db:prune` covers deployments that never revoke. After a token's `exp`, the signature/exp check rejects it regardless, so the row is safe to drop.
 
+> **Current wiring status.** The read side (`isJtiRevoked`) is enforced on every JWT resolution, but **no route or lifecycle event calls `revokeJti` yet** — revoking a key/client stops *minting*, and it does not denylist already-issued tokens. Today the operational way to kill an outstanding, unexpired JWT is to **ban its owner** (AUTH-1 cuts machine access immediately, §3); otherwise it dies at `exp` (≤15 min by default). Wire `revokeJti` into a revocation flow before advertising per-token revocation to integrators.
+
 ---
 
 ## 7. Scope model & the intersection rule
@@ -250,7 +252,7 @@ Optimistic concurrency uses **weak ETags** derived from a row's `updated_at`: `u
 
 _Source: `src/lib/api-auth/v1-guard.server.ts`._
 
-Mirrors `requireAdminPermission` but speaks problem+json and exposes the resolved caller for audit + per-credential rate limiting. The authorization decision is identical to the cookie surface: same status/membership gate (`decideSecureAccess`), same **permission ∩ scope** rule. The CSRF/origin guard runs only for **ambient** (cookie) credentials — bearer credentials are non-ambient (`isBearer`), so it does not apply. A denied request emits an `api.access.denied` audit event and a `403` carrying `detail: "The credential lacks the required permission or scope."`. `requireApiAccount` is the parallel guard for the `account.*` self-service surface.
+Mirrors `requireAdminPermission` but speaks problem+json and exposes the resolved caller for audit + per-credential rate limiting. The authorization decision is identical to the cookie surface: same status/membership gate (`decideSecureAccess`), same **permission ∩ scope** rule. The CSRF/origin guard runs only for **ambient** (cookie) credentials — bearer credentials are non-ambient (`isBearer`), so it does not apply. A denied request emits an `api.access.denied` audit event and a `403` carrying `detail: "The credential lacks the required permission or scope."`. `requireAccountUser` (`src/lib/account/guard.server.ts`) is the parallel guard for the `account.*` self-service surface.
 
 ---
 
@@ -298,7 +300,7 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 - **Confidentiality at rest** — no plaintext secret is ever stored; JWTs hold no server secret.
 - **Least privilege** — `scopes ∩ owner permissions`, enforced at both creation and use; no credential out-scopes its creator (§7).
 - **Tenant isolation** — credentials act in their bound org, not the active-org cookie (MACHINE-1).
-- **Revocation completeness** — keys/clients via `status`; JWTs via the `jti` denylist; a Better Auth ban immediately stops all of a user's machine credentials (AUTH-1), and `unban` restores them.
+- **Revocation completeness** — keys/clients via `status`; a Better Auth ban immediately stops all of a user's machine credentials **including outstanding JWTs** (AUTH-1), and `unban` restores them. The `jti` denylist is enforced at resolution but has no writer wired yet (§6.5) — until it does, ban-the-owner is the per-token kill switch.
 - **Side-channel resistance** — constant-time secret comparison (P2-3).
 - **Auditability** — every issuance/denial writes an audit event with a `requestId` that matches the response `x-request-id` header.
 

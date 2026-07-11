@@ -1160,6 +1160,10 @@
           "subject": "Тема",
           "updatedAt": "Оновлено"
         },
+        "filters": {
+          "key": "Тип шаблону",
+          "locale": "Мова"
+        },
         "fields": {
           "subject": "Тема",
           "bodyHtml": "HTML-тіло",

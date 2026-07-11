@@ -1160,6 +1160,10 @@
           "subject": "Asunto",
           "updatedAt": "Actualizado"
         },
+        "filters": {
+          "key": "Tipo de plantilla",
+          "locale": "Idioma"
+        },
         "fields": {
           "subject": "Asunto",
           "bodyHtml": "Cuerpo HTML",

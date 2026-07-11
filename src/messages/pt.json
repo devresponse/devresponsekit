@@ -1160,6 +1160,10 @@
           "subject": "Assunto",
           "updatedAt": "Atualizado"
         },
+        "filters": {
+          "key": "Tipo de modelo",
+          "locale": "Idioma"
+        },
         "fields": {
           "subject": "Assunto",
           "bodyHtml": "Corpo HTML",

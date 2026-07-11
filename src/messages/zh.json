@@ -1160,6 +1160,10 @@
           "subject": "主题",
           "updatedAt": "更新时间"
         },
+        "filters": {
+          "key": "模板类型",
+          "locale": "语言"
+        },
         "fields": {
           "subject": "主题",
           "bodyHtml": "HTML 正文",

@@ -1439,6 +1439,10 @@
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",
       "reset": "Reset zoom"
+    },
+    "image": {
+      "expand": "Expand image to full view",
+      "title": "Image — full view"
     }
   },
   "help": {
@@ -1458,6 +1462,10 @@
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",
       "reset": "Reset zoom"
+    },
+    "image": {
+      "expand": "Expand image to full view",
+      "title": "Image — full view"
     }
   },
   "errorBoundary": {

@@ -1439,6 +1439,10 @@
       "zoomIn": "拡大",
       "zoomOut": "縮小",
       "reset": "ズームをリセット"
+    },
+    "image": {
+      "expand": "画像を全体表示に展開",
+      "title": "画像 — 全体表示"
     }
   },
   "help": {
@@ -1458,6 +1462,10 @@
       "zoomIn": "拡大",
       "zoomOut": "縮小",
       "reset": "ズームをリセット"
+    },
+    "image": {
+      "expand": "画像を全体表示に展開",
+      "title": "画像 — 全体表示"
     }
   },
   "errorBoundary": {

@@ -1,6 +1,6 @@
 // Screenshot capture for the demo.devresponse.ca walkthrough.
 // Run from the repo root: node help/capture.mjs
-// Produces 1024x768 PNGs in help/screenshots/.
+// Produces 1440x900 PNGs in help/screenshots/.
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
@@ -68,7 +68,7 @@ async function shoot(page, slug, route, opts = {}) {
   await page.screenshot({ path: path.join(OUT, `${slug}.png`) });
   console.log(`ok  ${slug}  ${route}`);
   for (let i = 0; i < (opts.extraScrolls ?? 0); i++) {
-    await page.mouse.move(512, 400);
+    await page.mouse.move(720, 450);
     await page.mouse.wheel(0, 650);
     await page.waitForTimeout(600);
     await page.screenshot({ path: path.join(OUT, `${slug}--${i + 2}.png`) });
@@ -84,7 +84,7 @@ function pngSize(file) {
 fs.mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 const context = await browser.newContext({
-  viewport: { width: 1024, height: 768 },
+  viewport: { width: 1440, height: 900 },
   colorScheme: "light",
   deviceScaleFactor: 1,
 });
@@ -107,9 +107,9 @@ await browser.close();
 let bad = 0;
 for (const f of fs.readdirSync(OUT).filter((f) => f.endsWith(".png"))) {
   const { w, h } = pngSize(path.join(OUT, f));
-  if (w !== 1024 || h !== 768) {
+  if (w !== 1440 || h !== 900) {
     console.error(`WRONG SIZE ${f}: ${w}x${h}`);
     bad++;
   }
 }
-console.log(bad === 0 ? "all screenshots are 1024x768" : `${bad} screenshots have wrong size`);
+console.log(bad === 0 ? "all screenshots are 1440x900" : `${bad} screenshots have wrong size`);

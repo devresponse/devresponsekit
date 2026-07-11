@@ -32,6 +32,7 @@ coverage
 playwright-report
 test-results
 .vitest-cache
+.stryker-tmp/
 
 # Generated
 src/db/schema/generated.ts

@@ -229,7 +229,8 @@
     "skipToMain": "Skip to main content",
     "skipToNavigation": "Skip to navigation",
     "account": "Account",
-    "documentation": "Documentation"
+    "documentation": "Documentation",
+    "help": "Help"
   },
   "administrator": {
     "appTitle": "Administrator",
@@ -1431,6 +1432,25 @@
     "onThisPage": "On this page",
     "lastUpdated": "Last updated {date}",
     "breadcrumbHome": "Documentation",
+    "readDocument": "Read",
+    "diagram": {
+      "expand": "Expand diagram to full view",
+      "title": "Diagram — full view",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out",
+      "reset": "Reset zoom"
+    }
+  },
+  "help": {
+    "appTitle": "Help",
+    "index": {
+      "title": "Help",
+      "description": "A screenshot walkthrough of every screen in the application."
+    },
+    "emptyCatalog": "No documents are available to you yet.",
+    "onThisPage": "On this page",
+    "lastUpdated": "Last updated {date}",
+    "breadcrumbHome": "Help",
     "readDocument": "Read",
     "diagram": {
       "expand": "Expand diagram to full view",

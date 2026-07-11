@@ -5,6 +5,7 @@ import DOMPurify from "dompurify";
 import { useTheme } from "@/components/theme/theme-provider";
 import { useTranslations } from "next-intl";
 import { DiagramModal } from "./diagram-modal";
+import type { DocSpace } from "@/lib/docs/source/types";
 
 /**
  * DocArticle
@@ -30,10 +31,10 @@ import { DiagramModal } from "./diagram-modal";
  */
 const MERMAID_SELECTOR = '.mermaid[data-rendered="true"]';
 
-export function DocArticle({ html }: { html: string }) {
+export function DocArticle({ html, space = "docs" }: { html: string; space?: DocSpace }) {
   const ref = useRef<HTMLElement>(null);
   const { resolvedTheme } = useTheme();
-  const t = useTranslations("docs");
+  const t = useTranslations(space);
   // Latest translator without forcing the render effect to re-run on every
   // render (which would re-import and re-render Mermaid needlessly).
   const tRef = useRef(t);
@@ -136,7 +137,7 @@ export function DocArticle({ html }: { html: string }) {
         dangerouslySetInnerHTML={{ __html: html }}
       />
       {diagramSvg !== null ? (
-        <DiagramModal svg={diagramSvg} onClose={() => setDiagramSvg(null)} />
+        <DiagramModal svg={diagramSvg} onClose={() => setDiagramSvg(null)} space={space} />
       ) : null}
     </>
   );

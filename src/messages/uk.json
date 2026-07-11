@@ -229,7 +229,8 @@
     "skipToMain": "Перейти до основного вмісту",
     "skipToNavigation": "Перейти до навігації",
     "account": "Обліковий запис",
-    "documentation": "Документація"
+    "documentation": "Документація",
+    "help": "Довідка"
   },
   "administrator": {
     "appTitle": "Адміністратор",
@@ -1431,6 +1432,25 @@
     "onThisPage": "На цій сторінці",
     "lastUpdated": "Востаннє оновлено {date}",
     "breadcrumbHome": "Документація",
+    "readDocument": "Читати",
+    "diagram": {
+      "expand": "Розгорнути діаграму на весь екран",
+      "title": "Діаграма — повний перегляд",
+      "zoomIn": "Збільшити",
+      "zoomOut": "Зменшити",
+      "reset": "Скинути масштаб"
+    }
+  },
+  "help": {
+    "appTitle": "Довідка",
+    "index": {
+      "title": "Довідка",
+      "description": "Покроковий огляд кожного екрана застосунку зі знімками екрана."
+    },
+    "emptyCatalog": "Для вас поки немає доступних документів.",
+    "onThisPage": "На цій сторінці",
+    "lastUpdated": "Востаннє оновлено {date}",
+    "breadcrumbHome": "Довідка",
     "readDocument": "Читати",
     "diagram": {
       "expand": "Розгорнути діаграму на весь екран",

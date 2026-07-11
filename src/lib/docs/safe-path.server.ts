@@ -2,6 +2,7 @@ import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getServerEnv } from "@/lib/env";
+import type { DocSpace } from "./source/types";
 
 /**
  * Path-safety boundary for the documentation viewer.
@@ -91,23 +92,28 @@ export function isPathInsideRoot(root: string, candidate: string): boolean {
   return !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
-let cachedRoot: string | null = null;
+const cachedRoots = new Map<DocSpace, string>();
 
 /**
- * Resolves and caches the canonical (symlink-free) absolute docs root.
- * Defaults to `<cwd>/docs` when `DOCS_ROOT` is unset.
+ * Resolves and caches the canonical (symlink-free) absolute content root
+ * for a space. The docs space defaults to `<cwd>/docs` when `DOCS_ROOT`
+ * is unset; the help space defaults to `<cwd>/help` when `HELP_ROOT` is
+ * unset.
  */
-export async function getDocsRoot(): Promise<string> {
-  if (cachedRoot) return cachedRoot;
-  const configured = getServerEnv().DOCS_ROOT;
-  const base = configured ? path.resolve(configured) : path.resolve(process.cwd(), "docs");
-  cachedRoot = await fs.realpath(base);
-  return cachedRoot;
+export async function getDocsRoot(space: DocSpace = "docs"): Promise<string> {
+  const cached = cachedRoots.get(space);
+  if (cached) return cached;
+  const env = getServerEnv();
+  const configured = space === "help" ? env.HELP_ROOT : env.DOCS_ROOT;
+  const base = configured ? path.resolve(configured) : path.resolve(process.cwd(), space);
+  const root = await fs.realpath(base);
+  cachedRoots.set(space, root);
+  return root;
 }
 
-/** Test seam: forget the cached root so a new `DOCS_ROOT` takes effect. */
+/** Test seam: forget the cached roots so a new `DOCS_ROOT`/`HELP_ROOT` takes effect. */
 export function resetDocsRootCache(): void {
-  cachedRoot = null;
+  cachedRoots.clear();
 }
 
 /**
@@ -137,10 +143,13 @@ export interface ResolvedDoc {
  * the `.md` then `.mdx` extension. Returns `null` for unsafe slugs or
  * misses — callers map that to `notFound()`.
  */
-export async function resolveDocFile(slug: string | string[]): Promise<ResolvedDoc | null> {
+export async function resolveDocFile(
+  slug: string | string[],
+  space: DocSpace = "docs",
+): Promise<ResolvedDoc | null> {
   const segments = splitSlug(slug);
   if (!segments) return null;
-  const root = await getDocsRoot();
+  const root = await getDocsRoot(space);
   const relBase = segments.join(path.sep);
 
   for (const ext of DOC_EXTENSIONS) {
@@ -166,7 +175,10 @@ export interface ResolvedAsset {
  * file inside the docs root, restricted to the image allow-list. Returns
  * `null` for unsafe paths, disallowed extensions, or misses.
  */
-export async function resolveAssetFile(slug: string | string[]): Promise<ResolvedAsset | null> {
+export async function resolveAssetFile(
+  slug: string | string[],
+  space: DocSpace = "docs",
+): Promise<ResolvedAsset | null> {
   const segments = splitSlug(slug);
   if (!segments) return null;
   const last = segments[segments.length - 1]!;
@@ -174,7 +186,7 @@ export async function resolveAssetFile(slug: string | string[]): Promise<Resolve
   const contentType = IMAGE_CONTENT_TYPES[ext];
   if (!contentType) return null;
 
-  const root = await getDocsRoot();
+  const root = await getDocsRoot(space);
   const candidate = path.resolve(root, segments.join(path.sep));
   if (!isPathInsideRoot(root, candidate)) return null;
   const real = await realpathInside(root, candidate);

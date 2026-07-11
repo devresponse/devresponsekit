@@ -178,6 +178,7 @@ interface InternalMenuItem {
     | "workspace"
     | "account"
     | "documentation"
+    | "help"
     | "admin"
     | "users"
     | "audit"
@@ -224,6 +225,15 @@ const DEFAULT_SHELL_MENU: InternalMenuItem[] = [
     icon: "book-open",
     // User-level: every active member can read the documentation. Per-doc
     // visibility tightens access inside the app, not at the launcher.
+    requiredPermissions: ["shell.view"],
+  },
+  {
+    id: "help",
+    labelKey: "help",
+    href: "/app/help",
+    icon: "circle-help",
+    // Identical to the documentation entry: user-level, gated on the
+    // membership baseline; per-doc visibility applies inside the app.
     requiredPermissions: ["shell.view"],
   },
   {

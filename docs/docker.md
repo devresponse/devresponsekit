@@ -222,9 +222,10 @@ volumes:
 - **Observability is opt-in.** Sentry only initializes when
   `NEXT_PUBLIC_SENTRY_DSN` is set; the image is unchanged otherwise. See
   [configuration.md](configuration.md).
-- **In-app docs viewer.** `docs/` is copied into the image so the `/docs`
-  viewer works out of the box (it defaults to `<cwd>/docs`). Override with
-  `DOCS_ROOT` to serve a different directory (e.g. a mounted volume).
+- **In-app docs + help viewers.** `docs/` and `help/` are copied into the
+  image so both viewers work out of the box (they default to `<cwd>/docs`
+  and `<cwd>/help`). Override with `DOCS_ROOT` / `HELP_ROOT` to serve a
+  different directory (e.g. a mounted volume).
 - **Email retries need a scheduled drainer.** `sendAppEmail` attempts delivery
   once inline; a transient provider failure leaves the row retryable in
   `app_outbox`. Run **`pnpm outbox:drain`** periodically (cron / K8s CronJob /

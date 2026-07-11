@@ -229,7 +229,8 @@
     "skipToMain": "跳转到主要内容",
     "skipToNavigation": "跳转到导航",
     "account": "账户",
-    "documentation": "文档"
+    "documentation": "文档",
+    "help": "帮助"
   },
   "administrator": {
     "appTitle": "管理员",
@@ -1431,6 +1432,25 @@
     "onThisPage": "本页内容",
     "lastUpdated": "最后更新于 {date}",
     "breadcrumbHome": "文档",
+    "readDocument": "阅读",
+    "diagram": {
+      "expand": "将图表展开为完整视图",
+      "title": "图表——完整视图",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "reset": "重置缩放"
+    }
+  },
+  "help": {
+    "appTitle": "帮助",
+    "index": {
+      "title": "帮助",
+      "description": "以屏幕截图逐页介绍应用程序的每个界面。"
+    },
+    "emptyCatalog": "目前还没有可供您使用的文档。",
+    "onThisPage": "本页内容",
+    "lastUpdated": "最后更新于 {date}",
+    "breadcrumbHome": "帮助",
     "readDocument": "阅读",
     "diagram": {
       "expand": "将图表展开为完整视图",

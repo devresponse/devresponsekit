@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import type { DocHeading } from "@/lib/docs/render/pipeline.server";
+import type { DocSpace } from "@/lib/docs/source/types";
 
 /**
  * DocsToc
@@ -10,9 +11,17 @@ import type { DocHeading } from "@/lib/docs/render/pipeline.server";
  * keeps it dependency-free and accessible. Renders nothing when the
  * document has no eligible headings.
  */
-export async function DocsToc({ locale, headings }: { locale: string; headings: DocHeading[] }) {
+export async function DocsToc({
+  locale,
+  headings,
+  space = "docs",
+}: {
+  locale: string;
+  headings: DocHeading[];
+  space?: DocSpace;
+}) {
   if (headings.length === 0) return null;
-  const t = await getTranslations({ locale, namespace: "docs" });
+  const t = await getTranslations({ locale, namespace: space });
 
   return (
     <nav aria-label={t("onThisPage")} className="text-sm">

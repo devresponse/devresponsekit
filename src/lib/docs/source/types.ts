@@ -7,6 +7,14 @@
  * rendering pipeline only ever depend on this interface.
  */
 
+/**
+ * Content space served by the viewer machinery. Each space has its own
+ * content root, catalog cache, app route base (`/app/<space>`), and asset
+ * route (`/api/<space>/asset`). "docs" is the original documentation
+ * viewer; "help" is its identical sibling serving the walkthrough.
+ */
+export type DocSpace = "docs" | "help";
+
 /** Visibility of a document to the viewer audience. */
 export type DocVisibility = "public" | "internal";
 

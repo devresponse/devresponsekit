@@ -14,12 +14,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/flexsidebar";
-import type { DocCatalogEntry } from "@/lib/docs/source/types";
+import type { DocCatalogEntry, DocSpace } from "@/lib/docs/source/types";
 
 /**
  * DocsSidebar
  *
- * Catalog navigation for the documentation viewer, grouped by the
+ * Catalog navigation for a viewer space (docs or help), grouped by the
  * document's `group`. Follows the FlexSidebar pattern used by the
  * Account/Administrator sidebars (icons in the collapsed rail, labels as
  * tooltips, active item from the locale-less pathname). The tree is built
@@ -33,8 +33,16 @@ export interface DocsSidebarGroup {
 
 const DOC_ICON = "file-text";
 
-export function DocsSidebar({ locale, groups }: { locale: string; groups: DocsSidebarGroup[] }) {
-  const t = useTranslations("docs");
+export function DocsSidebar({
+  locale,
+  groups,
+  space = "docs",
+}: {
+  locale: string;
+  groups: DocsSidebarGroup[];
+  space?: DocSpace;
+}) {
+  const t = useTranslations(space);
   const pathname = usePathname();
   const Icon = getMenuIcon(DOC_ICON);
 
@@ -49,7 +57,7 @@ export function DocsSidebar({ locale, groups }: { locale: string; groups: DocsSi
               <SidebarGroupContent>
                 <SidebarMenu>
                   {group.items.map((item) => {
-                    const href = `/app/docs/${item.slug}`;
+                    const href = `/app/${space}/${item.slug}`;
                     return (
                       <SidebarMenuItem key={item.slug}>
                         <SidebarMenuButton

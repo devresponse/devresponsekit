@@ -9,6 +9,7 @@ import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypePrettyCode from "rehype-pretty-code";
 import rehypeStringify from "rehype-stringify";
 import { docsSanitizeSchema } from "./sanitize-schema";
+import type { DocSpace } from "../source/types";
 
 /**
  * Markdown → safe HTML pipeline for the documentation viewer.
@@ -38,6 +39,12 @@ export interface RenderOptions {
   locale: string;
   /** Cache key (typically `slug|updatedAt`); skips re-rendering when hit. */
   cacheKey?: string;
+  /**
+   * Content space the document belongs to — selects the app route base
+   * (`/app/<space>`) and asset route (`/api/<space>/asset`) that relative
+   * links/images are rewritten to. Defaults to the docs viewer.
+   */
+  space?: DocSpace;
 }
 
 /* ----------------------------- hast helpers ----------------------------- */
@@ -86,14 +93,14 @@ const DOC_LINK = /\.mdx?(?=$|[#?])/i;
 
 /**
  * Rewrites links and images on the sanitized tree:
- *   - relative `*.md`/`*.mdx` links → `/{locale}/app/docs/{slug}` routes
- *   - relative image `src` → the path-safe asset route
+ *   - relative `*.md`/`*.mdx` links → `/{locale}/app/{space}/{slug}` routes
+ *   - relative image `src` → the space's path-safe asset route
  *   - external links get `target="_blank"` + `rel="noopener noreferrer"`
  *
  * Hash links and already-absolute in-app links are left untouched. Author
  * hrefs with dangerous protocols were already removed by sanitize.
  */
-function rehypeRewriteLinks(locale: string) {
+function rehypeRewriteLinks(locale: string, space: DocSpace) {
   return (tree: HastNode) => {
     walk(tree, (node) => {
       if (node.type !== "element") return;
@@ -106,7 +113,7 @@ function rehypeRewriteLinks(locale: string) {
           props.rel = "noopener noreferrer";
         } else if (!href.startsWith("#") && !href.startsWith("/") && DOC_LINK.test(href)) {
           const clean = href.replace(/^\.\//, "").replace(DOC_LINK, "");
-          props.href = `/${locale}/app/docs/${clean}`;
+          props.href = `/${locale}/app/${space}/${clean}`;
         }
       }
 
@@ -114,7 +121,7 @@ function rehypeRewriteLinks(locale: string) {
         const src = props.src;
         if (!EXTERNAL.test(src) && !src.startsWith("/")) {
           const clean = src.replace(/^\.\//, "");
-          props.src = `/api/docs/asset/${clean}`;
+          props.src = `/api/${space}/asset/${clean}`;
         }
       }
     });
@@ -177,9 +184,12 @@ export function clearRenderCache(): void {
 }
 
 export async function renderDocument(body: string, options: RenderOptions): Promise<RenderedDoc> {
-  const { locale, cacheKey } = options;
-  if (cacheKey) {
-    const hit = renderCache.get(cacheKey);
+  const { locale, cacheKey, space = "docs" } = options;
+  // Scope cache entries by space — a docs and a help document may share a
+  // slug (e.g. `README`) yet must never return each other's HTML.
+  const scopedKey = cacheKey ? `${space}|${cacheKey}` : undefined;
+  if (scopedKey) {
+    const hit = renderCache.get(scopedKey);
     if (hit) return hit;
   }
 
@@ -192,7 +202,7 @@ export async function renderDocument(body: string, options: RenderOptions): Prom
     .use(rehypeSlug)
     .use(rehypeAutolinkHeadings, { behavior: "wrap" })
     .use(() => rehypeCollectHeadings(headings))
-    .use(() => rehypeRewriteLinks(locale))
+    .use(() => rehypeRewriteLinks(locale, space))
     .use(rehypeMermaid)
     .use(rehypePrettyCode, {
       theme: { light: "github-light", dark: "github-dark" },
@@ -202,6 +212,6 @@ export async function renderDocument(body: string, options: RenderOptions): Prom
     .process(body);
 
   const rendered: RenderedDoc = { html: String(file), headings };
-  if (cacheKey) renderCache.set(cacheKey, rendered);
+  if (scopedKey) renderCache.set(scopedKey, rendered);
   return rendered;
 }

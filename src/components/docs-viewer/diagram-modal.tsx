@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import type { DocSpace } from "@/lib/docs/source/types";
 
 /**
  * DiagramModal
@@ -33,8 +34,16 @@ const STEP = 0.25;
 const clampZoom = (value: number) =>
   Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100));
 
-export function DiagramModal({ svg, onClose }: { svg: string; onClose: () => void }) {
-  const t = useTranslations("docs");
+export function DiagramModal({
+  svg,
+  onClose,
+  space = "docs",
+}: {
+  svg: string;
+  onClose: () => void;
+  space?: DocSpace;
+}) {
+  const t = useTranslations(space);
   const [zoom, setZoom] = useState(1);
 
   return (

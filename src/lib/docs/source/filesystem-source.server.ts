@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getDocsRoot, resolveDocFile, DOC_EXTENSIONS } from "../safe-path.server";
 import { deriveTitle, parseFrontmatter } from "../frontmatter";
-import type { DocCatalogEntry, DocContent, DocumentSource } from "./types";
+import type { DocCatalogEntry, DocContent, DocSpace, DocumentSource } from "./types";
 
 /**
  * Filesystem-backed {@link DocumentSource} (Phase 1).
@@ -83,15 +83,17 @@ async function buildEntry(root: string, absPath: string): Promise<DocCatalogEntr
 }
 
 export class FileSystemDocumentSource implements DocumentSource {
+  constructor(private readonly space: DocSpace = "docs") {}
+
   async listCatalog(): Promise<DocCatalogEntry[]> {
-    const root = await getDocsRoot();
+    const root = await getDocsRoot(this.space);
     const files = await walk(root);
     const entries = await Promise.all(files.map((file) => buildEntry(root, file)));
     return entries;
   }
 
   async getDocument(slug: string): Promise<DocContent | null> {
-    const resolved = await resolveDocFile(slug);
+    const resolved = await resolveDocFile(slug, this.space);
     if (!resolved) return null;
     const raw = await fs.readFile(resolved.absPath, "utf8");
     const { data, content } = parseFrontmatter(raw);

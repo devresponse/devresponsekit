@@ -5,8 +5,8 @@ import { SidebarProvider } from "@/components/ui/flexsidebar";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
 import { getVisibleGroupedCatalog } from "@/lib/docs/catalog.server";
-import { DocsSidebar } from "./_components/docs-sidebar";
-import { DocsTopHeader } from "./_components/docs-top-header";
+import { DocsSidebar } from "@/components/docs-viewer/docs-sidebar";
+import { DocsTopHeader } from "@/components/docs-viewer/docs-top-header";
 
 export const dynamic = "force-dynamic";
 

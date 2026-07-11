@@ -61,13 +61,15 @@ RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs nextjs
 
 # `.next/standalone` already contains server.js + the minimal traced
-# node_modules; `.next/static` and `public` are served by it. `docs/` is
-# the in-app documentation viewer's source root (DOCS_ROOT defaults to
-# <cwd>/docs) — copy it so the /docs viewer works out of the box.
+# node_modules; `.next/static` and `public` are served by it. `docs/` and
+# `help/` are the in-app viewers' source roots (DOCS_ROOT/HELP_ROOT default
+# to <cwd>/docs and <cwd>/help) — copy them so both viewers work out of
+# the box.
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/docs ./docs
+COPY --from=builder --chown=nextjs:nodejs /app/help ./help
 
 USER nextjs
 EXPOSE 3000

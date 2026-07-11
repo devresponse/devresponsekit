@@ -203,6 +203,12 @@ const serverEnvSchema = z
      */
     DOCS_ROOT: z.string().optional(),
     /**
+     * Content root for the Help viewer (`/app/help`) — the docs viewer's
+     * sibling space. Defaults to the repo's `help/` folder. Shares
+     * `DOCS_SOURCE` / `DOCS_INTERNAL_VISIBLE` with the docs space.
+     */
+    HELP_ROOT: z.string().optional(),
+    /**
      * Gates full MDX evaluation (executing author JS). OFF by default and
      * only ever safe for the trusted filesystem source — never for an
      * external/CMS source. Phase 1 ignores it (MDX renders as Markdown).

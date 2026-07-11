@@ -1439,6 +1439,10 @@
       "zoomIn": "Zoom avant",
       "zoomOut": "Zoom arrière",
       "reset": "Réinitialiser le zoom"
+    },
+    "image": {
+      "expand": "Agrandir l'image en plein écran",
+      "title": "Image — vue agrandie"
     }
   },
   "help": {
@@ -1458,6 +1462,10 @@
       "zoomIn": "Zoom avant",
       "zoomOut": "Zoom arrière",
       "reset": "Réinitialiser le zoom"
+    },
+    "image": {
+      "expand": "Agrandir l'image en plein écran",
+      "title": "Image — vue agrandie"
     }
   },
   "errorBoundary": {

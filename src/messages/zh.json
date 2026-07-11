@@ -1439,6 +1439,10 @@
       "zoomIn": "放大",
       "zoomOut": "缩小",
       "reset": "重置缩放"
+    },
+    "image": {
+      "expand": "将图片展开为完整视图",
+      "title": "图片——完整视图"
     }
   },
   "help": {
@@ -1458,6 +1462,10 @@
       "zoomIn": "放大",
       "zoomOut": "缩小",
       "reset": "重置缩放"
+    },
+    "image": {
+      "expand": "将图片展开为完整视图",
+      "title": "图片——完整视图"
     }
   },
   "errorBoundary": {

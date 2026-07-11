@@ -1439,6 +1439,10 @@
       "zoomIn": "Aproximar",
       "zoomOut": "Afastar",
       "reset": "Repor zoom"
+    },
+    "image": {
+      "expand": "Expandir a imagem para vista completa",
+      "title": "Imagem — vista completa"
     }
   },
   "help": {
@@ -1458,6 +1462,10 @@
       "zoomIn": "Aproximar",
       "zoomOut": "Afastar",
       "reset": "Repor zoom"
+    },
+    "image": {
+      "expand": "Expandir a imagem para vista completa",
+      "title": "Imagem — vista completa"
     }
   },
   "errorBoundary": {

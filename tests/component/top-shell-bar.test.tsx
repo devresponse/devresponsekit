@@ -20,6 +20,15 @@ describe("TopShellBar", () => {
     renderWithIntl(<TopShellBar className="extra-bar">x</TopShellBar>);
     expect(screen.getByRole("banner")).toHaveClass("extra-bar");
   });
+
+  it("carries the always-dark scope so the brand bar stays dark in both page themes", () => {
+    // The `dark` class scopes the app's dark palette onto the header
+    // subtree (globals.css `.dark { --… }` + `.sh-top-bar` alias
+    // re-declaration), independent of the document theme — the source of
+    // the bar's permanent contrast. Guards against an accidental removal.
+    renderWithIntl(<TopShellBar>x</TopShellBar>);
+    expect(screen.getByRole("banner")).toHaveClass("sh-top-bar", "dark");
+  });
 });
 
 describe("ShellSkipLinks", () => {

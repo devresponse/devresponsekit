@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { db } from "@/db/database";
+import { isSupportedLocale } from "@/config/i18n-config";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { EmailTemplateFilters } from "./_template-filters";
 
 export const dynamic = "force-dynamic";
 
@@ -23,13 +25,22 @@ export const dynamic = "force-dynamic";
  * full list directly from the database — no client grid needed. Each
  * row links to the standard edit page.
  *
+ * Two URL-backed filters narrow the list: template type (`key`) and
+ * `locale`, each with an "All" option. The dropdown options come from the
+ * keys/locales that actually exist, so they never go stale; unrecognized
+ * query values are ignored (treated as "All"). Filtering happens in the
+ * database query — the URL is the single source of truth, matching the
+ * grid filter convention (docs/admin-manager.md §10).
+ *
  * Caller MUST hold `admin.email.read`; editing additionally requires
  * `admin.email.manage` (enforced again by the edit page and the API).
  */
 export default async function AdministratorEmailTemplatesPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ key?: string; locale?: string }>;
 }) {
   const { locale } = await params;
   const guard = await checkAdminPermissionServer("admin.email.read");
@@ -40,13 +51,42 @@ export default async function AdministratorEmailTemplatesPage({
   const canManage = manageGuard !== "denied" && manageGuard !== "unauthenticated";
 
   const t = await getTranslations({ locale, namespace: "administrator.email.templates" });
+  const tGrid = await getTranslations({ locale, namespace: "administrator.grid" });
 
-  const templates = await db
+  // Filter-option lists come from the templates that actually exist, so the
+  // dropdowns never offer a value that yields nothing (and never omit one
+  // that would). Two lightweight DISTINCT queries over a tiny table.
+  const [keyRows, localeRows] = await Promise.all([
+    db.selectFrom("app_email_templates").select("key").distinct().orderBy("key", "asc").execute(),
+    db
+      .selectFrom("app_email_templates")
+      .select("locale")
+      .distinct()
+      .orderBy("locale", "asc")
+      .execute(),
+  ]);
+  const keyOptions = keyRows.map((r) => r.key);
+  const localeOptions = localeRows.map((r) => r.locale);
+
+  // Validate the requested filters against what exists / is supported;
+  // anything else is silently treated as "All" (no filter).
+  const requested = await searchParams;
+  const activeKey = requested.key && keyOptions.includes(requested.key) ? requested.key : null;
+  const activeLocale =
+    requested.locale &&
+    isSupportedLocale(requested.locale) &&
+    localeOptions.includes(requested.locale)
+      ? requested.locale
+      : null;
+
+  let query = db
     .selectFrom("app_email_templates")
-    .select(["id", "key", "locale", "subject", "description", "updated_at"])
-    .orderBy("key", "asc")
-    .orderBy("locale", "asc")
-    .execute();
+    .select(["id", "key", "locale", "subject", "description", "updated_at"]);
+  if (activeKey) query = query.where("key", "=", activeKey);
+  if (activeLocale) query = query.where("locale", "=", activeLocale);
+  const templates = await query.orderBy("key", "asc").orderBy("locale", "asc").execute();
+
+  const hasActiveFilter = activeKey !== null || activeLocale !== null;
 
   return (
     <section className="space-y-4 p-6">
@@ -54,6 +94,13 @@ export default async function AdministratorEmailTemplatesPage({
         <h1 className="text-lg font-semibold">{t("title")}</h1>
         <p className="text-muted-foreground text-sm">{t("description")}</p>
       </div>
+
+      <EmailTemplateFilters
+        keyOptions={keyOptions}
+        localeOptions={localeOptions}
+        activeKey={activeKey}
+        activeLocale={activeLocale}
+      />
 
       <div className="rounded-lg border">
         <Table containerLabel={t("title")}>
@@ -70,7 +117,7 @@ export default async function AdministratorEmailTemplatesPage({
             {templates.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-sm">
-                  {t("empty")}
+                  {hasActiveFilter ? tGrid("empty") : t("empty")}
                 </TableCell>
               </TableRow>
             ) : (

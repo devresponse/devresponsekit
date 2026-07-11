@@ -1160,6 +1160,10 @@
           "subject": "विषय",
           "updatedAt": "अपडेट किया गया"
         },
+        "filters": {
+          "key": "टेम्पलेट प्रकार",
+          "locale": "लोकेल"
+        },
         "fields": {
           "subject": "विषय",
           "bodyHtml": "HTML मुख्य भाग",

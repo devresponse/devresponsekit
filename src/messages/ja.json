@@ -1160,6 +1160,10 @@
           "subject": "件名",
           "updatedAt": "更新日時"
         },
+        "filters": {
+          "key": "テンプレートの種類",
+          "locale": "言語"
+        },
         "fields": {
           "subject": "件名",
           "bodyHtml": "HTML 本文",

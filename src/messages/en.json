@@ -1160,6 +1160,10 @@
           "subject": "Subject",
           "updatedAt": "Updated"
         },
+        "filters": {
+          "key": "Template type",
+          "locale": "Locale"
+        },
         "fields": {
           "subject": "Subject",
           "bodyHtml": "HTML body",

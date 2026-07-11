@@ -1160,6 +1160,10 @@
           "subject": "Objet",
           "updatedAt": "Mis à jour"
         },
+        "filters": {
+          "key": "Type de modèle",
+          "locale": "Langue"
+        },
         "fields": {
           "subject": "Objet",
           "bodyHtml": "Corps HTML",

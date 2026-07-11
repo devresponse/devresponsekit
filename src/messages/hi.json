@@ -229,7 +229,8 @@
     "skipToMain": "मुख्य सामग्री पर जाएँ",
     "skipToNavigation": "नेविगेशन पर जाएँ",
     "account": "खाता",
-    "documentation": "दस्तावेज़"
+    "documentation": "दस्तावेज़",
+    "help": "सहायता"
   },
   "administrator": {
     "appTitle": "व्यवस्थापक",
@@ -1431,6 +1432,25 @@
     "onThisPage": "इस पृष्ठ पर",
     "lastUpdated": "अंतिम बार अपडेट किया गया {date}",
     "breadcrumbHome": "दस्तावेज़",
+    "readDocument": "पढ़ें",
+    "diagram": {
+      "expand": "आरेख को पूर्ण दृश्य में विस्तृत करें",
+      "title": "आरेख — पूर्ण दृश्य",
+      "zoomIn": "ज़ूम इन करें",
+      "zoomOut": "ज़ूम आउट करें",
+      "reset": "ज़ूम रीसेट करें"
+    }
+  },
+  "help": {
+    "appTitle": "सहायता",
+    "index": {
+      "title": "सहायता",
+      "description": "एप्लिकेशन की हर स्क्रीन का स्क्रीनशॉट-आधारित अवलोकन।"
+    },
+    "emptyCatalog": "आपके लिए अभी तक कोई दस्तावेज़ उपलब्ध नहीं है।",
+    "onThisPage": "इस पृष्ठ पर",
+    "lastUpdated": "अंतिम बार अपडेट किया गया {date}",
+    "breadcrumbHome": "सहायता",
     "readDocument": "पढ़ें",
     "diagram": {
       "expand": "आरेख को पूर्ण दृश्य में विस्तृत करें",

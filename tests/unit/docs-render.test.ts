@@ -62,6 +62,26 @@ describe("renderDocument", () => {
     expect(second.html).toBe(first.html);
   });
 
+  it("rewrites links and images into the help space when space is 'help'", async () => {
+    const md = ["[intro](README.md)", "", "![shot](screenshots/01-landing.png)"].join("\n");
+    const { html } = await renderDocument(md, { locale: "en", space: "help" });
+    expect(html).toContain('href="/en/app/help/README"');
+    expect(html).toContain('src="/api/help/asset/screenshots/01-landing.png"');
+  });
+
+  it("never serves one space's cached render to the other space", async () => {
+    // Same cacheKey (e.g. two `README` docs with equal mtimes) — the cache
+    // must still be keyed by space or the wrong HTML leaks across viewers.
+    const docs = await renderDocument("[a](a.md)", { locale: "en", cacheKey: "README|1" });
+    const help = await renderDocument("[a](a.md)", {
+      locale: "en",
+      cacheKey: "README|1",
+      space: "help",
+    });
+    expect(docs.html).toContain('href="/en/app/docs/a"');
+    expect(help.html).toContain('href="/en/app/help/a"');
+  });
+
   it("extracts mermaid blocks into a client mount instead of highlighting them", async () => {
     const md = [
       "```mermaid",

@@ -229,7 +229,8 @@
     "skipToMain": "Ir para o conteúdo principal",
     "skipToNavigation": "Ir para a navegação",
     "account": "Conta",
-    "documentation": "Documentação"
+    "documentation": "Documentação",
+    "help": "Ajuda"
   },
   "administrator": {
     "appTitle": "Administrador",
@@ -1431,6 +1432,25 @@
     "onThisPage": "Nesta página",
     "lastUpdated": "Última atualização {date}",
     "breadcrumbHome": "Documentação",
+    "readDocument": "Ler",
+    "diagram": {
+      "expand": "Expandir o diagrama para vista completa",
+      "title": "Diagrama — vista completa",
+      "zoomIn": "Aproximar",
+      "zoomOut": "Afastar",
+      "reset": "Repor zoom"
+    }
+  },
+  "help": {
+    "appTitle": "Ajuda",
+    "index": {
+      "title": "Ajuda",
+      "description": "Um tour em capturas de tela por cada tela da aplicação."
+    },
+    "emptyCatalog": "Ainda não há documentos disponíveis para si.",
+    "onThisPage": "Nesta página",
+    "lastUpdated": "Última atualização {date}",
+    "breadcrumbHome": "Ajuda",
     "readDocument": "Ler",
     "diagram": {
       "expand": "Expandir o diagrama para vista completa",

@@ -5,6 +5,7 @@ import {
   Briefcase,
   Building2,
   Circle,
+  CircleHelp,
   CircleUser,
   FileText,
   Home,
@@ -53,8 +54,9 @@ export const MENU_ICONS: Record<string, LucideIcon> = {
   // Account (self-service) workspace.
   "circle-user": CircleUser,
   "id-card": IdCard,
-  // Documentation viewer.
+  // Documentation + help viewers.
   "book-open": BookOpen,
+  "circle-help": CircleHelp,
   "file-text": FileText,
 };
 

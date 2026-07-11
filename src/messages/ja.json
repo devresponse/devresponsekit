@@ -229,7 +229,8 @@
     "skipToMain": "メインコンテンツへスキップ",
     "skipToNavigation": "ナビゲーションへスキップ",
     "account": "アカウント",
-    "documentation": "ドキュメント"
+    "documentation": "ドキュメント",
+    "help": "ヘルプ"
   },
   "administrator": {
     "appTitle": "管理者",
@@ -1431,6 +1432,25 @@
     "onThisPage": "このページの内容",
     "lastUpdated": "最終更新：{date}",
     "breadcrumbHome": "ドキュメント",
+    "readDocument": "読む",
+    "diagram": {
+      "expand": "図を全体表示に展開",
+      "title": "図 — 全体表示",
+      "zoomIn": "拡大",
+      "zoomOut": "縮小",
+      "reset": "ズームをリセット"
+    }
+  },
+  "help": {
+    "appTitle": "ヘルプ",
+    "index": {
+      "title": "ヘルプ",
+      "description": "アプリケーションの各画面をスクリーンショットで紹介するウォークスルーです。"
+    },
+    "emptyCatalog": "ご利用いただけるドキュメントはまだありません。",
+    "onThisPage": "このページの内容",
+    "lastUpdated": "最終更新：{date}",
+    "breadcrumbHome": "ヘルプ",
     "readDocument": "読む",
     "diagram": {
       "expand": "図を全体表示に展開",

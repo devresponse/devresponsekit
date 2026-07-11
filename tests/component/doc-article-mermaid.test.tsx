@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DocArticle } from "@/app/[locale]/(secure)/app/docs/_components/doc-article";
+import { DocArticle } from "@/components/docs-viewer/doc-article";
 
 /**
  * DocArticle lazily renders `.mermaid` mounts with Mermaid and makes each

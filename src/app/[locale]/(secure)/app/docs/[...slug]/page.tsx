@@ -5,9 +5,9 @@ import { requireSecureSession } from "@/lib/auth-guard";
 import { canViewDoc } from "@/lib/docs/catalog.server";
 import { getDocumentSource } from "@/lib/docs/source/index.server";
 import { renderDocument } from "@/lib/docs/render/pipeline.server";
-import { DocArticle } from "../_components/doc-article";
-import { DocsBreadcrumbs } from "../_components/docs-breadcrumbs";
-import { DocsToc } from "../_components/docs-toc";
+import { DocArticle } from "@/components/docs-viewer/doc-article";
+import { DocsBreadcrumbs } from "@/components/docs-viewer/docs-breadcrumbs";
+import { DocsToc } from "@/components/docs-viewer/docs-toc";
 
 export const dynamic = "force-dynamic";
 

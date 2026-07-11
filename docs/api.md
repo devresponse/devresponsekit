@@ -112,7 +112,7 @@ See [Architecture → Authorization](./architecture.md#authorization-the-three-t
 RFC 7807 `application/problem+json`:
 
 ```json
-{ "type": "about:blank", "title": "Forbidden", "status": 403, "code": "forbidden", "detail": "…", "requestId": "5f3c…" }
+{ "type": "https://devresponse.com/problems/forbidden", "title": "Insufficient scope or permission", "status": 403, "code": "forbidden", "detail": "…", "requestId": "5f3c…" }
 ```
 
 ### Administrator routes
@@ -208,7 +208,7 @@ This is the cookie-session console surface (users, roles, permissions, groups, o
 | Audit | `GET /audit` | `admin.audit.read` |
 | Export | `GET /export/[resource]` | export permission |
 
-> The exact permission per action and request/response shapes live in [`docs/openapi-admin.json`](./openapi-admin.json) and [`admin-manager.md`](./admin-manager.md). `GET /api/administrator/metrics` exists but is **intentionally excluded** from the spec/SDK — it backs the console home dashboard only.
+> The exact permission per action and request/response shapes live in [`docs/openapi-admin.json`](./openapi-admin.json) and [`admin-manager.md`](./admin-manager.md). `GET /api/administrator/metrics` exists but is **intentionally excluded** from the spec/SDK — it backs the console home dashboard only. The `mcp-agents` routes are **not yet modeled** in the spec or the committed SDK either — drive them from the console UI (or plain `fetch`) per [Admin Manager §8.13](./admin-manager.md#813-mcp-agents).
 
 ### The committed admin SDK
 

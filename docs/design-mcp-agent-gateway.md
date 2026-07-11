@@ -45,7 +45,7 @@ Register once (step 1), operate per call (steps 2–3), governed throughout. The
 | Agent authentication | `grant_type=client_credentials` at `/api/v1/auth/token` → `verifyClientCredentials` | **exists** |
 | Token format & validation | EdDSA JWT (short-lived) + `/api/v1/jwks.json` for stateless signature checks | **exists** |
 | Per-tool authorization | `requireApiPermission` = `permission ∩ scope`, plus status/membership gate | **exists** |
-| Operation surface (the tools) | `/api/v1` — 16 paths / 21 ops, already mirrored 1:1 by the `my dr` CLI | **exists** |
+| Operation surface (the tools) | `/api/v1` — 16 paths / 21 ops, already mirrored 1:1 by the `my dr` CLI (external `mycli` repo) | **exists** |
 | Rate limiting | Token-bucket per credential + a global floor (`consumeToken`) | **exists** |
 | Audit & revocation | `audit_events`; client revoke, `jti` denylist, service-user revoke | **exists** |
 | Self-registration gating | Per-org sign-up policy (open / invite / domain), status-gated, "assigns no role" default | **template** |
@@ -98,7 +98,7 @@ The self-registration surface needs the most care; almost everything else is reu
 
 ## 7. Built for extensibility
 
-- **Tools generate themselves.** The tool surface derives from the OpenAPI spec — the same source that already produces the `my dr` CLI and the C# client. A new `/api/v1` endpoint becomes a new MCP tool (with its scope) for near-zero marginal cost.
+- **Tools generate themselves.** The tool surface derives from the OpenAPI spec — the same source that already produces the `my dr` CLI and the C# client (both in the external `mycli` repo). A new `/api/v1` endpoint becomes a new MCP tool (with its scope) for near-zero marginal cost.
 - **More than tools.** Expose the docs catalog and JSON schemas as read-only MCP _resources_, and ship curated _prompts_ ("triage a user", "rotate a client secret").
 - **Multiple auth modes.** Client-credentials for autonomous agents now; authorization-code + PKCE for user-delegated agents later; an API-key bridge for the simplest cases — all over the one token endpoint.
 - **Transport isolation.** Streamable HTTP (stateless, serverless-friendly) is the adapter's concern alone; the tool/auth layers don't change when the transport evolves.
@@ -142,7 +142,7 @@ The core self-registration flow (§4), shipped behind `MCP_REGISTRATION_ENABLED`
 - **`POST /api/mcp/register`** (RFC 7591 Dynamic Client Registration) — public and rate-limited (a per-IP bucket + a deployment-wide floor). Accepts standard client metadata plus an `organization` extension naming the target tenant (falls back to `MCP_REGISTRATION_DEFAULT_ORG`); only active orgs resolve. It **provisions a machine service account + a ZERO-SCOPE OAuth client** bound to it, and returns the `client_id` / `client_secret` once, RFC 7591-shaped.
 - **Safe by construction.** `MCP_REGISTRATION_MODE=approval` (default) parks the service account `pending_approval` — it cannot even mint a token until an admin activates it (the existing issuance gate). `open` mode activates it immediately, but the client is scopeless, so every tool 403s until an admin grants scopes (`permission ∩ scope = ∅`). Either way the dangerous default — auto-granted power — is unreachable.
 - **The machine principal.** A self-registered agent authenticates only via client-credentials, so it gets NO login account: a namespaced `better_auth_user_id` is synthesized (no FK; `isBetterAuthUserBanned` treats an unknown id as not-banned) alongside an `app_users` row, an org membership, and the zero-scope client. It surfaces in the admin user list (identifiable by its `@agents.mcp.invalid` email and `mcp` membership source) and is revocable there.
-- **Abuse controls.** Two-layer rate limit + a per-org quota (`MCP_REGISTRATION_MAX_PER_ORG`, 0 = unlimited) + active-org-only resolution + audit (`mcp.client.registered`).
+- **Abuse controls.** Two-layer rate limit + a per-org quota (`MCP_REGISTRATION_MAX_PER_ORG`, default 50, 0 = unlimited) + active-org-only resolution + audit (`mcp.client.registered`). The quota counts only **active** clients (`countActiveOauthClientsForOrg`), so unauthenticated `pending_approval` junk registrations cannot consume an org's slots (P1-2).
 - **Discovery.** `/.well-known/oauth-authorization-server` advertises `registration_endpoint` when registration is enabled.
 
 An admin grants scopes (and, in approval mode, activates the account) via the existing OAuth-client + user admin surfaces — a richer agent-lifecycle console arrives in Phase 4 (§12). Generated tools arrive in Phase 3 (§11).

@@ -100,15 +100,15 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 
 ### Single Sign-On handoff
 
-> **Required at boot for every deployment.** Despite the "SSO" name, `src/lib/env.ts` validates `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, and `SSO_HANDOFF_JWT_SECRET` **unconditionally** (`.min(1)` / `.min(16)`). The app **fails fast at boot** if any is missing — even on a deployment that never uses SSO. Set all four everywhere (placeholder values are fine when SSO is unused).
+> **Required at boot for every deployment.** Despite the "SSO" name, `src/lib/env.ts` validates `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, and `SSO_HANDOFF_JWT_SECRET` **unconditionally** (`.min(1)` / `.min(32)`). The app **fails fast at boot** if any is missing — even on a deployment that never uses SSO. Set all four everywhere (placeholder values are fine when SSO is unused).
 
 | Variable | Required | Controls |
 | --- | --- | --- |
 | `SSO_HANDOFF_ISSUER` | **yes (at boot)** | `iss` claim of handoff tokens. |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | **yes (at boot)** | Audience is built as `<prefix>:<applicationId>`. |
 | `SSO_HANDOFF_APPLICATION_ID` | **yes (at boot)** | This deployment's application id, so the audience check can't be spoofed via the Host header. |
-| `SSO_HANDOFF_JWT_SECRET` | **yes (at boot)** | HS256 signing secret (≥16 chars). **Must differ** from `BETTER_AUTH_SECRET`. |
-| `SSO_HANDOFF_TTL_SECONDS` | no | Token lifetime (default 60; clamped to a small max). |
+| `SSO_HANDOFF_JWT_SECRET` | **yes (at boot)** | HS256 signing secret (≥32 chars). **Must differ** from `BETTER_AUTH_SECRET`. |
+| `SSO_HANDOFF_TTL_SECONDS` | no | Token lifetime (default 60). Values above 300 are rejected at boot, and the signer **clamps the effective TTL to ≤60s** (`SSO_HANDOFF_MAX_TTL_SECONDS`), so a handoff token never outlives its nonce row. |
 | `SSO_ALLOWED_ORIGIN_SUFFIXES` | no | Comma-separated allow-list of host suffixes a registered app origin may use. Unset → derived from `NEXT_PUBLIC_PRODUCTION_HOST`. |
 
 ### Reverse proxy / limits
@@ -127,6 +127,7 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 | `RESEND_API_KEY` | Resend API key (when provider = resend). |
 | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_BASE_URL` | Mailgun config (use `https://api.eu.mailgun.net` for EU). |
 | `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to `GET /api/internal/outbox-drain`, which retries `pending` outbox rows on a serverless host (no long-running `pnpm outbox:drain` process). The route **fails closed** when unset. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#7-ci). |
+| `OUTBOX_DRAIN_LIMIT` | Max outbox rows processed per `pnpm outbox:drain` run (default 100). The serverless `/api/internal/outbox-drain` route uses the library default of 50 instead. |
 
 ### Machine API credentials (both paths DARK by default)
 

@@ -237,17 +237,21 @@ This exercises the *real* mechanics of a live fleet — per-subdomain cookie iso
 
    > With `COOKIE_DOMAIN` set, browse the primary at `http://devresponse.local:3000` — a browser refuses a `.devresponse.local` cookie set from a `localhost` page, so sign-in via `localhost:3000` will not stick.
 
-3. **Register the satellites by SQL** (the console's enterprise-app validator requires `https://` origins by design; the launch flow reads the stored row as-is, so local `http://` origins go in directly):
+3. **Satellite registration — already seeded.** The baseline seed (`pnpm db:seed`, part of `db:provision` and `db:reset:reload`) registers all three satellite apps at their §6.6 origins, so a fresh local database's application switcher lists Option A/B/C out of the box. Only if you deleted them (or need different origins) re-register by SQL — the console's enterprise-app validator requires `https://` origins by design, but the launch flow reads the stored row as-is, so local `http://` origins go in directly:
 
    ```sql
    insert into auth.app_enterprise_applications
      (id, label, origin, subdomain, sso_audience, status, sort_order)
    values
-     ('standalone', 'App Standalone (A)', 'http://app1.devresponse.local:3001',
+     ('standalone', 'App Standalone (Option A)', 'http://app1.devresponse.local:3001',
       'app1', 'devresponse-app:standalone', 'available', 10),
-     ('handoff', 'App Handoff (B)', 'http://app2.devresponse.local:3002',
-      'app2', 'devresponse-app:handoff', 'available', 20);
+     ('handoff', 'App Handoff (Option B)', 'http://app2.devresponse.local:3002',
+      'app2', 'devresponse-app:handoff', 'available', 20),
+     ('shared', 'App Shared (Option C)', 'http://app3.devresponse.local:3003',
+      'app3', 'devresponse-app:shared', 'available', 30);
    ```
+
+   Option C's switcher entry rides the same launch link as A/B — the handoff into an already-shared session is redundant but lands correctly signed in.
 
 4. **Write each satellite's `.env.local`.** A shown; B is identical with `handoff` / `app2` / `:3002`; C follows [§5.2](#52-option-c-configuration) instead (the **primary's** `BETTER_AUTH_SECRET`, its own `http://app3.devresponse.local:3003` URLs, `COOKIE_DOMAIN=".devresponse.local"` matching the primary, `SSO_HANDOFF_*` placeholders):
 

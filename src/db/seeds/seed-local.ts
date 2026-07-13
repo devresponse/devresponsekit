@@ -152,36 +152,47 @@ async function main() {
       }
     }
 
-    const apps: Array<[string, string, string, string, string]> = [
+    // The three reference satellite apps (devresponseapps forks), pointed at
+    // the local subdomain rig from docs/integration-satellite-apps.md §6.6 —
+    // so a fresh local database has a working application-switcher entry for
+    // each integration model out of the box. Options A/B are consumed via the
+    // SSO handoff; Option C shares the primary's session (the launch flow
+    // still works for it — it just lands already signed in). A production
+    // deployment replaces these via Administrator → Enterprise apps.
+    // [id, label, description, origin, subdomain, sso_audience]
+    const apps: Array<[string, string, string, string, string, string]> = [
       [
-        "devresponse-portal",
-        "DevResponse Portal",
-        "https://portal.devresponse.com",
-        "portal",
-        "devresponse-app:portal",
+        "standalone",
+        "App Standalone (Option A)",
+        "Satellite demo - SSO handoff + own app_users",
+        "http://app1.devresponse.local:3001",
+        "app1",
+        "devresponse-app:standalone",
       ],
       [
-        "devresponse-analytics",
-        "Analytics",
-        "https://analytics.devresponse.com",
-        "analytics",
-        "devresponse-app:analytics",
+        "handoff",
+        "App Handoff (Option B)",
+        "Satellite demo - SSO handoff, table-less",
+        "http://app2.devresponse.local:3002",
+        "app2",
+        "devresponse-app:handoff",
       ],
       [
-        "devresponse-docs",
-        "Documentation",
-        "https://docs.devresponse.com",
-        "docs",
-        "devresponse-app:docs",
+        "shared",
+        "App Shared (Option C)",
+        "Satellite demo - shared auth schema, parent-domain cookie",
+        "http://app3.devresponse.local:3003",
+        "app3",
+        "devresponse-app:shared",
       ],
     ];
-    for (const [id, label, origin, subdomain, audience] of apps) {
+    for (const [i, [id, label, description, origin, subdomain, audience]] of apps.entries()) {
       await pool.query(
         `insert into app_enterprise_applications
-           (id, label, origin, subdomain, sso_audience, status, sort_order)
-         values ($1, $2, $3, $4, $5, 'available', 100)
+           (id, label, description, origin, subdomain, sso_audience, status, sort_order)
+         values ($1, $2, $3, $4, $5, $6, 'available', $7)
          on conflict (id) do nothing`,
-        [id, label, origin, subdomain, audience],
+        [id, label, description, origin, subdomain, audience, (i + 1) * 10],
       );
     }
 

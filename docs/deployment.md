@@ -55,7 +55,7 @@ pnpm db:provision
 
 1. **`db:auth:migrate`** — Better Auth tables (`user`/`session`/`account`/`verification`). **CI never runs this.**
 2. **`db:app:migrate`** — extensions (`pgcrypto`, `pg_trgm`, created in `public`) + the **core** app schema, then the **localized data** under `src/db/migrations/locales/`. **CI re-runs this on every deploy.**
-3. **`db:seed`** — the default org, the `admin.*` permission catalog, baseline roles, and your first admin (from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`).
+3. **`db:seed`** — the default org, the `admin.*` permission catalog, baseline roles, and your first admin (from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`). The demo satellite apps it registers for the local dev rig are **skipped** under `NODE_ENV=production` (opt in with `SEED_DEMO_APPS=1`); register real enterprise apps via the admin console instead.
 
 Every step is **idempotent and ledgered** — applied migrations are recorded in `app_schema_migrations`, so re-running `db:provision` (or letting CI re-run `db:app:migrate`) only applies new work. All tables land in the schema named by `DB_SCHEMA` (default `auth`); extensions stay in `public` so every schema resolves them.
 

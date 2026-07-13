@@ -237,7 +237,7 @@ This exercises the *real* mechanics of a live fleet — per-subdomain cookie iso
 
    > With `COOKIE_DOMAIN` set, browse the primary at `http://devresponse.local:3000` — a browser refuses a `.devresponse.local` cookie set from a `localhost` page, so sign-in via `localhost:3000` will not stick.
 
-3. **Satellite registration — already seeded.** The baseline seed (`pnpm db:seed`, part of `db:provision` and `db:reset:reload`) registers all three satellite apps at their §6.6 origins, so a fresh local database's application switcher lists Option A/B/C out of the box. Only if you deleted them (or need different origins) re-register by SQL — the console's enterprise-app validator requires `https://` origins by design, but the launch flow reads the stored row as-is, so local `http://` origins go in directly:
+3. **Satellite registration — already seeded (dev only).** The baseline seed (`pnpm db:seed`, part of `db:provision` and `db:reset:reload`) registers all three satellite apps at their §6.6 origins, so a fresh **local** database's application switcher lists Option A/B/C out of the box. Under `NODE_ENV=production` the seed **skips** these demo entries (they'd be dead links; opt in with `SEED_DEMO_APPS=1` if you really want them) — production apps are registered via **Administrator → Enterprise apps**. Only if you deleted the seeded rows (or need different origins) re-register by SQL — the console's enterprise-app validator requires `https://` origins by design, but the launch flow reads the stored row as-is, so local `http://` origins go in directly:
 
    ```sql
    insert into auth.app_enterprise_applications

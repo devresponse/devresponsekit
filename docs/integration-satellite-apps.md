@@ -190,7 +190,24 @@ Every app keeps the kit's multi-stage `Dockerfile` (`output: "standalone"`, non-
 
 Each app ships the kit's `vercel.json` with the daily `outbox-drain` cron — set `CRON_SECRET` (the route fails closed without it) or **remove the `crons` block** on satellites that never send email.
 
-### 6.6 Migration & first-boot order (A/B)
+### 6.6 Local development — all four apps on one machine
+
+A topology that runs the whole fleet locally over plain http, verified end to end (sign-in → launch → confirm → satellite dashboard, replay rejected, C session shared):
+
+| App | URL | Cookie host |
+| --- | --- | --- |
+| Primary | `http://localhost:3000` | `localhost` |
+| A (`app-standalone`) | `http://standalone.localtest.me:3001` | `standalone.localtest.me` (isolated) |
+| B (`app-handoff`) | `http://handoff.localtest.me:3002` | `handoff.localtest.me` (isolated) |
+| C (`app-shared`) | `http://localhost:3003` | `localhost` — **same host as the primary**, so the host-only session cookie is shared across ports and no parent-domain cookie is needed in dev |
+
+- `*.localtest.me` resolves to `127.0.0.1` via public DNS — no hosts-file edits, and it gives A/B real per-host cookie isolation that four `localhost` ports cannot.
+- **Start each handoff satellite with `next dev -p <port> -H <its-subdomain>`.** Route handlers build absolute URLs from the request URL (the consume → confirm redirect), and the dev server normalizes unknown hosts to `localhost` unless it is bound to the hostname. Add the host to `allowedDevOrigins` in `next.config.mjs` as well.
+- **Drop the CSP `upgrade-insecure-requests` directive in development.** `localhost` is exempt (a trustworthy origin), but on an `http://*.localtest.me` host the browser silently upgrades every subresource *and the confirm form's POST* to `https://` — the handoff then dies with no request ever reaching the satellite. Guard the directive on `NODE_ENV === "production"` (the `devresponseapps` forks do).
+- **Register the local origins by SQL.** The admin console's enterprise-app validator requires `https://` origins; the launch flow itself reads the stored row as-is, so for local http origins insert the rows directly (`id`, `label`, `origin`, `subdomain`, `sso_audience`, `status='available'`).
+- Point A/B at the **primary's database** locally (the same-DB topology, §4.5) so the shipped consume code works unchanged; their distinct `BETTER_AUTH_SECRET`s and per-host cookies keep the sessions separate. Use the dev fixture (`pnpm db:seed:dev`) for test users.
+
+### 6.7 Migration & first-boot order (A/B)
 
 1. Provision the satellite database; run `pnpm db:app:migrate` (and the Better Auth bootstrap, per [Deployment §2](./deployment.md#2-one-time-database-bootstrap)).
 2. Register the enterprise-app row + origin suffix on the primary (§3.1).
@@ -209,6 +226,8 @@ Each app ships the kit's `vercel.json` with the daily `outbox-drain` cron — se
 | Consume POST 401s **every** time (fresh tokens) | Separate-DB deployment without the §4.5 nonce inversion — there is no nonce row to burn |
 | "unknown user" on consume | Separate-DB deployment without the §4.5 user upsert |
 | Consume POST 403s | The confirm form posted cross-origin, or `ADMIN_TRUSTED_ORIGINS` doesn't include the satellite's own origin |
+| Continue on the confirm page does nothing — no POST ever reaches the satellite (local http dev) | The CSP `upgrade-insecure-requests` directive upgraded the form POST to `https://` against a plain-http dev server; guard it on production (see §6.6) |
+| Confirm page appears on `localhost` instead of the satellite's subdomain (local dev) | The dev server wasn't bound to the hostname — start it with `next dev -H <subdomain>` (see §6.6) |
 | Signed in on primary but C satellite sees no session | `COOKIE_DOMAIN` not set to the parent domain on **both** sides, different `BETTER_AUTH_SECRET`, or different `DB_SCHEMA` |
 | Boot fails on a C satellite | Missing `SSO_HANDOFF_*` placeholders — all four are validated at boot on every fork |
 

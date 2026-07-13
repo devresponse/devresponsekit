@@ -154,11 +154,18 @@ async function main() {
 
     // The three reference satellite apps (devresponseapps forks), pointed at
     // the local subdomain rig from docs/integration-satellite-apps.md §6.6 —
-    // so a fresh local database has a working application-switcher entry for
+    // so a fresh LOCAL database has a working application-switcher entry for
     // each integration model out of the box. Options A/B are consumed via the
     // SSO handoff; Option C shares the primary's session (the launch flow
-    // still works for it — it just lands already signed in). A production
-    // deployment replaces these via Administrator → Enterprise apps.
+    // still works for it — it just lands already signed in).
+    //
+    // DEV-ONLY: the origins are local-rig hosts, so on a production bootstrap
+    // (deployment.md §2 runs this same seed) they would be dead switcher
+    // entries. Skipped under NODE_ENV=production unless SEED_DEMO_APPS=1
+    // explicitly opts in (mirroring dev-init.ts's guard); production
+    // deployments register real apps via Administrator → Enterprise apps.
+    const seedDemoApps =
+      process.env.NODE_ENV !== "production" || process.env.SEED_DEMO_APPS === "1";
     // [id, label, description, origin, subdomain, sso_audience]
     const apps: Array<[string, string, string, string, string, string]> = [
       [
@@ -186,13 +193,20 @@ async function main() {
         "devresponse-app:shared",
       ],
     ];
-    for (const [i, [id, label, description, origin, subdomain, audience]] of apps.entries()) {
-      await pool.query(
-        `insert into app_enterprise_applications
-           (id, label, description, origin, subdomain, sso_audience, status, sort_order)
-         values ($1, $2, $3, $4, $5, $6, 'available', $7)
-         on conflict (id) do nothing`,
-        [id, label, description, origin, subdomain, audience, (i + 1) * 10],
+    if (seedDemoApps) {
+      for (const [i, [id, label, description, origin, subdomain, audience]] of apps.entries()) {
+        await pool.query(
+          `insert into app_enterprise_applications
+             (id, label, description, origin, subdomain, sso_audience, status, sort_order)
+           values ($1, $2, $3, $4, $5, $6, 'available', $7)
+           on conflict (id) do nothing`,
+          [id, label, description, origin, subdomain, audience, (i + 1) * 10],
+        );
+      }
+      console.log(`[seed] ensured ${apps.length} demo satellite apps (local-rig origins)`);
+    } else {
+      console.log(
+        "[seed] skipped demo satellite apps (NODE_ENV=production; set SEED_DEMO_APPS=1 to include)",
       );
     }
 

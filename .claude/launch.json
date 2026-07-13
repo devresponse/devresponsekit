@@ -4,7 +4,7 @@
     {
       "name": "next-dev",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
+      "runtimeArgs": ["dev", "-H", "devresponse.local"],
       "port": 3000
     },
     {
@@ -21,7 +21,7 @@
         "../devresponseapps/app-standalone",
         "dev",
         "-H",
-        "standalone.localtest.me"
+        "app1.devresponse.local"
       ],
       "port": 3001
     },
@@ -33,14 +33,20 @@
         "../devresponseapps/app-handoff",
         "dev",
         "-H",
-        "handoff.localtest.me"
+        "app2.devresponse.local"
       ],
       "port": 3002
     },
     {
       "name": "app-shared",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--dir", "../devresponseapps/app-shared", "dev"],
+      "runtimeArgs": [
+        "--dir",
+        "../devresponseapps/app-shared",
+        "dev",
+        "-H",
+        "app3.devresponse.local"
+      ],
       "port": 3003
     }
   ]

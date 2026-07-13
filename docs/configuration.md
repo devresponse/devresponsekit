@@ -37,6 +37,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `BETTER_AUTH_SECRET` | **yes** | Signing secret for sessions. Use ≥32 random bytes. Rotating it invalidates all sessions. |
 | `BETTER_AUTH_URL` | **yes** | Origin where `/api/auth/*` is reachable. Must match the browser origin. Also the base origin baked into links in outbound emails — verification, password reset, and invitation accept links. |
 | `ADMIN_TRUSTED_ORIGINS` | no | Extra comma-separated trusted origins for Better Auth and the admin origin guard (the app's own origin is always trusted). |
+| `COOKIE_DOMAIN` | no | Parent domain for the session cookie (e.g. `.devresponse.com`). **Unset = host-only cookie (per-app isolation — the safe default).** Set only for co-trusted shared-`auth`-schema satellites (Option C), on the primary **and** every satellite alike — see [Satellite Apps §5](./integration-satellite-apps.md#5-option-c-in-detail--shared-auth-schema). |
 
 ### Database (PostgreSQL)
 

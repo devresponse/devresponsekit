@@ -95,6 +95,16 @@ const serverEnvSchema = z
      */
     ADMIN_TRUSTED_ORIGINS: z.string().optional(),
     /**
+     * Parent domain for the Better Auth session cookie (e.g.
+     * `.devresponse.com`). Unset (the default) keeps the cookie host-only —
+     * the safe per-app isolation posture. Set it ONLY for the shared-`auth`-
+     * schema satellite model (Option C, docs/integration-satellite-apps.md):
+     * the primary and every co-trusted satellite must then share the SAME
+     * value so one session cookie spans the fleet. Never set it on a
+     * deployment whose subdomains are not all first-party and co-trusted.
+     */
+    COOKIE_DOMAIN: z.string().optional(),
+    /**
      * Outbound email delivery provider. Unset = no delivery: every email
      * is still rendered and recorded in `app_outbox` with status `logged`
      * (specs.md §35), which is the right mode for local dev and CI.

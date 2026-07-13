@@ -105,7 +105,12 @@ function buildContentSecurityPolicy(nonce: string): string {
     "worker-src 'self' blob:",
     "report-uri /api/security/csp-report",
     "report-to csp-endpoint",
-    "upgrade-insecure-requests",
+    // Only meaningful in production (real TLS). In dev, a non-localhost host
+    // (e.g. devresponse.local subdomain SSO testing) is not a "trustworthy
+    // origin", so the directive would silently upgrade every subresource and
+    // form POST to https:// and fail against the plain-http dev server
+    // (localhost itself is exempt, which is why this never bites there).
+    ...(process.env.NODE_ENV === "production" ? ["upgrade-insecure-requests"] : []),
   ].join("; ");
 }
 

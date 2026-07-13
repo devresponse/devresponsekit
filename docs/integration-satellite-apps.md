@@ -286,6 +286,7 @@ Why these steps look the way they do:
 - **Every app runs `next dev -H <its-hostname>`.** Route handlers build absolute URLs from the request URL (the consume → confirm redirect), and the dev server normalizes unknown hosts to `localhost` unless it is bound to the hostname. The hostnames also need to be in `allowedDevOrigins` in each `next.config.mjs` (the kit and the forks ship `*.devresponse.local` + `*.localtest.me`).
 - **The CSP `upgrade-insecure-requests` directive is production-only.** `localhost` is exempt (a trustworthy origin), but on an `http://*.devresponse.local` host the browser would silently upgrade every subresource *and the confirm form's POST* to `https://` — the handoff then dies with no request ever reaching the satellite. The kit and the forks guard it on `NODE_ENV === "production"`.
 - A/B point at the **primary's database** locally (the same-DB topology, §4.5) so the shipped consume code works unchanged; their distinct `BETTER_AUTH_SECRET`s and per-host cookies keep the sessions separate.
+- **Handoff satellites under a `COOKIE_DOMAIN` primary need their own cookie prefix.** Once the primary issues a parent-domain session cookie (this rig; any fleet that includes Option C), that cookie reaches **every** subdomain under Better Auth's default cookie name — it shadows an A/B satellite's own host-only session cookie (same name; the older cookie sorts first), fails signature validation against the satellite's secret, and the handoff appears to never stick. Give each handoff satellite a distinct `advanced.cookiePrefix` (and pass the same prefix to the proxy's `getSessionCookie` check) — the reference forks use `drk-standalone` / `drk-handoff`.
 - `.local` names ride the **hosts file** (Windows resolves it ahead of DNS/mDNS); if a VPN or DNS agent interferes, the `*.localtest.me` fallback needs no hosts entries at all.
 
 ### 6.7 Migration & first-boot order (A/B)
@@ -311,6 +312,7 @@ Why these steps look the way they do:
 | Confirm page appears on `localhost` instead of the satellite's subdomain (local dev) | The dev server wasn't bound to the hostname — start it with `next dev -H <subdomain>` (see §6.6) |
 | Signed in on primary but C satellite sees no session | `COOKIE_DOMAIN` not set to the parent domain on **both** sides, different `BETTER_AUTH_SECRET`, or different `DB_SCHEMA` |
 | Sign-in on the primary stops sticking (local dev) | `COOKIE_DOMAIN` is set but you're browsing via `localhost` — a browser refuses a parent-domain cookie from a `localhost` page; use `http://devresponse.local:3000` (see §6.6) |
+| Handoff completes but the satellite immediately bounces to its own sign-in | The primary's parent-domain cookie (Option C fleet) is shadowing the satellite's session cookie under the default name — give each handoff satellite a distinct `advanced.cookiePrefix` (see §6.6) |
 | Boot fails on a C satellite | Missing `SSO_HANDOFF_*` placeholders — all four are validated at boot on every fork |
 
 More: [Troubleshooting](./troubleshooting.md) covers the kit-wide failure modes.
@@ -319,6 +321,7 @@ More: [Troubleshooting](./troubleshooting.md) covers the kit-wide failure modes.
 
 - The handoff secret is HS256-symmetric: anyone holding `SSO_HANDOFF_JWT_SECRET` can mint sign-in tokens for **every** registered satellite. Store it like `BETTER_AUTH_SECRET`, keep it distinct from it, rotate it across both sides together.
 - A/B satellites are separate security domains; C satellites are the same security domain as the primary. Choose accordingly, and re-read [API Security §8](./api-security.md#8-third-party-and-satellite-web-apps) before giving any external team a C-style integration.
+- **Mixed fleets (C alongside A/B) have one extra rule:** the moment the primary issues a parent-domain cookie for C, that cookie reaches every subdomain — each handoff satellite must run a distinct `advanced.cookiePrefix` so the foreign cookie can't shadow its own session (§6.6). The shadowing fails *closed* (the satellite sees no session), but it looks like a broken handoff.
 - A satellite that needs the machine API is *also* an API client — issue it its own credential per [API Security §2](./api-security.md#2-which-credential-should-a-third-party-get); SSO artifacts are never API credentials.
 
 ---

@@ -26,7 +26,7 @@ This folder is the canonical documentation set, organized by **audience**.
 | Document | What's inside |
 | --- | --- |
 | [Architecture](./architecture.md) | System design, modules, boundaries, data flow, auth/authz, the data model — including the load-bearing **access-control decisions** (ADR-0001 three-tier access, ADR-0002 organization groups) |
-| [Developer Onboarding](./developer-onboarding.md) | Tooling, install, run, test, project structure, conventions, "how to add a feature" |
+| [Developer Onboarding](./developer-onboarding.md) | Tooling, install, run, test, project structure, conventions, "how to add a feature", and local debugging (seeded credentials, DB inspection, the local SSO rig) |
 | [API Reference & Clients](./api.md) | The `/api/v1` machine API and admin console API — surface, authentication, error model, request/response examples, and the typed v1 + committed admin SDK clients |
 | [API Security & Third-Party Applications](./api-security.md) | The practical hardening guide — choosing credentials for third parties, the operator playbook, consumer obligations, verifying platform JWTs, revocation/incident response, MCP agents, satellite trust boundaries |
 | [Satellite Apps — Integration Guide](./integration-satellite-apps.md) | Standing up a subdomain app that delegates auth to the platform — the three integration options as built in `devresponseapps`, both sides' configuration contracts, and the deployment scenarios |

@@ -63,6 +63,15 @@ Want multi-tenant test data? Load the dev fixture — 3 organizations × 7 users
 pnpm db:seed:dev
 ```
 
+Every fixture account shares the password **`DevPassword123!`** (override with `DEV_SEED_PASSWORD`):
+
+| Account | Authority |
+| --- | --- |
+| `superuser@orga.local` (also `orgb`/`orgc`) | Cross-organization superadmin |
+| `orgadmin@orga.local` (also `orgb`/`orgc`) | Full `admin.*` catalog, scoped to that one org |
+| `user1..5@orga.local` (also `orgb`/`orgc`) | Plain member — `shell.view` only |
+| `multi1..3@shared.local` | Member of **all three** orgs (exercises the org switcher) |
+
 Need a clean slate? (Destructive — local only.)
 
 ```bash
@@ -188,11 +197,30 @@ A typical admin feature (mirror an existing one such as Roles or Groups):
 
 ## 9. Debugging locally
 
+### 9.1 Where to look first
+
 - **Server logs** print to the `pnpm dev` terminal — server component and route-handler errors land here.
-- **Database:** connect with any Postgres client to `postgresql://devresponse:devresponse@localhost:5444/devresponse_db`. Inspect `app_audit_events` to see what the app recorded for an action.
-- **Auth issues:** check the `session` / `account` tables and the Better Auth catch-all responses; confirm `BETTER_AUTH_URL` matches the origin you're hitting.
-- **Email in dev:** with no `EMAIL_PROVIDER`, messages are written to `app_outbox` with status `logged` and visible under **Administrator → Email**.
-- **Request correlation:** every admin response carries `x-request-id`; grep `app_audit_events` (and Sentry, if enabled) for that id.
+- **Liveness/readiness:** `GET /api/health` (process up) and `GET /api/health/ready` (database reachable — `503` means check Postgres before anything else).
+- **Request correlation:** every admin and v1 response carries `x-request-id`; grep `app_audit_events` (and Sentry, if enabled) for that id. The audit trail is often the fastest answer to "what did the app actually do?"
+
+### 9.2 Database inspection
+
+- Connect with any Postgres client to `postgresql://devresponse:devresponse@localhost:5444/devresponse_db`.
+- **Every table lives in the `auth` schema** (`DB_SCHEMA`), not `public` — use `\dt auth.*` or `SET search_path = auth, public;`. If you find app tables in `public`, a migration/seed ran without the connection-level search path: `DB_SEARCH_PATH_VIA_OPTIONS=0` is set. That flag exists **only** for transaction-pooling endpoints (Neon pooled, PgBouncer) paired with a server-side `ALTER ROLE … SET search_path`; against local/direct Postgres, leave it unset. Recover by unsetting it, dropping the stray `public` tables, and re-running `pnpm db:reset:reload`.
+- Inspect `app_audit_events` to see what the app recorded for an action; `app_sso_handoff_nonces` shows one row per SSO launch (`consumed_at` stamps on use — a `null` for an old token means the consume POST never arrived).
+
+### 9.3 Auth & session issues
+
+- Check the `session` / `account` tables and the Better Auth catch-all responses; confirm `BETTER_AUTH_URL` matches the origin you're hitting.
+- Remember cookies are **host-scoped, port-agnostic**: two apps on `localhost` (any ports) share the same `better-auth.session_token` cookie slot and will clobber each other; put local test apps on distinct hostnames (see §9.5) when that matters.
+
+### 9.4 Email in dev
+
+With no `EMAIL_PROVIDER`, messages are written to `app_outbox` with status `logged` and visible under **Administrator → Email** — nothing is ever sent.
+
+### 9.5 The local SSO / satellite rig
+
+To debug cross-subdomain SSO (or any multi-app flow) on one machine, use the verified four-app topology in the [Satellite Apps Integration Guide §6.6](./integration-satellite-apps.md#66-local-development--all-four-apps-on-one-machine): the kit on `localhost:3000`, handoff satellites on `*.localtest.me` subdomains (public DNS → `127.0.0.1`, real per-host cookie isolation), and a shared-session satellite on `localhost:3003`. It includes the copy-paste steps (seed, secret, SQL registration, per-app env, `next dev -H …`) and the two dev-only gotchas (host binding for absolute URLs; the CSP `upgrade-insecure-requests` directive silently killing form POSTs on http non-localhost hosts).
 
 ## 10. Common mistakes & troubleshooting
 
@@ -202,6 +230,7 @@ A typical admin feature (mirror an existing one such as Roles or Groups):
 | App can't reach the database | Is `pnpm db:up` running? Is the port `5444` (not 5432)? Check `DATABASE_URL`. |
 | Boot error about a secret/JWK | `BETTER_AUTH_SECRET` / `SSO_HANDOFF_JWT_SECRET` unset, or `API_JWT_ENABLED=1` without `API_JWT_PRIVATE_KEY`. |
 | `403`/`404` on an admin call you expected to work | Tenant scope — a non-superadmin only sees their own org; out-of-scope resources return **404 by design**. |
+| Tables ended up in `public` instead of `auth` | `DB_SEARCH_PATH_VIA_OPTIONS=0` is set locally — a pooler-only setting. Unset it, drop the strays, re-run `pnpm db:reset:reload` (see §9.2). |
 | Locale-parity test fails | A new text key is missing from one of the 8 locale files (en, fr, es, uk, pt, zh, hi, ja). Add it everywhere. |
 | Coverage gate fails but tests pass | New untested code dropped global coverage below the ratchet — add tests (the local sharded runner does **not** compute coverage; run `pnpm test:coverage`). |
 | Flaky/odd test failures with "not a function" | Run the **sharded** runner (`pnpm test`), not a single in-process Vitest run — see [Testing](./testing.md). |

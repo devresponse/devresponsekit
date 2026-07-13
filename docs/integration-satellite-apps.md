@@ -201,11 +201,72 @@ A topology that runs the whole fleet locally over plain http, verified end to en
 | B (`app-handoff`) | `http://handoff.localtest.me:3002` | `handoff.localtest.me` (isolated) |
 | C (`app-shared`) | `http://localhost:3003` | `localhost` — **same host as the primary**, so the host-only session cookie is shared across ports and no parent-domain cookie is needed in dev |
 
+**Step-by-step** (assumes the `devresponseapps` checkout sits next to the kit's):
+
+1. **Provision + seed the primary** — and load the dev fixture so you have users to sign in with ([Developer Onboarding §3](./developer-onboarding.md#3-run-locally) lists the credentials):
+
+   ```bash
+   pnpm db:up && pnpm db:provision && pnpm db:seed:dev
+   ```
+
+2. **Mint the shared handoff secret** and set the primary's `.env`:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   ```
+
+   ```bash
+   SSO_HANDOFF_ISSUER="http://localhost:3000"
+   SSO_HANDOFF_JWT_SECRET="<the generated value>"
+   SSO_ALLOWED_ORIGIN_SUFFIXES="localtest.me,localhost"
+   ```
+
+3. **Register the satellites by SQL** (the console's enterprise-app validator requires `https://` origins by design; the launch flow reads the stored row as-is, so local `http://` origins go in directly):
+
+   ```sql
+   insert into auth.app_enterprise_applications
+     (id, label, origin, subdomain, sso_audience, status, sort_order)
+   values
+     ('standalone', 'App Standalone (A)', 'http://standalone.localtest.me:3001',
+      'standalone', 'devresponse-app:standalone', 'available', 10),
+     ('handoff', 'App Handoff (B)', 'http://handoff.localtest.me:3002',
+      'handoff', 'devresponse-app:handoff', 'available', 20);
+   ```
+
+4. **Write each satellite's `.env.local`.** A shown; B is identical with `handoff` / `:3002`; C follows [§5.2](#52-option-c-configuration) instead (the **primary's** `BETTER_AUTH_SECRET`, its own `http://localhost:3003` URLs, `SSO_HANDOFF_*` placeholders):
+
+   ```bash
+   NEXT_PUBLIC_APP_NAME="DevResponse — Standalone (A)"
+   NEXT_PUBLIC_APP_URL="http://standalone.localtest.me:3001"
+   NEXT_PUBLIC_PRODUCTION_HOST="standalone.localtest.me"
+   BETTER_AUTH_SECRET="<its own 32+ char secret>"
+   BETTER_AUTH_URL="http://standalone.localtest.me:3001"
+   ADMIN_TRUSTED_ORIGINS="http://standalone.localtest.me:3001"
+   DATABASE_URL="postgresql://devresponse:devresponse@localhost:5444/devresponse_db"  # the PRIMARY's DB — same-DB topology
+   DB_SCHEMA="auth"
+   SSO_HANDOFF_ISSUER="http://localhost:3000"
+   SSO_HANDOFF_AUDIENCE_PREFIX="devresponse-app"
+   SSO_HANDOFF_APPLICATION_ID="standalone"
+   SSO_HANDOFF_JWT_SECRET="<the shared secret from step 2>"
+   ```
+
+5. **Run the fleet** — the handoff satellites bound to their subdomains:
+
+   ```bash
+   pnpm dev                                                              # primary :3000
+   pnpm --dir ../devresponseapps/app-standalone dev -H standalone.localtest.me
+   pnpm --dir ../devresponseapps/app-handoff    dev -H handoff.localtest.me
+   pnpm --dir ../devresponseapps/app-shared     dev                     # :3003, plain localhost
+   ```
+
+6. **Smoke-test** per [§7](#7-smoke-test--troubleshooting): sign in on the primary, hit `/api/sso/launch?applicationId=standalone` (then `handoff`), and simply open `http://localhost:3003/en/app/dashboard` for C.
+
+Why these steps look the way they do:
+
 - `*.localtest.me` resolves to `127.0.0.1` via public DNS — no hosts-file edits, and it gives A/B real per-host cookie isolation that four `localhost` ports cannot.
 - **Start each handoff satellite with `next dev -p <port> -H <its-subdomain>`.** Route handlers build absolute URLs from the request URL (the consume → confirm redirect), and the dev server normalizes unknown hosts to `localhost` unless it is bound to the hostname. Add the host to `allowedDevOrigins` in `next.config.mjs` as well.
 - **Drop the CSP `upgrade-insecure-requests` directive in development.** `localhost` is exempt (a trustworthy origin), but on an `http://*.localtest.me` host the browser silently upgrades every subresource *and the confirm form's POST* to `https://` — the handoff then dies with no request ever reaching the satellite. Guard the directive on `NODE_ENV === "production"` (the `devresponseapps` forks do).
-- **Register the local origins by SQL.** The admin console's enterprise-app validator requires `https://` origins; the launch flow itself reads the stored row as-is, so for local http origins insert the rows directly (`id`, `label`, `origin`, `subdomain`, `sso_audience`, `status='available'`).
-- Point A/B at the **primary's database** locally (the same-DB topology, §4.5) so the shipped consume code works unchanged; their distinct `BETTER_AUTH_SECRET`s and per-host cookies keep the sessions separate. Use the dev fixture (`pnpm db:seed:dev`) for test users.
+- A/B point at the **primary's database** locally (the same-DB topology, §4.5) so the shipped consume code works unchanged; their distinct `BETTER_AUTH_SECRET`s and per-host cookies keep the sessions separate.
 
 ### 6.7 Migration & first-boot order (A/B)
 

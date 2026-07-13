@@ -51,6 +51,12 @@ const nextConfig = {
   // an ADDITIONAL build artifact: `next start` and serverless targets are
   // unaffected. See the Dockerfile and docs/docker.md.
   output: "standalone",
+  // Local subdomain-SSO testing: the dev server may be reached via a
+  // non-localhost hostname (devresponse.local via the hosts file, or
+  // *.localtest.me via public DNS), which Next's dev cross-origin protection
+  // would otherwise block. Dev-only setting; ignored by production builds.
+  // See docs/integration-satellite-apps.md §6.6.
+  allowedDevOrigins: ["devresponse.local", "*.devresponse.local", "*.localtest.me"],
   // The proxy.ts (formerly middleware.ts) file lives under src/.
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

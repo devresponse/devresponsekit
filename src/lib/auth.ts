@@ -182,6 +182,20 @@ export const auth = betterAuth({
     updateAge: 60 * 15,
   },
 
+  // Shared-session (Option C) support: with COOKIE_DOMAIN set, the session
+  // cookie is issued on the parent domain (e.g. `.devresponse.com`) so
+  // co-trusted satellites sharing this deployment's `auth` schema + secret
+  // validate the same session with zero redirects. Unset (the default), the
+  // cookie stays host-only and per-app isolation is preserved — see the env
+  // schema docstring and docs/integration-satellite-apps.md §5.
+  ...(env.COOKIE_DOMAIN
+    ? {
+        advanced: {
+          crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN },
+        },
+      }
+    : {}),
+
   databaseHooks: {
     // AUTH-5: provision the app_users row at SIGN-UP (email/password), so a
     // self-registered account is visible in the admin Users list immediately —

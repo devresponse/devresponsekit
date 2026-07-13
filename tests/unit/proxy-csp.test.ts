@@ -86,6 +86,8 @@ describe("proxy — enforcing CSP (production)", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     // Styles intentionally keep 'unsafe-inline' (nonces can't cover style attrs).
     expect(csp).toContain("style-src 'self' 'unsafe-inline'");
+    // Production upgrades http subresources/form posts; dev must not (see below).
+    expect(csp).toContain("upgrade-insecure-requests");
   });
 
   it("mints a fresh nonce per request", () => {
@@ -115,5 +117,13 @@ describe("proxy — development CSP", () => {
     expect(ss).toContain("'unsafe-inline'");
     expect(ss).toContain("'unsafe-eval'");
     expect(scriptNonce(csp)).toBeNull();
+  });
+
+  it("omits upgrade-insecure-requests (it would break http dev hosts that aren't localhost)", () => {
+    // A non-localhost dev host (e.g. app1.devresponse.local) is not a
+    // "trustworthy origin", so the directive would silently upgrade every
+    // subresource and form POST to https:// against the plain-http dev server.
+    const csp = proxy(req("/en")).headers.get("Content-Security-Policy")!;
+    expect(csp).not.toContain("upgrade-insecure-requests");
   });
 });

@@ -12,6 +12,36 @@
       "runtimeExecutable": "docker",
       "runtimeArgs": ["compose", "up", "postgres"],
       "port": 5444
+    },
+    {
+      "name": "app-standalone",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "../devresponseapps/app-standalone",
+        "dev",
+        "-H",
+        "standalone.localtest.me"
+      ],
+      "port": 3001
+    },
+    {
+      "name": "app-handoff",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "../devresponseapps/app-handoff",
+        "dev",
+        "-H",
+        "handoff.localtest.me"
+      ],
+      "port": 3002
+    },
+    {
+      "name": "app-shared",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "../devresponseapps/app-shared", "dev"],
+      "port": 3003
     }
   ]
 }

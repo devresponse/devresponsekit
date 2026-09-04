@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
 
+# Least privilege in-file (review 2026-09-04 #113): every job here only reads
+# the checkout and talks to services with their own credentials. Raise per job
+# if a step ever needs more — never at workflow level.
+permissions:
+  contents: read
+
 # Superseded runs on the same ref are wasted compute — cancel them.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

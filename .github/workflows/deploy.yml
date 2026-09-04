@@ -30,6 +30,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege in-file (review 2026-09-04 #113): the job only checks out and
+# calls Vercel/Neon with their own secrets — GITHUB_TOKEN needs read only.
+permissions:
+  contents: read
+
 # Never interrupt a migrate+deploy mid-flight; queue instead.
 concurrency:
   group: deploy-production
@@ -42,13 +47,29 @@ jobs:
     timeout-minutes: 20
     # A workflow_run fires on CI failure too, so only proceed when the
     # triggering CI run SUCCEEDED. A manual dispatch always proceeds.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    #
+    # Fork guard (review 2026-09-04 #10): `branches: [main]` above matches the
+    # HEAD branch name of the triggering run, so a fork PR whose branch is
+    # named `main` would otherwise satisfy it and this job would check out the
+    # fork's commit and run `pnpm install` + migrations with production
+    # secrets. Require the run to be a PUSH from THIS repository.
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      }}
     # Gate behind a GitHub Environment for required reviewers + scoped secrets
     # (docs/deployment.md §6). Remove `environment:` for unattended deploys.
     environment: production
 
+    # VERCEL_TOKEN is deliberately NOT job-level: it is scoped to the three
+    # `vercel` steps below so `pnpm install` / migrations / the CLI install
+    # never see it (#113).
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
@@ -85,10 +106,16 @@ jobs:
         run: pnpm add -g vercel@54.14.5 # pin for reproducibility; bump deliberately
 
       - name: Pull Vercel production environment + project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build for production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy the prebuilt output to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"

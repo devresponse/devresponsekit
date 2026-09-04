@@ -127,7 +127,7 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 | `EMAIL_FROM` | From address/name. |
 | `RESEND_API_KEY` | Resend API key (when provider = resend). |
 | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_BASE_URL` | Mailgun config (use `https://api.eu.mailgun.net` for EU). |
-| `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to `GET /api/internal/outbox-drain`, which retries `pending` outbox rows on a serverless host (no long-running `pnpm outbox:drain` process). The route **fails closed** when unset. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#7-ci). |
+| `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to `GET /api/internal/outbox-drain`, which retries `pending` outbox rows on a serverless host (no long-running `pnpm outbox:drain` process). The route **fails closed** when unset (an empty value counts as unset). Validated by the env schema: when set it must be **at least 32 chars** or the server refuses to boot — a short guessable value can never silently enable the endpoint. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#7-ci). |
 | `OUTBOX_DRAIN_LIMIT` | Max outbox rows processed per `pnpm outbox:drain` run (default 100). The serverless `/api/internal/outbox-drain` route uses the library default of 50 instead. |
 
 ### Machine API credentials (both paths DARK by default)
@@ -241,7 +241,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE`, `SENTRY_TRACES_SAMPLE_RATE` | Tracing sample rates. |
 | `NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE`, `…_ERROR_SAMPLE_RATE` | Session-replay sampling. |
 | `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | **Build/CI only** — source-map upload. Never expose `SENTRY_AUTH_TOKEN` to the client. |
-| `METRICS_TOKEN` | **Presence enables** the Prometheus scrape endpoint `GET /api/metrics`. The route **fails closed** when unset (401, nothing exposed). Scrapers present it as `Authorization: Bearer …`; compared in constant time. See [observability.md](./observability.md#5-metrics). |
+| `METRICS_TOKEN` | **Presence enables** the Prometheus scrape endpoint `GET /api/metrics`. The route **fails closed** when unset (401, nothing exposed; an empty value counts as unset). Validated by the env schema: when set it must be **at least 32 chars** or the server refuses to boot. Scrapers present it as `Authorization: Bearer …`; compared in constant time. See [observability.md](./observability.md#5-metrics). |
 | `LOG_LEVEL` | Structured-logger level: `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` \| `silent`. Defaults to `info` (and to `silent` under `NODE_ENV=test`). |
 
 ### Docs viewer & test escape hatch
@@ -329,7 +329,8 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 - [ ] OAuth client secrets — per provider, only if social login enabled.
 - [ ] `RESEND_API_KEY` / `MAILGUN_API_KEY` — only if email enabled.
 - [ ] `SENTRY_AUTH_TOKEN` — build/CI only, never client-exposed.
-- [ ] `METRICS_TOKEN` — only if scraping `/api/metrics`; long random secret, scraper-side only.
+- [ ] `METRICS_TOKEN` — only if scraping `/api/metrics`; long random secret (≥32 chars, enforced at boot), scraper-side only.
+- [ ] `CRON_SECRET` — only if a scheduler calls `/api/internal/outbox-drain`; ≥32 chars, enforced at boot.
 - [ ] `DATABASE_URL` — direct endpoint by default; a pooled endpoint also needs `DB_SEARCH_PATH_VIA_OPTIONS=0` + an `ALTER ROLE` (see the pooler note above).
 
 ---
@@ -340,8 +341,8 @@ Most variables above are validated at boot by `src/lib/env.ts` — a missing or 
 
 | Variable | Used by | If unset |
 | --- | --- | --- |
-| `CRON_SECRET` | `/api/internal/outbox-drain` | endpoint fails closed (401) |
-| `METRICS_TOKEN` | `/api/metrics` | endpoint fails closed (401) |
+| `CRON_SECRET` | `/api/internal/outbox-drain` | endpoint fails closed (401); when set, must be ≥32 chars (boot-time check) |
+| `METRICS_TOKEN` | `/api/metrics` | endpoint fails closed (401); when set, must be ≥32 chars (boot-time check) |
 | `LOG_LEVEL` | the Pino logger | defaults to `info` (`silent` under test) |
 | `AUDIT_RETENTION_DAYS` / `OUTBOX_RETENTION_DAYS` | `pnpm db:prune` | default 365 / 90; `0` disables |
 | `SHUTDOWN_TIMEOUT_MS` | graceful-shutdown drain | defaults to 10000 ms |

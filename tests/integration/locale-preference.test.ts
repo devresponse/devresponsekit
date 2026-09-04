@@ -16,6 +16,13 @@ import type { NextRequest } from "next/server";
 const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
 const auditMock = vi.fn();
+const originCheck = vi.fn();
+
+// The CSRF origin guard short-circuits under NODE_ENV=test, so it is mocked
+// here to drive the deny path (its matching logic has its own unit suite).
+vi.mock("@/lib/admin/origin-guard.server", () => ({
+  checkTrustedOrigin: (...a: unknown[]) => originCheck(...a),
+}));
 
 const updateExecute = vi.fn().mockResolvedValue(undefined);
 const upsertExecute = vi.fn().mockResolvedValue(undefined);
@@ -63,6 +70,7 @@ beforeEach(async () => {
   sessionGetter.mockReset();
   accessGetter.mockReset();
   auditMock.mockReset();
+  originCheck.mockReset().mockReturnValue({ ok: true });
   updateExecute.mockClear();
   upsertExecute.mockClear();
   ({ POST } = await import("@/app/api/preferences/locale/route"));
@@ -70,6 +78,24 @@ beforeEach(async () => {
 afterEach(() => vi.resetModules());
 
 describe("POST /api/preferences/locale", () => {
+  it("returns 403 untrusted_origin on a cross-origin request BEFORE touching the session (review #39/#188)", async () => {
+    originCheck.mockReturnValue({ ok: false, reason: "untrusted_origin" });
+    const res = await POST(makeRequest({ locale: "fr" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "untrusted_origin" });
+    expect(sessionGetter).not.toHaveBeenCalled();
+    expect(updateExecute).not.toHaveBeenCalled();
+    expect(upsertExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when neither Origin nor Referer is present (missing_origin)", async () => {
+    originCheck.mockReturnValue({ ok: false, reason: "missing_origin" });
+    const res = await POST(makeRequest({ locale: "fr" }));
+    expect(res.status).toBe(403);
+    expect(updateExecute).not.toHaveBeenCalled();
+  });
+
   it("returns 401 when there is no session", async () => {
     sessionGetter.mockResolvedValue(null);
     const res = await POST(makeRequest({ locale: "fr" }));

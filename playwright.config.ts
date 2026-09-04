@@ -10,6 +10,10 @@ export default defineConfig({
   testDir: "tests",
   testMatch: ["e2e/**/*.spec.ts", "accessibility/**/*.spec.ts"],
   timeout: 30_000,
+  // A committed `test.only` / `describe.only` must FAIL the required E2E
+  // check instead of silently shrinking it to the focused cases (review #124).
+  // Mirrors vitest's `allowOnly: !CI` default.
+  forbidOnly: !!process.env.CI,
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],

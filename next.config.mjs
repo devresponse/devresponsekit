@@ -45,6 +45,10 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Do not advertise the framework on every response (`X-Powered-By:
+  // Next.js`); the static header set above is deliberately minimal and the
+  // server must not add a fingerprint the config cannot strip (review #115).
+  poweredByHeader: false,
   // Emit a self-contained server bundle (`.next/standalone`) with only the
   // traced runtime dependencies, so the production container is a thin
   // `node server.js` image instead of the full repo + node_modules. This is

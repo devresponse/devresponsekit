@@ -68,6 +68,8 @@ const TOUCHED_KEYS = [
   "BETTER_AUTH_SECRET",
   "SSO_HANDOFF_JWT_SECRET",
   "PGPOOL_MAX",
+  "CRON_SECRET",
+  "METRICS_TOKEN",
 ] as const;
 
 async function loadEnvWith(patch: Record<string, string | undefined>) {
@@ -236,6 +238,64 @@ describe("pool/proxy env validation (P2-12)", () => {
     const { mod, restore } = await loadEnvWith({ PGPOOL_MAX: "abc" });
     try {
       expect(() => mod.getServerEnv()).toThrow(/PGPOOL_MAX/);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("operator secrets CRON_SECRET / METRICS_TOKEN (review #92/#222)", () => {
+  const STRONG = "s".repeat(40);
+
+  it("are undefined when unset — the consuming routes keep failing closed", async () => {
+    const { mod, restore } = await loadEnvWith({
+      CRON_SECRET: undefined,
+      METRICS_TOKEN: undefined,
+    });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.CRON_SECRET).toBeUndefined();
+      expect(env.METRICS_TOKEN).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it("treat an empty string as unset (an `X=` line in .env must not enable the endpoint)", async () => {
+    const { mod, restore } = await loadEnvWith({ CRON_SECRET: "", METRICS_TOKEN: "" });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.CRON_SECRET).toBeUndefined();
+      expect(env.METRICS_TOKEN).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it("reject a CRON_SECRET shorter than 32 chars at boot", async () => {
+    const { mod, restore } = await loadEnvWith({ CRON_SECRET: "x" });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/CRON_SECRET/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("reject a METRICS_TOKEN shorter than 32 chars at boot", async () => {
+    const { mod, restore } = await loadEnvWith({ METRICS_TOKEN: "short-token" });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/METRICS_TOKEN/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("accept >=32-char values verbatim", async () => {
+    const { mod, restore } = await loadEnvWith({ CRON_SECRET: STRONG, METRICS_TOKEN: STRONG });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.CRON_SECRET).toBe(STRONG);
+      expect(env.METRICS_TOKEN).toBe(STRONG);
     } finally {
       restore();
     }

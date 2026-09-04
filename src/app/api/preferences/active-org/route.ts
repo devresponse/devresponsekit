@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
+import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
@@ -20,8 +21,18 @@ const bodySchema = z.object({ organizationId: z.string().uuid() });
  * Authority lives in the membership check here AND in
  * `getUserAccessContext` (which only resolves the caller's own
  * memberships), so the cookie is a selector, never a grant.
+ *
+ * This is a cookie-session mutation, so it carries the same trusted-origin
+ * CSRF guard as the account/administrator mutation guards (review #39/#188).
+ * The route authenticates ONLY via the ambient session cookie, so the guard
+ * is unconditional — there is no bearer path to exempt.
  */
 export async function POST(request: NextRequest) {
+  const origin = checkTrustedOrigin(request);
+  if (!origin.ok) {
+    return NextResponse.json({ error: "untrusted_origin" }, { status: 403 });
+  }
+
   const session = await getCurrentSession();
   if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });

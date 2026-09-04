@@ -21,7 +21,7 @@ Two related references carry the deeper detail this page links to rather than re
 | Group | Base path | Auth | Audience |
 | --- | --- | --- | --- |
 | Better Auth | `/api/auth/[...all]` | Better Auth (cookies) | Browser auth flows & OAuth callbacks |
-| Account self-service | `/api/account/*`, `/api/preferences/*` | Cookie session | The signed-in user |
+| Account self-service | `/api/account/*`, `/api/preferences/*` | Cookie session (`/api/account/*` also accepts a bearer credential carrying the matching `account.*` scope) | The signed-in user |
 | Invitations | `/api/invitations/accept` | Cookie session | Signed-in invitees accepting an organization invitation |
 | Navigation | `/api/navigation/*` | Cookie session | The web UI |
 | SSO handoff | `/api/sso/launch`, `/api/sso/consume` | Cookie session / signed token | Cross-subdomain SSO |
@@ -63,7 +63,7 @@ There are two auth models. **Cookie session** gates the admin console and accoun
 
 ### Cookie session (browser & admin console)
 
-Better Auth sets a session cookie on sign-in. Cross-site mutations (`POST`/`PATCH`/`PUT`/`DELETE`) are additionally protected by an **origin guard**: the request's `Origin` (or `Referer`) must be a trusted origin. A non-browser caller of `/api/administrator/*` must therefore send **both** the session cookie and a matching `Origin` header.
+Better Auth sets a session cookie on sign-in. Cross-site mutations (`POST`/`PATCH`/`PUT`/`DELETE`) are additionally protected by an **origin guard**: the request's `Origin` (or `Referer`) must be a trusted origin. The guard covers every cookie-session mutation — `/api/administrator/*`, `/api/account/*`, `/api/preferences/*` (active-org and locale switches), and `/api/invitations/accept` — so a non-browser caller must send **both** the session cookie and a matching `Origin` header; a miss is `403 untrusted_origin`.
 
 ### Bearer credentials (machine API)
 
@@ -92,6 +92,8 @@ curl https://app.example.com/api/v1/users -H "Authorization: Bearer eyJ…"
 **Authority rule (the one invariant to remember):** a credential's effective access is the **intersection of its scopes and its owner's live permissions** (`src/lib/api-auth/scopes.ts`, enforced by `requireApiPermission` in `v1-guard.server.ts`). A credential can never be minted with more authority than its creator holds, and `GET /api/v1/me` reports the resulting `effectiveScopes`.
 
 Scopes **are** the permission vocabulary — every `admin.*` catalog key (see [`admin-manager.md` §6.1](./admin-manager.md#61-permission-catalog)) plus a small set of self-service `account.*` scopes (`account.read`, `account.profile.write`, `account.preferences.write`, `account.apikeys.manage`). A scope ending in `.*` (e.g. `admin.users.*`) matches every key under that prefix.
+
+The self-service write scopes gate the account mutations for bearer callers: `PATCH /api/account/profile` requires `account.profile.write`, `PUT /api/account/preferences` requires `account.preferences.write`, and the `/api/v1/me/api-keys*` mutations require `account.apikeys.manage`. A read-only (`account.read`) or zero-scope credential gets `403 insufficient_scope` on every one of them; a cookie session carries the user's full authority and is unaffected.
 
 > For the full threat model, secret storage, issuance, rotation, and revocation, see **[Design: API Keys & Access Tokens](./design-api-keys-and-tokens.md)**.
 

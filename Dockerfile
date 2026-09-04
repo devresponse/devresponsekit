@@ -22,7 +22,7 @@
 # (22.23.2, 2026-08-25). Dependabot's `docker` ecosystem (.github/dependabot.yml)
 # proposes digest bumps; keep BOTH stages on the same digest.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS builder
+FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS builder
 
 ENV PNPM_HOME="/pnpm" \
     PATH="/pnpm:$PATH" \
@@ -50,7 +50,7 @@ RUN pnpm build
 # Stage 2 — runner: copy only the standalone server + static assets and
 # run as an unprivileged user.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runner
+FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS runner
 
 ENV NODE_ENV="production" \
     NEXT_TELEMETRY_DISABLED="1" \

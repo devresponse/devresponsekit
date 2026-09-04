@@ -103,8 +103,9 @@ describe("dependency governance: lockfile floors from the 2026-09 sweep", () => 
     ["next", undefined, "16.2.11"], // GHSA-6gpp-xcg3-4w24, -m99w-x7hq-7vfj, -89xv-2m56-2m9x, -p9j2-gv94-2wf4
     ["eslint-config-next", undefined, "16.2.11"],
     ["sharp", undefined, "0.35.0"], // GHSA-f88m-g3jw-g9cj
-    ["undici", 7, "7.29.0"], // GHSA-4cwx-7wf7-3272
-    ["undici", 8, "8.9.0"],
+    // undici 7.x left the tree when jsdom 30 (undici ^8.9.0) replaced jsdom 29;
+    // the `jsdom>undici` override now floors the 8.x line instead.
+    ["undici", 8, "8.9.0"], // GHSA-4cwx-7wf7-3272
     ["postcss", undefined, "8.5.23"], // GHSA-r28c-9q8g-f849, GHSA-fxqj-rqcc-2cmp
     ["nanoid", 3, "3.3.18"], // GHSA-28wg-ghj8-5hjv, GHSA-2v37-7h3g-55p8
     ["fast-uri", undefined, "3.1.6"],

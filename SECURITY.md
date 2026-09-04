@@ -95,7 +95,7 @@ release that satisfies the floor on its own; the override can then go.
 
 | Override | Floor | Why (advisories closed) | Scope / consumer | Review by |
 | --- | --- | --- | --- | --- |
-| `jsdom>undici` | `^7.29.0` | `GHSA-4cwx-7wf7-3272` (high). `jsdom` declares `undici@^7.25.0`; the resolved copy sat one patch below the fix. | Dev (jsdom test environment). The direct dev `undici` is pinned `8.10.2` separately. | 2026-12-01 |
+| `jsdom>undici` | `^8.9.0` | `GHSA-4cwx-7wf7-3272` (high). `jsdom@30` declares `undici@^8.9.0` (its network stack needs undici 8 — forcing 7.x hangs XHR/`fromURL`); the floor is the first patched 8.x release and dedupes with the direct dev pin. | Dev (jsdom test environment). The direct dev `undici` is pinned `8.10.2` separately. | 2026-12-01 |
 | `dompurify` | `^3.4.13` | `GHSA-cmwh-pvxp-8882`, `GHSA-55q2-fjhq-7xh7` (moderate), `GHSA-c2j3-45gr-mqc4` (low). | Runtime (`mermaid` on the in-app docs renderer, also a direct dependency). | 2026-12-01 |
 | `postcss` | `^8.5.23` | `GHSA-r28c-9q8g-f849` (high, `sourceMappingURL` path traversal), `GHSA-fxqj-rqcc-2cmp` (moderate); pulls `nanoid@^3.3.18` (`GHSA-28wg-ghj8-5hjv`, `GHSA-2v37-7h3g-55p8`, high). `next` pins `postcss@8.4.31`. | Build (Next.js + Tailwind), validated by `pnpm build`. | 2026-12-01 |
 | `@babel/core` | `^7.29.6` | Dependabot alert #4. | Dev (Stryker instrumenter). | 2026-12-01 |

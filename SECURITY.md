@@ -72,41 +72,111 @@ date** — when an upstream fix lands, drop the entry rather than let it linger.
 
 | GHSA | Package | Severity | Why it is not reachable in production | Review by |
 | --- | --- | --- | --- | --- |
-| `GHSA-5xrq-8626-4rwp` | `vitest` | High | The **test runner** (`@vitest/coverage-v8`, dev). Never imported by the production runtime bundle. | 2026-09-18 |
+| _none_ | — | — | The allowlist is **empty** as of 2026-09-04: every advisory is fixed by a version bump or an override floor (next section). Add a row here (and the id to `ignoreGhsas`) only for an advisory confined to dev/build/test tooling that has **no** fixed release — never for anything reachable at runtime. | — |
 
-To re-verify reachability: `pnpm why vitest` shows it arrives only via the
-test runner (`@vitest/coverage-v8`), and the Next.js standalone trace
-(`output: "standalone"`) excludes it from the runtime image. A **new**
+To re-verify reachability for a future entry: `pnpm why <pkg>` must show it
+arriving only via dev tooling, and the Next.js standalone trace
+(`output: "standalone"`) must exclude it from the runtime image. A **new**
 high/critical advisory that is *not* in this list fails CI by design, so the
 gate still catches anything unreviewed.
 
+### Override floors (`pnpm.overrides`)
+
+The preferred fix for a vulnerable **transitive** is to raise its floor with
+`pnpm.overrides`, not to mute the advisory: a mute's rationale rots the moment
+a later CVE moves the patched line, while a floor keeps resolving to the fixed
+release. Every override in `package.json` is listed here with the reason it
+exists; `tests/unit/dependency-governance.test.ts` fails when an override is
+added without a row (and when the lockfile resolves below the patched lines
+the 2026-09 sweep established). Floors are **scoped** — to a parent
+(`parent>child`) or a major (`pkg@N`) — so a floor can never cross a major
+version behind a consumer's back. Review each row when its parent ships a
+release that satisfies the floor on its own; the override can then go.
+
+| Override | Floor | Why (advisories closed) | Scope / consumer | Review by |
+| --- | --- | --- | --- | --- |
+| `jsdom>undici` | `^7.29.0` | `GHSA-4cwx-7wf7-3272` (high). `jsdom` declares `undici@^7.25.0`; the resolved copy sat one patch below the fix. | Dev (jsdom test environment). The direct dev `undici` is pinned `8.10.2` separately. | 2026-12-01 |
+| `dompurify` | `^3.4.13` | `GHSA-cmwh-pvxp-8882`, `GHSA-55q2-fjhq-7xh7` (moderate), `GHSA-c2j3-45gr-mqc4` (low). | Runtime (`mermaid` on the in-app docs renderer, also a direct dependency). | 2026-12-01 |
+| `postcss` | `^8.5.23` | `GHSA-r28c-9q8g-f849` (high, `sourceMappingURL` path traversal), `GHSA-fxqj-rqcc-2cmp` (moderate); pulls `nanoid@^3.3.18` (`GHSA-28wg-ghj8-5hjv`, `GHSA-2v37-7h3g-55p8`, high). `next` pins `postcss@8.4.31`. | Build (Next.js + Tailwind), validated by `pnpm build`. | 2026-12-01 |
+| `@babel/core` | `^7.29.6` | Dependabot alert #4. | Dev (Stryker instrumenter). | 2026-12-01 |
+| `esbuild` | `^0.28.1` | Dependabot alert #3; `vite` declares `^0.27.0`. | Dev (vitest), validated by `pnpm test:coverage`. | 2026-12-01 |
+| `next>sharp` | `^0.35.0` | `GHSA-f88m-g3jw-g9cj` (high — libvips CVE-2026-33327/33328/35590/35591). `next@16.2.x` declares `sharp@^0.34.5` as an optional dependency. | **Runtime** (`next/image` optimisation in the standalone server). Validated by `pnpm build` + the Trivy image scan. | 2026-12-01 |
+| `js-yaml@3` | `^3.15.2` | `GHSA-52cp-r559-cp3m`, `GHSA-5p4m-2wfm-xmqj` (high — merge-key / `!!omap` quadratic CPU), `GHSA-h67p-54hq-rp68` (moderate). `gray-matter` declares `^3.13.1`, which 3.15.x satisfies. | **Runtime** (`gray-matter` docs frontmatter — repo-authored input only). Pinned by `tests/unit/docs-frontmatter.test.ts`. | 2026-12-01 |
+| `js-yaml@4` | `^4.3.1` | Same three advisories on the 4.x line. | Dev (`@eslint/eslintrc`, `cosmiconfig` via `kysely-codegen`). | 2026-12-01 |
+| `ajv>fast-uri` | `^3.1.6` | `GHSA-v2hh-gcrm-f6hx`, `GHSA-7p8r-x3mc-p8w7`, `GHSA-5jgf-p345-68v8`, `GHSA-f65p-4m7j-42xc`, `GHSA-fph4-wmhf-6fwf`, `GHSA-jqff-g426-hqxp` (high). | Dev/build (`ajv` under Stryker and webpack's `schema-utils`). | 2026-12-01 |
+| `browserslist` | `^4.28.7` | `GHSA-c83g-rgw3-j3cx`, `GHSA-73wf-gq98-2v4g` (high). | Build/dev (`@babel/helper-compilation-targets`, `webpack` via `@sentry/webpack-plugin`). | 2026-12-01 |
+| `brace-expansion@1` | `^1.1.18` | `GHSA-3jxr-9vmj-r5cp`, `GHSA-mh99-v99m-4gvg`, `GHSA-rgw5-rvv9-x895` (high, ReDoS). | Dev (`minimatch@3` under eslint). | 2026-12-01 |
+| `brace-expansion@5` | `^5.0.9` | Same three advisories on the 5.x line. | Dev (`minimatch@10` under Stryker). | 2026-12-01 |
+| `typed-rest-client>qs` | `^6.16.0` | `GHSA-q8mj-m7cp-5q26`, `GHSA-x5fp-wj9c-mxmx`, `GHSA-4mjr-xmp4-gh2g` (moderate). `typed-rest-client` pins `qs@6.15.1` exactly. | Dev (Stryker dashboard client). The direct dev `qs` is `^6.16.0`. | 2026-12-01 |
+
+To confirm a floor took effect: `pnpm why <pkg>` must show a single resolved
+version at or above the floor for every parent the row names, and
+`pnpm audit --audit-level low` must report nothing for it (it reported **0**
+advisories at every level after the 2026-09-04 sweep).
+
 ### Cleared
+
+- **2026-09 dependency sweep (review #8, #9, #26, #114).** Both required
+  supply-chain gates (`Dependency audit` and `trivy`) had gone red on `main`
+  with 28 high advisories across `next@16.2.10` (4 GHSAs incl.
+  `GHSA-6gpp-xcg3-4w24` proxy bypass and `GHSA-m99w-x7hq-7vfj` Server-Actions
+  DoS), `next>sharp@0.34.5`, `undici`, `postcss`/`nanoid`, `fast-uri`,
+  `browserslist`, `brace-expansion`, and `js-yaml`. Fixed by bumping `next` +
+  `eslint-config-next` to 16.2.12, the direct dev `undici` to 8.10.2 and
+  `postcss` to 8.5.28, and by raising/adding the override floors in the table
+  above. No advisory was muted. Validated with `pnpm build`, the full
+  `pnpm test:coverage` (ratchet intact), and `pnpm audit --audit-level low`
+  (clean).
+- `js-yaml` (`GHSA-h67p-54hq-rp68`, previously dismissed as "only v4 patches
+  it"): that rationale went stale when js-yaml 3.15.x was published for the 3.x
+  line. The `js-yaml@3: ^3.15.2` floor now keeps `gray-matter`'s copy on the
+  patched line (it satisfies gray-matter's `^3.13.1`), so the docs viewer is
+  unchanged and no longer carries the two newer high advisories either.
+- `vitest` (`GHSA-5xrq-8626-4rwp`, high — test runner only) was the sole
+  `ignoreGhsas` mute. `vitest@4.1.9` is no longer reported by `pnpm audit`
+  (verified with the allowlist emptied on 2026-09-04), so the entry was
+  dropped and the allowlist is empty.
 
 - `dompurify` (`GHSA-cmwh-pvxp-8882`, moderate — `ALLOWED_ATTR` pollution via
   `setConfig`) reached the runtime via `mermaid` on the in-app docs renderer.
-  Pinned forward to the patched line with `pnpm.overrides` (`dompurify:
-  ^3.4.11`); `pnpm why dompurify` confirms a single resolved `3.4.11`, and the
+  Pinned forward to the patched line with `pnpm.overrides` (now `dompurify:
+  ^3.4.13`); `pnpm why dompurify` confirms a single resolved version, and the
   mermaid render path stays defended by `securityLevel: "strict"` + server-side
   `rehypeSanitize`.
 - `postcss`, `esbuild`, and `@babel/core` (Dependabot alerts #1/#3/#4) were
   patched transitives held back by conservative parent pins — `next` pins
   `postcss@8.4.31`, `vite` declares `esbuild@^0.27.0`, and several tools shared
-  `@babel/core@7.29.0`. Pinned forward with `pnpm.overrides` (`postcss:
-  ^8.5.10`, `esbuild: ^0.28.1`, `@babel/core: ^7.29.6`) to the patched lines.
-  Because the first two are forced *past* their parents' declared ranges, both
-  were validated end to end: `pnpm build` (Next.js + Tailwind exercise postcss)
-  and the full `pnpm test:coverage` (vitest is the only vite/esbuild consumer
-  here) both pass. `pnpm why <pkg>` confirms a single resolved version each.
+  `@babel/core@7.29.0`. Pinned forward with `pnpm.overrides` (`postcss`,
+  `esbuild`, `@babel/core` — current floors in the table above) to the patched
+  lines. Because the first two are forced *past* their parents' declared
+  ranges, both were validated end to end: `pnpm build` (Next.js + Tailwind
+  exercise postcss) and the full `pnpm test:coverage` (vitest is the only
+  vite/esbuild consumer here) both pass. `pnpm why <pkg>` confirms a single
+  resolved version each.
 
 ### Moderate / low transitive advisories (below the high gate)
 
-These are reported by `pnpm audit` but **do not block CI** (they are not
-high/critical) and are **not** runtime-exploitable. Tracked here so they are
-governed, not silent; drop a row when the upstream fix lands.
+Advisories below the high gate are reported by `pnpm audit` but **do not
+block CI**. They are still governed, not silent: prefer raising a floor (table
+above) and, only when a fix genuinely does not exist, record the accepted risk
+here with its reachability rationale so the row can be dropped when the
+upstream fix lands.
 
-| GHSA | Package | Severity | Reachability | 
+| GHSA | Package | Severity | Reachability |
 | --- | --- | --- | --- |
-| `GHSA-h67p-54hq-rp68` | `js-yaml` | Moderate | **Dismissed — tolerable risk (Dependabot #5).** Via `gray-matter` (docs frontmatter, runtime) and `@eslint/eslintrc` (dev). The only patch is js-yaml **v4**, but `gray-matter` (unmaintained) pins `js-yaml@^3.13.1`, so it cannot be bumped without replacing gray-matter. The runtime path parses only repo-authored, trusted frontmatter — never attacker-supplied YAML. Revisit if gray-matter is ever replaced. |
+| _none_ | — | — | `pnpm audit --audit-level low` reported 0 advisories after the 2026-09-04 sweep. |
+
+### Production image scan (Trivy)
+
+`.github/workflows/docker-scan.yml` (required check `trivy`) builds the
+Dockerfile and fails on any **fixable** HIGH/CRITICAL in the image; accepted,
+non-runtime-reachable findings would go in `.trivyignore` with the same
+rationale + review-by discipline as the table above. The runner stage deletes
+the base image's bundled `npm`/`npx`/`corepack`/`yarn` CLIs, so npm's vendored
+dependency tree (the source of every previous `.trivyignore` mute) is no longer
+in the image and `.trivyignore` currently carries **no** entries. The base
+image digest is tracked by Dependabot's `docker` ecosystem; a stale digest is
+the usual cause of a base-OS finding (see [docs/docker.md](docs/docker.md)).
 
 ## Secret scanning
 

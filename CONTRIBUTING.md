@@ -55,8 +55,28 @@ A PR must pass all of these; run them locally before pushing:
 | E2E + accessibility (Playwright + axe) | `pnpm test:e2e` / `pnpm test:a11y` |
 | Dependency audit (hard gate) | `pnpm audit --audit-level high` |
 
-CI additionally runs **CodeQL** and **gitleaks** secret scanning. `test:all`
+CI additionally runs **CodeQL** and **gitleaks** secret scanning (a required
+check; rules, allowlist policy, and the local command are in
+[SECURITY.md → Secret scanning](SECURITY.md#secret-scanning)). `test:all`
 runs typecheck + lint + format check + coverage + e2e + a11y locally.
+
+## Regenerating the help walkthrough screenshots
+
+The in-app help (`/app/help`) is a screenshot tour whose images live in
+`help/screenshots/` and are produced by `help/capture.mjs` (Playwright, from
+the repo). The script is operator tooling, not servable content: it is
+excluded from the Docker build context and holds **no credentials** — pass
+them through the environment and it exits non-zero when one is missing:
+
+```bash
+CAPTURE_BASE_URL=https://<host> CAPTURE_EMAIL=<admin account> CAPTURE_PASSWORD=<from your secret store>   node help/capture.mjs
+```
+
+The account needs the administrator-console permissions for the
+`/administrator` screens. `CAPTURE_USER_ID` / `CAPTURE_ROLE_ID` /
+`CAPTURE_ORG_ID` optionally pick the representative detail rows. Never inline
+a password in the script, a shell alias, or a commit — the secret-scan gate
+rejects quoted password literals under `help/` and `scripts/`.
 
 ## Testing expectations
 

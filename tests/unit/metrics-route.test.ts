@@ -4,6 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // wiring tests never reach `audit.server` → `db`.
 const auditSpy = vi.hoisted(() => vi.fn((_input: unknown) => Promise.resolve()));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: auditSpy }));
+// The route reads METRICS_TOKEN through the validated env (review #222), which
+// caches after its first parse; mirror `process.env` per call so `vi.stubEnv`
+// still drives each case. The schema rules themselves are pinned in env.test.ts.
+vi.mock("@/lib/env", () => ({
+  getServerEnv: () => ({ METRICS_TOKEN: process.env.METRICS_TOKEN || undefined }),
+}));
 
 import { GET } from "@/app/api/metrics/route";
 import { __resetRateLimitForTests, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -23,7 +29,7 @@ import { __resetMetricsForTests, registry } from "@/lib/observability/metrics.se
  *
  * Time is injected via the limiter's `nowMs` arg for determinism.
  */
-const TOKEN = "test-metrics-token-0123456789";
+const TOKEN = "test-metrics-token-0123456789-abcdef";
 
 function scrapeRequest(authHeader?: string): Request {
   return new Request("http://localhost/api/metrics", {

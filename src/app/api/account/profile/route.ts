@@ -21,10 +21,14 @@ export const dynamic = "force-dynamic";
  * by `actor.appUserId` (never an id from the body), and the Better Auth
  * name by the session itself (`auth.api.updateUser` acts on the current
  * user). There is no way to target another account.
+ *
+ * A bearer credential must carry `account.profile.write` (design §7); a
+ * read-only or zero-scope key is refused with 403 `insufficient_scope`.
+ * Cookie sessions carry full user authority and pass (review #184).
  */
 
 export async function PATCH(request: NextRequest) {
-  const guard = await requireAccountUser(request);
+  const guard = await requireAccountUser(request, "account.profile.write");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

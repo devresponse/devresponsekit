@@ -62,9 +62,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const scopes = normalizeScopes(parsed.data.scopes);
-  // A cookie admin carries full authority (null granted scopes); they may
-  // only grant scopes their own permissions cover.
-  const ungrantable = ungrantableScopesForCaller(guard.access.permissions, null, scopes);
+  // A cookie admin carries full authority (null granted scopes) and may
+  // grant any scope their own permissions cover. A bearer caller (API key /
+  // JWT / agent token) is additionally bounded by its own granted scopes —
+  // a credential can never mint a broader one (design §7; review #12).
+  const ungrantable = ungrantableScopesForCaller(
+    guard.access.permissions,
+    guard.grantedScopes,
+    scopes,
+  );
   if (ungrantable.length > 0) {
     return adminErrorResponse("invalid_scope", 422, request, {
       requestId: guard.requestId,

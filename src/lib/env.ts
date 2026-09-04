@@ -26,6 +26,24 @@ const EXAMPLE_SECRET_PLACEHOLDERS: ReadonlySet<string> = new Set([
   "replace-with-a-different-strong-random-secret",
 ]);
 
+/**
+ * An OPTIONAL operator-chosen shared secret (cron / scrape tokens). Unset or
+ * empty ⇒ `undefined`, so the consuming route keeps failing closed; when a
+ * value IS present it must be at least {@link OPERATOR_SECRET_MIN_LENGTH}
+ * chars — a short guessable token must fail at boot, not be accepted
+ * silently (review #92/#222).
+ */
+const OPERATOR_SECRET_MIN_LENGTH = 32;
+function operatorSecret(name: string) {
+  return z
+    .string()
+    .optional()
+    .transform((value) => (value ? value : undefined))
+    .refine((value) => value === undefined || value.length >= OPERATOR_SECRET_MIN_LENGTH, {
+      message: `${name} must be at least ${OPERATOR_SECRET_MIN_LENGTH} chars when set`,
+    });
+}
+
 const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -117,6 +135,21 @@ const serverEnvSchema = z
     MAILGUN_DOMAIN: z.string().optional(),
     /** Override for the EU region: https://api.eu.mailgun.net */
     MAILGUN_BASE_URL: z.url().default("https://api.mailgun.net"),
+    /**
+     * Shared secret the scheduler presents (`Authorization: Bearer …`) to
+     * `GET /api/internal/outbox-drain`. OPTIONAL — the route FAILS CLOSED
+     * (401) when unset — but when set it must be a real secret: at least 32
+     * chars, so a one-character value cannot silently enable the endpoint
+     * (review #92). An empty string is treated as unset. Read through
+     * {@link getServerEnv} by the route so the check actually bites.
+     */
+    CRON_SECRET: operatorSecret("CRON_SECRET"),
+    /**
+     * Bearer token gating the Prometheus scrape endpoint `GET /api/metrics`.
+     * Same contract as CRON_SECRET: optional, fails closed when unset, at
+     * least 32 chars when set, empty string = unset (review #222).
+     */
+    METRICS_TOKEN: operatorSecret("METRICS_TOKEN"),
     /**
      * Test-only escape hatch ("1"/"true"): disables Better Auth's built-in
      * rate limiter, which production mode applies to sensitive endpoints

@@ -24,10 +24,14 @@ export const dynamic = "force-dynamic";
  * supported allow-list, time zone against the runtime Intl engine, date
  * format against the fixed option set, number-format locale against the
  * supported locales (or "system" → NULL).
+ *
+ * A bearer credential must carry `account.preferences.write` (design §7);
+ * a read-only or zero-scope key is refused with 403 `insufficient_scope`.
+ * Cookie sessions carry full user authority and pass (review #184).
  */
 
 export async function PUT(request: NextRequest) {
-  const guard = await requireAccountUser(request);
+  const guard = await requireAccountUser(request, "account.preferences.write");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

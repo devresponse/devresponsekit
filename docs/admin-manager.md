@@ -573,7 +573,7 @@ at `/app/administrator/agents`; nav-gated on `admin.clients.read`.
 | --- | --- | --- |
 | `GET /mcp-agents` | `admin.clients.read` | List agents in scope (client id, service-account + client status, scope ceiling) |
 | `POST /mcp-agents/[id]/approve` | `admin.clients.manage` | Activate a `pending_approval` service account so it can mint tokens (idempotent); `admin.mcp_agent.approved` |
-| `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority (`422` on over-grant); `admin.mcp_agent.scopes_updated` |
+| `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority — and, for a bearer caller, against the calling credential's own scopes, so a narrowly-scoped key or agent token can never lift a ceiling beyond itself (`422` on over-grant); `admin.mcp_agent.scopes_updated` |
 | `DELETE /mcp-agents/[id]` | `admin.clients.manage` | Revoke the client (idempotent — leaves the service account for the audit trail); `admin.mcp_agent.revoked` |
 
 Scopes are a **ceiling**, not a grant: per the `permission ∩ scope` invariant a

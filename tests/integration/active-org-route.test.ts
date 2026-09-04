@@ -11,7 +11,13 @@ const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
 const hasMembership = vi.fn();
 const auditMock = vi.fn();
+const originCheck = vi.fn();
 
+// The CSRF origin guard short-circuits under NODE_ENV=test, so it is mocked
+// here to drive the deny path (its matching logic has its own unit suite).
+vi.mock("@/lib/admin/origin-guard.server", () => ({
+  checkTrustedOrigin: (...a: unknown[]) => originCheck(...a),
+}));
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
   getImpersonatorId: (s: unknown) =>
@@ -51,7 +57,10 @@ const activeAccess = {
 let POST: typeof RouteModule.POST;
 
 beforeEach(async () => {
-  for (const m of [sessionGetter, accessGetter, hasMembership, auditMock]) m.mockReset();
+  for (const m of [sessionGetter, accessGetter, hasMembership, auditMock, originCheck]) {
+    m.mockReset();
+  }
+  originCheck.mockReturnValue({ ok: true });
   sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
   accessGetter.mockResolvedValue(activeAccess);
   ({ POST } = await import("@/app/api/preferences/active-org/route"));
@@ -59,6 +68,25 @@ beforeEach(async () => {
 afterEach(() => vi.resetModules());
 
 describe("POST /api/preferences/active-org", () => {
+  it("returns 403 untrusted_origin on a cross-origin request BEFORE touching the session (review #39/#188)", async () => {
+    originCheck.mockReturnValue({ ok: false, reason: "untrusted_origin" });
+    hasMembership.mockResolvedValue(true);
+    const res = await POST(req({ organizationId: ORG_ID }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "untrusted_origin" });
+    expect(res.cookies.get("active_org")).toBeUndefined();
+    expect(sessionGetter).not.toHaveBeenCalled();
+    expect(hasMembership).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when neither Origin nor Referer is present (missing_origin)", async () => {
+    originCheck.mockReturnValue({ ok: false, reason: "missing_origin" });
+    const res = await POST(req({ organizationId: ORG_ID }));
+    expect(res.status).toBe(403);
+    expect(sessionGetter).not.toHaveBeenCalled();
+  });
+
   it("returns 401 when not authenticated", async () => {
     sessionGetter.mockResolvedValue(null);
     const res = await POST(req({ organizationId: ORG_ID }));

@@ -2,7 +2,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "@/app/[locale]/(secure)/app/administrator/_components/grid/data-grid";
 import { DataGrid } from "@/app/[locale]/(secure)/app/administrator/_components/grid/data-grid";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
@@ -25,9 +25,7 @@ interface Row {
   name: string;
 }
 
-const COLUMNS: ColumnDef<Row, unknown>[] = [
-  { id: "name", accessorKey: "name", header: () => "Name" },
-];
+const COLUMNS: GridColumnDef<Row>[] = [{ id: "name", accessorKey: "name", header: () => "Name" }];
 
 const fetchMock = vi.fn();
 

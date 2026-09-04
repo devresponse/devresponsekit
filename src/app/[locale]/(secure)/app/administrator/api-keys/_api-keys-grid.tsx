@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../_components/grid/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -123,7 +123,7 @@ export function AdministratorApiKeysGrid({
     [dialogs, t],
   );
 
-  const columns = useMemo<ColumnDef<ApiKeyRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<ApiKeyRow>[]>(
     () => [
       {
         id: "name",

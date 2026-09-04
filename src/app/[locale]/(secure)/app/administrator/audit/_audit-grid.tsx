@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../_components/grid/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,7 +82,7 @@ export function AdministratorAuditGrid({
 
   const [openRow, setOpenRow] = useState<AuditRow | null>(null);
 
-  const columns = useMemo<ColumnDef<AuditRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<AuditRow>[]>(
     () => [
       {
         id: "created_at",

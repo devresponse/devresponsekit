@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../_components/grid/data-grid";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
@@ -93,7 +93,7 @@ export function AdministratorEnterpriseAppsGrid({
     [dialogs, t, tErr],
   );
 
-  const columns = useMemo<ColumnDef<EnterpriseAppRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<EnterpriseAppRow>[]>(
     () => [
       {
         id: "id",
@@ -168,7 +168,7 @@ export function AdministratorEnterpriseAppsGrid({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<EnterpriseAppRow, unknown>,
+            } as GridColumnDef<EnterpriseAppRow>,
           ]
         : []),
     ],

@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../../_components/grid/data-grid";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -193,7 +193,7 @@ export function OrganizationInvitationsPanel({
     [dialogs, orgId, t],
   );
 
-  const columns = useMemo<ColumnDef<InvitationRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<InvitationRow>[]>(
     () => [
       {
         id: "email",
@@ -255,7 +255,7 @@ export function OrganizationInvitationsPanel({
                     </Button>
                   </div>
                 ) : null,
-            } as ColumnDef<InvitationRow, unknown>,
+            } as GridColumnDef<InvitationRow>,
           ]
         : []),
     ],

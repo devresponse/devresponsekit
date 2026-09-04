@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../../_components/grid/data-grid";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import {
@@ -113,8 +113,8 @@ export function GroupMembersGrid({
     }
   }, [selected, groupId, t]);
 
-  const columns = useMemo<ColumnDef<MemberRow, unknown>[]>(() => {
-    const base: ColumnDef<MemberRow, unknown>[] = [
+  const columns = useMemo<GridColumnDef<MemberRow>[]>(() => {
+    const base: GridColumnDef<MemberRow>[] = [
       {
         id: "primary_email",
         accessorKey: "primary_email",
@@ -164,7 +164,7 @@ export function GroupMembersGrid({
             </Button>
           </div>
         ),
-      } as ColumnDef<MemberRow, unknown>,
+      } as GridColumnDef<MemberRow>,
     ];
   }, [t, locale, dateFormatter, canAssign, onRemove]);
 

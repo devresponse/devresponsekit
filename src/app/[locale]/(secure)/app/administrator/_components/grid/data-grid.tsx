@@ -2,10 +2,12 @@
 
 import {
   flexRender,
-  getCoreRowModel,
-  useReactTable,
+  rowSortingFeature,
+  tableFeatures,
+  useTable,
   type ColumnDef,
   type HeaderContext,
+  type RowData,
 } from "@tanstack/react-table";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, type ReactNode } from "react";
@@ -46,13 +48,13 @@ import {
  * URL-backed sort state. Opt out per-column with `enableSorting:
  * false` (used by row-action columns).
  */
-export interface DataGridProps<TItem> {
+export interface DataGridProps<TItem extends RowData> {
   /** Stable name used for local-storage / a11y (`administrator.users`, etc.). */
   name: string;
   /** API endpoint; receives URL state appended as query string. */
   endpoint: string;
   /** TanStack column definitions. `header` may be a translation key. */
-  columns: ColumnDef<TItem, unknown>[];
+  columns: GridColumnDef<TItem>[];
   /** Hook options forwarded to {@link useGridState}. */
   options?: UseGridStateOptions;
   /** Optional initial server-rendered page (saves first round-trip). */
@@ -99,9 +101,20 @@ export interface DataGridProps<TItem> {
   filters?: GridFilterDescriptor[];
 }
 
+/**
+ * TanStack Table v9 registers features explicitly. Sorting, filtering and
+ * pagination are all server-driven (URL state via `useGridState`), so the
+ * only feature the grid needs is `rowSortingFeature` — purely for the
+ * per-column `enableSorting` flag that {@link renderSortableHeader} reads.
+ */
+export const gridFeatures = tableFeatures({ rowSortingFeature });
+export type GridFeatures = typeof gridFeatures;
+/** Column definition bound to the grid feature set; `TValue` is always `unknown`. */
+export type GridColumnDef<TItem extends RowData> = ColumnDef<GridFeatures, TItem, unknown>;
+
 const EMPTY_OPTIONS: UseGridStateOptions = {};
 
-export function DataGrid<TItem>(props: DataGridProps<TItem>) {
+export function DataGrid<TItem extends RowData>(props: DataGridProps<TItem>) {
   const t = useTranslations("administrator.grid");
   const options = props.options ?? EMPTY_OPTIONS;
   const { state, setPage, setPageSize, setSort, setSearch, setFilter } = useGridState(options);
@@ -117,24 +130,21 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
 
   const selection = props.selection;
-  const selectionColumn = useMemo<ColumnDef<TItem, unknown> | null>(() => {
+  const selectionColumn = useMemo<GridColumnDef<TItem> | null>(() => {
     if (!selection) return null;
     return buildSelectionColumn<TItem>(selection.state, selection.getRowId, items, t);
   }, [selection, items, t]);
 
-  const tableColumns = useMemo<ColumnDef<TItem, unknown>[]>(
+  const tableColumns = useMemo<GridColumnDef<TItem>[]>(
     () => (selectionColumn ? [selectionColumn, ...props.columns] : props.columns),
     [selectionColumn, props.columns],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features: gridFeatures,
     data: items,
     columns: tableColumns,
-    getCoreRowModel: getCoreRowModel(),
-    manualPagination: true,
     manualSorting: true,
-    manualFiltering: true,
-    pageCount: totalPages,
   });
 
   const onSortToggle = useCallback(
@@ -245,7 +255,7 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
                         ? null
                         : renderSortableHeader(
                             h.column.columnDef,
-                            h.getContext,
+                            () => h.getContext(),
                             state,
                             onSortToggle,
                           )}
@@ -257,7 +267,7 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
             <TableBody>
               {table.getRowModel().rows.map((row) => (
                 <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell
                       key={cell.id}
                       className={cn("px-3 py-1.5 text-sm", cell.column.id === "__select" && "w-9")}
@@ -291,8 +301,8 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
  * the attribute — putting it on the inner button is invalid per
  * jsx-a11y). `undefined` = column not sortable, attribute omitted.
  */
-function ariaSortFor<TItem>(
-  columnDef: ColumnDef<TItem, unknown>,
+function ariaSortFor<TItem extends RowData>(
+  columnDef: GridColumnDef<TItem>,
   state: GridState,
 ): "ascending" | "descending" | "none" | undefined {
   const accessorKey =
@@ -316,9 +326,9 @@ function ariaSortFor<TItem>(
  *      synthetic cells) are not sortable.
  * The selection column is always rendered raw.
  */
-function renderSortableHeader<TItem>(
-  columnDef: ColumnDef<TItem, unknown>,
-  getContext: () => HeaderContext<TItem, unknown>,
+function renderSortableHeader<TItem extends RowData>(
+  columnDef: GridColumnDef<TItem>,
+  getContext: () => HeaderContext<GridFeatures, TItem, unknown>,
   state: GridState,
   onToggle: (field: string, next: ColumnSortDirection) => void,
 ): ReactNode {
@@ -356,12 +366,12 @@ function renderSortableHeader<TItem>(
  * back to "page" so explicit toggles never accidentally extend the
  * "select all matching" intent.
  */
-function buildSelectionColumn<TItem>(
+function buildSelectionColumn<TItem extends RowData>(
   selection: UseGridSelectionResult,
   getRowId: (item: TItem) => string,
   items: TItem[],
   t: ReturnType<typeof useTranslations>,
-): ColumnDef<TItem, unknown> {
+): GridColumnDef<TItem> {
   const pageIds = items.map(getRowId);
   const pageAllSelected =
     selection.mode === "all" ||

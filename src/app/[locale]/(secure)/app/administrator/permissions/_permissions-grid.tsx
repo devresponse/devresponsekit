@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../_components/grid/data-grid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,7 +74,7 @@ export function AdministratorPermissionsGrid({
     [t, tErr, dialogs],
   );
 
-  const columns = useMemo<ColumnDef<PermissionRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<PermissionRow>[]>(
     () => [
       {
         id: "key",
@@ -130,7 +130,7 @@ export function AdministratorPermissionsGrid({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<PermissionRow, unknown>,
+            } as GridColumnDef<PermissionRow>,
           ]
         : []),
     ],

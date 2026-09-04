@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../../_components/grid/data-grid";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import {
@@ -113,8 +113,8 @@ export function UserRolesPanel({
     }
   }, [selectedRole, userId, t]);
 
-  const columns = useMemo<ColumnDef<RoleRow, unknown>[]>(() => {
-    const base: ColumnDef<RoleRow, unknown>[] = [
+  const columns = useMemo<GridColumnDef<RoleRow>[]>(() => {
+    const base: GridColumnDef<RoleRow>[] = [
       {
         id: "role_name",
         accessorKey: "role_name",
@@ -180,7 +180,7 @@ export function UserRolesPanel({
             </Button>
           </div>
         ),
-      } as ColumnDef<RoleRow, unknown>,
+      } as GridColumnDef<RoleRow>,
     ];
   }, [t, locale, dateFormatter, canAssign, onRemove]);
 

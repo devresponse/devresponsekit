@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../_components/grid/data-grid";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +94,7 @@ export function AdministratorOrganizationsGrid({
     [dialogs, t, tErr],
   );
 
-  const columns = useMemo<ColumnDef<OrgRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<OrgRow>[]>(
     () => [
       {
         id: "slug",
@@ -159,7 +159,7 @@ export function AdministratorOrganizationsGrid({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<OrgRow, unknown>,
+            } as GridColumnDef<OrgRow>,
           ]
         : []),
     ],

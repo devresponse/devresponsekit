@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../_components/grid/data-grid";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../_components/grid/data-grid";
@@ -38,7 +38,7 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
     [intlLocale],
   );
 
-  const columns = useMemo<ColumnDef<MembershipRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<MembershipRow>[]>(
     () => [
       {
         id: "organization_slug",

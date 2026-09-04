@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../../_components/grid/data-grid";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
@@ -67,7 +67,7 @@ export function UserMembershipsPanel({
     [t, userId, dialogs],
   );
 
-  const columns = useMemo<ColumnDef<MembershipRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<MembershipRow>[]>(
     () => [
       {
         id: "organization_slug",
@@ -128,7 +128,7 @@ export function UserMembershipsPanel({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<MembershipRow, unknown>,
+            } as GridColumnDef<MembershipRow>,
           ]
         : []),
     ],

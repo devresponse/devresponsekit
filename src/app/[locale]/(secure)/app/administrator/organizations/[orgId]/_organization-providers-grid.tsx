@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { GridColumnDef } from "../../_components/grid/data-grid";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { DataGrid } from "../../_components/grid/data-grid";
@@ -63,7 +63,7 @@ export function OrganizationProvidersGrid({
     [t, orgId, dialogs],
   );
 
-  const columns = useMemo<ColumnDef<BindingRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<BindingRow>[]>(
     () => [
       {
         id: "provider",
@@ -118,7 +118,7 @@ export function OrganizationProvidersGrid({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<BindingRow, unknown>,
+            } as GridColumnDef<BindingRow>,
           ]
         : []),
     ],

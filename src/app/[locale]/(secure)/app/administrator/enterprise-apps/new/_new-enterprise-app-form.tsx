@@ -79,6 +79,8 @@ export function NewEnterpriseAppForm({ locale }: { locale: string }) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         if (body.error === "id_taken") {
           form.setError("id", { type: "server", message: tErr("idTaken") });
+        } else if (body.error === "audience_taken") {
+          form.setError("sso_audience", { type: "server", message: tErr("audienceTaken") });
         } else {
           form.setError("root", { type: "server", message: t("new.errorToast") });
         }

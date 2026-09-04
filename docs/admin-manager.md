@@ -91,6 +91,8 @@ Default budgets (capacity = burst, refill = steady requests/sec):
 | `DEFAULT_ADMIN_MUTATION_LIMIT` | 30 | 1 | Per-row mutations (create, status, ban, …) |
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 (≈1 / 5s) | Bulk actions (a single call touches ≤500 rows) |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 (≈1 / 20s) | CSV export (heavy; ≤100k rows) |
+| `DEFAULT_SSO_LAUNCH_LIMIT` | 30 | 1 | `GET /api/sso/launch` — keyed per principal (session user id; trusted client IP while signed out) |
+| `DEFAULT_SSO_CONSUME_LIMIT` | 30 | 1 | `GET`/`POST /api/sso/consume` — keyed per trusted client IP (no principal exists before the token verifies) |
 
 The bucket is in-memory and process-local: a restart resets it and budgets are
 not shared across instances. The supported 1.0 topology is therefore a single
@@ -501,6 +503,15 @@ The SSO-enabled application catalog (`app_enterprise_applications`).
 | `GET /enterprise-apps` | `admin.apps.read` | List the catalog |
 | `POST /enterprise-apps` | `admin.apps.manage` | `admin.app.created` |
 | `GET/PATCH/DELETE /enterprise-apps/[id]` | `.read` / `admin.apps.manage` | `admin.app.updated` / `.deleted`; delete may emit `.delete_blocked` |
+
+`sso_audience` is what a satellite's consume route trusts, so it must be
+**unique across the catalog**: `POST` and `PATCH` refuse a value another
+application already owns with `409 audience_taken` (the form maps it onto the
+audience field). The consumer additionally binds every token to its own
+`SSO_HANDOFF_APPLICATION_ID`, so even a colliding audience cannot make one
+satellite accept another's tokens. A UNIQUE index is scheduled for a later core
+migration; until then the check is route-level (a concurrent create could still
+race it).
 
 ### 8.8 API keys
 

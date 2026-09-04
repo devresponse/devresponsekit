@@ -107,7 +107,7 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 | --- | --- | --- |
 | `SSO_HANDOFF_ISSUER` | **yes (at boot)** | `iss` claim of handoff tokens. |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | **yes (at boot)** | Audience is built as `<prefix>:<applicationId>`. |
-| `SSO_HANDOFF_APPLICATION_ID` | **yes (at boot)** | This deployment's application id, so the audience check can't be spoofed via the Host header. |
+| `SSO_HANDOFF_APPLICATION_ID` | **yes (at boot)** | This deployment's application id — it MUST equal the `id` of the enterprise-application row registered on the issuer. The consumer requires the token's `targetApplicationId` claim to equal it (in addition to the `<prefix>:<id>` audience check) and burns the nonce only for that id, so a token minted for another registered app is never accepted here; the value is never derived from the Host header. |
 | `SSO_HANDOFF_JWT_SECRET` | **yes (at boot)** | HS256 signing secret (≥32 chars). **Must differ** from `BETTER_AUTH_SECRET`. |
 | `SSO_HANDOFF_TTL_SECONDS` | no | Token lifetime (default 60). Values above 300 are rejected at boot, and the signer **clamps the effective TTL to ≤60s** (`SSO_HANDOFF_MAX_TTL_SECONDS`), so a handoff token never outlives its nonce row. |
 | `SSO_ALLOWED_ORIGIN_SUFFIXES` | no | Comma-separated allow-list of host suffixes a registered app origin may use. Unset → derived from `NEXT_PUBLIC_PRODUCTION_HOST`. |

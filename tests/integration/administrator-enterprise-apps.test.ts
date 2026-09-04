@@ -282,6 +282,7 @@ describe("POST /api/administrator/enterprise-apps", () => {
   it("returns 409 id_taken when the row already exists", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue(null); // audience not taken
     insertExecute.mockRejectedValue(new Error("duplicate key value violates unique constraint"));
     const res = await POST(
       jsonReq({
@@ -299,6 +300,7 @@ describe("POST /api/administrator/enterprise-apps", () => {
   it("returns 201 on successful creation and writes an audit row", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue(null); // audience not taken
     insertExecute.mockResolvedValue(undefined);
     const res = await POST(
       jsonReq({
@@ -318,6 +320,30 @@ describe("POST /api/administrator/enterprise-apps", () => {
         targetApplicationId: "docs",
       }),
     );
+  });
+
+  it("returns 409 audience_taken when another app already owns the sso_audience (review #15)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    // The audience lookup finds the victim satellite's row.
+    selectFirst.mockResolvedValue({ id: "victim" });
+    insertExecute.mockResolvedValue(undefined);
+    const res = await POST(
+      jsonReq({
+        id: "evil",
+        label: "Evil",
+        origin: "https://evil.example.com",
+        subdomain: "evil",
+        sso_audience: "devresponse-app:victim",
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "audience_taken",
+      message: "errors.audience_taken",
+    });
+    expect(insertExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });
 
@@ -394,6 +420,36 @@ describe("PATCH /api/administrator/enterprise-apps/:id", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.app.updated", outcome: "success" }),
     );
+  });
+
+  it("returns 409 audience_taken when moving sso_audience onto another app's value (review #15)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst
+      .mockResolvedValueOnce({ id: "docs", organization_id: null }) // existing row
+      .mockResolvedValueOnce({ id: "victim" }); // audience owner (id != docs)
+    updateExecute.mockResolvedValue(undefined);
+    const res = await PATCH(idReq("docs", { sso_audience: "devresponse-app:victim" }), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "audience_taken" });
+    expect(updateExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("allows an sso_audience change when no OTHER app owns the value", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst
+      .mockResolvedValueOnce({ id: "docs", organization_id: null }) // existing row
+      .mockResolvedValueOnce(null); // no conflicting owner (own row excluded)
+    updateExecute.mockResolvedValue(undefined);
+    const res = await PATCH(idReq("docs", { sso_audience: "devresponse-app:docs" }), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(200);
+    expect(updateExecute).toHaveBeenCalled();
   });
 });
 

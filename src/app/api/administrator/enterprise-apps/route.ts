@@ -6,6 +6,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { createEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
 import { isAllowedEnterpriseOrigin, isHttpsOrigin } from "@/lib/admin/enterprise-apps.server";
+import { isSsoAudienceTaken } from "@/lib/admin/enterprise-apps-audience.server";
 import {
   likeContains,
   applySortAndPagination,
@@ -135,7 +136,7 @@ export async function GET(request: NextRequest) {
  *   - description: optional text
  *   - origin: HTTPS origin (scheme + authority only, §8.7)
  *   - subdomain: hostname-safe DNS label (§8.7)
- *   - sso_audience: text
+ *   - sso_audience: text; MUST be unique across the catalog (409 `audience_taken`)
  *   - status: "available" | "disabled" (default "available")
  *   - sort_order: integer (default 100)
  *   - organization_id: optional UUID scope (null = global)
@@ -182,6 +183,11 @@ export async function POST(request: NextRequest) {
   // the trusted host allow-list, not any HTTPS URL.
   if (!isAllowedEnterpriseOrigin(input.origin)) {
     return adminErrorResponse("origin_not_allowed", 400, request);
+  }
+  // Review #15: the audience is what a satellite's consume route trusts; two
+  // rows sharing one would let a token minted for either app reach the other.
+  if (await isSsoAudienceTaken(input.sso_audience)) {
+    return adminErrorResponse("audience_taken", 409, request);
   }
 
   try {

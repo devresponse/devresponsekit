@@ -35,6 +35,7 @@ naïve `COPY . .` image would produce.
 | Traced runtime `node_modules` | The Postgres database (run it separately) |
 | `.next/static`, `public/` | Migration / seed scripts (`tsx`, `src/db/**`) |
 | `docs/` (source for the in-app `/docs` viewer) | Your `.env` / secrets (passed at runtime) |
+| `help/` (source for the in-app help viewer) | The `npm` / `npx` / `corepack` / `yarn` CLIs (deleted from the runner stage, see §7) |
 
 Because the migration and seed scripts (`pnpm db:*`, which use `tsx`) are
 **not** in the runtime image, this container **never runs migrations on
@@ -188,8 +189,23 @@ volumes:
 
 ## 7. Hardening (recommended for production)
 
-- **Pin the base image by digest.** The Dockerfile uses `node:22-bookworm-slim`;
-  for byte-for-byte reproducibility, pin it: `FROM node:22-bookworm-slim@sha256:<digest>`.
+- **Base image is pinned by digest — keep it current.** Both stages use
+  `FROM node:22-bookworm-slim@sha256:<digest>` (the multi-arch index digest,
+  identical in both `FROM` lines) for byte-for-byte reproducibility.
+  Dependabot's `docker` ecosystem (`.github/dependabot.yml`) opens a PR when
+  the tag moves to a new digest; to bump by hand, take the `digest` field from
+  `https://hub.docker.com/v2/repositories/library/node/tags/22-bookworm-slim`
+  and update both lines together. The weekly Trivy scan
+  (`.github/workflows/docker-scan.yml`, a required check) goes red when a
+  stale base image accumulates fixable HIGH/CRITICAL CVEs, so a digest bump is
+  the usual fix for a base-OS finding.
+- **No package-manager CLIs in the runtime image.** The runner stage deletes
+  the `npm`, `npx`, `corepack`, and `yarn` binaries (and npm's vendored
+  `node_modules`) that the Node base image bundles. The container only ever
+  runs `node server.js`, so nothing is lost — and npm's own dependency tree
+  (tar, pacote, sigstore, minimatch, …) can no longer produce "fixable
+  HIGH/CRITICAL" Trivy findings that are unreachable in production. If you
+  `docker exec` into a container, expect `npm`/`npx` to be absent by design.
 - **Read-only root filesystem:** `docker run --read-only --tmpfs /tmp …`
   (the standalone server does not write to its own directory).
 - **Drop capabilities / no new privileges:**

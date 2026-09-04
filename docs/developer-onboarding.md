@@ -218,6 +218,15 @@ A typical admin feature (mirror an existing one such as Roles or Groups):
 
 With no `EMAIL_PROVIDER`, messages are written to `app_outbox` with status `logged` and visible under **Administrator → Email** — nothing is ever sent.
 
+The bodies shown there are **redacted**: a password-reset, verification or invitation link reads `…/reset-password/[redacted]?…` / `…?token=[redacted]` because the admin outbox must never hand an org admin a live credential (review #21). To follow such a link locally, read the DB-only `delivery_payload` column (never served by the API):
+
+```sql
+select delivery_payload->>'text' from app_outbox
+ where to_email = 'you@example.com' order by created_at desc limit 1;
+```
+
+The e2e suites do the same through `tests/e2e/helpers/outbox-db.ts`.
+
 ### 9.5 The local SSO / satellite rig
 
 To debug cross-subdomain SSO (or any multi-app flow) on one machine, use the **suggested subdomain setup** in the [Satellite Apps Integration Guide §6.6](./integration-satellite-apps.md#66-local-development--all-four-apps-on-one-machine-the-suggested-setup): the kit on `http://devresponse.local:3000` and the three satellites on `app1`/`app2`/`app3.devresponse.local` — true subdomains that mirror a live fleet (per-subdomain cookie isolation for the handoff apps, a parent-domain shared session for Option C). One elevated run of **`scripts/setup-local-subdomains.ps1`** maps the four hosts to `127.0.0.1` (idempotent; `-Remove` undoes it); `*.localtest.me` is the no-admin-rights fallback. The guide includes the copy-paste steps (seed, secret, SQL registration, per-app env, `next dev -H …`) and the two dev-only gotchas (host binding for absolute URLs; the CSP `upgrade-insecure-requests` directive silently killing form POSTs on http non-localhost hosts).

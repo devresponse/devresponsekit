@@ -32,9 +32,14 @@ export const dynamic = "force-dynamic";
  * Caller MUST hold `admin.email.read`. ADR-0001: the result is org-scoped —
  * a SUPERADMIN sees every org's mail (and platform/system org-less rows),
  * an ORG ADMIN sees only their own org's rows, and an admin with no
- * resolvable org sees nothing. Bodies are returned for the detail view —
- * they may embed one-time reset links, the same exposure as any provider
- * dashboard; the links are single-use and short-lived.
+ * resolvable org sees nothing.
+ *
+ * The list is METADATA ONLY (review #221): bodies are served per row by
+ * `GET /api/administrator/email/outbox/[id]`, so a 200-row page no longer
+ * ships 200 rendered emails. Those bodies are the REDACTED rendering written
+ * at insert time (review #21) — one-time reset / verification / invitation
+ * tokens are replaced by `[redacted]` before the row is stored, and the
+ * unredacted `delivery_payload` column is never selected by any admin route.
  */
 export async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.read");
@@ -94,8 +99,6 @@ export async function GET(request: NextRequest) {
       "o.to_email",
       "o.from_email",
       "o.subject",
-      "o.body_html",
-      "o.body_text",
       "o.status",
       "o.provider",
       "o.provider_message_id",

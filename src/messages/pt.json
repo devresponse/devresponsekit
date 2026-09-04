@@ -1146,7 +1146,9 @@
         "organization": "Organização",
         "error": "Erro",
         "bodyText": "Corpo de texto",
-        "bodyHtml": "Corpo HTML"
+        "bodyHtml": "Corpo HTML",
+        "bodyLoading": "A carregar…",
+        "bodyLoadError": "Não foi possível carregar o corpo deste e-mail."
       },
       "templates": {
         "title": "Modelos de e-mail",

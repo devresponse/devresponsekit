@@ -245,9 +245,21 @@ export interface AppOutboxTable {
   to_email: string;
   from_email: string;
   subject: string;
+  /**
+   * REDACTED rendering (review #21): reset / verification / invitation tokens
+   * are replaced by `[redacted]` before insert, because these columns (and
+   * `variables`) feed the org-scoped administrator outbox API.
+   */
   body_html: string;
   body_text: string | null;
   variables: Json;
+  /**
+   * The UNREDACTED `{ subject, html, text }` the retry worker delivers
+   * (0003). Set only when redaction changed the stored copy, nulled once the
+   * row is terminal (`sent` / `failed`). DB-only: never selected by an
+   * administrator route — see `src/lib/email/outbox-secrets.ts`.
+   */
+  delivery_payload: ColumnType<unknown, string | null | undefined, string | null>;
   status: ColumnType<string, string | undefined, string>;
   provider: string | null;
   provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;

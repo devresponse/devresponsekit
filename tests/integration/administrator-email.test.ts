@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as OutboxRouteModule from "@/app/api/administrator/email/outbox/route";
+import type * as OutboxDetailRouteModule from "@/app/api/administrator/email/outbox/[id]/route";
 import type * as TemplatesRouteModule from "@/app/api/administrator/email/templates/route";
 import type * as TemplateRouteModule from "@/app/api/administrator/email/templates/[id]/route";
 import type * as TestRouteModule from "@/app/api/administrator/email/test/route";
@@ -20,6 +21,8 @@ const itemsExecute = vi.fn();
 const selectFirst = vi.fn();
 const updateFirst = vi.fn();
 const sendMock = vi.fn();
+/** Every `.select(...)` argument the handler under test issued (projection guard). */
+let selectedColumns: unknown[] = [];
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -46,6 +49,12 @@ vi.mock("@/db/database", () => {
         get(_, prop) {
           if (prop === "execute") return itemsExecute;
           if (prop === "executeTakeFirst") return selectFirst;
+          if (prop === "select") {
+            return (...args: unknown[]) => {
+              selectedColumns.push(args[0]);
+              return proxy;
+            };
+          }
           return (...args: unknown[]) => {
             const cb = args[0];
             if (typeof cb === "function") {
@@ -121,6 +130,7 @@ const ORG_ADMIN = (perms: string[]) => ({
 });
 
 let outboxGET: typeof OutboxRouteModule.GET;
+let outboxDetailGET: typeof OutboxDetailRouteModule.GET;
 let templatesGET: typeof TemplatesRouteModule.GET;
 let templatePUT: typeof TemplateRouteModule.PUT;
 let testPOST: typeof TestRouteModule.POST;
@@ -136,10 +146,12 @@ beforeEach(async () => {
     sendMock,
   ])
     m.mockReset();
+  selectedColumns = [];
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
   ({ GET: outboxGET } = await import("@/app/api/administrator/email/outbox/route"));
+  ({ GET: outboxDetailGET } = await import("@/app/api/administrator/email/outbox/[id]/route"));
   ({ GET: templatesGET } = await import("@/app/api/administrator/email/templates/route"));
   ({ PUT: templatePUT } = await import("@/app/api/administrator/email/templates/[id]/route"));
   ({ POST: testPOST } = await import("@/app/api/administrator/email/test/route"));
@@ -188,6 +200,88 @@ describe("GET /api/administrator/email/outbox", () => {
       makeReq("/api/administrator/email/outbox?filter[status]=failed&filter[template_key]=x&q=u@"),
     );
     expect(res.status).toBe(200);
+  });
+
+  it("projects METADATA ONLY — no bodies in the list (review #221)", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.read"]));
+    await outboxGET(makeReq("/api/administrator/email/outbox"));
+    const columns = selectedColumns.flatMap((c) => (Array.isArray(c) ? (c as string[]) : []));
+    expect(columns).toContain("o.subject");
+    expect(columns).toContain("o.to_email");
+    expect(columns).not.toContain("o.body_html");
+    expect(columns).not.toContain("o.body_text");
+    expect(columns).not.toContain("o.delivery_payload");
+    expect(columns).not.toContain("o.variables");
+  });
+});
+
+/**
+ * Detail endpoint (review #221): the one place bodies are served. Bodies are
+ * whatever `sendAppEmail` stored — the REDACTED rendering (review #21) — and
+ * the unredacted `delivery_payload` is never part of the projection.
+ */
+describe("GET /api/administrator/email/outbox/[id]", () => {
+  const OUTBOX_ID = "22222222-3333-4444-8555-666666666666";
+  const ctx = { params: Promise.resolve({ id: OUTBOX_ID }) };
+  const url = `/api/administrator/email/outbox/${OUTBOX_ID}`;
+  const storedRow = {
+    id: OUTBOX_ID,
+    organization_id: "o-1",
+    organization_slug: "o-1",
+    organization_name: "Org 1",
+    template_key: "password_reset",
+    to_email: "u@x.com",
+    from_email: "no-reply@x.com",
+    subject: "Reset your password",
+    body_html: '<a href="http://x/reset-password/[redacted]?callbackURL=%2F">Reset</a>',
+    body_text: "http://x/reset-password/[redacted]?callbackURL=%2F",
+    status: "logged",
+    provider: null,
+    provider_message_id: null,
+    error: null,
+    related_better_auth_user_id: "ba-9",
+    created_at: "2026-01-01T00:00:00Z",
+    sent_at: null,
+  };
+
+  it("returns 403 without admin.email.read", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.users.read"]));
+    expect((await outboxDetailGET(makeReq(url), ctx)).status).toBe(403);
+  });
+
+  it("returns 404 for a malformed id (AdminError envelope)", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.read"]));
+    const res = await outboxDetailGET(makeReq("/api/administrator/email/outbox/nope"), {
+      params: Promise.resolve({ id: "nope" }),
+    });
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toBe("not_found");
+  });
+
+  it("returns 404 when the row does not exist", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.read"]));
+    selectFirst.mockResolvedValue(undefined);
+    expect((await outboxDetailGET(makeReq(url), ctx)).status).toBe(404);
+  });
+
+  it("returns the row with its (redacted) bodies for an ORG ADMIN of the owning org", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.email.read"]));
+    selectFirst.mockResolvedValue(storedRow);
+    const res = await outboxDetailGET(makeReq(url), ctx);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as typeof storedRow & Record<string, unknown>;
+    expect(body.id).toBe(OUTBOX_ID);
+    expect(body.body_html).toContain("/reset-password/[redacted]?");
+    expect(body.body_text).toContain("/reset-password/[redacted]?");
+    // The finding's integration assertion: no live reset URL in the response.
+    expect(JSON.stringify(body)).not.toMatch(/\/reset-password\/(?!\[redacted\])[^/?"]+/);
+    // Never part of the projection.
+    expect(body.delivery_payload).toBeUndefined();
+    expect(body.variables).toBeUndefined();
+    const columns = selectedColumns.flatMap((c) => (Array.isArray(c) ? (c as string[]) : []));
+    expect(columns).toContain("o.body_html");
+    expect(columns).not.toContain("o.delivery_payload");
+    expect(columns).not.toContain("o.variables");
   });
 });
 

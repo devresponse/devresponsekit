@@ -54,6 +54,13 @@ Two layers, both fail-safe (redact-by-default):
   plaintext credential; the audit log records **metadata only**.
 - **Sentry** — `sentry-shared.ts` strips cookies, query strings, emails, bearer/API tokens,
   and secret-like values from events. Reset URLs and other one-time tokens are never sent.
+- **Email outbox** — `src/lib/email/outbox-secrets.ts` redacts one-time links (the
+  `/reset-password/<token>` path segment and every `token=` query value → `[redacted]`) from
+  the `app_outbox` columns the administrator API can read (`subject`, `body_html`,
+  `body_text`, `variables`) **at insert time**. The unredacted message exists only in memory
+  for the inline delivery and, for retries, in the DB-only `delivery_payload` column, which
+  the drain worker nulls once a row is terminal (`sent` / `failed`) and which no admin route
+  selects (review #21).
 
 When adding a field that could carry user data or a secret, extend the redaction list in the
 same change.

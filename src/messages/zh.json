@@ -1146,7 +1146,9 @@
         "organization": "组织",
         "error": "错误",
         "bodyText": "文本正文",
-        "bodyHtml": "HTML 正文"
+        "bodyHtml": "HTML 正文",
+        "bodyLoading": "加载中…",
+        "bodyLoadError": "无法加载此邮件的正文。"
       },
       "templates": {
         "title": "邮件模板",

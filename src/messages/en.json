@@ -1146,7 +1146,9 @@
         "organization": "Organization",
         "error": "Error",
         "bodyText": "Text body",
-        "bodyHtml": "HTML body"
+        "bodyHtml": "HTML body",
+        "bodyLoading": "Loading…",
+        "bodyLoadError": "Could not load this email's body."
       },
       "templates": {
         "title": "Email templates",

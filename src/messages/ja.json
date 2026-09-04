@@ -1146,7 +1146,9 @@
         "organization": "組織",
         "error": "エラー",
         "bodyText": "テキスト本文",
-        "bodyHtml": "HTML 本文"
+        "bodyHtml": "HTML 本文",
+        "bodyLoading": "読み込み中…",
+        "bodyLoadError": "このメールの本文を読み込めませんでした。"
       },
       "templates": {
         "title": "メールテンプレート",

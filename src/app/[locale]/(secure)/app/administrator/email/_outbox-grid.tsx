@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
@@ -19,10 +19,13 @@ import { useGridState } from "../_components/grid/use-grid-state";
 /**
  * Client-side outbox explorer (specs.md §35), following the audit-grid
  * pattern: read-only paginated grid, URL-backed filters, per-row detail
- * Sheet. The detail view renders email bodies as TEXT (never
+ * Sheet. The list is metadata only; the bodies are fetched per row from
+ * `GET /api/administrator/email/outbox/[id]` when the Sheet opens (review
+ * #221). The detail view renders email bodies as TEXT (never
  * `dangerouslySetInnerHTML`) — templates are admin-editable, and the
  * outbox must not become an HTML injection vector into an admin's
- * browser.
+ * browser. Bodies arrive already redacted (review #21): one-time reset /
+ * verification / invitation tokens read `[redacted]`.
  */
 interface OutboxRow {
   id: string;
@@ -33,8 +36,6 @@ interface OutboxRow {
   to_email: string;
   from_email: string;
   subject: string;
-  body_html: string;
-  body_text: string | null;
   status: string;
   provider: string | null;
   provider_message_id: string | null;
@@ -42,6 +43,12 @@ interface OutboxRow {
   related_better_auth_user_id: string | null;
   created_at: string;
   sent_at: string | null;
+}
+
+/** The detail endpoint's shape: the list row plus the rendered bodies. */
+interface OutboxDetailRow extends OutboxRow {
+  body_html: string;
+  body_text: string | null;
 }
 
 export function AdministratorOutboxGrid({ canManage }: { canManage: boolean }) {
@@ -146,7 +153,7 @@ export function AdministratorOutboxGrid({ canManage }: { canManage: boolean }) {
       />
       <Sheet open={openRow !== null} onOpenChange={(open) => !open && setOpenRow(null)}>
         <SheetContent side="right" className="w-full sm:max-w-xl">
-          {openRow ? <OutboxDetail row={openRow} t={t} /> : null}
+          {openRow ? <OutboxDetail key={openRow.id} row={openRow} t={t} /> : null}
         </SheetContent>
       </Sheet>
     </div>
@@ -260,6 +267,44 @@ function SendTestEmail({ onSent }: { onSent: () => void }) {
   );
 }
 
+type DetailBodies =
+  | { state: "loading" }
+  | { state: "error" }
+  | { state: "ready"; body_html: string; body_text: string | null };
+
+/**
+ * Loads the bodies for one row. The list row already carries every metadata
+ * field, so the header/fields render immediately and only the two body
+ * panes wait on the fetch. The caller keys `OutboxDetail` on the row id, so
+ * a different row remounts into a fresh `loading` state; a response that
+ * lands after unmount is discarded via the cancel flag.
+ */
+function useOutboxBodies(id: string): DetailBodies {
+  const [bodies, setBodies] = useState<DetailBodies>({ state: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/administrator/email/outbox/${encodeURIComponent(id)}`, {
+      credentials: "same-origin",
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`outbox detail ${res.status}`);
+        return (await res.json()) as OutboxDetailRow;
+      })
+      .then((detail) => {
+        if (!cancelled) {
+          setBodies({ state: "ready", body_html: detail.body_html, body_text: detail.body_text });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setBodies({ state: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+  return bodies;
+}
+
 function OutboxDetail({
   row,
   t,
@@ -267,6 +312,11 @@ function OutboxDetail({
   row: OutboxRow;
   t: ReturnType<typeof useTranslations<"administrator.email">>;
 }) {
+  const bodies = useOutboxBodies(row.id);
+  const placeholder =
+    bodies.state === "loading" ? t("detail.bodyLoading") : t("detail.bodyLoadError");
+  const bodyText = bodies.state === "ready" ? (bodies.body_text ?? "—") : placeholder;
+  const bodyHtml = bodies.state === "ready" ? bodies.body_html : placeholder;
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto">
       <SheetHeader>
@@ -291,14 +341,20 @@ function OutboxDetail({
       </dl>
       <div className="space-y-1">
         <h4 className="text-sm font-semibold">{t("detail.bodyText")}</h4>
-        <pre className="bg-muted rounded-md p-3 text-xs whitespace-pre-wrap">
-          {row.body_text ?? "—"}
+        <pre
+          className="bg-muted rounded-md p-3 text-xs whitespace-pre-wrap"
+          aria-busy={bodies.state === "loading"}
+        >
+          {bodyText}
         </pre>
       </div>
       <div className="space-y-1">
         <h4 className="text-sm font-semibold">{t("detail.bodyHtml")}</h4>
-        <pre className="bg-muted overflow-x-auto rounded-md p-3 text-xs whitespace-pre-wrap">
-          {row.body_html}
+        <pre
+          className="bg-muted overflow-x-auto rounded-md p-3 text-xs whitespace-pre-wrap"
+          aria-busy={bodies.state === "loading"}
+        >
+          {bodyHtml}
         </pre>
       </div>
     </div>

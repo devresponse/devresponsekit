@@ -1146,7 +1146,9 @@
         "organization": "Організація",
         "error": "Помилка",
         "bodyText": "Текстове тіло",
-        "bodyHtml": "HTML-тіло"
+        "bodyHtml": "HTML-тіло",
+        "bodyLoading": "Завантаження…",
+        "bodyLoadError": "Не вдалося завантажити вміст цього листа."
       },
       "templates": {
         "title": "Шаблони листів",

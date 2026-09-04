@@ -1146,7 +1146,9 @@
         "organization": "Organización",
         "error": "Error",
         "bodyText": "Cuerpo de texto",
-        "bodyHtml": "Cuerpo HTML"
+        "bodyHtml": "Cuerpo HTML",
+        "bodyLoading": "Cargando…",
+        "bodyLoadError": "No se pudo cargar el cuerpo de este correo."
       },
       "templates": {
         "title": "Plantillas de correo",

@@ -9,6 +9,7 @@ import type * as SendModule from "@/lib/email/send.server";
  *   - provider succeeds    → `pending` insert, update to `sent`
  *   - provider throws      → row stays `pending`, scheduled for retry, NO throw
  *   - unknown template key → throws (programmer error)
+ * plus the review #21 secret-redaction contract (see the last describe).
  */
 const state = vi.hoisted(() => ({
   templateRows: [] as Array<{
@@ -112,7 +113,9 @@ describe("sendAppEmail", () => {
     const row = state.insertedValues[0]!;
     expect(row.subject).toBe("Reset your password");
     expect(row.body_html).toContain("Hi &lt;Ada&gt;");
-    expect(row.body_html).toContain('href="http://x/reset?token=t"');
+    // The stored link is REDACTED (review #21) — the token never lands in
+    // an admin-readable column; delivery uses the in-memory rendering.
+    expect(row.body_html).toContain('href="http://x/reset?token=[redacted]"');
     expect(row.body_text).toContain("Hi <Ada>");
   });
 
@@ -261,5 +264,104 @@ describe("sendAppEmail — organization attribution", () => {
       organizationId: null,
     });
     expect(state.insertedValues[0]!.organization_id).toBeNull();
+  });
+});
+
+/**
+ * Review #21 — one-time tokens never reach an admin-readable column. The
+ * stored `subject` / `body_html` / `body_text` / `variables` carry
+ * `[redacted]`; the real rendering goes to the provider from memory and,
+ * for a retry, lives ONLY in `delivery_payload`, which is cleared on `sent`.
+ */
+describe("sendAppEmail — secret redaction (review #21)", () => {
+  const RESET_URL = "http://x/reset-password/LiveToken123?callbackURL=%2Fen%2Freset-password";
+
+  it("stores a redacted body/variables and the unredacted copy only in delivery_payload", async () => {
+    const deliver = vi.fn().mockResolvedValue({ providerMessageId: "msg-1" });
+    state.provider = { id: "resend", deliver };
+
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: "Ada", resetUrl: RESET_URL },
+    });
+
+    const row = state.insertedValues[0]!;
+    // Nothing an admin route can select carries the token…
+    for (const column of ["subject", "body_html", "body_text", "variables"] as const) {
+      expect(String(row[column])).not.toContain("LiveToken123");
+    }
+    expect(row.body_html).toContain("/reset-password/[redacted]?callbackURL=");
+    expect(row.body_text).toContain("/reset-password/[redacted]?callbackURL=");
+    expect(JSON.parse(row.variables as string)).toEqual({
+      name: "Ada",
+      resetUrl: "http://x/reset-password/[redacted]?callbackURL=%2Fen%2Freset-password",
+    });
+    // …while the deliverable is kept, unredacted, for the retry worker.
+    const payload = JSON.parse(row.delivery_payload as string) as {
+      subject: string;
+      html: string;
+      text: string | null;
+    };
+    expect(payload.html).toContain(`href="${RESET_URL.replace("&", "&amp;")}"`);
+    expect(payload.text).toContain(RESET_URL);
+    expect(payload.subject).toBe("Reset your password");
+
+    // The provider received the REAL link, not the placeholder.
+    const sent = deliver.mock.calls[0]![0] as { html: string; text?: string };
+    expect(sent.text).toContain(RESET_URL);
+    expect(sent.html).not.toContain("[redacted]");
+    // Delivered → the unredacted copy is dropped with the `sent` update.
+    expect(state.updateSets[0]).toMatchObject({ status: "sent", delivery_payload: null });
+  });
+
+  it("keeps delivery_payload when the inline attempt fails (the retry needs it)", async () => {
+    state.provider = { id: "resend", deliver: vi.fn().mockRejectedValue(new Error("boom")) };
+
+    const result = await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "email_verification",
+      variables: {
+        name: "Ada",
+        verifyUrl: "http://x/verify-email?token=LiveToken456&callbackURL=%2F",
+      },
+    });
+
+    expect(result.status).toBe("pending");
+    expect(state.insertedValues[0]!.body_text).not.toContain("LiveToken456");
+    expect(state.insertedValues[0]!.body_text).toContain("token=[redacted]&callbackURL=");
+    expect(state.insertedValues[0]!.delivery_payload).toContain("LiveToken456");
+    // The failure update does NOT touch the payload — it is still needed.
+    expect(state.updateSets[0]!.delivery_payload).toBeUndefined();
+  });
+
+  it("stores no delivery_payload for a secret-free email (nothing was redacted)", async () => {
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "test_email",
+      variables: { appName: "App", sentBy: "ba-1" },
+    });
+    const row = state.insertedValues[0]!;
+    expect(row.delivery_payload).toBeNull();
+    expect(row.body_html).not.toContain("[redacted]");
+  });
+
+  it("redacts the invitation accept link with no provider configured (`logged` row)", async () => {
+    await sendAppEmail({
+      to: "invitee@example.com",
+      templateKey: "organization_invitation",
+      variables: {
+        inviterName: "Ada",
+        organizationName: "Org",
+        acceptUrl: "http://x/en/invite?token=PlainInviteToken",
+      },
+    });
+    const row = state.insertedValues[0]!;
+    expect(row.status).toBe("logged");
+    expect(row.body_html).not.toContain("PlainInviteToken");
+    expect(row.body_html).toContain("/en/invite?token=[redacted]");
+    // A `logged` row is never delivered by the worker, but the DB-only copy
+    // is still the developer's/e2e's only record of the real link.
+    expect(row.delivery_payload).toContain("PlainInviteToken");
   });
 });

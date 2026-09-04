@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import { db } from "@/db/database";
 import { logServerError } from "@/lib/observability/logger.server";
 import { getConfiguredEmailProvider } from "./providers.server";
+import { parseOutboxDeliveryPayload } from "./outbox-secrets";
 
 /**
  * Outbox retry worker (review D1).
@@ -23,6 +24,14 @@ import { getConfiguredEmailProvider } from "./providers.server";
  * outbox row id) so the provider dedupes the retry (audit #11) — Resend
  * natively; Mailgun best-effort (see providers.server.ts). Invoke from a
  * scheduler / init job (e.g. `pnpm outbox:drain`).
+ *
+ * Secrets (review #21): `body_html` / `body_text` hold a REDACTED rendering
+ * (tokens replaced by `[redacted]`), so a retry delivers from
+ * `delivery_payload` — the unredacted copy `sendAppEmail` stores only for
+ * rows that carried a secret — and falls back to the stored columns when it
+ * is null (a row without secrets, or one written before 0003). The payload
+ * is nulled as soon as the row is terminal, so a live token never outlives
+ * the delivery that needs it.
  */
 
 /** Max delivery attempts before a row is marked terminally `failed`. */
@@ -78,7 +87,16 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
     const outcome = await db.transaction().execute(async (trx) => {
       const row = await trx
         .selectFrom("app_outbox")
-        .select(["id", "to_email", "from_email", "subject", "body_html", "body_text", "attempts"])
+        .select([
+          "id",
+          "to_email",
+          "from_email",
+          "subject",
+          "body_html",
+          "body_text",
+          "delivery_payload",
+          "attempts",
+        ])
         .where("status", "=", "pending")
         // Claim ONLY rows enqueued for the active provider (P3-8). A row's
         // `from_email`/headers were chosen for the provider it was queued
@@ -98,13 +116,20 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
 
       const attempts = row.attempts + 1;
       const now = new Date();
+      // The deliverable is the unredacted payload when the row carries one;
+      // otherwise the stored columns ARE the message (#21).
+      const message = parseOutboxDeliveryPayload(row.delivery_payload) ?? {
+        subject: row.subject,
+        html: row.body_html,
+        text: row.body_text,
+      };
       try {
         const delivered = await provider.deliver({
           to: row.to_email,
           from: row.from_email,
-          subject: row.subject,
-          html: row.body_html,
-          text: row.body_text ?? undefined,
+          subject: message.subject,
+          html: message.html,
+          text: message.text ?? undefined,
           // Stable per-row key → the provider dedupes a re-attempt of a send
           // that actually reached it before we recorded `sent` (#11).
           idempotencyKey: `outbox-${row.id}`,
@@ -119,12 +144,14 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
             next_attempt_at: null,
             sent_at: now,
             error: null,
+            // Terminal: drop the unredacted copy (#21).
+            delivery_payload: null,
           })
           .where("id", "=", row.id)
           .execute();
         return "sent" as const;
       } catch (err) {
-        const message = summarizeDeliveryError(err);
+        const reason = summarizeDeliveryError(err);
         const terminal = attempts >= OUTBOX_MAX_ATTEMPTS;
         await trx
           .updateTable("app_outbox")
@@ -133,7 +160,10 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
             attempts,
             last_attempt_at: now,
             next_attempt_at: terminal ? null : new Date(now.getTime() + backoffDelayMs(attempts)),
-            error: message,
+            error: reason,
+            // A terminally failed row will never be delivered: drop the
+            // unredacted copy; a retryable one keeps it for the next attempt.
+            ...(terminal ? { delivery_payload: null } : {}),
           })
           .where("id", "=", row.id)
           .execute();

@@ -83,6 +83,28 @@ const listParams = (filters: string[] = [], q = true): Obj[] => {
 };
 
 const okResp = (schemaName = "Ok"): Obj => ({ description: "OK", ...json(ref(schemaName)) });
+
+/**
+ * Outbox row metadata, shared by the list item and the detail schema. The
+ * detail adds the rendered bodies; the list never carries them (review #221).
+ */
+const OUTBOX_ITEM_PROPERTIES: Record<string, Obj> = {
+  id: uuid(),
+  organization_id: { type: ["string", "null"], format: "uuid" },
+  organization_slug: nullableString(),
+  organization_name: nullableString(),
+  template_key: nullableString(),
+  to_email: { type: "string" },
+  from_email: { type: "string" },
+  subject: { type: "string" },
+  status: { type: "string", enum: ["pending", "sent", "failed", "logged"] },
+  provider: nullableString(),
+  provider_message_id: nullableString(),
+  error: nullableString(),
+  related_better_auth_user_id: nullableString(),
+  created_at: dateTime(),
+  sent_at: dateTime(true),
+};
 const createdResp = (schemaName: string): Obj => ({
   description: "Created",
   ...json(ref(schemaName)),
@@ -1045,28 +1067,23 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         },
 
         // ---- Email -------------------------------------------------------
+        // The list row is METADATA ONLY (review #221); the rendered bodies
+        // are served per row by `GET /email/outbox/{id}` (OutboxDetail).
         OutboxItem: {
           type: "object",
+          properties: OUTBOX_ITEM_PROPERTIES,
+          required: ["id", "to_email", "status"],
+        },
+        OutboxDetail: {
+          type: "object",
+          description:
+            "One outbox row with its rendered bodies. Bodies are the REDACTED rendering stored at insert time: one-time reset / verification / invitation tokens read `[redacted]`.",
           properties: {
-            id: uuid(),
-            organization_id: { type: ["string", "null"], format: "uuid" },
-            organization_slug: nullableString(),
-            organization_name: nullableString(),
-            template_key: nullableString(),
-            to_email: { type: "string" },
-            from_email: { type: "string" },
-            subject: { type: "string" },
+            ...OUTBOX_ITEM_PROPERTIES,
             body_html: { type: "string" },
             body_text: nullableString(),
-            status: { type: "string", enum: ["pending", "sent", "failed", "logged"] },
-            provider: nullableString(),
-            provider_message_id: nullableString(),
-            error: nullableString(),
-            related_better_auth_user_id: nullableString(),
-            created_at: dateTime(),
-            sent_at: dateTime(true),
           },
-          required: ["id", "to_email", "status"],
+          required: ["id", "to_email", "status", "body_html"],
         },
         OutboxList: listOf("OutboxItem"),
         EmailTemplate: {
@@ -1947,9 +1964,18 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         get: {
           operationId: "listOutbox",
           tags: ["Email"],
-          summary: "List the email outbox",
+          summary: "List the email outbox (metadata only)",
           parameters: listParams(["filter[status]", "filter[template_key]"]),
           responses: { "200": okResp("OutboxList"), "403": errRef("Forbidden") },
+        },
+      },
+      "/email/outbox/{id}": {
+        get: {
+          operationId: "getOutboxItem",
+          tags: ["Email"],
+          summary: "Read one outbox row with its (redacted) bodies",
+          parameters: [idParam()],
+          responses: { "200": okResp("OutboxDetail"), ...readErrors() },
         },
       },
       "/email/templates": {

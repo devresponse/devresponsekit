@@ -4,7 +4,9 @@ import { db } from "@/db/database";
 import { requiresSuperadminForSharedTarget, type OrgScope } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { targetOutranksActor } from "@/lib/admin/user-target.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
+import type { UserAccessContext } from "@/lib/auth-status";
 
 /**
  * Shared per-user mutation helpers used by both the per-id endpoints
@@ -29,6 +31,12 @@ export interface BulkUserActor {
    * restore) on a user shared with other orgs are refused unless SUPERADMIN.
    */
   scope: OrgScope;
+  /**
+   * The actor's access context (permissions + org), used by the per-row
+   * privilege-ordering guard (review #7): a non-SUPERADMIN may not act on a
+   * target who outranks them. Pass `guard.access`.
+   */
+  access: Pick<UserAccessContext, "permissions" | "organizationId">;
 }
 
 /**
@@ -361,6 +369,22 @@ export async function executeBulkUserAction(
   actor: BulkUserActor,
   options: BulkUserOptions = {},
 ): Promise<BulkUserOutcome> {
+  // Privilege ordering (review #7): every bulk action is a lockout / status
+  // primitive, so — exactly like the single-row routes — a non-SUPERADMIN may
+  // not apply it to a target who outranks them (a single-org superadmin, or a
+  // more-privileged peer). Refused rows are audited and reported per row so
+  // the batch cannot be used to bypass the `[id]` route guard.
+  if (await targetOutranksActor(actor.access, target)) {
+    await auditUserAction("admin.user.action_denied", "denied", {
+      request: actor.request,
+      actorBetterAuthUserId: actor.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      reason: "target_outranks_actor",
+      metadata: { action, targetBetterAuthUserId: target.betterAuthUserId, bulk: true },
+    });
+    return { ok: false, appUserId: target.appUserId, error: "forbidden_target_outranks_actor" };
+  }
   switch (action) {
     case "approve":
     case "block":

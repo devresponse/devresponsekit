@@ -258,7 +258,7 @@ export async function POST(request: NextRequest) {
     const outcome = await executeBulkUserAction(
       action,
       target,
-      { betterAuthUserId: guard.betterAuthUserId, request, scope },
+      { betterAuthUserId: guard.betterAuthUserId, request, scope, access: guard.access },
       { reason: parsed.data.reason, expiresInSeconds: parsed.data.expiresInSeconds },
     );
     results.push(outcome);

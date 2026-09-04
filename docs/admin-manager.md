@@ -133,6 +133,13 @@ The pipeline, in order:
 For an array of permissions, **any one** match satisfies the check (used by the
 layout, which only needs "is this caller an admin of some kind").
 
+The pipeline authorizes the **caller**; `[id]` routes then authorize the
+**target** in a fixed order right after `resolveTargetUser` (§6, §8.1):
+`canAccessUser` (out of scope → 404), then `refuseOutrankingTarget` (the target
+outranks a non-superadmin actor → 403 + `admin.user.action_denied`), then the
+AUTHZ-2 shared-target rule where the action is account-global. All three run
+before the body is parsed or any Better Auth / DB side effect is issued.
+
 `checkAdminPermissionServer(permission)` is the RSC variant: it returns a grant,
 `"denied"`, or `"unauthenticated"` so a page/layout can decide whether to call
 `notFound()` (§6.2).
@@ -282,6 +289,18 @@ Key helpers:
 - `userIsGlobalSuperuser(appUserId)` — the global determination used by
   `getUserAccessContext` so an active-org selector can never downgrade a
   superadmin.
+- `targetOutranksActor(access, target)` / `refuseOutrankingTarget(guard, target,
+  request, action)` (`src/lib/admin/user-target.server.ts`) — **privilege
+  ordering** for account-level actions on another user. Scope and the
+  shared-target rule say nothing about *rank*: a single-org superadmin passes
+  both, so without this an org admin could set that superadmin's password and
+  sign in with global authority. A superadmin actor is exempt; otherwise the
+  target outranks the actor when the target's effective permissions **in the
+  actor's org** (bound-org resolution — never the `active_org` cookie) include
+  any permission the actor lacks — which covers a `superuser` holder (expanded
+  to the full superuser set, and folded in globally by `userIsGlobalSuperuser`)
+  and a more-privileged peer. The same subset test the impersonate guard uses
+  (§19). A non-superadmin with no resolvable org fails closed.
 
 An org admin **creating** a tenant resource has its `organization_id` forced to
 their org; an org admin **issuing a key** may only target a user in their org.
@@ -401,6 +420,20 @@ Manages the application user lifecycle and per-user administration.
 The Better Auth `role` (`user`/`admin`) is distinct from app roles in
 `app_user_roles`. Created passwords are forwarded to Better Auth and never
 logged, returned, or placed in audit metadata.
+
+**Target outranks actor (privilege ordering).** Every action that reaches into
+*another* user's account — `POST …/password` (`mode: "set"`), `POST …/ban`,
+`…/unban`, `DELETE /users/[id]` (soft-delete), `POST …/restore`,
+`POST …/status`, `GET/DELETE …/sessions` and `DELETE …/sessions/[sessionId]`,
+plus every `POST /users/bulk` row — calls `refuseOutrankingTarget` immediately
+after target resolution (§6). A **non-superadmin** actor whose target holds any
+permission they lack (a superadmin, or a more-privileged peer) receives **403**
+`forbidden` and an `admin.user.action_denied` (`denied`, reason
+`target_outranks_actor`, `metadata.action`) audit row; nothing is sent to
+Better Auth or written to the DB. A superadmin actor is exempt. The check runs
+**before** the AUTHZ-2 shared-target rule, which is kept as well. The
+`reset_email` password mode is a recovery flow the target completes themselves
+and is not rank-gated. Self-service `/api/account/*` surfaces are unaffected.
 
 ### 8.2 Organizations
 
@@ -602,7 +635,9 @@ keys, or raw passwords. Internal exception detail may go in `metadata` (e.g.
 `admin.organization.deleted`, `admin.api_key.created`,
 `admin.mcp_agent.approved`, `admin.user.impersonation_started`. The pipeline
 itself writes
-`administrator.access.denied` and `administrator.rate_limited`.
+`administrator.access.denied` and `administrator.rate_limited`; the per-target
+privilege-ordering guard (§8.1) writes `admin.user.action_denied` with
+`reason: "target_outranks_actor"` and the attempted `action` in metadata.
 
 ### 12.1 Audit posture (append-only + retention)
 
@@ -645,6 +680,12 @@ restore`, and `ids` is either an explicit UUID array **or** the literal `"*"`
 - **Org scoping.** The batch is confined by `resolveOrgScope` (ADR-0001): a null
   scope touches no one; an org admin's batch is filtered to users with a
   membership in their org, so a foreign-org id simply resolves to `not_found`.
+- **Privilege ordering per row.** `executeBulkUserAction` applies
+  `targetOutranksActor` to every row before dispatch (§8.1): a row whose target
+  outranks a non-superadmin actor resolves to
+  `forbidden_target_outranks_actor` and audits `admin.user.action_denied`
+  (`bulk: true`), so the batch endpoint cannot be used to bypass the `[id]`
+  route guard. The AUTHZ-2 `forbidden_shared_target` refusal follows it.
 - **Partial failure.** Each row's outcome is captured; one row failing does not
   abort the batch. A summary `admin.users.bulk_action` row is written alongside
   the per-row events. The bulk budget (§2.5) throttles the whole call.
@@ -666,7 +707,8 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   permission they do not already hold (an org admin cannot impersonate a
   superadmin or a more-privileged peer); a mismatch audits
   `admin.user.impersonation_failed` and returns 403. A superadmin already holds
-  every power, so the check is skipped for them.
+  every power, so the check is skipped for them. The same subset test guards
+  the other account-level actions via `targetOutranksActor` (§6, §8.1).
 - The UI presents a double-confirm; the server cannot enforce that but caps the
   call rate via the mutation bucket so a missing confirm cannot loop.
 - Both success and failure are audited, with the **original** admin as the actor

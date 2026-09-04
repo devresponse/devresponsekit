@@ -13,7 +13,11 @@ import {
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import {
+  isResolvedUserResponse,
+  refuseOutrankingTarget,
+  resolveTargetUser,
+} from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +84,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     // across tenants, that's SUPERADMIN-only; an org admin may only set the
     // password of a user confined to their own org. (The reset-email mode is
     // a recovery flow the user completes themselves, so it isn't gated here.)
+    //
+    // Privilege ordering (review #7): a non-SUPERADMIN may not mint a
+    // credential for a target who outranks them — a single-org superadmin
+    // passes the shared-target test below, so this check is what stops an
+    // org admin from setting a superadmin's password and signing in with
+    // global authority. 403 + audit.
+    const outranked = await refuseOutrankingTarget(guard, target, request, "password_set");
+    if (outranked) return outranked;
+
     const scope = resolveOrgScope(guard.access);
     if (!scope) return adminErrorResponse("not_found", 404, request);
     if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {

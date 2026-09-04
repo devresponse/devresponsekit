@@ -12,7 +12,11 @@ import {
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import {
+  isResolvedUserResponse,
+  refuseOutrankingTarget,
+  resolveTargetUser,
+} from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +39,11 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // Privilege ordering (review #7): a non-SUPERADMIN may not act on a target
+  // who outranks them (a superadmin, or a more-privileged peer) — 403 + audit.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "sessions_list");
+  if (outranked) return outranked;
 
   let sessions: unknown;
   try {
@@ -82,6 +91,11 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // Privilege ordering (review #7): a non-SUPERADMIN may not act on a target
+  // who outranks them (a superadmin, or a more-privileged peer) — 403 + audit.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "sessions_revoke_all");
+  if (outranked) return outranked;
 
   // AUTHZ-2: force sign-out everywhere is account-global — it ends the user's
   // sessions in EVERY org. For a user shared across tenants that's

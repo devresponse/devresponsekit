@@ -7,20 +7,14 @@
 # that live in base-image tooling the runtime never invokes.
 #
 # The runner stage executes `node server.js` (the Next.js standalone server) as
-# an unprivileged user. The bundled `npm` CLI (and its own dependencies) ship in
-# the node base image but are never run in production.
-
-# picomatch ReDoS via crafted extglob patterns — bundled inside the base image's
-# npm CLI (/usr/local/lib/node_modules/npm/...). npm is not invoked at runtime,
-# and the app's own dependency tree is gated separately by `pnpm audit`.
-# Review by 2026-09-18 (drop when the node base image bumps its bundled npm).
-CVE-2026-33671
-
-# sigstore certificateOIDs verification-constraint bypass (CVE-2026-48815, HIGH;
-# fixed in sigstore 4.1.1). Same class as CVE-2026-33671 above — bundled inside
-# the base image's npm CLI (/usr/local/lib/node_modules/npm/node_modules/sigstore/,
-# used by npm for package provenance). NOT in this app's dependency tree (absent
-# from pnpm-lock.yaml), and npm is never invoked in the production runtime
-# (`node server.js` only). The app's own deps are gated separately by `pnpm audit`.
-# Review by 2026-10-03 (drop when the node base image bumps its bundled npm).
-CVE-2026-48815
+# an unprivileged user. The base image's bundled package-manager CLIs (npm, npx,
+# corepack, yarn) are DELETED from the runner stage (see Dockerfile), so their
+# vendored dependencies (tar, pacote, sigstore, picomatch, brace-expansion, …)
+# no longer exist in the image and no longer need muting here — the two earlier
+# npm-CLI mutes (CVE-2026-33671 picomatch, CVE-2026-48815 sigstore) were dropped
+# for that reason (review #26 / #114). Everything Trivy still reports is either
+# the base OS layer or the app's own traced runtime dependencies, which are
+# gated by `pnpm audit` as well.
+#
+# Format: one CVE id per line, preceded by a comment carrying the package, why
+# it is unreachable at runtime, and a "Review by YYYY-MM-DD" date.

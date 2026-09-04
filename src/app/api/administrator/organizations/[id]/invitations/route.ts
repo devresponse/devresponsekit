@@ -2,8 +2,14 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import {
+  conferrablePermissions,
+  permissionKeysForRoles,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import {
   likeContains,
   applySortAndPagination,
@@ -110,6 +116,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
  * `member_exists` when the address already belongs to an ACTIVE member;
  * 409 `invitation_exists` when a pending invitation is already out.
  *
+ * Attaching a role is a deferred role ASSIGNMENT, so it is bound by the same
+ * privilege-escalation guard (AUTHZ-3) as `users/[id]/app-roles`: a
+ * non-SUPERADMIN may only attach a role whose conferred permissions are a
+ * subset of what they can confer themselves — 403 `forbidden` otherwise.
+ *
  * Caller MUST hold `admin.orgs.update`.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -151,6 +162,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .executeTakeFirst();
     if (!role) {
       return adminErrorResponse("role_not_found", 404, request);
+    }
+    // Privilege-escalation guard (AUTHZ-3, review #6): the invitee receives
+    // this role on acceptance, so the inviter must be able to confer every
+    // permission it carries — otherwise an org admin could invite their own
+    // alternate mailbox with the seeded `superuser` role and mint a second,
+    // global-superadmin account. Identical wiring to the sibling conferral
+    // routes: a bearer credential is bounded by its scopes and never takes
+    // the SUPERADMIN fast-path (P1-1). `consumeInvitation` re-checks against
+    // the inviter's authority at accept time (defense in depth).
+    if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+      const conferred = await permissionKeysForRoles([role.id]);
+      const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+      const unheld = unheldPermissionKeys(conferrable, conferred);
+      if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
     }
   }
 

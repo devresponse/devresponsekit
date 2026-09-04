@@ -219,6 +219,60 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     expect(((await res.json()) as { error: string }).error).toBe("role_not_found");
   });
 
+  // AUTHZ-3 conferral cap on the attached role (review #6). The DB proxy
+  // serves permissionKeysForRoles(...) through `executeMock`, so its return
+  // value IS the permission set the requested role confers.
+  describe("roleId conferral guard (AUTHZ-3, review #6)", () => {
+    const withRole = () => jsonReq(BASE, { email: "ada@example.com", roleId: ROLE_ID });
+    const roleFound = () =>
+      selectFirst
+        .mockResolvedValueOnce(ORG_ROW) // org load
+        .mockResolvedValueOnce({ id: ROLE_ID }) // role belongs to this org
+        .mockResolvedValueOnce(undefined); // no active member
+
+    it("403 forbidden when an org admin invites with a role granting `superuser`", async () => {
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+      roleFound();
+      executeMock.mockResolvedValue([{ key: "superuser" }]);
+      const res = await createPOST(withRole(), listCtx());
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe("forbidden");
+      expect(createInvitationMock).not.toHaveBeenCalled();
+      expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("403 forbidden when the role confers a permission the org admin does not hold", async () => {
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update", "admin.users.read"]));
+      roleFound();
+      executeMock.mockResolvedValue([{ key: "admin.users.read" }, { key: "admin.users.delete" }]);
+      const res = await createPOST(withRole(), listCtx());
+      expect(res.status).toBe(403);
+      expect(createInvitationMock).not.toHaveBeenCalled();
+    });
+
+    it("201 when the role's permissions are a subset of what the org admin holds", async () => {
+      accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update", "admin.users.read"]));
+      roleFound();
+      executeMock.mockResolvedValue([{ key: "admin.users.read" }]);
+      const res = await createPOST(withRole(), listCtx());
+      expect(res.status).toBe(201);
+      expect(createInvitationMock).toHaveBeenCalledWith(
+        expect.objectContaining({ organizationId: ORG_ID, roleId: ROLE_ID }),
+      );
+    });
+
+    it("201 for a SUPERADMIN cookie session inviting with a `superuser` role", async () => {
+      accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+      roleFound();
+      executeMock.mockResolvedValue([{ key: "superuser" }]);
+      const res = await createPOST(withRole(), listCtx());
+      expect(res.status).toBe(201);
+      expect(createInvitationMock).toHaveBeenCalledWith(
+        expect.objectContaining({ roleId: ROLE_ID }),
+      );
+    });
+  });
+
   it("returns 409 member_exists when the address already belongs to an active member", async () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce({ id: "m-1" }); // active-member lookup hits

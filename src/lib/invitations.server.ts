@@ -1,6 +1,12 @@
 import "server-only";
 import { sql } from "kysely";
 import { db } from "@/db/database";
+import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
+import {
+  permissionKeysForRoles,
+  permissionKeysHeldInOrg,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
 import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
 import { auditEvent } from "@/lib/audit.server";
 import { getServerEnv } from "@/lib/env";
@@ -26,6 +32,12 @@ import { getServerEnv } from "@/lib/env";
  *   - Consumption NEVER elevates a blocked/suspended/deactivated user —
  *     explicit administrator denials always win (same invariant as
  *     `reevaluatePendingActivation`).
+ *   - The optional role is a DEFERRED conferral (AUTHZ-3, review #6): the
+ *     create route refuses a role the inviter cannot confer, and
+ *     `consumeInvitation` re-checks the role against the inviter's CURRENT
+ *     authority before granting it. A role that fails the re-check (inviter
+ *     demoted/removed/deleted since the invite) is skipped — the membership
+ *     is still created — and recorded as `roleDenied` on the audit event.
  *   - These helpers do not scope: admin routes MUST `canAccessOrg`-guard the
  *     target organization before calling in (ADR-0001).
  */
@@ -42,6 +54,8 @@ export interface InvitationRow {
   organizationName: string;
   email: string;
   roleId: string | null;
+  /** The inviting admin (`invited_by`); null once that account is deleted. */
+  invitedByAppUserId: string | null;
   status: string;
   expiresAt: Date;
 }
@@ -143,6 +157,7 @@ export async function findValidInvitationByToken(
       "o.name as organization_name",
       "i.email",
       "i.role_id",
+      "i.invited_by",
       "i.status",
       "i.expires_at",
     ])
@@ -159,9 +174,32 @@ export async function findValidInvitationByToken(
     organizationName: row.organization_name,
     email: row.email,
     roleId: row.role_id,
+    invitedByAppUserId: row.invited_by,
     status: row.status,
     expiresAt: row.expires_at,
   };
+}
+
+/**
+ * Whether the inviter may (still) confer `roleId` in `organizationId` — the
+ * consume-time half of the AUTHZ-3 guard (review #6). Fails closed:
+ *   - no inviter on record (account deleted since the invite) → false;
+ *   - a GLOBAL superuser inviter → true (mirrors the routes' `isSuperadmin`
+ *     fast-path; a superuser holds the full catalog by definition);
+ *   - otherwise every permission the role carries must be in the inviter's
+ *     CURRENT held set for that org (active membership required).
+ */
+export async function inviterMayConferRole(input: {
+  invitedByAppUserId: string | null;
+  roleId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  if (!input.invitedByAppUserId) return false;
+  if (await userIsGlobalSuperuser(input.invitedByAppUserId)) return true;
+  const conferred = await permissionKeysForRoles([input.roleId]);
+  if (conferred.length === 0) return true;
+  const held = await permissionKeysHeldInOrg(input.invitedByAppUserId, input.organizationId);
+  return unheldPermissionKeys(held, conferred).length === 0;
 }
 
 export type ConsumeInvitationResult =
@@ -251,8 +289,13 @@ export async function consumeInvitation(input: {
     .execute();
 
   // Optional role grant — re-validated against the inviting org at consume
-  // time (the role may have been deleted or re-scoped since the invite).
+  // time (the role may have been deleted or re-scoped since the invite), and
+  // against the INVITER's current authority (AUTHZ-3, review #6): the grant
+  // happens now, on the invitee's request, so the create route's guard must
+  // be re-asserted here or a since-demoted inviter's stale invitation — or a
+  // row that predates the guard — would still confer.
   let roleGranted = false;
+  let roleDenied = false;
   if (invitation.roleId) {
     const role = await db
       .selectFrom("app_roles")
@@ -261,16 +304,25 @@ export async function consumeInvitation(input: {
       .where("organization_id", "=", invitation.organizationId)
       .executeTakeFirst();
     if (role) {
-      await db
-        .insertInto("app_user_roles")
-        .values({
-          app_user_id: appUser.id,
-          organization_id: invitation.organizationId,
-          role_id: role.id,
-        })
-        .onConflict((oc) => oc.columns(["app_user_id", "organization_id", "role_id"]).doNothing())
-        .execute();
-      roleGranted = true;
+      const allowed = await inviterMayConferRole({
+        invitedByAppUserId: invitation.invitedByAppUserId,
+        roleId: role.id,
+        organizationId: invitation.organizationId,
+      });
+      if (allowed) {
+        await db
+          .insertInto("app_user_roles")
+          .values({
+            app_user_id: appUser.id,
+            organization_id: invitation.organizationId,
+            role_id: role.id,
+          })
+          .onConflict((oc) => oc.columns(["app_user_id", "organization_id", "role_id"]).doNothing())
+          .execute();
+        roleGranted = true;
+      } else {
+        roleDenied = true;
+      }
     }
   }
 
@@ -285,7 +337,10 @@ export async function consumeInvitation(input: {
     metadata: {
       invitationId: invitation.id,
       roleGranted,
-      ...(invitation.roleId && !roleGranted ? { roleMissing: invitation.roleId } : {}),
+      ...(roleDenied ? { roleDenied: invitation.roleId } : {}),
+      ...(invitation.roleId && !roleGranted && !roleDenied
+        ? { roleMissing: invitation.roleId }
+        : {}),
     },
   });
 

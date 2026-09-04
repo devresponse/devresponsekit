@@ -61,6 +61,53 @@ export async function permissionKeysForRoles(roleIds: ReadonlyArray<string>): Pr
 }
 
 /**
+ * Distinct permission keys a user currently HOLDS in one organization —
+ * direct roles (`app_user_roles`) ∪ group-conferred roles (ADR-0002), exactly
+ * as `getUserAccessContext` resolves them, but additionally requiring an
+ * ACTIVE membership in that org (a suspended/blocked member holds nothing
+ * there). Returns `[]` for an unknown user or a non-member.
+ *
+ * Used by deferred conferrals that are consumed later by someone else — an
+ * invitation's role is granted on ACCEPT, when the inviter's request-time
+ * guard no longer exists — so the grant can be re-checked against the
+ * inviter's CURRENT authority (review #6). Does NOT expand the `superuser`
+ * marker into the full catalog: callers short-circuit on
+ * `userIsGlobalSuperuser` first, as the route guards do with `isSuperadmin`.
+ */
+export async function permissionKeysHeldInOrg(
+  appUserId: string,
+  organizationId: string,
+): Promise<string[]> {
+  const activeMember = await db
+    .selectFrom("app_organization_memberships")
+    .select("id")
+    .where("app_user_id", "=", appUserId)
+    .where("organization_id", "=", organizationId)
+    .where("status", "=", "active")
+    .executeTakeFirst();
+  if (!activeMember) return [];
+
+  const directPerms = db
+    .selectFrom("app_user_roles as ur")
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.key as key")
+    .where("ur.app_user_id", "=", appUserId)
+    .where("ur.organization_id", "=", organizationId);
+  const groupPerms = db
+    .selectFrom("app_group_memberships as gm")
+    .innerJoin("app_groups as g", "g.id", "gm.group_id")
+    .innerJoin("app_group_roles as gr", "gr.group_id", "g.id")
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "gr.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.key as key")
+    .where("gm.app_user_id", "=", appUserId)
+    .where("g.organization_id", "=", organizationId);
+  const rows = await directPerms.union(groupPerms).execute();
+  return [...new Set(rows.map((r) => r.key))];
+}
+
+/**
  * Pure: the requested permission keys the actor may NOT confer — those not in
  * the actor's own held set. Returns `[]` when every requested key is held
  * (i.e. the grant is allowed). Permission keys are concrete catalog keys (no

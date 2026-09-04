@@ -66,6 +66,11 @@ beforeEach(() => {
     },
     betterAuthUserId: "admin-1",
     requestId: "req-1",
+    // Cookie admin: the real guard returns `grantedScopes: null` (full user
+    // authority) for a session caller and an explicit array for bearers.
+    callerKind: "session",
+    credentialId: null,
+    grantedScopes: null,
   });
   listMcpAgents
     .mockReset()
@@ -117,6 +122,72 @@ describe("/api/administrator/mcp-agents", () => {
     const res = await PATCH(req({ scopes: ["admin.audit.read"] }), ctx());
     expect(res.status).toBe(422);
     expect(updateOauthClient).not.toHaveBeenCalled();
+  });
+
+  describe("bearer caller is bounded by its OWN scopes (review #12)", () => {
+    // The owning principal holds broad permissions, but the calling
+    // credential was deliberately narrowed to `admin.clients.manage` only.
+    // Before the fix the route passed `null` (full user authority) and let
+    // such a credential lift an agent's ceiling to anything the owner holds.
+    function bearerGuard(grantedScopes: string[]) {
+      requireAdminPermission.mockResolvedValue({
+        access: {
+          permissions: [
+            "admin.clients.read",
+            "admin.clients.manage",
+            "admin.users.delete",
+            "account.read",
+          ],
+          appUserId: "actor-1",
+        },
+        betterAuthUserId: "admin-1",
+        requestId: "req-1",
+        callerKind: "api_key",
+        credentialId: "key-1",
+        grantedScopes,
+      });
+    }
+
+    it("422s a scope the OWNER holds but the credential does not (no self-escalation)", async () => {
+      bearerGuard(["admin.clients.manage"]);
+      const res = await PATCH(req({ scopes: ["admin.users.delete"] }), ctx());
+      expect(res.status).toBe(422);
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_scope" });
+      expect(updateOauthClient).not.toHaveBeenCalled();
+      expect(auditEvent).not.toHaveBeenCalled();
+    });
+
+    it("422s an account scope the credential does not carry (bearer ≠ self-grantable)", async () => {
+      // Cookie admins may always grant account.* scopes; a bearer caller may
+      // delegate only what it holds itself.
+      bearerGuard(["admin.clients.manage"]);
+      const res = await PATCH(req({ scopes: ["account.read"] }), ctx());
+      expect(res.status).toBe(422);
+      expect(updateOauthClient).not.toHaveBeenCalled();
+    });
+
+    it("lets a bearer caller grant a scope it holds AND the owner holds", async () => {
+      bearerGuard(["admin.clients.manage", "admin.users.delete"]);
+      const res = await PATCH(req({ scopes: ["admin.users.delete"] }), ctx());
+      expect(res.status).toBe(200);
+      expect(updateOauthClient).toHaveBeenCalledWith(UUID, { scopes: ["admin.users.delete"] });
+    });
+
+    it("a cookie admin (null scopes) still grants anything its permissions cover", async () => {
+      requireAdminPermission.mockResolvedValue({
+        access: {
+          permissions: ["admin.clients.manage", "admin.users.delete"],
+          appUserId: "actor-1",
+        },
+        betterAuthUserId: "admin-1",
+        requestId: "req-1",
+        callerKind: "session",
+        credentialId: null,
+        grantedScopes: null,
+      });
+      const res = await PATCH(req({ scopes: ["admin.users.delete", "account.read"] }), ctx());
+      expect(res.status).toBe(200);
+    });
   });
 
   it("revokes the agent client (DELETE)", async () => {

@@ -640,6 +640,7 @@
       "membershipExists": "This user is already a member of the organization.",
       "bindingExists": "This provider binding already exists.",
       "idTaken": "That id is already in use.",
+      "audienceTaken": "That SSO audience is already used by another application.",
       "invalidOrigin": "Origin must be an HTTPS URL with no path.",
       "applicationInUse": "This application is still referenced and cannot be deleted.",
       "rateLimited": "Too many requests. Try again in a moment.",
@@ -1146,7 +1147,9 @@
         "organization": "Organization",
         "error": "Error",
         "bodyText": "Text body",
-        "bodyHtml": "HTML body"
+        "bodyHtml": "HTML body",
+        "bodyLoading": "Loading…",
+        "bodyLoadError": "Could not load this email's body."
       },
       "templates": {
         "title": "Email templates",
@@ -1243,6 +1246,7 @@
     "filters_required_for_select_all": "Filters are required when selecting all.",
     "forbidden": "You do not have permission to perform this action.",
     "id_taken": "This identifier is already in use.",
+    "audience_taken": "This SSO audience is already in use.",
     "invalid_body": "The request body is invalid.",
     "invalid_id": "The provided id is not a valid UUID.",
     "invalid_origin": "The request origin is not allowed.",

@@ -12,6 +12,7 @@ import type * as OrgInvitationsRoute from "@/app/api/administrator/organizations
 import type * as PermissionsRoute from "@/app/api/administrator/permissions/route";
 import type * as ExportRoute from "@/app/api/administrator/export/[resource]/route";
 import type * as OutboxRoute from "@/app/api/administrator/email/outbox/route";
+import type * as OutboxDetailRoute from "@/app/api/administrator/email/outbox/[id]/route";
 
 /**
  * ADR-0001 cross-tenant isolation suite (docs/adr/0001-three-tier-access-control.md).
@@ -106,6 +107,7 @@ let bindingsGet: typeof BindingsRoute.GET;
 let permissionsPost: typeof PermissionsRoute.POST;
 let exportGet: typeof ExportRoute.GET;
 let outboxGet: typeof OutboxRoute.GET;
+let outboxDetailGet: typeof OutboxDetailRoute.GET;
 let authSettingsGet: typeof AuthSettingsRoute.GET;
 let authDefaultsGet: typeof AuthDefaultsRoute.GET;
 let authDefaultsPatch: typeof AuthDefaultsRoute.PATCH;
@@ -124,6 +126,7 @@ beforeEach(async () => {
   ({ POST: permissionsPost } = await import("@/app/api/administrator/permissions/route"));
   ({ GET: exportGet } = await import("@/app/api/administrator/export/[resource]/route"));
   ({ GET: outboxGet } = await import("@/app/api/administrator/email/outbox/route"));
+  ({ GET: outboxDetailGet } = await import("@/app/api/administrator/email/outbox/[id]/route"));
   ({ GET: authSettingsGet } =
     await import("@/app/api/administrator/organizations/[id]/auth-settings/route"));
   ({ GET: authDefaultsGet, PATCH: authDefaultsPatch } =
@@ -371,5 +374,55 @@ describe("GET /email/outbox — org-scoped after the tenant column was added", (
     dbExecuteResult = [{ id: "o-1", organization_id: null, to_email: "sys@x.com" }];
     dbFirst.mockResolvedValue({ total: "1" });
     expect((await outboxGet(req(url))).status).toBe(200);
+  });
+});
+
+describe("GET /email/outbox/[id] — bodies are org-scoped like the list (review #221 / #21)", () => {
+  const OUTBOX_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const ctx = { params: Promise.resolve({ id: OUTBOX_ID }) };
+  const url = `http://test.local/api/administrator/email/outbox/${OUTBOX_ID}`;
+  const rowIn = (org: string | null) => ({
+    id: OUTBOX_ID,
+    organization_id: org,
+    template_key: "password_reset",
+    to_email: "victim@org-b.com",
+    subject: "Reset your password",
+    body_html: "<p>http://x/reset-password/[redacted]?callbackURL=%2F</p>",
+    body_text: "http://x/reset-password/[redacted]?callbackURL=%2F",
+    status: "logged",
+  });
+
+  it("ORG ADMIN of org-a gets 404 for a row owned by org-b (no existence leak)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.email.read"]));
+    dbFirst.mockResolvedValue(rowIn(ORG_B));
+    expect((await outboxDetailGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("ORG ADMIN gets 404 for an org-less platform row (SUPERADMIN-only)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.email.read"]));
+    dbFirst.mockResolvedValue(rowIn(null));
+    expect((await outboxDetailGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("an admin with no resolvable org gets 404, never the row", async () => {
+    accessGetter.mockResolvedValue(nullScopeAdmin(["admin.email.read"]));
+    dbFirst.mockResolvedValue(rowIn(ORG_A));
+    expect((await outboxDetailGet(req(url), ctx)).status).toBe(404);
+  });
+
+  it("ORG ADMIN reads their own org's row — with redacted bodies only", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.email.read"]));
+    dbFirst.mockResolvedValue(rowIn(ORG_A));
+    const res = await outboxDetailGet(req(url), ctx);
+    expect(res.status).toBe(200);
+    const text = JSON.stringify(await res.json());
+    expect(text).toContain("/reset-password/[redacted]?");
+    expect(text).not.toMatch(/\/reset-password\/(?!\[redacted\])[^/?"]+/);
+  });
+
+  it("SUPERADMIN reaches a row in any org and the org-less rows", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.email.read"]));
+    dbFirst.mockResolvedValue(rowIn(null));
+    expect((await outboxDetailGet(req(url), ctx)).status).toBe(200);
   });
 });

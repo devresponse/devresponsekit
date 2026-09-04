@@ -27,6 +27,8 @@ import { fileURLToPath } from "node:url";
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
 const ADMIN_ROUTES_DIR = join(SRC_DIR, "app", "api", "administrator");
 const V1_ROUTES_DIR = join(SRC_DIR, "app", "api", "v1");
+const ACCOUNT_ROUTES_DIR = join(SRC_DIR, "app", "api", "account");
+const V1_ME_ROUTES_DIR = join(V1_ROUTES_DIR, "me");
 // `[locale]` and `(secure)` are literal directory names — build the path with
 // join() (not new URL(), which would percent-encode the brackets).
 const ADMIN_PAGES_DIR = join(SRC_DIR, "app", "[locale]", "(secure)", "app", "administrator");
@@ -154,6 +156,42 @@ describe("ADR-0001: every /api/v1 route is org-scoped (or self-scoped)", () => {
           `(resolveOrgScope / canAccessOrg / canAccessUser), confine it to the ` +
           `caller via requireAccountUser, or add a justified entry to V1_EXEMPT.`,
       ).toBe(true);
+    },
+  );
+});
+
+describe("review #184: every self-service guard call names an account scope literal", () => {
+  // `requireAccountUser(request)` WITHOUT a scope admits ANY resolvable bearer
+  // credential — a read-only or zero-scope key — to the handler. The
+  // self-service surface (`/api/account/*`, `/api/v1/me/*`) must therefore
+  // always pass the `account.<x>` scope literal the design (§7) assigns, so a
+  // new handler that forgets it fails here instead of shipping unscoped.
+  const routeFiles = [
+    ...walkFiles(ACCOUNT_ROUTES_DIR, "route.ts"),
+    ...walkFiles(V1_ME_ROUTES_DIR, "route.ts"),
+  ];
+  const GUARD_CALL = /requireAccountUser\s*\(([^)]*)\)/g;
+  const SCOPED_CALL = /^\s*request\s*,\s*"account\.[a-z]+(?:\.[a-z]+)?"\s*$/;
+
+  it("discovers the self-service route handlers", () => {
+    expect(routeFiles.length).toBeGreaterThan(4);
+  });
+
+  it.each(routeFiles.map((f) => [rel(f, "api/"), f] as const))(
+    "%s passes an account scope to every requireAccountUser call",
+    (relPath, full) => {
+      const source = readFileSync(full, "utf8");
+      const calls = [...source.matchAll(GUARD_CALL)].map((m) => m[1] ?? "");
+      expect(calls.length, `${relPath} has no requireAccountUser call`).toBeGreaterThan(0);
+      for (const args of calls) {
+        expect(
+          SCOPED_CALL.test(args),
+          `${relPath}: requireAccountUser(${args.trim()}) must pass an "account.<x>" scope literal ` +
+            `(e.g. "account.read" for reads, "account.profile.write" / ` +
+            `"account.preferences.write" / "account.apikeys.manage" for mutations) so a ` +
+            `read-only or zero-scope bearer key cannot reach the handler.`,
+        ).toBe(true);
+      }
     },
   );
 });

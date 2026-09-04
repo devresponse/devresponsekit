@@ -68,6 +68,7 @@ export * from './OrgMemberList';
 export * from './OrganizationDetail';
 export * from './OrganizationList';
 export * from './OrganizationListItem';
+export * from './OutboxDetail';
 export * from './OutboxItem';
 export * from './OutboxList';
 export * from './PermissionList';

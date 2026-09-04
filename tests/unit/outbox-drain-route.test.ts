@@ -6,7 +6,9 @@ import type * as RouteModule from "@/app/api/internal/outbox-drain/route";
  * (`GET /api/internal/outbox-drain`). The contract is security-critical: it
  * must run the drain ONLY for a caller presenting the `CRON_SECRET` bearer, and
  * must **fail closed** when the secret is unconfigured (Vercel Cron sends the
- * request unauthenticated in that case). The drainer itself is mocked.
+ * request unauthenticated in that case). The drainer itself is mocked; the
+ * env schema is REAL (`vi.resetModules` re-parses it per test) so the
+ * ≥32-char rule on `CRON_SECRET` is exercised end-to-end (review #92).
  */
 const drainSpy = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/email/outbox-worker.server", () => ({ drainOutbox: drainSpy }));
@@ -15,7 +17,7 @@ vi.mock("@/lib/observability/logger.server", () => ({
   logServerError: vi.fn(),
 }));
 
-const SECRET = "test-cron-secret-value";
+const SECRET = "test-cron-secret-value-at-least-32-chars-long";
 let GET: typeof RouteModule.GET;
 
 function req(authHeader?: string): Request {
@@ -66,6 +68,13 @@ describe("GET /api/internal/outbox-drain", () => {
     vi.stubEnv("CRON_SECRET", "");
     const res = await GET(req("Bearer anything"));
     expect(res.status).toBe(401);
+    expect(drainSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses to boot on a short CRON_SECRET instead of accepting it (review #92)", async () => {
+    // A one-character secret must fail env validation, never authorize a drain.
+    vi.stubEnv("CRON_SECRET", "x");
+    await expect(GET(req("Bearer x"))).rejects.toThrow(/CRON_SECRET/);
     expect(drainSpy).not.toHaveBeenCalled();
   });
 

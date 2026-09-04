@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { db, pgPool } from "@/db/database";
+import { permissionKeysHeldInOrg } from "@/lib/admin/grantable-permissions.server";
 import {
   consumeInvitation,
   createInvitation,
@@ -22,6 +23,9 @@ import {
  *      → consume against a real user (membership activated, user
  *      activated, guarded single-use flip) → replay refused; and an
  *      expired row is invisible to `findValidInvitationByToken`.
+ *   5. The consume-time AUTHZ-3 re-check (review #6): the invited role is
+ *      granted only when the INVITER currently holds every permission it
+ *      confers (`permissionKeysHeldInOrg` runs its real UNION query here).
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts), excluded from `pnpm test`.
  * All fixtures use a `__dbtest_inv_` prefix and self-clean (audit rows via
@@ -55,7 +59,19 @@ async function cleanup(): Promise<void> {
     .deleteFrom("app_organization_invitations")
     .where("email", "like", `${PREFIX}%`)
     .execute();
+  // Role ↔ permission links are plain FKs (no cascade): unlink before the
+  // roles/permissions go.
+  const roles = await db
+    .selectFrom("app_roles")
+    .select(["id"])
+    .where("key", "like", `${PREFIX}%`)
+    .execute();
+  const roleIds = roles.map((r) => r.id);
+  if (roleIds.length > 0) {
+    await db.deleteFrom("app_role_permissions").where("role_id", "in", roleIds).execute();
+  }
   await db.deleteFrom("app_roles").where("key", "like", `${PREFIX}%`).execute();
+  await db.deleteFrom("app_permissions").where("key", "like", `${PREFIX}%`).execute();
   await db.deleteFrom("app_organizations").where("slug", "like", `${PREFIX}%`).execute();
 }
 
@@ -68,17 +84,36 @@ async function newOrg(slug: string): Promise<string> {
   return row.id;
 }
 
-async function newUser(tag: string, status = "pending_approval"): Promise<string> {
+async function newUser(tag: string, status = "pending_approval", email = EMAIL): Promise<string> {
   const row = await db
     .insertInto("app_users")
     .values({
       better_auth_user_id: `${PREFIX}${tag}`,
-      primary_email: EMAIL,
+      primary_email: email,
       status,
     })
     .returning("id")
     .executeTakeFirstOrThrow();
   return row.id;
+}
+
+/** An org role carrying one freshly minted `${PREFIX}` permission key. */
+async function newRoleWithPermission(orgId: string, tag: string): Promise<string> {
+  const perm = await db
+    .insertInto("app_permissions")
+    .values({ key: `${PREFIX}perm.${tag}`, description: "DBTest permission" })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  const role = await db
+    .insertInto("app_roles")
+    .values({ organization_id: orgId, key: `${PREFIX}${tag}`, name: `DBTest ${tag}` })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  await db
+    .insertInto("app_role_permissions")
+    .values({ role_id: role.id, permission_id: perm.id })
+    .execute();
+  return role.id;
 }
 
 beforeEach(cleanup);
@@ -210,6 +245,99 @@ describe("app_organization_invitations (DB-backed, 0008)", () => {
       actorBetterAuthUserId: `${PREFIX}consume-user`,
     });
     expect(replay).toEqual({ consumed: false, reason: "already_consumed" });
+  });
+
+  it("grants the invited role only when the INVITER currently holds its permissions (AUTHZ-3, review #6)", async () => {
+    const orgId = await newOrg("confer");
+    const roleId = await newRoleWithPermission(orgId, "confer-role");
+    const inviterId = await newUser("confer-inviter", "active", `${PREFIX}inviter@dbtest.local`);
+    await db
+      .insertInto("app_organization_memberships")
+      .values({ organization_id: orgId, app_user_id: inviterId, status: "active" })
+      .execute();
+    const inviteeId = await newUser("confer-invitee");
+
+    // 1. The inviter holds NOTHING in the org → the role is withheld; the
+    // membership is still created; the audit row says why.
+    const first = await createInvitation({
+      organizationId: orgId,
+      email: EMAIL,
+      roleId,
+      invitedByAppUserId: inviterId,
+    });
+    const found = await findValidInvitationByToken(first.plaintextToken);
+    expect(found).toMatchObject({ roleId, invitedByAppUserId: inviterId });
+    expect(await permissionKeysHeldInOrg(inviterId, orgId)).toEqual([]);
+
+    const denied = await consumeInvitation({
+      invitation: found!,
+      appUser: { id: inviteeId, primaryEmail: EMAIL, status: "pending_approval" },
+      actorBetterAuthUserId: `${PREFIX}confer-invitee`,
+    });
+    expect(denied).toEqual({ consumed: true, roleGranted: false });
+    expect(
+      await db
+        .selectFrom("app_user_roles")
+        .select("role_id")
+        .where("app_user_id", "=", inviteeId)
+        .execute(),
+    ).toEqual([]);
+    expect(
+      (
+        await db
+          .selectFrom("app_organization_memberships")
+          .select("status")
+          .where("app_user_id", "=", inviteeId)
+          .where("organization_id", "=", orgId)
+          .executeTakeFirstOrThrow()
+      ).status,
+    ).toBe("active");
+    const audit = await db
+      .selectFrom("app_audit_events")
+      .select("metadata")
+      .where("event_type", "=", "auth.account.invitation_accepted")
+      .where("email", "=", EMAIL)
+      .orderBy("created_at", "desc")
+      .executeTakeFirstOrThrow();
+    expect(audit.metadata).toMatchObject({ roleGranted: false, roleDenied: roleId });
+
+    // 2. Give the inviter the role directly → they now hold its permission
+    // → a fresh invitation grants it on accept.
+    await db
+      .insertInto("app_user_roles")
+      .values({ app_user_id: inviterId, organization_id: orgId, role_id: roleId })
+      .execute();
+    expect(await permissionKeysHeldInOrg(inviterId, orgId)).toEqual([`${PREFIX}perm.confer-role`]);
+
+    const second = await createInvitation({
+      organizationId: orgId,
+      email: EMAIL,
+      roleId,
+      invitedByAppUserId: inviterId,
+    });
+    const granted = await consumeInvitation({
+      invitation: (await findValidInvitationByToken(second.plaintextToken))!,
+      appUser: { id: inviteeId, primaryEmail: EMAIL, status: "active" },
+      actorBetterAuthUserId: `${PREFIX}confer-invitee`,
+    });
+    expect(granted).toEqual({ consumed: true, roleGranted: true });
+    expect(
+      await db
+        .selectFrom("app_user_roles")
+        .select("role_id")
+        .where("app_user_id", "=", inviteeId)
+        .where("organization_id", "=", orgId)
+        .execute(),
+    ).toEqual([{ role_id: roleId }]);
+
+    // 3. A suspended inviter membership holds nothing in that org.
+    await db
+      .updateTable("app_organization_memberships")
+      .set({ status: "suspended" })
+      .where("app_user_id", "=", inviterId)
+      .where("organization_id", "=", orgId)
+      .execute();
+    expect(await permissionKeysHeldInOrg(inviterId, orgId)).toEqual([]);
   });
 
   it("treats a pending row past expires_at as expired at read time", async () => {

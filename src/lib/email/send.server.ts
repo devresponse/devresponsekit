@@ -4,6 +4,7 @@ import { getServerEnv } from "@/lib/env";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { getConfiguredEmailProvider } from "./providers.server";
 import { backoffDelayMs, summarizeDeliveryError } from "./outbox-worker.server";
+import { redactRenderedEmail } from "./outbox-secrets";
 import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
 
 /**
@@ -127,11 +128,22 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
   const organizationId = await resolveOrganizationId(input);
   const template = await resolveTemplate(input.templateKey, locale);
 
-  const subject = renderEmailTemplate(template.subject, input.variables, "text");
-  const bodyHtml = renderEmailTemplate(template.bodyHtml, input.variables, "html");
-  const bodyText = template.bodyText
-    ? renderEmailTemplate(template.bodyText, input.variables, "text")
-    : null;
+  // The deliverable: what the provider receives. Kept in memory for the
+  // inline attempt below; never stored in an admin-readable column.
+  const rendered = {
+    subject: renderEmailTemplate(template.subject, input.variables, "text"),
+    html: renderEmailTemplate(template.bodyHtml, input.variables, "html"),
+    text: template.bodyText
+      ? renderEmailTemplate(template.bodyText, input.variables, "text")
+      : null,
+  };
+  // The record: the same message with any one-time token replaced by
+  // `[redacted]` (review #21). Only when redaction actually changed something
+  // is the unredacted rendering also written to `delivery_payload`, so the
+  // retry worker (and, with no provider, a developer reading the DB) still
+  // has the real link; that column is never selected by an admin route and
+  // is nulled once the row is terminal.
+  const redaction = redactRenderedEmail(rendered, input.variables);
 
   const provider = getConfiguredEmailProvider();
 
@@ -142,13 +154,12 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
       template_key: input.templateKey,
       to_email: input.to,
       from_email: env.EMAIL_FROM,
-      subject,
-      body_html: bodyHtml,
-      body_text: bodyText,
-      // Recorded for debugging/re-render; reset URLs embed one-time
-      // tokens which are consumed on use, the same trade-off as any
-      // provider dashboard or mail spool.
-      variables: JSON.stringify(input.variables),
+      subject: redaction.stored.subject,
+      body_html: redaction.stored.html,
+      body_text: redaction.stored.text,
+      // Recorded for debugging (redacted like the bodies).
+      variables: JSON.stringify(redaction.variables),
+      delivery_payload: redaction.redacted ? JSON.stringify(rendered) : null,
       status: provider ? "pending" : "logged",
       provider: provider?.id ?? null,
       related_better_auth_user_id: input.relatedBetterAuthUserId ?? null,
@@ -164,9 +175,9 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
     const result = await provider.deliver({
       to: input.to,
       from: env.EMAIL_FROM,
-      subject,
-      html: bodyHtml,
-      text: bodyText ?? undefined,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text ?? undefined,
       // Same key as the worker's retries (the outbox row id), so a retry after
       // this inline send crashed post-delivery is deduped provider-side (#11).
       idempotencyKey: `outbox-${inserted.id}`,
@@ -181,6 +192,8 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
         last_attempt_at: now,
         next_attempt_at: null,
         sent_at: now,
+        // Delivered: the unredacted copy has served its purpose (#21).
+        delivery_payload: null,
       })
       .where("id", "=", inserted.id)
       .execute();

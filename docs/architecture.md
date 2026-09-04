@@ -111,6 +111,7 @@ flowchart LR
 
 - **Email + password** (always on) and **Google / Microsoft / GitHub OAuth** (each enabled only when its client id *and* secret are present).
 - **Plugins:** the built-in `admin` plugin (ban / impersonate / session management), a server-only `ssoSession` plugin (subdomain SSO), and `nextCookies` (must be last).
+- **Admin plugin surface:** the plugin's raw HTTP endpoints (`/api/auth/admin/*`) are closed — a global `hooks.before` middleware (`src/lib/auth-admin-surface.ts`) returns 404 for any `/admin/*` request carrying `ctx.request`. The app reaches the plugin only through server-side `auth.api.*` calls (headers, never `request`) made by the guarded `/api/administrator/users/[id]/*` routes, so app RBAC, org scoping, the impersonation escalation guard, rate limits and audit always apply. See [Administrator console §8.1](./admin-manager.md#81-users).
 - **Sessions:** rolling ~8-hour sessions refreshed on activity. Trusted origins come from `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_URL`, and `ADMIN_TRUSTED_ORIGINS`.
 - **Provisioning hook:** on sign-up (email/password) or first login (OAuth), an `app_users` row is provisioned and linked to the Better Auth user via `better_auth_user_id`. The hooks resolve the target organization's runtime sign-up policy (0007) to decide the initial status and whether email verification is required; a live invitation (0008) activates the account in the inviting org. See [Sign-up Policy](./auth-signup-policy.md).
 
@@ -195,6 +196,8 @@ Administrator mutations pass through an in-memory **per-actor token bucket** (`s
 | `DEFAULT_ADMIN_MUTATION_LIMIT` | 30 | 1 / sec | Standard `POST`/`PATCH`/`DELETE` |
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 / sec | Bulk operations |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 / sec | CSV export |
+| `DEFAULT_SSO_LAUNCH_LIMIT` | 30 | 1 / sec | `GET /api/sso/launch`, keyed per principal (session user id, else trusted client IP) |
+| `DEFAULT_SSO_CONSUME_LIMIT` | 30 | 1 / sec | `GET`/`POST /api/sso/consume`, keyed per trusted client IP |
 
 The store is in-process (resets on restart). A distributed (e.g. Redis) backend is a noted follow-up — see `TODO` in [Deployment](./deployment.md).
 
@@ -210,18 +213,25 @@ sequenceDiagram
     participant Sat as Satellite /api/sso/consume
 
     U->>Hub: GET /api/sso/launch?applicationId=app
-    Hub->>Hub: verify membership + app access
-    Hub->>DB: write one-time nonce (jti)
-    Hub->>Hub: sign JWT (HS256, ≤60s, aud=app)
+    Hub->>Hub: validate app id shape, rate-limit per principal
+    Hub->>Hub: verify session (refuse impersonated) + membership + app access
+    Hub->>DB: write one-time nonce (jti, target app id)
+    Hub->>Hub: sign JWT (HS256, ≤60s, aud=app, targetApplicationId=app)
     Hub-->>U: 302 → satellite /api/sso/consume?token=…
-    U->>Sat: GET /api/sso/consume?token=…
-    Sat->>Sat: verify signature, issuer, audience, expiry
-    Sat->>DB: atomically burn nonce
+    U->>Sat: GET /api/sso/consume?token=… (rate-limited per IP)
+    Sat->>Sat: verify signature, issuer, audience, expiry,<br/>targetApplicationId == SSO_HANDOFF_APPLICATION_ID
+    Sat->>DB: atomically burn nonce (jti + target app id)
     Sat->>Sat: establish satellite session (ssoSession plugin)
     Sat-->>U: 302 → /app/dashboard (token stripped from URL)
 ```
 
 The handoff JWT is symmetric (HS256) and signed with `SSO_HANDOFF_JWT_SECRET` — a **separate** secret from `BETTER_AUTH_SECRET` and from the machine-API signing key. Destination origins must fall under the configured allow-list. See [Configuration](./configuration.md#single-sign-on-handoff).
+
+Three guards sit around the diagram above:
+
+- **No launch while impersonating.** An impersonated hub session is refused at launch (`403 forbidden_while_impersonating`). The satellite session would carry no `impersonatedBy`, outlive the impersonation cap, escape the tenant confinement that keeps the impersonation escalation guard sound, and be attributed to the target rather than the admin.
+- **Application-id binding.** `sso_audience` is an admin-typed column; the consumer therefore also requires the token's `targetApplicationId` to equal its own `SSO_HANDOFF_APPLICATION_ID` and burns the nonce only where `target_application_id` matches. The catalog rejects a duplicate audience at registration (`409 audience_taken`); a UNIQUE index is scheduled for a later core migration.
+- **Rate limits.** Both endpoints are throttled before any audit row is written — launch per principal, consume per trusted client IP (see [Rate limiting](#rate-limiting)).
 
 ### Machine API authentication
 
@@ -279,7 +289,7 @@ The org filter on **both** branches is what keeps groups inside the ADR-0001 bou
 
 ## 5. Data model
 
-PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The schema is provisioned by a **frozen baseline plus append-only migrations**: `src/db/migrations/0001-initial-schema.sql` is the complete, idempotent baseline (FROZEN — `CREATE … IF NOT EXISTS`, so re-running it never alters a provisioned database); further schema changes are added as new numbered `NNNN-*.sql` files — today that is `0002-admin-groups-permissions.sql`, and the next core migration is `0003`. A lightweight runner (`src/db/migrations/run-migrations.ts`) records applied filenames in an `app_schema_migrations` ledger and applies each not-yet-recorded file, in lexical order, inside its own transaction. It runs in two passes: the **core** top-level files, then the **email-template `locales/`** pass — one file per locale, of which the English base `locales/0000-email-templates-en.sql` is ALWAYS applied while the localized files are excludable via `DB_MIGRATE_LOCALES`. (Better Auth's own `better-auth*` files are owned by its tooling and skipped by this runner.) TypeScript types live in `src/db/schema/app-schema.ts`. See [Deployment](./deployment.md).
+PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The schema is provisioned by a **frozen baseline plus append-only migrations**: `src/db/migrations/0001-initial-schema.sql` is the complete, idempotent baseline (FROZEN — `CREATE … IF NOT EXISTS`, so re-running it never alters a provisioned database); further schema changes are added as new numbered `NNNN-*.sql` files — today that is `0002-admin-groups-permissions.sql` and `0003-outbox-delivery-payload.sql`, and the next core migration is `0004`. A lightweight runner (`src/db/migrations/run-migrations.ts`) records applied filenames in an `app_schema_migrations` ledger and applies each not-yet-recorded file, in lexical order, inside its own transaction. It runs in two passes: the **core** top-level files, then the **email-template `locales/`** pass — one file per locale, of which the English base `locales/0000-email-templates-en.sql` is ALWAYS applied while the localized files are excludable via `DB_MIGRATE_LOCALES`. (Better Auth's own `better-auth*` files are owned by its tooling and skipped by this runner.) TypeScript types live in `src/db/schema/app-schema.ts`. See [Deployment](./deployment.md).
 
 **Schema:** every table — the `app_*` tables **and** the Better Auth vendor tables — is deployed into one schema, **`auth`** by default, configurable via `DB_SCHEMA` (`src/db/schema-config.ts`). The schema is applied at the **connection level** via `search_path=<DB_SCHEMA>,public`, so all (unqualified) Kysely queries resolve to it with no per-query qualification; the shared extensions (`pgcrypto`, `pg_trgm`) stay in `public`. Setting a different `DB_SCHEMA` per deployment isolates applications by schema with no code changes. See [Configuration → `DB_SCHEMA`](./configuration.md#database-postgresql).
 
@@ -333,7 +343,7 @@ The application tables link to Better Auth's `user` table logically via `app_use
 | **Request correlation** | `request-id.server.ts` + audit + Sentry | One `x-request-id` ties a response, its audit rows, and any error event together. |
 | **Uniform list envelope** | `list-query.server.ts` | Admin/v1 list endpoints share pagination, sorting, filtering, and response shape. |
 | **Guard-returns-response** | `requireAdminPermission`, `requireAccountUser` | Guards return either a typed grant or a ready-to-send `NextResponse`, keeping handlers linear. |
-| **Frozen baseline + append-only migrations** | `0001-initial-schema.sql` + numbered `NNNN-*.sql` (today: `0002`) via `run-migrations.ts` | Idempotent baseline is frozen and safe to re-run; further changes are append-only numbered files applied once each and tracked in the `app_schema_migrations` ledger. Email templates live in `locales/` (en base always applied). |
+| **Frozen baseline + append-only migrations** | `0001-initial-schema.sql` + numbered `NNNN-*.sql` (today: `0002`, `0003`) via `run-migrations.ts` | Idempotent baseline is frozen and safe to re-run; further changes are append-only numbered files applied once each and tracked in the `app_schema_migrations` ledger. Email templates live in `locales/` (en base always applied). |
 
 ---
 

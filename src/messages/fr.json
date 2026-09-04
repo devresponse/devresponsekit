@@ -640,6 +640,7 @@
       "membershipExists": "Cet utilisateur est déjà membre de l'organisation.",
       "bindingExists": "Cette liaison de fournisseur existe déjà.",
       "idTaken": "Cet identifiant est déjà utilisé.",
+      "audienceTaken": "Cette audience SSO est déjà utilisée par une autre application.",
       "invalidOrigin": "L'origine doit être une URL HTTPS sans chemin.",
       "applicationInUse": "Cette application est encore référencée et ne peut pas être supprimée.",
       "rateLimited": "Trop de requêtes. Réessayez dans un instant.",
@@ -1146,7 +1147,9 @@
         "organization": "Organisation",
         "error": "Erreur",
         "bodyText": "Corps texte",
-        "bodyHtml": "Corps HTML"
+        "bodyHtml": "Corps HTML",
+        "bodyLoading": "Chargement…",
+        "bodyLoadError": "Impossible de charger le corps de cet e-mail."
       },
       "templates": {
         "title": "Modèles d'e-mail",
@@ -1243,6 +1246,7 @@
     "filters_required_for_select_all": "Les filtres sont requis pour tout sélectionner.",
     "forbidden": "Vous n’avez pas la permission requise.",
     "id_taken": "Cet identifiant est déjà utilisé.",
+    "audience_taken": "Cette audience SSO est déjà utilisée.",
     "invalid_body": "Le corps de la requête est invalide.",
     "invalid_id": "L’identifiant fourni n’est pas un UUID valide.",
     "invalid_origin": "L’origine de la requête n’est pas autorisée.",

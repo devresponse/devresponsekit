@@ -7,7 +7,7 @@ captured: 2026-07-10
 ---
 # DevResponseKit demo walkthrough
 
-A screenshot-based tour of **https://demo.devresponse.ca**, captured 2026-07-10 at 1440×900 (light theme, English locale), signed in as the seed administrator. Every screen has its own page embedding its screenshots. Regenerate the images any time with `node help/capture.mjs` (uses the repo's Playwright).
+A screenshot-based tour of **https://demo.devresponse.ca**, captured 2026-07-10 at 1440×900 (light theme, English locale), signed in as an account that holds the full administrator-console permission set. Every screen has its own page embedding its screenshots. The images are produced by the repository's capture tooling, which is not part of the served help content; see the repository's CONTRIBUTING guide to regenerate them.
 
 ## App map
 

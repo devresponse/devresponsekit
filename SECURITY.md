@@ -178,6 +178,65 @@ in the image and `.trivyignore` currently carries **no** entries. The base
 image digest is tracked by Dependabot's `docker` ecosystem; a stale digest is
 the usual cause of a base-OS finding (see [docs/docker.md](docs/docker.md)).
 
+## Secret scanning
+
+[`.github/workflows/secret-scan.yml`](.github/workflows/secret-scan.yml) runs
+**gitleaks** (pinned container image) over every push and pull request as a
+**required** status check on `main`; a hit blocks the merge. The configuration
+is [`.gitleaks.toml`](.gitleaks.toml) and
+[`tests/unit/gitleaks-config.test.ts`](tests/unit/gitleaks-config.test.ts)
+pins its policy, so a change that weakens the gate fails the unit suite before
+it ever reaches CI.
+
+**Custom detection rules.** The bundled gitleaks rules know nothing about the
+credential formats this application issues, so the config adds its own:
+
+| Rule id | Catches | Real shape (source of truth) |
+| --- | --- | --- |
+| `devresponse-api-key` | `drk_live_` / `drk_test_` API keys | prefix + 32 base62 chars (`src/lib/api-auth/api-key.ts`) |
+| `devresponse-oauth-client-secret` | `drkcsec_` OAuth client secrets | prefix + 40 base62 chars (`src/lib/api-auth/oauth-clients.server.ts`) |
+| `devresponse-oauth-client-id` | `drkc_` OAuth client ids | prefix + 24 base62 chars |
+| `devresponse-seed-default-password` | the documented seed-admin default password anywhere except the files that document it | `.env.example` `SEED_ADMIN_PASSWORD` |
+| `devresponse-tooling-hardcoded-password` | a quoted password literal assigned in operator tooling (`help/`, `scripts/`) | tooling reads credentials from the environment |
+
+Only the plaintext of a key or client secret is ever shown (once); the
+database holds a SHA-256 hash. A full-length value in the tree is therefore a
+leak by construction, and the rules are length-bounded to exactly the real
+shapes so **fixtures never collide with them**: keep test and documentation
+values shorter than the real random segment (the unit test enforces this
+across the tree) and they need no allowlisting at all. A deliberately
+full-length placeholder is allowed only under `tests/` or `docs/` **and** only
+when it carries an obvious marker (`example`, `placeholder`, `redacted`).
+
+**Allowlist policy.** Allowlists are path-scoped wherever the allowed value is
+a credential shape; a global regex allowlist for a credential family would make
+the required check structurally blind to that family everywhere (that was the
+state before the 2026-09 review, and it is what the unit test now forbids).
+The seed-admin default password may appear only in the files that document
+the local-only default (`.env.example`, `docs/configuration.md`,
+`docs/developer-onboarding.md`, `specs.md`, CI's seed step, and the e2e
+sign-in helper) — a copy in application code or tooling fails the gate.
+Generated artifacts (`.next/`, `coverage/`, the UAT CSV export) and two
+self-describing dummy literals (`ci-only-…-not-for-production`,
+`test-secret-test-secret-test-secret`) are the only unscoped entries, and each
+must still match something in the tree (dead entries only widen what the
+scanner ignores). The one allowance for the app's own formats is fenced three
+ways: short throwaway values (at most 12 random characters — e.g. the public
+display prefix `drk_live_AbCd1234`) are ignored only under `tests/` and
+`docs/`, and only for the bundled `generic-api-key` rule; the
+`devresponse-*` rules are never allowlisted. `tests/` is never
+blanket-allowlisted.
+
+**Run it locally** exactly as CI does (Docker):
+
+```bash
+docker run --rm -v "$(pwd):/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+  detect --source=/repo --no-git --config=/repo/.gitleaks.toml --redact
+```
+
+If a finding is a false positive, prefer shortening the fixture over adding an
+allowlist entry; if an entry is unavoidable, scope it to the narrowest path.
+
 ## Handling of secrets
 
 Never include real secrets, production credentials, or customer data in a

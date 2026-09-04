@@ -1,20 +1,142 @@
 # gitleaks configuration (BUILD-1).
 #
-# Extends the bundled default rules and allowlists the repo's intentional
-# NON-secrets so the scan is honest — it fails only on real, novel leaks, not
-# on fixtures, examples, or generated build output.
+# Extends the bundled default rules, ADDS detection rules for the app's OWN
+# credential formats (the bundled rules have no pattern for them), and
+# allowlists the repo's intentional NON-secrets so the scan is honest — it
+# fails only on real, novel leaks, not on fixtures, examples, or generated
+# build output.
+#
+# Policy (SECURITY.md → "Secret scanning"):
+#   - Allowlists are PATH-scoped wherever the allowed value is a credential
+#     shape. A global regex allowlist for a credential format would make the
+#     required `gitleaks` check structurally blind to that family everywhere.
+#   - Fixture credentials stay SHORTER than the real shapes (a 32-char API key
+#     random, a 40-char client secret, a 24-char client id), so they never
+#     collide with the detection rules below and need no allowlisting at all.
+#
+# Verify locally exactly as CI does (.github/workflows/secret-scan.yml):
+#   docker run --rm -v "$(pwd):/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+#     detect --source=/repo --no-git --config=/repo/.gitleaks.toml --redact
+#
+# tests/unit/gitleaks-config.test.ts pins the invariants of this file.
 title = "devresponsekit gitleaks config"
 
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Build output, fixtures, archived docs, and documented local-only/CI dummy values — not real credentials."
+# ---------------------------------------------------------------------------
+# Detection rules for DevResponseKit's own credential shapes.
+#
+# The real formats (src/lib/api-auth/api-key.ts, oauth-clients.server.ts):
+#   drk_live_<32 base62>   API key (also drk_test_)
+#   drkcsec_<40 base62>    OAuth client secret
+#   drkc_<24 base62>       OAuth client id (not a secret on its own, but a real
+#                          one in the tree means a real tenant is referenced)
+# Only the plaintext is shown once; a hash is persisted. So a full-length value
+# in the tree is, by construction, a leak — never something the app wrote.
+# ---------------------------------------------------------------------------
 
-# Path-scoped allowances for GENERATED artifacts only (no committed source).
-# NOTE: `tests/` is intentionally NOT blanket-allowlisted — a real secret
-# accidentally committed in a fixture must still be caught. Test fixtures use
-# documented throwaway values, allowlisted by the precise regexes below.
+[[rules]]
+id = "devresponse-api-key"
+description = "DevResponseKit API key (drk_live_/drk_test_ + 32 base62 chars)"
+regex = '''\bdrk_(?:live|test)_([A-Za-z0-9]{32})\b'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["drk_live_", "drk_test_"]
+tags = ["devresponse", "api-key"]
+
+  # Escape hatch for a deliberately full-length placeholder in a fixture or a
+  # doc: it must live under tests/ or docs/ AND carry an obvious marker.
+  [[rules.allowlists]]
+  description = "Marked full-length placeholders in fixtures and docs only"
+  condition = "AND"
+  paths = ['''(^|/)(tests|docs)/''']
+  regexTarget = "match"
+  regexes = ['''(?i)(example|placeholder|redacted)''']
+
+[[rules]]
+id = "devresponse-oauth-client-secret"
+description = "DevResponseKit OAuth client secret (drkcsec_ + 40 base62 chars)"
+regex = '''\bdrkcsec_([A-Za-z0-9]{40})\b'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["drkcsec_"]
+tags = ["devresponse", "oauth-client-secret"]
+
+  [[rules.allowlists]]
+  description = "Marked full-length placeholders in fixtures and docs only"
+  condition = "AND"
+  paths = ['''(^|/)(tests|docs)/''']
+  regexTarget = "match"
+  regexes = ['''(?i)(example|placeholder|redacted)''']
+
+[[rules]]
+id = "devresponse-oauth-client-id"
+description = "DevResponseKit OAuth client id (drkc_ + 24 base62 chars)"
+regex = '''\bdrkc_([A-Za-z0-9]{24})\b'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["drkc_"]
+tags = ["devresponse", "oauth-client-id"]
+
+  [[rules.allowlists]]
+  description = "Marked full-length placeholders in fixtures and docs only"
+  condition = "AND"
+  paths = ['''(^|/)(tests|docs)/''']
+  regexTarget = "match"
+  regexes = ['''(?i)(example|placeholder|redacted)''']
+
+# ---------------------------------------------------------------------------
+# The documented seed-admin default password. The bundled rules never match it
+# (its trailing `!` breaks the generic-api-key terminator), so without a rule
+# of its own a copy in tooling or app code would sail through — which is how
+# help/capture.mjs once shipped it against a live host. Only the files that
+# DOCUMENT the local-only default may contain it; everywhere else it fails the
+# gate. Add a path here only for documentation of the default, never for code.
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "devresponse-seed-default-password"
+description = "The seed-admin default password outside the files that document it"
+regex = '''ChangeMe-LocalOnly-123!'''
+keywords = ["changeme-localonly"]
+tags = ["devresponse", "seed-default"]
+
+  [[rules.allowlists]]
+  description = "Files that legitimately document the local-only seed default"
+  paths = [
+    '''(^|/)\.env\.example$''',
+    '''(^|/)\.gitleaks\.toml$''',
+    '''(^|/)\.github/workflows/ci\.yml$''',
+    '''(^|/)docs/configuration\.md$''',
+    '''(^|/)docs/developer-onboarding\.md$''',
+    '''(^|/)specs\.md$''',
+    '''(^|/)COMMENT-AUDIT\.md$''',      # audit report quoting the documented default
+    '''(^|/)tests/e2e/helpers/admin-auth\.ts$''',
+  ]
+
+# A quoted password literal assigned in operator tooling (help/, scripts/).
+# Tooling must read credentials from the environment (see help/capture.mjs).
+[[rules]]
+id = "devresponse-tooling-hardcoded-password"
+description = "Quoted password literal assigned in operator tooling under help/ or scripts/"
+path = '''(^|/)(help|scripts)/.*\.(m?js|cjs|ts|ps1)$'''
+regex = '''(?i)(?:password|passwd|pwd)\s*[:=]\s*["']([^"'\s]{8,})["']'''
+secretGroup = 1
+entropy = 3.0
+keywords = ["password", "passwd", "pwd"]
+tags = ["devresponse", "tooling"]
+
+# ---------------------------------------------------------------------------
+# Global allowlists — GENERATED artifacts and a few documented dummy literals
+# that are not credential shapes. NOTE: `tests/` is intentionally NOT blanket-
+# allowlisted — a real secret accidentally committed in a fixture must still
+# be caught. Test fixtures use short throwaway values that never reach the
+# real credential lengths, so they need no entries here.
+# ---------------------------------------------------------------------------
+
+[[allowlists]]
+description = "Generated build output and generated documentation exports — not committed application source"
 paths = [
   '''(^|/)\.next/''',        # Next.js build output (generated, gitignored)
   '''(^|/)node_modules/''',
@@ -29,17 +151,24 @@ paths = [
   '''(^|/)docs/uat/uat-stories\.csv$''',
 ]
 
-# Documented dummy values that appear in tests, CI config, seed defaults, and
-# setup docs. These allow the KNOWN non-secrets while leaving the rest of the
-# tree (incl. fixtures) scanned, so a novel real credential still trips the gate.
+[[allowlists]]
+description = "Documented CI-only / test-only dummy literals (self-describing, not credential shapes)"
 regexes = [
-  '''ci-only-[a-z0-9-]+-not-for-production''',
-  '''ChangeMe-LocalOnly-123!''',
-  '''change-me-min-16-chars''',
-  '''test-secret-test-secret-test-secret''',
-  # The app's OWN credential prefixes — API keys (`drk_live_`/`drk_test_`),
-  # OAuth client ids (`drkc_`), and client secrets (`drkcsec_`). Fixtures and
-  # docs use throwaway values in these formats; third-party secrets (AWS,
-  # GitHub, real private keys, …) are NOT in this family and stay scanned.
-  '''drk(_(live|test)_|c_|csec_)[A-Za-z0-9_-]+''',
+  '''ci-only-[a-z0-9-]+-not-for-production''',   # .github/workflows/ci.yml
+  '''test-secret-test-secret-test-secret''',      # tests/setup/vitest.setup.ts
 ]
+
+# Short throwaway values in the app's own credential FORMATS — the public
+# display-prefix shape (`drk_live_AbCd1234`, what the UI shows for a key) and
+# similar fixtures. The bundled generic-api-key rule flags them on keyword
+# context; the rules above never do (they are far below the real lengths).
+# This is the ONLY allowance for the family, and it is fenced three ways:
+# tests/ + docs/ paths only, at most 12 random chars (a real key has 32, a
+# client id 24, a client secret 40), and only against the bundled generic
+# rule — the devresponse-* rules are never allowlisted by it.
+[[allowlists]]
+description = "Short (≤12 random chars) throwaway values in the app's credential formats, fixtures and docs only"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|/)(tests|docs)/''']
+regexes = ['''^drk(?:_(?:live|test)_|c_|csec_)[A-Za-z0-9]{1,12}$''']

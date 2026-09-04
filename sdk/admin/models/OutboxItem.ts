@@ -72,18 +72,6 @@ export interface OutboxItem {
      * @type {string}
      * @memberof OutboxItem
      */
-    bodyHtml?: string;
-    /**
-     * 
-     * @type {string}
-     * @memberof OutboxItem
-     */
-    bodyText?: string | null;
-    /**
-     * 
-     * @type {string}
-     * @memberof OutboxItem
-     */
     status: OutboxItemStatusEnum;
     /**
      * 
@@ -164,8 +152,6 @@ export function OutboxItemFromJSONTyped(json: any, ignoreDiscriminator: boolean)
         'toEmail': json['to_email'],
         'fromEmail': json['from_email'] == null ? undefined : json['from_email'],
         'subject': json['subject'] == null ? undefined : json['subject'],
-        'bodyHtml': json['body_html'] == null ? undefined : json['body_html'],
-        'bodyText': json['body_text'] == null ? undefined : json['body_text'],
         'status': json['status'],
         'provider': json['provider'] == null ? undefined : json['provider'],
         'providerMessageId': json['provider_message_id'] == null ? undefined : json['provider_message_id'],
@@ -195,8 +181,6 @@ export function OutboxItemToJSONTyped(value?: OutboxItem | null, ignoreDiscrimin
         'to_email': value['toEmail'],
         'from_email': value['fromEmail'],
         'subject': value['subject'],
-        'body_html': value['bodyHtml'],
-        'body_text': value['bodyText'],
         'status': value['status'],
         'provider': value['provider'],
         'provider_message_id': value['providerMessageId'],

@@ -9,6 +9,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
  *   Edge B — a delivery failure must persist a SHORT, single-line reason in
  *     `app_outbox.error` (admin-visible, org-scoped), never the provider's raw
  *     multi-line response body.
+ *   Edge C — a redacted row (review #21) must be delivered from the jsonb
+ *     `delivery_payload` (the real link), never from the stored `[redacted]`
+ *     body, and the payload must be nulled once the row is `sent`.
  *
  * Runs `drainOutbox` against real Postgres; only the provider is mocked (the
  * `db` pool is real). Driven by `pnpm test:db`. Fixtures use `__dbtest_`.
@@ -29,7 +32,14 @@ const { drainOutbox } = await import("@/lib/email/outbox-worker.server");
 
 const PREFIX = "__dbtest_drain_";
 
-async function insertPending(provider: string): Promise<string> {
+async function insertPending(
+  provider: string,
+  overrides: Partial<{
+    body_html: string;
+    body_text: string | null;
+    delivery_payload: string | null;
+  }> = {},
+): Promise<string> {
   const row = await db
     .insertInto("app_outbox")
     .values({
@@ -44,6 +54,7 @@ async function insertPending(provider: string): Promise<string> {
       status: "pending",
       provider,
       next_attempt_at: null, // immediately due
+      ...overrides,
     })
     .returning("id")
     .executeTakeFirstOrThrow();
@@ -53,7 +64,7 @@ async function insertPending(provider: string): Promise<string> {
 async function getRow(id: string) {
   return db
     .selectFrom("app_outbox")
-    .select(["id", "status", "provider", "attempts", "error"])
+    .select(["id", "status", "provider", "attempts", "error", "delivery_payload"])
     .where("id", "=", id)
     .executeTakeFirstOrThrow();
 }
@@ -105,5 +116,39 @@ describe("drainOutbox (DB-backed, P3-8)", () => {
     expect(error!.length).toBeLessThanOrEqual(201); // 200 chars + the ellipsis
     expect(error!.startsWith("resend 500:")).toBe(true); // useful prefix kept
     expect(error!).not.toContain(rawBody); // the raw body is NOT stored verbatim
+  });
+
+  it("Edge C: delivers the unredacted delivery_payload and nulls it once sent (#21)", async () => {
+    const live = "http://x/reset-password/LiveDbToken?callbackURL=%2F";
+    const id = await insertPending("resend", {
+      body_html: '<a href="http://x/reset-password/[redacted]?callbackURL=%2F">Reset</a>',
+      body_text: "http://x/reset-password/[redacted]?callbackURL=%2F",
+      delivery_payload: JSON.stringify({
+        subject: "Reset your password",
+        html: `<a href="${live}">Reset</a>`,
+        text: live,
+      }),
+    });
+    const delivered: Array<{ subject: string; html: string; text?: string }> = [];
+    state.provider = {
+      id: "resend",
+      deliver: async (e) => {
+        delivered.push(e as (typeof delivered)[number]);
+        return { providerMessageId: "m-c" };
+      },
+    };
+
+    const result = await drainOutbox(10);
+
+    expect(result).toMatchObject({ claimed: 1, sent: 1 });
+    // The provider got the REAL link (jsonb read back as an object by pg)…
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]!.subject).toBe("Reset your password");
+    expect(delivered[0]!.text).toBe(live);
+    expect(delivered[0]!.html).not.toContain("[redacted]");
+    // …and the live token is no longer at rest once the row is terminal.
+    const row = await getRow(id);
+    expect(row.status).toBe("sent");
+    expect(row.delivery_payload).toBeNull();
   });
 });

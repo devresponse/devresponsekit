@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { getServerEnv } from "@/lib/env";
 import { registry, startDefaultMetrics } from "@/lib/observability/metrics.server";
 
 // Reads the prom-client registry (Node-only) and node:crypto.
@@ -14,10 +15,12 @@ export const dynamic = "force-dynamic";
  * time, and **fails closed** when the token is unset, so a deployment that
  * forgets to configure it never leaks metrics (which can carry route names,
  * counts, and timing). Point your scraper at it with
- * `Authorization: Bearer <METRICS_TOKEN>`.
+ * `Authorization: Bearer <METRICS_TOKEN>`. The token is read through the
+ * validated env (`src/lib/env.ts`: optional, ≥32 chars when set, empty =
+ * unset) so a short guessable value fails at boot (review #222).
  */
 function isAuthorized(request: Request): boolean {
-  const expected = process.env.METRICS_TOKEN;
+  const expected = getServerEnv().METRICS_TOKEN;
   if (!expected) return false; // fail closed: no token configured ⇒ endpoint disabled
   const header = request.headers.get("authorization") ?? "";
   const prefix = "Bearer ";

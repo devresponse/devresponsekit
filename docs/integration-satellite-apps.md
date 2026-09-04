@@ -56,6 +56,9 @@ sequenceDiagram
 
 - Claims: `jti` (one-time-use id), `sub` (Better Auth user id), `email`, `organizationId`, `appUserId`, `targetApplicationId`, `locale`, `roles[]` — **no display name** (the satellite derives one).
 - `iss` = `SSO_HANDOFF_ISSUER`; `aud` = `<SSO_HANDOFF_AUDIENCE_PREFIX>:<applicationId>` — so a token minted for one satellite is rejected by every other.
+- **Application-id binding:** the consumer also requires `targetApplicationId` to equal its own `SSO_HANDOFF_APPLICATION_ID` and burns the nonce only where the row's `target_application_id` matches. `aud` alone is not trusted — `sso_audience` is an admin-typed column, so this holds even if two registered apps were to carry the same audience (the catalog refuses that with `409 audience_taken`).
+- **No launch while impersonating:** an impersonated primary session gets `403 forbidden_while_impersonating` from `/api/sso/launch`; a satellite session would carry no impersonation marker and be attributed to the target.
+- **Rate limits:** launch is throttled per principal, consume GET/POST per trusted client IP (30-burst, 1/s); denials are `429` with `Retry-After` and write no audit row.
 - TTL: the signer **hard-clamps to ≤60 seconds** regardless of `SSO_HANDOFF_TTL_SECONDS`.
 - Single use: the `jti` is burned on the consume POST; replays are rejected.
 
@@ -65,7 +68,7 @@ sequenceDiagram
 
 ### 3.1 Primary side (the issuer)
 
-1. **Register the satellite as an enterprise application** (Administrator → Enterprise apps, `admin.apps.manage`): its `origin` (e.g. `https://apps.example.com`) and `sso_audience` = `<prefix>:<applicationId>` (e.g. `devresponse-app:standalone`), status available ([Admin Manager §8.7](./admin-manager.md#87-enterprise-applications)).
+1. **Register the satellite as an enterprise application** (Administrator → Enterprise apps, `admin.apps.manage`): its `id` (**exactly** the satellite's `SSO_HANDOFF_APPLICATION_ID`), `origin` (e.g. `https://apps.example.com`) and `sso_audience` = `<prefix>:<applicationId>` (e.g. `devresponse-app:standalone`; unique across the catalog — a duplicate is refused with `409 audience_taken`), status available ([Admin Manager §8.7](./admin-manager.md#87-enterprise-applications)).
 2. **Cover the subdomain in `SSO_ALLOWED_ORIGIN_SUFFIXES`** (or leave it derived from `NEXT_PUBLIC_PRODUCTION_HOST` when the satellite lives under the same root host) — see [Configuration → SSO handoff](./configuration.md#single-sign-on-handoff).
 3. **Share three values** with the satellite: `SSO_HANDOFF_ISSUER` (the primary's origin), `SSO_HANDOFF_AUDIENCE_PREFIX`, and `SSO_HANDOFF_JWT_SECRET` (≥32 chars; **must differ** from every `BETTER_AUTH_SECRET`).
 
@@ -80,7 +83,7 @@ sequenceDiagram
 | `ADMIN_TRUSTED_ORIGINS` | the satellite's own origin | feeds Better Auth `trustedOrigins` + the origin guard on the consume POST |
 | `SSO_HANDOFF_ISSUER` | the **primary's** origin | |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | same as primary (e.g. `devresponse-app`) | |
-| `SSO_HANDOFF_APPLICATION_ID` | **unique per satellite** (e.g. `standalone`, `handoff`) | must match the registered `sso_audience` suffix |
+| `SSO_HANDOFF_APPLICATION_ID` | **unique per satellite** (e.g. `standalone`, `handoff`) | must equal the registered enterprise-app `id` (and therefore the `sso_audience` suffix) — the consumer binds every token's `targetApplicationId` to it |
 | `SSO_HANDOFF_JWT_SECRET` | **same as primary** (HS256 is symmetric) | |
 
 All four `SSO_HANDOFF_*` values are validated **at boot** on every DevResponseKit-derived app — including Option C, which never uses them at runtime (set placeholders there).
@@ -309,6 +312,9 @@ Why these steps look the way they do:
 | Launch returns 404 / "unknown application" | No enterprise-app row for `applicationId`, or the row's status isn't available |
 | Launch rejects the destination | Satellite origin not covered by `SSO_ALLOWED_ORIGIN_SUFFIXES` |
 | Consume GET rejects the token | `SSO_HANDOFF_JWT_SECRET` / `ISSUER` / `AUDIENCE_PREFIX` mismatch between the two sides; or the satellite's `SSO_HANDOFF_APPLICATION_ID` doesn't match the registered audience; or >60s elapsed |
+| Consume rejects the token with audit reason `target_application_mismatch` | The satellite's `SSO_HANDOFF_APPLICATION_ID` differs from the enterprise-app row's `id` on the primary (the audience may still match) — make them identical |
+| Launch returns `403 forbidden_while_impersonating` | You are impersonating a user on the primary; stop impersonation first — handoffs are never minted from impersonated sessions |
+| Launch or consume returns `429` | Per-principal (launch) / per-IP (consume) rate limit tripped; honour `Retry-After` |
 | Consume POST 401s **every** time (fresh tokens) | Separate-DB deployment without the §4.5 nonce inversion — there is no nonce row to burn |
 | "unknown user" on consume | Separate-DB deployment without the §4.5 user upsert |
 | Consume POST 403s | The confirm form posted cross-origin, or `ADMIN_TRUSTED_ORIGINS` doesn't include the satellite's own origin |
@@ -326,6 +332,7 @@ More: [Troubleshooting](./troubleshooting.md) covers the kit-wide failure modes.
 - The handoff secret is HS256-symmetric: anyone holding `SSO_HANDOFF_JWT_SECRET` can mint sign-in tokens for **every** registered satellite. Store it like `BETTER_AUTH_SECRET`, keep it distinct from it, rotate it across both sides together.
 - A/B satellites are separate security domains; C satellites are the same security domain as the primary. Choose accordingly, and re-read [API Security §8](./api-security.md#8-third-party-and-satellite-web-apps) before giving any external team a C-style integration.
 - **Mixed fleets (C alongside A/B) have one extra rule:** the moment the primary issues a parent-domain cookie for C, that cookie reaches every subdomain — each handoff satellite must run a distinct `advanced.cookiePrefix` so the foreign cookie can't shadow its own session (§6.6). The shadowing fails *closed* (the satellite sees no session), but it looks like a broken handoff.
+- The consumer never trusts `aud` alone: every token is bound to the satellite's own `SSO_HANDOFF_APPLICATION_ID` (`targetApplicationId` claim + nonce row), the catalog refuses duplicate audiences, impersonated primary sessions cannot launch, and both endpoints are rate-limited before any audit write (§2).
 - A satellite that needs the machine API is *also* an API client — issue it its own credential per [API Security §2](./api-security.md#2-which-credential-should-a-third-party-get); SSO artifacts are never API credentials.
 
 ---

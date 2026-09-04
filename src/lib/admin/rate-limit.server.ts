@@ -176,6 +176,31 @@ export const DEFAULT_ADMIN_EXPORT_LIMIT: RateLimitOptions = {
 };
 
 /**
+ * SSO handoff budgets (review #16). Both routes were previously unthrottled,
+ * and every failed call writes an append-only `app_audit_events` row.
+ *
+ * `/api/sso/launch` is keyed per PRINCIPAL — the session user id once a
+ * session resolves, the trusted client IP before that — so one noisy user
+ * cannot starve the rest of a NAT. A real user launches one handoff per app
+ * tile click, so the mutation tier (30 burst, 1/s) is generous.
+ */
+export const DEFAULT_SSO_LAUNCH_LIMIT: RateLimitOptions = {
+  capacity: 30,
+  refillPerSec: 1,
+};
+
+/**
+ * `/api/sso/consume` has no principal until the token verifies, so it is
+ * keyed per trusted client IP. A legitimate handoff is one GET + one POST;
+ * many users may sit behind one egress IP, so the burst matches the
+ * mutation tier rather than the tighter bulk/export tiers.
+ */
+export const DEFAULT_SSO_CONSUME_LIMIT: RateLimitOptions = {
+  capacity: 30,
+  refillPerSec: 1,
+};
+
+/**
  * Budget for the DENIAL AUDIT, not for traffic. A sustained flood of 429s must
  * not amplify into unbounded `app_audit_events` rows, so each denied actor is
  * audited at most ≈once per minute per scope — enough to know "actor X tripped

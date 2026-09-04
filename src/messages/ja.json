@@ -640,6 +640,7 @@
       "membershipExists": "このユーザーはすでに組織のメンバーです。",
       "bindingExists": "このプロバイダーバインディングはすでに存在します。",
       "idTaken": "その id はすでに使用されています。",
+      "audienceTaken": "この SSO オーディエンスは別のアプリケーションで既に使用されています。",
       "invalidOrigin": "オリジンはパスを含まない HTTPS URL である必要があります。",
       "applicationInUse": "このアプリケーションはまだ参照されているため、削除できません。",
       "rateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。",
@@ -1146,7 +1147,9 @@
         "organization": "組織",
         "error": "エラー",
         "bodyText": "テキスト本文",
-        "bodyHtml": "HTML 本文"
+        "bodyHtml": "HTML 本文",
+        "bodyLoading": "読み込み中…",
+        "bodyLoadError": "このメールの本文を読み込めませんでした。"
       },
       "templates": {
         "title": "メールテンプレート",
@@ -1243,6 +1246,7 @@
     "filters_required_for_select_all": "すべてを選択するにはフィルターが必要です。",
     "forbidden": "この操作を実行する権限がありません。",
     "id_taken": "この識別子はすでに使用されています。",
+    "audience_taken": "この SSO オーディエンスはすでに使用されています。",
     "invalid_body": "リクエスト本文が無効です。",
     "invalid_id": "指定された id は有効な UUID ではありません。",
     "invalid_origin": "リクエストのオリジンは許可されていません。",

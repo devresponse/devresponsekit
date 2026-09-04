@@ -208,10 +208,12 @@ _Source: `src/lib/api-auth/scopes.ts`._
 
 `ACCOUNT_SCOPES` (self-service, **not** `app_permissions` rows; gate the strictly self-scoped `/api/account/*` + `/api/v1/me/*` routes that need only an active membership):
 
-- `account.read`
-- `account.profile.write`
-- `account.preferences.write`
-- `account.apikeys.manage`
+- `account.read` — `GET /api/v1/me`, `GET /api/v1/me/api-keys`
+- `account.profile.write` — `PATCH /api/account/profile`
+- `account.preferences.write` — `PUT /api/account/preferences`
+- `account.apikeys.manage` — `POST /api/v1/me/api-keys`, `DELETE`/`rotate` on `/api/v1/me/api-keys/[id]`
+
+Every self-service handler passes its scope literal to `requireAccountUser(request, scope)`; a bearer credential lacking it is refused with `403 insufficient_scope` before any write, while a cookie session (`grantedScopes === null`) passes unconditionally. A source scan in `tests/unit/admin-route-scope-invariant.test.ts` fails CI if a `/api/account/*` or `/api/v1/me/*` handler calls the guard without a scope.
 
 ### Matching
 

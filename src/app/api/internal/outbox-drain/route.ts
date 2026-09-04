@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { drainOutbox } from "@/lib/email/outbox-worker.server";
+import { getServerEnv } from "@/lib/env";
 import { logServerError, logger } from "@/lib/observability/logger.server";
 
 // Touches the pg pool + node:crypto, so it must run on the Node runtime.
@@ -27,9 +28,13 @@ export const maxDuration = 60;
  * **fails closed** when `CRON_SECRET` is unset, so a deployment that forgets to
  * configure the secret never exposes an unauthenticated drain trigger (rather
  * than silently allowing one, which is how Vercel Cron behaves without it).
+ *
+ * The secret is read through the validated env (`CRON_SECRET` in
+ * `src/lib/env.ts`: optional, ≥32 chars when set, empty = unset) so a weak
+ * value fails at boot instead of quietly enabling the endpoint (review #92).
  */
 function isAuthorized(request: Request): boolean {
-  const expected = process.env.CRON_SECRET;
+  const expected = getServerEnv().CRON_SECRET;
   // Fail closed: with no secret configured the endpoint is never callable.
   if (!expected) return false;
 

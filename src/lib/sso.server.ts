@@ -135,12 +135,21 @@ export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectIn
 
 /**
  * Atomically consumes a handoff `jti`, returning true exactly once per token.
+ *
+ * The burn is predicated on `targetApplicationId` as well as `jti` (review
+ * #15): the nonce row records which app the launch was FOR, so a consumer
+ * can only spend nonces minted for its own application id — even if two
+ * registered apps were to share an `sso_audience`.
  */
-export async function consumeSsoHandoffNonce(jti: string): Promise<boolean> {
+export async function consumeSsoHandoffNonce(
+  jti: string,
+  targetApplicationId: string,
+): Promise<boolean> {
   const result = await db
     .updateTable("app_sso_handoff_nonces")
     .set({ consumed_at: new Date() })
     .where("jti", "=", jti)
+    .where("target_application_id", "=", targetApplicationId)
     .where("consumed_at", "is", null)
     .where("expires_at", ">", new Date())
     .returning(["jti"])

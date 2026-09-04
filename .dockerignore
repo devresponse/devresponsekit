@@ -22,6 +22,11 @@ playwright-report
 coverage
 coverage-*.log
 
+# Operator tooling that lives beside the servable help content. The help
+# viewer serves only *.md and images, and the capture script (Playwright,
+# credentials from env) belongs in a source checkout, not the runtime image.
+help/capture.mjs
+
 # Local-only and generated artifacts
 *.log
 tsconfig.tsbuildinfo

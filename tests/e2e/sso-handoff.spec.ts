@@ -10,40 +10,71 @@ import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
  * the real sign/verify/nonce-consume path that is otherwise mock-only, plus the
  * P2-2 confirmation step that defeats IdP-initiated login-CSRF.
  *
- * The launch signs the token with the app's `sso_audience`, and the consumer
- * checks it against this deployment's `SSO_HANDOFF_AUDIENCE_PREFIX` +
- * `SSO_HANDOFF_APPLICATION_ID` — so the registered app's audience must equal
- * that expected value for a single-instance round trip. CI's `browser` job
- * sets `SSO_HANDOFF_APPLICATION_ID=portal` and `SSO_HANDOFF_AUDIENCE_PREFIX=
- * devresponse-app`, hence the audience below.
+ * The consumer binds every token to THIS deployment (review #15): the token's
+ * `aud` must equal `SSO_HANDOFF_AUDIENCE_PREFIX:SSO_HANDOFF_APPLICATION_ID`
+ * AND its `targetApplicationId` must equal `SSO_HANDOFF_APPLICATION_ID`, and the
+ * nonce burn is predicated on that id. For a single-instance round trip the
+ * registered app's `id` must therefore BE the deployment's application id. CI's
+ * `browser` job sets `SSO_HANDOFF_APPLICATION_ID=portal` and
+ * `SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app`, hence the values below.
  */
+const APP_ID = "portal";
+const AUDIENCE = "devresponse-app:portal";
+
 test.beforeEach(async ({ page }) => {
   await signInAsSeedAdmin(page);
 });
 
 test("sso handoff: launch -> consume -> replay rejected", async ({ page }, testInfo) => {
-  const slug = `e2e-sso-${testInfo.project.name}-${Date.now()}`;
-  const audience = "devresponse-app:portal";
-
-  // Register the destination app. Its origin must fall under the configured
-  // SSO_ALLOWED_ORIGIN_SUFFIXES (devresponse.com) — we only read the launch
-  // redirect's token, never actually navigate to that host.
-  const createRes = await page.request.post("/api/administrator/enterprise-apps", {
+  // Ensure the destination app exists. The row's id is fixed (see above) and a
+  // consumed handoff leaves a nonce row referencing it, so the cleanup delete
+  // is refused (`application_in_use`) and a previous project run may have left
+  // the row behind — look it up first and only create when absent. Its origin
+  // must fall under the configured SSO_ALLOWED_ORIGIN_SUFFIXES
+  // (devresponse.com) — we only read the launch redirect's token, never
+  // actually navigate to that host.
+  const existingRes = await page.request.get(`/api/administrator/enterprise-apps/${APP_ID}`, {
     headers: ADMIN_API_HEADERS,
-    data: {
-      id: slug,
-      label: `E2E SSO ${slug}`,
-      origin: `https://${slug}.devresponse.com`,
-      subdomain: slug,
-      sso_audience: audience,
-      status: "available",
-    },
   });
-  expect(createRes.ok(), await createRes.text()).toBe(true);
+  if (existingRes.status() === 404) {
+    const createRes = await page.request.post("/api/administrator/enterprise-apps", {
+      headers: ADMIN_API_HEADERS,
+      data: {
+        id: APP_ID,
+        label: "E2E SSO portal",
+        origin: "https://portal.devresponse.com",
+        subdomain: "portal",
+        sso_audience: AUDIENCE,
+        status: "available",
+      },
+    });
+    expect(createRes.ok(), await createRes.text()).toBe(true);
+  } else {
+    expect(existingRes.ok(), await existingRes.text()).toBe(true);
+    expect((await existingRes.json()).sso_audience).toBe(AUDIENCE);
+  }
 
+  const foreignSlug = `e2e-sso-foreign-${testInfo.project.name}-${Date.now()}`;
   try {
+    // A SECOND app may not be registered with the same audience (review #15):
+    // the catalog refuses it with 409 audience_taken, so no other app can be
+    // set up to have its tokens accepted by this deployment.
+    const dupRes = await page.request.post("/api/administrator/enterprise-apps", {
+      headers: ADMIN_API_HEADERS,
+      data: {
+        id: foreignSlug,
+        label: `E2E SSO foreign ${foreignSlug}`,
+        origin: `https://${foreignSlug}.devresponse.com`,
+        subdomain: foreignSlug,
+        sso_audience: AUDIENCE,
+        status: "available",
+      },
+    });
+    expect(dupRes.status(), await dupRes.text()).toBe(409);
+    expect((await dupRes.json()).error).toBe("audience_taken");
+
     // LAUNCH — a 302 whose Location carries the one-time handoff token.
-    const launchRes = await page.request.get(`/api/sso/launch?applicationId=${slug}`, {
+    const launchRes = await page.request.get(`/api/sso/launch?applicationId=${APP_ID}`, {
       maxRedirects: 0,
     });
     // NextResponse.redirect() defaults to 307 (temporary, method-preserving).
@@ -83,7 +114,10 @@ test("sso handoff: launch -> consume -> replay rejected", async ({ page }, testI
     });
     expect(replayRes.status()).toBe(401);
   } finally {
-    await page.request.delete(`/api/administrator/enterprise-apps/${slug}`, {
+    // Best-effort cleanup: the consumed nonce row references the app, so this
+    // is normally refused with 409 application_in_use and the row persists
+    // for the next project run (handled by the lookup above).
+    await page.request.delete(`/api/administrator/enterprise-apps/${APP_ID}`, {
       headers: ADMIN_API_HEADERS,
     });
   }

@@ -640,6 +640,7 @@
       "membershipExists": "Este usuario ya es miembro de la organización.",
       "bindingExists": "Este enlace de proveedor ya existe.",
       "idTaken": "Ese identificador ya está en uso.",
+      "audienceTaken": "Esa audiencia SSO ya la utiliza otra aplicación.",
       "invalidOrigin": "El origen debe ser una URL HTTPS sin ruta.",
       "applicationInUse": "Esta aplicación todavía está referenciada y no se puede eliminar.",
       "rateLimited": "Demasiadas solicitudes. Inténtelo de nuevo en un momento.",
@@ -1146,7 +1147,9 @@
         "organization": "Organización",
         "error": "Error",
         "bodyText": "Cuerpo de texto",
-        "bodyHtml": "Cuerpo HTML"
+        "bodyHtml": "Cuerpo HTML",
+        "bodyLoading": "Cargando…",
+        "bodyLoadError": "No se pudo cargar el cuerpo de este correo."
       },
       "templates": {
         "title": "Plantillas de correo",
@@ -1243,6 +1246,7 @@
     "filters_required_for_select_all": "Se requieren filtros al seleccionar todo.",
     "forbidden": "No tienes permiso para realizar esta acción.",
     "id_taken": "Este identificador ya está en uso.",
+    "audience_taken": "Esta audiencia SSO ya está en uso.",
     "invalid_body": "El cuerpo de la solicitud no es válido.",
     "invalid_id": "El id no es un UUID válido.",
     "invalid_origin": "El origen de la solicitud no está permitido.",

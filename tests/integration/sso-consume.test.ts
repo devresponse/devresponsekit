@@ -42,17 +42,17 @@ vi.mock("@/lib/observability/server", () => ({
   captureServerError: (...args: unknown[]) => captureMock(...args),
 }));
 
-function getRequest(url: string): NextRequest {
+function getRequest(url: string, headers: Record<string, string> = {}): NextRequest {
   const u = new URL(url);
   return {
     nextUrl: u,
     url: u.toString(),
     method: "GET",
-    headers: new Headers(),
+    headers: new Headers(headers),
   } as unknown as NextRequest;
 }
 
-function postRequest(token: string | null): NextRequest {
+function postRequest(token: string | null, headers: Record<string, string> = {}): NextRequest {
   const u = new URL("http://localhost/api/sso/consume");
   const form = new FormData();
   if (token !== null) form.set("token", token);
@@ -60,7 +60,7 @@ function postRequest(token: string | null): NextRequest {
     nextUrl: u,
     url: u.toString(),
     method: "POST",
-    headers: new Headers(),
+    headers: new Headers(headers),
     formData: async () => form,
   } as unknown as NextRequest;
 }
@@ -155,7 +155,8 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toContain("/fr/app/dashboard");
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(consumeMock).toHaveBeenCalledWith("j1");
+    // The burn is bound to THIS deployment's application id (review #15).
+    expect(consumeMock).toHaveBeenCalledWith("j1", "portal");
     expect(createSsoSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({ body: { userId: "ba-1" }, returnHeaders: true }),
     );
@@ -214,5 +215,116 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
     const res = await POST(postRequest(null));
     expect(res.status).toBe(400);
     expect(verifyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("application-id binding — token minted for another app (review #15)", () => {
+  // A token whose `aud` matches (two registered apps sharing one audience) but
+  // whose `targetApplicationId` names the OTHER app must be refused here.
+  const FOREIGN = { ...PAYLOAD, targetApplicationId: "evil" };
+
+  it("GET refuses it with 401 and audits target_application_mismatch (no confirm redirect)", async () => {
+    verifyMock.mockResolvedValue({ payload: FOREIGN });
+    const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.json()).toMatchObject({ error: "invalid_token" });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "sso.consume.failure",
+        reason: "target_application_mismatch",
+      }),
+    );
+  });
+
+  it("POST refuses it with 401 BEFORE burning the nonce or creating a session", async () => {
+    verifyMock.mockResolvedValue({ payload: FOREIGN });
+    consumeMock.mockResolvedValue(true);
+    const res = await POST(postRequest("abc"));
+    expect(res.status).toBe(401);
+    expect(consumeMock).not.toHaveBeenCalled();
+    expect(createSsoSessionMock).not.toHaveBeenCalled();
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "sso.consume.failure",
+        reason: "target_application_mismatch",
+      }),
+    );
+  });
+
+  it("still accepts a token whose targetApplicationId equals SSO_HANDOFF_APPLICATION_ID", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/sso/confirm");
+  });
+});
+
+describe("per-IP rate limit (review #16)", () => {
+  const ipA = { "x-forwarded-for": "203.0.113.9" };
+  const ipB = { "x-forwarded-for": "198.51.100.4" };
+
+  it("GET: an unauthenticated garbage-token flood from one IP hits 429 + Retry-After and stops writing audit rows", async () => {
+    verifyMock.mockRejectedValue(new Error("signature_invalid"));
+    // DEFAULT_SSO_CONSUME_LIMIT: 30-token burst.
+    for (let i = 0; i < 30; i += 1) {
+      expect((await GET(getRequest("http://localhost/api/sso/consume?token=zz", ipA))).status).toBe(
+        401,
+      );
+    }
+    expect(auditMock).toHaveBeenCalledTimes(30);
+    auditMock.mockClear();
+    verifyMock.mockClear();
+
+    const denied = await GET(getRequest("http://localhost/api/sso/consume?token=zz", ipA));
+    expect(denied.status).toBe(429);
+    expect(Number(denied.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(await denied.json()).toMatchObject({ error: "rate_limited" });
+    expect(denied.headers.get("x-request-id")).toBeTruthy();
+    // No verification and no `sso.consume.*` audit row for the denied call.
+    expect(verifyMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "sso.consume.failure" }),
+    );
+
+    // Even a missing-token request is throttled before its audit write.
+    auditMock.mockClear();
+    const noToken = await GET(getRequest("http://localhost/api/sso/consume", ipA));
+    expect(noToken.status).toBe(429);
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "sso.consume.failure" }),
+    );
+
+    // Another IP keeps its own budget.
+    expect((await GET(getRequest("http://localhost/api/sso/consume?token=zz", ipB))).status).toBe(
+      401,
+    );
+  });
+
+  it("POST: shares the same per-IP scope and denies before the origin check / nonce burn", async () => {
+    verifyMock.mockRejectedValue(new Error("signature_invalid"));
+    for (let i = 0; i < 30; i += 1) {
+      expect((await POST(postRequest("zz", ipA))).status).toBe(401);
+    }
+    consumeMock.mockClear();
+    auditMock.mockClear();
+
+    const denied = await POST(postRequest("zz", ipA));
+    expect(denied.status).toBe(429);
+    expect(denied.headers.get("retry-after")).toBeTruthy();
+    expect(consumeMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "sso.consume.failure" }),
+    );
+  });
+
+  it("a legitimate single handoff (GET then POST) from a fresh IP is untouched", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    expect((await GET(getRequest("http://localhost/api/sso/consume?token=abc", ipB))).status).toBe(
+      307,
+    );
+    expect((await POST(postRequest("abc", ipB))).status).toBe(303);
   });
 });

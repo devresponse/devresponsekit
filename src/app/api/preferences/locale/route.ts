@@ -8,6 +8,7 @@ import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { isSupportedLocale, locales } from "@/config/i18n-config";
 // Shared first-party JSON error envelope (P3-12).
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,18 @@ const bodySchema = z.object({
  * is validated against the configured allow-list to prevent arbitrary
  * cookie/string injection. Successful changes are audit-logged as
  * `i18n.locale.changed` per §15.6.
+ *
+ * Cookie-session mutation ⇒ trusted-origin CSRF guard first, exactly like
+ * the account/administrator mutation guards (review #39/#188). The route
+ * authenticates only via the session cookie, so the guard is unconditional.
+ * Pending users may still set their locale once the origin is trusted.
  */
 export async function POST(request: NextRequest) {
+  const origin = checkTrustedOrigin(request);
+  if (!origin.ok) {
+    return adminErrorResponse("untrusted_origin", 403, request);
+  }
+
   const session = await getCurrentSession();
   if (!session) {
     return adminErrorResponse("unauthenticated", 401, request);

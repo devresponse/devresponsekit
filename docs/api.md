@@ -21,7 +21,7 @@ Two related references carry the deeper detail this page links to rather than re
 | Group | Base path | Auth | Audience |
 | --- | --- | --- | --- |
 | Better Auth | `/api/auth/[...all]` | Better Auth (cookies) | Browser auth flows & OAuth callbacks |
-| Account self-service | `/api/account/*`, `/api/preferences/*` | Cookie session | The signed-in user |
+| Account self-service | `/api/account/*`, `/api/preferences/*` | Cookie session (`/api/account/*` also accepts a bearer credential carrying the matching `account.*` scope) | The signed-in user |
 | Invitations | `/api/invitations/accept` | Cookie session | Signed-in invitees accepting an organization invitation |
 | Navigation | `/api/navigation/*` | Cookie session | The web UI |
 | SSO handoff | `/api/sso/launch`, `/api/sso/consume` | Cookie session / signed token | Cross-subdomain SSO |
@@ -63,7 +63,7 @@ There are two auth models. **Cookie session** gates the admin console and accoun
 
 ### Cookie session (browser & admin console)
 
-Better Auth sets a session cookie on sign-in. Cross-site mutations (`POST`/`PATCH`/`PUT`/`DELETE`) are additionally protected by an **origin guard**: the request's `Origin` (or `Referer`) must be a trusted origin. A non-browser caller of `/api/administrator/*` must therefore send **both** the session cookie and a matching `Origin` header.
+Better Auth sets a session cookie on sign-in. Cross-site mutations (`POST`/`PATCH`/`PUT`/`DELETE`) are additionally protected by an **origin guard**: the request's `Origin` (or `Referer`) must be a trusted origin. The guard covers every cookie-session mutation — `/api/administrator/*`, `/api/account/*`, `/api/preferences/*` (active-org and locale switches), and `/api/invitations/accept` — so a non-browser caller must send **both** the session cookie and a matching `Origin` header; a miss is `403 untrusted_origin`.
 
 ### Bearer credentials (machine API)
 
@@ -92,6 +92,8 @@ curl https://app.example.com/api/v1/users -H "Authorization: Bearer eyJ…"
 **Authority rule (the one invariant to remember):** a credential's effective access is the **intersection of its scopes and its owner's live permissions** (`src/lib/api-auth/scopes.ts`, enforced by `requireApiPermission` in `v1-guard.server.ts`). A credential can never be minted with more authority than its creator holds, and `GET /api/v1/me` reports the resulting `effectiveScopes`.
 
 Scopes **are** the permission vocabulary — every `admin.*` catalog key (see [`admin-manager.md` §6.1](./admin-manager.md#61-permission-catalog)) plus a small set of self-service `account.*` scopes (`account.read`, `account.profile.write`, `account.preferences.write`, `account.apikeys.manage`). A scope ending in `.*` (e.g. `admin.users.*`) matches every key under that prefix.
+
+The self-service write scopes gate the account mutations for bearer callers: `PATCH /api/account/profile` requires `account.profile.write`, `PUT /api/account/preferences` requires `account.preferences.write`, and the `/api/v1/me/api-keys*` mutations require `account.apikeys.manage`. A read-only (`account.read`) or zero-scope credential gets `403 insufficient_scope` on every one of them; a cookie session carries the user's full authority and is unaffected.
 
 > For the full threat model, secret storage, issuance, rotation, and revocation, see **[Design: API Keys & Access Tokens](./design-api-keys-and-tokens.md)**.
 
@@ -203,7 +205,7 @@ This is the cookie-session console surface (users, roles, permissions, groups, o
 | Organizations | `GET/POST /organizations`; `GET/PATCH/DELETE …/[id]`; `…/[id]/members`, `/provider-bindings`, `/auth-settings`, `/invitations`, `/invitations/[invitationId]`, `/invitations/[invitationId]/resend` | `admin.orgs.*` |
 | Sign-up policy (platform) | `GET/PATCH /auth-settings/defaults` | `admin.orgs.*` + **superadmin** |
 | API keys | `GET/POST /api-keys`; `GET/PATCH/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
-| Email | `GET /email/outbox`; `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
+| Email | `GET /email/outbox` (metadata), `…/outbox/[id]` (redacted bodies); `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
 | MCP agents | `GET /mcp-agents`; `POST …/[id]/approve`; `PATCH`/`DELETE …/[id]` | `admin.clients.read` / `admin.clients.manage` |
 | Audit | `GET /audit` | `admin.audit.read` |
 | Export | `GET /export/[resource]` | export permission |
@@ -265,10 +267,17 @@ The two surfaces overlap (both can manage users) but differ in **auth** (bearer 
 
 | Endpoint | Method | Auth | Purpose |
 | --- | --- | --- | --- |
-| `/api/sso/launch` | GET | Cookie session | Verify access to a registered app, mint a one-time handoff token, redirect to the destination |
-| `/api/sso/consume` | GET | Signed token | Verify and burn the token, establish the destination session, strip the token from the URL |
+| `/api/sso/launch` | GET | Cookie session (not impersonated) | Verify access to a registered app, mint a one-time handoff token, redirect to the destination |
+| `/api/sso/consume` | GET | Signed token | Verify the token and redirect to the confirmation interstitial (no nonce burn, no session) |
+| `/api/sso/consume` | POST | Signed token + trusted origin | Burn the token, establish the destination session, redirect to the dashboard |
 
-Query parameters for `launch`: `applicationId` (required), `locale` (optional). The token is HS256, single-use, valid ≤60s, with an audience bound to the destination application. See [Architecture → SSO](./architecture.md#single-sign-on-handoff) and [Configuration](./configuration.md#single-sign-on-handoff).
+Query parameters for `launch`: `applicationId` (required; must match the app-id shape `^[a-z0-9][a-z0-9._-]{0,127}$` — anything else is a `400 invalid_application_id` with no database work), `locale` (optional). The token is HS256, single-use, valid ≤60s, with an audience bound to the destination application. See [Architecture → SSO](./architecture.md#single-sign-on-handoff) and [Configuration](./configuration.md#single-sign-on-handoff).
+
+Contract details that matter to a caller:
+
+- **Impersonated sessions cannot launch.** A session with `impersonatedBy` set gets `403 forbidden_while_impersonating` (audited against the impersonating admin). The satellite session a handoff would mint carries no impersonation marker, outlives the impersonation cap, and is attributed to the target — so it is never minted.
+- **Application-id binding on consume.** Besides the `aud` check, both consume methods require the token's `targetApplicationId` claim to equal the consumer's own `SSO_HANDOFF_APPLICATION_ID`, and the nonce burn is predicated on that id too. A token minted for another registered app is rejected (`401 invalid_token`, audit reason `target_application_mismatch`) even if the two apps' audiences collide. The catalog refuses a duplicate `sso_audience` at registration (`409 audience_taken`).
+- **Rate limits.** `launch` is throttled per principal (session user id, or trusted client IP while signed out); `consume` GET and POST are throttled per trusted client IP. Both use the standard 30-burst / 1 per second budget and answer `429 rate_limited` with a `Retry-After` header before any audit row is written.
 
 ## 8. Secret-handling notes
 

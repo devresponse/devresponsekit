@@ -91,6 +91,8 @@ Default budgets (capacity = burst, refill = steady requests/sec):
 | `DEFAULT_ADMIN_MUTATION_LIMIT` | 30 | 1 | Per-row mutations (create, status, ban, …) |
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 (≈1 / 5s) | Bulk actions (a single call touches ≤500 rows) |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 (≈1 / 20s) | CSV export (heavy; ≤100k rows) |
+| `DEFAULT_SSO_LAUNCH_LIMIT` | 30 | 1 | `GET /api/sso/launch` — keyed per principal (session user id; trusted client IP while signed out) |
+| `DEFAULT_SSO_CONSUME_LIMIT` | 30 | 1 | `GET`/`POST /api/sso/consume` — keyed per trusted client IP (no principal exists before the token verifies) |
 
 The bucket is in-memory and process-local: a restart resets it and budgets are
 not shared across instances. The supported 1.0 topology is therefore a single
@@ -454,6 +456,22 @@ carries the same guard: `POST /api/v1/users/[id]/status` returns a **403**
 cannot do what the console refuses. Self-service `/api/account/*` surfaces are
 unaffected.
 
+**The Better Auth admin plugin's raw HTTP surface is closed.** Every plugin
+endpoint (`/api/auth/admin/list-users`, `/set-user-password`,
+`/impersonate-user`, `/set-role`, `/remove-user`, …) is mounted on the public
+`/api/auth/[...all]` catch-all and, upstream, is gated only by the Better Auth
+`admin` role — no permission catalog, no ADR-0001 org scoping, no
+privilege-escalation guard, no rate limit, no audit row. A global `hooks.before`
+middleware (`src/lib/auth-admin-surface.ts`) therefore returns **404** for any
+`/admin/*` request that arrives over HTTP (`ctx.request` set), while the app's
+own server-side `auth.api.*` calls (headers only, never `request`;
+`src/lib/admin/auth-admin.server.ts`) pass through. The routes in the table
+above are the **only** way to reach the plugin, so the app's checks always run.
+Consequence for the `admin` role: holding it grants nothing by itself — it is
+merely what the plugin's own `hasPermission` requires for the `auth.api.*` calls
+those routes make on the actor's behalf. Minting it (`POST /users/[id]/role`)
+stays superadmin-only. Never pass `request` to an `auth.api.*` admin call.
+
 ### 8.2 Organizations
 
 Manages the tenant entity and its memberships.
@@ -467,7 +485,7 @@ Manages the tenant entity and its memberships.
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` | IdP org links; `admin.organization.provider_bound` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
 | `GET/PATCH /auth-settings/defaults` | `admin.orgs.read` / `.update` + **superadmin** | The platform-default sign-up policy (`organization_id IS NULL`); 403 for org admins; no DELETE (the baseline must always exist); `admin.platform.auth_policy_updated` |
-| `GET/POST …/[id]/invitations` | `admin.orgs.read` / `admin.orgs.update` | Organization invitations (0008): paginated list (token hashes never exposed) and create-with-email (outbox-first accept link; 409 `member_exists` / `invitation_exists`, 404 `role_not_found` for a cross-org role); `admin.organization.invitation_created` |
+| `GET/POST …/[id]/invitations` | `admin.orgs.read` / `admin.orgs.update` | Organization invitations (0008): paginated list (token hashes never exposed) and create-with-email (outbox-first accept link; 409 `member_exists` / `invitation_exists`, 404 `role_not_found` for a cross-org role; an attached `roleId` is a deferred role assignment under the AUTHZ-3 conferral guard — 403 `forbidden` when the role confers a permission the non-superadmin caller cannot confer, and re-checked against the inviter's current authority at accept time — see [Sign-up Policy §6](./auth-signup-policy.md#6-invitations)); `admin.organization.invitation_created` |
 | `DELETE …/[id]/invitations/[invitationId]` | `admin.orgs.update` | Revoke a pending invitation (the link dies immediately); `admin.organization.invitation_revoked` |
 | `POST …/[id]/invitations/[invitationId]/resend` | `admin.orgs.update` | Rotate the token + expiry in place and re-send (revives expired-pending); `admin.organization.invitation_resent` |
 
@@ -538,6 +556,15 @@ The SSO-enabled application catalog (`app_enterprise_applications`).
 | `POST /enterprise-apps` | `admin.apps.manage` | `admin.app.created` |
 | `GET/PATCH/DELETE /enterprise-apps/[id]` | `.read` / `admin.apps.manage` | `admin.app.updated` / `.deleted`; delete may emit `.delete_blocked` |
 
+`sso_audience` is what a satellite's consume route trusts, so it must be
+**unique across the catalog**: `POST` and `PATCH` refuse a value another
+application already owns with `409 audience_taken` (the form maps it onto the
+audience field). The consumer additionally binds every token to its own
+`SSO_HANDOFF_APPLICATION_ID`, so even a colliding audience cannot make one
+satellite accept another's tokens. A UNIQUE index is scheduled for a later core
+migration; until then the check is route-level (a concurrent create could still
+race it).
+
 ### 8.8 API keys
 
 The cookie-session governance console for API keys across all users and orgs.
@@ -578,10 +605,13 @@ a grid, with per-row drill-in to the event metadata.
 
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
-| `GET /email/outbox` | `admin.email.read` | Paginated outbound-email log (org-scoped) |
+| `GET /email/outbox` | `admin.email.read` | Paginated outbound-email log (org-scoped); **metadata only** — no bodies (review #221) |
+| `GET /email/outbox/[id]` | `admin.email.read` | One row with its rendered `body_html` / `body_text`; org-scoped like the list (foreign / org-less row → 404). Bodies are the **redacted** rendering stored at insert time — see below |
 | `GET /email/templates` | `admin.email.read` | List editable templates (platform-global catalog) |
 | `GET/PUT /email/templates/[id]` | `.read` / `admin.email.manage` | Inspect / edit template content; `admin.email.template_updated` |
 | `POST /email/test` | `admin.email.manage` | Send a test email through the outbox pipeline; `admin.email.test_sent` |
+
+**Outbox bodies never carry a live credential (review #21).** Password-reset, email-verification and invitation emails embed a one-time link. `sendAppEmail` stores a **redacted** rendering — the `/reset-password/<token>` path segment and every `token=` query value replaced by `[redacted]` — in `subject` / `body_html` / `body_text` / `variables`, so an org admin holding `admin.email.read` can inspect what was sent to a co-member (a single-org superadmin included) without being able to mint and lift that user's reset link. The real message is delivered from memory on the inline attempt; for a retry it lives only in the DB-only `app_outbox.delivery_payload` column (never selected by any administrator route, nulled once the row is `sent` / `failed`). Consequence for development with no `EMAIL_PROVIDER`: the reset / invite link is no longer readable in the Email workspace — read `delivery_payload` from the database instead (see [Developer onboarding §9.4](./developer-onboarding.md#94-email-in-dev)).
 
 ### 8.13 MCP agents
 
@@ -595,7 +625,7 @@ at `/app/administrator/agents`; nav-gated on `admin.clients.read`.
 | --- | --- | --- |
 | `GET /mcp-agents` | `admin.clients.read` | List agents in scope (client id, service-account + client status, scope ceiling) |
 | `POST /mcp-agents/[id]/approve` | `admin.clients.manage` | Activate a `pending_approval` service account so it can mint tokens (idempotent); `admin.mcp_agent.approved` |
-| `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority (`422` on over-grant); `admin.mcp_agent.scopes_updated` |
+| `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority — and, for a bearer caller, against the calling credential's own scopes, so a narrowly-scoped key or agent token can never lift a ceiling beyond itself (`422` on over-grant); `admin.mcp_agent.scopes_updated` |
 | `DELETE /mcp-agents/[id]` | `admin.clients.manage` | Revoke the client (idempotent — leaves the service account for the audit trail); `admin.mcp_agent.revoked` |
 
 Scopes are a **ceiling**, not a grant: per the `permission ∩ scope` invariant a
@@ -730,6 +760,15 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   `admin.user.impersonation_failed` and returns 403. A superadmin already holds
   every power, so the check is skipped for them. The same subset test guards
   the other account-level actions via `targetOutranksActor` (§6, §8.1).
+- This route is the **only** path to Better Auth's `impersonateUser` — the raw
+  `POST /api/auth/admin/impersonate-user` endpoint is closed (404; see §8.1).
+  The plugin is configured with `allowImpersonatingAdmins: true` on purpose:
+  Better Auth would otherwise refuse any target holding its `admin` role, which
+  org admins hold by design, so a superadmin could not impersonate an org admin
+  (a legitimate support action). With the HTTP surface closed, the guard above
+  is strictly finer-grained than that blanket block, so the block would only
+  add false negatives. Pinned by
+  `tests/security/better-auth-admin-http-surface.test.ts`.
 - The UI presents a double-confirm; the server cannot enforce that but caps the
   call rate via the mutation bucket so a missing confirm cannot loop.
 - Both success and failure are audited, with the **original** admin as the actor

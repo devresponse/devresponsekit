@@ -108,6 +108,8 @@ export async function failStalePendingOutbox(days: number): Promise<number> {
       status: "failed",
       error: "orphaned: no active provider claimed this row within the retry window",
       last_attempt_at: new Date(),
+      // Terminal: the unredacted delivery copy is no longer needed (#21).
+      delivery_payload: null,
     })
     .where("status", "=", "pending")
     .where(sql<boolean>`created_at < now() - ${sql.lit(days)} * interval '1 day'`)

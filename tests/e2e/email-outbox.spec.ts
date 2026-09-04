@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
+import { readOutboxDeliveryLink } from "./helpers/outbox-db";
 
 /**
  * E2E — the email subsystem (specs.md §35) end to end:
@@ -10,7 +11,10 @@ import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
  *   2. The full password-reset round trip: the forgot-password form
  *      triggers Better Auth's `sendResetPassword`, the rendered email
  *      lands in the outbox, and the link it contains actually resets
- *      the password through the `/reset-password` page.
+ *      the password through the `/reset-password` page. The admin API
+ *      serves that row REDACTED (review #21 — no live token for an org
+ *      admin to lift), so the real link is read from the DB-only
+ *      `delivery_payload` column via the `outbox-db` helper.
  */
 test.beforeEach(async ({ page }) => {
   await signInAsSeedAdmin(page);
@@ -21,8 +25,12 @@ interface OutboxItem {
   template_key: string | null;
   to_email: string;
   subject: string;
-  body_text: string | null;
   status: string;
+}
+
+interface OutboxDetail extends OutboxItem {
+  body_html: string;
+  body_text: string | null;
 }
 
 test("test email is recorded in the outbox and visible in the email workspace", async ({
@@ -89,8 +97,8 @@ test("password reset round trip: form → outbox → emailed link → new passwo
       await userPage.getByRole("button", { name: /send reset link/i }).click();
       await expect(userPage.getByRole("status")).toBeVisible();
 
-      // The rendered email is in the outbox (admin cookie jar on `page`).
-      let resetUrl: string | undefined;
+      // The rendered email is in the outbox (admin cookie jar on `page`)…
+      let rowId: string | undefined;
       await expect
         .poll(async () => {
           const list = await page.request.get(
@@ -98,10 +106,31 @@ test("password reset round trip: form → outbox → emailed link → new passwo
           );
           if (!list.ok()) return false;
           const body = (await list.json()) as { items: OutboxItem[] };
-          const row = body.items.find(
+          rowId = body.items.find(
             (i) => i.to_email === email && i.template_key === "password_reset",
-          );
-          resetUrl = row?.body_text?.match(/https?:\/\/\S+/)?.[0];
+          )?.id;
+          return Boolean(rowId);
+        })
+        .toBe(true);
+
+      // …the list carries no bodies (#221), and the detail serves them
+      // REDACTED (#21): the admin surface never exposes the live token.
+      const detail = await page.request.get(`/api/administrator/email/outbox/${rowId}`);
+      expect(detail.status(), await detail.text()).toBe(200);
+      const detailBody = (await detail.json()) as OutboxDetail;
+      expect(detailBody.body_text).toContain("/reset-password/[redacted]?");
+      expect(detailBody.body_text).not.toMatch(/\/reset-password\/(?!\[redacted\])[^/?\s]+/);
+      expect(detailBody.body_html).not.toMatch(/\/reset-password\/(?!\[redacted\])[^/?"]+/);
+
+      // The REAL link lives only in the DB-only delivery payload.
+      let resetUrl: string | undefined;
+      await expect
+        .poll(async () => {
+          resetUrl = await readOutboxDeliveryLink({
+            to: email,
+            templateKey: "password_reset",
+            pattern: /https?:\/\/\S+\/reset-password\/[^\s"<]+/,
+          });
           return Boolean(resetUrl);
         })
         .toBe(true);

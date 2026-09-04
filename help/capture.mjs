@@ -1,13 +1,45 @@
-// Screenshot capture for the demo.devresponse.ca walkthrough.
-// Run from the repo root: node help/capture.mjs
-// Produces 1440x900 PNGs in help/screenshots/.
+// Screenshot capture for the in-app help walkthrough (help/*.md +
+// help/screenshots/). Produces 1440x900 PNGs in help/screenshots/.
+//
+// This is OPERATOR TOOLING, not servable help content: the help viewer serves
+// only *.md and images, and .dockerignore keeps this file out of the runtime
+// image. It holds NO credentials — everything it needs comes from the
+// environment and it exits early (non-zero) when something is missing:
+//
+//   CAPTURE_BASE_URL   origin to capture, e.g. https://demo.example.com
+//   CAPTURE_EMAIL      account to sign in as (needs the admin-console
+//                      permissions for the /administrator screens)
+//   CAPTURE_PASSWORD   that account's password — inject it from a secret
+//                      store; never paste it into a script or a commit
+//   CAPTURE_USER_ID    (optional) ids of the representative user / role /
+//   CAPTURE_ROLE_ID    organization whose detail pages are captured; the
+//   CAPTURE_ORG_ID     defaults are the public demo tenant's rows
+//
+// Run from the repo root (uses the repo's Playwright):
+//   CAPTURE_BASE_URL=... CAPTURE_EMAIL=... CAPTURE_PASSWORD=... node help/capture.mjs
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-const BASE = "https://demo.devresponse.ca";
-const EMAIL = "admin@devresponse.local";
-const PASSWORD = "ChangeMe-LocalOnly-123!";
+/** Reads a required setting from the environment or exits with a clear message. */
+function requireEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    console.error(
+      `help/capture.mjs: missing required environment variable ${name}. ` +
+        "Set CAPTURE_BASE_URL, CAPTURE_EMAIL and CAPTURE_PASSWORD (see the header of this file).",
+    );
+    process.exit(2);
+  }
+  return value;
+}
+
+const BASE = new URL(requireEnv("CAPTURE_BASE_URL")).origin;
+const EMAIL = requireEnv("CAPTURE_EMAIL");
+const PASSWORD = requireEnv("CAPTURE_PASSWORD");
+const USER_ID = process.env.CAPTURE_USER_ID?.trim() || "1ac53f53-dcae-4658-bde3-fd2166fb5d97";
+const ROLE_ID = process.env.CAPTURE_ROLE_ID?.trim() || "c02b9969-bacf-44e6-8ede-d84405121b3a";
+const ORG_ID = process.env.CAPTURE_ORG_ID?.trim() || "3a24bf3a-e9cc-45db-b910-a2237aebd6dd";
 const OUT = path.join("help", "screenshots");
 
 // [slug, route, options]
@@ -32,21 +64,14 @@ const APP_SHOTS = [
   ["18-docs-architecture", "/en/app/docs/architecture", { extraScrolls: 1, settleMs: 2500 }],
   ["30-admin-overview", "/en/app/administrator", { extraScrolls: 2 }],
   ["31-admin-users", "/en/app/administrator/users"],
-  ["32-admin-user-detail", "/en/app/administrator/users/1ac53f53-dcae-4658-bde3-fd2166fb5d97"],
+  ["32-admin-user-detail", `/en/app/administrator/users/${USER_ID}`],
   ["33-admin-user-create", "/en/app/administrator/users/new"],
   ["34-admin-roles", "/en/app/administrator/roles"],
-  [
-    "35-admin-role-detail",
-    "/en/app/administrator/roles/c02b9969-bacf-44e6-8ede-d84405121b3a",
-    { extraScrolls: 1 },
-  ],
+  ["35-admin-role-detail", `/en/app/administrator/roles/${ROLE_ID}`, { extraScrolls: 1 }],
   ["36-admin-permissions", "/en/app/administrator/permissions", { extraScrolls: 1 }],
   ["37-admin-groups", "/en/app/administrator/groups"],
   ["38-admin-organizations", "/en/app/administrator/organizations", { extraScrolls: 1 }],
-  [
-    "39-admin-org-detail",
-    "/en/app/administrator/organizations/3a24bf3a-e9cc-45db-b910-a2237aebd6dd",
-  ],
+  ["39-admin-org-detail", `/en/app/administrator/organizations/${ORG_ID}`],
   ["40-admin-memberships", "/en/app/administrator/memberships"],
   ["41-admin-enterprise-apps", "/en/app/administrator/enterprise-apps"],
   ["42-admin-api-keys", "/en/app/administrator/api-keys"],

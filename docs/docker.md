@@ -241,7 +241,10 @@ volumes:
 - **In-app docs + help viewers.** `docs/` and `help/` are copied into the
   image so both viewers work out of the box (they default to `<cwd>/docs`
   and `<cwd>/help`). Override with `DOCS_ROOT` / `HELP_ROOT` to serve a
-  different directory (e.g. a mounted volume).
+  different directory (e.g. a mounted volume). The screenshot capture tool
+  beside the help content (`help/capture.mjs`) is operator tooling and is
+  excluded from the build context by `.dockerignore`, so the image holds only
+  servable content.
 - **Email retries need a scheduled drainer.** `sendAppEmail` attempts delivery
   once inline; a transient provider failure leaves the row retryable in
   `app_outbox`. Run **`pnpm outbox:drain`** periodically (cron / K8s CronJob /

@@ -127,6 +127,8 @@ These encode project rules and will fail the build if violated:
 | Admin rate-limit invariant | Every admin mutation calls `enforceRateLimit`. |
 | Locale message parity | Every text key exists in **all eight** locales (`en`/`fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`). |
 | Permission catalog count | The `ADMIN_PERMISSION_CATALOG` has the expected number of keys (currently **35**). |
+| `tests/unit/gitleaks-config.test.ts` | The secret-scan config (`.gitleaks.toml`) detects the app's own credential formats at their real lengths, no fixture in the tree reaches those lengths, and the seed-admin default password is allowlisted only in the files that document it (never globally). See [SECURITY.md → Secret scanning](../SECURITY.md#secret-scanning). |
+| `tests/unit/help-capture-tooling.test.ts` | `help/capture.mjs` takes credentials from `CAPTURE_*` env vars only (fails fast when unset), holds no credential literal, and is excluded from the Docker build context. |
 
 When you add a route, permission, or string, expect to update the corresponding invariant.
 

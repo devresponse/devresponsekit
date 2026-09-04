@@ -136,7 +136,7 @@ Common statuses on both surfaces: `400` invalid body, `401` unauthenticated, `40
 | `/api/v1/me/api-keys` | GET / POST | `account.read` / `account.apikeys.manage` | List / mint the caller's own keys (plaintext once) |
 | `/api/v1/me/api-keys/[id]` | DELETE; `…/rotate` POST | `account.apikeys.manage` | Revoke / rotate one of the caller's own keys |
 | `/api/v1/users` | GET / POST | `admin.users.read` / `.create` | User administration |
-| `/api/v1/users/[id]` | GET; `…/status` POST | `admin.users.read` / `.manage` | Read a user (emits a weak ETag); apply a status transition |
+| `/api/v1/users/[id]` | GET; `…/status` POST | `admin.users.read` / `.manage` | Read a user (emits a weak ETag); apply a status transition — a non-superadmin principal gets **403** `forbidden` (audited `admin.user.action_denied`) for a target who outranks them, exactly as the console does ([Admin Manager §8.1](./admin-manager.md#81-users)) |
 | `/api/v1/admin/api-keys` | GET; `…/[id]` DELETE | `admin.apikeys.read` / `.manage` | API-key governance (list / revoke any key) |
 | `/api/v1/admin/oauth-clients` | GET / POST; `…/[id]` GET/PATCH/DELETE; `…/rotate-secret` POST | `admin.clients.read` / `.manage` | OAuth client (client-credentials) management |
 | `/api/v1/audit-events` | GET | `admin.audit.read` | Read the audit log |

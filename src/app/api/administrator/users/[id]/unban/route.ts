@@ -9,7 +9,11 @@ import { unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import {
+  isResolvedUserResponse,
+  refuseOutrankingTarget,
+  resolveTargetUser,
+} from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +41,11 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // Privilege ordering (review #7): a non-SUPERADMIN may not act on a target
+  // who outranks them (a superadmin, or a more-privileged peer) — 403 + audit.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "unban");
+  if (outranked) return outranked;
 
   // AUTHZ-2: unban restores account-global access. A non-SUPERADMIN may not
   // unban a user shared with other orgs (a shared user can only have been

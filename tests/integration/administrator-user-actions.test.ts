@@ -29,6 +29,10 @@ const authUpdateUser = vi.fn();
 // AUTHZ-2 shared-target gate. Default false (single-org / superadmin); flip to
 // true to exercise the "account-global action on a shared user → 403" path.
 const requiresSuperadminMock = vi.fn();
+// Shared status-mutation core (exercised end-to-end by admin-status-action
+// .test.ts); configurable so the review #7 guard tests can assert it is NOT
+// reached for an out-ranking target.
+const statusChangeMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -44,7 +48,9 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return {
     ...actual,
-    getUserAccessContext: (id: string) => accessGetter(id),
+    // Forward EVERY argument so tests can pin the bound-org call shape
+    // (`getUserAccessContext(id, { organizationId })`), not just the id.
+    getUserAccessContext: (...a: unknown[]) => accessGetter(...a),
   };
 });
 vi.mock("@/lib/audit.server", () => ({
@@ -105,7 +111,7 @@ vi.mock("@/db/database", () => ({
 // Likewise stub the shared status-mutation core used by the /status
 // route (it is exercised end-to-end by admin-status-action.test.ts).
 vi.mock("@/lib/admin-status.server", () => ({
-  performAdminStatusChange: vi.fn(async () => ({ ok: true, status: "active" })),
+  performAdminStatusChange: (...a: unknown[]) => statusChangeMock(...a),
 }));
 
 const TARGET_ID = "11111111-1111-4111-8111-111111111101";
@@ -155,6 +161,8 @@ beforeEach(() => {
   authUpdateUser.mockReset();
   requiresSuperadminMock.mockReset();
   requiresSuperadminMock.mockResolvedValue(false); // target not shared by default
+  statusChangeMock.mockReset();
+  statusChangeMock.mockResolvedValue({ ok: true, status: "active" });
 });
 afterEach(() => vi.resetModules());
 
@@ -498,5 +506,293 @@ describe("DELETE /api/administrator/users/[id]/sessions/[sessionId]", () => {
       const metaBlob = JSON.stringify(arg?.metadata ?? {});
       expect(metaBlob).not.toContain(sessionToken);
     }
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Privilege ordering — target outranks actor (review #7)                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every account-level action on ANOTHER user must refuse a non-SUPERADMIN
+ * actor whose target outranks them. The exploit this pins: dev-init's
+ * `orgadmin@<org>` (all `admin.*`, no `superuser`) and `superuser@<org>` share
+ * ONE org, so the target passes `canAccessUser` and the AUTHZ-2 shared-target
+ * test — only the rank check stands between an org admin and "set the
+ * superadmin's password, sign in with global authority".
+ *
+ * Three scenarios per route:
+ *   - org admin  vs superadmin target → 403 `forbidden` + `admin.user.
+ *     action_denied` (`denied`, reason `target_outranks_actor`), side effect
+ *     NOT invoked;
+ *   - superadmin vs anyone (here: a target who also holds superuser) → allowed;
+ *   - org admin  vs plain member (subset of the actor's permissions) → allowed.
+ */
+interface GuardedRoute {
+  name: string;
+  perm: string;
+  /** The Better Auth / mutation-core side effect that must not run on deny. */
+  effect: () => ReturnType<typeof vi.fn>;
+  /** DB row returned for the target lookup (restore needs `deactivated`). */
+  row?: typeof targetRow;
+  invoke: () => Promise<Response>;
+}
+
+const SESSION_TOKEN = "sess-token-abc";
+
+const guardedRoutes: GuardedRoute[] = [
+  {
+    name: "POST /users/[id]/password (mode=set)",
+    perm: "admin.users.setPassword",
+    effect: () => authSetPassword,
+    invoke: async () => {
+      const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+          method: "POST",
+          body: JSON.stringify({ mode: "set", password: "supersecret-pw-123" }),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    // Rank-gated too: a reset email on an out-ranking target is the first hop
+    // of a two-request chain (trigger reset → read the live link from the
+    // email outbox with `admin.email.read` → set the password), and a
+    // superadmin can self-serve a reset from the sign-in page.
+    name: "POST /users/[id]/password (mode=reset_email)",
+    perm: "admin.users.setPassword",
+    effect: () => authForget,
+    invoke: async () => {
+      const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+          method: "POST",
+          body: JSON.stringify({ mode: "reset_email" }),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    name: "POST /users/[id]/ban",
+    perm: "admin.users.ban",
+    effect: () => authBan,
+    invoke: async () => {
+      const { POST } = await import("@/app/api/administrator/users/[id]/ban/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/ban`, {
+          method: "POST",
+          body: JSON.stringify({ reason: "spam" }),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    name: "POST /users/[id]/unban",
+    perm: "admin.users.ban",
+    effect: () => authUnban,
+    invoke: async () => {
+      const { POST } = await import("@/app/api/administrator/users/[id]/unban/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/unban`, {
+          method: "POST",
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    name: "DELETE /users/[id] (soft delete)",
+    perm: "admin.users.delete",
+    effect: () => authBan,
+    invoke: async () => {
+      const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
+      return DELETE(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+          method: "DELETE",
+          body: JSON.stringify({ reason: "gone" }),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    name: "POST /users/[id]/restore",
+    perm: "admin.users.delete",
+    effect: () => authUnban,
+    row: { ...targetRow, status: "deactivated" },
+    invoke: async () => {
+      const { POST } = await import("@/app/api/administrator/users/[id]/restore/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/restore`, {
+          method: "POST",
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    name: "POST /users/[id]/status",
+    perm: "admin.users.manage",
+    effect: () => statusChangeMock,
+    invoke: async () => {
+      const { POST } = await import("@/app/api/administrator/users/[id]/status/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/status`, {
+          method: "POST",
+          body: JSON.stringify({ action: "suspend", reason: "policy" }),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    name: "GET /users/[id]/sessions (list)",
+    perm: "admin.users.sessions",
+    effect: () => authListSessions,
+    invoke: async () => {
+      const { GET } = await import("@/app/api/administrator/users/[id]/sessions/route");
+      return GET(makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/sessions`), {
+        params: Promise.resolve({ id: TARGET_ID }),
+      });
+    },
+  },
+  {
+    name: "DELETE /users/[id]/sessions (revoke all)",
+    perm: "admin.users.sessions",
+    effect: () => authRevokeSessions,
+    invoke: async () => {
+      const { DELETE } = await import("@/app/api/administrator/users/[id]/sessions/route");
+      return DELETE(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/sessions`, {
+          method: "DELETE",
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
+    name: "DELETE /users/[id]/sessions/[sessionId]",
+    perm: "admin.users.sessions",
+    effect: () => authRevokeSession,
+    invoke: async () => {
+      const { DELETE } =
+        await import("@/app/api/administrator/users/[id]/sessions/[sessionId]/route");
+      return DELETE(
+        makeRequest(
+          `http://test.local/api/administrator/users/${TARGET_ID}/sessions/${SESSION_TOKEN}`,
+          { method: "DELETE" },
+        ),
+        { params: Promise.resolve({ id: TARGET_ID, sessionId: SESSION_TOKEN }) },
+      );
+    },
+  },
+];
+
+const ACTOR_BA = "ba-1";
+const withSuperuser = (perm: string) => ({
+  ...grantedAccess(perm),
+  permissions: [perm, "superuser"],
+});
+
+function armEffects() {
+  authSetPassword.mockResolvedValue({ ok: true });
+  authForget.mockResolvedValue({ ok: true });
+  authBan.mockResolvedValue({ ok: true });
+  authUnban.mockResolvedValue({ ok: true });
+  authListSessions.mockResolvedValue([]);
+  authRevokeSessions.mockResolvedValue({ ok: true });
+  authRevokeSession.mockResolvedValue({ ok: true });
+}
+
+describe.each(guardedRoutes)("$name — target-outranks-actor guard (review #7)", (route) => {
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
+    dbMock.mockResolvedValue(route.row ?? targetRow);
+    armEffects();
+  });
+
+  it("org admin vs superadmin target → 403 forbidden + denied audit, no side effect", async () => {
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_BA ? grantedAccess(route.perm) : withSuperuser(route.perm),
+    );
+    const res = await route.invoke();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "forbidden" }));
+    expect(route.effect()).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.action_denied",
+        outcome: "denied",
+        reason: "target_outranks_actor",
+        actorBetterAuthUserId: ACTOR_BA,
+        appUserId: TARGET_ID,
+      }),
+    );
+    // The target is evaluated in the ACTOR's org (bound-org path — the
+    // `{ organizationId }` argument), never via the request's active_org
+    // cookie.
+    expect(accessGetter).toHaveBeenCalledWith("ba-target", { organizationId: "o-1" });
+  });
+
+  it("org admin vs a more-privileged peer (strict superset) → 403", async () => {
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_BA
+        ? grantedAccess(route.perm)
+        : { ...grantedAccess(route.perm), permissions: [route.perm, "admin.roles.update"] },
+    );
+    const res = await route.invoke();
+    expect(res.status).toBe(403);
+    expect(route.effect()).not.toHaveBeenCalled();
+  });
+
+  it("superadmin vs anyone (even another superadmin) → allowed", async () => {
+    accessGetter.mockImplementation(() => withSuperuser(route.perm));
+    const res = await route.invoke();
+    expect(res.status).toBe(200);
+    expect(route.effect()).toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.action_denied" }),
+    );
+  });
+
+  it("org admin vs plain member (subset of the actor's permissions) → allowed", async () => {
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_BA
+        ? { ...grantedAccess(route.perm), permissions: [route.perm, "shell.view"] }
+        : { ...grantedAccess(route.perm), permissions: ["shell.view"] },
+    );
+    const res = await route.invoke();
+    expect(res.status).toBe(200);
+    expect(route.effect()).toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.action_denied" }),
+    );
+  });
+});
+
+describe("POST /users/[id]/password — rank guard precedes body parsing", () => {
+  it("an out-ranking target is refused before the body is read (no 400 on a bad body)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
+    dbMock.mockResolvedValue(targetRow);
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_BA
+        ? grantedAccess("admin.users.setPassword")
+        : withSuperuser("admin.users.setPassword"),
+    );
+    const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+    const request = makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+      method: "POST",
+      body: JSON.stringify({ mode: "bogus" }),
+    });
+    const jsonSpy = vi.spyOn(request, "json");
+    const res = await POST(request, { params: Promise.resolve({ id: TARGET_ID }) });
+    expect(res.status).toBe(403);
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(authForget).not.toHaveBeenCalled();
+    expect(authSetPassword).not.toHaveBeenCalled();
   });
 });

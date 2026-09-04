@@ -14,12 +14,17 @@ const unbanMock = vi.fn();
 const auditMock = vi.fn();
 const txRun = vi.fn();
 const requiresSuperadminMock = vi.fn();
+// Review #7 privilege-ordering guard (targetOutranksActor). Default false.
+const outranksMock = vi.fn();
 
 vi.mock("@/lib/admin-status.server", () => ({
   performAdminStatusChange: (...a: unknown[]) => performStatusChange(...a),
 }));
 vi.mock("@/lib/admin/access-scope.server", () => ({
   requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
+}));
+vi.mock("@/lib/admin/user-target.server", () => ({
+  targetOutranksActor: (...a: unknown[]) => outranksMock(...a),
 }));
 vi.mock("@/lib/admin/auth-admin.server", () => ({
   banBetterAuthUser: (...a: unknown[]) => banMock(...a),
@@ -60,6 +65,8 @@ const actor = {
   betterAuthUserId: "admin",
   request: { headers: new Headers() },
   scope: { kind: "all" } as const,
+  access: { permissions: ["superuser"], organizationId: null },
+  requestId: "req-bulk-1",
 };
 
 beforeEach(async () => {
@@ -70,8 +77,10 @@ beforeEach(async () => {
     auditMock,
     txRun,
     requiresSuperadminMock,
+    outranksMock,
   ])
     m.mockReset();
+  outranksMock.mockResolvedValue(false);
   performStatusChange.mockResolvedValue({ ok: true });
   banMock.mockResolvedValue(undefined);
   unbanMock.mockResolvedValue(undefined);
@@ -209,5 +218,57 @@ describe("account-global actions refuse a shared target for a non-superadmin (AU
     expect(performStatusChange).toHaveBeenCalledWith(
       expect.objectContaining({ scope: actor.scope, newStatus: "suspended" }),
     );
+  });
+});
+
+describe("every action refuses a target who outranks the actor (review #7)", () => {
+  beforeEach(() => {
+    outranksMock.mockResolvedValue(true);
+  });
+
+  it.each([
+    "approve",
+    "block",
+    "suspend",
+    "reactivate",
+    "ban",
+    "unban",
+    "soft_delete",
+    "restore",
+  ] as const)("%s is refused per row, audited, and touches nothing", async (action) => {
+    const out = await executeBulkUserAction(action, target, actor, { reason: "x" });
+    expect(out).toEqual({
+      ok: false,
+      appUserId: "u1",
+      error: "forbidden_target_outranks_actor",
+    });
+    expect(outranksMock).toHaveBeenCalledWith(actor.access, target);
+    expect(performStatusChange).not.toHaveBeenCalled();
+    expect(banMock).not.toHaveBeenCalled();
+    expect(unbanMock).not.toHaveBeenCalled();
+    expect(txRun).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.action_denied",
+      "denied",
+      expect.objectContaining({
+        appUserId: "u1",
+        reason: "target_outranks_actor",
+        // The batch's x-request-id is threaded through so a denied row can be
+        // correlated with the bulk call in the audit explorer.
+        requestId: "req-bulk-1",
+        metadata: expect.objectContaining({ action, bulk: true }),
+      }),
+    );
+  });
+
+  it("the rank guard runs BEFORE the AUTHZ-2 shared-target guard", async () => {
+    requiresSuperadminMock.mockResolvedValue(true);
+    const out = await executeBulkUserAction("ban", target, actor, { reason: "x" });
+    expect(out).toEqual({
+      ok: false,
+      appUserId: "u1",
+      error: "forbidden_target_outranks_actor",
+    });
+    expect(requiresSuperadminMock).not.toHaveBeenCalled();
   });
 });

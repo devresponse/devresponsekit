@@ -604,6 +604,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           responses: {
             "200": { description: "Applied", ...json(ref("OkStatus")) },
             "400": errRef("BadRequest"),
+            "403": errRef("Forbidden"),
             "404": errRef("NotFound"),
             "412": errRef("PreconditionFailed"),
             "429": errRef("RateLimited"),

@@ -6,7 +6,11 @@ import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import {
+  isResolvedUserResponse,
+  refuseOutrankingTarget,
+  resolveTargetUser,
+} from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +77,11 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // Privilege ordering (review #7): a non-SUPERADMIN may not act on a target
+  // who outranks them (a superadmin, or a more-privileged peer) — 403 + audit.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "status");
+  if (outranked) return outranked;
 
   // AUTHZ-1: derive the actor's tenant scope so the mutation core can confine
   // an org admin to their own org. resolveTargetUser already 404s a non-

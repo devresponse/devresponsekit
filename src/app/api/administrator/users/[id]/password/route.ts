@@ -13,7 +13,11 @@ import {
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import {
+  isResolvedUserResponse,
+  refuseOutrankingTarget,
+  resolveTargetUser,
+} from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +67,18 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
+  // Privilege ordering (review #7): a non-SUPERADMIN may not touch the
+  // credential of a target who outranks them — a single-org superadmin passes
+  // the shared-target test below, so this check is what stops an org admin
+  // from setting a superadmin's password and signing in with global
+  // authority. It runs BEFORE the body is parsed, for BOTH modes: a reset
+  // email on an out-ranking target is the first hop of a two-request chain
+  // (trigger the reset, read the live link from the email outbox with
+  // `admin.email.read`, set the password), and a superadmin can self-serve a
+  // reset from the sign-in page, so nothing is lost by gating it. 403 + audit.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "password");
+  if (outranked) return outranked;
+
   let json: unknown;
   try {
     json = await request.json();
@@ -79,7 +95,8 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     // credential usable in EVERY org the user belongs to. For a user shared
     // across tenants, that's SUPERADMIN-only; an org admin may only set the
     // password of a user confined to their own org. (The reset-email mode is
-    // a recovery flow the user completes themselves, so it isn't gated here.)
+    // a recovery flow the user completes themselves, so it isn't gated here;
+    // the rank guard above applies to both modes.)
     const scope = resolveOrgScope(guard.access);
     if (!scope) return adminErrorResponse("not_found", 404, request);
     if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {

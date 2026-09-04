@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as GrantableModule from "@/lib/admin/grantable-permissions.server";
 import { hashSecret } from "@/lib/api-auth/api-key";
 import {
   consumeInvitation,
@@ -15,12 +16,34 @@ import {
  *
  * Pins the security contract: hash-at-rest tokens (plaintext never
  * persisted), the email-match rule, the guarded single-use consume, the
- * never-elevate-a-blocked-user rule, and the same-org role re-validation.
- * The Kysely layer is stubbed per-table; hashing is real (Web Crypto).
+ * never-elevate-a-blocked-user rule, the same-org role re-validation, and
+ * the consume-time AUTHZ-3 re-check of the role against the INVITER's
+ * current authority (review #6). The Kysely layer is stubbed per-table;
+ * hashing is real (Web Crypto).
  */
 
 const auditMock = vi.fn();
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMock(...a) }));
+
+// Inviter-authority primitives (review #6). `unheldPermissionKeys` runs for
+// real (pure); the two DB lookups + the global-superuser probe are stubbed so
+// each test states the inviter's standing directly.
+const globalSuperuserMock = vi.fn();
+const rolePermsMock = vi.fn();
+const heldPermsMock = vi.fn();
+vi.mock("@/lib/admin/access-scope.server", () => ({
+  userIsGlobalSuperuser: (id: string) => globalSuperuserMock(id),
+}));
+vi.mock("@/lib/admin/grantable-permissions.server", async () => {
+  const actual = await vi.importActual<typeof GrantableModule>(
+    "@/lib/admin/grantable-permissions.server",
+  );
+  return {
+    unheldPermissionKeys: actual.unheldPermissionKeys,
+    permissionKeysForRoles: (ids: string[]) => rolePermsMock(ids),
+    permissionKeysHeldInOrg: (userId: string, orgId: string) => heldPermsMock(userId, orgId),
+  };
+});
 
 interface Stubs {
   invitationSelect: () => unknown;
@@ -116,6 +139,7 @@ const INVITATION: InvitationRow = {
   organizationName: "Org One",
   email: "ada@example.com",
   roleId: null,
+  invitedByAppUserId: "admin-1",
   status: "pending",
   expiresAt: new Date("2099-01-01T00:00:00Z"),
 };
@@ -124,6 +148,11 @@ const ELIGIBLE_USER = { id: "user-1", primaryEmail: "ada@example.com", status: "
 
 beforeEach(() => {
   auditMock.mockReset();
+  globalSuperuserMock.mockReset().mockResolvedValue(false);
+  // Default inviter standing: an org admin who holds exactly what the role
+  // confers, so the legitimate grant path is the baseline.
+  rolePermsMock.mockReset().mockResolvedValue(["admin.users.read"]);
+  heldPermsMock.mockReset().mockResolvedValue(["admin.orgs.update", "admin.users.read"]);
   insertCalls = [];
   updateCalls = [];
   stubs = {
@@ -161,11 +190,17 @@ describe("findValidInvitationByToken", () => {
       organization_name: "Org One",
       email: "ada@example.com",
       role_id: null,
+      invited_by: "admin-1",
       status: "pending",
       expires_at: new Date("2099-01-01T00:00:00Z"),
     });
     const found = await findValidInvitationByToken("token");
-    expect(found).toMatchObject({ id: "inv-1", organizationId: "org-1", email: "ada@example.com" });
+    expect(found).toMatchObject({
+      id: "inv-1",
+      organizationId: "org-1",
+      email: "ada@example.com",
+      invitedByAppUserId: "admin-1",
+    });
 
     stubs.invitationSelect = () => undefined;
     expect(await findValidInvitationByToken("nope")).toBeNull();
@@ -269,6 +304,87 @@ describe("consumeInvitation", () => {
         metadata: expect.objectContaining({ roleMissing: "role-gone" }),
       }),
     );
+  });
+
+  describe("consume-time AUTHZ-3 re-check of the invited role (review #6)", () => {
+    const invited = { ...INVITATION, roleId: "role-1" };
+    beforeEach(() => {
+      stubs.roleSelect = () => ({ id: "role-1" });
+    });
+
+    it("does NOT grant a role conferring a permission the inviter lacks — membership still created, audited as roleDenied", async () => {
+      rolePermsMock.mockResolvedValue(["superuser"]);
+      heldPermsMock.mockResolvedValue(["admin.orgs.update"]);
+      const result = await consumeInvitation({
+        invitation: invited,
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: true, roleGranted: false });
+      expect(insertCalls.find((c) => c.table === "app_user_roles")).toBeUndefined();
+      expect(insertCalls.find((c) => c.table === "app_organization_memberships")).toBeDefined();
+      expect(heldPermsMock).toHaveBeenCalledWith("admin-1", "org-1");
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "auth.account.invitation_accepted",
+          metadata: expect.objectContaining({ roleGranted: false, roleDenied: "role-1" }),
+        }),
+      );
+      expect(
+        (auditMock.mock.calls[0]![0] as { metadata: Record<string, unknown> }).metadata,
+      ).not.toHaveProperty("roleMissing");
+    });
+
+    it("fails closed when the inviter account no longer exists (invited_by NULL)", async () => {
+      const result = await consumeInvitation({
+        invitation: { ...invited, invitedByAppUserId: null },
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: true, roleGranted: false });
+      expect(insertCalls.find((c) => c.table === "app_user_roles")).toBeUndefined();
+      expect(rolePermsMock).not.toHaveBeenCalled();
+      expect(heldPermsMock).not.toHaveBeenCalled();
+    });
+
+    it("grants a `superuser` role when the inviter is a GLOBAL superuser", async () => {
+      globalSuperuserMock.mockResolvedValue(true);
+      rolePermsMock.mockResolvedValue(["superuser"]);
+      heldPermsMock.mockResolvedValue([]);
+      const result = await consumeInvitation({
+        invitation: invited,
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: true, roleGranted: true });
+      expect(insertCalls.find((c) => c.table === "app_user_roles")?.values).toMatchObject({
+        role_id: "role-1",
+      });
+      expect(globalSuperuserMock).toHaveBeenCalledWith("admin-1");
+    });
+
+    it("grants when the role's permissions are a subset of the inviter's current held set", async () => {
+      rolePermsMock.mockResolvedValue(["admin.users.read"]);
+      heldPermsMock.mockResolvedValue(["admin.orgs.update", "admin.users.read"]);
+      const result = await consumeInvitation({
+        invitation: invited,
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: true, roleGranted: true });
+      expect(insertCalls.find((c) => c.table === "app_user_roles")).toBeDefined();
+    });
+
+    it("grants a permission-less role without consulting the inviter's held set", async () => {
+      rolePermsMock.mockResolvedValue([]);
+      const result = await consumeInvitation({
+        invitation: invited,
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: true, roleGranted: true });
+      expect(heldPermsMock).not.toHaveBeenCalled();
+    });
   });
 });
 

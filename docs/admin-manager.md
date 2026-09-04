@@ -402,6 +402,22 @@ The Better Auth `role` (`user`/`admin`) is distinct from app roles in
 `app_user_roles`. Created passwords are forwarded to Better Auth and never
 logged, returned, or placed in audit metadata.
 
+**The Better Auth admin plugin's raw HTTP surface is closed.** Every plugin
+endpoint (`/api/auth/admin/list-users`, `/set-user-password`,
+`/impersonate-user`, `/set-role`, `/remove-user`, …) is mounted on the public
+`/api/auth/[...all]` catch-all and, upstream, is gated only by the Better Auth
+`admin` role — no permission catalog, no ADR-0001 org scoping, no
+privilege-escalation guard, no rate limit, no audit row. A global `hooks.before`
+middleware (`src/lib/auth-admin-surface.ts`) therefore returns **404** for any
+`/admin/*` request that arrives over HTTP (`ctx.request` set), while the app's
+own server-side `auth.api.*` calls (headers only, never `request`;
+`src/lib/admin/auth-admin.server.ts`) pass through. The routes in the table
+above are the **only** way to reach the plugin, so the app's checks always run.
+Consequence for the `admin` role: holding it grants nothing by itself — it is
+merely what the plugin's own `hasPermission` requires for the `auth.api.*` calls
+those routes make on the actor's behalf. Minting it (`POST /users/[id]/role`)
+stays superadmin-only. Never pass `request` to an `auth.api.*` admin call.
+
 ### 8.2 Organizations
 
 Manages the tenant entity and its memberships.
@@ -667,6 +683,15 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   superadmin or a more-privileged peer); a mismatch audits
   `admin.user.impersonation_failed` and returns 403. A superadmin already holds
   every power, so the check is skipped for them.
+- This route is the **only** path to Better Auth's `impersonateUser` — the raw
+  `POST /api/auth/admin/impersonate-user` endpoint is closed (404; see §8.1).
+  The plugin is configured with `allowImpersonatingAdmins: true` on purpose:
+  Better Auth would otherwise refuse any target holding its `admin` role, which
+  org admins hold by design, so a superadmin could not impersonate an org admin
+  (a legitimate support action). With the HTTP surface closed, the guard above
+  is strictly finer-grained than that blanket block, so the block would only
+  add false negatives. Pinned by
+  `tests/security/better-auth-admin-http-surface.test.ts`.
 - The UI presents a double-confirm; the server cannot enforce that but caps the
   call rate via the mutation bucket so a missing confirm cannot loop.
 - Both success and failure are audited, with the **original** admin as the actor

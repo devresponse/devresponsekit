@@ -34,11 +34,13 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   // Granting the Better Auth platform role (`admin`) is SUPERADMIN-only.
-  // The Better Auth `admin` role reaches the un-scoped `/api/auth/admin/*`
-  // plugin surface (list/ban/impersonate/set-password across ALL orgs),
-  // which bypasses the application permission catalog and ADR-0001 org
-  // scoping. Holding `admin.users.setRole` alone must therefore NOT let an
-  // org admin mint a platform admin (cross-tenant privilege escalation).
+  // The raw `/api/auth/admin/*` plugin surface is closed (404 over HTTP —
+  // see src/lib/auth-admin-surface.ts), but the role is still what the
+  // plugin's own authz requires for every `auth.api.*` admin call the
+  // console routes make on the actor's behalf (list/ban/impersonate/
+  // set-password), i.e. it is the key to the whole admin console. Holding
+  // `admin.users.setRole` alone must therefore NOT let an org admin mint a
+  // platform admin (cross-tenant privilege escalation).
   // Org-level role management goes through `app_user_roles` / app-roles.
   if (!isSuperadmin(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);

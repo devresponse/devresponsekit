@@ -39,12 +39,13 @@ import {
  */
 
 const BASE_URL = "http://localhost:3000";
-const PASSWORD = "correct-horse-battery-staple-1";
+const PASSWORD = "ci-only-admin-surface-password-not-for-production";
 
 function makeAuth(opts: { guarded: boolean; allowImpersonatingAdmins?: boolean }) {
   return betterAuth({
     database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
-    secret: "admin-http-surface-test-secret-000000000",
+    // Allow-listed dummy (see .gitleaks.toml) — a high-entropy literal here trips gitleaks generic-api-key.
+    secret: "test-secret-test-secret-test-secret",
     baseURL: BASE_URL,
     emailAndPassword: { enabled: true },
     ...(opts.guarded ? { hooks: { before: rejectAdminPluginOverHttp } } : {}),

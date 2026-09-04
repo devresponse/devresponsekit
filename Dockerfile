@@ -18,9 +18,11 @@
 # Debian "slim" (not Alpine) so native modules like `sharp` (Next image
 # optimization) use prebuilt glibc binaries. Digest-pinned for reproducibility
 # + supply-chain integrity; bump the tag AND digest together (see docs/docker.md
-# "Hardening"). Digest is the multi-arch index for `node:22-bookworm-slim`.
+# "Hardening"). Digest is the multi-arch index for `node:22-bookworm-slim`
+# (22.23.2, 2026-08-25). Dependabot's `docker` ecosystem (.github/dependabot.yml)
+# proposes digest bumps; keep BOTH stages on the same digest.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2 AS builder
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS builder
 
 ENV PNPM_HOME="/pnpm" \
     PATH="/pnpm:$PATH" \
@@ -48,7 +50,7 @@ RUN pnpm build
 # Stage 2 — runner: copy only the standalone server + static assets and
 # run as an unprivileged user.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim@sha256:d9f850096136edbc402debdd8729579a288aac64574ada0ff4db26b6ae58b0b2 AS runner
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runner
 
 ENV NODE_ENV="production" \
     NEXT_TELEMETRY_DISABLED="1" \
@@ -59,6 +61,19 @@ WORKDIR /app
 # Non-root runtime user.
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs nextjs
+
+# Strip the package-manager CLIs the base image bundles (npm + its vendored
+# node_modules, npx, corepack, yarn). The runtime is `node server.js` only and
+# never invokes them, yet npm's bundled dependencies (tar, pacote, minimatch/
+# brace-expansion, ip-address, sigstore, picomatch, …) are what the Trivy image
+# scan kept flagging — a whole class of "fixable HIGH/CRITICAL" findings that
+# are unreachable in production and that no app-side dependency bump can clear.
+# Removing them keeps `.trivyignore` empty of npm-CLI mutes and shrinks the
+# runtime attack surface (nothing in the image can install packages).
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+           /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v*
 
 # `.next/standalone` already contains server.js + the minimal traced
 # node_modules; `.next/static` and `public` are served by it. `docs/` and

@@ -28,6 +28,13 @@ updates:
     open-pull-requests-limit: 2
     commit-message:
       prefix: build
+    # Node MAJOR jumps (22 -> 26, PR #388) are a deliberate runtime upgrade
+    # (.nvmrc, CI setup-node, engines, the dependency-governance invariant all
+    # pin 22) — never an unattended bump. Digest and minor/patch bumps still
+    # arrive; hand-closing a major PR would only make Dependabot re-propose it.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -59,3 +66,10 @@ updates:
     commit-message:
       prefix: deps
       prefix-development: deps-dev
+    # Declined majors (each is a real port, tracked separately — see the
+    # 2026-09-04 review): @tanstack/react-table v9 (187 type errors across 19
+    # files: useTable + tableFeatures registry, TFeatures generics, prototype
+    # methods; PR #378). Minor/patch bumps still arrive.
+    ignore:
+      - dependency-name: "@tanstack/react-table"
+        update-types: ["version-update:semver-major"]

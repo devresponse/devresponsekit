@@ -1,7 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
-import { getCurrentSession } from "@/lib/auth-guard";
+import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
+import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
+import {
+  DEFAULT_SSO_LAUNCH_LIMIT,
+  actorIdFromRequest,
+  enforceRateLimit,
+} from "@/lib/admin/rate-limit.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +20,22 @@ export const dynamic = "force-dynamic";
  * are always audit-logged. The success response sets
  * `Referrer-Policy: no-referrer` so the target subdomain cannot leak
  * the launching URL to third parties.
+ *
+ * Order of checks (review #4, #16):
+ *   1. `applicationId` shape (`APP_ID_RE`) — a missing/malformed id is a
+ *      plain 400 with NO database work and NO audit row: this is a public,
+ *      SameSite=Lax-reachable GET, and an unauthenticated flood must not be
+ *      able to write attacker-chosen strings into the append-only audit
+ *      table.
+ *   2. Per-principal rate limit (session user id, or trusted client IP while
+ *      signed out) — bounds the audit/nonce/purge writes below.
+ *   3. Session, then impersonation: an impersonated session is REFUSED. The
+ *      satellite session the consumer would mint carries no `impersonatedBy`,
+ *      outlives the impersonation cap, and is attributed to the target — it
+ *      would launder the admin's impersonation into an unmarked session
+ *      (and, on a shared-DB satellite, escape the tenant confinement that
+ *      makes the impersonation escalation guard sound — see
+ *      `/api/preferences/active-org`, P0-1).
  */
 export async function GET(request: NextRequest) {
   const applicationId = request.nextUrl.searchParams.get("applicationId");
@@ -21,16 +43,22 @@ export async function GET(request: NextRequest) {
   const locale = localeParam && isSupportedLocale(localeParam) ? localeParam : defaultLocale;
 
   if (!applicationId) {
-    await auditEvent({
-      eventType: "sso.launch.failure",
-      outcome: "failure",
-      reason: "missing_application_id",
-      request,
-    });
     return NextResponse.json({ error: "missing_application_id" }, { status: 400 });
+  }
+  if (!APP_ID_RE.test(applicationId)) {
+    return NextResponse.json({ error: "invalid_application_id" }, { status: 400 });
   }
 
   const session = await getCurrentSession();
+
+  const limited = enforceRateLimit(
+    "sso.launch",
+    session ? session.user.id : actorIdFromRequest(request),
+    DEFAULT_SSO_LAUNCH_LIMIT,
+    request,
+  );
+  if (limited) return limited;
+
   if (!session) {
     await auditEvent({
       eventType: "sso.launch.failure",
@@ -40,6 +68,22 @@ export async function GET(request: NextRequest) {
       request,
     });
     return NextResponse.redirect(new URL(`/${locale}/sign-in`, request.url));
+  }
+
+  const impersonatorId = getImpersonatorId(session);
+  if (impersonatorId) {
+    // Attribute the denial to the human behind the session (the admin), not
+    // the impersonated target, so the audit row names who actually tried.
+    await auditEvent({
+      eventType: "sso.launch.failure",
+      outcome: "denied",
+      reason: "forbidden_while_impersonating",
+      actorBetterAuthUserId: impersonatorId,
+      targetApplicationId: applicationId,
+      request,
+      metadata: { impersonatedBetterAuthUserId: session.user.id },
+    });
+    return NextResponse.json({ error: "forbidden_while_impersonating" }, { status: 403 });
   }
 
   try {

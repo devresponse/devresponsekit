@@ -16,7 +16,9 @@ import {
  * (the `.server` module is only a re-export shim). `origin` is only length-bounded
  * here; the HTTPS + trusted-suffix checks stay in the route (server-only env) and
  * surface as `invalid_origin` / `origin_not_allowed`, which the form maps onto the
- * origin field.
+ * origin field. Likewise `sso_audience` is only shape-checked here — its
+ * catalog-wide uniqueness needs the database and is enforced by the routes
+ * (`409 audience_taken`, review #15).
  */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

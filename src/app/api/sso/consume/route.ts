@@ -2,10 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { auth } from "@/lib/auth";
 import { consumeSsoHandoffNonce } from "@/lib/sso.server";
-import { verifySsoHandoff } from "@/lib/jwt-handoff.server";
+import { verifySsoHandoff, type VerifiedSsoHandoff } from "@/lib/jwt-handoff.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
+import {
+  DEFAULT_SSO_CONSUME_LIMIT,
+  actorIdFromRequest,
+  enforceRateLimit,
+} from "@/lib/admin/rate-limit.server";
 import { logServerError } from "@/lib/observability/logger.server";
 import { captureServerError } from "@/lib/observability/server";
 
@@ -24,13 +29,36 @@ function ssoErrorResponse(code: string, status: number, requestId: string): Next
 }
 
 /**
+ * Per-IP throttle for both consume methods (review #16). The endpoint is
+ * public and every rejected call writes an append-only audit row, so an
+ * unauthenticated curl loop must hit a ceiling before it reaches the audit
+ * table. Keyed on the trusted-hop client IP (P2-4) — there is no principal
+ * until the token verifies. Runs before any audit/DB work.
+ */
+function rateLimitConsume(request: NextRequest, requestId: string): NextResponse | null {
+  return enforceRateLimit(
+    "sso.consume",
+    actorIdFromRequest(request),
+    DEFAULT_SSO_CONSUME_LIMIT,
+    request,
+    requestId,
+  );
+}
+
+/**
  * Resolves the audience this deployment accepts, or an error response. A
  * receiving deployment missing its audience config 500s on the FIRST handoff
  * but boots clean — a silent landmine — so log + capture it (OPS-OBS-4).
+ *
+ * Also returns the bare `applicationId`: the token's `targetApplicationId`
+ * claim MUST equal it (review #15). `aud` alone is not enough — `sso_audience`
+ * is an admin-typed column, so two registered apps can carry the same
+ * audience (misconfiguration, or an org admin shadowing another org's
+ * satellite) and a token minted for the other app would otherwise pass here.
  */
 function resolveExpectedAudience(
   requestId: string,
-): { audience: string } | { error: NextResponse } {
+): { audience: string; applicationId: string } | { error: NextResponse } {
   const audiencePrefix = process.env.SSO_HANDOFF_AUDIENCE_PREFIX;
   if (!audiencePrefix) {
     const err = new Error("SSO_HANDOFF_AUDIENCE_PREFIX is not configured");
@@ -57,7 +85,21 @@ function resolveExpectedAudience(
     captureServerError(err, { requestId, status: 500 });
     return { error: ssoErrorResponse("audience_not_configured", 500, requestId) };
   }
-  return { audience: `${audiencePrefix}:${applicationId}` };
+  return { audience: `${audiencePrefix}:${applicationId}`, applicationId };
+}
+
+/**
+ * Binds a verified token to THIS deployment's application id (review #15).
+ * Throws the same way `verifySsoHandoff` does so the callers' catch blocks
+ * audit + 401 uniformly; the reason string lands in the audit row.
+ */
+function assertTargetApplication(
+  payload: VerifiedSsoHandoff["payload"],
+  applicationId: string,
+): void {
+  if (payload.targetApplicationId !== applicationId) {
+    throw new Error("target_application_mismatch");
+  }
 }
 
 function landingLocale(payloadLocale: unknown, fallback: string | null): string {
@@ -89,6 +131,9 @@ export async function GET(request: NextRequest) {
   // Mint/echo a correlation id up front (memoised per-request), so every
   // response and the audit rows share one id (OPS-OBS-4).
   const requestId = getOrCreateRequestId(request);
+  const limited = rateLimitConsume(request, requestId);
+  if (limited) return limited;
+
   const token = request.nextUrl.searchParams.get("token");
   const localeParam = request.nextUrl.searchParams.get("locale");
 
@@ -107,6 +152,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const verified = await verifySsoHandoff({ token, expectedAudience: aud.audience });
+    assertTargetApplication(verified.payload, aud.applicationId);
     // Verified but NOT yet consumed: hand off to the confirmation page. The
     // nonce stays live (≤ TTL) until the user confirms via POST.
     const locale = landingLocale(verified.payload.locale, localeParam);
@@ -143,6 +189,8 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const requestId = getOrCreateRequestId(request);
+  const limited = rateLimitConsume(request, requestId);
+  if (limited) return limited;
 
   const origin = checkTrustedOrigin(request);
   if (!origin.ok) {
@@ -178,9 +226,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const verified = await verifySsoHandoff({ token, expectedAudience: aud.audience });
+    assertTargetApplication(verified.payload, aud.applicationId);
     // Consume the jti atomically BEFORE establishing any session, so a replayed
-    // token is rejected even on concurrent requests.
-    const consumed = await consumeSsoHandoffNonce(verified.payload.jti);
+    // token is rejected even on concurrent requests. The burn is ALSO
+    // predicated on this deployment's application id, so a nonce minted for
+    // another app can never be spent here (review #15, defence in depth).
+    const consumed = await consumeSsoHandoffNonce(verified.payload.jti, aud.applicationId);
     if (!consumed) {
       await auditEvent({
         eventType: "sso.consume.failure",

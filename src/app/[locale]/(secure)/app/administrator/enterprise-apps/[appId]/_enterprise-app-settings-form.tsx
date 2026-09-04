@@ -94,6 +94,15 @@ export function EnterpriseAppSettingsForm({
         router.refresh();
         return;
       }
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (body.error === "audience_taken") {
+          form.setError("sso_audience", { type: "server", message: tErr("audienceTaken") });
+        } else {
+          form.setError("root", { type: "server", message: tErr("invalidBody") });
+        }
+        return;
+      }
       if (res.status === 400) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         if (body.error === "invalid_origin") {

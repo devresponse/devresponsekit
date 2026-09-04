@@ -265,10 +265,17 @@ The two surfaces overlap (both can manage users) but differ in **auth** (bearer 
 
 | Endpoint | Method | Auth | Purpose |
 | --- | --- | --- | --- |
-| `/api/sso/launch` | GET | Cookie session | Verify access to a registered app, mint a one-time handoff token, redirect to the destination |
-| `/api/sso/consume` | GET | Signed token | Verify and burn the token, establish the destination session, strip the token from the URL |
+| `/api/sso/launch` | GET | Cookie session (not impersonated) | Verify access to a registered app, mint a one-time handoff token, redirect to the destination |
+| `/api/sso/consume` | GET | Signed token | Verify the token and redirect to the confirmation interstitial (no nonce burn, no session) |
+| `/api/sso/consume` | POST | Signed token + trusted origin | Burn the token, establish the destination session, redirect to the dashboard |
 
-Query parameters for `launch`: `applicationId` (required), `locale` (optional). The token is HS256, single-use, valid ≤60s, with an audience bound to the destination application. See [Architecture → SSO](./architecture.md#single-sign-on-handoff) and [Configuration](./configuration.md#single-sign-on-handoff).
+Query parameters for `launch`: `applicationId` (required; must match the app-id shape `^[a-z0-9][a-z0-9._-]{0,127}$` — anything else is a `400 invalid_application_id` with no database work), `locale` (optional). The token is HS256, single-use, valid ≤60s, with an audience bound to the destination application. See [Architecture → SSO](./architecture.md#single-sign-on-handoff) and [Configuration](./configuration.md#single-sign-on-handoff).
+
+Contract details that matter to a caller:
+
+- **Impersonated sessions cannot launch.** A session with `impersonatedBy` set gets `403 forbidden_while_impersonating` (audited against the impersonating admin). The satellite session a handoff would mint carries no impersonation marker, outlives the impersonation cap, and is attributed to the target — so it is never minted.
+- **Application-id binding on consume.** Besides the `aud` check, both consume methods require the token's `targetApplicationId` claim to equal the consumer's own `SSO_HANDOFF_APPLICATION_ID`, and the nonce burn is predicated on that id too. A token minted for another registered app is rejected (`401 invalid_token`, audit reason `target_application_mismatch`) even if the two apps' audiences collide. The catalog refuses a duplicate `sso_audience` at registration (`409 audience_taken`).
+- **Rate limits.** `launch` is throttled per principal (session user id, or trusted client IP while signed out); `consume` GET and POST are throttled per trusted client IP. Both use the standard 30-burst / 1 per second budget and answer `429 rate_limited` with a `Retry-After` header before any audit row is written.
 
 ## 8. Secret-handling notes
 

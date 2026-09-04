@@ -20,6 +20,7 @@ const rolesExecute = vi.fn();
 const nonceInsertExecute = vi.fn().mockResolvedValue(undefined);
 const nonceDeleteExecute = vi.fn().mockResolvedValue(undefined);
 const nonceUpdateExecute = vi.fn();
+const nonceUpdateWhere = vi.fn();
 
 vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
@@ -64,15 +65,18 @@ vi.mock("@/db/database", () => ({
     insertInto: () => ({ values: () => ({ execute: nonceInsertExecute }) }),
     deleteFrom: () => ({ where: () => ({ execute: nonceDeleteExecute }) }),
     updateTable: () => ({
-      set: () => ({
-        where: () => ({
-          where: () => ({
-            where: () => ({
-              returning: () => ({ executeTakeFirst: nonceUpdateExecute }),
-            }),
-          }),
-        }),
-      }),
+      set: () => {
+        // Record every `where(lhs, op, rhs)` so the test can pin the burn
+        // predicate (jti + target_application_id + consumed_at + expires_at).
+        const chain = {
+          where: (...args: unknown[]) => {
+            nonceUpdateWhere(...args);
+            return chain;
+          },
+          returning: () => ({ executeTakeFirst: nonceUpdateExecute }),
+        };
+        return chain;
+      },
     }),
   },
 }));
@@ -97,6 +101,7 @@ beforeEach(async () => {
   nonceInsertExecute.mockClear();
   nonceDeleteExecute.mockClear();
   nonceUpdateExecute.mockReset();
+  nonceUpdateWhere.mockReset();
   mod = await import("@/lib/sso.server");
 });
 afterEach(() => vi.resetModules());
@@ -195,9 +200,18 @@ describe("createSsoHandoffRedirect", () => {
 describe("consumeSsoHandoffNonce", () => {
   it("returns true exactly once per token (atomic update)", async () => {
     nonceUpdateExecute.mockResolvedValueOnce({ jti: "j1" });
-    expect(await mod.consumeSsoHandoffNonce("j1")).toBe(true);
+    expect(await mod.consumeSsoHandoffNonce("j1", "portal")).toBe(true);
 
     nonceUpdateExecute.mockResolvedValueOnce(undefined);
-    expect(await mod.consumeSsoHandoffNonce("j1")).toBe(false);
+    expect(await mod.consumeSsoHandoffNonce("j1", "portal")).toBe(false);
+  });
+
+  it("predicates the burn on target_application_id as well as jti (review #15)", async () => {
+    nonceUpdateExecute.mockResolvedValueOnce(undefined);
+    await mod.consumeSsoHandoffNonce("j1", "portal");
+    expect(nonceUpdateWhere).toHaveBeenCalledWith("jti", "=", "j1");
+    expect(nonceUpdateWhere).toHaveBeenCalledWith("target_application_id", "=", "portal");
+    expect(nonceUpdateWhere).toHaveBeenCalledWith("consumed_at", "is", null);
+    expect(nonceUpdateWhere).toHaveBeenCalledWith("expires_at", ">", expect.any(Date));
   });
 });

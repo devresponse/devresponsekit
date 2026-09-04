@@ -195,6 +195,8 @@ Administrator mutations pass through an in-memory **per-actor token bucket** (`s
 | `DEFAULT_ADMIN_MUTATION_LIMIT` | 30 | 1 / sec | Standard `POST`/`PATCH`/`DELETE` |
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 / sec | Bulk operations |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 / sec | CSV export |
+| `DEFAULT_SSO_LAUNCH_LIMIT` | 30 | 1 / sec | `GET /api/sso/launch`, keyed per principal (session user id, else trusted client IP) |
+| `DEFAULT_SSO_CONSUME_LIMIT` | 30 | 1 / sec | `GET`/`POST /api/sso/consume`, keyed per trusted client IP |
 
 The store is in-process (resets on restart). A distributed (e.g. Redis) backend is a noted follow-up — see `TODO` in [Deployment](./deployment.md).
 
@@ -210,18 +212,25 @@ sequenceDiagram
     participant Sat as Satellite /api/sso/consume
 
     U->>Hub: GET /api/sso/launch?applicationId=app
-    Hub->>Hub: verify membership + app access
-    Hub->>DB: write one-time nonce (jti)
-    Hub->>Hub: sign JWT (HS256, ≤60s, aud=app)
+    Hub->>Hub: validate app id shape, rate-limit per principal
+    Hub->>Hub: verify session (refuse impersonated) + membership + app access
+    Hub->>DB: write one-time nonce (jti, target app id)
+    Hub->>Hub: sign JWT (HS256, ≤60s, aud=app, targetApplicationId=app)
     Hub-->>U: 302 → satellite /api/sso/consume?token=…
-    U->>Sat: GET /api/sso/consume?token=…
-    Sat->>Sat: verify signature, issuer, audience, expiry
-    Sat->>DB: atomically burn nonce
+    U->>Sat: GET /api/sso/consume?token=… (rate-limited per IP)
+    Sat->>Sat: verify signature, issuer, audience, expiry,<br/>targetApplicationId == SSO_HANDOFF_APPLICATION_ID
+    Sat->>DB: atomically burn nonce (jti + target app id)
     Sat->>Sat: establish satellite session (ssoSession plugin)
     Sat-->>U: 302 → /app/dashboard (token stripped from URL)
 ```
 
 The handoff JWT is symmetric (HS256) and signed with `SSO_HANDOFF_JWT_SECRET` — a **separate** secret from `BETTER_AUTH_SECRET` and from the machine-API signing key. Destination origins must fall under the configured allow-list. See [Configuration](./configuration.md#single-sign-on-handoff).
+
+Three guards sit around the diagram above:
+
+- **No launch while impersonating.** An impersonated hub session is refused at launch (`403 forbidden_while_impersonating`). The satellite session would carry no `impersonatedBy`, outlive the impersonation cap, escape the tenant confinement that keeps the impersonation escalation guard sound, and be attributed to the target rather than the admin.
+- **Application-id binding.** `sso_audience` is an admin-typed column; the consumer therefore also requires the token's `targetApplicationId` to equal its own `SSO_HANDOFF_APPLICATION_ID` and burns the nonce only where `target_application_id` matches. The catalog rejects a duplicate audience at registration (`409 audience_taken`); a UNIQUE index is scheduled for a later core migration.
+- **Rate limits.** Both endpoints are throttled before any audit row is written — launch per principal, consume per trusted client IP (see [Rate limiting](#rate-limiting)).
 
 ### Machine API authentication
 

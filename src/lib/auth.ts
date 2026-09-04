@@ -3,6 +3,7 @@ import { admin } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
+import { ADMIN_PLUGIN_OPTIONS, rejectAdminPluginOverHttp } from "@/lib/auth-admin-surface";
 import { ssoSession } from "@/lib/auth-sso-session";
 import { getServerEnv } from "@/lib/env";
 import { ORG_SIGNUP_HINT_COOKIE, readCookieValue } from "@/lib/scoped-auth";
@@ -395,19 +396,20 @@ export const auth = betterAuth({
     },
   },
 
+  // Review 2026-09-04 #3: the admin plugin's raw HTTP surface
+  // (`/api/auth/admin/*`) is closed. The app only ever reaches the plugin via
+  // server-side `auth.api.*` calls (headers, never `request`), which this
+  // hook lets through; real HTTP requests to `/admin/*` get 404. Policy and
+  // rationale live in `auth-admin-surface.ts`.
+  hooks: { before: rejectAdminPluginOverHttp },
+
   // The nextCookies plugin makes Better Auth set cookies via Next.js
   // server actions and route handlers correctly — it MUST stay last.
   plugins: [
-    // `allowImpersonatingAdmins`: Better Auth otherwise refuses to impersonate
-    // ANY user holding the `admin` role ("You cannot impersonate admins"),
-    // which blocks a superadmin from impersonating an org admin — a legitimate
-    // support action. We delegate the real policy to the impersonate route
-    // (`/api/administrator/users/[id]/impersonate`), which gates on the app
-    // RBAC `admin.users.impersonate` permission AND enforces a privilege-
-    // escalation guard (a non-superadmin can never assume a session carrying a
-    // permission they lack). That guard is finer-grained than Better Auth's
-    // blanket block, so the block here only causes false negatives.
-    admin({ allowImpersonatingAdmins: true }),
+    // Plugin options (incl. the `allowImpersonatingAdmins` decision) are
+    // shared with the security test that exercises the real plugin — see
+    // `auth-admin-surface.ts` for the rationale.
+    admin(ADMIN_PLUGIN_OPTIONS),
     ssoSession(),
     nextCookies(),
   ],

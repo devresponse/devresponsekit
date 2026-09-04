@@ -111,6 +111,7 @@ flowchart LR
 
 - **Email + password** (always on) and **Google / Microsoft / GitHub OAuth** (each enabled only when its client id *and* secret are present).
 - **Plugins:** the built-in `admin` plugin (ban / impersonate / session management), a server-only `ssoSession` plugin (subdomain SSO), and `nextCookies` (must be last).
+- **Admin plugin surface:** the plugin's raw HTTP endpoints (`/api/auth/admin/*`) are closed — a global `hooks.before` middleware (`src/lib/auth-admin-surface.ts`) returns 404 for any `/admin/*` request carrying `ctx.request`. The app reaches the plugin only through server-side `auth.api.*` calls (headers, never `request`) made by the guarded `/api/administrator/users/[id]/*` routes, so app RBAC, org scoping, the impersonation escalation guard, rate limits and audit always apply. See [Administrator console §8.1](./admin-manager.md#81-users).
 - **Sessions:** rolling ~8-hour sessions refreshed on activity. Trusted origins come from `NEXT_PUBLIC_APP_URL`, `BETTER_AUTH_URL`, and `ADMIN_TRUSTED_ORIGINS`.
 - **Provisioning hook:** on sign-up (email/password) or first login (OAuth), an `app_users` row is provisioned and linked to the Better Auth user via `better_auth_user_id`. The hooks resolve the target organization's runtime sign-up policy (0007) to decide the initial status and whether email verification is required; a live invitation (0008) activates the account in the inviting org. See [Sign-up Policy](./auth-signup-policy.md).
 

@@ -138,7 +138,11 @@ The pipeline authorizes the **caller**; `[id]` routes then authorize the
 `canAccessUser` (out of scope → 404), then `refuseOutrankingTarget` (the target
 outranks a non-superadmin actor → 403 + `admin.user.action_denied`), then the
 AUTHZ-2 shared-target rule where the action is account-global. All three run
-before the body is parsed or any Better Auth / DB side effect is issued.
+before the body is parsed or any Better Auth / DB side effect is issued (the
+password route included: the rank guard applies before the `mode` is read, so
+it covers `set` and `reset_email` alike). The machine API mirrors the same
+order — `POST /api/v1/users/[id]/status` applies `canAccessUser` then
+`targetOutranksActor` before reaching the shared status core.
 
 `checkAdminPermissionServer(permission)` is the RSC variant: it returns a grant,
 `"denied"`, or `"unauthenticated"` so a page/layout can decide whether to call
@@ -300,7 +304,14 @@ Key helpers:
   any permission the actor lacks — which covers a `superuser` holder (expanded
   to the full superuser set, and folded in globally by `userIsGlobalSuperuser`)
   and a more-privileged peer. The same subset test the impersonate guard uses
-  (§19). A non-superadmin with no resolvable org fails closed.
+  (§19). A non-superadmin with no resolvable org fails closed. The comparison
+  is over the **whole** effective permission set, not just `superuser` /
+  `admin.*`: a plain member who holds a feature permission the org admin lacks
+  is also "out of rank" and cannot be banned, suspended, deleted, or have their
+  sessions revoked by that admin (fail-closed by design — the same rule the
+  impersonate guard applies). If that blocks a legitimate action, grant the
+  actor the missing permission or escalate to a superadmin; do not loosen the
+  guard.
 
 An org admin **creating** a tenant resource has its `organization_id` forced to
 their org; an org admin **issuing a key** may only target a user in their org.
@@ -422,18 +433,26 @@ The Better Auth `role` (`user`/`admin`) is distinct from app roles in
 logged, returned, or placed in audit metadata.
 
 **Target outranks actor (privilege ordering).** Every action that reaches into
-*another* user's account — `POST …/password` (`mode: "set"`), `POST …/ban`,
-`…/unban`, `DELETE /users/[id]` (soft-delete), `POST …/restore`,
-`POST …/status`, `GET/DELETE …/sessions` and `DELETE …/sessions/[sessionId]`,
-plus every `POST /users/bulk` row — calls `refuseOutrankingTarget` immediately
-after target resolution (§6). A **non-superadmin** actor whose target holds any
-permission they lack (a superadmin, or a more-privileged peer) receives **403**
-`forbidden` and an `admin.user.action_denied` (`denied`, reason
-`target_outranks_actor`, `metadata.action`) audit row; nothing is sent to
-Better Auth or written to the DB. A superadmin actor is exempt. The check runs
-**before** the AUTHZ-2 shared-target rule, which is kept as well. The
-`reset_email` password mode is a recovery flow the target completes themselves
-and is not rank-gated. Self-service `/api/account/*` surfaces are unaffected.
+*another* user's account — `POST …/password` (both `mode: "set"` and
+`mode: "reset_email"`), `POST …/ban`, `…/unban`, `DELETE /users/[id]`
+(soft-delete), `POST …/restore`, `POST …/status`, `GET/DELETE …/sessions` and
+`DELETE …/sessions/[sessionId]`, plus every `POST /users/bulk` row — calls
+`refuseOutrankingTarget` immediately after target resolution (§6). A
+**non-superadmin** actor whose target holds any permission they lack (a
+superadmin, or a more-privileged peer) receives **403** `forbidden` and an
+`admin.user.action_denied` (`denied`, reason `target_outranks_actor`,
+`metadata.action`, `requestId`) audit row; nothing is sent to Better Auth or
+written to the DB. A superadmin actor is exempt. The check runs **before** the
+AUTHZ-2 shared-target rule, which is kept as well. The `reset_email` mode is
+rank-gated too: a reset link on an out-ranking target is the first hop of a
+two-request chain (trigger the reset, read the live link from the email outbox
+with `admin.email.read` (§8.12), set the password), and a superadmin can
+self-serve a reset from the sign-in page, so nothing is lost. The machine API
+carries the same guard: `POST /api/v1/users/[id]/status` returns a **403**
+`forbidden` problem and audits `admin.user.action_denied`
+(`metadata.surface: "v1"`) for an out-ranking target, so a bearer credential
+cannot do what the console refuses. Self-service `/api/account/*` surfaces are
+unaffected.
 
 ### 8.2 Organizations
 
@@ -684,8 +703,10 @@ restore`, and `ids` is either an explicit UUID array **or** the literal `"*"`
   `targetOutranksActor` to every row before dispatch (§8.1): a row whose target
   outranks a non-superadmin actor resolves to
   `forbidden_target_outranks_actor` and audits `admin.user.action_denied`
-  (`bulk: true`), so the batch endpoint cannot be used to bypass the `[id]`
-  route guard. The AUTHZ-2 `forbidden_shared_target` refusal follows it.
+  (`bulk: true`, `requestId` = the batch call's `x-request-id`), so neither the
+  batch endpoint nor the machine API (`POST /api/v1/users/[id]/status`, which
+  carries the same guard) can be used to bypass the `[id]` route guard. The
+  AUTHZ-2 `forbidden_shared_target` refusal follows it.
 - **Partial failure.** Each row's outcome is captured; one row failing does not
   abort the batch. A summary `admin.users.bulk_action` row is written alongside
   the per-row events. The bulk budget (§2.5) throttles the whole call.

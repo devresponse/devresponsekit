@@ -37,6 +37,12 @@ export interface BulkUserActor {
    * target who outranks them. Pass `guard.access`.
    */
   access: Pick<UserAccessContext, "permissions" | "organizationId">;
+  /**
+   * Correlation id of the batch request (`guard.requestId`), stamped on the
+   * per-row refusal audit rows so a denied row can be joined to the
+   * `x-request-id` of the bulk call. Optional for legacy callers.
+   */
+  requestId?: string;
 }
 
 /**
@@ -380,6 +386,7 @@ export async function executeBulkUserAction(
       actorBetterAuthUserId: actor.betterAuthUserId,
       appUserId: target.appUserId,
       email: target.primaryEmail,
+      requestId: actor.requestId ?? null,
       reason: "target_outranks_actor",
       metadata: { action, targetBetterAuthUserId: target.betterAuthUserId, bulk: true },
     });

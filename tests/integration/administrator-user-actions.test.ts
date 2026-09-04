@@ -48,7 +48,9 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return {
     ...actual,
-    getUserAccessContext: (id: string) => accessGetter(id),
+    // Forward EVERY argument so tests can pin the bound-org call shape
+    // (`getUserAccessContext(id, { organizationId })`), not just the id.
+    getUserAccessContext: (...a: unknown[]) => accessGetter(...a),
   };
 });
 vi.mock("@/lib/audit.server", () => ({
@@ -555,6 +557,25 @@ const guardedRoutes: GuardedRoute[] = [
     },
   },
   {
+    // Rank-gated too: a reset email on an out-ranking target is the first hop
+    // of a two-request chain (trigger reset → read the live link from the
+    // email outbox with `admin.email.read` → set the password), and a
+    // superadmin can self-serve a reset from the sign-in page.
+    name: "POST /users/[id]/password (mode=reset_email)",
+    perm: "admin.users.setPassword",
+    effect: () => authForget,
+    invoke: async () => {
+      const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+          method: "POST",
+          body: JSON.stringify({ mode: "reset_email" }),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
     name: "POST /users/[id]/ban",
     perm: "admin.users.ban",
     effect: () => authBan,
@@ -679,6 +700,7 @@ const withSuperuser = (perm: string) => ({
 
 function armEffects() {
   authSetPassword.mockResolvedValue({ ok: true });
+  authForget.mockResolvedValue({ ok: true });
   authBan.mockResolvedValue({ ok: true });
   authUnban.mockResolvedValue({ ok: true });
   authListSessions.mockResolvedValue([]);
@@ -710,9 +732,10 @@ describe.each(guardedRoutes)("$name — target-outranks-actor guard (review #7)"
         appUserId: TARGET_ID,
       }),
     );
-    // The target is evaluated in the ACTOR's org (bound-org path), never via
-    // the request's active_org cookie.
-    expect(accessGetter).toHaveBeenCalledWith("ba-target");
+    // The target is evaluated in the ACTOR's org (bound-org path — the
+    // `{ organizationId }` argument), never via the request's active_org
+    // cookie.
+    expect(accessGetter).toHaveBeenCalledWith("ba-target", { organizationId: "o-1" });
   });
 
   it("org admin vs a more-privileged peer (strict superset) → 403", async () => {
@@ -751,25 +774,25 @@ describe.each(guardedRoutes)("$name — target-outranks-actor guard (review #7)"
   });
 });
 
-describe("POST /users/[id]/password (mode=reset_email) is a recovery flow, not gated by rank", () => {
-  it("org admin may still trigger a reset email for a superadmin target", async () => {
+describe("POST /users/[id]/password — rank guard precedes body parsing", () => {
+  it("an out-ranking target is refused before the body is read (no 400 on a bad body)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
     dbMock.mockResolvedValue(targetRow);
-    authForget.mockResolvedValue({ ok: true });
     accessGetter.mockImplementation((id: string) =>
       id === ACTOR_BA
         ? grantedAccess("admin.users.setPassword")
         : withSuperuser("admin.users.setPassword"),
     );
     const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
-    const res = await POST(
-      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
-        method: "POST",
-        body: JSON.stringify({ mode: "reset_email" }),
-      }),
-      { params: Promise.resolve({ id: TARGET_ID }) },
-    );
-    expect(res.status).toBe(200);
-    expect(authForget).toHaveBeenCalled();
+    const request = makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+      method: "POST",
+      body: JSON.stringify({ mode: "bogus" }),
+    });
+    const jsonSpy = vi.spyOn(request, "json");
+    const res = await POST(request, { params: Promise.resolve({ id: TARGET_ID }) });
+    expect(res.status).toBe(403);
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(authForget).not.toHaveBeenCalled();
+    expect(authSetPassword).not.toHaveBeenCalled();
   });
 });

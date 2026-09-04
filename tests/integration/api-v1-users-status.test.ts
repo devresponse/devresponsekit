@@ -1,21 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as Route from "@/app/api/v1/users/[id]/status/route";
+import type * as AuthStatusModule from "@/lib/auth-status";
 
 /**
  * POST /api/v1/users/[id]/status — REST status adapter (was 0%).
  * Security contract: permission gate (admin.users.manage), ADR-0001 org
  * scoping via canAccessUser (org admin cannot touch a user outside their
  * org → 404, no existence leak), and optimistic concurrency via If-Match
- * (stale → 412). canAccessUser runs for real; guard + status core + DB are
- * mocked.
+ * (stale → 412), plus the privilege-ordering guard (review #7): a
+ * non-superadmin bearer principal cannot block/suspend a co-org superadmin
+ * through the machine API any more than through the administrator route.
+ * canAccessUser + targetOutranksActor run for real; guard + status core +
+ * DB + getUserAccessContext (the target's effective permissions) + audit
+ * sink are mocked.
  */
 const requireApiPermission = vi.fn();
 const enforceApiRateLimit = vi.fn();
 const performAdminStatusChange = vi.fn();
+const accessGetter = vi.fn();
+const auditMock = vi.fn();
 
 const state: {
-  current: { id: string; updated_at: Date } | undefined;
+  current:
+    | { id: string; better_auth_user_id: string; primary_email: string; updated_at: Date }
+    | undefined;
   membership: { id: string } | undefined;
 } = { current: undefined, membership: undefined };
 
@@ -25,6 +34,16 @@ vi.mock("@/lib/api-auth/v1-guard.server", () => ({
 }));
 vi.mock("@/lib/admin-status.server", () => ({
   performAdminStatusChange: (...a: unknown[]) => performAdminStatusChange(...a),
+}));
+vi.mock("@/lib/auth-status", async () => {
+  const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
+  return {
+    ...actual,
+    getUserAccessContext: (...a: unknown[]) => accessGetter(...a),
+  };
+});
+vi.mock("@/lib/audit.server", () => ({
+  auditEvent: (...a: unknown[]) => auditMock(...a),
 }));
 vi.mock("@/db/database", () => {
   function tableKey(t: unknown) {
@@ -52,6 +71,7 @@ vi.mock("@/db/database", () => {
 });
 
 const USER = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const TARGET_BA = "ba-target";
 const UPDATED = new Date("2026-01-01T00:00:00.000Z");
 
 function req(id: string, init?: { body?: unknown; ifMatch?: string }): NextRequest {
@@ -84,18 +104,34 @@ function grant(opts: { permissions: string[]; organizationId: string | null }) {
     },
   };
 }
-const orgAdmin = () => grant({ permissions: ["admin.users.manage"], organizationId: "o1" });
+// Every active member holds `shell.view` (membership baseline), so a realistic
+// org admin carries it alongside their admin.* grant.
+const orgAdmin = () =>
+  grant({ permissions: ["admin.users.manage", "shell.view"], organizationId: "o1" });
 const superadmin = () =>
   grant({ permissions: ["admin.users.manage", "superuser"], organizationId: null });
 
 let POST: typeof Route.POST;
 
 beforeEach(async () => {
-  for (const m of [requireApiPermission, enforceApiRateLimit, performAdminStatusChange])
+  for (const m of [
+    requireApiPermission,
+    enforceApiRateLimit,
+    performAdminStatusChange,
+    accessGetter,
+    auditMock,
+  ])
     m.mockReset();
   enforceApiRateLimit.mockReturnValue(null);
   performAdminStatusChange.mockResolvedValue({ ok: true, status: "suspended" });
-  state.current = { id: USER, updated_at: UPDATED };
+  // Default target: a plain member (strict subset of any admin's permissions).
+  accessGetter.mockResolvedValue({ permissions: ["shell.view"], organizationId: "o1" });
+  state.current = {
+    id: USER,
+    better_auth_user_id: TARGET_BA,
+    primary_email: "target@example.com",
+    updated_at: UPDATED,
+  };
   state.membership = { id: "m1" };
   ({ POST } = await import("@/app/api/v1/users/[id]/status/route"));
 });
@@ -141,6 +177,59 @@ describe("POST /api/v1/users/[id]/status", () => {
     expect(performAdminStatusChange).toHaveBeenCalledWith(
       expect.objectContaining({ targetAppUserId: USER, newStatus: "suspended" }),
     );
+  });
+
+  describe("target outranks actor (review #7)", () => {
+    const superuserTarget = () =>
+      accessGetter.mockResolvedValue({
+        permissions: ["admin.users.manage", "superuser"],
+        organizationId: "o1",
+      });
+
+    it("403 forbidden + denied audit when an ORG ADMIN credential targets a co-org SUPERUSER", async () => {
+      superuserTarget();
+      requireApiPermission.mockResolvedValue(orgAdmin());
+      for (const action of ["block", "suspend"] as const) {
+        const res = await POST(req(USER, { body: { action } }), ctx(USER));
+        expect(res.status).toBe(403);
+        expect(await res.json()).toEqual(expect.objectContaining({ code: "forbidden" }));
+      }
+      expect(performAdminStatusChange).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.user.action_denied",
+          outcome: "denied",
+          reason: "target_outranks_actor",
+          actorBetterAuthUserId: "ba1",
+          appUserId: USER,
+          requestId: "r1",
+          metadata: expect.objectContaining({ action: "status", surface: "v1" }),
+        }),
+      );
+      // The target is evaluated in the credential's BOUND org (bound-org
+      // getUserAccessContext), never via an active_org cookie.
+      expect(accessGetter).toHaveBeenCalledWith(TARGET_BA, { organizationId: "o1" });
+    });
+
+    it("403 when the target is a more-privileged peer (holds a permission the actor lacks)", async () => {
+      accessGetter.mockResolvedValue({
+        permissions: ["admin.users.manage", "admin.roles.update"],
+        organizationId: "o1",
+      });
+      requireApiPermission.mockResolvedValue(orgAdmin());
+      expect((await POST(req(USER), ctx(USER))).status).toBe(403);
+      expect(performAdminStatusChange).not.toHaveBeenCalled();
+    });
+
+    it("200 when a SUPERADMIN credential targets another superuser", async () => {
+      superuserTarget();
+      requireApiPermission.mockResolvedValue(superadmin());
+      expect((await POST(req(USER), ctx(USER))).status).toBe(200);
+      expect(performAdminStatusChange).toHaveBeenCalled();
+      expect(auditMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: "admin.user.action_denied" }),
+      );
+    });
   });
 
   it("404 when the status core reports the user vanished", async () => {

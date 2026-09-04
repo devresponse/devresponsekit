@@ -66,6 +66,7 @@ const actor = {
   request: { headers: new Headers() },
   scope: { kind: "all" } as const,
   access: { permissions: ["superuser"], organizationId: null },
+  requestId: "req-bulk-1",
 };
 
 beforeEach(async () => {
@@ -252,6 +253,9 @@ describe("every action refuses a target who outranks the actor (review #7)", () 
       expect.objectContaining({
         appUserId: "u1",
         reason: "target_outranks_actor",
+        // The batch's x-request-id is threaded through so a denied row can be
+        // correlated with the bulk call in the audit explorer.
+        requestId: "req-bulk-1",
         metadata: expect.objectContaining({ action, bulk: true }),
       }),
     );

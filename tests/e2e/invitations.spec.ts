@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
+import { readOutboxDeliveryLink } from "./helpers/outbox-db";
 
 /**
  * End-to-end proof of the invitation flow (0008):
@@ -9,9 +10,11 @@ import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
  *   the account is pre-verified (no verify-email bounce), signed in
  *   immediately, and lands ACTIVE in the app — no admin approval step.
  *
- * The accept link is pulled from the outbox through the admin email API
+ * The accept link is pulled from the outbox row's DB-only delivery payload
  * (outbox-first delivery records every email even with no provider
- * configured), so the test exercises the REAL emailed URL.
+ * configured), so the test exercises the REAL emailed URL. The admin email
+ * API serves the same row REDACTED (review #21) — proven here too — so an
+ * org admin can never lift a live accept link from the outbox.
  */
 test("invited user signs up via the emailed link and lands active in the app", async ({ page }) => {
   await signInAsSeedAdmin(page);
@@ -27,16 +30,31 @@ test("invited user signs up via the emailed link and lands active in the app", a
   );
   expect(createRes.status()).toBe(201);
 
-  // The outbox row holds the rendered email; extract the accept URL.
+  // The outbox row is listed (metadata only, #221) and its detail carries
+  // the email with the token REDACTED (#21).
   const outboxRes = await page.request.get(
     `/api/administrator/email/outbox?q=${encodeURIComponent(email)}&page=1&pageSize=5`,
   );
   expect(outboxRes.ok()).toBeTruthy();
-  const outbox = (await outboxRes.json()) as { items: Array<{ body_html: string }> };
+  const outbox = (await outboxRes.json()) as { items: Array<{ id: string; body_html?: string }> };
   expect(outbox.items.length).toBeGreaterThan(0);
-  const match = outbox.items[0]!.body_html.match(/href="([^"]*\/invite\?token=[^"]+)"/);
-  expect(match, "outbox email should carry the accept link").toBeTruthy();
-  const acceptUrl = new URL(match![1]!);
+  expect(outbox.items[0]!.body_html).toBeUndefined();
+  const detailRes = await page.request.get(
+    `/api/administrator/email/outbox/${outbox.items[0]!.id}`,
+  );
+  expect(detailRes.ok()).toBeTruthy();
+  const detail = (await detailRes.json()) as { body_html: string };
+  expect(detail.body_html).toContain("/invite?token=[redacted]");
+  expect(detail.body_html).not.toMatch(/\/invite\?token=(?!\[redacted\])/);
+
+  // The REAL accept URL exists only in the DB-only delivery payload.
+  const acceptLink = await readOutboxDeliveryLink({
+    to: email,
+    templateKey: "organization_invitation",
+    pattern: /href="([^"]*\/invite\?token=[^"]+)"/,
+  });
+  expect(acceptLink, "outbox delivery payload should carry the accept link").toBeTruthy();
+  const acceptUrl = new URL(acceptLink!);
 
   // Continue as the INVITEE: fresh session.
   await page.context().clearCookies();

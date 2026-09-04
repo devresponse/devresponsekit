@@ -79,6 +79,7 @@ models/OrgMemberList.ts
 models/OrganizationDetail.ts
 models/OrganizationList.ts
 models/OrganizationListItem.ts
+models/OutboxDetail.ts
 models/OutboxItem.ts
 models/OutboxList.ts
 models/PermissionList.ts

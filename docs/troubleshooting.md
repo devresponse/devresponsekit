@@ -266,6 +266,12 @@ eight locale files. Add the key to `en.json` first, then `fr`/`es`/`uk`/`pt`/`zh
 deliver; check `app_outbox` for `failed` rows and the recorded error (see the
 incident playbook in Part 1 §4 for the serverless drain cron).
 
+**The reset / invite link in the outbox reads `[redacted]`.** By design (review
+#21): the administrator outbox stores a redacted body so an org admin can never
+lift a co-member's live one-time link. Locally, read the DB-only
+`app_outbox.delivery_payload` column instead — see
+[Developer onboarding §9.4](./developer-onboarding.md#94-email-in-dev).
+
 **SSO handoff fails.**
 - The token is single-use and valid ≤60s (the signer clamps any larger
   `SSO_HANDOFF_TTL_SECONDS` down to 60) — a reused or expired token is rejected.

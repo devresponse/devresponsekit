@@ -1147,7 +1147,9 @@
         "organization": "संगठन",
         "error": "त्रुटि",
         "bodyText": "टेक्स्ट मुख्य भाग",
-        "bodyHtml": "HTML मुख्य भाग"
+        "bodyHtml": "HTML मुख्य भाग",
+        "bodyLoading": "लोड हो रहा है…",
+        "bodyLoadError": "इस ईमेल का मुख्य भाग लोड नहीं किया जा सका।"
       },
       "templates": {
         "title": "ईमेल टेम्पलेट",

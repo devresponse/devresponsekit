@@ -19,6 +19,7 @@ import type {
   EmailTemplate,
   EmailTemplateListEnvelope,
   OkId,
+  OutboxDetail,
   OutboxList,
   SendTestEmailRequest,
   SendTestEmailResult,
@@ -33,6 +34,8 @@ import {
     EmailTemplateListEnvelopeToJSON,
     OkIdFromJSON,
     OkIdToJSON,
+    OutboxDetailFromJSON,
+    OutboxDetailToJSON,
     OutboxListFromJSON,
     OutboxListToJSON,
     SendTestEmailRequestFromJSON,
@@ -44,6 +47,10 @@ import {
 } from '../models/index';
 
 export interface GetEmailTemplateRequest {
+    id: string;
+}
+
+export interface GetOutboxItemRequest {
     id: string;
 }
 
@@ -104,6 +111,39 @@ export class EmailApi extends runtime.BaseAPI {
     }
 
     /**
+     * Read one outbox row with its (redacted) bodies
+     */
+    async getOutboxItemRaw(requestParameters: GetOutboxItemRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<OutboxDetail>> {
+        if (requestParameters['id'] == null) {
+            throw new runtime.RequiredError(
+                'id',
+                'Required parameter "id" was null or undefined when calling getOutboxItem().'
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        const response = await this.request({
+            path: `/email/outbox/{id}`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
+            method: 'GET',
+            headers: headerParameters,
+            query: queryParameters,
+        }, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) => OutboxDetailFromJSON(jsonValue));
+    }
+
+    /**
+     * Read one outbox row with its (redacted) bodies
+     */
+    async getOutboxItem(requestParameters: GetOutboxItemRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<OutboxDetail> {
+        const response = await this.getOutboxItemRaw(requestParameters, initOverrides);
+        return await response.value();
+    }
+
+    /**
      * List email templates
      */
     async listEmailTemplatesRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<EmailTemplateListEnvelope>> {
@@ -130,7 +170,7 @@ export class EmailApi extends runtime.BaseAPI {
     }
 
     /**
-     * List the email outbox
+     * List the email outbox (metadata only)
      */
     async listOutboxRaw(requestParameters: ListOutboxRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<OutboxList>> {
         const queryParameters: any = {};
@@ -172,7 +212,7 @@ export class EmailApi extends runtime.BaseAPI {
     }
 
     /**
-     * List the email outbox
+     * List the email outbox (metadata only)
      */
     async listOutbox(requestParameters: ListOutboxRequest = {}, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<OutboxList> {
         const response = await this.listOutboxRaw(requestParameters, initOverrides);

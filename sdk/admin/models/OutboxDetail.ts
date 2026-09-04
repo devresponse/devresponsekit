@@ -14,131 +14,144 @@
 
 import { mapValues } from '../runtime';
 /**
- * 
+ * One outbox row with its rendered bodies. Bodies are the REDACTED rendering stored at insert time: one-time reset / verification / invitation tokens read `[redacted]`.
  * @export
- * @interface OutboxItem
+ * @interface OutboxDetail
  */
-export interface OutboxItem {
+export interface OutboxDetail {
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     id: string;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     organizationId?: string | null;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     organizationSlug?: string | null;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     organizationName?: string | null;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     templateKey?: string | null;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     toEmail: string;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     fromEmail?: string;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     subject?: string;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
-    status: OutboxItemStatusEnum;
+    status: OutboxDetailStatusEnum;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     provider?: string | null;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     providerMessageId?: string | null;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     error?: string | null;
     /**
      * 
      * @type {string}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     relatedBetterAuthUserId?: string | null;
     /**
      * 
      * @type {Date}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     createdAt?: Date;
     /**
      * 
      * @type {Date}
-     * @memberof OutboxItem
+     * @memberof OutboxDetail
      */
     sentAt?: Date | null;
+    /**
+     * 
+     * @type {string}
+     * @memberof OutboxDetail
+     */
+    bodyHtml: string;
+    /**
+     * 
+     * @type {string}
+     * @memberof OutboxDetail
+     */
+    bodyText?: string | null;
 }
 
 
 /**
  * @export
  */
-export const OutboxItemStatusEnum = {
+export const OutboxDetailStatusEnum = {
     Pending: 'pending',
     Sent: 'sent',
     Failed: 'failed',
     Logged: 'logged'
 } as const;
-export type OutboxItemStatusEnum = typeof OutboxItemStatusEnum[keyof typeof OutboxItemStatusEnum];
+export type OutboxDetailStatusEnum = typeof OutboxDetailStatusEnum[keyof typeof OutboxDetailStatusEnum];
 
 
 /**
- * Check if a given object implements the OutboxItem interface.
+ * Check if a given object implements the OutboxDetail interface.
  */
-export function instanceOfOutboxItem(value: object): value is OutboxItem {
+export function instanceOfOutboxDetail(value: object): value is OutboxDetail {
     if (!('id' in value) || value['id'] === undefined) return false;
     if (!('toEmail' in value) || value['toEmail'] === undefined) return false;
     if (!('status' in value) || value['status'] === undefined) return false;
+    if (!('bodyHtml' in value) || value['bodyHtml'] === undefined) return false;
     return true;
 }
 
-export function OutboxItemFromJSON(json: any): OutboxItem {
-    return OutboxItemFromJSONTyped(json, false);
+export function OutboxDetailFromJSON(json: any): OutboxDetail {
+    return OutboxDetailFromJSONTyped(json, false);
 }
 
-export function OutboxItemFromJSONTyped(json: any, ignoreDiscriminator: boolean): OutboxItem {
+export function OutboxDetailFromJSONTyped(json: any, ignoreDiscriminator: boolean): OutboxDetail {
     if (json == null) {
         return json;
     }
@@ -159,14 +172,16 @@ export function OutboxItemFromJSONTyped(json: any, ignoreDiscriminator: boolean)
         'relatedBetterAuthUserId': json['related_better_auth_user_id'] == null ? undefined : json['related_better_auth_user_id'],
         'createdAt': json['created_at'] == null ? undefined : (new Date(json['created_at'])),
         'sentAt': json['sent_at'] == null ? undefined : (new Date(json['sent_at'])),
+        'bodyHtml': json['body_html'],
+        'bodyText': json['body_text'] == null ? undefined : json['body_text'],
     };
 }
 
-export function OutboxItemToJSON(json: any): OutboxItem {
-    return OutboxItemToJSONTyped(json, false);
+export function OutboxDetailToJSON(json: any): OutboxDetail {
+    return OutboxDetailToJSONTyped(json, false);
 }
 
-export function OutboxItemToJSONTyped(value?: OutboxItem | null, ignoreDiscriminator: boolean = false): any {
+export function OutboxDetailToJSONTyped(value?: OutboxDetail | null, ignoreDiscriminator: boolean = false): any {
     if (value == null) {
         return value;
     }
@@ -188,6 +203,8 @@ export function OutboxItemToJSONTyped(value?: OutboxItem | null, ignoreDiscrimin
         'related_better_auth_user_id': value['relatedBetterAuthUserId'],
         'created_at': value['createdAt'] == null ? undefined : ((value['createdAt']).toISOString()),
         'sent_at': value['sentAt'] == null ? undefined : ((value['sentAt'] as any).toISOString()),
+        'body_html': value['bodyHtml'],
+        'body_text': value['bodyText'],
     };
 }
 

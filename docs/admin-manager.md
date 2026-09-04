@@ -553,10 +553,13 @@ a grid, with per-row drill-in to the event metadata.
 
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
-| `GET /email/outbox` | `admin.email.read` | Paginated outbound-email log (org-scoped) |
+| `GET /email/outbox` | `admin.email.read` | Paginated outbound-email log (org-scoped); **metadata only** — no bodies (review #221) |
+| `GET /email/outbox/[id]` | `admin.email.read` | One row with its rendered `body_html` / `body_text`; org-scoped like the list (foreign / org-less row → 404). Bodies are the **redacted** rendering stored at insert time — see below |
 | `GET /email/templates` | `admin.email.read` | List editable templates (platform-global catalog) |
 | `GET/PUT /email/templates/[id]` | `.read` / `admin.email.manage` | Inspect / edit template content; `admin.email.template_updated` |
 | `POST /email/test` | `admin.email.manage` | Send a test email through the outbox pipeline; `admin.email.test_sent` |
+
+**Outbox bodies never carry a live credential (review #21).** Password-reset, email-verification and invitation emails embed a one-time link. `sendAppEmail` stores a **redacted** rendering — the `/reset-password/<token>` path segment and every `token=` query value replaced by `[redacted]` — in `subject` / `body_html` / `body_text` / `variables`, so an org admin holding `admin.email.read` can inspect what was sent to a co-member (a single-org superadmin included) without being able to mint and lift that user's reset link. The real message is delivered from memory on the inline attempt; for a retry it lives only in the DB-only `app_outbox.delivery_payload` column (never selected by any administrator route, nulled once the row is `sent` / `failed`). Consequence for development with no `EMAIL_PROVIDER`: the reset / invite link is no longer readable in the Email workspace — read `delivery_payload` from the database instead (see [Developer onboarding §9.4](./developer-onboarding.md#94-email-in-dev)).
 
 ### 8.13 MCP agents
 

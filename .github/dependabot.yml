@@ -11,11 +11,24 @@
 # The npm updates burn down the dependency backlog so we can eventually lower
 # the audit gate from `high` to `moderate` (see F4 / package.json auditConfig).
 #
+# The `docker` ecosystem tracks the digest-pinned `node:22-bookworm-slim` base
+# image in the Dockerfile (both stages share one digest), so base-image CVE
+# fixes arrive as reviewable PRs instead of accumulating until the weekly Trivy
+# scan (docker-scan.yml, a required check) goes red.
+#
 # NOT covered here: the gitleaks and lychee container images are pinned by
 # digest inside `docker run` steps (not `uses:`), which no Dependabot ecosystem
 # tracks — bump those manually using the `# vX.Y.Z` comment next to each digest.
 version: 2
 updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: build
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

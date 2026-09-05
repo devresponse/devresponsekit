@@ -74,6 +74,40 @@ const V1_EXEMPT: Record<string, string> = {
   "api/v1/openapi.json/route.ts": "public API description; platform-global, no tenant data",
 };
 
+// Review #28: every OTHER `src/app/api/**/route.ts` (outside administrator/**
+// and v1/**) must confine its data access to the CALLER'S OWN identity — the
+// self-service guard, the v1 guard, the unified caller resolver, or the raw
+// session — or be a public / platform-global surface listed below with a
+// reason. A new first-party route that reads tenant data through neither
+// fails here instead of shipping unscoped.
+const API_ROUTES_DIR = join(SRC_DIR, "app", "api");
+const PREFERENCES_ROUTES_DIR = join(SRC_DIR, "app", "api", "preferences");
+const OTHER_SCOPE_MARKERS = [
+  "@/lib/admin/access-scope.server",
+  "requireAccountUser",
+  "requireApiPermission",
+  "resolveCaller",
+  "getCurrentSession",
+];
+const OTHER_EXEMPT: Record<string, string> = {
+  "api/auth/[...all]/route.ts":
+    "Better Auth catch-all; the plugin owns identity, no app tenant read",
+  "api/health/route.ts": "public liveness probe; touches nothing",
+  "api/health/ready/route.ts": "public readiness probe; a dependency ping, no tenant data",
+  "api/metrics/route.ts":
+    "Prometheus scrape gated by METRICS_TOKEN; platform-wide counters, no tenant rows",
+  "api/docs/asset/[...path]/route.ts": "static docs asset from the repo tree; no tenant data",
+  "api/help/asset/[...path]/route.ts": "static help asset from the repo tree; no tenant data",
+  "api/sso/jwks.json/route.ts": "public JWKS; platform-global signing keys, no tenant data",
+  "api/sso/consume/route.ts":
+    "consumer side of the handoff: the signed token IS the principal (jti + sub bound at launch); no session yet",
+  "api/internal/outbox-drain/route.ts":
+    "cron worker gated by CRON_SECRET; drains the platform-global outbox, no per-tenant read",
+  "api/mcp/register/route.ts":
+    "RFC 7591 dynamic client registration — unauthenticated by protocol, dark unless MCP_REGISTRATION_ENABLED; creates a zero-scope client, reads no tenant data",
+  "api/security/csp-report/route.ts": "browser CSP violation sink; logs only, no tenant data",
+};
+
 const PAGE_EXEMPT: Record<string, string> = {
   // Email templates are platform-global (no organization column) and the
   // detail page is SUPERADMIN-gated via checkAdminPermissionServer — there is
@@ -160,26 +194,83 @@ describe("ADR-0001: every /api/v1 route is org-scoped (or self-scoped)", () => {
   );
 });
 
+describe("review #28: every OTHER /api route is caller-scoped (or explicitly exempt)", () => {
+  const isAdminOrV1 = (f: string) => {
+    const norm = f.replace(/\\/g, "/");
+    return norm.includes("/api/administrator/") || norm.includes("/api/v1/");
+  };
+  const routeFiles = walkFiles(API_ROUTES_DIR, "route.ts").filter((f) => !isAdminOrV1(f));
+
+  it("discovers the remaining route handlers", () => {
+    expect(routeFiles.length).toBeGreaterThan(15);
+  });
+
+  it("names only real route files in the exemption map", () => {
+    for (const key of Object.keys(OTHER_EXEMPT)) {
+      expect(
+        routeFiles.some((f) => f.replace(/\\/g, "/").endsWith(key)),
+        `OTHER_EXEMPT names ${key}, which no longer exists — drop the stale entry`,
+      ).toBe(true);
+    }
+  });
+
+  it.each(routeFiles.map((f) => [rel(f, "api/"), f] as const))(
+    "%s confines its reads to the caller (or is explicitly exempt)",
+    (relPath, full) => {
+      const source = readFileSync(full, "utf8");
+      const referencesScope = OTHER_SCOPE_MARKERS.some((m) => source.includes(m));
+      const reason = exemptReason(full, OTHER_EXEMPT);
+      if (reason !== undefined) {
+        expect(reason.length).toBeGreaterThan(0);
+        return;
+      }
+      expect(
+        referencesScope,
+        `${relPath} references no caller-scoping primitive. Gate it with ` +
+          `requireAccountUser / requireApiPermission (or resolve the caller via ` +
+          `resolveCaller / getCurrentSession and scope every read to it), derive an ` +
+          `org boundary from @/lib/admin/access-scope.server, or add a justified ` +
+          `entry to OTHER_EXEMPT.`,
+      ).toBe(true);
+    },
+  );
+});
+
 describe("review #184: every self-service guard call names an account scope literal", () => {
   // `requireAccountUser(request)` WITHOUT a scope admits ANY resolvable bearer
   // credential — a read-only or zero-scope key — to the handler. The
-  // self-service surface (`/api/account/*`, `/api/v1/me/*`) must therefore
-  // always pass the `account.<x>` scope literal the design (§7) assigns, so a
-  // new handler that forgets it fails here instead of shipping unscoped.
+  // self-service surface (`/api/account/*`, `/api/v1/me/*`, and since review
+  // #28 the `/api/preferences/*` mutations) must therefore always pass the
+  // `account.<x>` scope literal the design (§7) assigns, so a new handler that
+  // forgets it fails here instead of shipping unscoped.
   const routeFiles = [
     ...walkFiles(ACCOUNT_ROUTES_DIR, "route.ts"),
     ...walkFiles(V1_ME_ROUTES_DIR, "route.ts"),
+    ...walkFiles(PREFERENCES_ROUTES_DIR, "route.ts"),
   ];
   const GUARD_CALL = /requireAccountUser\s*\(([^)]*)\)/g;
   const SCOPED_CALL = /^\s*request\s*,\s*"account\.[a-z]+(?:\.[a-z]+)?"\s*$/;
+  const SELF_SERVICE_EXEMPT: Record<string, string> = {
+    // Browser redirect target after a scoped sign-in (GET, session-only, no
+    // bearer path): it degrades to a plain redirect on every failure, so there
+    // is no guard call to scope — the cookie it sets is a selector among the
+    // caller's own memberships, never a grant.
+    "api/preferences/active-org/apply/route.ts":
+      "GET redirect applicator; session-only with no bearer path, degrades to a plain redirect",
+  };
 
   it("discovers the self-service route handlers", () => {
-    expect(routeFiles.length).toBeGreaterThan(4);
+    expect(routeFiles.length).toBeGreaterThan(6);
   });
 
   it.each(routeFiles.map((f) => [rel(f, "api/"), f] as const))(
     "%s passes an account scope to every requireAccountUser call",
     (relPath, full) => {
+      const reason = exemptReason(full, SELF_SERVICE_EXEMPT);
+      if (reason !== undefined) {
+        expect(reason.length).toBeGreaterThan(0);
+        return;
+      }
       const source = readFileSync(full, "utf8");
       const calls = [...source.matchAll(GUARD_CALL)].map((m) => m[1] ?? "");
       expect(calls.length, `${relPath} has no requireAccountUser call`).toBeGreaterThan(0);

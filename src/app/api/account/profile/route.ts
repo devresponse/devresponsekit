@@ -11,6 +11,8 @@ import { updateProfileSchema } from "@/lib/validation/account";
 // x-request-id). Despite the module name it is a generic envelope; reusing it
 // here unifies the account/navigation surfaces with the admin one (P3-12).
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 
 export const dynamic = "force-dynamic";
 
@@ -26,12 +28,26 @@ export const dynamic = "force-dynamic";
  * A bearer credential must carry `account.profile.write` (design §7); a
  * read-only or zero-scope key is refused with 403 `insufficient_scope`.
  * Cookie sessions carry full user authority and pass (review #184).
+ *
+ * Rate-limited per user on the mutation tier (review #28): each call reaches
+ * Better Auth's `updateUser` plus an `app_users` write and an audit row, so a
+ * scripted loop must hit the same ceiling the administrator mutations do.
  */
 
 export async function PATCH(request: NextRequest) {
   const guard = await requireAccountUser(request, "account.profile.write");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
+
+  const requestId = getOrCreateRequestId(request);
+  const limited = enforceRateLimit(
+    "account.profile",
+    actor.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    requestId,
+  );
+  if (limited) return limited;
 
   let json: unknown;
   try {
@@ -60,6 +76,7 @@ export async function PATCH(request: NextRequest) {
       actorBetterAuthUserId: actor.betterAuthUserId,
       appUserId: actor.appUserId,
       request,
+      requestId,
       reason: "auth_update_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
@@ -82,6 +99,7 @@ export async function PATCH(request: NextRequest) {
     actorBetterAuthUserId: actor.betterAuthUserId,
     appUserId: actor.appUserId,
     request,
+    requestId,
     // Field NAMES only — never the values.
     metadata: { fields: ["name", "displayName"] },
   });

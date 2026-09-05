@@ -207,3 +207,62 @@ describe("PUT /api/account/preferences", () => {
     expect(insertValues[0]).toMatchObject({ number_format_locale: null });
   });
 });
+
+/**
+ * Review #28: both self-service mutations were unthrottled. They now share the
+ * administrator mutation tier (30-token burst, 1/s refill) keyed per user, so
+ * a scripted loop hits 429 — with `Retry-After` and the request's correlation
+ * id — BEFORE any write, and one user's flood never touches another's budget.
+ */
+describe("self-service mutations are rate-limited per user (review #28)", () => {
+  it("PATCH /api/account/profile: the 31st call in a burst is 429 and writes nothing", async () => {
+    for (let i = 0; i < 30; i += 1) {
+      expect((await profilePATCH(makeReq({ name: "Ada" }, "PATCH"))).status).toBe(200);
+    }
+    updateUserMock.mockClear();
+    updateWheres.length = 0;
+    const denied = await profilePATCH(makeReq({ name: "Ada" }, "PATCH"));
+    expect(denied.status).toBe(429);
+    expect(Number(denied.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    const body = (await denied.json()) as { error: string; requestId: string };
+    expect(body.error).toBe("rate_limited");
+    expect(denied.headers.get("x-request-id")).toBe(body.requestId);
+    expect(updateUserMock).not.toHaveBeenCalled();
+    expect(updateWheres).toHaveLength(0);
+  });
+
+  it("PUT /api/account/preferences: the 31st call in a burst is 429 and writes nothing", async () => {
+    const valid = {
+      preferredLocale: "fr",
+      timeZone: "UTC",
+      dateFormat: "system",
+      numberFormatLocale: "system",
+    };
+    for (let i = 0; i < 30; i += 1) {
+      expect((await preferencesPUT(makeReq(valid, "PUT"))).status).toBe(200);
+    }
+    insertValues.length = 0;
+    const denied = await preferencesPUT(makeReq(valid, "PUT"));
+    expect(denied.status).toBe(429);
+    expect(denied.headers.get("retry-after")).toBeTruthy();
+    expect(insertValues).toHaveLength(0);
+  });
+
+  it("the two routes and two users keep separate buckets", async () => {
+    for (let i = 0; i < 30; i += 1) {
+      expect((await profilePATCH(makeReq({ name: "Ada" }, "PATCH"))).status).toBe(200);
+    }
+    expect((await profilePATCH(makeReq({ name: "Ada" }, "PATCH"))).status).toBe(429);
+    // Same user, other route: its own scope, still open.
+    const prefs = {
+      preferredLocale: "fr",
+      timeZone: "UTC",
+      dateFormat: "system",
+      numberFormatLocale: "system",
+    };
+    expect((await preferencesPUT(makeReq(prefs, "PUT"))).status).toBe(200);
+    // Other user, exhausted route: its own actor key, still open.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-other" } });
+    expect((await profilePATCH(makeReq({ name: "Bob" }, "PATCH"))).status).toBe(200);
+  });
+});

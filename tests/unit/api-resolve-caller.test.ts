@@ -87,7 +87,20 @@ describe("resolveCaller — cookie path", () => {
       betterAuthUserId: "ba1",
       grantedScopes: null,
       isBearer: false,
+      impersonatorId: null,
     });
+  });
+
+  it("surfaces the impersonating admin on an impersonation session (review #28 / P0-1)", async () => {
+    // The admin plugin stamps `impersonatedBy` on the session row; the account
+    // guard consumers (active-org switch) refuse such callers from this field
+    // without a second session lookup.
+    getCurrentSession.mockResolvedValue({
+      user: { id: "target" },
+      session: { id: "s-imp", impersonatedBy: "admin-9" },
+    });
+    const caller = await mod.resolveCaller(req());
+    expect(caller).toMatchObject({ kind: "session", impersonatorId: "admin-9" });
   });
 
   it("returns null when no session and no token", async () => {
@@ -117,6 +130,8 @@ describe("resolveCaller — API key path", () => {
       isBearer: true,
       credentialId: "k1",
       grantedScopes: ["admin.users.read"],
+      // A minted credential is never an impersonation (review #28).
+      impersonatorId: null,
     });
   });
 
@@ -169,7 +184,12 @@ describe("resolveCaller — JWT path", () => {
     });
     isJtiRevoked.mockResolvedValue(false);
     const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
-    expect(caller).toMatchObject({ kind: "jwt", credentialId: "j1", isBearer: true });
+    expect(caller).toMatchObject({
+      kind: "jwt",
+      credentialId: "j1",
+      isBearer: true,
+      impersonatorId: null,
+    });
   });
 
   it("resolves against the token's bound org claim, not the active_org cookie (MACHINE-1)", async () => {

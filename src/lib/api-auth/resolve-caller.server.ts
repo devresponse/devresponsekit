@@ -3,6 +3,7 @@ import { getCurrentSession } from "@/lib/auth-guard";
 import { getUserAccessContext, type UserAccessContext } from "@/lib/auth-status";
 import { getServerEnv } from "@/lib/env";
 import { getClientIp } from "@/lib/client-ip";
+import { readImpersonatorId } from "@/lib/impersonation";
 import { looksLikeApiKey } from "@/lib/api-auth/api-key";
 import { touchApiKeyUsage, verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
@@ -40,6 +41,14 @@ export interface ResolvedCaller {
   isBearer: boolean;
   /** api_key id / jwt jti, for audit + per-credential rate limiting. */
   credentialId: string | null;
+  /**
+   * The ORIGINAL actor's id when the cookie session is an impersonation
+   * session (admin plugin `impersonatedBy`), else `null`. Always `null` for
+   * bearer credentials — a minted key/token is never an impersonation.
+   * Surfaced here so a guard consumer (e.g. the active-org switch, P0-1) can
+   * refuse impersonated sessions without a second session lookup (review #28).
+   */
+  impersonatorId: string | null;
 }
 
 /** Extracts the `Bearer` token (if any) from the Authorization header. */
@@ -94,6 +103,7 @@ export async function resolveCaller(request: { headers: Headers }): Promise<Reso
         grantedScopes: verified.scopes,
         isBearer: true,
         credentialId: verified.id,
+        impersonatorId: null,
       };
     }
 
@@ -117,6 +127,7 @@ export async function resolveCaller(request: { headers: Headers }): Promise<Reso
           grantedScopes: verified.scopes,
           isBearer: true,
           credentialId: verified.jti,
+          impersonatorId: null,
         };
       } catch {
         // Invalid / expired / wrong-audience token → unauthenticated.
@@ -139,5 +150,6 @@ export async function resolveCaller(request: { headers: Headers }): Promise<Reso
     grantedScopes: null,
     isBearer: false,
     credentialId: null,
+    impersonatorId: readImpersonatorId(session),
   };
 }

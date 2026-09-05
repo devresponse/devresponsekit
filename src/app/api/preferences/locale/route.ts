@@ -3,12 +3,12 @@ import { sql } from "kysely";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
-import { getCurrentSession } from "@/lib/auth-guard";
-import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
+import { requireAccountUser } from "@/lib/account/guard.server";
 import { isSupportedLocale, locales } from "@/config/i18n-config";
 // Shared first-party JSON error envelope (P3-12).
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 
 export const dynamic = "force-dynamic";
 
@@ -24,53 +24,59 @@ const bodySchema = z.object({
  * cookie/string injection. Successful changes are audit-logged as
  * `i18n.locale.changed` per §15.6.
  *
- * Cookie-session mutation ⇒ trusted-origin CSRF guard first, exactly like
- * the account/administrator mutation guards (review #39/#188). The route
- * authenticates only via the session cookie, so the guard is unconditional.
- * Pending users may still set their locale once the origin is trusted.
+ * Authorization goes through the shared self-service guard
+ * (`requireAccountUser`, review #28) — the SAME gate as `/api/account/*`:
+ * trusted-origin CSRF check on ambient cookies (review #39/#188), active
+ * user + active membership, and the `account.preferences.write` scope for a
+ * bearer credential. The only client that persists a locale is the secure
+ * shell's switcher (an active member by construction), so the guard's
+ * active-member requirement changes nothing for real traffic. The write is
+ * scoped strictly to `actor.appUserId`; no id is accepted from the body.
+ *
+ * Rate-limited per user on the mutation tier so a scripted loop cannot spam
+ * `app_audit_events` (review #28 — one bucket shape for every first-party
+ * cookie mutation).
  */
 export async function POST(request: NextRequest) {
-  const origin = checkTrustedOrigin(request);
-  if (!origin.ok) {
-    return adminErrorResponse("untrusted_origin", 403, request);
-  }
+  const guard = await requireAccountUser(request, "account.preferences.write");
+  if (!guard.ok) return guard.response;
+  const { actor } = guard;
 
-  const session = await getCurrentSession();
-  if (!session) {
-    return adminErrorResponse("unauthenticated", 401, request);
-  }
-
-  const access = await getUserAccessContext(session.user.id);
-  // Even pending users may set their preferred locale.
-  if (decideSecureAccess(access.status, access.membershipStatus) === "blocked") {
-    return adminErrorResponse("forbidden", 403, request);
-  }
-  if (!access.appUserId) {
-    return adminErrorResponse("not_provisioned", 403, request);
-  }
+  const requestId = getOrCreateRequestId(request);
+  const limited = enforceRateLimit(
+    "preferences.locale",
+    actor.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    requestId,
+  );
+  if (limited) return limited;
 
   let json: unknown;
   try {
     json = await request.json();
   } catch {
-    return adminErrorResponse("invalid_body", 400, request);
+    return adminErrorResponse("invalid_body", 400, request, { requestId });
   }
 
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return adminErrorResponse("invalid_locale", 400, request, { extra: { allowed: locales } });
+    return adminErrorResponse("invalid_locale", 400, request, {
+      requestId,
+      extra: { allowed: locales },
+    });
   }
 
   await db
     .updateTable("app_users")
     .set({ preferred_locale: parsed.data.locale, updated_at: sql`now()` })
-    .where("id", "=", access.appUserId)
+    .where("id", "=", actor.appUserId)
     .execute();
 
   await db
     .insertInto("app_user_locale_preferences")
     .values({
-      app_user_id: access.appUserId,
+      app_user_id: actor.appUserId,
       locale: parsed.data.locale,
     })
     .onConflict((oc) =>
@@ -84,9 +90,10 @@ export async function POST(request: NextRequest) {
   await auditEvent({
     eventType: "i18n.locale.changed",
     outcome: "success",
-    actorBetterAuthUserId: session.user.id,
-    appUserId: access.appUserId,
+    actorBetterAuthUserId: actor.betterAuthUserId,
+    appUserId: actor.appUserId,
     request,
+    requestId,
     metadata: { locale: parsed.data.locale },
   });
 

@@ -20,6 +20,11 @@ import { fileURLToPath } from "node:url";
  * token endpoint the lower-level `consumeToken`). GET (read) handlers are not
  * required to throttle.
  *
+ * Review #28 added a THIRD scan over every remaining `src/app/api/**` route
+ * (account, preferences, invitations, sso, mcp, the public sinks) with its
+ * own justified EXEMPT map, so the self-service mutations that shipped
+ * unthrottled can never do so again.
+ *
  * The admin check additionally requires each `enforceRateLimit` call to thread
  * the request CONTEXT (`request` + a `requestId` — `guard.requestId` or a local
  * one from `getOrCreateRequestId`), so a 429 carries the same `x-request-id` as
@@ -46,6 +51,32 @@ const V1_RATE_LIMIT_CALL = /(?:enforceApiRateLimit|consumeToken)\s*\(/g;
 
 const ADMIN_EXEMPT: Record<string, string> = {};
 const V1_EXEMPT: Record<string, string> = {};
+
+// Review #28: the scan used to stop at administrator/** and v1/**, so the
+// self-service and preference mutations shipped unthrottled. Every OTHER
+// `src/app/api/**/route.ts` is walked here against the union of the three
+// limiter primitives (the account/preference/invitation routes call
+// `enforceRateLimit` with the request context; the public sinks call the
+// low-level `consumeToken` per IP + a global floor).
+const API_ROUTES_DIR = join(SRC_DIR, "app", "api");
+const ANY_RATE_LIMIT_CALL = /(?:enforceRateLimit|enforceApiRateLimit|consumeToken)\s*\(/g;
+const OTHER_EXEMPT: Record<string, string> = {
+  // Better Auth owns this catch-all end to end, including its own limiter
+  // (sign-in 3 req / 10 s, password reset 3 / 60 s per client IP — see the
+  // `rateLimit` option in src/lib/auth.ts). Wrapping the handler with an app
+  // limiter is forbidden: the route MUST NOT be wrapped with custom checks or
+  // Better Auth's lifecycle deadlocks (documented in the route).
+  "api/auth/[...all]/route.ts":
+    "Better Auth catch-all: the plugin applies its own per-IP limiter; wrapping the handler is forbidden",
+  // MCP JSON-RPC transport (Phase 0, dark unless MCP_ENABLED). Bearer-only:
+  // a cookie session is refused, so every call is a credential-bound
+  // principal whose minting is already throttled at /api/v1/auth/token and
+  // whose tool calls are bounded by permission ∩ scope. A per-call bucket
+  // on the transport itself is a gateway design decision (per credential vs
+  // per tool) tracked with the RFC 8707 audience work, not a drive-by here.
+  "api/mcp/route.ts":
+    "bearer-only MCP transport (dark unless MCP_ENABLED); credential minting is throttled at /v1/auth/token, per-call bucket tracked with the RFC 8707 rollout",
+};
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -117,6 +148,44 @@ describe("every /api/v1 mutation is rate-limited", () => {
     "%s rate-limits every mutating handler",
     (relPath, full) => {
       assertRateLimited(full, relPath, V1_RATE_LIMIT_CALL, V1_EXEMPT, "enforceApiRateLimit");
+    },
+  );
+});
+
+describe("review #28: every OTHER /api mutation is rate-limited (or explicitly exempt)", () => {
+  const isAdminOrV1 = (f: string) => {
+    const norm = f.replace(/\\/g, "/");
+    return norm.includes("/api/administrator/") || norm.includes("/api/v1/");
+  };
+  const routeFiles = walk(API_ROUTES_DIR).filter((f) => !isAdminOrV1(f));
+
+  it("discovers the remaining route handlers (account, preferences, sso, mcp, sinks, …)", () => {
+    // account/{preferences,profile}, preferences/{locale,active-org},
+    // invitations/accept, sso/{launch,consume}, mcp/{route,register},
+    // security/csp-report, auth catch-all, health, navigation, … — a shrink
+    // below this means the walk is broken, not that the surface got smaller.
+    expect(routeFiles.length).toBeGreaterThan(15);
+  });
+
+  it("names only real route files in the exemption map", () => {
+    for (const key of Object.keys(OTHER_EXEMPT)) {
+      expect(
+        routeFiles.some((f) => f.replace(/\\/g, "/").endsWith(key)),
+        `OTHER_EXEMPT names ${key}, which no longer exists — drop the stale entry`,
+      ).toBe(true);
+    }
+  });
+
+  it.each(routeFiles.map((f) => [rel(f, "api/"), f] as const))(
+    "%s rate-limits every mutating handler",
+    (relPath, full) => {
+      assertRateLimited(
+        full,
+        relPath,
+        ANY_RATE_LIMIT_CALL,
+        OTHER_EXEMPT,
+        "enforceRateLimit / consumeToken",
+      );
     },
   );
 });

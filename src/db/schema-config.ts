@@ -46,16 +46,21 @@ export const DB_SCHEMA = resolveSchema();
 export const SEARCH_PATH_OPTION = `-c search_path="${DB_SCHEMA}",public`;
 
 /**
- * Whether to send `search_path` as a libpq startup parameter (the `options`
- * field). ON by default — works on a direct endpoint and local Postgres.
+ * Whether to send per-connection settings as libpq STARTUP parameters: the
+ * `options` field carrying `search_path`, and — same switch, review #20 — the
+ * runtime pool's `statement_timeout` / `idle_in_transaction_session_timeout`
+ * (`src/db/database.ts`), which `pg` also places in the startup packet. ON by
+ * default — works on a direct endpoint and local Postgres.
  *
  * A TRANSACTION-POOLING endpoint (Neon's pooled host, PgBouncer, Supabase's
  * pooler) REJECTS startup parameters — every connection fails with `08P01
  * unsupported startup parameter in options: search_path`. To run the app
- * against one, set `DB_SEARCH_PATH_VIA_OPTIONS=0` AND make the schema a
- * server-side role default so unqualified objects still resolve to it:
+ * against one, set `DB_SEARCH_PATH_VIA_OPTIONS=0` AND make all three
+ * server-side role defaults so every connection still gets them:
  *
  *   ALTER ROLE <db_role> SET search_path = "<DB_SCHEMA>", public;
+ *   ALTER ROLE <db_role> SET statement_timeout = '30s';
+ *   ALTER ROLE <db_role> SET idle_in_transaction_session_timeout = '30s';
  *
  * Migrations/seeds/reset keep the option ON against the DIRECT endpoint (they
  * need it, plus DDL + advisory locks the pooler also can't do), so leave the
@@ -94,7 +99,8 @@ export function createAppPool(extra: PoolConfig = {}): Pool {
     connectionString: resolveDatabaseUrl(),
     // A transaction pooler rejects the `options` startup parameter, so omit it
     // when DB_SEARCH_PATH_VIA_OPTIONS is off and rely on a role-level
-    // search_path instead (see SEARCH_PATH_VIA_OPTIONS above).
+    // search_path instead (see SEARCH_PATH_VIA_OPTIONS above). The runtime
+    // pool gates its timeout startup parameters on the same flag (review #20).
     ...(SEARCH_PATH_VIA_OPTIONS ? { options: SEARCH_PATH_OPTION } : {}),
     ...extra,
   });

@@ -48,11 +48,11 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `DB_SCHEMA` | no | Schema **all** tables (app + Better Auth) are deployed into. Default `auth`. Applied at the connection level as `search_path=<DB_SCHEMA>,public`; extensions (`pgcrypto`, `pg_trgm`) stay shared in `public`. Set a different value per deployment to **isolate applications by schema**. Must be a plain SQL identifier. |
 | `PGPOOL_MAX` | no | Max pool connections (default 10). |
 | `PG_CONNECT_TIMEOUT_MS` | no | Connection acquisition timeout (default 5000). |
-| `PG_STATEMENT_TIMEOUT_MS` | no | Per-statement server-side ceiling (default 30000). |
-| `PG_IDLE_IN_TX_TIMEOUT_MS` | no | Idle-in-transaction server-side ceiling (default 30000). |
-| `DB_SEARCH_PATH_VIA_OPTIONS` | no | Whether to set `search_path` via the libpq `options` startup parameter (default **on**). Set to `0` only on a **transaction-pooling** endpoint, which rejects startup parameters — see the pooler note below. |
+| `PG_STATEMENT_TIMEOUT_MS` | no | Per-statement server-side ceiling (default 30000). Sent as a startup parameter, so it is **only sent while `DB_SEARCH_PATH_VIA_OPTIONS` is on** — on a pooled endpoint set the equivalent `ALTER ROLE` instead (pooler note below). |
+| `PG_IDLE_IN_TX_TIMEOUT_MS` | no | Idle-in-transaction server-side ceiling (default 30000). Same startup-parameter caveat as `PG_STATEMENT_TIMEOUT_MS`. |
+| `DB_SEARCH_PATH_VIA_OPTIONS` | no | Whether to send per-connection settings as libpq **startup parameters**: `search_path` (the `options` field) **and** the two `PG_*_TIMEOUT_MS` ceilings above (default **on**). Set to `0` only on a **transaction-pooling** endpoint, which rejects startup parameters — with `0` **none** of the three is sent; see the pooler note below. |
 
-> **Schema & connection poolers:** by default the connection sets `search_path` via the libpq `options` **startup parameter**. A **transaction-pooling** endpoint (Neon's pooled host, PgBouncer transaction mode, some Supabase tiers) **rejects startup parameters** — every connection fails with `08P01 unsupported startup parameter in options: search_path`. To run against one: **(1)** set the schema as a server-side role default the pooler honors — `ALTER ROLE <app_role> SET search_path = auth, public;` — and **(2)** set `DB_SEARCH_PATH_VIA_OPTIONS=0` so the app stops sending the rejected parameter. Migrations/seeds/reset always use the **direct** (non-pooled) endpoint (they need the parameter, plus DDL + advisory locks the pooler can't do).
+> **Schema & connection poolers:** by default each connection sets `search_path` via the libpq `options` **startup parameter**, and `statement_timeout` / `idle_in_transaction_session_timeout` the same way (`pg` places them in the startup packet). A **transaction-pooling** endpoint (Neon's pooled host, PgBouncer transaction mode, some Supabase tiers) **rejects startup parameters** — every connection fails with `08P01 unsupported startup parameter in options: search_path`. To run against one: **(1)** make all three server-side role defaults the pooler honors — `ALTER ROLE <app_role> SET search_path = auth, public; ALTER ROLE <app_role> SET statement_timeout = '30s'; ALTER ROLE <app_role> SET idle_in_transaction_session_timeout = '30s';` (`30s` matches the code defaults; mirror any `PG_*_TIMEOUT_MS` override) — and **(2)** set `DB_SEARCH_PATH_VIA_OPTIONS=0` so the app stops sending the rejected parameters (review #20). Migrations/seeds/reset always use the **direct** (non-pooled) endpoint (they need the parameter, plus DDL + advisory locks the pooler can't do).
 
 ### Social login (all optional — a provider activates only when both id and secret are set)
 
@@ -308,7 +308,8 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 
 | Variable | Default | Controls |
 | --- | --- | --- |
-| `SHUTDOWN_TIMEOUT_MS` | 10000 | Graceful-shutdown drain budget (ms). On `SIGTERM`/`SIGINT` the pg pool is drained within this window so in-flight queries finish cleanly; a stuck query can never hang shutdown past it. |
+| `SHUTDOWN_TIMEOUT_MS` | 10000 | Graceful-shutdown budget (ms). On `SIGTERM`/`SIGINT` Next's own cleanup drains HTTP (in-flight requests finish, so their queries do too) and exits 143/130; the app's watchdog only ends the pg pool and exits with the same signal code if that drain overruns this budget, so a stuck request can never hang shutdown past it. Never ends the pool while HTTP is still draining (review #24). No-op on Vercel. Do not set `NEXT_MANUAL_SIG_HANDLE`. |
+| `PROCESS_FATAL_ON_UNCAUGHT` | unset | Opt-in (`1`/`true`) fail-fast on `uncaughtException`. Next 16 treats `uncaughtException` **and** `unhandledRejection` as non-fatal, so by default the process-fault handlers only log + capture to Sentry. With the flag, an uncaught exception exits `1` after the capture so the orchestrator restarts the worker; an unhandled rejection never exits regardless (review #23). |
 | `AUDIT_RETENTION_DAYS` | 365 | Retention window for `app_audit_events`, applied by `pnpm db:prune`. A compliance record, so the window is long. Set to `0` to disable that table's time-based prune. |
 | `OUTBOX_RETENTION_DAYS` | 90 | Retention window for terminal `app_outbox` rows (`sent`/`failed`/`logged`), applied by `pnpm db:prune`. `pending` rows (in-flight retries) are never pruned. Set to `0` to disable. |
 
@@ -384,7 +385,7 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 - [ ] `SENTRY_AUTH_TOKEN` — build/CI only, never client-exposed.
 - [ ] `METRICS_TOKEN` — only if scraping `/api/metrics`; long random secret (≥32 chars, enforced at boot), scraper-side only.
 - [ ] `CRON_SECRET` — only if a scheduler calls `/api/internal/outbox-drain`; ≥32 chars, enforced at boot.
-- [ ] `DATABASE_URL` — direct endpoint by default; a pooled endpoint also needs `DB_SEARCH_PATH_VIA_OPTIONS=0` + an `ALTER ROLE` (see the pooler note above).
+- [ ] `DATABASE_URL` — direct endpoint by default; a pooled endpoint also needs `DB_SEARCH_PATH_VIA_OPTIONS=0` + the three `ALTER ROLE` defaults (`search_path`, `statement_timeout`, `idle_in_transaction_session_timeout` — see the pooler note above).
 
 ---
 

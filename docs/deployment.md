@@ -106,12 +106,21 @@ Push to `main` (or run the workflow from the Actions tab). After it completes, v
 
 **Single application instance (1.0).** The abuse-mitigation **rate limiter** on admin mutations, bulk operations, and CSV export is **in-process** (`src/lib/admin/rate-limit.server.ts`) — its budget lives in one Node process's memory and **resets on restart**. With more than one instance (multiple containers, or serverless where each invocation is a separate process) the limit degrades to best-effort: it is enforced per instance and effectively multiplies by the instance count. The limiter layers on top of the real authorization checks, so this is a hardening regression, not an authz hole. For a hard, cluster-wide limit, run a single instance; a shared (Redis/Postgres) backend is planned post-1.0. (This applies only to the **application** tier — Postgres is external and unaffected.)
 
-**Direct endpoint by default; pooled needs two changes.** The app sets `search_path` via a per-connection startup parameter (`-c search_path=…`), which a **transaction pooler rejects** — every connection fails with `08P01 unsupported startup parameter in options: search_path` — along with the DDL + advisory locks the migrator needs. So both migrations and runtime use the **direct/unpooled** endpoint by default. To run the **runtime** on the **pooled** endpoint:
+**Direct endpoint by default; pooled needs two changes.** The app sends three per-connection **startup parameters**: `search_path` (`-c search_path=…`) plus the `statement_timeout` / `idle_in_transaction_session_timeout` ceilings from `src/db/database.ts` (`pg` puts those in the startup packet too). A **transaction pooler rejects** startup parameters — every connection fails with `08P01 unsupported startup parameter in options: search_path` — along with the DDL + advisory locks the migrator needs. So both migrations and runtime use the **direct/unpooled** endpoint by default. To run the **runtime** on the **pooled** endpoint:
 
-1. Run `ALTER ROLE <db_role> SET search_path = "auth", public;` once against the database (a role default the pooler honors — `<db_role>` is the user in your connection string, e.g. Neon's `neondb_owner`).
-2. Set `DB_SEARCH_PATH_VIA_OPTIONS=0` in Vercel so the app stops sending the rejected parameter.
+1. Set all three as role defaults the pooler honors, once against the database (`<app_role>` is the user in your connection string, e.g. Neon's `neondb_owner`). The `30s` values match what the code sends by default (`PG_STATEMENT_TIMEOUT_MS` / `PG_IDLE_IN_TX_TIMEOUT_MS` = 30000); mirror any override you set:
+
+   ```sql
+   ALTER ROLE <app_role> SET search_path = "auth", public;
+   ALTER ROLE <app_role> SET statement_timeout = '30s';
+   ALTER ROLE <app_role> SET idle_in_transaction_session_timeout = '30s';
+   ```
+
+2. Set `DB_SEARCH_PATH_VIA_OPTIONS=0` in Vercel so the app stops sending **all three** rejected parameters (review #20 — the flag used to strip only `search_path`, and the pooler rejected the timeouts just the same). Verify with `show statement_timeout;` on a pooled connection: it must read `30s`, not `0`.
 
 Migrations still use the direct endpoint. Keep `PGPOOL_MAX` small on serverless (each function instance opens its own pool).
+
+**Shutdown on Vercel is a no-op; on a long-running server it is a two-step drain.** Vercel never delivers `SIGTERM` to a warm function in the normal freeze/teardown path, and the app's shutdown watchdog (`src/lib/shutdown.server.ts`) registers nothing when the platform's `VERCEL` variable is set — pool connections are simply dropped when the function instance is recycled. On `next start` / the container (`docs/docker.md` §7), Next's own cleanup drains HTTP and exits `143`/`130`; the watchdog only ends the pool and exits with the same code if that drain overruns `SHUTDOWN_TIMEOUT_MS` (review #24).
 
 **Schema changes** ship as new numbered files in `src/db/migrations/` — never edit an applied migration:
 

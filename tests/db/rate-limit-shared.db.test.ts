@@ -157,11 +157,25 @@ describe("shared bucket — atomic refill-and-consume", () => {
 
 describe("shared bucket — housekeeping", () => {
   it("pruneStaleSharedBuckets deletes only keys idle past the stale window", async () => {
-    const opts = { capacity: 5, refillPerSec: 1 };
     const now = Date.UTC(2026, 0, 6, 12);
-    await consumeSharedToken(key("stale"), opts, now - SHARED_STALE_AFTER_MS - 1);
-    await consumeSharedToken(key("fresh"), opts, now - SHARED_STALE_AFTER_MS + 60_000);
-    await consumeSharedToken(key("live"), opts, now);
+    // Start from an empty prefix: the earlier suites leave their rows behind.
+    await cleanup();
+    // Seed the rows directly rather than via consumeSharedToken: a consume
+    // fires the opportunistic fire-and-forget prune, which would race this
+    // test's own prune (the stale row vanished before the `before` check in
+    // CI). The explicit call below is the only prune that runs here.
+    await db
+      .insertInto("app_rate_limits")
+      .values([
+        { key: key("stale"), tokens: 4, updated_at: new Date(now - SHARED_STALE_AFTER_MS - 1) },
+        {
+          key: key("fresh"),
+          tokens: 4,
+          updated_at: new Date(now - SHARED_STALE_AFTER_MS + 60_000),
+        },
+        { key: key("live"), tokens: 4, updated_at: new Date(now) },
+      ])
+      .execute();
     // Other suites' / production rows are never touched by our count check:
     // assert on OUR keys only.
     const before = await db

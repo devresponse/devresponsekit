@@ -7,6 +7,7 @@ import pt from "@/messages/pt.json";
 import zh from "@/messages/zh.json";
 import hi from "@/messages/hi.json";
 import ja from "@/messages/ja.json";
+import { defaultLocale, locales } from "@/config/i18n-config";
 
 /**
  * Locale message-parity guard (a11y-6).
@@ -52,6 +53,16 @@ const ITEM_GROUPS = ["stats", "features", "why", "stack"] as const;
 
 describe("locale message parity (vs en)", () => {
   const enPaths = leafPaths(en).sort();
+
+  // Completeness guard (review #110): the catalogs above are static imports,
+  // so a locale added to `locales` in i18n-config.ts is invisible to this file
+  // until someone imports its JSON here. Without this check a new locale ships
+  // with a green suite and zero parity coverage.
+  it("checks every non-default locale declared in i18n-config", () => {
+    const declared = locales.filter((l) => l !== defaultLocale).sort();
+    const covered = LOCALES.map(([name]) => name).sort();
+    expect(covered).toEqual(declared);
+  });
 
   it.each(LOCALES)("%s has exactly the same key-paths as en", (name, messages) => {
     const paths = leafPaths(messages).sort();

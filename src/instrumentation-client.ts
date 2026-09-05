@@ -1,5 +1,12 @@
 import * as Sentry from "@sentry/nextjs";
-import { parseSampleRate, scrubBreadcrumb, scrubEvent } from "@/lib/observability/sentry-shared";
+import {
+  SENTRY_DATA_COLLECTION,
+  parseSampleRate,
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubSpan,
+  scrubTransaction,
+} from "@/lib/observability/sentry-shared";
 
 /**
  * Browser-side Sentry initialization (Next.js loads this file in the
@@ -42,8 +49,13 @@ Sentry.init({
       blockAllMedia: true,
     }),
   ],
-  sendDefaultPii: false,
+  // Never record cookies / query strings / bodies / IPs at write time;
+  // the scrubbers below are the backstop for errors, transactions, AND
+  // spans (review #22).
+  dataCollection: SENTRY_DATA_COLLECTION,
   beforeSend: scrubEvent,
+  beforeSendTransaction: scrubTransaction,
+  beforeSendSpan: scrubSpan,
   beforeBreadcrumb: scrubBreadcrumb,
 });
 

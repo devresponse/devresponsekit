@@ -1,5 +1,12 @@
 import * as Sentry from "@sentry/nextjs";
-import { parseSampleRate, scrubBreadcrumb, scrubEvent } from "@/lib/observability/sentry-shared";
+import {
+  SENTRY_DATA_COLLECTION,
+  parseSampleRate,
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubSpan,
+  scrubTransaction,
+} from "@/lib/observability/sentry-shared";
 
 /**
  * Sentry initialization for the Node.js server runtime. Imported lazily
@@ -22,8 +29,12 @@ Sentry.init({
   release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
   // Distributed tracing (also powers server-side performance spans).
   tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, 0.1),
-  // Never attach cookies / IPs by default; the scrubber is the backstop.
-  sendDefaultPii: false,
+  // Never record cookies / query strings / bodies / IPs at write time;
+  // the scrubbers below are the backstop for errors, transactions, AND
+  // spans (review #22).
+  dataCollection: SENTRY_DATA_COLLECTION,
   beforeSend: scrubEvent,
+  beforeSendTransaction: scrubTransaction,
+  beforeSendSpan: scrubSpan,
   beforeBreadcrumb: scrubBreadcrumb,
 });

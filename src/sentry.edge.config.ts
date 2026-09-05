@@ -1,5 +1,12 @@
 import * as Sentry from "@sentry/nextjs";
-import { parseSampleRate, scrubBreadcrumb, scrubEvent } from "@/lib/observability/sentry-shared";
+import {
+  SENTRY_DATA_COLLECTION,
+  parseSampleRate,
+  scrubBreadcrumb,
+  scrubEvent,
+  scrubSpan,
+  scrubTransaction,
+} from "@/lib/observability/sentry-shared";
 
 /**
  * Sentry initialization for the Edge runtime (middleware/`proxy.ts` and
@@ -20,7 +27,12 @@ Sentry.init({
     process.env.NODE_ENV,
   release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
   tracesSampleRate: parseSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE, 0.1),
-  sendDefaultPii: false,
+  // Never record cookies / query strings / bodies / IPs at write time;
+  // the scrubbers below are the backstop for errors, transactions, AND
+  // spans (review #22).
+  dataCollection: SENTRY_DATA_COLLECTION,
   beforeSend: scrubEvent,
+  beforeSendTransaction: scrubTransaction,
+  beforeSendSpan: scrubSpan,
   beforeBreadcrumb: scrubBreadcrumb,
 });

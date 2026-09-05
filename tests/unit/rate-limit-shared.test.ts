@@ -136,6 +136,17 @@ describe("consumeSharedToken — statement result interpretation", () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it("clamps elapsed at 0 when the stored timestamp is AHEAD of this instance's clock", async () => {
+    // Another instance wrote the row 2 s "in the future" relative to our
+    // clock. Clamped: 0.2 refilled → 0.8 short at 0.5/s → 2 s. Unclamped the
+    // negative elapsed would drain the snapshot to -0.8 and report 4 s.
+    answer([{ tokens_after: null, prior_tokens: 0.2, prior_updated_at: new Date(12_000) }]);
+    expect(await mod.consumeSharedToken("scope:k", OPTS, 10_000)).toEqual({
+      ok: false,
+      retryAfterSeconds: 2,
+    });
+  });
+
   it("denies with the one-token wait when the row vanished under a concurrent prune", async () => {
     answer([{ tokens_after: null, prior_tokens: null, prior_updated_at: null }]);
     expect(await mod.consumeSharedToken("scope:k", OPTS, 10_000)).toEqual({

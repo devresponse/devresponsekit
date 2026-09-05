@@ -75,6 +75,15 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
   DEFAULT_ADMIN_MUTATION_LIMIT: {},
 }));
+// The token route's pre-auth floors consume from the SHARED bucket (review
+// #98). Without this mock the real module would hit the `@/db/database` stub
+// below, throw inside its SQL, and only reach `consumeToken` through the
+// production DB-error FALLBACK — so the 429 case would pass by way of the
+// fail-soft path rather than the contract. Route it through the same
+// recording spy the sibling token suites use.
+vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+  consumeSharedToken: async (...a: unknown[]) => consumeToken(...a),
+}));
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
   verifyClientCredentials: (...a: unknown[]) => verifyClientCredentials(...a),
 }));
@@ -283,6 +292,9 @@ describe("POST /api/v1/auth/token", () => {
       req("/api/v1/auth/token", { method: "POST", body: { grant_type: "api_key" } }),
     );
     expect(res.status).toBe(429);
+    // The deny came from the shared-floor spy (mocked above), not the
+    // limiter's DB-error fallback: the first bucket consulted is the global one.
+    expect(consumeToken.mock.calls[0]?.[0]).toBe("api.token:__global__");
   });
 });
 

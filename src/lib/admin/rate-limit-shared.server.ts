@@ -133,6 +133,14 @@ async function consumeViaDatabase(
 ): Promise<RateLimitResult> {
   const db = await getDb();
   const { capacity, refillPerSec } = options;
+  // Clock skew between instances (review #98 follow-up): an instance whose
+  // clock LAGS the last writer's presents an `excluded.updated_at` earlier
+  // than the stored one. Elapsed is clamped at 0 so a lagging clock never
+  // un-refills the bucket (an unclamped `-0.5 s` would take 3 → 2.5 tokens),
+  // and the stored timestamp is `greatest(...)` so it never moves backwards
+  // either — otherwise the NEXT caller on the true clock would be credited
+  // the lag as free refill. Both clamps are pinned by
+  // tests/db/rate-limit-shared.db.test.ts ("the clock never runs backwards").
   const { rows } = await sql<ConsumeRow>`
     with attempt as (
       insert into app_rate_limits as r (key, tokens, updated_at)
@@ -144,7 +152,7 @@ async function consumeViaDatabase(
                 + greatest(0, extract(epoch from (excluded.updated_at - r.updated_at)))
                   * ${refillPerSec}::numeric
             ) - 1,
-            updated_at = excluded.updated_at
+            updated_at = greatest(r.updated_at, excluded.updated_at)
         where least(
               excluded.tokens + 1,
               r.tokens
@@ -168,7 +176,9 @@ async function consumeViaDatabase(
   // statement's snapshot of the row (its state before any concurrent writer),
   // mirroring the in-memory arithmetic. A row that vanished between the
   // conflict and the snapshot (another instance's prune) yields the
-  // one-token wait.
+  // one-token wait. Elapsed is clamped at 0 for the same clock-skew reason as
+  // the SQL above: a stored timestamp AHEAD of this instance's clock must not
+  // shrink the balance (pinned by the unit suite's lagging-clock case).
   let refilled = 0;
   if (row?.prior_tokens !== null && row?.prior_tokens !== undefined && row.prior_updated_at) {
     const elapsedSec = Math.max(0, (nowMs - row.prior_updated_at.getTime()) / 1000);

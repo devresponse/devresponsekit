@@ -88,7 +88,7 @@ describe("shared bucket — atomic refill-and-consume", () => {
     expect((await consumeSharedToken(key("refill"), opts, later)).ok).toBe(false);
   });
 
-  it("a slow-refill deny reports the real wait, and the clock never runs backwards", async () => {
+  it("a slow-refill deny reports the real wait, and a lagging clock's Retry-After clamps elapsed at 0", async () => {
     const opts = { capacity: 1, refillPerSec: 0.05 }; // 20 s per token
     const t0 = Date.UTC(2026, 0, 3);
     expect((await consumeSharedToken(key("slow"), opts, t0)).ok).toBe(true);
@@ -96,10 +96,41 @@ describe("shared bucket — atomic refill-and-consume", () => {
       ok: false,
       retryAfterSeconds: 15,
     });
-    // An instance whose clock lags (an earlier `now`) must not un-refill the
-    // bucket: elapsed is clamped at 0, so the balance is unchanged and denied.
-    expect((await consumeSharedToken(key("slow"), opts, t0 - 60_000)).ok).toBe(false);
-    expect((await balance("slow"))?.tokens).toBe(0);
+    // Deny path from an instance whose clock lags the last writer by 60 s:
+    // the JS-side Retry-After clamps elapsed at 0, so the wait is the
+    // one-token 20 s. Unclamped arithmetic would refill -3 tokens and report
+    // 80 s. A deny writes nothing, so the row is exactly as the allow left it.
+    expect(await consumeSharedToken(key("slow"), opts, t0 - 60_000)).toEqual({
+      ok: false,
+      retryAfterSeconds: 20,
+    });
+    expect(await balance("slow")).toEqual({ tokens: 0, updatedAt: new Date(t0) });
+  });
+
+  it("the clock never runs backwards: an allow from a lagging instance neither un-refills the bucket nor rewinds its timestamp", async () => {
+    // The clamps only matter on an ALLOW from a NON-EMPTY bucket (a deny
+    // writes nothing, so an empty bucket would pass with or without them —
+    // review of #98). Capacity 5 at 1/s so half a second of lag is visible
+    // in the balance.
+    const opts = { capacity: 5, refillPerSec: 1 };
+    const t0 = Date.UTC(2026, 0, 3, 12);
+    expect((await consumeSharedToken(key("skew"), opts, t0)).ok).toBe(true);
+    expect(await balance("skew")).toEqual({ tokens: 4, updatedAt: new Date(t0) });
+
+    // 500 ms "earlier": unclamped SQL would refill -0.5 and leave 2.5; the
+    // `greatest(0, …)` clamp leaves exactly 3, and `greatest(updated_at, …)`
+    // keeps the stored clock at t0 instead of rewinding it to t0 - 500.
+    expect((await consumeSharedToken(key("skew"), opts, t0 - 500)).ok).toBe(true);
+    expect(await balance("skew")).toEqual({ tokens: 3, updatedAt: new Date(t0) });
+
+    // Back on the true clock at t0: no refill is credited for the lag — the
+    // balance is 2, not the 2.5 a rewound timestamp would have granted.
+    expect((await consumeSharedToken(key("skew"), opts, t0)).ok).toBe(true);
+    expect(await balance("skew")).toEqual({ tokens: 2, updatedAt: new Date(t0) });
+
+    // Real time still refills from the (never-rewound) stored clock: +1 s → 3, consume → 2.
+    expect((await consumeSharedToken(key("skew"), opts, t0 + 1_000)).ok).toBe(true);
+    expect(await balance("skew")).toEqual({ tokens: 2, updatedAt: new Date(t0 + 1_000) });
   });
 
   it("isolates keys — one exhausted bucket does not affect another", async () => {

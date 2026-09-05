@@ -7,8 +7,13 @@ import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
  * else proves that a bearer minted by the live token endpoint actually opens
  * the gateway while a live Better Auth session cookie does not:
  *
- *   - `initialize` + `tools/list` with a client-credentials JWT → 200, a
+ *   - `initialize` + `tools/list` with a client-credentials JWT minted for
+ *     the MCP resource (`resource=<origin>/api/mcp`, RFC 8707) → 200, a
  *     non-empty `tools` array;
+ *   - the SAME requests with a JWT minted for the DEFAULT (v1) audience →
+ *     401 whose `WWW-Authenticate` carries the RFC 6750 `invalid_token`
+ *     challenge — the audience binding #407 introduced (review #50/#53): a
+ *     token for the general machine API must not drive the gateway;
  *   - the SAME requests carrying only the admin's session cookie → 401 with
  *     the RFC 9728 `WWW-Authenticate` challenge (a cookie is not an
  *     audience-bound OAuth token, so the gateway must refuse it even though
@@ -68,16 +73,30 @@ test("MCP accepts a bearer JWT and refuses a session cookie", async ({
   };
 
   try {
-    const tokenRes = await request.post("/api/v1/auth/token", {
-      data: {
-        grant_type: "client_credentials",
-        client_id: client.clientId,
-        client_secret: client.clientSecret,
-      },
-    });
-    expect(tokenRes.ok(), await tokenRes.text()).toBe(true);
-    const { access_token: bearer } = (await tokenRes.json()) as { access_token: string };
-    expect(bearer).toBeTruthy();
+    // Discover the resource identifier the way an MCP client does (RFC 9728):
+    // the gateway derives it from the server's own BETTER_AUTH_URL, which is
+    // what `resource=` must match — not from the URL Playwright happens to
+    // dial, so the spec also holds when a local run listens on another port.
+    const metaRes = await request.get("/.well-known/oauth-protected-resource");
+    expect(metaRes.status(), await metaRes.text()).toBe(200);
+    const { resource: mcpResource } = (await metaRes.json()) as { resource: string };
+    expect(mcpResource).toMatch(/\/api\/mcp$/);
+
+    const mint = async (resource?: string) => {
+      const tokenRes = await request.post("/api/v1/auth/token", {
+        data: {
+          grant_type: "client_credentials",
+          client_id: client.clientId,
+          client_secret: client.clientSecret,
+          ...(resource ? { resource } : {}),
+        },
+      });
+      expect(tokenRes.ok(), await tokenRes.text()).toBe(true);
+      const { access_token: token } = (await tokenRes.json()) as { access_token: string };
+      expect(token).toBeTruthy();
+      return token;
+    };
+    const bearer = await mint(mcpResource);
 
     // --- Bearer path. The `request` fixture is a cookieless context, so a 200
     // here is the token alone opening the gateway.
@@ -116,6 +135,36 @@ test("MCP accepts a bearer JWT and refuses a session cookie", async ({
     expect(result.isError).toBeFalsy();
     expect(result.content[0]?.text).toContain(me.betterAuthUserId);
 
+    // --- Wrong-audience path: the same client, the same scopes, but a token
+    // minted WITHOUT `resource` (the v1 default every pre-existing client
+    // gets). The gateway must refuse it with the RFC 6750 `invalid_token`
+    // challenge that names the resource to re-request — proving the 200s
+    // above came from the audience, not merely from a valid signature.
+    const v1Bearer = await mint();
+    expect(v1Bearer).not.toBe(bearer);
+    for (const [id, method, params] of [
+      [20, "initialize", { protocolVersion: "2025-06-18" }],
+      [21, "tools/list", {}],
+    ] as const) {
+      const res = await rpc(request, id, method, params, v1Bearer);
+      expect(res.status(), `${method} with a v1-audience token`).toBe(401);
+      const wwwAuth = res.headers()["www-authenticate"] ?? "";
+      expect(wwwAuth).toContain("Bearer");
+      expect(wwwAuth).toContain("resource_metadata=");
+      expect(wwwAuth).toContain('error="invalid_token"');
+      expect(wwwAuth).toContain(`resource=${mcpResource}`);
+      const body = (await res.json()) as JsonRpcResponse;
+      expect(body.id).toBe(id);
+      expect(body.result).toBeUndefined();
+      expect(body.error?.message).toBe("Unauthorized");
+    }
+    // ...and the v1 token still does what it was minted for: the guard that
+    // refused it at the gateway accepts it at the machine API.
+    const v1Me = await request.get("/api/v1/me", {
+      headers: { authorization: `Bearer ${v1Bearer}` },
+    });
+    expect(v1Me.status(), await v1Me.text()).toBe(200);
+
     // --- Cookie path: `page.request` carries the admin's live session cookie
     // (it just authenticated the admin API above) and NO bearer.
     for (const [id, method, params] of [
@@ -127,6 +176,9 @@ test("MCP accepts a bearer JWT and refuses a session cookie", async ({
       const wwwAuth = res.headers()["www-authenticate"] ?? "";
       expect(wwwAuth).toContain("Bearer");
       expect(wwwAuth).toContain("resource_metadata=");
+      // No bearer at all is "present a token", not "wrong token" (RFC 6750
+      // §3.1): the challenge must not carry an error code here.
+      expect(wwwAuth).not.toContain("error=");
       const body = (await res.json()) as JsonRpcResponse;
       expect(body.id).toBe(id);
       expect(body.result).toBeUndefined();

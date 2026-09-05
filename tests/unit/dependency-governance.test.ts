@@ -267,14 +267,32 @@ describe("dependency governance: the audit workflow runs on a schedule", () => {
     expect(triggers).toMatch(/^  workflow_dispatch:\s*$/m);
     const cron = triggers.match(/- cron: "([^"]+)"/)?.[1];
     expect(cron, "a schedule trigger").toBeDefined();
-    // Weekly (day-of-week fixed, day-of-month/month wildcards) and NOT the
-    // same minute as codeql.yml / docker-scan.yml, which also run Mondays.
+    // Weekly: day-of-week fixed, day-of-month/month wildcards.
     const [minute, hour, dom, month, dow] = cron!.split(" ");
     expect(dom).toBe("*");
     expect(month).toBe("*");
     expect(dow).toMatch(/^[0-6]$/);
-    expect(`${hour}:${minute}`).not.toBe("4:27");
-    expect(`${hour}:${minute}`).not.toBe("6:0");
+    // The three weekly security workflows must not share a runner window.
+    // Read the sibling crons from their files rather than hard-coding their
+    // current values: a literal "4:27" here stayed green while codeql.yml
+    // itself drifted onto the audit's slot (must-fix review of #227).
+    const slot = (file: string) => {
+      const expr = read(file).match(/- cron: "([^"]+)"/)?.[1];
+      expect(expr, `${file} has a cron`).toBeDefined();
+      const [m, h] = expr!.split(" ");
+      return `${h}:${m}`;
+    };
+    const slots = [
+      ["dependency-audit.yml", `${hour}:${minute}`],
+      ["codeql.yml", slot(".github/workflows/codeql.yml")],
+      ["docker-scan.yml", slot(".github/workflows/docker-scan.yml")],
+    ] as const;
+    for (const [a, aSlot] of slots) {
+      for (const [b, bSlot] of slots) {
+        if (a === b) continue;
+        expect(aSlot, `${a} and ${b} share the ${aSlot} cron slot`).not.toBe(bSlot);
+      }
+    }
   });
 
   it("gates with the same command and allowlist as before the split", () => {
@@ -293,7 +311,17 @@ describe("dependency governance: the audit workflow runs on a schedule", () => {
   });
 
   it("notifies only on a failed SCHEDULED run, with issues: write scoped to that job", () => {
-    expect(audit).toMatch(/^permissions:\n  contents: read\n/m);
+    // The WHOLE workflow-level permissions block must be `contents: read`.
+    // Anchoring only its first two lines let an `issues: write` appended
+    // there slip through — granted to the audit job that runs `pnpm install`
+    // of the entire tree, exactly what least-privilege #113 fences — because
+    // `auditJob` is sliced from `jobs:` and never sees the top-level block
+    // (must-fix review of #227).
+    const workflowPermissions = audit.slice(
+      audit.indexOf("\npermissions:\n"),
+      audit.indexOf("\njobs:\n"),
+    );
+    expect(workflowPermissions).toBe("\npermissions:\n  contents: read\n");
     expect(notifyJob).toContain("needs: audit");
     expect(notifyJob).toContain("if: failure() && github.event_name == 'schedule'");
     expect(notifyJob).toMatch(/permissions:\n      issues: write\n    steps:/);

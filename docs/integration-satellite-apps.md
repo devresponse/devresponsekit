@@ -69,7 +69,7 @@ sequenceDiagram
 ### 3.1 Primary side (the issuer)
 
 1. **Register the satellite as an enterprise application** (Administrator → Enterprise apps, `admin.apps.manage`): its `id` (**exactly** the satellite's `SSO_HANDOFF_APPLICATION_ID`), `origin` (e.g. `https://apps.example.com`) and `sso_audience` = `<prefix>:<applicationId>` (e.g. `devresponse-app:standalone`; unique across the catalog — a duplicate is refused with `409 audience_taken`), status available ([Admin Manager §8.7](./admin-manager.md#87-enterprise-applications)).
-2. **Cover the subdomain in `SSO_ALLOWED_ORIGIN_SUFFIXES`** (or leave it derived from `NEXT_PUBLIC_PRODUCTION_HOST` when the satellite lives under the same root host) — see [Configuration → SSO handoff](./configuration.md#single-sign-on-handoff).
+2. **Cover the satellite's host in `SSO_ALLOWED_ORIGIN_SUFFIXES`** with a **registrable domain** (`devresponse.com`, `example.co.uk` — never a bare TLD or public suffix such as `co.uk` / `github.io`, which the primary refuses at boot). **In production this is required**: when unset the primary fails closed and registers no origin at all (`origin_not_allowed`). Only outside production is an unset value derived from `NEXT_PUBLIC_PRODUCTION_HOST` — see [Configuration → SSO handoff](./configuration.md#single-sign-on-handoff).
 3. **Share three values** with the satellite: `SSO_HANDOFF_ISSUER` (the primary's origin), `SSO_HANDOFF_AUDIENCE_PREFIX`, and `SSO_HANDOFF_JWT_SECRET` (≥32 chars; **must differ** from every `BETTER_AUTH_SECRET`).
 
 ### 3.2 Satellite side (the consumer)

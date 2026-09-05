@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { invalidOriginSuffixes, splitOriginSuffixList } from "@/lib/admin/origin-suffixes";
 
 /**
  * Server-side environment variable schema.
@@ -103,8 +104,11 @@ const serverEnvSchema = z
     /**
      * Comma-separated registrable-domain suffixes an enterprise-app origin may
      * sit under to be a valid SSO handoff target (e.g. `devresponse.com`).
-     * Parsed by `allowedOriginSuffixes()`; validated here as a string so the
-     * var is no longer read entirely outside the schema (P2-12).
+     * Parsed by `allowedOriginSuffixes()`. Each entry must carry at least one
+     * label beyond its public suffix — a bare TLD or PSL entry (`com`,
+     * `co.uk`, `github.io`) fails boot in `superRefine` below, because it
+     * would let an org admin register a token-harvesting origin (review #14).
+     * Unset in production ⇒ registration fails closed (warned at boot).
      */
     SSO_ALLOWED_ORIGIN_SUFFIXES: z.string().optional(),
     /**
@@ -313,6 +317,20 @@ const serverEnvSchema = z
         message: "must differ from BETTER_AUTH_SECRET (they sign distinct trust domains)",
       });
     }
+    // Origin allow-list hygiene (review #14): every configured suffix must be
+    // a registrable domain. `localhost` is tolerated outside production for
+    // the local satellite rig. Unset is NOT an error (SSO may be unused) —
+    // production then fails closed on registration, see getServerEnv().
+    const badSuffixes = invalidOriginSuffixes(env.SSO_ALLOWED_ORIGIN_SUFFIXES, {
+      allowLocalhost: env.NODE_ENV !== "production",
+    });
+    if (badSuffixes.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SSO_ALLOWED_ORIGIN_SUFFIXES"],
+        message: `every entry must be a registrable domain (at least one label beyond the public suffix — never a bare TLD such as "com" or a public suffix such as "co.uk" / "github.io"); rejected: ${badSuffixes.join(", ")}`,
+      });
+    }
     // And a production deployment must never boot on a publicly-known
     // .env.example placeholder — an env copied but not edited fails closed.
     if (env.NODE_ENV === "production") {
@@ -407,5 +425,25 @@ export function getServerEnv(): ServerEnv {
     throw new Error(`Invalid server environment variables: ${invalidKeys}`);
   }
   cached = parsed.data;
+  warnIfOriginAllowListUnset(cached);
   return cached;
+}
+
+/**
+ * Boot-time warning (review #14): a production deployment with no
+ * `SSO_ALLOWED_ORIGIN_SUFFIXES` can register NO enterprise-app origin
+ * (`allowedOriginSuffixes()` fails closed rather than deriving a possibly
+ * bare public suffix from the host). Not a boot failure — SSO may be unused —
+ * but loud, so the operator sees it before the first `origin_not_allowed`.
+ * `console.warn` on purpose: this module must stay importable from `tsx`
+ * scripts, where the `server-only` pino logger cannot resolve. Skipped during
+ * `next build` (no running server; the strict parse re-runs at real boot).
+ */
+function warnIfOriginAllowListUnset(env: ServerEnv): void {
+  if (env.NODE_ENV !== "production") return;
+  if (process.env.NEXT_PHASE === "phase-production-build") return;
+  if (splitOriginSuffixList(env.SSO_ALLOWED_ORIGIN_SUFFIXES).length > 0) return;
+  console.warn(
+    "[env] SSO_ALLOWED_ORIGIN_SUFFIXES is unset: in production the enterprise-app origin allow-list is EMPTY (no origin can be registered for SSO handoff). Set it to the registrable domain(s) your satellites live under, e.g. devresponse.com — see docs/configuration.md#single-sign-on-handoff",
+  );
 }

@@ -70,6 +70,7 @@ const TOUCHED_KEYS = [
   "PGPOOL_MAX",
   "CRON_SECRET",
   "METRICS_TOKEN",
+  "SSO_ALLOWED_ORIGIN_SUFFIXES",
 ] as const;
 
 async function loadEnvWith(patch: Record<string, string | undefined>) {
@@ -127,6 +128,119 @@ describe("AUTH_RATE_LIMIT_DISABLED production guard (AUTH-5)", () => {
     try {
       expect(mod.getServerEnv().AUTH_RATE_LIMIT_DISABLED).toBe(true);
     } finally {
+      restore();
+    }
+  });
+});
+
+/**
+ * Review #14: `SSO_ALLOWED_ORIGIN_SUFFIXES` bounds where SSO handoff tokens
+ * may be sent. A bare TLD / public-suffix entry must fail BOOT (loud), a
+ * production deployment that leaves it unset must be warned (registration
+ * then fails closed in `allowedOriginSuffixes()`), and a clean list boots.
+ */
+describe("SSO_ALLOWED_ORIGIN_SUFFIXES boot validation (review #14)", () => {
+  it.each(["co.uk", "com", "github.io"])(
+    "refuses to boot when the list contains the public suffix %s",
+    async (suffix) => {
+      const { mod, restore } = await loadEnvWith({ SSO_ALLOWED_ORIGIN_SUFFIXES: suffix });
+      try {
+        expect(() => mod.getServerEnv()).toThrow(/SSO_ALLOWED_ORIGIN_SUFFIXES/);
+      } finally {
+        restore();
+      }
+    },
+  );
+
+  it("refuses to boot when ONE entry of a mixed list is a public suffix", async () => {
+    const { mod, restore } = await loadEnvWith({
+      SSO_ALLOWED_ORIGIN_SUFFIXES: "devresponse.com,co.uk",
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/SSO_ALLOWED_ORIGIN_SUFFIXES/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("boots with registrable domains (example.co.uk, devresponse.com)", async () => {
+    const { mod, restore } = await loadEnvWith({
+      SSO_ALLOWED_ORIGIN_SUFFIXES: "example.co.uk, devresponse.com",
+    });
+    try {
+      expect(mod.getServerEnv().SSO_ALLOWED_ORIGIN_SUFFIXES).toBe("example.co.uk, devresponse.com");
+    } finally {
+      restore();
+    }
+  });
+
+  it("tolerates localhost outside production but refuses it in production", async () => {
+    const dev = await loadEnvWith({
+      NODE_ENV: "development",
+      SSO_ALLOWED_ORIGIN_SUFFIXES: "devresponse.local,localhost",
+    });
+    try {
+      expect(() => dev.mod.getServerEnv()).not.toThrow();
+    } finally {
+      dev.restore();
+    }
+    const prod = await loadEnvWith({
+      NODE_ENV: "production",
+      SSO_ALLOWED_ORIGIN_SUFFIXES: "devresponse.local,localhost",
+    });
+    try {
+      expect(() => prod.mod.getServerEnv()).toThrow(/SSO_ALLOWED_ORIGIN_SUFFIXES/);
+    } finally {
+      prod.restore();
+    }
+  });
+
+  it("boots but warns loudly when unset in production (registration fails closed)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      SSO_ALLOWED_ORIGIN_SUFFIXES: undefined,
+    });
+    try {
+      expect(() => mod.getServerEnv()).not.toThrow();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toMatch(/SSO_ALLOWED_ORIGIN_SUFFIXES is unset/);
+      // cached parse ⇒ the warning is emitted once per process, not per call
+      mod.getServerEnv();
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+      restore();
+    }
+  });
+
+  it("does not warn when unset outside production (the host-derived fallback applies)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "development",
+      SSO_ALLOWED_ORIGIN_SUFFIXES: undefined,
+    });
+    try {
+      mod.getServerEnv();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      restore();
+    }
+  });
+
+  it("does not warn during the production build phase", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+      SSO_ALLOWED_ORIGIN_SUFFIXES: undefined,
+    });
+    try {
+      mod.getServerEnv();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
       restore();
     }
   });

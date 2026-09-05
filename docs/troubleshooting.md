@@ -278,7 +278,10 @@ lift a co-member's live one-time link. Locally, read the DB-only
 - `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, and `SSO_HANDOFF_JWT_SECRET`
   must match between hub and receiver; the receiver's `SSO_HANDOFF_APPLICATION_ID`
   must match the audience.
-- The destination origin must fall under `SSO_ALLOWED_ORIGIN_SUFFIXES`.
+- The destination origin must fall under `SSO_ALLOWED_ORIGIN_SUFFIXES`. In
+  production that variable is **required** for registration (unset ⇒ every
+  origin is `origin_not_allowed` and a boot warning is logged), and each entry
+  must be a registrable domain — a bare `com` / `co.uk` / `github.io` fails boot.
 
 **Machine API returns 401/403.**
 - Is the path enabled? `API_KEYS_ENABLED` / `API_JWT_ENABLED` are **off by default**.

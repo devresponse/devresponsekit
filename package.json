@@ -109,6 +109,7 @@
     "shiki": "^4.3.0",
     "tailwind-merge": "3.6.0",
     "tailwindcss-animate": "1.0.7",
+    "tldts": "7.4.11",
     "unified": "^11.0.5",
     "vaul": "1.1.2",
     "zod": "4.4.3",

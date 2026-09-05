@@ -62,7 +62,7 @@ Every step is **idempotent and ledgered** — applied migrations are recorded in
 Notes:
 
 - **English-only install:** the email templates live under `src/db/migrations/locales/`, one file per locale, applied by default. Set `DB_MIGRATE_LOCALES=0` (or `false`/`no`/`off`) to skip the **localized** files — the non-English email-template rows are then absent and those recipients fall back to English. The core schema and the English base (`locales/0000-email-templates-en.sql`, always applied) install regardless, so an English-only database still has every template.
-- `db:seed` is safe to re-run (all writes are `on conflict do nothing`). In production, change the seeded admin password immediately or supply non-default `SEED_ADMIN_*` values.
+- `db:seed` is safe to re-run: every insert is `on conflict do nothing`, and its one update — relaxing the platform sign-up default from the migration's fail-closed `admin_approval` to `auto_active` — is **first-run only**. It is gated on the row never having been edited by an administrator (`updated_by IS NULL`; the admin API stamps it on every edit), so a re-run after you tightened the policy under **Administrator → Platform sign-up defaults** leaves it exactly as configured and prints `[seed] platform sign-up policy left as configured (admin-managed)`. See [Sign-up policy §5](./auth-signup-policy.md#5-activation-re-evaluation-at-sign-in). In production, change the seeded admin password immediately or supply non-default `SEED_ADMIN_*` values.
 - **Never** run `db:seed:dev` against production — it creates 24 accounts (21 org-scoped + 3 cross-org members) sharing one weak password and refuses to run under `NODE_ENV=production` unless forced.
 
 ---

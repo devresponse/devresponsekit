@@ -52,6 +52,8 @@ pnpm dev              # start the dev server → http://localhost:3000
 
 > All tables are deployed into the **`auth`** schema (configurable via `DB_SCHEMA`; the migrate steps create it automatically). If you inspect the DB with `psql`, the tables won't be in `public` — use `\dt auth.*` or `SET search_path = auth, public;`. See [Configuration → `DB_SCHEMA`](./configuration.md#database-postgresql).
 
+> `db:provision` / `db:seed` are safe to re-run. The seed's inserts are `on conflict do nothing`, and its only update — relaxing the platform sign-up default to `auto_active` (verify → active, no approval step) — runs **only on a never-administered row**. If you changed the policy under **Administrator → Platform sign-up defaults**, a re-seed keeps your setting and logs `[seed] platform sign-up policy left as configured (admin-managed)`. See [Sign-up policy §5](./auth-signup-policy.md#5-activation-re-evaluation-at-sign-in).
+
 Sign in with the seeded admin (defaults from `.env`):
 
 - **Email:** `admin@devresponse.local`

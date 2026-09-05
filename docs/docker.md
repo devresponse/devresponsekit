@@ -268,3 +268,8 @@ volumes:
   so run it from a source checkout or a "tools" image — not the runtime
   container. `OUTBOX_DRAIN_LIMIT` (default 100) bounds rows per run; concurrent
   runs are safe (`FOR UPDATE SKIP LOCKED`).
+- **MCP self-registration needs a scheduled reaper** (only if
+  `MCP_REGISTRATION_ENABLED`). Run **`pnpm mcp:reap`** periodically the same
+  way to expire registrations still pending after
+  `MCP_REGISTRATION_PENDING_TTL_DAYS` (default 7), so junk registrations do not
+  pile up in the Agents console. Same toolchain caveat as the drainer.

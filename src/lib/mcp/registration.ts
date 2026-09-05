@@ -40,6 +40,45 @@ export const registrationRequestSchema = z
 
 export type RegistrationRequest = z.infer<typeof registrationRequestSchema>;
 
+/**
+ * Parses `MCP_REGISTRATION_ALLOWED_ORGS` (comma-separated slugs/ids) into a
+ * normalized list: trimmed, lower-cased, empties dropped, duplicates kept
+ * harmlessly (membership checks only).
+ */
+export function parseRegistrationOrgAllowList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0);
+}
+
+/**
+ * Whether a RESOLVED org may be the target of a registration that named it
+ * explicitly in `organization` (review #51).
+ *
+ * The check runs after resolution so the operator can configure a slug while
+ * the caller sends the id (or vice versa) — both are compared. Rules:
+ *   - a default org and/or an allow-list is configured → the org must be one
+ *     of them; a default org alone therefore REFUSES every other org (before
+ *     #51 a caller-supplied `organization` silently overrode the default);
+ *   - neither is configured → any active org is permitted (the open
+ *     multi-tenant mode, unchanged).
+ * A refusal is reported to the caller as the same generic "Unknown
+ * organization" rejection an unresolvable identifier gets, so the endpoint
+ * never confirms that a tenant exists but is closed.
+ */
+export function isRegistrationOrgPermitted(
+  org: { id: string; slug: string },
+  policy: { defaultOrg: string | undefined; allowList: readonly string[] },
+): boolean {
+  const permitted = new Set(policy.allowList);
+  const defaultOrg = policy.defaultOrg?.trim().toLowerCase();
+  if (defaultOrg) permitted.add(defaultOrg);
+  if (permitted.size === 0) return true;
+  return permitted.has(org.slug.toLowerCase()) || permitted.has(org.id.toLowerCase());
+}
+
 export interface RegistrationResponse {
   client_id: string;
   client_secret: string;

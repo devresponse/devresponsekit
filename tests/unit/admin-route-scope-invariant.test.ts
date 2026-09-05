@@ -103,6 +103,8 @@ const OTHER_EXEMPT: Record<string, string> = {
     "consumer side of the handoff: the signed token IS the principal (jti + sub bound at launch); no session yet",
   "api/internal/outbox-drain/route.ts":
     "cron worker gated by CRON_SECRET; drains the platform-global outbox, no per-tenant read",
+  "api/internal/mcp-registration-reap/route.ts":
+    "cron worker gated by CRON_SECRET; expires stale pending MCP self-registrations platform-wide (review #51), no per-tenant read",
   "api/mcp/register/route.ts":
     "RFC 7591 dynamic client registration — unauthenticated by protocol, dark unless MCP_REGISTRATION_ENABLED; creates a zero-scope client, reads no tenant data",
   "api/security/csp-report/route.ts": "browser CSP violation sink; logs only, no tenant data",

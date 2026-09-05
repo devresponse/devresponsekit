@@ -1,9 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { isCronAuthorized } from "@/lib/cron-auth.server";
 import { drainOutbox } from "@/lib/email/outbox-worker.server";
 import { getServerEnv } from "@/lib/env";
 import { logServerError, logger } from "@/lib/observability/logger.server";
-
 // Touches the pg pool + node:crypto, so it must run on the Node runtime.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,40 +21,18 @@ export const maxDuration = 60;
  * `vercel.json` — calls this route on an interval. It re-attempts the
  * `pending` rows `sendAppEmail` left for retry (see `outbox-worker.server.ts`).
  *
- * It is NOT user-facing: it is gated by a shared secret in `CRON_SECRET`,
- * compared in constant time. Vercel Cron automatically attaches
- * `Authorization: Bearer <CRON_SECRET>` when that env var is set. The route
- * **fails closed** when `CRON_SECRET` is unset, so a deployment that forgets to
- * configure the secret never exposes an unauthenticated drain trigger (rather
- * than silently allowing one, which is how Vercel Cron behaves without it).
- *
- * The secret is read through the validated env (`CRON_SECRET` in
- * `src/lib/env.ts`: optional, ≥32 chars when set, empty = unset) so a weak
- * value fails at boot instead of quietly enabling the endpoint (review #92).
+ * It is NOT user-facing: it is gated by the shared `CRON_SECRET` bearer
+ * (see `src/lib/cron-auth.server.ts` — constant-time compare, FAILS CLOSED
+ * when the secret is unset, ≥32 chars enforced at boot; review #92). Vercel
+ * Cron attaches `Authorization: Bearer <CRON_SECRET>` automatically when that
+ * env var is set.
  */
-function isAuthorized(request: Request): boolean {
-  const expected = getServerEnv().CRON_SECRET;
-  // Fail closed: with no secret configured the endpoint is never callable.
-  if (!expected) return false;
-
-  const header = request.headers.get("authorization") ?? "";
-  const prefix = "Bearer ";
-  if (!header.startsWith(prefix)) return false;
-
-  const presented = Buffer.from(header.slice(prefix.length));
-  const secret = Buffer.from(expected);
-  // Length-guard first: timingSafeEqual throws on a length mismatch (which
-  // would itself leak the length), so compare lengths before the constant-time
-  // byte comparison.
-  return presented.length === secret.length && timingSafeEqual(presented, secret);
-}
-
 function noStore(body: unknown, status: number): NextResponse {
   return NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
-  if (!isAuthorized(request)) {
+  if (!isCronAuthorized(request, getServerEnv().CRON_SECRET)) {
     return noStore({ error: "unauthorized" }, 401);
   }
 

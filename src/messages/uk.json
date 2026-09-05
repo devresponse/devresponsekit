@@ -1221,7 +1221,14 @@
       "revoke": "Revoke",
       "confirmRevoke": "Revoke this agent's access? This cannot be undone.",
       "scopesPrompt": "Comma-separated scopes (the client ceiling). The agent's service account must also hold each permission for a scope to take effect.",
-      "actionFailed": "The action could not be completed. Check your permissions and try again."
+      "actionFailed": "The action could not be completed. Check your permissions and try again.",
+      "filterLabel": "Фільтрувати агентів за статусом",
+      "filterAll": "Усі",
+      "filterPending": "Очікують",
+      "filterActive": "Активні",
+      "filterRevoked": "Відкликані",
+      "pendingSummary": "{count, plural, =0 {Немає агентів, що очікують схвалення} one {# агент очікує схвалення} few {# агенти очікують схвалення} other {# агентів очікують схвалення}}",
+      "emptyFiltered": "Жоден агент не відповідає цьому фільтру."
     }
   },
   "errors": {

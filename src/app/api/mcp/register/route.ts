@@ -5,10 +5,12 @@ import { clientIpKey } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import {
   buildRegistrationResponse,
+  isRegistrationOrgPermitted,
+  parseRegistrationOrgAllowList,
   registrationRequestSchema,
   statusForMode,
 } from "@/lib/mcp/registration";
-import { countActiveOauthClientsForOrg, provisionMcpAgent } from "@/lib/mcp/registration.server";
+import { registerMcpAgent } from "@/lib/mcp/registration.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +31,13 @@ const REG_GLOBAL_LIMIT = { capacity: 60, refillPerSec: 1 };
  * (it cannot even mint a token until an admin activates it); in `open` mode
  * it is active but the client is scopeless, so every tool 403s until an
  * admin grants scopes.
+ *
+ * Abuse controls (review #51): a caller may name an `organization` only where
+ * the operator opened it (default org / `MCP_REGISTRATION_ALLOWED_ORGS`); the
+ * per-org quota counts SELF-registered active clients only and is checked
+ * atomically with the insert under a per-org advisory lock
+ * (`registerMcpAgent`); stale pending registrations are expired by the
+ * scheduled reaper (`/api/internal/mcp-registration-reap`).
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const env = getServerEnv();
@@ -54,32 +63,43 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
   const body = parsed.data;
 
-  // Resolve the target org: the request's `organization`, else the configured
-  // default. Active orgs only; an unknown identifier never reveals which orgs
-  // exist beyond a generic rejection.
+  // Resolve the target org. A request that omits `organization` goes to the
+  // configured default; one that names an org must name one the operator
+  // opened (review #51 — before this a caller-supplied `organization`
+  // silently overrode MCP_REGISTRATION_DEFAULT_ORG and could target any
+  // active tenant). Active orgs only; a refused-but-existing org gets the
+  // SAME generic rejection as an unknown one, so the endpoint never reveals
+  // which orgs exist beyond the ones it is open for.
   const identifier = body.organization ?? env.MCP_REGISTRATION_DEFAULT_ORG ?? "";
   if (!identifier) {
     return oauthError("invalid_client_metadata", "An `organization` is required.", 400);
   }
   const org = await resolveOrganizationByIdentifier(identifier);
-  if (!org) {
+  if (
+    !org ||
+    (body.organization !== undefined &&
+      !isRegistrationOrgPermitted(org, {
+        defaultOrg: env.MCP_REGISTRATION_DEFAULT_ORG,
+        allowList: parseRegistrationOrgAllowList(env.MCP_REGISTRATION_ALLOWED_ORGS),
+      }))
+  ) {
     return oauthError("invalid_client_metadata", "Unknown organization.", 400);
   }
 
-  // Coarse per-org quota (0 = unlimited).
-  if (
-    env.MCP_REGISTRATION_MAX_PER_ORG > 0 &&
-    (await countActiveOauthClientsForOrg(org.id)) >= env.MCP_REGISTRATION_MAX_PER_ORG
-  ) {
-    return oauthError("access_denied", "Registration quota reached for this organization.", 403);
-  }
-
+  // Quota + provisioning in one transaction under a per-org advisory lock:
+  // the former route-level count → insert was a TOCTOU that let concurrent
+  // requests overshoot the quota (review #51). 0 = unlimited.
   const status = statusForMode(env.MCP_REGISTRATION_MODE);
-  const provisioned = await provisionMcpAgent({
+  const registered = await registerMcpAgent({
     clientName: body.client_name,
     organizationId: org.id,
     status,
+    maxPerOrg: env.MCP_REGISTRATION_MAX_PER_ORG,
   });
+  if (!registered.ok) {
+    return oauthError("access_denied", "Registration quota reached for this organization.", 403);
+  }
+  const provisioned = registered.agent;
 
   await auditEvent({
     eventType: "mcp.client.registered",

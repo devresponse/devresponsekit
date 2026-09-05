@@ -4,20 +4,25 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "@/i18n/navigation";
-import type { McpAgentSummary } from "@/lib/mcp/agents.server";
+import type { McpAgentSummary } from "@/lib/mcp/agents";
 
 /**
- * Client table for the MCP-agents console. Renders the org-scoped agent
- * inventory the server page fetched, and — for `admin.clients.manage`
- * holders — the approve / set-scopes / revoke actions, each a same-origin
- * call to the cookie-session admin API followed by a router refresh.
+ * Client table for the MCP-agents console. Renders ONE PAGE of the
+ * org-scoped agent inventory the server page fetched (review #13 — paging
+ * and the status filter live in `_agents-toolbar.tsx`), and — for
+ * `admin.clients.manage` holders — the approve / set-scopes / revoke
+ * actions, each a same-origin call to the cookie-session admin API followed
+ * by a router refresh. `filtered` picks the empty-state copy: "no agents
+ * match this filter" vs "none registered yet".
  */
 export function AgentsTable({
   agents,
   canManage,
+  filtered = false,
 }: {
   agents: McpAgentSummary[];
   canManage: boolean;
+  filtered?: boolean;
 }) {
   const t = useTranslations("administrator.agents");
   const router = useRouter();
@@ -73,7 +78,9 @@ export function AgentsTable({
   }
 
   if (agents.length === 0) {
-    return <p className="text-muted-foreground text-sm">{t("empty")}</p>;
+    return (
+      <p className="text-muted-foreground text-sm">{filtered ? t("emptyFiltered") : t("empty")}</p>
+    );
   }
 
   return (
@@ -90,8 +97,10 @@ export function AgentsTable({
         </thead>
         <tbody>
           {agents.map((agent) => {
-            const pending = agent.userStatus === "pending_approval";
-            const revoked = agent.clientStatus !== "active";
+            // `status` is derived server-side from the client + user rows
+            // (see McpAgentStatus) so the badge, filter and sort agree.
+            const pending = agent.status === "pending";
+            const revoked = agent.status === "revoked";
             const status = pending
               ? t("statusPending")
               : revoked

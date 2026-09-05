@@ -1221,7 +1221,14 @@
       "revoke": "Revoke",
       "confirmRevoke": "Revoke this agent's access? This cannot be undone.",
       "scopesPrompt": "Comma-separated scopes (the client ceiling). The agent's service account must also hold each permission for a scope to take effect.",
-      "actionFailed": "The action could not be completed. Check your permissions and try again."
+      "actionFailed": "The action could not be completed. Check your permissions and try again.",
+      "filterLabel": "按状态筛选代理",
+      "filterAll": "全部",
+      "filterPending": "待审批",
+      "filterActive": "活跃",
+      "filterRevoked": "已撤销",
+      "pendingSummary": "{count, plural, =0 {没有待审批的代理} other {# 个代理待审批}}",
+      "emptyFiltered": "没有符合此筛选条件的代理。"
     }
   },
   "errors": {

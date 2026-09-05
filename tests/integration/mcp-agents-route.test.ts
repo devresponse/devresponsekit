@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type * as AgentsModule from "@/lib/mcp/agents.server";
 
 /**
  * Integration tests for the MCP-agents admin console routes (Phase 4). The
@@ -19,11 +20,18 @@ vi.mock("@/lib/admin/permissions.server", () => ({
   requireAdminPermission: (...a: unknown[]) => requireAdminPermission(...a),
   isAdminPermissionDenial: (g: { __denied?: boolean }) => g?.__denied === true,
 }));
-vi.mock("@/lib/mcp/agents.server", () => ({
-  listMcpAgents: (...a: unknown[]) => listMcpAgents(...a),
-  getMcpAgent: (...a: unknown[]) => getMcpAgent(...a),
-  activateMcpAgent: (...a: unknown[]) => activateMcpAgent(...a),
-}));
+// The list-query parser stays REAL (it is the contract under test for GET,
+// review #13); only the DB-touching functions are stubbed.
+vi.mock("@/db/database", () => ({ db: {} }));
+vi.mock("@/lib/mcp/agents.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentsModule>();
+  return {
+    ...actual,
+    listMcpAgents: (...a: unknown[]) => listMcpAgents(...a),
+    getMcpAgent: (...a: unknown[]) => getMcpAgent(...a),
+    activateMcpAgent: (...a: unknown[]) => activateMcpAgent(...a),
+  };
+});
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
   updateOauthClient: (...a: unknown[]) => updateOauthClient(...a),
   revokeOauthClient: (...a: unknown[]) => revokeOauthClient(...a),
@@ -33,9 +41,10 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
   enforceRateLimit: () => null,
   DEFAULT_ADMIN_MUTATION_LIMIT: {},
 }));
+const resolveOrgScope = vi.fn();
 vi.mock("@/lib/admin/access-scope.server", () => ({
   canAccessOrg: () => true,
-  resolveOrgScope: () => ({ kind: "all" }),
+  resolveOrgScope: (...a: unknown[]) => resolveOrgScope(...a),
 }));
 vi.mock("@/lib/admin/errors.server", () => ({
   adminErrorResponse: (code: string, status: number) =>
@@ -57,6 +66,22 @@ function req(body?: unknown): NextRequest {
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 }
+function listReq(qs = ""): NextRequest {
+  return new NextRequest(`https://app.test/api/administrator/mcp-agents${qs}`);
+}
+const DEFAULT_SORT = [{ field: "created_at", direction: "desc" }];
+/** What the (stubbed) lib returns for a list call — the standard envelope + pendingCount. */
+function listResult(items: unknown[], extra: Record<string, unknown> = {}) {
+  return {
+    items,
+    page: 1,
+    pageSize: 25,
+    total: items.length,
+    sort: DEFAULT_SORT,
+    pendingCount: 0,
+    ...extra,
+  };
+}
 
 beforeEach(() => {
   requireAdminPermission.mockReset().mockResolvedValue({
@@ -72,9 +97,15 @@ beforeEach(() => {
     credentialId: null,
     grantedScopes: null,
   });
-  listMcpAgents
-    .mockReset()
-    .mockResolvedValue([{ clientRowId: UUID, clientId: "drkc_x", name: "A", scopes: [] }]);
+  resolveOrgScope.mockReset().mockReturnValue({ kind: "all" });
+  listMcpAgents.mockReset().mockResolvedValue(
+    listResult(
+      [{ clientRowId: UUID, clientId: "drkc_x", name: "A", scopes: [], status: "pending" }],
+      {
+        pendingCount: 1,
+      },
+    ),
+  );
   getMcpAgent.mockReset().mockResolvedValue({
     clientRowId: UUID,
     appUserId: "svc-1",
@@ -88,11 +119,57 @@ beforeEach(() => {
 });
 
 describe("/api/administrator/mcp-agents", () => {
-  it("lists agents (admin.clients.read)", async () => {
-    const res = await GET(req());
+  it("lists agents (admin.clients.read) on the standard list envelope + pendingCount", async () => {
+    const res = await GET(listReq());
     expect(res.status).toBe(200);
-    expect((await res.json()).items).toHaveLength(1);
+    expect(await res.json()).toEqual({
+      items: [{ clientRowId: UUID, clientId: "drkc_x", name: "A", scopes: [], status: "pending" }],
+      page: 1,
+      pageSize: 25,
+      total: 1,
+      sort: DEFAULT_SORT,
+      pendingCount: 1,
+    });
     expect(requireAdminPermission).toHaveBeenCalledWith(expect.anything(), "admin.clients.read");
+  });
+
+  describe("GET pagination + status filter (review #13)", () => {
+    it("parses page / pageSize / filter[status] / sort and hands them to the lib", async () => {
+      await GET(listReq("?page=3&pageSize=10&filter[status]=pending&sort=name.asc"));
+      expect(listMcpAgents).toHaveBeenCalledWith(expect.anything(), {
+        page: 3,
+        pageSize: 10,
+        sort: [{ field: "name", direction: "asc" }],
+        q: null,
+        filters: { status: "pending" },
+      });
+    });
+
+    it("clamps a bogus page / oversize pageSize and drops unknown sort fields + filters", async () => {
+      await GET(listReq("?page=-4&pageSize=5000&sort=email.desc&filter[email]=x"));
+      expect(listMcpAgents).toHaveBeenCalledWith(expect.anything(), {
+        page: 1,
+        pageSize: 200,
+        sort: DEFAULT_SORT,
+        q: null,
+        filters: {},
+      });
+    });
+
+    it("returns an empty envelope (with the requested page) for a caller with no org scope, without querying", async () => {
+      resolveOrgScope.mockReturnValue(null);
+      const res = await GET(listReq("?page=2&pageSize=5"));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        items: [],
+        page: 2,
+        pageSize: 5,
+        total: 0,
+        sort: DEFAULT_SORT,
+        pendingCount: 0,
+      });
+      expect(listMcpAgents).not.toHaveBeenCalled();
+    });
   });
 
   it("403s a denied caller", async () => {

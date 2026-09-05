@@ -93,12 +93,12 @@ Push to `main` (or run the workflow from the Actions tab). After it completes, v
 
 - [ ] `GET https://<domain>/` → the landing page returns **200**.
 - [ ] Sign in with the seed admin from §2; the session persists.
-- [ ] `GET https://<domain>/api/internal/outbox-drain` **without** the bearer header → **401** (confirms the cron endpoint is fail-closed).
+- [ ] `GET https://<domain>/api/internal/outbox-drain` and `/api/internal/mcp-registration-reap` **without** the bearer header → **401** (confirms both cron endpoints are fail-closed).
 - [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `000N-*.sql` files (`0001-initial-schema.sql`, `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql`, `0005-integrity-constraints.sql`, …), the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
 - [ ] If Sentry is configured, trigger a test error and confirm it lands ([Observability](./observability.md)).
 - [ ] If `METRICS_TOKEN` is set, `GET /api/metrics` with `Authorization: Bearer <token>` returns Prometheus text.
 
-> **The outbox-drain cron.** [`vercel.json`](../vercel.json) declares one scheduled job hitting `GET /api/internal/outbox-drain` **daily at 08:00 UTC** to retry `pending` rows in `app_outbox` (the serverless substitute for a long-running drain worker). Vercel Cron calls it with `Authorization: Bearer <CRON_SECRET>`, so **set `CRON_SECRET` in Vercel env** or the route returns 401 and no mail is ever retried. Daily works on all Vercel plans (Hobby included); higher frequencies need Pro. `pnpm db:prune` (token-revocation + audit/outbox retention) is **not** scheduled in this repo — add a cron or external caller if you want it.
+> **The cron jobs.** [`vercel.json`](../vercel.json) declares two scheduled jobs: `GET /api/internal/outbox-drain` **daily at 08:00 UTC** retries `pending` rows in `app_outbox` (the serverless substitute for a long-running drain worker), and `GET /api/internal/mcp-registration-reap` **daily at 08:30 UTC** expires MCP self-registrations still pending after `MCP_REGISTRATION_PENDING_TTL_DAYS` (the substitute for `pnpm mcp:reap`). Vercel Cron calls both with `Authorization: Bearer <CRON_SECRET>`, so **set `CRON_SECRET` in Vercel env** or the routes return 401 and neither mail is retried nor junk registrations expired. Daily works on all Vercel plans (Hobby included, which allows two daily crons); higher frequencies need Pro. `pnpm db:prune` (token-revocation + audit/outbox retention) is **not** scheduled in this repo — add a cron or external caller if you want it.
 
 ---
 

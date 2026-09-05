@@ -105,6 +105,14 @@ warrant a comms channel and an owner before deep debugging.
   confirm it is firing and the secret is set. On a long-running host, run the
   `pnpm outbox:drain` worker instead.
 
+### Agents console full of stale pending registrations
+- The reaper has not run: on Vercel confirm the daily
+  `GET /api/internal/mcp-registration-reap` cron in `vercel.json` is firing and
+  `CRON_SECRET` is set (the route **fails closed** without it); elsewhere
+  schedule `pnpm mcp:reap`. `MCP_REGISTRATION_PENDING_TTL_DAYS=0` disables the
+  sweep. Expired agents move to the **Revoked** filter; the **Pending** filter
+  (and its badge) shows only what still needs a decision.
+
 ### Abuse / rate-limit storm
 - Rate-limit denials return `429` + `Retry-After` and are recorded (flood-safely,
   ≈1/min/actor/scope) as `administrator.rate_limited` (outcome `denied`) — query

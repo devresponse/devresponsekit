@@ -1221,7 +1221,14 @@
       "revoke": "Revoke",
       "confirmRevoke": "Revoke this agent's access? This cannot be undone.",
       "scopesPrompt": "Comma-separated scopes (the client ceiling). The agent's service account must also hold each permission for a scope to take effect.",
-      "actionFailed": "The action could not be completed. Check your permissions and try again."
+      "actionFailed": "The action could not be completed. Check your permissions and try again.",
+      "filterLabel": "Filtrar agentes por status",
+      "filterAll": "Todos",
+      "filterPending": "Pendentes",
+      "filterActive": "Ativos",
+      "filterRevoked": "Revogados",
+      "pendingSummary": "{count, plural, =0 {Nenhum agente aguardando aprovação} one {# agente aguardando aprovação} other {# agentes aguardando aprovação}}",
+      "emptyFiltered": "Nenhum agente corresponde a este filtro."
     }
   },
   "errors": {

@@ -312,10 +312,41 @@ const serverEnvSchema = z
      * ZERO scopes, so every tool 403s until an admin grants scopes.
      */
     MCP_REGISTRATION_MODE: z.enum(["approval", "open"]).default("approval"),
-    /** Target org slug/id used when a registration request omits `organization`. */
+    /**
+     * Target org slug/id used when a registration request omits
+     * `organization`. Once set, a caller-supplied `organization` is REFUSED
+     * unless it names this org or one in `MCP_REGISTRATION_ALLOWED_ORGS` —
+     * a public caller must not be able to steer a registration into any
+     * tenant the operator did not open (review #51).
+     */
     MCP_REGISTRATION_DEFAULT_ORG: z.string().optional(),
-    /** Max active OAuth clients per org before registration is refused (0 = unlimited). */
+    /**
+     * Comma-separated org slugs/ids a registration request may name in
+     * `organization` (review #51). Unset: only the default org (when one is
+     * configured) is reachable; with neither set, any active org resolves —
+     * the pre-#51 behaviour, kept for deployments that deliberately run an
+     * open multi-tenant registration endpoint.
+     */
+    MCP_REGISTRATION_ALLOWED_ORGS: z.string().optional(),
+    /**
+     * Max SELF-REGISTERED active OAuth clients per org before registration
+     * is refused (0 = unlimited). Admin-created clients never count toward
+     * this quota (review #51), so junk self-registrations can never lock an
+     * admin out of creating clients — and vice versa.
+     */
     MCP_REGISTRATION_MAX_PER_ORG: z.coerce.number().int().nonnegative().default(50),
+    /**
+     * Age in days after which a still-`pending_approval` self-registration
+     * is expired by the reaper (`GET /api/internal/mcp-registration-reap` /
+     * `pnpm mcp:reap`), so junk registrations do not pile up in the Agents
+     * console indefinitely (review #13, #51). 0 disables the sweep; a BLANK
+     * value means "unset" (default 7) — `z.coerce` alone would turn
+     * `MCP_REGISTRATION_PENDING_TTL_DAYS=` into 0 and silently disable it.
+     */
+    MCP_REGISTRATION_PENDING_TTL_DAYS: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.coerce.number().int().nonnegative().default(7),
+    ),
     SEED_ADMIN_EMAIL: z.string().email().optional(),
     SEED_ADMIN_PASSWORD: z.string().optional(),
     SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),

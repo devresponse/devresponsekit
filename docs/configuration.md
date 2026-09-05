@@ -177,7 +177,7 @@ Requirements on the edge in front of the app:
 | `EMAIL_FROM` | From address/name. |
 | `RESEND_API_KEY` | Resend API key (when provider = resend). |
 | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_BASE_URL` | Mailgun config (use `https://api.eu.mailgun.net` for EU). |
-| `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to `GET /api/internal/outbox-drain`, which retries `pending` outbox rows on a serverless host (no long-running `pnpm outbox:drain` process). The route **fails closed** when unset (an empty value counts as unset). Validated by the env schema: when set it must be **at least 32 chars** or the server refuses to boot — a short guessable value can never silently enable the endpoint. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#7-ci). |
+| `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to the `/api/internal/*` cron entrypoints: `outbox-drain` (retries `pending` outbox rows on a serverless host with no long-running `pnpm outbox:drain` process) and `mcp-registration-reap` (expires stale pending MCP self-registrations; see the MCP section). The route **fails closed** when unset (an empty value counts as unset). Validated by the env schema: when set it must be **at least 32 chars** or the server refuses to boot — a short guessable value can never silently enable the endpoint. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#7-ci). |
 | `OUTBOX_DRAIN_LIMIT` | Max outbox rows processed per `pnpm outbox:drain` run (default 100). The serverless `/api/internal/outbox-drain` route uses the library default of 50 instead. |
 
 ### Machine API credentials (both paths DARK by default)
@@ -269,8 +269,10 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | `MCP_AUDIENCE_GRACE` | RFC 8707 rollout grace. **Off by default:** `/api/mcp` accepts only JWTs minted with `resource=<BETTER_AUTH_URL>/api/mcp` (an MCP audience). Set to `1`/`true` for a migration window so legacy tokens carrying the plain v1 audience (`API_JWT_AUDIENCE`) are also accepted; unset it once every agent requests the MCP resource. API keys are not audience-bound and are unaffected. |
 | `MCP_REGISTRATION_ENABLED` | Enable `POST /api/mcp/register` — RFC 7591 agent self-registration (`1`/`true`). **Dark by default.** |
 | `MCP_REGISTRATION_MODE` | `approval` (default — new agents park pending admin activation) or `open` (active but scopeless). |
-| `MCP_REGISTRATION_DEFAULT_ORG` | Target org slug/id used when a registration request omits `organization`. |
-| `MCP_REGISTRATION_MAX_PER_ORG` | Max active OAuth clients per org before registration is refused (`0` = unlimited; default `50`). |
+| `MCP_REGISTRATION_DEFAULT_ORG` | Target org slug/id used when a registration request omits `organization`. Once set, a request naming a **different** org is refused (same generic error as an unknown org) unless that org is on `MCP_REGISTRATION_ALLOWED_ORGS`. |
+| `MCP_REGISTRATION_ALLOWED_ORGS` | Comma-separated org slugs/ids a registration may name in `organization`. Unset: only the default org is reachable (when one is set). With neither this nor a default configured, any active org resolves — the deliberate open multi-tenant mode. |
+| `MCP_REGISTRATION_MAX_PER_ORG` | Max **self-registered** active OAuth clients per org before registration is refused (`0` = unlimited; default `50`). Counted atomically with the insert under a per-org lock; admin-created clients and still-pending registrations never count. In `open` mode every registration is active at once and does count — the quota is then the hard ceiling on the public endpoint. |
+| `MCP_REGISTRATION_PENDING_TTL_DAYS` | Days after which a still-`pending_approval` self-registration is expired by the reaper (`GET /api/internal/mcp-registration-reap` via Vercel Cron, or `pnpm mcp:reap` elsewhere): service user `deactivated`, membership `blocked`, client `revoked`. Default `7`; `0` disables the sweep; blank = default. |
 
 ### Seeding
 
@@ -385,7 +387,7 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 - [ ] `RESEND_API_KEY` / `MAILGUN_API_KEY` — only if email enabled.
 - [ ] `SENTRY_AUTH_TOKEN` — build/CI only, never client-exposed.
 - [ ] `METRICS_TOKEN` — only if scraping `/api/metrics`; long random secret (≥32 chars, enforced at boot), scraper-side only.
-- [ ] `CRON_SECRET` — only if a scheduler calls `/api/internal/outbox-drain`; ≥32 chars, enforced at boot.
+- [ ] `CRON_SECRET` — only if a scheduler calls `/api/internal/outbox-drain` or `/api/internal/mcp-registration-reap`; ≥32 chars, enforced at boot.
 - [ ] `DATABASE_URL` — direct endpoint by default; a pooled endpoint also needs `DB_SEARCH_PATH_VIA_OPTIONS=0` + the three `ALTER ROLE` defaults (`search_path`, `statement_timeout`, `idle_in_transaction_session_timeout` — see the pooler note above).
 
 ---
@@ -396,7 +398,7 @@ Most variables above are validated at boot by `src/lib/env.ts` — a missing or 
 
 | Variable | Used by | If unset |
 | --- | --- | --- |
-| `CRON_SECRET` | `/api/internal/outbox-drain` | endpoint fails closed (401); when set, must be ≥32 chars (boot-time check) |
+| `CRON_SECRET` | `/api/internal/outbox-drain`, `/api/internal/mcp-registration-reap` | endpoints fail closed (401); when set, must be ≥32 chars (boot-time check) |
 | `METRICS_TOKEN` | `/api/metrics` | endpoint fails closed (401); when set, must be ≥32 chars (boot-time check) |
 | `LOG_LEVEL` | the Pino logger | defaults to `info` (`silent` under test) |
 | `AUDIT_RETENTION_DAYS` / `OUTBOX_RETENTION_DAYS` | `pnpm db:prune` | default 365 / 90; `0` disables |

@@ -1,8 +1,8 @@
 import "server-only";
 import { timingSafeEqual } from "node:crypto";
-import { sql, type Selectable } from "kysely";
+import { sql, type Kysely, type Selectable } from "kysely";
 import { db } from "@/db/database";
-import type { AppOauthClientsTable } from "@/db/schema/app-schema";
+import type { AppDatabase, AppOauthClientsTable } from "@/db/schema/app-schema";
 import { hashSecret } from "@/lib/api-auth/api-key";
 
 /**
@@ -76,15 +76,23 @@ export interface CreatedOauthClient extends OauthClientSummary {
   clientSecret: string;
 }
 
-/** Registers a new client, returning the secret exactly once. */
+/**
+ * Registers a new client, returning the secret exactly once.
+ *
+ * `executor` lets a caller run the insert inside ITS transaction — MCP
+ * self-registration inserts the client under a per-org advisory lock so the
+ * quota check and the insert are atomic (review #51). Defaults to the shared
+ * pool for every other caller.
+ */
 export async function createOauthClient(
   input: CreateOauthClientInput,
+  executor: Kysely<AppDatabase> = db,
 ): Promise<CreatedOauthClient> {
   const clientId = `${CLIENT_ID_PREFIX}_${randomBase62(24)}`;
   const clientSecret = `${CLIENT_ID_PREFIX}sec_${randomBase62(40)}`;
   const secretHash = await hashSecret(clientSecret);
 
-  const row = await db
+  const row = await executor
     .insertInto("app_oauth_clients")
     .values({
       client_id: clientId,

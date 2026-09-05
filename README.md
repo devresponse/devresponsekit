@@ -77,6 +77,7 @@ build, and deploying a fully functional instance — see the canonical docs in
 | `pnpm db:app:migrate` | Apply the app schema migrations                  |
 | `pnpm db:prune`   | Prune expired revocations + aged audit/outbox rows (cron — see [Deployment](docs/deployment.md)) |
 | `pnpm outbox:drain` | Retry pending outbox emails (cron)               |
+| `pnpm mcp:reap`   | Expire stale pending MCP self-registrations (cron) |
 | `pnpm openapi:export` | Write the admin OpenAPI document to `docs/`      |
 | `pnpm sdk:admin:generate` | Regenerate the typed admin SDK from the OpenAPI doc |
 

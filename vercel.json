@@ -5,6 +5,10 @@
     {
       "path": "/api/internal/outbox-drain",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/internal/mcp-registration-reap",
+      "schedule": "30 8 * * *"
     }
   ]
 }

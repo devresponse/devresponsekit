@@ -1221,7 +1221,14 @@
       "revoke": "Revoke",
       "confirmRevoke": "Revoke this agent's access? This cannot be undone.",
       "scopesPrompt": "Comma-separated scopes (the client ceiling). The agent's service account must also hold each permission for a scope to take effect.",
-      "actionFailed": "The action could not be completed. Check your permissions and try again."
+      "actionFailed": "The action could not be completed. Check your permissions and try again.",
+      "filterLabel": "स्थिति के अनुसार एजेंट फ़िल्टर करें",
+      "filterAll": "सभी",
+      "filterPending": "लंबित",
+      "filterActive": "सक्रिय",
+      "filterRevoked": "निरस्त",
+      "pendingSummary": "{count, plural, =0 {अनुमोदन की प्रतीक्षा में कोई एजेंट नहीं} one {# एजेंट अनुमोदन की प्रतीक्षा में} other {# एजेंट अनुमोदन की प्रतीक्षा में}}",
+      "emptyFiltered": "इस फ़िल्टर से कोई एजेंट मेल नहीं खाता।"
     }
   },
   "errors": {

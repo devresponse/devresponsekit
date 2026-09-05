@@ -77,6 +77,38 @@ describe("createOauthClient", () => {
     expect(row.client_secret_hash).toEqual(expect.any(String));
     expect(row.client_secret_hash).not.toBe(created.clientSecret);
   });
+
+  it("inserts through a caller-supplied executor (a transaction) instead of the pool (review #51)", async () => {
+    // MCP self-registration runs the insert under its per-org advisory lock,
+    // so the client row must land on the TRANSACTION, not the shared pool.
+    const trxInserts: Record<string, unknown>[] = [];
+    const trx = {
+      insertInto: () => ({
+        values: (v: Record<string, unknown>) => {
+          trxInserts.push(v);
+          return {
+            returning: () => ({
+              executeTakeFirstOrThrow: () =>
+                Promise.resolve({ id: "c2", client_id: "drkc_trx", scopes: [] }),
+            }),
+          };
+        },
+      }),
+    } as unknown as Parameters<typeof mod.createOauthClient>[1];
+    const created = await mod.createOauthClient(
+      {
+        name: "agent",
+        scopes: [],
+        organizationId: "o1",
+        serviceAppUserId: "u1",
+        createdByAppUserId: "u1",
+      },
+      trx,
+    );
+    expect(created.client_id).toBe("drkc_trx");
+    expect(trxInserts).toHaveLength(1);
+    expect(state.inserts).toHaveLength(0); // nothing touched the pool
+  });
 });
 
 describe("verifyClientCredentials", () => {

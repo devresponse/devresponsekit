@@ -199,7 +199,7 @@ version is used: `corepack enable`, then `pnpm install`. The project pins
 (as CI does). If the lockfile is genuinely out of date, update dependencies in a
 dedicated change.
 
-**Node version errors.** Use Node 22 (what CI runs and what `.nvmrc` +
+**Node version errors.** Use Node 24 (what CI, the Docker image and Vercel run, and what `.nvmrc` +
 `package.json` `engines` pin). Point your version manager at `.nvmrc`.
 
 **Postgres won't start / port conflict.** `pnpm db:up` maps host port **5444**

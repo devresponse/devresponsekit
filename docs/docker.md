@@ -194,7 +194,7 @@ volumes:
 ## 7. Hardening (recommended for production)
 
 - **Base image is pinned by digest — keep it current.** Both stages use
-  `FROM node:22-bookworm-slim@sha256:<digest>` (the multi-arch index digest,
+  `FROM node:24-bookworm-slim@sha256:<digest>` (the multi-arch index digest,
   identical in both `FROM` lines) for byte-for-byte reproducibility.
   Dependabot's `docker` ecosystem (`.github/dependabot.yml`) opens a PR when
   the tag moves to a new digest; to bump by hand, take the `digest` field from

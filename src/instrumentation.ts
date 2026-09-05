@@ -10,15 +10,19 @@ import * as Sentry from "@sentry/nextjs";
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("./sentry.server.config");
-    // OPS-4: drain the pg pool on SIGTERM/SIGINT so a deploy/rollout closes
-    // DB connections cleanly. Skipped during the production *build* phase
-    // (no live pool to drain) and confined to the Node runtime — the
-    // shutdown module imports `pg`, which the edge runtime cannot load.
+    // OPS-4 / review #24: arm the SIGTERM/SIGINT watchdog. Next's own cleanup
+    // drains HTTP and exits 143/130; the watchdog only ends the pg pool and
+    // exits if that drain overruns SHUTDOWN_TIMEOUT_MS. Skipped during the
+    // production *build* phase (no live pool) and confined to the Node
+    // runtime — the shutdown module imports `pg`, which the edge runtime
+    // cannot load. A no-op on Vercel (see the module).
     if (process.env.NEXT_PHASE !== "phase-production-build") {
       const { registerGracefulShutdown } = await import("@/lib/shutdown.server");
       registerGracefulShutdown();
-      // D5: capture stray unhandledRejection/uncaughtException to Sentry + the
-      // log before the process dies (otherwise a crash is silent).
+      // D5 / review #23: log + capture stray unhandledRejection /
+      // uncaughtException to Sentry (otherwise they are invisible). They do
+      // not exit — Next treats both as non-fatal — unless
+      // PROCESS_FATAL_ON_UNCAUGHT=1 opts uncaught exceptions into exit(1).
       const { registerProcessErrorHandlers } = await import("@/lib/process-errors.server");
       registerProcessErrorHandlers();
     }

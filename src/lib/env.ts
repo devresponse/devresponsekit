@@ -107,6 +107,19 @@ const serverEnvSchema = z
     PG_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     PG_IDLE_IN_TX_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     /**
+     * Opt-in ("1"/"true") fail-fast on `uncaughtException` (review #23). Next
+     * 16 treats both `uncaughtException` and `unhandledRejection` as
+     * non-fatal, so by default the D5 handlers (src/lib/process-errors.server.ts)
+     * only log + capture. Set this to have an uncaught exception exit 1 after
+     * the capture so the orchestrator restarts the worker; an unhandled
+     * rejection never exits regardless. The handler reads `process.env`
+     * directly with the same rule — keep the two in sync.
+     */
+    PROCESS_FATAL_ON_UNCAUGHT: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
+    /**
      * Trusted reverse-proxy hop count for client-IP extraction (P2-4): the
      * (count)-th `X-Forwarded-For` entry from the right is the IP the trusted
      * edge observed. Must be >= 1. Read via {@link intFromEnv} in client-ip.ts.

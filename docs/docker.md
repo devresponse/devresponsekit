@@ -221,10 +221,21 @@ volumes:
   `GET /api/health` (200, no DB) and its `readinessProbe` to
   `GET /api/health/ready` (`select 1` → 200, or 503 when the database is
   unreachable). Both are unauthenticated and `no-store`.
-- **Graceful shutdown:** the server drains the PostgreSQL pool on `SIGTERM`/
-  `SIGINT` before exiting, bounded by `SHUTDOWN_TIMEOUT_MS` (default 10s), so a
-  rolling deploy closes DB connections cleanly. Set the orchestrator's
-  termination grace period to at least `SHUTDOWN_TIMEOUT_MS`.
+- **Graceful shutdown:** on `SIGTERM`/`SIGINT` two things run, in this order
+  (review #24). **(1)** Next's own signal cleanup (`node server.js` →
+  `start-server.js`) stops accepting connections, waits for every in-flight
+  request — and therefore every query it issues — to finish, then exits with
+  the signal code (`143` for SIGTERM, `130` for SIGINT); the PostgreSQL pool
+  is deliberately **not** ended during that window, because ending it fails
+  any request between two queries (`Cannot use a pool after calling end`) —
+  the idle sockets are closed by the OS at exit, which Postgres treats as an
+  ordinary disconnect. **(2)** The app's watchdog, armed by the same signal,
+  ends the pool and exits with the same signal code **only if** that drain
+  overruns `SHUTDOWN_TIMEOUT_MS` (default 10s), so a wedged request can never
+  hang the shutdown. Set the orchestrator's termination grace period
+  **above** `SHUTDOWN_TIMEOUT_MS`, treat exit code 143 as a normal signal
+  stop, and do **not** set `NEXT_MANUAL_SIG_HANDLE` (it removes step 1, so
+  the process would exit after the budget without draining HTTP).
 
 ---
 

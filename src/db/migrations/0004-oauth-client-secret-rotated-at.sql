@@ -18,12 +18,21 @@
 -- LANDING ORDER (operator gate): apply this file to production BEFORE the
 -- branch that ships it is merged — not "with" the deploy. Production deploys
 -- from every push to `main` through Vercel's git integration and no automated
--- migrate step runs ahead of it (docs/deployment.md), while the resolver reads
--- `secret_rotated_at` on EVERY request bearing an OAuth-client JWT and
--- `rotateOauthClientSecret` writes it. On a database without the column those
--- reads fail closed as 500s (an outage for every client_credentials caller)
--- and admin secret rotation 500s. Run `pnpm db:app:migrate` against the
--- production DATABASE_URL, confirm `secret_rotated_at` exists on
--- `app_oauth_clients`, then merge.
+-- migrate step runs ahead of it (docs/deployment.md §1, "current state"),
+-- while the resolver reads `secret_rotated_at` on EVERY request bearing an
+-- OAuth-client JWT and `rotateOauthClientSecret` writes it. On a database
+-- without the column those reads fail closed as 500s (an outage for every
+-- client_credentials caller) and admin secret rotation 500s. Run
+-- `pnpm db:app:migrate` against the production DATABASE_URL, confirm
+-- `secret_rotated_at` exists on `app_oauth_clients`, then merge.
+--
+-- VERIFY, DON'T ASSUME: this file is in `REQUIRED_CORE_MIGRATIONS`
+-- (migration-plan.ts), so once a build carrying it is live,
+-- `GET /api/health/ready` answers 503 `{"reason":"schema_behind"}` until the
+-- ledger records this id and 200 `{"status":"ready"}` afterwards — an
+-- unauthenticated curl, no database access or client credentials needed.
+-- Minting still succeeds without the column (verifyClientCredentials selects
+-- an explicit column list), so a mint-only smoke test proves nothing; the
+-- failure shows up on the first authenticated /api/v1 call.
 
 alter table app_oauth_clients add column if not exists secret_rotated_at timestamptz;

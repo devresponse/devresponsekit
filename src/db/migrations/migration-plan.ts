@@ -208,3 +208,38 @@ export function reconcileLedgerChecksum(
       `on purpose: update app_schema_migrations set checksum = '${actual}' where id = '${id}'.)`,
   );
 }
+
+/**
+ * The CORE migrations this build's code depends on, in ledger-id form. The
+ * readiness probe (`GET /api/health/ready`) checks every id here against
+ * `app_schema_migrations` and reports `schema_behind` (503) when one is
+ * missing, so a build that was promoted ahead of its migration — the exact
+ * failure mode of 0004 on a Vercel git-integration deploy, where nothing runs
+ * `db:app:migrate` before the new code goes live (review #43 landing gate) —
+ * is visible with an unauthenticated curl instead of surfacing as 500s on the
+ * first real request that reads the new column.
+ *
+ * A literal list rather than a runtime `readdir`: the migrations directory is
+ * not part of the traced serverless/standalone bundle, and the list must
+ * describe what THIS build expects, not whatever happens to be on disk.
+ * `tests/unit/migration-plan.test.ts` pins it to the actual core `*.sql`
+ * files, so adding the next core file (0007) without extending this list fails CI.
+ */
+export const REQUIRED_CORE_MIGRATIONS: readonly string[] = [
+  "0001-initial-schema.sql",
+  "0002-admin-groups-permissions.sql",
+  "0003-outbox-delivery-payload.sql",
+  "0004-oauth-client-secret-rotated-at.sql",
+  "0005-integrity-constraints.sql",
+  "0006-rate-limit-buckets.sql",
+];
+
+/**
+ * Ids from {@link REQUIRED_CORE_MIGRATIONS} that are absent from `applied`
+ * (the ledger's `id` column), in apply order. Empty means the schema is at
+ * least as new as this build needs.
+ */
+export function missingCoreMigrations(applied: Iterable<string>): string[] {
+  const have = new Set(applied);
+  return REQUIRED_CORE_MIGRATIONS.filter((id) => !have.has(id));
+}

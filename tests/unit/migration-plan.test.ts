@@ -1,6 +1,10 @@
+import { readdirSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ALWAYS_APPLIED_LOCALE,
+  REQUIRED_CORE_MIGRATIONS,
+  missingCoreMigrations,
   planMigrations,
   shouldIncludeLocales,
 } from "@/db/migrations/migration-plan";
@@ -99,5 +103,46 @@ describe("planMigrations", () => {
   it("never emits a Better-Auth-owned file as a core migration", () => {
     const plan = planMigrations(CORE, LOCALES, true);
     expect(plan.some((m) => m.file.startsWith("better-auth"))).toBe(false);
+  });
+});
+
+describe("REQUIRED_CORE_MIGRATIONS (readiness gate, review #43 landing gate)", () => {
+  it("equals the core *.sql files actually in src/db/migrations, in apply order", () => {
+    // The readiness probe can only catch a build promoted ahead of its
+    // migration if the list names EVERY core file this build ships. Pin it
+    // to the real directory so adding the next core file (0007) without extending the list fails
+    // here rather than silently passing readiness on a stale schema.
+    const dir = path.resolve(__dirname, "../../src/db/migrations");
+    const onDisk = planMigrations(readdirSync(dir), [], false)
+      .filter((m) => m.subdir === "")
+      .map((m) => m.id);
+    expect([...REQUIRED_CORE_MIGRATIONS]).toEqual(onDisk);
+  });
+
+  it("is the frozen baseline plus every forward migration, never a Better-Auth file", () => {
+    expect(REQUIRED_CORE_MIGRATIONS[0]).toBe("0001-initial-schema.sql");
+    expect(REQUIRED_CORE_MIGRATIONS).toContain("0004-oauth-client-secret-rotated-at.sql");
+    expect(REQUIRED_CORE_MIGRATIONS.some((id) => id.startsWith("better-auth"))).toBe(false);
+  });
+});
+
+describe("missingCoreMigrations", () => {
+  it("is empty when the ledger holds every required id (extra ledger rows are fine)", () => {
+    const ledger = [...REQUIRED_CORE_MIGRATIONS, "locales/0000-email-templates-en.sql"];
+    expect(missingCoreMigrations(ledger)).toEqual([]);
+  });
+
+  it("returns the absent ids in apply order", () => {
+    const ledger = REQUIRED_CORE_MIGRATIONS.filter(
+      (id) => id !== "0002-admin-groups-permissions.sql" && !id.startsWith("0004-"),
+    );
+    expect(missingCoreMigrations(ledger)).toEqual([
+      "0002-admin-groups-permissions.sql",
+      "0004-oauth-client-secret-rotated-at.sql",
+    ]);
+  });
+
+  it("reports everything missing for an empty ledger (never-migrated database)", () => {
+    expect(missingCoreMigrations([])).toEqual([...REQUIRED_CORE_MIGRATIONS]);
   });
 });

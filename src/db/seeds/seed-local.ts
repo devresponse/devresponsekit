@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import { createAppPool, ensureSchema } from "@/db/schema-config";
 import { setSignupProvisioningSuppressed } from "@/lib/auth-signup-provisioning";
 import { ADMIN_PERMISSION_CATALOG } from "@/lib/admin/permissions";
+import { seedPlatformSignupPolicy } from "@/db/seeds/platform-signup-policy";
 
 const LOCAL_ADMIN_NAME = "Local Admin";
 
@@ -85,13 +86,12 @@ async function main() {
     // inherits — including the default org where self-registrations land — so it
     // is exactly what the "Platform sign-up defaults" admin panel shows.
     // Verification stays required; the verification itself is the approval.
-    await pool.query(
-      `update app_organization_auth_settings
-          set require_email_verification = true,
-              signup_approval_mode = 'auto_active',
-              updated_at = now()
-        where organization_id is null`,
-    );
+    //
+    // FIRST RUN ONLY (review #17): the write is gated on `updated_by IS NULL`,
+    // which the admin API sets on every edit. A re-run after an administrator
+    // tightened the policy (admin_approval / invite_only) leaves it untouched
+    // and logs a loud notice instead of silently reopening self-registration.
+    await seedPlatformSignupPolicy(pool);
 
     const roles: Array<[string, string, string[]]> = [
       ["member", "Member", ["shell.view"]],

@@ -214,24 +214,65 @@ describe("registerMcpAgent (atomic quota, review #51)", () => {
     expect(await countSelfRegisteredMcpClientsForOrg(orgId)).toBe(MAX);
   });
 
-  it("does not serialize registrations across DIFFERENT orgs (quota is per org)", async () => {
-    const [a, b] = await Promise.all([
-      registerMcpAgent({
+  it("does not serialize registrations across DIFFERENT orgs (the advisory lock is per org)", async () => {
+    // Review must-fix: the previous version of this test only asserted that
+    // both registrations eventually succeeded, which a GLOBAL lock would also
+    // satisfy (it would admit them one after the other). To make the property
+    // observable we hold org A's registration lock in an open transaction on
+    // a dedicated connection and then race two registrations against it:
+    //   - org B must resolve WHILE the lock is held (no cross-org contention);
+    //   - org A must stay pending until we release it — the control that
+    //     proves this test drives the SAME lock key `registerMcpAgent` takes
+    //     (if the key ever drifted, org A would resolve early and fail here).
+    const holder = await pgPool.connect();
+    const settle = <T>(p: Promise<T>, ms: number): Promise<T | "pending"> =>
+      Promise.race([
+        p,
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), ms)),
+      ]);
+    let orgA: Promise<Awaited<ReturnType<typeof registerMcpAgent>>> | undefined;
+    try {
+      await holder.query("begin");
+      await holder.query(
+        "select pg_advisory_xact_lock(hashtext('mcp.register'), hashtext($1::text))",
+        [orgId],
+      );
+
+      orgA = registerMcpAgent({
         clientName: `${PREFIX}org-a`,
         organizationId: orgId,
         status: "active",
         maxPerOrg: 1,
-      }),
-      registerMcpAgent({
+      });
+      const orgB = registerMcpAgent({
         clientName: `${PREFIX}org-b`,
         organizationId: otherOrgId,
         status: "active",
         maxPerOrg: 1,
-      }),
-    ]);
-    expect(a.ok && b.ok).toBe(true);
-    if (a.ok) createdUserIds.push(a.agent.appUserId);
-    if (b.ok) createdUserIds.push(b.agent.appUserId);
+      });
+
+      // Org B completes while org A's lock is still held.
+      const b = await settle(orgB, 5_000);
+      expect(b).not.toBe("pending");
+      if (b !== "pending") {
+        expect(b.ok).toBe(true);
+        if (b.ok) createdUserIds.push(b.agent.appUserId);
+      }
+      // ...and org A is genuinely blocked on that lock (the control assertion).
+      expect(await settle(orgA, 500)).toBe("pending");
+    } finally {
+      await holder.query("rollback").catch(() => undefined);
+      holder.release();
+      // Always drain org A's registration so a failed assertion above cannot
+      // leak its rows past `afterEach` (a leaked membership would block the
+      // org delete in `afterAll` and poison the next run on a shared dev DB).
+      const a = await orgA;
+      if (a.ok) createdUserIds.push(a.agent.appUserId);
+    }
+
+    // Releasing the lock lets org A through; each org holds exactly one slot.
+    const a = await orgA;
+    expect(a.ok).toBe(true);
     expect(await countSelfRegisteredMcpClientsForOrg(orgId)).toBe(1);
     expect(await countSelfRegisteredMcpClientsForOrg(otherOrgId)).toBe(1);
   });

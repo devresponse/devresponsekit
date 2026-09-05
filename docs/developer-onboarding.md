@@ -65,6 +65,8 @@ Want multi-tenant test data? Load the dev fixture — 3 organizations × 7 users
 pnpm db:seed:dev
 ```
 
+> The dev fixture is **local-only by construction**. Before opening a connection it refuses (exit 1, nothing written) unless the `DATABASE_URL` host is local — `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, or no host — regardless of `NODE_ENV`, and it separately refuses under `NODE_ENV=production`. A Neon / RDS / any hosted URL in your `.env` therefore cannot be seeded by accident. If you genuinely want the fixture on a remote **disposable** database, pass `--force` (`pnpm db:seed:dev --force`) or set `DEV_SEED_ALLOW_REMOTE=1`; `NODE_ENV=production` additionally needs `DEV_SEED_ALLOW_PROD=1`. `pnpm db:reset` applies the same host check (`src/db/guards.ts`).
+
 Every fixture account shares the password **`DevPassword123!`** (override with `DEV_SEED_PASSWORD`):
 
 | Account | Authority |

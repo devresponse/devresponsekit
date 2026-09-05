@@ -10,6 +10,9 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  */
 const env = vi.hoisted(() => ({
   API_JWT_ENABLED: true,
+  BETTER_AUTH_URL: "https://app.example.com",
+  API_JWT_AUDIENCE: "devresponse-api",
+  API_JWT_ACCESS_TTL_SECONDS: 900,
   API_KEYS_ENABLED: true,
   API_JWT_PRIVATE_KEY: "{}",
 }));

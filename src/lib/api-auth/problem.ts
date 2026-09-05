@@ -43,6 +43,14 @@ const TITLES: Record<string, string> = {
   unsupported_grant_type: "Unsupported grant type",
   invalid_client: "Invalid client",
   invalid_scope: "Invalid scope",
+  // RFC 8707 §2: the requested `resource` is not one this server issues for.
+  invalid_target: "Invalid target resource",
+  // RFC 6750 §3.1: a well-formed token this resource does not accept (audience).
+  invalid_token: "Invalid token",
+  // The key / client a JWT was minted from has since been revoked or rotated
+  // (review #43) — distinct from `unauthorized` so a client knows to stop
+  // retrying with this credential rather than re-minting from it.
+  credential_revoked: "Credential revoked",
   internal_error: "Internal server error",
 };
 

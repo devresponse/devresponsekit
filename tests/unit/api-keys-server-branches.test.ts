@@ -286,9 +286,10 @@ describe("verifyApiKey — not-yet-expired key resolves", () => {
   };
 
   it("resolves a key whose expires_at is in the future (right side of && is false)", async () => {
+    const expiresAt = new Date(Date.now() + 60_000);
     state.takeFirst = {
       ...base,
-      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      expires_at: expiresAt.toISOString(),
     };
     const v = await mod.verifyApiKey("drk_live_future");
     expect(v).toEqual({
@@ -297,6 +298,8 @@ describe("verifyApiKey — not-yet-expired key resolves", () => {
       betterAuthUserId: "ba1",
       organizationId: "org-1",
       scopes: ["admin.users.read"],
+      // Surfaced so the token endpoint can cap a JWT's TTL at it (review #48).
+      expiresAt,
     });
   });
 

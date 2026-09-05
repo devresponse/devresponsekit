@@ -169,7 +169,13 @@ export async function revokeOauthClient(id: string, revokedByAppUserId: string):
   return Number(result.numUpdatedRows ?? 0) > 0;
 }
 
-/** Rotates a client's secret in place, returning the new plaintext. */
+/**
+ * Rotates a client's secret in place, returning the new plaintext. Stamps
+ * `secret_rotated_at` (app clock, matching the JWT `iat` clock) so tokens
+ * minted with the OLD secret are refused by the resolver from now on
+ * (review #43) — the row stays `active`, so the status check alone would
+ * not retire them.
+ */
 export async function rotateOauthClientSecret(id: string): Promise<string | null> {
   const existing = await getOauthClientById(id);
   if (!existing || existing.status !== "active") return null;
@@ -177,7 +183,7 @@ export async function rotateOauthClientSecret(id: string): Promise<string | null
   const secretHash = await hashSecret(clientSecret);
   await db
     .updateTable("app_oauth_clients")
-    .set({ client_secret_hash: secretHash })
+    .set({ client_secret_hash: secretHash, secret_rotated_at: new Date() })
     .where("id", "=", id)
     .execute();
   return clientSecret;

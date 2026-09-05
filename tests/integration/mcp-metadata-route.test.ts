@@ -47,6 +47,16 @@ describe("MCP discovery routes", () => {
     expect(body.grant_types_supported).toContain("client_credentials");
   });
 
+  it("advertises the MCP resource in BOTH documents so a client can request the right audience (review #50/#53)", async () => {
+    const protectedResource = await (await protectedResourceGet()).json();
+    const authServer = await (await authServerGet()).json();
+    expect(protectedResource.resource).toBe("https://app.example.com/api/mcp");
+    expect(authServer.resources_supported).toEqual([
+      "https://app.example.com/api/v1",
+      "https://app.example.com/api/mcp",
+    ]);
+  });
+
   it("uses API_JWT_ISSUER as the issuer when set", async () => {
     env.API_JWT_ISSUER = "https://issuer.example";
     const body = await (await authServerGet()).json();

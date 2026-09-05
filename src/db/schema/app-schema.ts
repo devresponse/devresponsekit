@@ -322,6 +322,15 @@ export interface AppOauthClientsTable {
   created_by: string | null;
   revoked_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>;
   revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * When the secret was last rotated (0004). Tokens with an `iat` before this
+   * stamp were minted with the OLD secret and are refused (review #43).
+   */
+  secret_rotated_at: ColumnType<
+    Date | null,
+    Date | string | null | undefined,
+    Date | string | null
+  >;
 }
 
 /** Revocation list for stateless JWT access tokens killed before `exp`. */

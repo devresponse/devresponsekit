@@ -26,6 +26,9 @@ const env = vi.hoisted(() => ({
   API_JWT_ENABLED: true,
   API_KEYS_ENABLED: true,
   API_JWT_PRIVATE_KEY: "{}",
+  BETTER_AUTH_URL: "https://app.example.com",
+  API_JWT_AUDIENCE: "devresponse-api",
+  API_JWT_ACCESS_TTL_SECONDS: 900,
 }));
 const consumeToken = vi.hoisted(() => vi.fn());
 const auditEvent = vi.fn();

@@ -9,15 +9,16 @@
  * server (the existing `/api/v1/auth/token` + `/api/v1/jwks.json`), so the
  * metadata simply points a client at endpoints that already exist.
  */
+import { mcpResourceIdentifier, supportedResources } from "@/lib/api-auth/resources";
 import { API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
+
+// The resource identifier now lives with the token endpoint's allow-list
+// (review #50/#53) so the metadata, the minted `aud` and the gateway's
+// expected audience can never drift apart; re-exported for existing callers.
+export { mcpResourceIdentifier };
 
 function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
-}
-
-/** Canonical resource identifier (RFC 8707) for the MCP endpoint. */
-export function mcpResourceIdentifier(baseUrl: string): string {
-  return `${trimTrailingSlash(baseUrl)}/api/mcp`;
 }
 
 /** URL of the protected-resource metadata document (RFC 9728). */
@@ -28,10 +29,19 @@ export function protectedResourceMetadataUrl(baseUrl: string): string {
 /**
  * `WWW-Authenticate` value for a 401 from the protected MCP resource
  * (RFC 9728 §5.1) — points the client at the metadata so it can discover
- * the authorization server and obtain a token.
+ * the authorization server and obtain a token. `challenge` adds the RFC 6750
+ * §3 `error` / `error_description` attributes (e.g. `invalid_token` for a
+ * token minted for another resource, review #50/#53); the description must
+ * not contain a double quote.
  */
-export function mcpWwwAuthenticate(baseUrl: string): string {
-  return `Bearer realm="devresponse-mcp", resource_metadata="${protectedResourceMetadataUrl(baseUrl)}"`;
+export function mcpWwwAuthenticate(
+  baseUrl: string,
+  challenge?: { error: string; description: string },
+): string {
+  const base = `Bearer realm="devresponse-mcp", resource_metadata="${protectedResourceMetadataUrl(baseUrl)}"`;
+  if (!challenge) return base;
+  const description = challenge.description.replace(/"/g, "'");
+  return `${base}, error="${challenge.error}", error_description="${description}"`;
 }
 
 export interface ProtectedResourceMetadata {
@@ -49,7 +59,9 @@ export function buildProtectedResourceMetadata(
 ): ProtectedResourceMetadata {
   const base = trimTrailingSlash(baseUrl);
   return {
-    resource: `${base}/api/mcp`,
+    // The identifier a client passes as `resource=` at the token endpoint
+    // (RFC 8707) and the `aud` the gateway requires (review #50/#53).
+    resource: mcpResourceIdentifier(base),
     resource_name: "DevResponseKit MCP gateway",
     authorization_servers: [trimTrailingSlash(issuer)],
     scopes_supported: [...API_SCOPE_CATALOG],
@@ -66,6 +78,14 @@ export interface AuthorizationServerMetadata {
   token_endpoint_auth_methods_supported: string[];
   scopes_supported: string[];
   response_types_supported: string[];
+  /**
+   * The RFC 8707 `resource` values the token endpoint accepts (review
+   * #50/#53). Not an IANA-registered AS-metadata member — RFC 8414 §2
+   * permits additional members — but it lets a client discover, without
+   * trial and error, that `resource=<origin>/api/mcp` is what an MCP-bound
+   * token needs.
+   */
+  resources_supported: string[];
   /** RFC 7591 DCR endpoint — present only when self-registration is enabled. */
   registration_endpoint?: string;
 }
@@ -87,6 +107,7 @@ export function buildAuthorizationServerMetadata(
     scopes_supported: [...API_SCOPE_CATALOG],
     // No authorization-code / implicit flow yet (Phase 5) → no response types.
     response_types_supported: [],
+    resources_supported: supportedResources(base),
   };
   if (options?.registrationEndpoint) {
     metadata.registration_endpoint = `${base}/api/mcp/register`;

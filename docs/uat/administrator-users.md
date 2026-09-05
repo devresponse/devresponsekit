@@ -140,7 +140,7 @@ User stories
 Negative & edge cases
 1. Out-of-scope access → the layout returns 404 for a non-admin; it never leaks that `/administrator/*` exists.
 2. The sidebar gate must match each page guard: the Users link requires `admin.users.read` (`administrator-navigation.ts:66`), which is exactly the Users page guard (`users/page.tsx:29`). Confirm no visible link 404s (the historical bug class).
-3. Loading: the console shows `administrator/loading.tsx` while the shell streams; no raw message keys.
+3. Not-found status: open `/en/app/administrator/users/<well-formed unknown UUID>` with the browser devtools Network tab open — the document response is an HTTP **404** (not a 200 that merely renders "Page not found"). The administrator tree deliberately has no `loading.tsx` streaming boundary: a boundary above the pages would flush the shell before the page's `notFound()` runs, turning every admin `[id]` 404 into a 200 (review #29, `tests/e2e/admin-cross-org-404.spec.ts`).
 
 Accessibility: the sidebar is keyboard-navigable; the active item is derived from the path (`administrator-sidebar.tsx:47`); group labels auto-hide when the rail is collapsed. Its collapse toggle is independent of the root shell (own cookie, no Ctrl/Cmd+B — `layout.tsx:38`).
 i18n: run `en` + `uk`; sidebar group and item labels come from the `administrator.nav` catalog — no raw keys.

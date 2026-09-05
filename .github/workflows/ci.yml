@@ -144,6 +144,10 @@ jobs:
       # e2e to register a destination app under devresponse.com. The signing
       # key is generated per run in the step below (never committed).
       API_JWT_ENABLED: "1"
+      # Review #29: the MCP gateway e2e (tests/e2e/mcp-bearer-only.spec.ts)
+      # drives /api/mcp with a real bearer + a real session cookie; the
+      # endpoint is dark (404) unless enabled. Registration stays dark.
+      MCP_ENABLED: "1"
       SSO_ALLOWED_ORIGIN_SUFFIXES: devresponse.com
       # Social login: CI-only dummy credentials so all three provider buttons
       # render (a provider activates only when BOTH its id and secret are set).

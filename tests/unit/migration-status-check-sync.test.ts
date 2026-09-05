@@ -10,7 +10,7 @@ import {
 } from "@/lib/status-values";
 
 /**
- * Drift guard between the status CHECK constraints migration 0004 adds
+ * Drift guard between the status CHECK constraints migration 0005 adds
  * (review #217 / #63) and the TypeScript enums the runtime validates against
  * (`src/lib/status-values.ts`). Same pattern as
  * `migration-permission-catalog-sync.test.ts`: parse the SQL, diff in BOTH
@@ -25,7 +25,7 @@ import {
  * two must agree — otherwise the preflight could pass rows the CHECK then
  * rejects (or vice versa), so both are parsed.
  */
-const MIGRATION = path.resolve(__dirname, "../../src/db/migrations/0004-integrity-constraints.sql");
+const MIGRATION = path.resolve(__dirname, "../../src/db/migrations/0005-integrity-constraints.sql");
 const sql = readFileSync(MIGRATION, "utf8");
 
 /** table.column → the values the runtime allows. */
@@ -66,7 +66,7 @@ function preflightValues(table: string, column: string): string[] | null {
   return m ? parseValueList(m[1]!) : null;
 }
 
-describe("0004 status CHECK constraints ↔ src/lib/status-values.ts (review #217)", () => {
+describe("0005 status CHECK constraints ↔ src/lib/status-values.ts (review #217)", () => {
   it("parses every expected constraint (guards against the DDL shape drifting past the regex)", () => {
     for (const [table, column] of EXPECTED) {
       expect(

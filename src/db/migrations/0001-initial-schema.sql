@@ -691,12 +691,15 @@ create index if not exists idx_app_outbox_due
 -- is the custom GUC `app.audit_retention`, which any session may SET, and the
 -- application connects as the role that OWNS the table — so this trigger is a
 -- guard against accidental mutation, not a privilege boundary. Migration
--- 0004-integrity-constraints.sql replaces the function: a DELETE is permitted
--- only when the EFFECTIVE role is the table owner inside the SECURITY DEFINER
--- `app_audit_events_prune()` function (the retention job's only path), and a
--- separate least-privilege runtime role holds INSERT/SELECT only.
--- The retention job (src/lib/retention.server.ts) calls that function; the
--- GUC-only bypass below is what 0004 supersedes.
+-- 0005-integrity-constraints.sql replaces the function: a DELETE is permitted
+-- only when the EFFECTIVE role is the table owner AND the marker is on — both
+-- hold inside the SECURITY DEFINER `app_audit_events_prune()` function (the
+-- retention job's path) whoever calls it, and neither can hold for the
+-- separate least-privilege runtime role, which holds INSERT/SELECT only. A
+-- session connected AS THE OWNER can still set the marker and delete; the
+-- boundary is the role split, not the trigger. The retention job
+-- (src/lib/retention.server.ts) calls that function; the GUC-only bypass
+-- below is what 0005 supersedes.
 
 create or replace function app_audit_events_block_mutation()
   returns trigger

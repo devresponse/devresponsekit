@@ -257,7 +257,7 @@ describe("seedDefaultAdminUser (DB-backed, review #18)", () => {
     // What the admin block path writes (user-actions.server.ts / admin-status
     // .server.ts): user AND membership both go to `blocked`. Every production
     // path writes `blocked`; `deactivated` is not a membership status at all
-    // (MEMBERSHIP_STATUS_VALUES), and 0004's CHECK now rejects it.
+    // (MEMBERSHIP_STATUS_VALUES), and 0005's CHECK now rejects it.
     await pgPool.query(
       `update app_users set status = 'blocked', status_reason = 'abuse' where id = $1`,
       [appUser!.id],
@@ -318,7 +318,7 @@ describe("seedDefaultAdminUser (DB-backed, review #18)", () => {
     const email = `adopt-${RUN}@${EMAIL_DOMAIN}`;
     const authUser = await insertAuthUser({ email, name: "Owner", emailVerified: false });
     // `pending_approval` is the real not-yet-active status (APP_USER_STATUS_VALUES,
-    // pinned by 0004's CHECK); the previous `pending_verification` never existed.
+    // pinned by 0005's CHECK); the previous `pending_verification` never existed.
     await pgPool.query(
       `insert into app_users (better_auth_user_id, primary_email, display_name, status, status_reason)
        values ($1, $2, $3, 'pending_approval', 'awaiting email')`,

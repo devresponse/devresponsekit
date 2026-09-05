@@ -1,11 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pgPool } from "@/db/database";
 
 /**
- * DB-BACKED proof that migration 0004-integrity-constraints.sql refuses to run
+ * DB-BACKED proof that migration 0005-integrity-constraints.sql refuses to run
  * against data that violates a constraint it adds — and that its refusal
  * leaves the database untouched, names every offender, and that the file is
  * idempotent once the data is clean (source review 2026-09-04, #217 rollout
@@ -13,16 +13,23 @@ import { pgPool } from "@/db/database";
  *
  * The migrated dev/CI database already carries the constraints, so the
  * scenario is built in a SCRATCH SCHEMA on a dedicated connection: apply the
- * frozen baseline (0001–0003) there, plant offending rows, run 0004 in a
+ * every core file that sorts BEFORE 0005 there (read from the directory, so
+ * a sibling that lands on main in between — 0004-oauth-… did — is never
+ * silently omitted), plant offending rows, run 0005 in a
  * transaction exactly as the runner does, and inspect. The schema (and the
- * `<schema>_runtime` role 0004 creates for it) are dropped afterwards.
+ * `<schema>_runtime` role 0005 creates for it) are dropped afterwards.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts).
  */
-const SCHEMA = "__dbtest_m0004";
+const SCHEMA = "__dbtest_m0005";
 const RUNTIME_ROLE = `${SCHEMA}_runtime`;
 const MIGRATIONS_DIR = path.resolve(__dirname, "../../src/db/migrations");
 const read = (file: string) => readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
+const MIGRATION = "0005-integrity-constraints.sql";
+/** The core files the scratch schema needs first: every `NNNN-*.sql` that sorts before MIGRATION. */
+const BASELINE = readdirSync(MIGRATIONS_DIR)
+  .filter((file) => /^\d{4}-.*\.sql$/.test(file) && file < MIGRATION)
+  .sort();
 
 let client: PoolClient;
 
@@ -56,11 +63,11 @@ beforeAll(async () => {
   await client.query(`drop schema if exists "${SCHEMA}" cascade`);
   await client.query(`create schema "${SCHEMA}"`);
   await client.query(`set search_path to "${SCHEMA}", public`);
-  for (const file of [
-    "0001-initial-schema.sql",
-    "0002-admin-groups-permissions.sql",
-    "0003-outbox-delivery-payload.sql",
-  ]) {
+  // Sanity: the listing starts at the frozen baseline and includes the
+  // sibling that once shared this migration's number.
+  expect(BASELINE[0]).toBe("0001-initial-schema.sql");
+  expect(BASELINE).toContain("0004-oauth-client-secret-rotated-at.sql");
+  for (const file of BASELINE) {
     await applyInTransaction(read(file));
   }
 });
@@ -81,7 +88,7 @@ afterAll(async () => {
   }
 });
 
-describe("0004 preflight (scratch schema)", () => {
+describe("0005 preflight (scratch schema)", () => {
   it("refuses with every offender listed and leaves the schema unchanged", async () => {
     // One offender per kind the preflight covers.
     await client.query(`
@@ -107,11 +114,11 @@ describe("0004 preflight (scratch schema)", () => {
 
     let message = "";
     try {
-      await applyInTransaction(read("0004-integrity-constraints.sql"));
+      await applyInTransaction(read(MIGRATION));
     } catch (err) {
       message = (err as Error).message;
     }
-    expect(message).toMatch(/\[0004\] refusing to apply: 6 row group\(s\)/);
+    expect(message).toMatch(/\[0005\] refusing to apply: 6 row group\(s\)/);
     expect(message).toContain("app_enterprise_applications.status = 'degraded' (1 rows)");
     expect(message).toContain("app_enterprise_applications.sso_audience = 'aud-shared' (2 rows)");
     expect(message).toContain("app_organizations.status = 'bogus' (1 rows)");
@@ -147,7 +154,7 @@ describe("0004 preflight (scratch schema)", () => {
       update app_organizations set status = 'archived' where slug = 'bad-status';
     `);
 
-    await applyInTransaction(read("0004-integrity-constraints.sql"));
+    await applyInTransaction(read(MIGRATION));
     expect(await constraintExists("app_organizations", "app_organizations_status_check")).toBe(
       true,
     );
@@ -168,7 +175,7 @@ describe("0004 preflight (scratch schema)", () => {
     expect(role.rows).toEqual([{ rolcanlogin: false }]);
 
     // Idempotent re-run: every guard short-circuits, nothing throws.
-    await applyInTransaction(read("0004-integrity-constraints.sql"));
+    await applyInTransaction(read(MIGRATION));
     expect(await constraintExists("app_organizations", "app_organizations_status_check")).toBe(
       true,
     );

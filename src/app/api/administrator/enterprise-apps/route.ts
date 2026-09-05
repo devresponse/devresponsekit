@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
       })
       .execute();
   } catch (err) {
-    // Review #15: the UNIQUE index on sso_audience (migration 0004) closes the
+    // Review #15: the UNIQUE index on sso_audience (migration 0005) closes the
     // race the pre-check above leaves open; its 23505 is an audience
     // collision, so it must NOT be reported as `id_taken`.
     if (isSsoAudienceUniqueViolation(err)) {

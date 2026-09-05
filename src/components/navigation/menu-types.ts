@@ -35,7 +35,7 @@ export interface EnterpriseApplicationMenuItem {
   /**
    * Derived from `APP_STATUS_VALUES` — ONE state model (review #63). The
    * switcher only ever lists `available` apps (launch rejects anything else),
-   * and the column's CHECK (migration 0004) admits `available` | `disabled`.
+   * and the column's CHECK (migration 0005) admits `available` | `disabled`.
    */
   status: AppStatus;
   active?: boolean;

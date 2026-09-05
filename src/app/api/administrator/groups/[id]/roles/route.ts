@@ -136,7 +136,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   }
 
   // Review #218: the row carries the org of both ends; the composite FKs
-  // (migration 0004) reject a role from any other org even if the same-org
+  // (migration 0005) reject a role from any other org even if the same-org
   // check above were bypassed.
   await db
     .insertInto("app_group_roles")

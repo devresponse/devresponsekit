@@ -1,7 +1,7 @@
 /**
  * Canonical status vocabularies for the identity / credential tables — the
  * TypeScript source of truth the database CHECK constraints in
- * `src/db/migrations/0004-integrity-constraints.sql` are copied from
+ * `src/db/migrations/0005-integrity-constraints.sql` are copied from
  * (review #217). `tests/unit/migration-status-check-sync.test.ts` parses the
  * SQL and diffs it against these arrays in both directions, so adding a value
  * here without a forward migration — or in a migration without updating the

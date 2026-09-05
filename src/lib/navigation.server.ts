@@ -72,7 +72,7 @@ export async function loadApplicationsMenu(
 ): Promise<NavigationMenuResponse<EnterpriseApplicationMenuItem>> {
   // Review #63: ONE state model. `degraded` was listed here but rejected by
   // launch (`APP_STATUS_VALUES` never contained it); the column's CHECK
-  // (migration 0004) now admits only `available` | `disabled`, and the
+  // (migration 0005) now admits only `available` | `disabled`, and the
   // switcher shows exactly what launch will accept.
   const rows = await db
     .selectFrom("app_enterprise_applications")

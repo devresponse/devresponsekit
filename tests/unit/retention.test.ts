@@ -123,6 +123,22 @@ describe("pruneAuditEvents", () => {
     expect(state.rawQueries[0]).not.toMatch(/audit_retention/);
     expect(state.deletedFrom).not.toContain("app_audit_events");
   });
+  it("raises a window below the database floor to the floor, and says so (review #83)", async () => {
+    // The database clamps regardless (migration 0005, `c_floor_days`); the
+    // worker mirrors it so the log matches what actually happens. 0 stays a
+    // disable, not a floor.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    state.auditDeleted = 1;
+    expect(mod.AUDIT_RETENTION_FLOOR_DAYS).toBe(30);
+    expect(await mod.pruneAuditEvents(1)).toBe(1);
+    expect(state.rawParams[0]).toEqual([30, 5000]);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/below the database floor of 30 days/));
+    warn.mockClear();
+    expect(await mod.pruneAuditEvents(31)).toBe(1);
+    expect(state.rawParams[1]).toEqual([31, 5000]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
   it("accepts a string count (a driver may hand an integer back as text)", async () => {
     state.auditBatches = ["3" as unknown as number];
     expect(await mod.pruneAuditEvents(30)).toBe(3);

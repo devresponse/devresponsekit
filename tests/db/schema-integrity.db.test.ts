@@ -6,7 +6,7 @@ import { isSsoAudienceUniqueViolation } from "@/lib/admin/enterprise-apps-audien
 import { pruneAuditEvents } from "@/lib/retention.server";
 
 /**
- * DB-BACKED proof of the invariants migration 0004-integrity-constraints.sql
+ * DB-BACKED proof of the invariants migration 0005-integrity-constraints.sql
  * moves into the schema (source review 2026-09-04: #15, #63, #83, #89, #217,
  * #218). Every case here is a real statement against the migrated database —
  * the unit suites mock the DB, so nothing else verifies that the constraints,
@@ -47,10 +47,14 @@ async function cleanup(): Promise<void> {
   await db.deleteFrom("app_enterprise_applications").where("id", "like", `${PREFIX}%`).execute();
   await db.deleteFrom("app_users").where("better_auth_user_id", "like", `${PREFIX}%`).execute();
   await db.deleteFrom("app_organizations").where("slug", "like", `${PREFIX}%`).execute();
-  // Audit rows are append-only; the sanctioned path is the prune function,
-  // scoped here by a ~98.6-year window (36000 days) to the 99- and 101-year-old
-  // probe rows below — nothing real is that old.
-  await sql`select app_audit_events_prune(36000, 1000)`.execute(db);
+  // Audit rows are append-only. The suite's probe rows (any age) are removed
+  // through the OWNER path the "owner with the marker" case below documents —
+  // the test connection is the owner, so marker + DELETE in one transaction
+  // is exactly the residual gap that case proves. Real rows are untouched.
+  await db.transaction().execute(async (trx) => {
+    await sql`select set_config('app.audit_retention', 'on', true)`.execute(trx);
+    await trx.deleteFrom("app_audit_events").where("event_type", "=", `${PREFIX}probe`).execute();
+  });
 }
 
 async function newOrg(slug: string): Promise<string> {
@@ -161,7 +165,7 @@ describe("#89 — every FK column has a leading-column index (or a reasoned allo
     expect(unindexed).toEqual(allowed);
   });
 
-  it("has the indexes 0004 adds for the org-scoped client paths and the listed FK columns", async () => {
+  it("has the indexes 0005 adds for the org-scoped client paths and the listed FK columns", async () => {
     const { rows } = await sql<{ indexname: string }>`
       select indexname from pg_indexes where schemaname = current_schema()
     `.execute(db);
@@ -296,9 +300,9 @@ describe("#218 — same-organization invariant for group roles and user roles", 
       .execute();
   });
 
-  it("app_group_roles: an insert WITHOUT organization_id (the pre-0004 build's shape) succeeds and lands in the group's org", async () => {
+  it("app_group_roles: an insert WITHOUT organization_id (the pre-0005 build's shape) succeeds and lands in the group's org", async () => {
     // Deployment §2 promises migrate-first + rollback safety: the build that
-    // is live while 0004 runs inserts `{group_id, role_id}` only. NOT NULL
+    // is live while 0005 runs inserts `{group_id, role_id}` only. NOT NULL
     // without the bind trigger turned that into a 23502 and a 500 on
     // POST /api/administrator/groups/[id]/roles for the whole window.
     const orgA = await newOrg("a");
@@ -458,6 +462,103 @@ describe("#83 — audit table: append-only trigger, SECURITY DEFINER prune, runt
     expect(err.code).toBe("23514");
   });
 
+  it("a NON-owner role that holds DELETE and sets the marker is still rejected (23514) — the owner half of the trigger", async () => {
+    // Review #83 must-fix: every other case here runs as the owner, so the
+    // `current_user = owner` condition never failed and could be deleted
+    // from the trigger unnoticed. This one runs as a throwaway role that has
+    // MORE than the runtime role (DELETE on the table) and still sets the
+    // marker — only condition (1) stands between it and the row. CREATE ROLE
+    // is transactional, so the rollback removes the role again. Needs a
+    // superuser test connection for SET ROLE (the local devresponse role and
+    // CI's service user both are).
+    const id = await oldAuditRow(101);
+    const client = await pgPool.connect();
+    const role = "__dbtest_si_audit_deleter";
+    try {
+      const su = await client.query<{ rolsuper: boolean }>(
+        `select rolsuper from pg_roles where rolname = current_user`,
+      );
+      expect(su.rows[0]!.rolsuper, "this case needs a superuser test connection (SET ROLE)").toBe(
+        true,
+      );
+      await client.query("begin");
+      await client.query(`create role "${role}" nologin`);
+      await client.query(`grant usage on schema "${DB_SCHEMA}" to "${role}"`);
+      await client.query(`grant select, delete on app_audit_events to "${role}"`);
+      await client.query(`set local role "${role}"`);
+      await client.query(`set local app.audit_retention = 'on'`);
+      let err: PgError | undefined;
+      try {
+        await client.query(`delete from app_audit_events where id = $1`, [id]);
+      } catch (e) {
+        err = e as PgError;
+      }
+      expect(err?.code).toBe("23514");
+      expect(err?.message).toMatch(new RegExp(`current_user=${role}\\)`));
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+    // Still there (and the role is gone with the rollback).
+    const left = await db
+      .selectFrom("app_audit_events")
+      .select("id")
+      .where("id", "=", id)
+      .executeTakeFirst();
+    expect(left?.id).toBe(id);
+    const gone = await sql<{
+      n: string;
+    }>`select count(*) as n from pg_roles where rolname = ${role}`.execute(db);
+    expect(Number(gone.rows[0]!.n)).toBe(0);
+  });
+
+  it(`app_audit_events_prune(1, n) called AS ${RUNTIME_ROLE} cannot reach a 2-day-old row — the window is clamped to the owner's 30-day floor`, async () => {
+    // Review #83 must-fix: the SECURITY DEFINER function is the runtime
+    // role's only DELETE path, so its p_days must not be the whole policy.
+    // Runs inside a rolled-back transaction because, clamped to 30 days, the
+    // call WOULD prune real rows older than a month on a long-lived dev DB.
+    const recent = await db
+      .insertInto("app_audit_events")
+      .values({
+        event_type: `${PREFIX}probe`,
+        outcome: "success",
+        created_at: sql`now() - interval '2 days'`,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    const aged = await oldAuditRow(101);
+    const client = await pgPool.connect();
+    try {
+      await client.query("begin");
+      await client.query(`set local role "${RUNTIME_ROLE}"`);
+      // Drain like the worker does, so the aged probe is reached whatever
+      // else is older than the floor.
+      for (;;) {
+        const { rows } = await client.query<{ n: number }>(
+          `select app_audit_events_prune(1, 10000) as n`,
+        );
+        if (Number(rows[0]!.n) < 10000) break;
+      }
+      const { rows } = await client.query<{ id: string }>(
+        `select id from app_audit_events where id = any($1::uuid[])`,
+        [[recent.id, aged]],
+      );
+      // The 2-day-old row survived a request for a 1-day window; the
+      // 101-year-old row is gone, proving the function did run and delete.
+      expect(rows.map((r) => r.id)).toEqual([recent.id]);
+      // The batch cap: asking for a million rows per call is honoured as at
+      // most 10000 — the function's own limit, not the caller's.
+      const cap = await client.query<{ n: number }>(
+        `select app_audit_events_prune(36500, 1000000) as n`,
+      );
+      expect(Number(cap.rows[0]!.n)).toBeLessThanOrEqual(10000);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+    // (The recent probe is still there after the rollback; cleanup() removes it.)
+  });
+
   it("pruneAuditEvents deletes ONLY aged rows, through app_audit_events_prune(), in batches", async () => {
     const a = await oldAuditRow(101);
     const b = await oldAuditRow(101);
@@ -495,7 +596,7 @@ describe("#83 — audit table: append-only trigger, SECURITY DEFINER prune, runt
     `.execute(db);
     expect(
       role.rows,
-      `${RUNTIME_ROLE} missing — 0004 creates it whenever the migrating role has CREATEROLE (true for the local devresponse role and CI's service user)`,
+      `${RUNTIME_ROLE} missing — 0005 creates it whenever the migrating role has CREATEROLE (true for the local devresponse role and CI's service user)`,
     ).toHaveLength(1);
     expect(role.rows[0]!.rolcanlogin).toBe(false);
 

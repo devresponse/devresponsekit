@@ -692,7 +692,7 @@ privilege-ordering guard (§8.1) writes `admin.user.action_denied` with
 
 The audit log is a tamper-evident compliance record. A row-level
 `BEFORE UPDATE OR DELETE` trigger (`app_audit_events_block_mutation`, installed
-by `0001-initial-schema.sql` and replaced by `0004-integrity-constraints.sql`)
+by `0001-initial-schema.sql` and replaced by `0005-integrity-constraints.sql`)
 **raises on any UPDATE or DELETE**; INSERTs are unaffected. The one UPDATE it
 permits is the org-deletion `SET NULL` tombstone (organization_id → null with
 every other column unchanged).
@@ -704,13 +704,20 @@ What the trigger does and does not guarantee (review #83):
   by the schema owner; `src/lib/retention.server.ts` calls it in batches. The
   trigger lets a DELETE through only when the **effective** role is the table
   owner _and_ the transaction-local marker that function sets is on — the
-  marker alone (the pre-0004 escape hatch) no longer suffices, so setting
+  marker alone (the pre-0005 escape hatch) no longer suffices, so setting
   `app.audit_retention` from a session connected as the **runtime role** does
   nothing. It still works from a session connected as the **owner** — which is
   what the application does by default, until the operator switches
   `DATABASE_URL` to the runtime role (next bullet); that residual gap is
   documented, tested (`tests/db/schema-integrity.db.test.ts`), and closed only
   by the role switch.
+- **The retention window is owner-controlled, not caller-controlled.** The
+  function clamps the `days` it is asked for to a floor of **30 days** baked
+  into its owner-owned body (and caps each batch at 10 000 rows), so a
+  compromised runtime credential calling `app_audit_events_prune(1, …)` in a
+  loop cannot erase anything younger than a month; `AUDIT_RETENTION_DAYS`
+  below 30 is honoured as 30 (the worker logs the clamp). Shortening the floor
+  is a new migration run as the owner, never an application setting.
 - **The privilege boundary is the runtime role, not the trigger.** When the
   application connects as the least-privilege `<DB_SCHEMA>_runtime` role
   ([Deployment §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended))

@@ -83,14 +83,98 @@ export function planMigrations(
 }
 
 /**
+ * Reduces a migration file to the form that is hashed (review #86): `--` line
+ * comments and `/* … *\/` block comments are dropped and every run of
+ * whitespace outside a literal collapses to one space. Single-quoted strings
+ * and double-quoted identifiers are kept VERBATIM (a `--` inside an email
+ * template's HTML is data, not a comment). Dollar-quoted bodies (`$$`,
+ * `$tag$`) are NOT literals here: a comment inside a plpgsql body is still a
+ * comment and its layout still layout, so the same rules apply inside them.
+ * Backslashes are not special (the files use standard_conforming_strings, no
+ * `E''` literals).
+ *
+ * Why normalise at all: the repo DELIBERATELY edits comments in frozen files
+ * (the July comment audit, review #403's sweep) and every such edit would
+ * otherwise invalidate the ledger row in every migrated database and the CI
+ * pin. Comments and layout have no effect on what a migration does, so they
+ * are not part of its identity; any DDL/DML change — one character inside a
+ * literal included — still produces a different hash.
+ */
+export function normalizeMigrationSql(sql: string): string {
+  const src = sql.replace(/\r\n/g, "\n");
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  let pendingSpace = false;
+  const emit = (s: string) => {
+    if (pendingSpace && out.length > 0) out += " ";
+    pendingSpace = false;
+    out += s;
+  };
+
+  while (i < n) {
+    const c = src[i]!;
+    const next = src[i + 1];
+
+    // Line comment → drop to end of line (the newline itself is whitespace).
+    if (c === "-" && next === "-") {
+      const eol = src.indexOf("\n", i);
+      i = eol === -1 ? n : eol;
+      continue;
+    }
+    // Block comment (PostgreSQL nests them) → drop entirely.
+    if (c === "/" && next === "*") {
+      let depth = 1;
+      i += 2;
+      while (i < n && depth > 0) {
+        if (src[i] === "/" && src[i + 1] === "*") {
+          depth++;
+          i += 2;
+        } else if (src[i] === "*" && src[i + 1] === "/") {
+          depth--;
+          i += 2;
+        } else i++;
+      }
+      continue;
+    }
+    // Single-quoted string ('' is an escaped quote) / double-quoted identifier
+    // ("" likewise) → copied verbatim, whitespace and all.
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === c) {
+          if (src[j + 1] === c) {
+            j += 2;
+            continue;
+          }
+          break;
+        }
+        j++;
+      }
+      emit(src.slice(i, j + 1));
+      i = j + 1;
+      continue;
+    }
+    if (c === " " || c === "\n" || c === "\t" || c === "\r" || c === "\f" || c === "\v") {
+      pendingSpace = true;
+      i++;
+      continue;
+    }
+    emit(c);
+    i++;
+  }
+  return out;
+}
+
+/**
  * Content checksum recorded in the `app_schema_migrations.checksum` ledger
- * column (review #86). Line endings are normalised to `\n` first so a CRLF
- * checkout (Windows without `.gitattributes` honoured) and CI's LF checkout
- * hash the same file — otherwise one database migrated from two machines
- * would report a false mismatch.
+ * column (review #86): sha256 of {@link normalizeMigrationSql}'s output, so a
+ * CRLF checkout, a re-flowed comment or a re-indented block hash the same as
+ * CI's copy, while any change to what the file DOES is a different hash.
+ * The same function produces the pins in tests/unit/migration-checksums.test.ts.
  */
 export function migrationChecksum(sql: string): string {
-  return createHash("sha256").update(sql.replace(/\r\n/g, "\n"), "utf8").digest("hex");
+  return createHash("sha256").update(normalizeMigrationSql(sql), "utf8").digest("hex");
 }
 
 export type LedgerChecksumVerdict = "match" | "backfill";
@@ -105,7 +189,9 @@ export type LedgerChecksumVerdict = "match" | "backfill";
  *   - different → throws. A frozen file edited after being applied silently
  *     diverges environments (an existing database skips it, a fresh one gets
  *     the edited DDL), so the runner MUST fail loudly with the id and both
- *     hashes rather than proceed.
+ *     hashes rather than proceed. Because the hash ignores comments and
+ *     whitespace ({@link normalizeMigrationSql}), a mismatch always means a
+ *     functional change, never a re-flowed comment.
  */
 export function reconcileLedgerChecksum(
   id: string,
@@ -116,8 +202,9 @@ export function reconcileLedgerChecksum(
   if (stored === actual) return "match";
   throw new Error(
     `[migrate] checksum mismatch for applied migration "${id}": ledger has ${stored}, ` +
-      `file on disk hashes to ${actual}. Applied migrations are frozen — restore the file, ` +
-      `or, if the edit was deliberate and comment-only, update the ledger row on purpose ` +
-      `(update app_schema_migrations set checksum = '${actual}' where id = '${id}').`,
+      `file on disk hashes to ${actual}. Applied migrations are frozen — restore the file. ` +
+      `(Comments and whitespace are not hashed, so this is a change to what the file DOES; ` +
+      `only if that change is deliberate and already applied by hand, update the ledger row ` +
+      `on purpose: update app_schema_migrations set checksum = '${actual}' where id = '${id}'.)`,
   );
 }

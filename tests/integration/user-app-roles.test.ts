@@ -216,7 +216,7 @@ describe("POST /users/[id]/app-roles — assignment scoping", () => {
 
   it("409 role_organization_mismatch when a SUPERADMIN pairs an org-B role with an org-A membership (review #218)", async () => {
     // A SUPERADMIN can access every org, so the scope checks alone let this
-    // through; the row is unrepresentable since migration 0004, and the
+    // through; the row is unrepresentable since migration 0005, and the
     // route must say why instead of surfacing the trigger's error.
     state.role = { id: ROLE, key: "editor", organization_id: ORG_B };
     state.org = { id: ORG_A };

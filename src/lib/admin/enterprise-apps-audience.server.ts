@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "@/db/database";
 
 /**
- * Name of the UNIQUE index migration 0004 puts on
+ * Name of the UNIQUE index migration 0005 puts on
  * `app_enterprise_applications (sso_audience)` (review #15). A 23505 that
  * names it is an audience collision, not an `id` collision.
  */
@@ -23,7 +23,7 @@ export function isSsoAudienceUniqueViolation(err: unknown): boolean {
 /**
  * Route-layer uniqueness check for `app_enterprise_applications.sso_audience`
  * (review #15) — the FIRST line of defence, giving a clean 409 before any
- * write; the UNIQUE index (migration 0004) is the second, closing the
+ * write; the UNIQUE index (migration 0005) is the second, closing the
  * check-then-write race, and the routes map its 23505 to the same
  * `audience_taken` code via {@link isSsoAudienceUniqueViolation}.
  *

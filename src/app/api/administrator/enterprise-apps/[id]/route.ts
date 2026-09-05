@@ -154,7 +154,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     await db.updateTable("app_enterprise_applications").set(updates).where("id", "=", id).execute();
   } catch (err) {
-    // Review #15: the UNIQUE index on sso_audience (migration 0004) is the
+    // Review #15: the UNIQUE index on sso_audience (migration 0005) is the
     // second line of defence behind the pre-check above — same 409 code.
     if (isSsoAudienceUniqueViolation(err)) {
       return adminErrorResponse("audience_taken", 409, request);

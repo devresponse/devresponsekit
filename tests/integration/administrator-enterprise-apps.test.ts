@@ -301,7 +301,7 @@ describe("POST /api/administrator/enterprise-apps", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
     // The pre-check saw no owner (a concurrent create won the race); the
-    // index in migration 0004 is the second line of defence.
+    // index in migration 0005 is the second line of defence.
     selectFirst.mockResolvedValue(null);
     insertExecute.mockRejectedValue(
       Object.assign(new Error('duplicate key value violates unique constraint "idx_…"'), {

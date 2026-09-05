@@ -44,8 +44,11 @@ import {
  * every statement a different connection.
  *
  * Integrity (review #86): the ledger also stores a sha256 `checksum` of each
- * applied file. On every run the hash of every already-applied file is
- * compared with the ledger; a mismatch aborts before anything is applied
+ * applied file — of its NORMALISED content (`normalizeMigrationSql`: comments
+ * stripped, whitespace collapsed, literals verbatim), so the deliberate
+ * comment-only edits this repo makes to frozen files never trip it while any
+ * functional edit does. On every run the hash of every already-applied file
+ * is compared with the ledger; a mismatch aborts before anything is applied
  * (`reconcileLedgerChecksum`). Rows ledgered before the column existed are
  * backfilled with the current hash and logged. The column is added
  * idempotently in the bootstrap below — not as a numbered migration — because
@@ -108,7 +111,7 @@ async function main() {
   // One dedicated session for the whole run: it owns the advisory lock and
   // every migration transaction (reviews #84, #85).
   const client = await pool.connect();
-  // Migrations report operator steps via RAISE NOTICE (e.g. 0004's runtime
+  // Migrations report operator steps via RAISE NOTICE (e.g. 0005's runtime
   // role split, review #83); `pg` drops notices unless something listens.
   client.on("notice", (notice) => {
     console.log(`[migrate] notice ${notice.message ?? ""}`);

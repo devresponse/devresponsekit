@@ -30,8 +30,21 @@ import { pruneExpiredRevocations } from "@/lib/api-auth/revocation.server";
 export const DEFAULT_AUDIT_RETENTION_DAYS = 365;
 export const DEFAULT_OUTBOX_RETENTION_DAYS = 90;
 export const DEFAULT_OUTBOX_MAX_PENDING_DAYS = 7;
-/** Batch size for the audit prune — bounds each DELETE's lock/WAL/timeout cost. */
+/**
+ * Batch size for the audit prune — bounds each DELETE's lock/WAL/timeout cost.
+ * Must stay ≤ the function's own cap (`c_max_batch`, 10000, migration 0005):
+ * the loop below treats a batch shorter than THIS number as "drained", so a
+ * larger value would stop after one capped batch.
+ */
 const AUDIT_PRUNE_BATCH = 5000;
+/**
+ * The shortest audit window the database will honour (review #83). Mirrors
+ * `c_floor_days` in `app_audit_events_prune` (migration 0005) — the database
+ * clamps whatever it is asked, this constant only lets the worker say so in
+ * its log instead of silently pruning less than configured. Change both in
+ * lock-step (a new migration re-creates the function).
+ */
+export const AUDIT_RETENTION_FLOOR_DAYS = 30;
 
 /** Parses a non-negative integer day-count env var, falling back when unset/invalid. */
 export function retentionDays(value: string | undefined, fallback: number): number {
@@ -42,22 +55,34 @@ export function retentionDays(value: string | undefined, fallback: number): numb
 }
 
 /**
- * Deletes audit rows older than `days` (a no-op when `days <= 0`).
+ * Deletes audit rows older than `days` (a no-op when `days <= 0`; a window
+ * shorter than {@link AUDIT_RETENTION_FLOOR_DAYS} is raised to the floor).
  *
  * B3 makes `app_audit_events` append-only via a trigger that blocks UPDATE and
- * DELETE. The ONE sanctioned path is `app_audit_events_prune(days, batch)`
- * (migration 0004, review #83): a SECURITY DEFINER function owned by the
- * schema owner, so it runs with the owner's privileges whoever calls it — the
- * least-privilege runtime role has no DELETE on the table at all, and the
- * trigger only lets a DELETE through when the effective role IS the owner
- * inside that function. Nothing here sets a GUC any more; the marker the
- * trigger checks is set inside the function, transaction-locally.
+ * DELETE. The ONE sanctioned path for the application is
+ * `app_audit_events_prune(days, batch)` (migration 0005, review #83): a
+ * SECURITY DEFINER function owned by the schema owner, so it runs with the
+ * owner's privileges whoever calls it — the least-privilege runtime role has
+ * no DELETE on the table at all, and the trigger lets a DELETE through only
+ * when the EFFECTIVE role is the table owner and the transaction-local
+ * `app.audit_retention` marker is on. The function satisfies both; a session
+ * connected as the runtime role can satisfy neither. (A session connected as
+ * the owner itself — the default until Deployment §8's role switch — can
+ * still set the marker and delete; the boundary is the role, not the
+ * trigger.) The function also clamps `days` to the floor server-side, so the
+ * clamp here is a courtesy log, not the enforcement. Nothing here sets a GUC.
  */
 export async function pruneAuditEvents(
   days: number,
   batchSize = AUDIT_PRUNE_BATCH,
 ): Promise<number> {
   if (days <= 0) return 0;
+  if (days < AUDIT_RETENTION_FLOOR_DAYS) {
+    console.warn(
+      `[retention] AUDIT_RETENTION_DAYS=${days} is below the database floor of ${AUDIT_RETENTION_FLOOR_DAYS} days; pruning at ${AUDIT_RETENTION_FLOOR_DAYS}`,
+    );
+    days = AUDIT_RETENTION_FLOOR_DAYS;
+  }
   let total = 0;
   // Delete in bounded batches (audit #21): the function deletes at most
   // `batchSize` rows per call (`ctid in (… limit N)`), each call its own

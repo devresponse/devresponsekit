@@ -1,4 +1,4 @@
--- 0004-integrity-constraints.sql
+-- 0005-integrity-constraints.sql
 --
 -- Database-level integrity for invariants that were previously enforced only
 -- in route code (source review 2026-09-04, Wave 3):
@@ -24,7 +24,7 @@
 --        moves into the schema: `unique (id, organization_id)` on groups and
 --        roles, a backfilled `organization_id` on app_group_roles with
 --        composite FKs (derived by a trigger from the group when a writer
---        omits it, so the pre-0004 build keeps working — see 4b), and on
+--        omits it, so the pre-0005 build keeps working — see 4b), and on
 --        app_user_roles a trigger-maintained `role_organization_id` with a
 --        composite FK for org-scoped roles (global roles, organization_id IS
 --        NULL, are exempt from the FK by MATCH SIMPLE and checked by the
@@ -40,7 +40,9 @@
 --        what the application does until the operator switches DATABASE_URL
 --        to the runtime role (Deployment §8) — can still set the marker and
 --        delete: the guarantee is against the runtime credential, not the
---        schema owner (see 5c).
+--        schema owner (see 5c). The retention function clamps the caller's
+--        window to an owner-owned floor (30 days) and caps the batch, so the
+--        runtime credential cannot use it to purge recent history (see 5b).
 --
 -- Rollout shape: every CHECK is added NOT VALID and then VALIDATEd (an
 -- online pattern — VALIDATE takes only SHARE UPDATE EXCLUSIVE), and the
@@ -129,7 +131,7 @@ begin
   end loop;
 
   if array_length(v_offenders, 1) > 0 then
-    raise exception '[0004] refusing to apply: % row group(s) violate a constraint this migration adds. Fix the data, then re-run. Offenders (table.column = value (count)): %',
+    raise exception '[0005] refusing to apply: % row group(s) violate a constraint this migration adds. Fix the data, then re-run. Offenders (table.column = value (count)): %',
       array_length(v_offenders, 1), array_to_string(v_offenders, '; ')
       using errcode = 'check_violation',
             hint = 'Nothing was changed. Review each offender, correct or remove the rows, and re-run pnpm db:app:migrate.';
@@ -284,7 +286,7 @@ end $$;
 --     is DERIVED in the database: the BEFORE trigger below fills
 --     organization_id from the group whenever a writer leaves it NULL —
 --     the mirror of the app_user_roles bind trigger in 4c. A writer that
---     does supply it (the post-0004 route) is left alone, and a wrong value
+--     does supply it (the post-0005 route) is left alone, and a wrong value
 --     still fails on the composite FKs; the trigger fills a gap, it never
 --     overrides an explicit claim. NOT NULL is then safe to add.
 alter table app_group_roles add column if not exists organization_id uuid;
@@ -424,11 +426,11 @@ begin
     begin
       execute format('create role %I nologin', v_role);
       raise notice '%', format(
-        '[0004] created runtime role %I (NOLOGIN, no password). Enable it deliberately with: alter role %I login password ''<secret>''; then point the application DATABASE_URL at it (docs/deployment.md, "Least-privilege runtime role").',
+        '[0005] created runtime role %I (NOLOGIN, no password). Enable it deliberately with: alter role %I login password ''<secret>''; then point the application DATABASE_URL at it (docs/deployment.md, "Least-privilege runtime role").',
         v_role, v_role);
     exception when insufficient_privilege then
       raise notice '%', format(
-        '[0004] could not create runtime role %I (the migrating role lacks CREATEROLE); the rest of this migration still applies. Manual steps, as a role that can create roles: create role %I nologin; then re-run pnpm db:app:migrate (the grant block is idempotent) — or grant by hand: grant usage on schema %I to %I; grant select, insert, update, delete on all tables in schema %I to %I; alter default privileges in schema %I grant select, insert, update, delete on tables to %I; revoke update, delete, truncate on %I.app_audit_events from %I; grant execute on function %I.app_audit_events_prune(integer, integer) to %I.',
+        '[0005] could not create runtime role %I (the migrating role lacks CREATEROLE); the rest of this migration still applies. Manual steps, as a role that can create roles: create role %I nologin; then re-run pnpm db:app:migrate (the grant block is idempotent) — or grant by hand: grant usage on schema %I to %I; grant select, insert, update, delete on all tables in schema %I to %I; alter default privileges in schema %I grant select, insert, update, delete on tables to %I; revoke update, delete, truncate on %I.app_audit_events from %I; grant execute on function %I.app_audit_events_prune(integer, integer) to %I.',
         v_role, v_role, v_schema, v_role, v_schema, v_role, v_schema, v_role, v_schema, v_role, v_schema, v_role);
     end;
   end if;
@@ -442,6 +444,20 @@ end $$;
 --     SECURITY DEFINER hygiene. The `app.audit_retention` marker is set
 --     transaction-locally INSIDE the function only — see the trigger below
 --     for why it is no longer sufficient on its own.
+--
+--     OWNER-CONTROLLED WINDOW (review #83, must-fix): the function is the
+--     runtime role's ONLY way to delete audit rows, so the caller's p_days
+--     must not be the whole policy — a stolen runtime credential calling
+--     prune(1, …) in a loop would otherwise erase everything older than a
+--     day. The window is therefore clamped to a FLOOR baked into this
+--     owner-owned function body (`c_floor_days`; the runtime role has no
+--     CREATE on the schema and cannot replace it), and the batch is capped
+--     so a single call stays bounded. Callers asking for less than the floor
+--     get the floor (the worker mirrors the clamp client-side and logs it);
+--     an operator who needs a shorter window changes the constant in a NEW
+--     migration, as the owner — never through the application credential.
+--     Keep `AUDIT_RETENTION_FLOOR_DAYS` in src/lib/retention.server.ts and
+--     the docs (configuration.md, admin-manager §12.1) equal to this value.
 create or replace function app_audit_events_prune(p_days integer, p_batch integer)
   returns integer
   language plpgsql
@@ -449,11 +465,15 @@ create or replace function app_audit_events_prune(p_days integer, p_batch intege
   set search_path from current
 as $$
 declare
+  c_floor_days constant integer := 30;
+  c_max_batch  constant integer := 10000;
   v_deleted integer;
 begin
   if p_days is null or p_days <= 0 or p_batch is null or p_batch <= 0 then
     return 0;
   end if;
+  p_days  := greatest(p_days, c_floor_days);
+  p_batch := least(p_batch, c_max_batch);
   perform set_config('app.audit_retention', 'on', true);
   delete from app_audit_events
    where ctid in (

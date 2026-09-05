@@ -11,6 +11,10 @@ import type { NextRequest } from "next/server";
  * authorization + validation + audit ordering without standing up a
  * Postgres instance. DB-state assertions are covered by the dedicated
  * SQL integration suite that runs against the seeded test database.
+ *
+ * Since review #28 the route authenticates through the shared self-service
+ * guard (`requireAccountUser`, run for real here — only the session and
+ * access lookups beneath it are mocked) and is rate-limited per user.
  */
 
 const sessionGetter = vi.fn();
@@ -116,6 +120,54 @@ describe("POST /api/preferences/locale", () => {
     });
     const res = await POST(makeRequest({ locale: "fr" }));
     expect(res.status).toBe(403);
+  });
+
+  it("returns 403 for a pending user — the shared guard admits ACTIVE members only (review #28)", async () => {
+    // The only client that persists a locale is the secure shell's switcher,
+    // which a pending user never reaches; the (auth)-layout switcher just
+    // changes the URL locale. So the guard's active-member rule costs nothing
+    // for real traffic and removes a bespoke "pending may write" carve-out.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "u@x.com",
+      status: "pending_approval",
+      organizationId: null,
+      membershipStatus: null,
+      preferredLocale: "en",
+      permissions: [],
+    });
+    const res = await POST(makeRequest({ locale: "fr" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "forbidden" });
+    expect(updateExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("throttles a scripted locale loop per user with 429 + Retry-After, before any write (review #28)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "u@x.com",
+      status: "active",
+      organizationId: "o-1",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: [],
+    });
+    // DEFAULT_ADMIN_MUTATION_LIMIT: 30-token burst.
+    for (let i = 0; i < 30; i += 1) {
+      expect((await POST(makeRequest({ locale: "fr" }))).status).toBe(200);
+    }
+    updateExecute.mockClear();
+    auditMock.mockClear();
+    const denied = await POST(makeRequest({ locale: "fr" }));
+    expect(denied.status).toBe(429);
+    expect(Number(denied.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(updateExecute).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "i18n.locale.changed" }),
+    );
   });
 
   it("returns 400 for an unsupported locale", async () => {

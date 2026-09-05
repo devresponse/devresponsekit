@@ -76,6 +76,44 @@ describe("getCurrentSession", () => {
   });
 });
 
+/**
+ * Review #122: `getImpersonatorId` is the authority for "is this an
+ * impersonation session" (STOP-impersonation, the active-org switch, the SSO
+ * launch refusal) and had no unit coverage — every consumer suite re-mocked
+ * it. Pin the real function against the session shape `getCurrentSession`
+ * returns.
+ */
+describe("getImpersonatorId", () => {
+  type Session = Awaited<ReturnType<typeof mod.getCurrentSession>>;
+  const asSession = (v: unknown) => v as Session;
+
+  it("returns the impersonating admin's id from the plugin's camelCase field", () => {
+    expect(
+      mod.getImpersonatorId(
+        asSession({ user: { id: "target" }, session: { id: "s", impersonatedBy: "admin-9" } }),
+      ),
+    ).toBe("admin-9");
+  });
+
+  it("accepts the snake_case column spelling (plugin version drift)", () => {
+    expect(
+      mod.getImpersonatorId(
+        asSession({ user: { id: "target" }, session: { id: "s", impersonated_by: "admin-9" } }),
+      ),
+    ).toBe("admin-9");
+  });
+
+  it("is null for a plain session and for no session", () => {
+    expect(
+      mod.getImpersonatorId(
+        asSession({ user: { id: "u" }, session: { id: "s", impersonatedBy: null } }),
+      ),
+    ).toBeNull();
+    expect(mod.getImpersonatorId(asSession({ user: { id: "u" } }))).toBeNull();
+    expect(mod.getImpersonatorId(null)).toBeNull();
+  });
+});
+
 describe("requireSecureSession", () => {
   it("redirects to localized sign-in with a sanitized returnTo when unauthenticated", async () => {
     getSessionMock.mockResolvedValue(null);

@@ -211,6 +211,32 @@ export default defineConfig({
           branches: 85,
         },
         "**/lib/sso.server.ts": { lines: 88, statements: 88, functions: 90, branches: 78 },
+        // Review 2026-09-04 #122 (+ #27): the four authority modules with no
+        // floor — the admin guard (incl. its untrusted-origin denial path), the
+        // session guard (`getImpersonatorId`, the P0-1 marker), the tenant-switch
+        // authority, and the self-service guard. Pinned a few points below the
+        // measured actuals after the review's tests landed; raise, never lower.
+        "**/lib/admin/permissions.server.ts": {
+          lines: 90,
+          statements: 90,
+          functions: 95,
+          branches: 85,
+        },
+        "**/lib/auth-guard.ts": { lines: 90, statements: 90, functions: 95, branches: 70 },
+        "**/lib/active-org.server.ts": {
+          lines: 95,
+          statements: 95,
+          functions: 95,
+          branches: 90,
+        },
+        "**/lib/account/guard.server.ts": {
+          lines: 90,
+          statements: 90,
+          functions: 95,
+          branches: 85,
+        },
+        // The pure impersonation-marker reader shared by both guards (review #28).
+        "**/lib/impersonation.ts": { lines: 100, statements: 100, functions: 100, branches: 100 },
       },
     },
   },

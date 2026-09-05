@@ -44,6 +44,13 @@ vi.mock("@/lib/observability/logger.server", () => ({
 vi.mock("@/lib/observability/server", () => ({
   captureServerError: (...args: unknown[]) => captureMock(...args),
 }));
+// Review #66: the origin guard short-circuits under NODE_ENV=test, so the
+// POST's origin-denied branch (403 + `denied` audit) was dead under the whole
+// suite. Mock it (default: allow) so the deny path can be driven explicitly.
+const originCheck = vi.fn();
+vi.mock("@/lib/admin/origin-guard.server", () => ({
+  checkTrustedOrigin: (...args: unknown[]) => originCheck(...args),
+}));
 
 function getRequest(url: string, headers: Record<string, string> = {}): NextRequest {
   const u = new URL(url);
@@ -92,6 +99,7 @@ beforeEach(async () => {
     captureMock,
   ])
     m.mockReset();
+  originCheck.mockReset().mockReturnValue({ ok: true });
   createSsoSessionMock.mockResolvedValue({
     headers: new Headers([["set-cookie", "better-auth.session_token=tok.sig; Path=/; HttpOnly"]]),
     response: { ok: true },
@@ -217,6 +225,49 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
     const res = await POST(postRequest(null));
     expect(res.status).toBe(400);
     expect(verifyMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["untrusted_origin", "https://evil.example"],
+    ["missing_origin", null],
+  ] as const)(
+    "refuses a cross-site confirm (%s) with 403 + a `denied` audit row BEFORE reading the token (review #66, P2-2)",
+    async (reason, origin) => {
+      originCheck.mockReturnValue({ ok: false, reason });
+      verifyMock.mockResolvedValue({ payload: PAYLOAD });
+      consumeMock.mockResolvedValue(true);
+      const request = postRequest("abc", origin ? { origin } : {});
+      const res = await POST(request);
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: string; requestId: string };
+      expect(body.error).toBe("forbidden");
+      expect(res.headers.get("x-request-id")).toBe(body.requestId);
+      // The guard saw THIS request (the same object the audit row cites).
+      expect(originCheck).toHaveBeenCalledWith(request);
+      expect(auditMock).toHaveBeenCalledTimes(1);
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "sso.consume.failure",
+          outcome: "denied",
+          reason,
+          request,
+        }),
+      );
+      // The login-CSRF defence: nothing past the gate ran — no token read,
+      // no verification, no nonce burn, no session, no cookie.
+      expect(verifyMock).not.toHaveBeenCalled();
+      expect(consumeMock).not.toHaveBeenCalled();
+      expect(createSsoSessionMock).not.toHaveBeenCalled();
+      expect(res.headers.get("set-cookie")).toBeNull();
+    },
+  );
+
+  it("does NOT apply the origin gate to the GET verify step (the interstitial is IdP-initiated by design)", async () => {
+    originCheck.mockReturnValue({ ok: false, reason: "untrusted_origin" });
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
+    expect(res.status).toBe(307);
+    expect(originCheck).not.toHaveBeenCalled();
   });
 });
 

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { withTrustedClientIp } from "@/lib/client-ip";
+import { readImpersonatorId } from "@/lib/impersonation";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 /**
@@ -27,7 +28,9 @@ export async function getCurrentSession() {
  * The ORIGINAL actor's id when the current session is an impersonation
  * session, else `null`. Better Auth's admin plugin stamps `impersonatedBy`
  * onto the session row when an admin starts impersonating; different plugin
- * versions camel- or snake-case the field, so accept both shapes.
+ * versions camel- or snake-case the field, so accept both shapes (the read
+ * itself lives in the pure `impersonation.ts` so the caller resolver can
+ * share it — review #28).
  *
  * This is the authority to STOP impersonating: the impersonated identity is
  * typically a plain member with no admin permissions, so the right to end the
@@ -37,13 +40,7 @@ export async function getCurrentSession() {
 export function getImpersonatorId(
   session: Awaited<ReturnType<typeof getCurrentSession>>,
 ): string | null {
-  if (!session) return null;
-  const sess = (session as unknown as { session?: Record<string, unknown> }).session;
-  return (
-    (sess?.impersonatedBy as string | null | undefined) ??
-    (sess?.impersonated_by as string | null | undefined) ??
-    null
-  );
+  return readImpersonatorId(session);
 }
 
 /**

@@ -8,6 +8,8 @@ import { isValidTimeZone, normalizeOptional } from "@/lib/account/preferences";
 import { updatePreferencesSchema } from "@/lib/validation/account";
 // Shared first-party JSON error envelope (P3-12).
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 
 export const dynamic = "force-dynamic";
 
@@ -28,12 +30,26 @@ export const dynamic = "force-dynamic";
  * A bearer credential must carry `account.preferences.write` (design §7);
  * a read-only or zero-scope key is refused with 403 `insufficient_scope`.
  * Cookie sessions carry full user authority and pass (review #184).
+ *
+ * Rate-limited per user on the mutation tier (review #28): every accepted
+ * call writes two rows plus an audit event, so a scripted loop must hit the
+ * same ceiling the administrator and invitation mutations do.
  */
 
 export async function PUT(request: NextRequest) {
   const guard = await requireAccountUser(request, "account.preferences.write");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
+
+  const requestId = getOrCreateRequestId(request);
+  const limited = enforceRateLimit(
+    "account.preferences",
+    actor.betterAuthUserId,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    requestId,
+  );
+  if (limited) return limited;
 
   let json: unknown;
   try {
@@ -86,6 +102,7 @@ export async function PUT(request: NextRequest) {
     actorBetterAuthUserId: actor.betterAuthUserId,
     appUserId: actor.appUserId,
     request,
+    requestId,
     metadata: { locale: parsed.data.preferredLocale },
   });
 

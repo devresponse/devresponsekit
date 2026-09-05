@@ -35,6 +35,13 @@ export interface AccountActor {
   credentialId: string | null;
   /** The calling credential's scopes (null for cookies = full authority). */
   grantedScopes: string[] | null;
+  /**
+   * The impersonating admin's id when the session is an impersonation
+   * session, else `null` (always `null` for bearer credentials). Lets a
+   * route confine an impersonated session (P0-1 active-org contract) without
+   * re-reading the session (review #28).
+   */
+  impersonatorId: string | null;
 }
 
 export type AccountGuardResult =
@@ -90,6 +97,7 @@ export async function requireAccountUser(
       callerKind: caller.kind,
       credentialId: caller.credentialId,
       grantedScopes: caller.grantedScopes,
+      impersonatorId: caller.impersonatorId,
     },
   };
 }

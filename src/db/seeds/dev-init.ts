@@ -1,5 +1,6 @@
 import "dotenv/config";
 import type { Pool } from "pg";
+import { assertDevSeedTarget } from "@/db/guards";
 import { createAppPool, ensureSchema } from "@/db/schema-config";
 import { setSignupProvisioningSuppressed } from "@/lib/auth-signup-provisioning";
 import { ADMIN_PERMISSION_CATALOG, ANY_ADMIN_PERMISSION } from "@/lib/admin/permissions";
@@ -39,8 +40,15 @@ import { ADMIN_PERMISSION_CATALOG, ANY_ADMIN_PERMISSION } from "@/lib/admin/perm
  *
  * Every account shares one password (`DEV_SEED_PASSWORD`, default
  * `DevPassword123!`). These are deliberately weak, known credentials for a
- * disposable database — the script refuses to run under
- * `NODE_ENV=production` unless `DEV_SEED_ALLOW_PROD=1` is set.
+ * disposable database, so the script has two independent refusals (both
+ * checked BEFORE any connection is opened — `assertDevSeedTarget` in
+ * `src/db/guards.ts`):
+ *   - `NODE_ENV=production` refuses unless `DEV_SEED_ALLOW_PROD=1`;
+ *   - a `DATABASE_URL` whose host is not local (`localhost`, `127.0.0.1`,
+ *     `::1`, `0.0.0.0`, or no host) refuses — whatever `NODE_ENV` says —
+ *     unless `--force` or `DEV_SEED_ALLOW_REMOTE=1` is given. `NODE_ENV` is
+ *     routinely unset in a shell whose `.env` carries a production URL; the
+ *     host is what actually says where the accounts would land.
  *
  * Role mapping (per organization):
  *   - `superuser@<org>`  → `superuser` role — holds the `superuser`
@@ -749,12 +757,13 @@ async function main() {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required to seed the database");
   }
-  if (process.env.NODE_ENV === "production" && process.env.DEV_SEED_ALLOW_PROD !== "1") {
-    throw new Error(
-      "Refusing to run the development seed with NODE_ENV=production — it creates known-password " +
-        "accounts. Set DEV_SEED_ALLOW_PROD=1 to override (not recommended).",
-    );
-  }
+  // Pre-flight (review #19): NODE_ENV=production refuses unless
+  // DEV_SEED_ALLOW_PROD=1, then any NON-LOCAL host refuses unless --force /
+  // DEV_SEED_ALLOW_REMOTE=1 — both evaluated before a pool exists, so a
+  // refusal never touches the database. See src/db/guards.ts.
+  const { host, database } = assertDevSeedTarget({ databaseUrl });
+  console.log(`[dev-init] target  host=${host}  database=${database}`);
+
   // The fixture provisions app_users + memberships itself, in specific orgs;
   // stand the sign-up auto-provisioning hook down so signUpEmail doesn't also
   // give each user a spurious default-org membership.

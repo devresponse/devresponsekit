@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { spawnSync } from "node:child_process";
+import { describeDatabaseTarget } from "./guards";
 import { createAppPool, DB_SCHEMA } from "./schema-config";
 
 /**
@@ -37,8 +38,6 @@ import { createAppPool, DB_SCHEMA } from "./schema-config";
  * fail-fast behaviour everywhere.
  */
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0", ""]);
-
 function parseArgs(argv: string[]): { yes: boolean; force: boolean; reload: boolean } {
   const args = new Set(argv.slice(2));
   return {
@@ -73,15 +72,6 @@ function runReloadSteps(): void {
   console.log("\n[db:reset] reload complete — schema + seed rebuilt from an empty database.");
 }
 
-function describeTarget(url: string): { host: string; database: string } {
-  try {
-    const u = new URL(url);
-    return { host: u.hostname, database: decodeURIComponent(u.pathname.replace(/^\//, "")) || "?" };
-  } catch {
-    return { host: "?", database: "?" };
-  }
-}
-
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
@@ -89,11 +79,14 @@ async function main() {
   }
 
   const { yes, force, reload } = parseArgs(process.argv);
-  const { host, database } = describeTarget(databaseUrl);
+  // Host classification is shared with the dev seed (src/db/guards.ts) so
+  // both tools agree on what "local" means; an unparseable URL counts as
+  // remote (fail closed).
+  const { host, database, local } = describeDatabaseTarget(databaseUrl);
 
   console.log(`[db:reset] target  host=${host}  database=${database}`);
 
-  if (!LOCAL_HOSTS.has(host) && !force) {
+  if (!local && !force) {
     console.error(
       `[db:reset] REFUSING: host "${host}" is not local and --force was not given.\n` +
         `           This command DROPS EVERY TABLE in the "${DB_SCHEMA}" schema.\n` +

@@ -75,7 +75,8 @@ function applyOrgSignupHint(request: NextRequest, response: NextResponse): void 
  * Deliberate exception — `style-src` keeps `'unsafe-inline'`. React renders
  * `style={{…}}` props as inline `style="…"` ATTRIBUTES, which a nonce cannot
  * cover (nonces apply to `<script>`/`<style>` elements, not attributes), and
- * libraries inject `<style>` blobs (recharts' `chart.tsx`, the theme provider). Style
+ * libraries inject `<style>` blobs (recharts via `metric-bar-chart.tsx`, the theme
+ * provider). Style
  * injection is a far weaker vector than script injection, so allowing inline
  * styles is the standard pragmatic trade to keep the UI intact.
  *

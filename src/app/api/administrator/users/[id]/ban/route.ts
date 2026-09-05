@@ -26,8 +26,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Wraps `auth.api.banUser`. Reason is required (UX: ban without
  * justification is the kind of action ops will want to look up later);
  * `expiresInSeconds` is optional — omit for indefinite per Better Auth
- * semantics. The new password / token is never logged. The reason is
- * persisted in the audit row's `reason` column (plan §5.2).
+ * semantics. The reason is persisted in the audit row's `reason` column
+ * (plan §5.2).
  *
  * Caller MUST hold `admin.users.ban`.
  */

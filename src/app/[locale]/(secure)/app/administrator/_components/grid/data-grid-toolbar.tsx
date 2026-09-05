@@ -28,17 +28,18 @@ import type { GridSelectionMode } from "./use-grid-selection";
  *      action set; destructive actions are highlighted via the
  *      `destructive` flag.
  *   3. Expose an "Export CSV" button that downloads the current view
- *      via `/api/administrator/export/<resource>`. We POST nothing —
- *      the export endpoint reads filters from the same query string the
- *      grid is using, so we just hit the URL and let the browser save
- *      the file.
+ *      via `/api/administrator/export/<resource>`. We GET the CSV with
+ *      the grid's own query string (the export endpoint honours the same
+ *      filters/sort), detect the server's `# export_truncated:` sentinel,
+ *      and save it via a Blob download so we can warn when the export
+ *      was capped (review #158).
  *
  * The toolbar is intentionally headless about selection state — it
  * receives a small `selection` object from the parent so it works with
  * the {@link useGridSelection} hook without coupling the two.
  */
 export interface BulkActionDescriptor {
-  /** Stable key — used as the React key and forwarded to `onAction`. */
+  /** Stable key — used as the React key. */
   key: string;
   /** Translated, user-facing label. */
   label: string;
@@ -67,14 +68,14 @@ export interface DataGridToolbarProps {
   exportState?: GridState;
   /**
    * Optional caller-provided action buttons (e.g. "New user"). Rendered
-   * in the same right-aligned action cluster as Bulk actions / Export
-   * CSV so all primary affordances share one row.
+   * in the same action cluster as Bulk actions / Export CSV so all
+   * primary affordances share one row.
    */
   headerActions?: ReactNode;
   /**
-   * Extra classes for the root. The grid passes `ml-auto` so the toolbar
-   * (selection summary + actions) shares one row with the search/filter
-   * controls and right-aligns within it.
+   * Extra classes for the root. No caller passes one today; the grid
+   * relies on the `contents` root so the toolbar's children flow inline
+   * (left-aligned) in the single controls row (review #157).
    */
   className?: string;
 }

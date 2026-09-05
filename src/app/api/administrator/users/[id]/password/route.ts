@@ -29,7 +29,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Two modes (plan §4 + §5.2):
  *   - `mode: "set"`     — admin sets a new password directly.
  *   - `mode: "reset_email"` — triggers a password-reset email via
- *                             Better Auth's `forgetPassword` flow.
+ *                             Better Auth's `requestPasswordReset`
+ *                             (`sendBetterAuthPasswordResetEmail`).
  *
  * The new password is forwarded to Better Auth and never logged or
  * echoed in the response or audit metadata. The audit row records only

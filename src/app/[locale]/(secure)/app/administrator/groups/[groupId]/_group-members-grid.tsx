@@ -96,8 +96,10 @@ export function GroupMembersGrid({
         setAddError(t("addError"));
         return;
       }
-      // The endpoint silently drops a user who isn't an ACTIVE member of the
-      // group's org (returns `added: 0`); surface that rather than a false ok.
+      // The endpoint answers 404 `user_not_found` when the user isn't an
+      // ACTIVE member of the group's org — that case is reported by the
+      // generic `!res.ok` branch above, and a 2xx always carries
+      // `added >= 1`, so this guard is defensive only (review #162).
       const body = (await res.json()) as { added?: number };
       if ((body.added ?? 0) === 0) {
         setAddError(t("notEligible"));

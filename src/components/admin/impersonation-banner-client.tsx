@@ -6,18 +6,18 @@ import { isSupportedLocale } from "@/config/i18n-config";
 
 /**
  * Client half of {@link ImpersonationBanner} — the "Stop impersonating"
- * button. Calls `DELETE /api/administrator/users/[id]/impersonate`
- * (which requires the [id] for symmetry / audit) and hard-reloads on
- * success so every cached layer rebuilds under the original actor.
+ * button. Calls `DELETE /api/administrator/users/[id]/impersonate` and
+ * hard-reloads on success so every cached layer rebuilds under the original
+ * actor.
  *
- * `targetAppUserId` is `null` when the banner failed to resolve the
- * target's `app_users` row (e.g. the impersonated identity has no
- * application record yet) — in that case we fall back to a known-bad
- * sentinel UUID so the endpoint's UUID validator still passes; the
- * server then returns 404 and the cookie clear still fires from the
- * server-side stop call we route through `auth.api.stopImpersonating`.
+ * The DELETE handler IGNORES the `[id]` segment: it resolves the impersonated
+ * user from the session itself and never validates or 404s on the id
+ * (review #109). `targetAppUserId` is `null` when the banner failed to
+ * resolve the target's `app_users` row (e.g. the impersonated identity has no
+ * application record yet); the fallback id below only satisfies the URL
+ * shape. Only a 2xx counts as success (P2-1) — see the handler comment.
  *
- * In practice this only happens during dev fixtures; production
+ * In practice the null case only happens during dev fixtures; production
  * always has the matching app row.
  */
 const FALLBACK_ID = "00000000-0000-0000-0000-000000000000";

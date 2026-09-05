@@ -35,7 +35,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     return jsonRpc(rpcError(null, RPC_PARSE_ERROR, "Parse error"), 400);
   }
 
-  // JSON-RPC batching was removed in MCP 2025-06-18.
+  // JSON-RPC batching was removed in MCP 2025-06-18. protocol.ts still
+  // accepts the older 2025-03-26 / 2024-11-05 revisions, under which batching
+  // was permitted — rejecting batches for those too is a deliberate deviation
+  // that keeps one code path; narrowing SUPPORTED_PROTOCOL_VERSIONS to
+  // 2025-06-18 would remove it (review #232).
   if (Array.isArray(payload)) {
     return jsonRpc(rpcError(null, RPC_INVALID_REQUEST, "JSON-RPC batching is not supported"), 400);
   }

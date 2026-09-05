@@ -149,9 +149,11 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/administrator/users
  *
- * Creates a new Better Auth user (via the admin plugin) and persists
- * the corresponding `app_users` row in a single transaction. Per
- * docs/admin-manager.md §4 + §8.1:
+ * Creates a new Better Auth user (via the admin plugin), then inserts the
+ * corresponding `app_users` row — two sequential writes, NOT one
+ * transaction (review #136): a duplicate-email race maps to 409 and leaves
+ * the orphan auth user for reconciliation (see the 23505 handling below).
+ * Per docs/admin-manager.md §4 + §8.1:
  *
  *   - Caller MUST hold `admin.users.create`.
  *   - Body validated with Zod (`.strict()` — unknown keys rejected).

@@ -74,8 +74,11 @@ const idsSchema = z
  * `admin.groups.assign`.
  *
  * Guards (ADR-0002): every role must belong to the GROUP'S org — a group may
- * not bundle a global or foreign-org role (404). Only a SUPERADMIN may bundle
- * a role that carries the `superuser` marker (privilege escalation → 403).
+ * not bundle a global or foreign-org role (404). A non-SUPERADMIN — or ANY
+ * bearer credential, since scopes bound it (P1-1) — may bundle only roles
+ * whose conferred permissions are a subset of their own conferrable set
+ * (privilege escalation → 403, AUTHZ-3); this subsumes the old
+ * `superuser`-marker check (review #138).
  */
 export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");

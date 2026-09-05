@@ -2,8 +2,9 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Card primitive (shadcn-style). Public/auth pages use this for sign-in,
- * sign-up, pending-approval, blocked, and logged-out screens.
+ * Card primitive (shadcn-style). Auth pages use this for the sign-in,
+ * sign-up, verify-email, invite, pending-approval, and blocked screens (the
+ * logged-out panel renders an Alert instead).
  */
 export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (

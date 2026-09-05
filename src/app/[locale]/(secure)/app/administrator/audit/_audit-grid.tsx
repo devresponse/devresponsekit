@@ -198,9 +198,11 @@ function outcomeVariant(outcome: string): "default" | "destructive" | "secondary
 }
 
 /**
- * Inline filter toolbar — the audit explorer is the only Phase-6 grid
- * with an exposed filter UI. Filters write directly to URL state so a
- * shared link reproduces the same view (§10).
+ * Inline filter toolbar — the audit explorer predates the generic
+ * `filters` prop of `DataGrid` (which the users, roles, organizations,
+ * memberships, api-keys and enterprise-apps grids use) and keeps its own
+ * toolbar (review #178). Filters write directly to URL state so a shared
+ * link reproduces the same view (§10).
  */
 function AuditFilterToolbar() {
   const t = useTranslations("administrator.audit");

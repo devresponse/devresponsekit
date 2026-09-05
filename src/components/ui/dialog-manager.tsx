@@ -39,7 +39,8 @@ import { cn } from "@/lib/utils";
  *   - `confirm({ title, description, confirmLabel?, cancelLabel?,
  *      destructive? })` — destructive confirmation modal. Replaces
  *     `window.confirm()`. Resolves with `true` if confirmed, `false`
- *     otherwise (including ESC/overlay click).
+ *     otherwise (ESC or Cancel; overlay clicks do not dismiss an
+ *     AlertDialog, so the promise stays pending until a choice is made).
  *   - `promptText({ title, description?, label, defaultValue?,
  *      placeholder?, required?, confirmLabel?, cancelLabel? })` — text
  *     input modal. Replaces `window.prompt()`. Resolves with the entered

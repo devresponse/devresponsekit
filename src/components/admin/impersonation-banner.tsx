@@ -7,9 +7,12 @@ import { StopImpersonationButton } from "./impersonation-banner-client";
  * Global "you are impersonating X" banner (docs/admin-manager.md
  * §19, §12.1 audit posture).
  *
- * Server component: reads the active session and the original actor's
- * email (best effort) so the banner shows "you are impersonating
- * target@x.com" with a "Stop impersonating" client-side button. Renders
+ * Server component: reads the active session and, when it carries an
+ * impersonator, looks up the impersonated TARGET's `app_users` row for its
+ * email (best effort — falls back to the Better Auth id) so the banner shows
+ * "you are impersonating target@x.com" with a "Stop impersonating"
+ * client-side button (review #166). The original actor's id is only the
+ * gate; it is never displayed. Renders
  * `null` when no impersonation is active so callers can drop it into
  * any layout without paying for the markup.
  *

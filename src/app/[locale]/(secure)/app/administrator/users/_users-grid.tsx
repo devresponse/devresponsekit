@@ -126,8 +126,10 @@ export function AdministratorUsersGrid({
   const runBulkAction = useCallback(
     async (action: BulkActionKey, options: { reason?: string } = {}) => {
       if (busy) return;
-      // Mirror the server cap so the UI doesn't optimistically allow a
-      // batch that the server will reject.
+      // Nothing to send in page mode with an empty selection (the server
+      // rejects an empty ids array). The 500-id cap (MAX_BULK_IDS) is NOT
+      // mirrored here — the bulk route enforces it and answers 400, which the
+      // generic error toast below reports (review #34).
       const explicitIds = Array.from(selection.selectedIds);
       if (selection.mode === "page" && explicitIds.length === 0) return;
 

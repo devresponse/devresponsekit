@@ -1,11 +1,17 @@
 /**
  * Supported locales for the application.
  *
- * Adding a locale requires:
- *  1. Updating this list.
- *  2. Adding `src/messages/<locale>.json`.
- *  3. Updating the `NEXT_PUBLIC_SUPPORTED_LOCALES` env value used by the
- *     client locale switcher.
+ * Adding a locale requires (review #110):
+ *  1. Updating this list — `LOCALE_LABELS` below is a type error until the
+ *     new locale gets a label.
+ *  2. Adding `src/messages/<locale>.json` (the parity test pins its keys
+ *     against `en.json`).
+ *  3. Adding the locale's email-template migration under
+ *     `src/db/migrations/locales/` (see `migration-plan.ts`).
+ *  4. Optionally a localized hero screenshot — `HERO_SCREENSHOT_LOCALES` in
+ *     the public landing page falls back to `en` otherwise.
+ * Nothing in `src/` reads a `NEXT_PUBLIC_SUPPORTED_LOCALES` env value; the
+ * locale switcher and language menu import `locales` from this module.
  */
 export const locales = ["en", "fr", "es", "uk", "pt", "zh", "hi", "ja"] as const;
 export const defaultLocale = "en" as const;

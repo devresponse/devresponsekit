@@ -24,10 +24,29 @@ import { toNextJsHandler } from "better-auth/next-js";
  */
 const handler = toNextJsHandler(auth);
 
-/** The same request with the trusted client-IP header stamped; body untouched. */
-function withTrustedClientIpRequest(request: Request): Request {
-  return new Request(request, { headers: withTrustedClientIp(request.headers) });
+/**
+ * The same request with the trusted client-IP header stamped.
+ *
+ * Rebuilt from its PARTS (url, method, headers, body) rather than via
+ * `new Request(request, { headers })`: Next hands route handlers a
+ * `NextRequest` built in its own realm, and on Node ≥ 24 undici's `Request`
+ * constructor rejects a foreign `Request` as `input` ("Cannot read private
+ * member #state"), which 500ed every auth call in production while the Node
+ * 22 CI runtime accepted it. The body is buffered (auth payloads are small
+ * JSON / form posts) so no cross-realm stream or `duplex` handling is
+ * involved either; GET/HEAD carry none.
+ */
+async function withTrustedClientIpRequest(request: Request): Promise<Request> {
+  const bodiless = request.method === "GET" || request.method === "HEAD";
+  const body = bodiless || request.body === null ? null : await request.arrayBuffer();
+  return new Request(request.url, {
+    method: request.method,
+    headers: withTrustedClientIp(request.headers),
+    body,
+  });
 }
 
-export const GET = (request: Request) => handler.GET(withTrustedClientIpRequest(request));
-export const POST = (request: Request) => handler.POST(withTrustedClientIpRequest(request));
+export const GET = async (request: Request) =>
+  handler.GET(await withTrustedClientIpRequest(request));
+export const POST = async (request: Request) =>
+  handler.POST(await withTrustedClientIpRequest(request));

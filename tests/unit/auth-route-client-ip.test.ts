@@ -95,4 +95,47 @@ describe("api/auth/[...all] — trusted client-IP header re-derived in the handl
     expect(received().headers.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
     expect(received().headers.get(CLIENT_IP_HEADER)).toBe(getClientIp(new Headers(headers)));
   });
+
+  it("accepts the NextRequest Next hands route handlers and keeps url/method/body (Node ≥ 24 realm regression)", async () => {
+    // Regression for the #397 outage: `new Request(nextRequest, init)` throws
+    // "Cannot read private member #state" on Node ≥ 24 because Next's
+    // NextRequest is built in another realm; the wrapper must rebuild the
+    // request from its parts instead.
+    const { NextRequest } = await import("next/server");
+    const body = JSON.stringify({ email: "a@example.com", password: "pw" });
+    const res = await POST(
+      new NextRequest("http://localhost:3000/api/auth/sign-in/email", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "ba.session=x",
+          "x-forwarded-for": "203.0.113.9",
+        },
+        body,
+      }),
+    );
+    expect(res.status).toBe(204);
+    const req = received();
+    expect(req.url).toBe("http://localhost:3000/api/auth/sign-in/email");
+    expect(req.method).toBe("POST");
+    expect(req.headers.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    expect(req.headers.get("cookie")).toBe("ba.session=x");
+    await expect(req.text()).resolves.toBe(body);
+  });
+
+  it("forwards a body-less POST (sign-out) and a GET as body-less, not as an empty stream", async () => {
+    const { NextRequest } = await import("next/server");
+    await POST(
+      new NextRequest("http://localhost:3000/api/auth/sign-out", {
+        method: "POST",
+        headers: { "x-forwarded-for": "203.0.113.9" },
+      }),
+    );
+    expect(received().method).toBe("POST");
+    expect(received().body).toBeNull();
+    handlerMock.mockClear();
+    await GET(new NextRequest("http://localhost:3000/api/auth/get-session"));
+    expect(received().method).toBe("GET");
+    expect(received().body).toBeNull();
+  });
 });

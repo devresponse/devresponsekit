@@ -295,7 +295,7 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 ### 10.2 Rate limiting
 
 - **Per-credential mutations** — `enforceApiRateLimit` keys the bucket on the credential id (`api_key` id / `jti` / `client_id`) when bearer, else the principal, so one noisy key cannot exhaust the principal's whole budget. Returns a problem+json `429` with `Retry-After`.
-- **Token endpoint** — two layers (P2-4): a per-`client_id`/IP bucket and a coarse **global floor** independent of any client-supplied value, so a distributed credential-stuffing run rotating `client_id`s or spoofing `X-Forwarded-For` still hits a deployment-wide ceiling. The trusted client IP is derived from a trusted proxy hop (`TRUSTED_PROXY_COUNT`), not the spoofable leftmost XFF.
+- **Token endpoint** — three layers, none keyed on an unverified client-supplied value (P2-4, review #11). Before any crypto or DB work: a coarse **global floor** independent of the request, then a **per-trusted-IP** bucket (the IP is derived from a trusted proxy hop, `TRUSTED_PROXY_COUNT`, not the spoofable leftmost `X-Forwarded-For`). Only **after** the credential verifies does a **per-credential** bucket (keyed on the verified `client_id` / API-key id) apply, giving each credential a fair share behind a shared egress IP. Because the public `client_id` never reaches a limiter key before verification, a remote party who merely knows a victim's id cannot drain the victim's budget with wrong secrets, rotating ids cannot escape the per-IP bucket, and unknown ids never allocate limiter entries. Denials return a problem+json `429` with `Retry-After` and count toward the `devresponsekit_rate_limit_denials_total{scope="api.token"}` metric.
 
 ### 10.3 Security properties (summary)
 

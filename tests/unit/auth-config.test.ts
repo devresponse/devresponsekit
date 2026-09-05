@@ -18,7 +18,7 @@ vi.mock("@/lib/auth-sso-session", () => ({ ssoSession: () => ({ id: "sso-session
 
 interface CapturedOptions {
   trustedOrigins?: string[];
-  rateLimit?: { enabled?: boolean };
+  rateLimit?: { enabled?: boolean; storage?: string };
   emailAndPassword: {
     enabled?: boolean;
     requireEmailVerification?: boolean;
@@ -105,17 +105,23 @@ describe("Better Auth security subtree (review #121)", () => {
     });
   });
 
-  it("leaves Better Auth's limiter ON unless AUTH_RATE_LIMIT_DISABLED is set", async () => {
+  it("leaves Better Auth's limiter ON unless AUTH_RATE_LIMIT_DISABLED is set, always DB-backed (review #199)", async () => {
     vi.stubEnv("AUTH_RATE_LIMIT_DISABLED", "");
     const on = await capture();
-    // Absent, not `{ enabled: true }`: the plugin's production default applies.
-    expect(on).not.toHaveProperty("rateLimit");
+    // `enabled` absent, not `{ enabled: true }`: the plugin's production
+    // default applies. `storage: "database"` moves the counters out of
+    // per-process memory (per lambda on Vercel) into Better Auth's
+    // `rateLimit` table, shared by every instance.
+    expect(on.rateLimit).toEqual({ storage: "database" });
 
     vi.resetModules();
     betterAuthMock.mockClear();
     vi.stubEnv("AUTH_RATE_LIMIT_DISABLED", "1");
     const off = await capture();
-    expect(off.rateLimit).toEqual({ enabled: false });
+    // The storage stays declared even when the limiter is off, so the
+    // generated schema snapshot (better-auth-schema.sql) never depends on the
+    // test-only escape hatch; `enabled: false` still means no check at all.
+    expect(off.rateLimit).toEqual({ enabled: false, storage: "database" });
   });
 
   it("issues host-only cookies unless COOKIE_DOMAIN opts into a parent domain", async () => {

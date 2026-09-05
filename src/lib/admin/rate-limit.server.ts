@@ -5,17 +5,16 @@ import { clientIpKey } from "@/lib/client-ip";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 
 /**
- * In-memory token-bucket rate limiter for Administrator mutation
- * endpoints.
+ * In-memory token-bucket rate limiter for AUTHENTICATED per-actor limits
+ * (Administrator mutations, bulk, export, the v1 per-credential buckets, the
+ * SSO handoff routes).
  *
  * Why an in-memory bucket?
  *   - The plan explicitly calls for an in-memory token bucket as the v1
- *     implementation, with a Redis adapter left as future work. We keep
- *     the surface area pluggable (a single `getStore()` accessor) so a
- *     drop-in replacement can swap the storage layer without touching
- *     call-sites.
+ *     implementation; the store is a module-scoped Map behind
+ *     {@link consumeToken}, so call-sites never see the storage layer.
  *   - Mutation endpoints (POST / PATCH / DELETE under
- *     `/api/administrator/*`) are the only consumers; read endpoints
+ *     `/api/administrator/*`) are the main consumers; read endpoints
  *     are served unbounded because a single admin opening multiple
  *     grid pages must not be throttled.
  *
@@ -24,12 +23,19 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
  *     UX / abuse guard layered on top of `requireAdminPermission`.
  *   - Keys MUST include the actor identifier so one noisy admin cannot
  *     starve another. Callers compose keys via {@link rateLimitKey}.
- *   - The limiter is a soft floor: a process restart resets all
- *     buckets, and the budget is NOT shared across processes. The
- *     supported 1.0 deployment topology is therefore a SINGLE application
- *     instance (see docs/deployment.md §5 "Operations & gotchas" —
- *     "Single application instance (1.0)");
- *     multi-instance is best-effort until a shared backend lands post-1.0.
+ *   - The budget is PER PROCESS: a restart resets every bucket and the
+ *     budget is not shared across instances (on Vercel, across lambdas).
+ *     That is acceptable for the per-actor limits kept here — an actor
+ *     first has to authenticate, so the fan-out an attacker controls is
+ *     bounded by the credentials they hold, and the limit is a UX guard on
+ *     top of authorization, not the security floor. It is NOT acceptable
+ *     for the PRE-AUTH floors (token endpoint, MCP registration, the CSP
+ *     sink, invitation acceptance), where the attacker chooses the fan-out
+ *     and a per-lambda "global" floor multiplies by the instance count
+ *     (review #98): those consume from the Postgres-backed bucket in
+ *     `rate-limit-shared.server.ts` instead, and the invariant test
+ *     `tests/unit/rate-limit-shared-floors-invariant.test.ts` keeps them
+ *     there. See docs/deployment.md §5 for the topology statement.
  *   - Deny responses include a `Retry-After` header (seconds) and a
  *     standard error envelope `{ error: "rate_limited", retryAfter }`.
  */
@@ -233,7 +239,27 @@ export function enforceRateLimit(
 ): NextResponse | null {
   const result = consumeToken(rateLimitKey(scope, actorId), options, nowMs);
   if (result.ok) return null;
+  return rateLimitDeniedResponse(scope, actorId, result, request, requestId, nowMs);
+}
 
+/**
+ * The deny side of {@link enforceRateLimit}, shared with the Postgres-backed
+ * `enforceSharedRateLimit` (review #98) so both paths count, audit and
+ * answer a denial identically: the metrics counter, the flood-gated denial
+ * audit, and the 429 envelope with `Retry-After`. The denial-audit gate
+ * deliberately stays IN-PROCESS even for shared buckets — it bounds audit
+ * write amplification per instance, which is the property that matters,
+ * and a DB round trip to decide whether to audit a 429 would be a second
+ * write-amplifier.
+ */
+export function rateLimitDeniedResponse(
+  scope: string,
+  actorId: string,
+  result: Extract<RateLimitResult, { ok: false }>,
+  request?: { headers: Headers },
+  requestId?: string,
+  nowMs?: number,
+): NextResponse {
   // Count EVERY denial (cheap in-memory counter, no flood concern — unlike the
   // sampled audit below) for the Prometheus `/api/metrics` scrape (#52).
   rateLimitDenialsTotal.inc({ scope });

@@ -392,11 +392,17 @@ Check the `ip_address` on a fresh session row against the real client address,
 and compare it with the `ip_address` of the matching `sso.consume.success` /
 `auth` audit row — both derive from the same rule and must agree.
 
-**Rate limits behave inconsistently across instances.** The limiter is in-process
-per instance, so the **supported 1.0 topology is a single application instance**
-(see [deployment.md §5](./deployment.md#5-operations--gotchas)). Multi-instance still
-runs, but the limit is best-effort per instance until a shared (Redis/Postgres)
-backend lands post-1.0.
+**Rate limits behave inconsistently across instances.** The **per-actor** admin
+guard (mutations, bulk, export, SSO handoff) is in-process per instance, so under
+horizontal scaling its budget multiplies by the instance count — expected, and
+best-effort by design. The **pre-auth floors** (token endpoint, MCP registration,
+CSP sink, invitation acceptance) and Better Auth's sign-in limiter are
+Postgres-backed and MUST be consistent; if they are not, check
+`devresponsekit_rate_limit_shared_fallbacks_total` on `/api/metrics` and the log
+stream for `shared rate-limit backend unavailable` — the app floors fall back to
+per-instance buckets when `app_rate_limits` is missing (migration `0006` not
+applied) or the database is unreachable. See
+[deployment.md §5](./deployment.md#5-operations--gotchas).
 
 **Audit / outbox tables growing without bound.** Schedule **`pnpm db:prune`**
 (`scripts/prune-retention.ts`) to apply `AUDIT_RETENTION_DAYS` (default 365) and

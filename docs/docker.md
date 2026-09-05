@@ -241,14 +241,18 @@ volumes:
 
 ## 8. Caveats / known limitations
 
-- **In-process rate limiter → single instance is the supported 1.0 topology.**
-  The admin abuse-guard rate limiter is per process and not shared across
-  replicas, so under horizontal scaling its budget multiplies by the number of
-  containers and resets on restart. The **supported 1.0 topology is a single
-  application instance**, where the limit enforces one global budget;
-  multi-instance still runs but the rate limit is best-effort until a shared
-  (Redis/Postgres) backend lands post-1.0. See
-  [Deployment → Supported topology](deployment.md#5-operations--gotchas) and
+- **Rate limiting across replicas: the security floors are shared, the
+  per-actor guards are not.** The **pre-auth floors** — the token endpoint,
+  MCP registration, the CSP report sink, invitation acceptance — and Better
+  Auth's own sign-in / password-reset limiter keep their buckets in Postgres
+  (`app_rate_limits` from migration `0006`, and Better Auth's `rateLimit`
+  table from `pnpm db:auth:migrate`), so they enforce **one budget across
+  every container**. The **admin per-actor** abuse guard (mutations, bulk,
+  export, SSO handoff) is still per process: under horizontal scaling its
+  budget multiplies by the number of containers and resets on restart. That
+  guard layers on top of authorization, so multi-instance is supported; only
+  the per-actor UX limit is best-effort there. See
+  [Deployment → Operations & gotchas](deployment.md#5-operations--gotchas) and
   [troubleshooting.md](troubleshooting.md).
 - **Observability is opt-in.** Sentry only initializes when
   `NEXT_PUBLIC_SENTRY_DSN` is set; the image is unchanged otherwise. See

@@ -305,7 +305,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | --- | --- |
 | `DOCS_SOURCE`, `DOCS_ROOT`, `DOCS_ALLOW_MDX_EXECUTION`, `DOCS_INTERNAL_VISIBLE` | In-app docs viewer (all optional; defaults serve the repo `docs/` read-only). |
 | `HELP_ROOT` | Content root for the in-app help viewer (`/app/help`), the docs viewer's identical sibling. Optional; defaults to the repo `help/` folder. Shares `DOCS_SOURCE` / `DOCS_INTERNAL_VISIBLE`. |
-| `AUTH_RATE_LIMIT_DISABLED` | **Test only** — disables Better Auth's built-in sign-in rate limiter. Never set in production. |
+| `AUTH_RATE_LIMIT_DISABLED` | **Test only** — disables Better Auth's built-in sign-in rate limiter (whose counters live in the database-backed `rateLimit` table, shared across instances — review #199). Never set in production. |
 
 ### Operations & data retention
 

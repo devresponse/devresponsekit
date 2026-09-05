@@ -80,7 +80,26 @@ export const auth = betterAuth({
   // (e.g. /sign-in/email at 3 req / 10 s per IP). Browser test suites
   // run against `next start` and sign in far faster than that from one
   // IP, so CI disables the limiter via this test-only env escape hatch.
-  ...(env.AUTH_RATE_LIMIT_DISABLED ? { rateLimit: { enabled: false } } : {}),
+  //
+  // Review #199: its default store is per-process memory, so on Vercel the
+  // sign-in / password-reset budgets were per lambda — the same gap as the
+  // app's own pre-auth floors (#98). `storage: "database"` keeps the counters
+  // in Better Auth's `rateLimit` table (key, count, lastRequest), created by
+  // `pnpm db:auth:migrate` and pinned in better-auth-schema.sql, so every
+  // instance shares one budget per IP + path. Trade-off: each limited auth
+  // request now costs a read plus a conditional increment against Postgres
+  // (Better Auth's atomic `consume`) instead of a Map lookup — on the
+  // endpoints that were about to hash a password anyway. `storage` is set
+  // unconditionally so the generated schema snapshot is the same with the
+  // limiter on or off; `enabled: false` still switches the check off
+  // entirely (no DB access), so AUTH_RATE_LIMIT_DISABLED means what it did.
+  // LANDING ORDER: Better Auth does not catch storage errors, so the table
+  // must exist BEFORE this build serves sign-ins — run `pnpm db:auth:migrate`
+  // against production first (docs/deployment.md §2).
+  rateLimit: {
+    storage: "database",
+    ...(env.AUTH_RATE_LIMIT_DISABLED ? { enabled: false } : {}),
+  },
 
   // Review 2026-09-04 #2: a verification the sign-up policy WAIVED is recorded
   // as a distinct, server-only user field so it is never mistaken for a

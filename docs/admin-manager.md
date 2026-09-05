@@ -73,6 +73,10 @@ sees the areas they can act on.
 Every Administrator **mutation** (POST / PATCH / PUT / DELETE) is throttled by a
 per-actor in-memory **token bucket** (`src/lib/admin/rate-limit.server.ts`).
 Read endpoints are unbounded — paging through a grid must never be throttled.
+(The in-memory store is per process; that is deliberate for these
+authenticated per-actor limits. The unauthenticated **pre-auth floors** —
+token endpoint, MCP registration, CSP sink, invitation acceptance — use the
+Postgres-backed bucket instead; see [Architecture → Rate limiting](./architecture.md#rate-limiting).)
 
 - The limiter is a **UX / abuse guard layered on top of** authorization, never a
   substitute for it (`requireAdminPermission` runs first).

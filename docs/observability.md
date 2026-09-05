@@ -108,6 +108,11 @@ business counter — not the full target set.
 - **`devresponsekit_rate_limit_denials_total{scope}`** — a counter incremented on **every**
   rate-limit denial (HTTP 429), labelled by limiter scope. Unlike the sampled denial *audit*
   (which is flood-gated), this counts all denials, so a spike is the canonical abuse signal.
+- **`devresponsekit_rate_limit_shared_fallbacks_total{scope}`** — incremented each time the
+  Postgres-backed pre-auth limiter (review #98) could not reach `app_rate_limits` and fell back
+  to the in-process bucket for one cool-down. Non-zero means the deployment-wide floors are
+  per-instance right now: the database is unhealthy or migration `0006` is not applied; the
+  paired `warn` log line carries the error.
 
 **Security model:**
 

@@ -359,6 +359,20 @@ export interface AppRevokedTokensTable {
   reason: string | null;
 }
 
+/**
+ * Shared token buckets for the pre-auth rate-limit floors (migration 0006,
+ * review #98). Written ONLY by the single refill-and-consume statement in
+ * `lib/admin/rate-limit-shared.server.ts` (raw SQL: the bucket math must run
+ * inside `ON CONFLICT DO UPDATE`); typed here so the opportunistic prune and
+ * the DB tests can read/delete through Kysely. `tokens` is `numeric` and
+ * arrives as a string from pg.
+ */
+export interface AppRateLimitsTable {
+  key: string;
+  tokens: ColumnType<string, string | number, string | number>;
+  updated_at: Timestamp;
+}
+
 export interface AppDatabase {
   app_organizations: AppOrganizationsTable;
   app_provider_organizations: AppProviderOrganizationsTable;
@@ -382,6 +396,7 @@ export interface AppDatabase {
   app_api_keys: AppApiKeysTable;
   app_oauth_clients: AppOauthClientsTable;
   app_revoked_tokens: AppRevokedTokensTable;
+  app_rate_limits: AppRateLimitsTable;
   session: BetterAuthSessionTable;
   user: BetterAuthUserTable;
 }

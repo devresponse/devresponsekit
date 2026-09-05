@@ -52,16 +52,22 @@ Two layers, both fail-safe (redact-by-default):
   `cookie` field (and their nested `*.` variants) to `[redacted]` before serialization —
   covering session tokens, API-key secrets, and the Better Auth secret. Never log a
   plaintext credential; the audit log records **metadata only**.
-- **Sentry** — `sentry-shared.ts` strips cookies, query strings, request bodies, the
-  `referer` header, emails, bearer/API tokens, and secret-like values from **every event
-  kind**: error events (`beforeSend`), sampled **transactions** (`beforeSendTransaction`),
-  and their **spans** (`beforeSendSpan`) — including the root-span attributes in
-  `contexts.trace.data` and each `spans[].data` (`url.full`, `url.query`,
-  `http.request.header.*`, …), span descriptions, and the transaction name. Reset URLs
-  (`/reset-password/<token>`) and other one-time tokens are never sent. The SDK is also told
-  not to _record_ cookies, query parameters, bodies, or user info in the first place
-  (`dataCollection` in all three `Sentry.init` calls); the hooks are the backstop
-  (review #22).
+- **Sentry** — `sentry-shared.ts` strips cookies, query strings, URL fragments, request
+  bodies, the `referer` header, emails, bearer/API tokens, and secret-like values from
+  **every event kind**: error events (`beforeSend`), sampled **transactions**
+  (`beforeSendTransaction`), and their **spans** (`beforeSendSpan`) — including the
+  root-span attributes in `contexts.trace.data` and each `spans[].data` (`url.full`,
+  `url.query`, `http.request.header.*`, …), span descriptions, and the transaction name.
+  The **client IP** is treated as user info and never sent: the IP-bearing proxy headers
+  the app itself reads for rate limiting (`x-forwarded-for`, `x-real-ip`,
+  `cf-connecting-ip`, `true-client-ip`, `x-vercel-forwarded-for`, `forwarded`, `via`, …)
+  are denied at write time and dropped by the hooks, as are the `http.client_ip` /
+  `user.ip_address` / `client.address` span attributes the Node HTTP instrumentation sets.
+  Reset URLs (`/reset-password/<token>`) and other one-time tokens are never sent. The SDK
+  is also told not to _record_ cookies, query parameters, bodies, or user info in the first
+  place (`dataCollection` in all three `Sentry.init` calls — this **replaces** the
+  deprecated `sendDefaultPii: false` bridge, so every deny list it used to apply is spelled
+  out explicitly); the hooks are the backstop (review #22).
 - **Email outbox** — `src/lib/email/outbox-secrets.ts` redacts one-time links (the
   `/reset-password/<token>` path segment and every `token=` query value → `[redacted]`) from
   the `app_outbox` columns the administrator API can read (`subject`, `body_html`,

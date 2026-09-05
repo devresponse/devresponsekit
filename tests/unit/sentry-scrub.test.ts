@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { ErrorEvent, Breadcrumb } from "@sentry/nextjs";
+// `@sentry/core` is the (hoisted, see .npmrc) engine behind `@sentry/nextjs`;
+// the SDK-parity suite below drives its REAL span-attribute writer so the
+// key shapes under test are the ones production emits, not hand-written ones.
+import { ServerRuntimeClient, createTransport, httpHeadersToSpanAttributes } from "@sentry/core";
 import {
   type SpanJSON,
   type TransactionEvent,
@@ -70,6 +74,34 @@ describe("scrubEvent", () => {
     expect(user.ip_address).toBeUndefined();
     expect(user.username).toBeUndefined();
     expect(user.id).toBe("u1");
+  });
+
+  it("drops every IP-bearing proxy header but keeps benign ones (review #22)", () => {
+    const out = scrubEvent(
+      asEvent({
+        request: {
+          headers: {
+            "X-Forwarded-For": "203.0.113.9, 10.0.0.1",
+            "x-real-ip": "203.0.113.9",
+            "CF-Connecting-IP": "203.0.113.9",
+            "True-Client-Ip": "203.0.113.9",
+            "X-Vercel-Forwarded-For": "203.0.113.9",
+            Forwarded: "for=203.0.113.9;proto=https",
+            Via: "1.1 vercel",
+            "X-Forwarded-User": "eve",
+            "Remote-Addr": "203.0.113.9",
+            "X-Forwarded-Host": "app.example",
+            "User-Agent": "ua",
+            Host: "app.example",
+            "Content-Type": "application/json",
+          },
+        },
+      }),
+      HINT,
+    );
+    const headers = (out.request as Record<string, unknown>).headers as Record<string, unknown>;
+    expect(Object.keys(headers).sort()).toEqual(["Content-Type", "Host", "User-Agent"]);
+    expect(JSON.stringify(out)).not.toContain("203.0.113.9");
   });
 
   it("drops the referer header, the request body, and a reset-token path segment (review #22)", () => {
@@ -163,12 +195,18 @@ describe("scrubTransaction", () => {
             "http.query": `?token=${JWT}`,
             "http.target": `/en/invite?token=${JWT}`,
             "http.request.method": "GET",
-            "http.request.header.cookie.better-auth.session_token": "sess",
+            // The SDK writes header names with `_` for `-` (normalizeAttributeKey).
+            "http.request.header.cookie.better_auth.session_token": "sess",
             "http.request.header.authorization": `Bearer ${JWT}`,
+            "http.request.header.proxy_authorization": `Basic ${JWT}`,
             "http.request.header.referer": "https://app/sign-in?returnTo=/admin",
-            "http.request.header.user-agent": "ua",
-            "http.response.header.set-cookie": "better-auth.session_token=sess",
+            "http.request.header.x_forwarded_for": "203.0.113.9, 10.0.0.1",
+            "http.request.header.x_real_ip": "203.0.113.9",
+            "http.request.header.user_agent": "ua",
+            "http.response.header.set_cookie": "better-auth.session_token=sess",
             "http.response.status_code": 200,
+            "http.client_ip": "203.0.113.9",
+            "user.ip_address": "203.0.113.9",
           },
         },
       },
@@ -182,7 +220,10 @@ describe("scrubTransaction", () => {
           data: {
             "url.full": "https://api/x?api_key=drk_live_AbC123",
             "url.query": "api_key=drk_live_AbC123",
+            "http.request.header.x_api_key": "drk_live_AbC123",
             "http.request.header.x-api-key": "drk_live_AbC123",
+            "http.request.body.data": '{"password":"hunter2"}',
+            "net.peer.ip": "203.0.113.9",
             "sso.token": "opaque-secret",
             "db.query.text": "select 1",
             "http.response.status_code": 200,
@@ -226,13 +267,18 @@ describe("scrubTransaction", () => {
     expect(data["http.target"]).toBe("/en/invite");
     expect(data["url.query"]).toBeUndefined();
     expect(data["http.query"]).toBeUndefined();
-    expect(data["http.request.header.cookie.better-auth.session_token"]).toBeUndefined();
+    expect(data["http.request.header.cookie.better_auth.session_token"]).toBeUndefined();
     expect(data["http.request.header.authorization"]).toBeUndefined();
+    expect(data["http.request.header.proxy_authorization"]).toBeUndefined();
     expect(data["http.request.header.referer"]).toBeUndefined();
-    expect(data["http.response.header.set-cookie"]).toBeUndefined();
+    expect(data["http.request.header.x_forwarded_for"]).toBeUndefined();
+    expect(data["http.request.header.x_real_ip"]).toBeUndefined();
+    expect(data["http.response.header.set_cookie"]).toBeUndefined();
+    expect(data["http.client_ip"]).toBeUndefined();
+    expect(data["user.ip_address"]).toBeUndefined();
     // Benign attributes survive so the transaction stays useful.
     expect(data["http.request.method"]).toBe("GET");
-    expect(data["http.request.header.user-agent"]).toBe("ua");
+    expect(data["http.request.header.user_agent"]).toBe("ua");
     expect(data["http.response.status_code"]).toBe(200);
   });
 
@@ -242,7 +288,12 @@ describe("scrubTransaction", () => {
     const d1 = s1.data as Record<string, unknown>;
     expect(d1["url.full"]).toBe("https://api/x");
     expect(d1["url.query"]).toBeUndefined();
+    // Both the SDK's `_` spelling and the hyphenated one are DROPPED (not
+    // merely replaced by the secret-key redactor).
+    expect(d1["http.request.header.x_api_key"]).toBeUndefined();
     expect(d1["http.request.header.x-api-key"]).toBeUndefined();
+    expect(d1["http.request.body.data"]).toBeUndefined();
+    expect(d1["net.peer.ip"]).toBeUndefined();
     expect(d1["sso.token"]).toBe("[redacted]");
     expect(d1["db.query.text"]).toBe("select 1");
     expect(d1["http.response.status_code"]).toBe(200);
@@ -263,6 +314,8 @@ describe("scrubTransaction", () => {
     expect(json).not.toContain("sess");
     expect(json).not.toContain("@x.com");
     expect(json).not.toContain("returnTo");
+    expect(json).not.toContain("203.0.113.9");
+    expect(json).not.toContain("hunter2");
     expect(out.type).toBe("transaction");
   });
 
@@ -306,6 +359,199 @@ describe("scrubSpanData", () => {
     scrubSpanData(d);
     expect(d).toEqual({ n: 1, ok: true, list: ["x"], "http.password": "[redacted]" });
   });
+
+  it("strips the query from the browser fetch/xhr `url` attribute and drops fragments", () => {
+    const d: Record<string, unknown> = {
+      url: "https://app/api/sso/consume?token=opaque123&returnTo=/admin#access_token=abc",
+      "http.url": "https://app/api/sso/consume?token=opaque123",
+      "http.query": "?token=opaque123",
+      "http.fragment": "#access_token=abc",
+      "url.fragment": "#access_token=abc",
+      type: "fetch",
+      "http.method": "GET",
+    };
+    scrubSpanData(d);
+    expect(d).toEqual({
+      url: "https://app/api/sso/consume",
+      "http.url": "https://app/api/sso/consume",
+      type: "fetch",
+      "http.method": "GET",
+    });
+  });
+
+  it("drops every client-IP attribute spelling the SDK / OTel write", () => {
+    const d: Record<string, unknown> = {
+      "http.client_ip": "203.0.113.9",
+      "user.ip_address": "203.0.113.9",
+      "client.address": "203.0.113.9",
+      "net.peer.ip": "203.0.113.9",
+      "net.sock.peer.addr": "203.0.113.9",
+      "network.peer.address": "203.0.113.9",
+      "server.address": "app.example",
+      "http.host": "app.example",
+    };
+    scrubSpanData(d);
+    expect(d).toEqual({ "server.address": "app.example", "http.host": "app.example" });
+  });
+
+  it("drops IP-bearing / proxy headers in the SDK's `_` spelling and keeps benign ones", () => {
+    const d: Record<string, unknown> = {
+      "http.request.header.x_forwarded_for": "203.0.113.9",
+      "http.request.header.x_real_ip": "203.0.113.9",
+      "http.request.header.cf_connecting_ip": "203.0.113.9",
+      "http.request.header.true_client_ip": "203.0.113.9",
+      "http.request.header.x_vercel_forwarded_for": "203.0.113.9",
+      "http.request.header.forwarded": "for=203.0.113.9",
+      "http.request.header.via": "1.1 vercel",
+      "http.request.header.x_forwarded_user": "eve",
+      "http.request.header.remote_addr": "203.0.113.9",
+      "http.request.header.x_forwarded_host": "app.example",
+      "http.request.header.user_agent": "ua",
+      "http.request.header.accept_language": "en-CA",
+      "http.request.header.host": "app.example",
+      "http.response.header.x_powered_by": "next",
+      "http.response.header.content_type": "text/html",
+    };
+    scrubSpanData(d);
+    expect(d).toEqual({
+      "http.request.header.user_agent": "ua",
+      "http.request.header.accept_language": "en-CA",
+      "http.request.header.host": "app.example",
+      "http.response.header.x_powered_by": "next",
+      "http.response.header.content_type": "text/html",
+    });
+  });
+});
+
+/**
+ * Review #22 (follow-up): drive the SDK's REAL header→span-attribute writer
+ * (`httpHeadersToSpanAttributes`, what the Node `http.server` root span and
+ * the `RequestData` integration call) with our policy resolved by a real
+ * `Client`, so the attribute keys under test are the ones production emits.
+ * Two properties are pinned: (1) the policy denies at least everything the
+ * deprecated `sendDefaultPii: false` bridge denied (no regression from the
+ * switch to `dataCollection`), and (2) whatever the SDK still records is
+ * scrubbed by the backstop with no IP / credential surviving.
+ */
+describe("SDK parity: real @sentry/core writer + SENTRY_DATA_COLLECTION", () => {
+  const IP = "203.0.113.9";
+  const JWT = "eyJhbGciOi.eyJzdWIiOi.sIgnAtuRe";
+  const REQUEST_HEADERS: Record<string, string> = {
+    "x-forwarded-for": `${IP}, 10.0.0.1`,
+    "x-real-ip": IP,
+    "cf-connecting-ip": IP,
+    "true-client-ip": IP,
+    "x-vercel-forwarded-for": IP,
+    "x-client-ip": IP,
+    forwarded: `for=${IP};proto=https`,
+    via: "1.1 vercel",
+    "x-forwarded-user": "eve",
+    "x-forwarded-host": "app.example",
+    "x-forwarded-proto": "https",
+    cookie: "better-auth.session_token=sess; theme=dark",
+    authorization: `Bearer ${JWT}`,
+    "proxy-authorization": `Basic ${JWT}`,
+    "x-api-key": "drk_live_AbC123",
+    referer: "https://app/sign-in?returnTo=/admin&email=eve@x.com",
+    "user-agent": "ua",
+    accept: "text/html",
+    "accept-language": "en-CA",
+    host: "app.example",
+    "content-type": "application/json",
+  };
+  const RESPONSE_HEADERS: Record<string, string> = {
+    "set-cookie": "better-auth.session_token=sess; Path=/; HttpOnly",
+    "x-powered-by": "next",
+    "content-type": "text/html",
+  };
+
+  /** The policy as the SDK resolves it inside a real `Client`. */
+  function resolvedPolicy() {
+    const client = new ServerRuntimeClient({
+      dataCollection: SENTRY_DATA_COLLECTION,
+      integrations: [],
+      stackParser: () => [],
+      transport: (opts) => createTransport(opts, () => Promise.resolve({})),
+    });
+    return client.getDataCollectionOptions();
+  }
+
+  it("resolves with every channel closed and the bridge's frameContextLines", () => {
+    expect(resolvedPolicy()).toMatchObject({
+      userInfo: false,
+      cookies: false,
+      queryParams: false,
+      httpBodies: [],
+      genAI: { inputs: false, outputs: false },
+      frameContextLines: 7,
+    });
+  });
+
+  it("denies at least every header the old sendDefaultPii:false bridge denied", () => {
+    const ours = httpHeadersToSpanAttributes(REQUEST_HEADERS, resolvedPolicy(), "request");
+    const bridge = httpHeadersToSpanAttributes(REQUEST_HEADERS, false, "request");
+    for (const [key, value] of Object.entries(bridge)) {
+      if (value === "[Filtered]") {
+        // Filtered by the bridge → filtered or not recorded at all by us.
+        expect([undefined, "[Filtered]"], key).toContain(ours[key]);
+      }
+    }
+    // Real key shapes: `-` → `_`, cookies exploded per name (we record none).
+    expect(ours["http.request.header.x_forwarded_for"]).toBe("[Filtered]");
+    expect(ours["http.request.header.x_real_ip"]).toBe("[Filtered]");
+    expect(ours["http.request.header.via"]).toBe("[Filtered]");
+    expect(ours["http.request.header.x_forwarded_user"]).toBe("[Filtered]");
+    expect(ours["http.request.header.x_vercel_forwarded_for"]).toBe("[Filtered]");
+    expect(ours["http.request.header.referer"]).toBe("[Filtered]");
+    expect(ours["http.request.header.x_api_key"]).toBe("[Filtered]");
+    expect(ours["http.request.header.cookie.better_auth.session_token"]).toBeUndefined();
+    expect(ours["http.request.header.cookie.theme"]).toBeUndefined();
+    expect(ours["http.request.header.user_agent"]).toBe("ua");
+    expect(ours["http.request.header.accept_language"]).toBe("en-CA");
+    expect(JSON.stringify(ours)).not.toContain(IP);
+  });
+
+  it("scrubs a Node http.server root span exactly as the integration builds it", () => {
+    // Mirrors @sentry/node-core httpServerSpansIntegration: fixed attributes
+    // (including the unconditional `http.client_ip`) spread with the
+    // policy-filtered header attributes.
+    const data: Record<string, unknown> = {
+      "sentry.op": "http.server",
+      "http.url": `https://app.example/en/invite?token=${JWT}`,
+      "http.method": "GET",
+      "http.target": `/en/invite?token=${JWT}`,
+      "http.host": "app.example",
+      "net.host.name": "app.example",
+      "http.client_ip": IP,
+      "http.user_agent": "ua",
+      "http.scheme": "https",
+      "http.flavor": "1.1",
+      "net.transport": "ip_tcp",
+      ...httpHeadersToSpanAttributes(REQUEST_HEADERS, resolvedPolicy(), "request"),
+      ...httpHeadersToSpanAttributes(RESPONSE_HEADERS, resolvedPolicy(), "response"),
+      "http.response.status_code": 200,
+    };
+    scrubSpanData(data);
+    const json = JSON.stringify(data);
+    expect(json).not.toContain(IP);
+    expect(json).not.toContain(JWT);
+    expect(json).not.toContain("sess");
+    expect(json).not.toContain("drk_live_");
+    expect(json).not.toContain("eve");
+    expect(json).not.toContain("[Filtered]"); // filtered placeholders are dropped, not shipped
+    expect(data["http.client_ip"]).toBeUndefined();
+    expect(data["http.request.header.x_forwarded_for"]).toBeUndefined();
+    expect(data["http.request.header.x_forwarded_host"]).toBeUndefined();
+    expect(data["http.response.header.set_cookie"]).toBeUndefined();
+    // The span stays useful.
+    expect(data["http.url"]).toBe("https://app.example/en/invite");
+    expect(data["http.target"]).toBe("/en/invite");
+    expect(data["http.user_agent"]).toBe("ua");
+    expect(data["http.request.header.user_agent"]).toBe("ua");
+    expect(data["http.request.header.host"]).toBe("app.example");
+    expect(data["http.response.header.x_powered_by"]).toBe("next");
+    expect(data["http.response.status_code"]).toBe(200);
+  });
 });
 
 describe("SENTRY_DATA_COLLECTION", () => {
@@ -316,11 +562,37 @@ describe("SENTRY_DATA_COLLECTION", () => {
       queryParams: false,
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
+      frameContextLines: 7,
     });
     const req = SENTRY_DATA_COLLECTION.httpHeaders?.request as { deny: string[] };
-    expect(req.deny).toEqual(
-      expect.arrayContaining(["authorization", "cookie", "x-api-key", "referer"]),
-    );
+    const res = SENTRY_DATA_COLLECTION.httpHeaders?.response as { deny: string[] };
+    const expected = [
+      "authorization",
+      "cookie",
+      "x-api-key",
+      "referer",
+      // the SDK's own `ipHeaderNames` (vendor/getIpAddress)
+      "x-client-ip",
+      "x-forwarded-for",
+      "fly-client-ip",
+      "cf-connecting-ip",
+      "fastly-client-ip",
+      "true-client-ip",
+      "x-real-ip",
+      "x-cluster-client-ip",
+      "x-forwarded",
+      "forwarded-for",
+      "forwarded",
+      "x-vercel-forwarded-for",
+      // the bridge's PII_HEADER_SNIPPETS
+      "forwarded",
+      "-ip",
+      "remote-",
+      "via",
+      "-user",
+    ];
+    expect(req.deny).toEqual(expect.arrayContaining(expected));
+    expect(res.deny).toEqual(expect.arrayContaining(expected));
   });
 });
 

@@ -67,8 +67,15 @@ describe.each(CONFIGS)("Sentry %s config", (_name, load) => {
       httpBodies: [],
     });
     // The deprecated flag is superseded by `dataCollection` (the SDK ignores
-    // it once the policy is set); it must never be flipped to true.
-    expect(options.sendDefaultPii).not.toBe(true);
+    // it once the policy is set) — it must not be re-introduced at all, or a
+    // future reader will believe it still does something.
+    expect(options.sendDefaultPii).toBeUndefined();
+    // The policy also denies the IP-bearing proxy headers the old
+    // `sendDefaultPii: false` bridge used to filter (review #22).
+    const dc = options.dataCollection as { httpHeaders: { request: { deny: string[] } } };
+    expect(dc.httpHeaders.request.deny).toEqual(
+      expect.arrayContaining(["x-forwarded-for", "x-real-ip", "forwarded"]),
+    );
   });
 
   it("stays disabled with no DSN configured", async () => {

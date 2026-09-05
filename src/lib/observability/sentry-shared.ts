@@ -51,6 +51,55 @@ const SENSITIVE_HEADERS = new Set([
 ]);
 
 /**
+ * Headers that carry the client's IP address — the SDK's own IP resolver
+ * (`ipHeaderNames` in `@sentry/core`, not exported) reads exactly these,
+ * and the app's rate limiter reads the same ones. The old
+ * `sendDefaultPii: false` bridge filtered them by name; a `dataCollection`
+ * policy replaces that bridge wholesale, so they must be denied here or
+ * every sampled server transaction ships the user's IP (review #22).
+ */
+const IP_HEADERS = new Set([
+  "x-client-ip",
+  "x-forwarded-for",
+  "fly-client-ip",
+  "cf-connecting-ip",
+  "fastly-client-ip",
+  "true-client-ip",
+  "x-real-ip",
+  "x-cluster-client-ip",
+  "x-forwarded",
+  "forwarded-for",
+  "forwarded",
+  "x-vercel-forwarded-for",
+]);
+
+/**
+ * Header-name fragments the SDK's `sendDefaultPii: false` bridge denied
+ * (`PII_HEADER_SNIPPETS`). Its deny-list matching is substring-based, so
+ * listing them keeps parity with the pre-`dataCollection` behaviour for
+ * any proxy header not named above (`x-forwarded-user`, `via`,
+ * `remote-addr`, `x-original-forwarded-for`, …).
+ */
+const PII_HEADER_SNIPPETS = ["forwarded", "-ip", "remote-", "via", "-user"];
+
+/** The write-time header deny list: exact names + the SDK's PII snippets. */
+const HEADER_DENY_LIST = [...SENSITIVE_HEADERS, ...IP_HEADERS, ...PII_HEADER_SNIPPETS];
+
+/**
+ * Whether a header (event-level spelling `X-Forwarded-For`, or the SDK's
+ * span-attribute spelling `x_forwarded_for` — `@sentry/core` rewrites `-`
+ * to `_` in attribute keys) must never leave the process.
+ */
+function isSensitiveHeaderName(name: string): boolean {
+  const lower = name.toLowerCase().replace(/_/g, "-");
+  return (
+    SENSITIVE_HEADERS.has(lower) ||
+    IP_HEADERS.has(lower) ||
+    PII_HEADER_SNIPPETS.some((snippet) => lower.includes(snippet))
+  );
+}
+
+/**
  * Write-time collection policy passed to every `Sentry.init`. The SDK
  * attaches request data to **transactions and spans** as well as error
  * events, and its own `sendDefaultPii: false` bridge still records query
@@ -58,9 +107,10 @@ const SENSITIVE_HEADERS = new Set([
  * it not to record them at all. The `scrub*` hooks below remain the
  * backstop for anything that reaches an event by another path (review #22).
  *
- * NOTE: once `dataCollection` is set the SDK ignores `sendDefaultPii`, and
- * its own defaults include `userInfo: true`, so every category is spelled
- * out here rather than relying on a default.
+ * NOTE: once `dataCollection` is set the SDK ignores `sendDefaultPii` and
+ * builds on its **permissive** defaults (`userInfo: true`, header deny list
+ * empty), so every category is spelled out here rather than relying on a
+ * default — including the IP-bearing headers the bridge used to deny.
  */
 export const SENTRY_DATA_COLLECTION: DataCollection = {
   userInfo: false,
@@ -68,10 +118,13 @@ export const SENTRY_DATA_COLLECTION: DataCollection = {
   queryParams: false,
   httpBodies: [],
   httpHeaders: {
-    request: { deny: Array.from(SENSITIVE_HEADERS) },
-    response: { deny: Array.from(SENSITIVE_HEADERS) },
+    request: { deny: HEADER_DENY_LIST },
+    response: { deny: HEADER_DENY_LIST },
   },
   genAI: { inputs: false, outputs: false },
+  // The `sendDefaultPii: false` bridge used 7 (the ContextLines default);
+  // the `dataCollection` defaults drop to 5. Keep the stack-context parity.
+  frameContextLines: 7,
 };
 
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -107,16 +160,41 @@ function stripQuery(url: string): string {
 }
 
 /**
- * Span-attribute keys that hold a raw query string (server `RequestData`
- * writes `url.query`; OTel/Next.js write `http.query`) — always dropped.
+ * Span-attribute keys that are always dropped:
+ *   - raw query strings (server `RequestData` writes `url.query`;
+ *     OTel / Next.js / browser fetch write `http.query`)
+ *   - URL fragments (`url.fragment` / `http.fragment` — a hash can carry
+ *     an OAuth implicit-flow token or a `returnTo`)
+ *   - the captured request body (`httpBodies: []` stops it at write time;
+ *     this mirrors the event-level `delete request.data` as the backstop)
+ *   - the client IP (`http.client_ip` is set **unconditionally** by the
+ *     Node http-server span integration from `x-forwarded-for`;
+ *     `user.ip_address` / `client.address` / `net.peer.ip` /
+ *     `net.sock.peer.addr` / `network.peer.address` are the RequestData /
+ *     OTel spellings) — the policy is "no user info", so no IP anywhere.
  */
-const QUERY_DATA_KEYS = new Set(["url.query", "http.query"]);
+const DROPPED_DATA_KEYS = new Set([
+  "url.query",
+  "http.query",
+  "url.fragment",
+  "http.fragment",
+  "http.request.body.data",
+  "http.client_ip",
+  "user.ip_address",
+  "client.address",
+  "net.peer.ip",
+  "net.sock.peer.addr",
+  "network.peer.address",
+]);
 
 /**
  * Span-attribute keys that hold a URL which may carry a query string /
  * reset token — re-run through {@link stripQuery} + {@link redactText}.
+ * The bare `url` key is what browser fetch / XHR `http.client` spans use
+ * for the full request URL (query included).
  */
 const URL_DATA_KEYS = new Set([
+  "url",
   "url.full",
   "url.path",
   "url.original",
@@ -140,27 +218,30 @@ const SECRET_KEY_RE =
 /**
  * `http.request.header.<name>[.<cookie>]` / `http.response.header.<name>`
  * attributes for a sensitive header (cookies are exploded one attribute
- * per cookie name, hence the optional suffix).
+ * per cookie name, hence the optional suffix). The SDK writes `<name>`
+ * with `_` in place of `-` (`x_forwarded_for`, `set_cookie`);
+ * {@link isSensitiveHeaderName} normalises both spellings.
  */
 const HEADER_DATA_RE = /^http\.(?:request|response)\.header\.([^.]+)(?:\.|$)/i;
 
 /**
- * Scrubs a span-attribute bag in place: query attributes dropped, URL
- * attributes query-stripped, sensitive-header attributes dropped, secret-
- * named keys replaced, and every remaining string value pattern-redacted.
- * Exported for the unit tests; callers use {@link scrubSpan} /
+ * Scrubs a span-attribute bag in place: query / fragment / body / IP
+ * attributes dropped, URL attributes query-stripped, sensitive-header
+ * attributes (auth, cookies, referer, IP-bearing proxy headers) dropped,
+ * secret-named keys replaced, and every remaining string value pattern-
+ * redacted. Exported for the unit tests; callers use {@link scrubSpan} /
  * {@link scrubTransaction}.
  */
 export function scrubSpanData(data: Record<string, unknown> | undefined): void {
   if (!data || typeof data !== "object") return;
   for (const key of Object.keys(data)) {
     const value = data[key];
-    if (QUERY_DATA_KEYS.has(key)) {
+    if (DROPPED_DATA_KEYS.has(key)) {
       delete data[key];
       continue;
     }
     const header = HEADER_DATA_RE.exec(key)?.[1];
-    if (header && SENSITIVE_HEADERS.has(header.toLowerCase())) {
+    if (header && isSensitiveHeaderName(header)) {
       delete data[key];
       continue;
     }
@@ -186,7 +267,7 @@ function scrubEventInPlace(event: Event): void {
     if (typeof request.url === "string") request.url = stripQuery(request.url);
     if (request.headers) {
       for (const key of Object.keys(request.headers)) {
-        if (SENSITIVE_HEADERS.has(key.toLowerCase())) {
+        if (isSensitiveHeaderName(key)) {
           delete (request.headers as Record<string, unknown>)[key];
         }
       }
@@ -219,6 +300,7 @@ function scrubEventInPlace(event: Event): void {
  * (setup-better-auth.md §7).
  *
  *   - request cookies + auth/cookie/referer headers + body → dropped
+ *   - IP-bearing proxy headers (`x-forwarded-for`, `x-real-ip`, …) → dropped
  *   - query string (may carry tokens, emails, SSO handoff JWTs) → dropped;
  *     a `/reset-password/<token>` path segment → redacted
  *   - user email / ip / username → dropped (we keep only an opaque id)

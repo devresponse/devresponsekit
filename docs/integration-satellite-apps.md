@@ -27,7 +27,7 @@ Remarkably, the three options differ by **two source-level deltas plus configura
 
 Decide by trust boundary first — the full rationale and comparison matrix is in [Design: Satellite Apps §3](./design-satellite-apps.md#3-auth-data-model--a--b--c-the-load-bearing-decision):
 
-- **Third-party, mixed-trust, or defense-in-depth fleet → A or B (the handoff).** Each satellite keeps its own session store, its own subdomain-scoped cookie, and its own `BETTER_AUTH_SECRET`; the only bridge is a single-use, audience-bound, ≤60-second token. A compromised satellite is contained.
+- **Third-party, mixed-trust, or defense-in-depth fleet → A or B (the handoff).** Each satellite keeps its own session store, its own subdomain-scoped cookie, and its own `BETTER_AUTH_SECRET`; it holds **no signing material** (handoffs are EdDSA-signed by the primary and verified against the primary's public JWKS), and the only bridge is a single-use, audience-bound, ≤60-second token. A compromised satellite is contained: it can forge nothing for the primary or for sibling satellites.
   - **A** when the satellite persists any per-user state (preferred locale, a local `status` kill switch) — the recommended default.
   - **B** for an ultra-thin viewer with zero per-user state, accepting that revocation rides the session TTL rather than a local status flag.
 - **First-party, co-trusted, same-team fleet → C.** Least code, zero-redirect UX, one identity source, instant central revocation — bought by collapsing the whole subdomain fleet into **one security domain** (shared parent-domain cookie + shared `BETTER_AUTH_SECRET`). Never offer C to a third party.
@@ -43,19 +43,22 @@ sequenceDiagram
     participant SP as Satellite POST /api/sso/consume
 
     U->>P: GET ?applicationId=<id>
-    P->>P: verify session + registered app,<br/>INSERT nonce (jti), sign HS256 JWT (≤60s)
+    P->>P: verify session + registered app,<br/>INSERT nonce (jti), sign EdDSA JWT (kid, ≤60s)
     P-->>SG: 302 …/api/sso/consume?token=…
-    SG->>SG: verify sig + iss + aud + exp (no session yet)
+    SG->>P: GET /api/sso/jwks.json (public keys, cached)
+    SG->>SG: verify sig (by kid) + typ + iss + aud + exp + age ≤60s (no session yet)
     SG-->>SC: 302 /{locale}/sso/confirm?token=…
     SC->>SP: same-origin POST (hidden token)
     SP->>SP: trusted-origin check → re-verify →<br/>burn nonce (one-time) → create session
     SP-->>U: 303 /{locale}/app/dashboard + session cookie
 ```
 
-**The token** is an HS256 JWT signed with the shared `SSO_HANDOFF_JWT_SECRET`:
+**The token** is an **EdDSA (Ed25519)** JWT signed with the primary's `SSO_HANDOFF_PRIVATE_KEY`; the satellite verifies it against the primary's public key set at **`GET <SSO_HANDOFF_ISSUER>/api/sso/jwks.json`** (jose `createRemoteJWKSet` — cached, refetched on an unknown `kid`, cooldown-limited) and **holds no secret** (review #5):
 
-- Claims: `jti` (one-time-use id), `sub` (Better Auth user id), `email`, `organizationId`, `appUserId`, `targetApplicationId`, `locale`, `roles[]` — **no display name** (the satellite derives one).
+- Header: `alg: EdDSA`, `typ: JWT`, `kid` (the JWK thumbprint, or the primary's pinned `SSO_HANDOFF_KID`). Anything else — `HS256`, `none` — is rejected before the signature is even checked.
+- Claims (**minimised**, review #60 — the token rides in a query string): `jti` (one-time-use id), `sub` (Better Auth user id), `email`, `targetApplicationId`, `locale`, plus `iss`/`aud`/`iat`/`exp`. **No display name** (the satellite derives one) and **no `organizationId`, `appUserId` or `roles[]`** — no consumer read them, and the old `roles[]` was incomplete (direct roles only, no group-conferred roles). A satellite resolves membership, roles and permissions from its **own** store; if it needs the user's organization or roles from the primary, it asks the machine API with its own credential rather than trusting a URL-borne claim.
 - `iss` = `SSO_HANDOFF_ISSUER`; `aud` = `<SSO_HANDOFF_AUDIENCE_PREFIX>:<applicationId>` — so a token minted for one satellite is rejected by every other.
+- **Age ceiling on the receiver** (review #61): the verifier enforces `maxTokenAge: 60s` (5s clock tolerance) in addition to `exp`, so the 60-second bound holds even against a signer that failed to clamp.
 - **Application-id binding:** the consumer also requires `targetApplicationId` to equal its own `SSO_HANDOFF_APPLICATION_ID` and burns the nonce only where the row's `target_application_id` matches. `aud` alone is not trusted — `sso_audience` is an admin-typed column, so this holds even if two registered apps were to carry the same audience (the catalog refuses that with `409 audience_taken`).
 - **No launch while impersonating:** an impersonated primary session gets `403 forbidden_while_impersonating` from `/api/sso/launch`; a satellite session would carry no impersonation marker and be attributed to the target.
 - **Rate limits:** launch is throttled per principal, consume GET/POST per trusted client IP (30-burst, 1/s); denials are `429` with `Retry-After` and write no audit row.
@@ -70,7 +73,7 @@ sequenceDiagram
 
 1. **Register the satellite as an enterprise application** (Administrator → Enterprise apps, `admin.apps.manage`): its `id` (**exactly** the satellite's `SSO_HANDOFF_APPLICATION_ID`), `origin` (e.g. `https://apps.example.com`) and `sso_audience` = `<prefix>:<applicationId>` (e.g. `devresponse-app:standalone`; unique across the catalog — a duplicate is refused with `409 audience_taken`), status available ([Admin Manager §8.7](./admin-manager.md#87-enterprise-applications)).
 2. **Cover the satellite's host in `SSO_ALLOWED_ORIGIN_SUFFIXES`** with a **registrable domain** (`devresponse.com`, `example.co.uk` — never a bare TLD or public suffix such as `co.uk` / `github.io`, which the primary refuses at boot). **In production this is required**: when unset the primary fails closed and registers no origin at all (`origin_not_allowed`). Only outside production is an unset value derived from `NEXT_PUBLIC_PRODUCTION_HOST` — see [Configuration → SSO handoff](./configuration.md#single-sign-on-handoff).
-3. **Share three values** with the satellite: `SSO_HANDOFF_ISSUER` (the primary's origin), `SSO_HANDOFF_AUDIENCE_PREFIX`, and `SSO_HANDOFF_JWT_SECRET` (≥32 chars; **must differ** from every `BETTER_AUTH_SECRET`).
+3. **Hold the signing key** — `SSO_HANDOFF_PRIVATE_KEY`, an Ed25519 private JWK generated with the command in [Configuration → SSO handoff](./configuration.md#single-sign-on-handoff) (distinct from `API_JWT_PRIVATE_KEY`). Its public half is served at `GET /api/sso/jwks.json`. **Nothing secret is shared with the satellite** — it only needs two public values: `SSO_HANDOFF_ISSUER` (the primary's origin URL) and `SSO_HANDOFF_AUDIENCE_PREFIX`.
 
 ### 3.2 Satellite side (the consumer)
 
@@ -81,12 +84,12 @@ sequenceDiagram
 | `BETTER_AUTH_URL` | the satellite's own origin | |
 | `DATABASE_URL` / `DB_SCHEMA` | **its own** database (or own schema on a shared instance) | `DB_SCHEMA` defaults to `auth` |
 | `ADMIN_TRUSTED_ORIGINS` | the satellite's own origin | feeds Better Auth `trustedOrigins` + the origin guard on the consume POST |
-| `SSO_HANDOFF_ISSUER` | the **primary's** origin | |
+| `SSO_HANDOFF_ISSUER` | the **primary's** origin URL | the satellite fetches `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json` to verify — must be reachable from the satellite |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | same as primary (e.g. `devresponse-app`) | |
 | `SSO_HANDOFF_APPLICATION_ID` | **unique per satellite** (e.g. `standalone`, `handoff`) | must equal the registered enterprise-app `id` (and therefore the `sso_audience` suffix) — the consumer binds every token's `targetApplicationId` to it |
-| `SSO_HANDOFF_JWT_SECRET` | **same as primary** (HS256 is symmetric) | |
+| `SSO_HANDOFF_PRIVATE_KEY` | **unset** | issuer-only; a satellite holds no signing key (its own `/api/sso/launch` answers 503, which is correct — it never launches) |
 
-All four `SSO_HANDOFF_*` values are validated **at boot** on every DevResponseKit-derived app — including Option C, which never uses them at runtime (set placeholders there).
+The three `SSO_HANDOFF_*` values above (`ISSUER`, `AUDIENCE_PREFIX`, `APPLICATION_ID`) are validated **at boot** on every DevResponseKit-derived app — including Option C, which never uses them at runtime (set placeholders there). `SSO_HANDOFF_PRIVATE_KEY` is optional everywhere and set only on the primary.
 
 ## 4. Options A & B in detail
 
@@ -222,10 +225,10 @@ This exercises the *real* mechanics of a live fleet — per-subdomain cookie iso
    pnpm db:up && pnpm db:provision && pnpm db:seed:dev
    ```
 
-2. **Mint the shared handoff secret** and set the primary's `.env`:
+2. **Mint the primary's handoff signing key** (an Ed25519 private JWK — the primary is the only holder) and set the primary's `.env`:
 
    ```bash
-   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   node -e "import('jose').then(async j=>{const {privateKey}=await j.generateKeyPair('EdDSA',{extractable:true});console.log(JSON.stringify(await j.exportJWK(privateKey)))})"
    ```
 
    ```bash
@@ -234,9 +237,11 @@ This exercises the *real* mechanics of a live fleet — per-subdomain cookie iso
    ADMIN_TRUSTED_ORIGINS="http://devresponse.local:3000"
    COOKIE_DOMAIN=".devresponse.local"            # parent-domain session cookie (Option C)
    SSO_HANDOFF_ISSUER="http://devresponse.local:3000"
-   SSO_HANDOFF_JWT_SECRET="<the generated value>"
+   SSO_HANDOFF_PRIVATE_KEY='<the printed JWK JSON>'
    SSO_ALLOWED_ORIGIN_SUFFIXES="devresponse.local,localhost"
    ```
+
+   > `SSO_HANDOFF_ISSUER` equals `BETTER_AUTH_URL`, so the primary is a **self-issuer** and verifies its own handoffs against its local key set — no HTTP self-fetch. The satellites below fetch `http://devresponse.local:3000/api/sso/jwks.json`.
 
    > With `COOKIE_DOMAIN` set, browse the primary at `http://devresponse.local:3000` — a browser refuses a `.devresponse.local` cookie set from a `localhost` page, so sign-in via `localhost:3000` will not stick.
 
@@ -267,10 +272,10 @@ This exercises the *real* mechanics of a live fleet — per-subdomain cookie iso
    ADMIN_TRUSTED_ORIGINS="http://app1.devresponse.local:3001"
    DATABASE_URL="postgresql://devresponse:devresponse@localhost:5444/devresponse_db"  # the PRIMARY's DB — same-DB topology
    DB_SCHEMA="auth"
-   SSO_HANDOFF_ISSUER="http://devresponse.local:3000"
+   SSO_HANDOFF_ISSUER="http://devresponse.local:3000"   # the satellite verifies against <issuer>/api/sso/jwks.json
    SSO_HANDOFF_AUDIENCE_PREFIX="devresponse-app"
    SSO_HANDOFF_APPLICATION_ID="standalone"
-   SSO_HANDOFF_JWT_SECRET="<the shared secret from step 2>"
+   # NO SSO_HANDOFF_PRIVATE_KEY — a satellite holds no signing material
    ```
 
 5. **Run the fleet** — every app bound to its hostname:
@@ -311,7 +316,8 @@ Why these steps look the way they do:
 | --- | --- |
 | Launch returns 404 / "unknown application" | No enterprise-app row for `applicationId`, or the row's status isn't available |
 | Launch rejects the destination | Satellite origin not covered by `SSO_ALLOWED_ORIGIN_SUFFIXES` |
-| Consume GET rejects the token | `SSO_HANDOFF_JWT_SECRET` / `ISSUER` / `AUDIENCE_PREFIX` mismatch between the two sides; or the satellite's `SSO_HANDOFF_APPLICATION_ID` doesn't match the registered audience; or >60s elapsed |
+| Consume GET rejects the token | `SSO_HANDOFF_ISSUER` / `AUDIENCE_PREFIX` mismatch between the two sides; the satellite cannot reach `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json` (or it returns `{ "keys": [] }` — the primary has no `SSO_HANDOFF_PRIVATE_KEY`); the satellite's `SSO_HANDOFF_APPLICATION_ID` doesn't match the registered audience; or >60s elapsed since `iat` (clock skew >5s counts) |
+| Launch returns `503 sso_not_configured` | The primary has no `SSO_HANDOFF_PRIVATE_KEY` (audit reason `signing_key_not_configured`) — generate one per §3.1 |
 | Consume rejects the token with audit reason `target_application_mismatch` | The satellite's `SSO_HANDOFF_APPLICATION_ID` differs from the enterprise-app row's `id` on the primary (the audience may still match) — make them identical |
 | Launch returns `403 forbidden_while_impersonating` | You are impersonating a user on the primary; stop impersonation first — handoffs are never minted from impersonated sessions |
 | Launch or consume returns `429` | Per-principal (launch) / per-IP (consume) rate limit tripped; honour `Retry-After` |
@@ -323,13 +329,15 @@ Why these steps look the way they do:
 | Signed in on primary but C satellite sees no session | `COOKIE_DOMAIN` not set to the parent domain on **both** sides, different `BETTER_AUTH_SECRET`, or different `DB_SCHEMA` |
 | Sign-in on the primary stops sticking (local dev) | `COOKIE_DOMAIN` is set but you're browsing via `localhost` — a browser refuses a parent-domain cookie from a `localhost` page; use `http://devresponse.local:3000` (see §6.6) |
 | Handoff completes but the satellite immediately bounces to its own sign-in | The primary's parent-domain cookie (Option C fleet) is shadowing the satellite's session cookie under the default name — give each handoff satellite a distinct `advanced.cookiePrefix` (see §6.6) |
-| Boot fails on a C satellite | Missing `SSO_HANDOFF_*` placeholders — all four are validated at boot on every fork |
+| Boot fails on a C satellite | Missing `SSO_HANDOFF_*` placeholders — `ISSUER`, `AUDIENCE_PREFIX` and `APPLICATION_ID` are validated at boot on every fork |
+| Boot fails on the primary with `SSO_HANDOFF_PRIVATE_KEY` | The value is not a JSON Ed25519 private JWK (`kty: OKP`, `crv: Ed25519`, `d` present), or it equals `API_JWT_PRIVATE_KEY` |
 
 More: [Troubleshooting](./troubleshooting.md) covers the kit-wide failure modes.
 
 ## 8. Security summary
 
-- The handoff secret is HS256-symmetric: anyone holding `SSO_HANDOFF_JWT_SECRET` can mint sign-in tokens for **every** registered satellite. Store it like `BETTER_AUTH_SECRET`, keep it distinct from it, rotate it across both sides together.
+- The handoff is **asymmetric** (review #5): only the primary holds `SSO_HANDOFF_PRIVATE_KEY`; satellites verify against its public JWKS and can mint nothing — for themselves or for siblings. Store the private key like `BETTER_AUTH_SECRET`, keep it distinct from `API_JWT_PRIVATE_KEY`, and rotate it on the primary alone via `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY` (satellites follow automatically).
+- The token carries only `sub`, `email`, `locale`, `targetApplicationId` and `jti` (review #60): it rides in a URL, so it never carries organization/role context — a satellite derives authority from its own store.
 - A/B satellites are separate security domains; C satellites are the same security domain as the primary. Choose accordingly, and re-read [API Security §8](./api-security.md#8-third-party-and-satellite-web-apps) before giving any external team a C-style integration.
 - **Mixed fleets (C alongside A/B) have one extra rule:** the moment the primary issues a parent-domain cookie for C, that cookie reaches every subdomain — each handoff satellite must run a distinct `advanced.cookiePrefix` so the foreign cookie can't shadow its own session (§6.6). The shadowing fails *closed* (the satellite sees no session), but it looks like a broken handoff.
 - The consumer never trusts `aud` alone: every token is bound to the satellite's own `SSO_HANDOFF_APPLICATION_ID` (`targetApplicationId` claim + nonce row), the catalog refuses duplicate audiences, impersonated primary sessions cannot launch, and both endpoints are rate-limited before any audit write (§2).

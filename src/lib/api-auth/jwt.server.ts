@@ -25,8 +25,8 @@ import { getServerEnv } from "@/lib/env";
  * `kid` rotation) is identical to the design.
  *
  * The keypair and audience are deliberately SEPARATE from
- * `SSO_HANDOFF_JWT_SECRET` (HS256, 60-second subdomain handoff) per the
- * "independent secrets" rule.
+ * `SSO_HANDOFF_PRIVATE_KEY` (the EdDSA key behind the 60-second subdomain
+ * handoff, `src/lib/jwt-handoff.server.ts`) per the "independent keys" rule.
  */
 
 const ALG = "EdDSA";

@@ -17,12 +17,32 @@ import { ADMIN_API_HEADERS, signInAsSeedAdmin } from "./helpers/admin-auth";
  * registered app's `id` must therefore BE the deployment's application id. CI's
  * `browser` job sets `SSO_HANDOFF_APPLICATION_ID=portal` and
  * `SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app`, hence the values below.
+ *
+ * Signing (review #5): the token is EdDSA-signed with the ephemeral
+ * `SSO_HANDOFF_PRIVATE_KEY` CI mints at runtime; because `SSO_HANDOFF_ISSUER`
+ * equals `BETTER_AUTH_URL` the deployment is a self-issuer and verifies against
+ * its local key set — the same public key it serves at `/api/sso/jwks.json`.
  */
 const APP_ID = "portal";
 const AUDIENCE = "devresponse-app:portal";
 
 test.beforeEach(async ({ page }) => {
   await signInAsSeedAdmin(page);
+});
+
+test("sso handoff: the public JWKS is served, cacheable, and carries no private material", async ({
+  page,
+}) => {
+  const res = await page.request.get("/api/sso/jwks.json");
+  expect(res.status(), await res.text()).toBe(200);
+  expect(res.headers()["cache-control"]).toContain("max-age=300");
+  const body = (await res.json()) as { keys: Record<string, unknown>[] };
+  expect(body.keys.length).toBeGreaterThanOrEqual(1);
+  for (const key of body.keys) {
+    expect(key).toMatchObject({ kty: "OKP", crv: "Ed25519", alg: "EdDSA", use: "sig" });
+    expect(typeof key.kid).toBe("string");
+    expect(key).not.toHaveProperty("d");
+  }
 });
 
 test("sso handoff: launch -> consume -> replay rejected", async ({ page }, testInfo) => {

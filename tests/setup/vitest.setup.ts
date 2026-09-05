@@ -23,11 +23,19 @@ if (!process.env["NODE_ENV"]) {
 process.env.BETTER_AUTH_SECRET ??= "test-secret-test-secret-test-secret";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5444/test";
-process.env.SSO_HANDOFF_ISSUER ??= "https://test.devresponse.local";
+// The issuer equals BETTER_AUTH_URL so the suite runs as a SELF-ISSUER: the
+// handoff verifier uses the local public key set (no JWKS fetch), exactly like
+// a single-deployment rig. The signing key is an ephemeral per-worker Ed25519
+// JWK (review #5) — never a committed value.
+process.env.SSO_HANDOFF_ISSUER ??= "http://localhost:3000";
 process.env.SSO_HANDOFF_AUDIENCE_PREFIX ??= "devresponse-app";
 process.env.SSO_HANDOFF_APPLICATION_ID ??= "portal";
-process.env.SSO_HANDOFF_JWT_SECRET ??= "test-sso-secret-test-sso-secret-pad";
 process.env.SSO_HANDOFF_TTL_SECONDS ??= "60";
+if (!process.env.SSO_HANDOFF_PRIVATE_KEY) {
+  const { exportJWK, generateKeyPair } = await import("jose");
+  const { privateKey } = await generateKeyPair("EdDSA", { extractable: true });
+  process.env.SSO_HANDOFF_PRIVATE_KEY = JSON.stringify(await exportJWK(privateKey));
+}
 // P2-5: enterprise-app origin allow-list. The integration tests register
 // apps under example.com / devresponse.* origins.
 process.env.SSO_ALLOWED_ORIGIN_SUFFIXES ??= "example.com,devresponse.com,devresponse.local";

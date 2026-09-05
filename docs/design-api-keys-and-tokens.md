@@ -28,7 +28,7 @@ Design principles enforced in code:
 
 1. **No plaintext at rest.** API-key and client secrets are surfaced exactly once at creation/rotation; only a SHA-256 hash is persisted (`src/lib/api-auth/api-key.ts`, `oauth-clients.server.ts`). JWTs hold no server-side secret at all.
 2. **Least privilege by construction.** A credential's authority is the **intersection** of its granted scopes and its owner's live permissions, and it can never be minted to out-scope its creator (§7).
-3. **Independent secrets.** The JWT signing key and audience are deliberately separate from `SSO_HANDOFF_JWT_SECRET` (the HS256 60-second subdomain handoff) — different algorithm, different key, different purpose.
+3. **Independent keys.** The JWT signing key and audience are deliberately separate from `SSO_HANDOFF_PRIVATE_KEY` (the Ed25519 key behind the 60-second subdomain handoff, published at `/api/sso/jwks.json`) — different key, different audience, different purpose; the env schema refuses one JWK serving both.
 4. **Dark by default.** Both `API_KEYS_ENABLED` and `API_JWT_ENABLED` default OFF (§10); the tables exist regardless so enabling is a config flip, not a migration.
 
 Threats explicitly handled: secret theft at rest (hash-only storage), timing side-channels on secret comparison (constant-time compare, P2-3), bearer self-escalation (caller-aware grantability, §7), a banned owner retaining machine access (`isBetterAuthUserBanned` chokepoint, AUTH-1), cross-tenant drift (credentials resolve against their bound org, not the active-org cookie, MACHINE-1), and credential stuffing against the token endpoint (per-credential + global rate-limit floor, P2-4).
@@ -264,7 +264,7 @@ _Cross-reference: [SECURITY.md → Handling of secrets](../SECURITY.md#handling-
 
 - API-key and OAuth-client secrets are returned **once** at creation/rotation and stored only as SHA-256 hashes. There is **no** endpoint to retrieve a secret again — losing it means rotating.
 - Never log or echo a plaintext credential. Audit events record metadata only (credential id / `jti` / `client_id`, scopes, grant type) — never the secret.
-- The JWT signing key (`API_JWT_PRIVATE_KEY`) is an env/KMS-referenced Ed25519 private JWK, independent from `SSO_HANDOFF_JWT_SECRET`. Only the public half ever leaves the server (JWKS).
+- The JWT signing key (`API_JWT_PRIVATE_KEY`) is an env/KMS-referenced Ed25519 private JWK, independent from `SSO_HANDOFF_PRIVATE_KEY`. Only the public half ever leaves the server (JWKS).
 - Secret comparison for OAuth clients is constant-time (`timingSafeHexEqual`, P2-3).
 
 ---

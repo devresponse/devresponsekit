@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
+import { isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
 import {
   DEFAULT_SSO_LAUNCH_LIMIT,
@@ -9,6 +10,8 @@ import {
   enforceRateLimit,
 } from "@/lib/admin/rate-limit.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
+import { logServerError } from "@/lib/observability/logger.server";
+import { captureServerError } from "@/lib/observability/server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +39,10 @@ export const dynamic = "force-dynamic";
  *      (and, on a shared-DB satellite, escape the tenant confinement that
  *      makes the impersonation escalation guard sound — see
  *      `/api/preferences/active-org`, P0-1).
+ *   4. Signing key (review #5): `SSO_HANDOFF_PRIVATE_KEY` is OPTIONAL at boot
+ *      (a consumer-only satellite never issues), so a deployment that tries
+ *      to LAUNCH without one fails closed here — `503 sso_not_configured`,
+ *      audited + logged — before any nonce/purge write.
  */
 export async function GET(request: NextRequest) {
   const applicationId = request.nextUrl.searchParams.get("applicationId");
@@ -84,6 +91,24 @@ export async function GET(request: NextRequest) {
       metadata: { impersonatedBetterAuthUserId: session.user.id },
     });
     return NextResponse.json({ error: "forbidden_while_impersonating" }, { status: 403 });
+  }
+
+  if (!isSsoHandoffSignerConfigured()) {
+    const err = new Error("SSO_HANDOFF_PRIVATE_KEY is not configured");
+    logServerError("sso.launch.config_error", {
+      reason: "signing_key_not_configured",
+      err,
+    });
+    captureServerError(err, { status: 503 });
+    await auditEvent({
+      eventType: "sso.launch.failure",
+      outcome: "error",
+      reason: "signing_key_not_configured",
+      actorBetterAuthUserId: session.user.id,
+      targetApplicationId: applicationId,
+      request,
+    });
+    return NextResponse.json({ error: "sso_not_configured" }, { status: 503 });
   }
 
   try {

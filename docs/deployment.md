@@ -79,7 +79,7 @@ Notes:
 - `BETTER_AUTH_SECRET` — strong random string (≥ 32 chars).
 - `BETTER_AUTH_URL` — `https://<your-domain>` (also set `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_PRODUCTION_HOST` to the same origin/host).
 - `DATABASE_URL` — see the endpoint decision below.
-- The four `SSO_HANDOFF_*` vars — `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, `SSO_HANDOFF_JWT_SECRET` (a **second**, distinct strong secret). Required **even if you never use cross-app SSO** — they are validated at boot; set sane placeholders.
+- The three `SSO_HANDOFF_*` vars — `SSO_HANDOFF_ISSUER` (the primary's origin URL), `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`. Required **even if you never use cross-app SSO** — they are validated at boot; set sane placeholders. If this deployment **issues** handoffs (it is the primary of a satellite fleet) also set `SSO_HANDOFF_PRIVATE_KEY` — an Ed25519 private JWK, generated per [Configuration → SSO handoff](./configuration.md#single-sign-on-handoff), **distinct** from `API_JWT_PRIVATE_KEY`. Satellites never get it; they verify against `https://<primary>/api/sso/jwks.json`.
 
 `NODE_ENV=production` is set by Vercel automatically. The `NEXT_PUBLIC_*` values are inlined at build time, so changing a domain requires a **redeploy**.
 

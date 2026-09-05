@@ -24,8 +24,39 @@ if (typeof window !== "undefined") {
  */
 const EXAMPLE_SECRET_PLACEHOLDERS: ReadonlySet<string> = new Set([
   "replace-with-strong-random-secret",
-  "replace-with-a-different-strong-random-secret",
 ]);
+
+/**
+ * An OPTIONAL Ed25519 private JWK (JSON string). Unset or empty ⇒ `undefined`;
+ * when a value IS present it must parse as an OKP/Ed25519 JWK carrying the
+ * private `d` member, so a truncated or wrong-type key fails at boot rather
+ * than on the first SSO launch (review #5).
+ */
+function optionalEd25519PrivateJwk(name: string) {
+  return z
+    .string()
+    .optional()
+    .transform((value) => (value ? value : undefined))
+    .refine(
+      (value) => {
+        if (value === undefined) return true;
+        try {
+          const jwk = JSON.parse(value) as Record<string, unknown> | null;
+          return (
+            !!jwk &&
+            typeof jwk === "object" &&
+            jwk.kty === "OKP" &&
+            jwk.crv === "Ed25519" &&
+            typeof jwk.x === "string" &&
+            typeof jwk.d === "string"
+          );
+        } catch {
+          return false;
+        }
+      },
+      { message: `${name} must be a JSON-encoded Ed25519 private JWK (kty OKP, crv Ed25519, d)` },
+    );
+}
 
 /**
  * An OPTIONAL operator-chosen shared secret (cron / scrape tokens). Unset or
@@ -87,9 +118,33 @@ const serverEnvSchema = z
     MICROSOFT_CLIENT_SECRET: z.string().optional().default(""),
     GITHUB_CLIENT_ID: z.string().optional().default(""),
     GITHUB_CLIENT_SECRET: z.string().optional().default(""),
+    /**
+     * The handoff issuer's ORIGIN URL (`iss` claim). Consumers fetch the
+     * issuer's public keys from `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json`, so
+     * it must be a URL — the primary's own origin.
+     */
     SSO_HANDOFF_ISSUER: z.string().min(1),
     SSO_HANDOFF_AUDIENCE_PREFIX: z.string().min(1),
-    SSO_HANDOFF_JWT_SECRET: z.string().min(32, "SSO_HANDOFF_JWT_SECRET must be at least 32 chars"),
+    /**
+     * OPTIONAL Ed25519 private JWK that SIGNS handoff tokens (review #5 —
+     * replaces the fleet-wide symmetric `SSO_HANDOFF_JWT_SECRET`). Only the
+     * ISSUER (the primary) sets it; consumers verify against the issuer's
+     * published JWKS and hold no signing material. Unset ⇒ this deployment
+     * cannot launch handoffs (`/api/sso/launch` → 503) but still consumes.
+     */
+    SSO_HANDOFF_PRIVATE_KEY: optionalEd25519PrivateJwk("SSO_HANDOFF_PRIVATE_KEY"),
+    /** Optional fixed `kid` for the handoff key (default: the JWK thumbprint). */
+    SSO_HANDOFF_KID: z.string().optional(),
+    /**
+     * OPTIONAL previous handoff signing key kept during a rotation overlap:
+     * its PUBLIC half stays in the JWKS (and the self-issuer verifier) so
+     * tokens minted just before the rotation still verify until they expire
+     * (≤60s). Set the new key as SSO_HANDOFF_PRIVATE_KEY, move the old one
+     * here, and remove it once the window has passed.
+     */
+    SSO_HANDOFF_PREVIOUS_PRIVATE_KEY: optionalEd25519PrivateJwk("SSO_HANDOFF_PREVIOUS_PRIVATE_KEY"),
+    /** Only needed if the previous key was published under a pinned SSO_HANDOFF_KID. */
+    SSO_HANDOFF_PREVIOUS_KID: z.string().optional(),
     SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
     /**
      * Identifier of THIS deployment when consuming SSO handoffs. Required (not
@@ -305,16 +360,16 @@ const serverEnvSchema = z
           "must not be enabled in a production deployment (it disables sign-in rate limiting); permitted only outside production or in CI",
       });
     }
-    // Signing-secret hygiene (audit #12/#22). BETTER_AUTH_SECRET signs sessions
-    // and SSO_HANDOFF_JWT_SECRET signs the SSO handoff JWT — two distinct trust
-    // domains. Reusing one value for both collapses them, so require they
-    // differ. (This may reject an existing deployment that reused a secret —
-    // that is the intended prompt to split them.)
-    if (env.BETTER_AUTH_SECRET === env.SSO_HANDOFF_JWT_SECRET) {
+    // Signing-key hygiene (audit #12/#22, review #5). BETTER_AUTH_SECRET signs
+    // sessions; the SSO handoff is signed by an independent asymmetric key
+    // (SSO_HANDOFF_PRIVATE_KEY, validated as an Ed25519 JWK above) and the
+    // machine API by another (API_JWT_PRIVATE_KEY) — three distinct trust
+    // domains. Refuse one keypair doing double duty.
+    if (env.SSO_HANDOFF_PRIVATE_KEY && env.SSO_HANDOFF_PRIVATE_KEY === env.API_JWT_PRIVATE_KEY) {
       ctx.addIssue({
         code: "custom",
-        path: ["SSO_HANDOFF_JWT_SECRET"],
-        message: "must differ from BETTER_AUTH_SECRET (they sign distinct trust domains)",
+        path: ["SSO_HANDOFF_PRIVATE_KEY"],
+        message: "must differ from API_JWT_PRIVATE_KEY (they sign distinct trust domains)",
       });
     }
     // Origin allow-list hygiene (review #14): every configured suffix must be
@@ -334,7 +389,7 @@ const serverEnvSchema = z
     // And a production deployment must never boot on a publicly-known
     // .env.example placeholder — an env copied but not edited fails closed.
     if (env.NODE_ENV === "production") {
-      for (const key of ["BETTER_AUTH_SECRET", "SSO_HANDOFF_JWT_SECRET"] as const) {
+      for (const key of ["BETTER_AUTH_SECRET"] as const) {
         if (EXAMPLE_SECRET_PLACEHOLDERS.has(env[key])) {
           ctx.addIssue({
             code: "custom",
@@ -392,16 +447,15 @@ function isBuildPhase(): boolean {
 function buildPhasePlaceholders(): ServerEnv {
   return serverEnvSchema.parse({
     NODE_ENV: "production",
-    // ≥32 chars and DISTINCT from each other so they satisfy the tightened
-    // min-length + must-differ rules; discarded after build-time page-data
-    // collection (never a running-server secret).
+    // ≥32 chars so it satisfies the tightened min-length rule; discarded after
+    // build-time page-data collection (never a running-server secret). No SSO
+    // signing key: it is optional, and the build never signs.
     BETTER_AUTH_SECRET: "build-phase-placeholder-better-auth-secret",
     BETTER_AUTH_URL: "http://localhost:3000",
     DATABASE_URL: "postgresql://build:build@localhost:5432/build",
-    SSO_HANDOFF_ISSUER: "build-placeholder",
+    SSO_HANDOFF_ISSUER: "http://localhost:3000",
     SSO_HANDOFF_AUDIENCE_PREFIX: "build-placeholder",
     SSO_HANDOFF_APPLICATION_ID: "build-placeholder",
-    SSO_HANDOFF_JWT_SECRET: "build-phase-placeholder-sso-handoff-secret",
   });
 }
 

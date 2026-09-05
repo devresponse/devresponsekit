@@ -130,7 +130,6 @@ jobs:
       SSO_HANDOFF_ISSUER: http://localhost:3000
       SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
       SSO_HANDOFF_APPLICATION_ID: portal
-      SSO_HANDOFF_JWT_SECRET: ci-only-sso-handoff-secret-not-for-production
       SEED_ADMIN_EMAIL: admin@devresponse.local
       SEED_ADMIN_PASSWORD: ChangeMe-LocalOnly-123!
       SEED_DEFAULT_ORGANIZATION_SLUG: default
@@ -166,13 +165,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # F2: the machine-API e2e needs a JWT signing key. Mint an ephemeral
-      # CI-only Ed25519 key at runtime and export it for the server boot — a
-      # private key must never be committed (gitleaks would flag it).
-      - name: Generate an ephemeral API JWT signing key (CI only)
+      # F2: the machine-API e2e needs a JWT signing key, and the SSO handoff
+      # e2e needs the (independent) EdDSA handoff key (review #5). Mint two
+      # ephemeral CI-only Ed25519 keys at runtime and export them for the
+      # server boot — a private key must never be committed (gitleaks would
+      # flag it).
+      - name: Generate ephemeral API JWT + SSO handoff signing keys (CI only)
         run: |
           KEY=$(node -e "import('jose').then(async (j) => { const { privateKey } = await j.generateKeyPair('EdDSA', { extractable: true }); process.stdout.write(JSON.stringify(await j.exportJWK(privateKey))) })")
           echo "API_JWT_PRIVATE_KEY=$KEY" >> "$GITHUB_ENV"
+          SSO_KEY=$(node -e "import('jose').then(async (j) => { const { privateKey } = await j.generateKeyPair('EdDSA', { extractable: true }); process.stdout.write(JSON.stringify(await j.exportJWK(privateKey))) })")
+          echo "SSO_HANDOFF_PRIVATE_KEY=$SSO_KEY" >> "$GITHUB_ENV"
 
       - name: Install Playwright browsers
         run: pnpm playwright install --with-deps chromium
@@ -348,7 +351,6 @@ jobs:
       SSO_HANDOFF_ISSUER: http://localhost:3000
       SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
       SSO_HANDOFF_APPLICATION_ID: portal
-      SSO_HANDOFF_JWT_SECRET: ci-only-sso-handoff-secret-not-for-production
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

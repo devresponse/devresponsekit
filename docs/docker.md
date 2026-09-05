@@ -72,10 +72,11 @@ container fails fast instead of serving broken auth.
 | `BETTER_AUTH_SECRET` | ≥ 32 chars; signs sessions. Use a unique random value per environment. |
 | `BETTER_AUTH_URL` | The app's public base URL, e.g. `https://app.example.com`. |
 | `DATABASE_URL` | Postgres connection string. |
-| `SSO_HANDOFF_ISSUER` | SSO handoff issuer id. |
+| `SSO_HANDOFF_ISSUER` | SSO handoff issuer — the primary's **origin URL** (consumers fetch its public keys from `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json`). |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | SSO handoff audience prefix. |
 | `SSO_HANDOFF_APPLICATION_ID` | This deployment's application id (required at boot even if SSO is unused). |
-| `SSO_HANDOFF_JWT_SECRET` | ≥ 32 chars; independent of `BETTER_AUTH_SECRET`. |
+
+Optional: `SSO_HANDOFF_PRIVATE_KEY` — the Ed25519 private JWK that **signs** handoffs; set it **only on the issuer** (satellites verify against the issuer's JWKS and hold no key). Without it the instance still consumes handoffs but `/api/sso/launch` answers 503. Generate one with the command in [configuration.md → SSO handoff](configuration.md#single-sign-on-handoff).
 
 Common optional variables: `DB_SCHEMA` (default `auth`),
 `NEXT_PUBLIC_APP_URL`, `ADMIN_TRUSTED_ORIGINS`, the `EMAIL_*` provider keys,
@@ -90,10 +91,11 @@ Put the runtime values in a file (do **not** bake them into the image):
 BETTER_AUTH_SECRET=...
 BETTER_AUTH_URL=https://app.example.com
 DATABASE_URL=postgres://app:***@db:5432/app
-SSO_HANDOFF_ISSUER=devresponse
+SSO_HANDOFF_ISSUER=https://app.example.com
 SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app
 SSO_HANDOFF_APPLICATION_ID=main
-SSO_HANDOFF_JWT_SECRET=...
+# issuer only — Ed25519 private JWK (JSON); omit on satellites
+SSO_HANDOFF_PRIVATE_KEY={"kty":"OKP","crv":"Ed25519","x":"...","d":"..."}
 ```
 
 In production, prefer your orchestrator's secret mechanism (Kubernetes
@@ -166,10 +168,12 @@ services:
       DATABASE_URL: postgres://app:app@db:5432/app
       BETTER_AUTH_SECRET: change-me-to-a-random-32char-min-secret
       BETTER_AUTH_URL: http://localhost:3000
-      SSO_HANDOFF_ISSUER: devresponse
+      SSO_HANDOFF_ISSUER: http://localhost:3000
       SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
-      # Min 32 chars AND different from BETTER_AUTH_SECRET (openssl rand -base64 32)
-      SSO_HANDOFF_JWT_SECRET: change-me-to-a-DIFFERENT-random-secret
+      SSO_HANDOFF_APPLICATION_ID: main
+      # Issuer only: an Ed25519 private JWK (JSON string) — generate one with the
+      # command in configuration.md; leave unset on a consumer-only satellite.
+      # SSO_HANDOFF_PRIVATE_KEY: '{"kty":"OKP","crv":"Ed25519","x":"...","d":"..."}'
 
 volumes:
   dbdata:

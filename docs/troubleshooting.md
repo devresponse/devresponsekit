@@ -131,9 +131,14 @@ warrant a comms channel and an owner before deep debugging.
 - Treat as **SEV1**. Preserve evidence — do **not** truncate `app_audit_events`
   (it is append-only). Capture the relevant `request_id`s and IPs.
 - If a secret may be exposed, rotate it (`BETTER_AUTH_SECRET`,
-  `SSO_HANDOFF_JWT_SECRET`, `API_JWT_PRIVATE_KEY`, provider keys) — rotating the
+  `SSO_HANDOFF_PRIVATE_KEY`, `API_JWT_PRIVATE_KEY`, provider keys) — rotating the
   auth secret signs everyone out, which is acceptable under a breach. Full
   per-secret steps in [Deployment](./deployment.md).
+- **`SSO_HANDOFF_PRIVATE_KEY` (Ed25519 JWK) — dual-key rotation, issuer only.**
+  Same mechanics as the API key below via `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY`;
+  satellites hold no key and need no change (they refetch
+  `/api/sso/jwks.json` on an unknown `kid`). The overlap only needs to cover
+  the ≤60s token lifetime.
 - **`API_JWT_PRIVATE_KEY` (Ed25519 JWK) — dual-key rotation.** JWKS publishes the
   current and previous public key, so tokens keep verifying during the overlap.
   (1) Move the current key to `API_JWT_PREVIOUS_PRIVATE_KEY` (+
@@ -215,7 +220,9 @@ transaction-pooling pooler the session `search_path` can be dropped — set it a
 role default (`ALTER ROLE <app> SET search_path = auth, public;`).
 
 **Boot fails with a secret/JWK error.** A required secret is missing or malformed:
-- `BETTER_AUTH_SECRET` and `SSO_HANDOFF_JWT_SECRET` must be set (and distinct).
+- `BETTER_AUTH_SECRET` must be set (≥32 chars).
+- `SSO_HANDOFF_PRIVATE_KEY`, when set, must be a valid Ed25519 private JWK JSON
+  (`kty: OKP`, `crv: Ed25519`, with `d`) and must differ from `API_JWT_PRIVATE_KEY`.
 - If `API_JWT_ENABLED=1`, `API_JWT_PRIVATE_KEY` must be a valid Ed25519 JWK JSON.
 - If `EMAIL_PROVIDER` is set, its credentials must be present.
 
@@ -285,9 +292,17 @@ lift a co-member's live one-time link. Locally, read the DB-only
 **SSO handoff fails.**
 - The token is single-use and valid ≤60s (the signer clamps any larger
   `SSO_HANDOFF_TTL_SECONDS` down to 60) — a reused or expired token is rejected.
-- `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, and `SSO_HANDOFF_JWT_SECRET`
-  must match between hub and receiver; the receiver's `SSO_HANDOFF_APPLICATION_ID`
-  must match the audience.
+- `SSO_HANDOFF_ISSUER` and `SSO_HANDOFF_AUDIENCE_PREFIX` must match between hub
+  and receiver; the receiver's `SSO_HANDOFF_APPLICATION_ID` must match the
+  audience. There is no shared secret: the receiver verifies against the hub's
+  `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json`, so the issuer must be the hub's
+  reachable origin URL and that endpoint must return the hub's key (`{ "keys":
+  [] }` means the hub has no `SSO_HANDOFF_PRIVATE_KEY`).
+- Launch answers `503 sso_not_configured` (audit reason
+  `signing_key_not_configured`): the hub has no `SSO_HANDOFF_PRIVATE_KEY`.
+- The token is rejected as too old even though `exp` is in the future: the
+  receiver enforces `maxTokenAge` 60s from `iat` — check the clocks on both
+  hosts (5s tolerance).
 - The destination origin must fall under `SSO_ALLOWED_ORIGIN_SUFFIXES`. In
   production that variable is **required** for registration (unset ⇒ every
   origin is `origin_not_allowed` and a boot warning is logged), and each entry

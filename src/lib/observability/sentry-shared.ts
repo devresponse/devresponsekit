@@ -71,6 +71,10 @@ const IP_HEADERS = new Set([
   "forwarded-for",
   "forwarded",
   "x-vercel-forwarded-for",
+  // The app's own trusted-client-IP header (`CLIENT_IP_HEADER` in
+  // src/lib/client-ip.ts; a literal here because this module is shared with
+  // the browser bundle, which must not import the server env module).
+  "x-drk-client-ip",
 ]);
 
 /**

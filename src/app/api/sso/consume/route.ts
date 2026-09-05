@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { auth } from "@/lib/auth";
+import { withTrustedClientIp } from "@/lib/client-ip";
 import { consumeSsoHandoffNonce } from "@/lib/sso.server";
 import { verifySsoHandoff, type VerifiedSsoHandoff } from "@/lib/jwt-handoff.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
@@ -246,11 +247,18 @@ export async function POST(request: NextRequest) {
     // failure here cannot be retried with the same token — intentional: a token
     // that reached session establishment was valid, and the failure modes below
     // (banned/unknown user, session store down) all warrant a fresh launch.
+    //
+    // Headers go through `withTrustedClientIp`: this route is NOT behind the
+    // proxy matcher, so the `x-drk-client-ip` header Better Auth reads for
+    // `session.ipAddress` must be derived here from the trusted hop — a
+    // client replaying the handoff (e.g. curl) could otherwise inject it, and
+    // the audit row below (which uses the same `getClientIp` model) would
+    // disagree with the session (review #35 / #190).
     let sessionHeaders: Headers;
     try {
       const result = await auth.api.createSsoSession({
         body: { userId: verified.payload.sub },
-        headers: request.headers,
+        headers: withTrustedClientIp(request.headers),
         returnHeaders: true,
       });
       sessionHeaders = result.headers;

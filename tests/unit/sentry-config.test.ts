@@ -74,7 +74,7 @@ describe.each(CONFIGS)("Sentry %s config", (_name, load) => {
     // `sendDefaultPii: false` bridge used to filter (review #22).
     const dc = options.dataCollection as { httpHeaders: { request: { deny: string[] } } };
     expect(dc.httpHeaders.request.deny).toEqual(
-      expect.arrayContaining(["x-forwarded-for", "x-real-ip", "forwarded"]),
+      expect.arrayContaining(["x-forwarded-for", "x-real-ip", "forwarded", "x-drk-client-ip"]),
     );
   });
 

@@ -57,7 +57,7 @@ _Source: `src/lib/api-auth/resolve-caller.server.ts`._
 `resolveCaller(request)` is the single entry point that understands every credential kind and returns a normalized `ResolvedCaller` (or `null`). It only answers _"who is this?"_ — status/membership and permission∩scope decisions belong to the guard (§8). Resolution order, first match wins:
 
 1. `Authorization: Bearer drk_…` → **API key** (detected by `looksLikeApiKey`, the `drk_` product prefix). Gated on `API_KEYS_ENABLED`; verified by hash lookup; usage stamped best-effort.
-2. `Authorization: Bearer eyJ…` → **JWT** (anything bearer that is not an API key). Gated on `API_JWT_ENABLED`; verified via JWKS, then the `jti` revocation check.
+2. `Authorization: Bearer eyJ…` → **JWT** (anything bearer that is not an API key). Gated on `API_JWT_ENABLED`; verified via JWKS against the resource's expected audience (§6.1), then the source-credential check (`cid`, §6.5). `resolveCallerDetailed` also reports *why* a bearer failed so the v1 guard can answer `401 credential_revoked` / `401 invalid_token` (audience) instead of a generic 401.
 3. No bearer → **session cookie** via the existing `getCurrentSession()`.
 
 The resolved shape:
@@ -89,14 +89,14 @@ Three tables back the subsystem. They are created by the baseline migration and 
 | Table | Purpose | Key columns |
 | --- | --- | --- |
 | `app_api_keys` | Machine API keys | `key_hash` (unique), `key_prefix`, `scopes text[]`, `status`, `expires_at`, `app_user_id`, `organization_id`, `last_used_at`/`last_used_ip`, revocation columns |
-| `app_oauth_clients` | Client-credentials principals | `client_id` (unique), `client_secret_hash`, `app_user_id` (service user), `scopes text[]`, `status` |
-| `app_revoked_tokens` | JWT `jti` denylist | `jti` (PK), `expires_at`, `revoked_at`, `reason` |
+| `app_oauth_clients` | Client-credentials principals | `client_id` (unique), `client_secret_hash`, `app_user_id` (service user), `scopes text[]`, `status`, `secret_rotated_at` (migration `0004`; retires tokens issued before a secret rotation, §6.5) |
+| `app_revoked_tokens` | Vestigial JWT `jti` denylist (no writer — outstanding-token revocation is the `cid` check, §6.5; kept from the frozen `0001` migration until a later core migration drops it) | `jti` (PK), `expires_at`, `revoked_at`, `reason` |
 
 Notes:
 
 - Both `app_api_keys.app_user_id` and `app_oauth_clients.app_user_id` are `on delete cascade` references to `app_users` — deleting the owner transitively disables the credential.
 - Only the **hash** is stored; there is no column that could hold a plaintext secret.
-- `app_revoked_tokens` is bounded: rows are purged once `expires_at` passes (§6.4).
+- `app_revoked_tokens` stays bounded (empty in practice): the `pnpm db:prune` retention job still purges rows once `expires_at` passes (§6.5).
 - `scopes` is a Postgres `text[]`; the codec/matcher in `scopes.ts` operates on string arrays (§7).
 
 ---
@@ -153,7 +153,10 @@ Grants:
 - `client_credentials` — `client_id` + `client_secret` (§2).
 - `api_key` — an `api_key` (a `drk_…` key), gated on `API_KEYS_ENABLED`.
 
-Flow: resolve the credential → re-check that the principal is an **active member of the credential's bound org** (MACHINE-1) → reject + audit a **banned** principal (MAPI-2; `decideSecureAccess` never reads the Better Auth `banned` flag, so this is an explicit mint-time gate) → apply optional **down-scoping** → mint. An optional `scope` parameter narrows the token to a subset of the credential's scopes; a requested scope that exceeds the credential is rejected with `invalid_scope` (never a superset). Success emits a `token.issued` audit event; failures use `invalid_client` / `unsupported_grant_type` / `invalid_scope`.
+Flow: resolve the credential → re-check that the principal is an **active member of the credential's bound org** (MACHINE-1) → reject + audit a **banned** principal (MAPI-2; `decideSecureAccess` never reads the Better Auth `banned` flag, so this is an explicit mint-time gate) → apply optional **down-scoping** → resolve the **`resource`** → cap the **TTL** → mint. An optional `scope` parameter narrows the token to a subset of the credential's scopes; a requested scope that exceeds the credential is rejected with `invalid_scope` (never a superset). Success emits a `token.issued` audit event (with the resource, audience and effective `expires_in`); failures use `invalid_client` / `unsupported_grant_type` / `invalid_scope` / `invalid_target`.
+
+- **`resource` (RFC 8707, review #50/#53).** `src/lib/api-auth/resources.ts` derives the allow-list from the deployment's own origin: `<BETTER_AUTH_URL>/api/v1` (the default when the parameter is omitted → `aud = API_JWT_AUDIENCE`, so pre-existing clients and verifiers are unaffected) and `<BETTER_AUTH_URL>/api/mcp` (→ `aud` = that identifier). Matching is exact after URL normalisation and trailing-slash trimming — no sub-paths, query strings or fragments; anything else is `400 invalid_target`. The check runs only after the credential verified, so it is not an oracle for unauthenticated callers.
+- **TTL cap (review #48).** For the `api_key` grant the lifetime is `min(API_JWT_ACCESS_TTL_SECONDS, floor((expires_at − now) / 1000))`, so a token never outlives the key it came from; a key with under one second left is refused with `invalid_client` rather than minting a 0-second token (a key already past `expires_at` never gets past `verifyApiKey`). The response's `expires_in` reports the capped value.
 
 ### 6.2 Minting & claims
 
@@ -164,12 +167,14 @@ Flow: resolve the credential → re-check that the principal is an **active memb
 | `alg` (header) | `EdDSA` |
 | `kid` (header) | `API_JWT_KID`, else the JWK thumbprint |
 | `iss` | `API_JWT_ISSUER`, defaulting to `BETTER_AUTH_URL` |
-| `aud` | `API_JWT_AUDIENCE` (default `devresponse-api`) |
+| `aud` | per `resource` (§6.1): `API_JWT_AUDIENCE` (default `devresponse-api`) for the v1 API, or `<origin>/api/mcp` for the MCP gateway |
 | `sub` | the principal's Better Auth user id |
 | `scope` | space-delimited effective scopes |
 | `org` | the bound organization id |
-| `jti` | a UUID — used for revocation (§6.4) + audit |
-| `exp` | now + `API_JWT_ACCESS_TTL_SECONDS` (default 900, hard-capped ≤ 3600) |
+| `jti` | a UUID — used for audit + per-credential rate limiting |
+| `cid` | `"<api_key\|oauth_client>:<row id>"` — the credential the token was minted from, re-checked on every request (§6.5) |
+| `iat` | issue time; compared with an OAuth client's `secret_rotated_at` (§6.5) |
+| `exp` | now + `API_JWT_ACCESS_TTL_SECONDS` (default 900, hard-capped ≤ 3600), never past the source API key's `expires_at` (§6.1) |
 
 The signing key is an Ed25519 JWK JSON string (containing the private `d` member). `getKeyMaterial` parses it, imports the signing key, derives the public JWK (stripping `d`, stamping `alg`/`use`/`kid`), and caches the result.
 
@@ -190,13 +195,18 @@ The published/verified key set is the **current** signing key plus an **optional
 
 `verifyAccessToken` builds a local JWK Set (current + previous) and `jose` selects the key by the token's `kid`, so a token minted with either key verifies during the overlap. To rotate with **zero downtime**: move the old `API_JWT_PRIVATE_KEY` to `API_JWT_PREVIOUS_PRIVATE_KEY`, set the new key as `API_JWT_PRIVATE_KEY`, then remove the previous entry once the window drains (≤ `API_JWT_ACCESS_TTL_SECONDS`, since every pre-rotation token has expired by then). When the deployment relies on the JWK thumbprint for `kid` (no pinned `API_JWT_KID`), the previous key's `kid` matches automatically and `API_JWT_PREVIOUS_KID` is unnecessary.
 
-### 6.5 `jti` revocation
+### 6.5 Revocation of outstanding tokens (`cid`)
 
-_Source: `src/lib/api-auth/revocation.server.ts`._
+_Source: `src/lib/api-auth/revocation.server.ts` (review #43)._
 
-Access tokens are stateless, so killing one before its natural `exp` means recording its `jti` in `app_revoked_tokens`; the resolver rejects any token whose `jti` is present (`isJtiRevoked`). `revokeJti(jti, expiresAt, reason?)` is idempotent (`on conflict do nothing`) and **opportunistically prunes** expired rows on every write — it is the table's only writer, so this keeps the table bounded to live revocations without a scheduled job (D3); the scheduled `pnpm db:prune` covers deployments that never revoke. After a token's `exp`, the signature/exp check rejects it regardless, so the row is safe to drop.
+Access tokens are stateless, so killing one before its natural `exp` needs a per-request read against something that revocation actually writes. Every token carries a **`cid` claim** naming the credential it was minted from, and the resolver's JWT branch calls `isSourceCredentialActive(credential, iat)` on every request — **one primary-key read**:
 
-> **Current wiring status.** The read side (`isJtiRevoked`) is enforced on every JWT resolution, but **no route or lifecycle event calls `revokeJti` yet** — revoking a key/client stops *minting*, and it does not denylist already-issued tokens. Today the operational way to kill an outstanding, unexpired JWT is to **ban its owner** (AUTH-1 cuts machine access immediately, §3); otherwise it dies at `exp` (≤15 min by default). Wire `revokeJti` into a revocation flow before advertising per-token revocation to integrators.
+- **API key** — the row must be `active` and not past `expires_at`. `revokeApiKey` and `rotateApiKey` both flip the old row to `revoked`, so a revoke **or** a rotation retires every token minted from that key on its next request (`401 credential_revoked`).
+- **OAuth client** — the row must be `active`, and the token's `iat` must not precede `secret_rotated_at` (migration `0004`, stamped by `rotateOauthClientSecret`). Revoking the client kills all its tokens; rotating its secret kills those minted with the old secret while the client itself keeps minting.
+
+A token minted before the `cid` claim existed (a legacy token) has no `cid` and is honoured until its `exp` — a window of at most `API_JWT_ACCESS_TTL_SECONDS` after the deploy that closes on its own. No positive cache sits in front of the read: it would reintroduce a revocation lag equal to its TTL, which is exactly the gap this check closes, and the read replaced the (always-empty) `jti` denylist lookup, so per-request DB cost is unchanged.
+
+> **What happened to the `jti` denylist.** The original design recorded revoked `jti`s in `app_revoked_tokens`, but nothing ever wrote to it — every operational revocation is a credential-level act, and a per-token kill switch had no caller or UI. `revokeJti` / `isJtiRevoked` were removed rather than wired. The table stays (it is in the frozen `0001` migration and costs nothing empty), `pruneExpiredRevocations` keeps the `pnpm db:prune` retention contract, and a later core migration may drop it. Banning the owner (AUTH-1, §3) remains the principal-wide kill switch.
 
 ---
 

@@ -147,8 +147,9 @@ The canonical, audience-organized documentation set lives in **[docs/](docs/READ
   environment) authenticates via API keys — stored only as SHA-256
   hashes — or Ed25519 JWT bearer tokens. Every credential's scopes are
   intersected with its owner's permissions, so a credential can never
-  exceed its owner's authority; revoked JWTs are tracked in
-  `app_revoked_tokens`.
+  exceed its owner's authority; every JWT names the key/client it was
+  minted from (`cid`), so revoking or rotating that credential retires its
+  outstanding tokens on their next request.
 - Outbound email is outbox-first: every message is recorded in
   `app_outbox` before any delivery attempt.
 - All admin mutations, account changes, and denied attempts are written

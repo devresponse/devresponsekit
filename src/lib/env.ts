@@ -287,6 +287,19 @@ const serverEnvSchema = z
       .string()
       .optional()
       .transform((value) => value === "1" || value === "true"),
+    /**
+     * Rollout grace for RFC 8707 audience binding at `/api/mcp` (review
+     * #50/#53). OFF (default): the gateway accepts only JWTs minted with
+     * `resource=<origin>/api/mcp` (an MCP audience). ON (`1`/`true`): legacy
+     * tokens carrying the plain v1 audience (`API_JWT_AUDIENCE`) are ALSO
+     * accepted, so existing agents keep working while they migrate to
+     * requesting the MCP resource. Unset it once every agent has moved.
+     * API keys are not audience-bound and are unaffected either way.
+     */
+    MCP_AUDIENCE_GRACE: z
+      .string()
+      .optional()
+      .transform((value) => value === "1" || value === "true"),
     /** Master switch for the `/api/mcp/register` self-registration endpoint (RFC 7591). DARK by default. */
     MCP_REGISTRATION_ENABLED: z
       .string()

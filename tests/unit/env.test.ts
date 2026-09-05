@@ -73,6 +73,7 @@ const TOUCHED_KEYS = [
   "CRON_SECRET",
   "METRICS_TOKEN",
   "SSO_ALLOWED_ORIGIN_SUFFIXES",
+  "MCP_AUDIENCE_GRACE",
 ] as const;
 
 async function loadEnvWith(patch: Record<string, string | undefined>) {
@@ -95,6 +96,34 @@ async function loadEnvWith(patch: Record<string, string | undefined>) {
   const mod = (await import("@/lib/env")) as typeof EnvModule;
   return { mod, restore };
 }
+
+describe("MCP_AUDIENCE_GRACE (RFC 8707 rollout flag, review #50/#53)", () => {
+  it("is OFF by default — /api/mcp requires the MCP audience", async () => {
+    const { mod, restore } = await loadEnvWith({ MCP_AUDIENCE_GRACE: undefined });
+    try {
+      expect(mod.getServerEnv().MCP_AUDIENCE_GRACE).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("accepts 1 / true and treats anything else as off", async () => {
+    for (const [value, expected] of [
+      ["1", true],
+      ["true", true],
+      ["", false],
+      ["0", false],
+      ["yes", false],
+    ] as const) {
+      const { mod, restore } = await loadEnvWith({ MCP_AUDIENCE_GRACE: value });
+      try {
+        expect(mod.getServerEnv().MCP_AUDIENCE_GRACE, value).toBe(expected);
+      } finally {
+        restore();
+      }
+    }
+  });
+});
 
 describe("AUTH_RATE_LIMIT_DISABLED production guard (AUTH-5)", () => {
   it("throws in production when enabled outside CI", async () => {

@@ -142,10 +142,16 @@ describe("rotateOauthClientSecret", () => {
     expect(await mod.rotateOauthClientSecret("c1")).toBeNull();
   });
 
-  it("writes a fresh hash and returns a new drkcsec_ secret", async () => {
+  it("writes a fresh hash + a rotation stamp and returns a new drkcsec_ secret", async () => {
     state.takeFirst = { id: "c1", status: "active" };
+    const before = Date.now();
     const secret = await mod.rotateOauthClientSecret("c1");
     expect(secret).toMatch(/^drkcsec_/);
     expect(state.updates[0]).toHaveProperty("client_secret_hash");
+    // review #43: the stamp is what retires tokens minted with the OLD secret
+    // (the row stays `active`, so the status check alone would not).
+    const stamp = state.updates[0]?.secret_rotated_at;
+    expect(stamp).toBeInstanceOf(Date);
+    expect((stamp as Date).getTime()).toBeGreaterThanOrEqual(before);
   });
 });

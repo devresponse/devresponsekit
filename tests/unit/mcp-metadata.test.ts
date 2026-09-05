@@ -42,6 +42,31 @@ describe("MCP discovery metadata", () => {
     expect(mcpWwwAuthenticate(BASE)).toContain(
       'resource_metadata="https://app.example.com/.well-known/oauth-protected-resource"',
     );
+    expect(mcpWwwAuthenticate(BASE)).not.toContain("error=");
+  });
+
+  it("appends an RFC 6750 error challenge when given, with double quotes neutralised", () => {
+    const value = mcpWwwAuthenticate(BASE, {
+      error: "invalid_token",
+      description: 'wrong "audience"; request resource=https://app.example.com/api/mcp',
+    });
+    expect(value).toContain("resource_metadata=");
+    expect(value).toContain('error="invalid_token"');
+    expect(value).toContain(
+      `error_description="wrong 'audience'; request resource=https://app.example.com/api/mcp"`,
+    );
+  });
+
+  it("advertises the RFC 8707 resources the token endpoint accepts (review #50/#53)", () => {
+    const as = buildAuthorizationServerMetadata(BASE, BASE);
+    expect(as.resources_supported).toEqual([
+      "https://app.example.com/api/v1",
+      "https://app.example.com/api/mcp",
+    ]);
+    // The protected resource's identifier IS the second entry, so a client
+    // can pass the advertised `resource` straight to the token endpoint.
+    expect(as.resources_supported).toContain(buildProtectedResourceMetadata(BASE, BASE).resource);
+    expect(buildProtectedResourceMetadata(BASE, BASE).resource).toBe(mcpResourceIdentifier(BASE));
   });
 
   it("includes the registration endpoint only when self-registration is enabled", () => {

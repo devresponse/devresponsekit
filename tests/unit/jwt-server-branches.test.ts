@@ -38,14 +38,22 @@ function baseEnv(overrides: Record<string, unknown> = {}) {
  * payload-shape branches of verifyAccessToken. */
 async function signRaw(
   claims: Record<string, unknown>,
-  opts: { setSub?: boolean; setJti?: boolean; setExp?: boolean; issuer?: string } = {},
+  opts: {
+    setSub?: boolean;
+    setJti?: boolean;
+    setExp?: boolean;
+    setIat?: boolean;
+    issuer?: string;
+    /** `null` omits the `aud` claim entirely. */
+    audience?: string | string[] | null;
+  } = {},
 ): Promise<string> {
   const key = (await importJWK({ ...privateJwk, alg: "EdDSA" }, "EdDSA")) as CryptoKey;
   let s = new SignJWT(claims)
     .setProtectedHeader({ alg: "EdDSA", kid: "k", typ: "JWT" })
-    .setIssuer(opts.issuer ?? ISSUER)
-    .setAudience(AUDIENCE)
-    .setIssuedAt();
+    .setIssuer(opts.issuer ?? ISSUER);
+  if (opts.audience !== null) s = s.setAudience(opts.audience ?? AUDIENCE);
+  if (opts.setIat !== false) s = s.setIssuedAt();
   if (opts.setSub !== false) s = s.setSubject("ba-1");
   if (opts.setJti !== false) s = s.setJti("jti-1");
   if (opts.setExp !== false) s = s.setExpirationTime("900s");
@@ -135,6 +143,36 @@ describe("verifyAccessToken — payload-shape branches", () => {
     const token = await signRaw({ scope: "account.read", org: { not: "a string" } });
     const verified = await M.verifyAccessToken(token);
     expect(verified.organizationId).toBeNull();
+  });
+
+  it("rejects a token missing the `iat` claim (needed for the rotation check, review #43)", async () => {
+    const token = await signRaw({ scope: "account.read" }, { setIat: false });
+    await expect(M.verifyAccessToken(token)).rejects.toThrow(/missing required claims/);
+  });
+
+  it("treats a malformed `cid` claim as no source credential", async () => {
+    for (const cid of [42, "nocolon", ":missing-kind", "api_key:", "session:abc"]) {
+      const verified = await M.verifyAccessToken(await signRaw({ cid }));
+      expect(verified.credential).toBeNull();
+    }
+    const verified = await M.verifyAccessToken(await signRaw({ cid: "api_key:key-7" }));
+    expect(verified.credential).toEqual({ kind: "api_key", id: "key-7" });
+  });
+});
+
+describe("verifyAccessToken — audience branches (RFC 8707, review #50/#53)", () => {
+  it("rejects a token with NO aud claim (an audience is mandatory)", async () => {
+    const token = await signRaw({}, { audience: null });
+    await expect(M.verifyAccessToken(token)).rejects.toBeInstanceOf(M.AccessTokenAudienceError);
+  });
+
+  it("accepts an array `aud` when ANY member matches, and reports every member", async () => {
+    const token = await signRaw({}, { audience: ["other", AUDIENCE] });
+    const verified = await M.verifyAccessToken(token);
+    expect(verified.audience).toEqual(["other", AUDIENCE]);
+    await expect(
+      M.verifyAccessToken(token, { expectedAudience: "nothing-matches" }),
+    ).rejects.toMatchObject({ expected: ["nothing-matches"], actual: ["other", AUDIENCE] });
   });
 });
 

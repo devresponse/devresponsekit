@@ -49,6 +49,63 @@ describe("api jwt issuer", () => {
     expect((key as Record<string, unknown>).d).toBeUndefined();
   });
 
+  it("carries the source credential as `cid` and reads it back (review #43)", async () => {
+    const { mintAccessToken, verifyAccessToken, __resetJwtKeyCacheForTests } =
+      await import("@/lib/api-auth/jwt.server");
+    __resetJwtKeyCacheForTests();
+    const minted = await mintAccessToken({
+      subject: "ba-user-1",
+      scopes: ["account.read"],
+      jti: "jti-cid",
+      credential: { kind: "oauth_client", id: "client-42" },
+    });
+    const verified = await verifyAccessToken(minted.token);
+    expect(verified.credential).toEqual({ kind: "oauth_client", id: "client-42" });
+    expect(verified.issuedAt.getTime()).toBeLessThanOrEqual(Date.now());
+    // A token minted without one (legacy / test) reads back as null.
+    const legacy = await mintAccessToken({ subject: "x", scopes: [], jti: "jti-legacy" });
+    expect((await verifyAccessToken(legacy.token)).credential).toBeNull();
+  });
+
+  it("defaults `aud` to API_JWT_AUDIENCE and verifies against it (existing clients unchanged)", async () => {
+    const { mintAccessToken, verifyAccessToken, __resetJwtKeyCacheForTests } =
+      await import("@/lib/api-auth/jwt.server");
+    __resetJwtKeyCacheForTests();
+    const minted = await mintAccessToken({ subject: "x", scopes: [], jti: "jti-aud" });
+    expect(minted.audience).toBe("devresponse-api");
+    expect((await verifyAccessToken(minted.token)).audience).toEqual(["devresponse-api"]);
+  });
+
+  it("mints a per-resource audience and refuses it where another audience is expected (review #50/#53)", async () => {
+    const { mintAccessToken, verifyAccessToken, AccessTokenAudienceError } =
+      await import("@/lib/api-auth/jwt.server");
+    const MCP = "https://test.devresponse.local/api/mcp";
+    const minted = await mintAccessToken({
+      subject: "x",
+      scopes: ["account.read"],
+      jti: "jti-mcp",
+      audience: MCP,
+    });
+    expect(minted.audience).toBe(MCP);
+    // Accepted where the MCP audience is expected (alone, or in a grace list)…
+    expect((await verifyAccessToken(minted.token, { expectedAudience: MCP })).audience).toEqual([
+      MCP,
+    ]);
+    await expect(
+      verifyAccessToken(minted.token, { expectedAudience: [MCP, "devresponse-api"] }),
+    ).resolves.toMatchObject({ jti: "jti-mcp" });
+    // …refused with the TYPED error where only the v1 audience is expected
+    // (the default), so the resource server can say which resource to request.
+    const failure = await verifyAccessToken(minted.token).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(AccessTokenAudienceError);
+    expect(failure).toMatchObject({ expected: ["devresponse-api"], actual: [MCP] });
+    // And the reverse: a v1 token is not accepted by an MCP-only verifier.
+    const v1 = await mintAccessToken({ subject: "x", scopes: [], jti: "jti-v1" });
+    await expect(verifyAccessToken(v1.token, { expectedAudience: MCP })).rejects.toBeInstanceOf(
+      AccessTokenAudienceError,
+    );
+  });
+
   it("rejects a tampered token", async () => {
     const { mintAccessToken, verifyAccessToken, __resetJwtKeyCacheForTests } =
       await import("@/lib/api-auth/jwt.server");

@@ -89,6 +89,12 @@ Then call the API:
 curl https://app.example.com/api/v1/users -H "Authorization: Bearer eyJ…"
 ```
 
+Two details of the token endpoint worth knowing:
+
+- **`resource` (RFC 8707) selects the audience.** Omit it (or pass `resource=<origin>/api/v1`) for a v1 token — `aud` is `API_JWT_AUDIENCE`. Pass `resource=<origin>/api/mcp` for a token that drives the [MCP gateway](#11-mcp-agent-gateway-model-context-protocol); such a token is refused at `/api/v1` (`401 invalid_token`), and a v1 token is refused at `/api/mcp`. Any other value is `400 invalid_target`. The accepted values are listed as `resources_supported` in `/.well-known/oauth-authorization-server`.
+- **`expires_in` is capped by the key.** For the `api_key` grant the lifetime is the smaller of `API_JWT_ACCESS_TTL_SECONDS` and the seconds left until the key's `expires_at`, so a token never outlives its key; a key with under a second left is refused (`401 invalid_client`).
+- **Revoking or rotating the credential kills its tokens.** Every JWT names the key/client it came from (`cid`), and each request re-checks that row: after a revoke or rotation the next call with an outstanding token returns `401 credential_revoked` — do not retry it, mint a fresh one from the new credential.
+
 **Authority rule (the one invariant to remember):** a credential's effective access is the **intersection of its scopes and its owner's live permissions** (`src/lib/api-auth/scopes.ts`, enforced by `requireApiPermission` in `v1-guard.server.ts`). A credential can never be minted with more authority than its creator holds, and `GET /api/v1/me` reports the resulting `effectiveScopes`.
 
 Scopes **are** the permission vocabulary — every `admin.*` catalog key (see [`admin-manager.md` §6.1](./admin-manager.md#61-permission-catalog)) plus a small set of self-service `account.*` scopes (`account.read`, `account.profile.write`, `account.preferences.write`, `account.apikeys.manage`). A scope ending in `.*` (e.g. `admin.users.*`) matches every key under that prefix.
@@ -312,13 +318,14 @@ _Dark by default (`MCP_ENABLED`), like the machine API it fronts. Flags: [Config
 
 | Endpoint | Method | Auth | Purpose |
 | --- | --- | --- | --- |
-| `/api/mcp` | POST | **Bearer** (API key or client-credentials JWT) | JSON-RPC: `initialize`, `tools/list`, `tools/call`, `ping` |
+| `/api/mcp` | POST | **Bearer** (API key, or a JWT minted with `resource=<origin>/api/mcp`) | JSON-RPC: `initialize`, `tools/list`, `tools/call`, `ping` |
 | `/api/mcp` | GET | — | `405` — no server-initiated stream |
 | `/api/mcp/register` | POST | Public (rate-limited) | RFC 7591 agent self-registration; gated by `MCP_REGISTRATION_ENABLED` |
 | `/.well-known/oauth-protected-resource` | GET | Public | RFC 9728 protected-resource metadata |
 | `/.well-known/oauth-authorization-server` | GET | Public | RFC 8414 authorization-server metadata |
 
 - **Bearer-only.** A cookie session is rejected (it is not an audience-bound OAuth token). An unauthenticated call returns `401` with `WWW-Authenticate: Bearer …, resource_metadata="…/.well-known/oauth-protected-resource"`, so a compliant client auto-discovers the token endpoint (`/api/v1/auth/token`) and JWKS.
+- **Audience-bound (RFC 8707).** A JWT must have been requested with `resource=<origin>/api/mcp` — the identifier advertised as `resource` in the protected-resource metadata. A token minted for `/api/v1` gets `401` with `error="invalid_token"` and an `error_description` naming the resource to request, unless the operator has `MCP_AUDIENCE_GRACE=1` on for a migration window. API keys are not audience-bound.
 - **Tools are generated from the OpenAPI spec.** Each scoped `/api/v1` operation becomes one MCP tool (~18 today), carrying its required scope; a new scoped endpoint becomes a tool for free. `issueToken`, `getJwks`, and `getOpenApi` are excluded.
 - **Self-registration is safe by construction.** A newly registered agent gets a machine service account + a **zero-scope** OAuth client. In `approval` mode (default) it cannot mint a token until an admin activates it; in `open` mode it is active but every tool `403`s until scopes are granted. Admins approve, scope, and revoke agents from **Administrator → Agents** ([Admin Manager §8.13](./admin-manager.md#813-mcp-agents)).
 

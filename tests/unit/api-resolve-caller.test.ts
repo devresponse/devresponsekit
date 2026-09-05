@@ -10,10 +10,18 @@ import type * as ResolveModule from "@/lib/api-auth/resolve-caller.server";
 const env = vi.hoisted(() => ({ API_KEYS_ENABLED: false, API_JWT_ENABLED: false }));
 const verifyApiKey = vi.fn();
 const verifyAccessToken = vi.fn();
-const isJtiRevoked = vi.fn();
+const isSourceCredentialActive = vi.fn();
 const getCurrentSession = vi.fn();
 const getUserAccessContext = vi.fn();
 const isBetterAuthUserBanned = vi.fn();
+
+/** Mirrors the typed audience failure jwt.server throws (review #50/#53). */
+class AccessTokenAudienceError extends Error {
+  constructor() {
+    super("aud");
+    this.name = "AccessTokenAudienceError";
+  }
+}
 
 vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
 vi.mock("@/lib/api-auth/api-keys.server", () => ({
@@ -25,10 +33,26 @@ vi.mock("@/lib/api-auth/ban-status.server", () => ({
 }));
 vi.mock("@/lib/api-auth/jwt.server", () => ({
   verifyAccessToken: (...a: unknown[]) => verifyAccessToken(...a),
+  AccessTokenAudienceError,
 }));
 vi.mock("@/lib/api-auth/revocation.server", () => ({
-  isJtiRevoked: (...a: unknown[]) => isJtiRevoked(...a),
+  isSourceCredentialActive: (...a: unknown[]) => isSourceCredentialActive(...a),
 }));
+
+const ISSUED_AT = new Date("2026-09-05T10:00:00.000Z");
+const EXPIRES_AT = new Date("2026-09-05T10:15:00.000Z");
+/** A verified token as jwt.server returns it, with the `cid` claim present. */
+const verifiedToken = (over: Record<string, unknown> = {}) => ({
+  subject: "ba1",
+  jti: "j1",
+  organizationId: "org-b",
+  scopes: ["admin.users.read"],
+  issuedAt: ISSUED_AT,
+  expiresAt: EXPIRES_AT,
+  audience: ["devresponse-api"],
+  credential: { kind: "api_key", id: "key-1" },
+  ...over,
+});
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => getCurrentSession() }));
 vi.mock("@/lib/auth-status", () => ({
   getUserAccessContext: (...a: unknown[]) => getUserAccessContext(...a),
@@ -48,7 +72,7 @@ beforeEach(async () => {
   for (const m of [
     verifyApiKey,
     verifyAccessToken,
-    isJtiRevoked,
+    isSourceCredentialActive,
     getCurrentSession,
     getUserAccessContext,
     isBetterAuthUserBanned,
@@ -56,6 +80,7 @@ beforeEach(async () => {
     m.mockReset();
   getUserAccessContext.mockResolvedValue(ACCESS);
   isBetterAuthUserBanned.mockResolvedValue(false);
+  isSourceCredentialActive.mockResolvedValue(true);
   mod = await import("@/lib/api-auth/resolve-caller.server");
 });
 afterEach(() => vi.resetModules());
@@ -174,15 +199,9 @@ describe("resolveCaller — JWT path", () => {
     expect(await mod.resolveCaller(req("Bearer eyJhbGciOi.test.sig"))).toBeNull();
   });
 
-  it("resolves a valid, non-revoked token to a jwt caller", async () => {
+  it("resolves a valid token from an active credential to a jwt caller", async () => {
     env.API_JWT_ENABLED = true;
-    verifyAccessToken.mockResolvedValue({
-      subject: "ba1",
-      jti: "j1",
-      organizationId: "org-b",
-      scopes: ["admin.users.read"],
-    });
-    isJtiRevoked.mockResolvedValue(false);
+    verifyAccessToken.mockResolvedValue(verifiedToken());
     const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
     expect(caller).toMatchObject({
       kind: "jwt",
@@ -190,34 +209,104 @@ describe("resolveCaller — JWT path", () => {
       isBearer: true,
       impersonatorId: null,
     });
+    // The token's own claims ride along for the MCP gateway's exchange.
+    expect(caller?.jwt).toEqual({
+      organizationId: "org-b",
+      expiresAt: EXPIRES_AT,
+      audience: ["devresponse-api"],
+      credential: { kind: "api_key", id: "key-1" },
+    });
   });
 
   it("resolves against the token's bound org claim, not the active_org cookie (MACHINE-1)", async () => {
     env.API_JWT_ENABLED = true;
-    verifyAccessToken.mockResolvedValue({
-      subject: "ba1",
-      jti: "j1",
-      organizationId: "org-b",
-      scopes: ["admin.users.read"],
-    });
-    isJtiRevoked.mockResolvedValue(false);
+    verifyAccessToken.mockResolvedValue(verifiedToken());
     await mod.resolveCaller(req("Bearer eyJ.token.sig"));
     expect(getUserAccessContext).toHaveBeenCalledWith("ba1", { organizationId: "org-b" });
   });
 
-  it("returns null when the token's jti is revoked", async () => {
+  it("re-checks the SOURCE credential on every request and rejects once it is revoked (review #43)", async () => {
     env.API_JWT_ENABLED = true;
-    verifyAccessToken.mockResolvedValue({ subject: "ba1", jti: "j1", scopes: [] });
-    isJtiRevoked.mockResolvedValue(true);
-    expect(await mod.resolveCaller(req("Bearer eyJ.token.sig"))).toBeNull();
+    verifyAccessToken.mockResolvedValue(verifiedToken());
+    // First request: the key is still active → 200-path.
+    isSourceCredentialActive.mockResolvedValueOnce(true);
+    expect(await mod.resolveCaller(req("Bearer eyJ.token.sig"))).not.toBeNull();
+    // The key is revoked in between; the SAME (still signature-valid,
+    // unexpired) token must now be refused with the distinct reason.
+    isSourceCredentialActive.mockResolvedValueOnce(false);
+    const result = await mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"));
+    expect(result).toEqual({ ok: false, reason: "credential_revoked" });
+    expect(isSourceCredentialActive).toHaveBeenCalledTimes(2);
+    expect(isSourceCredentialActive).toHaveBeenLastCalledWith(
+      { kind: "api_key", id: "key-1" },
+      ISSUED_AT,
+    );
+    // Nothing downstream of the revocation check ran for the dead token.
+    expect(isBetterAuthUserBanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a token whose OAuth client was revoked or rotated with credential_revoked", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue(
+      verifiedToken({ credential: { kind: "oauth_client", id: "client-9" } }),
+    );
+    isSourceCredentialActive.mockResolvedValue(false);
+    expect(await mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"))).toEqual({
+      ok: false,
+      reason: "credential_revoked",
+    });
+    expect(isSourceCredentialActive).toHaveBeenCalledWith(
+      { kind: "oauth_client", id: "client-9" },
+      ISSUED_AT,
+    );
+  });
+
+  it("honours a legacy token minted without a `cid` claim (it dies at exp on its own)", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue(verifiedToken({ credential: null }));
+    const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
+    expect(caller?.kind).toBe("jwt");
+    expect(isSourceCredentialActive).not.toHaveBeenCalled();
+  });
+
+  it("passes the caller's expected audience through to verification (review #50/#53)", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue(verifiedToken({ audience: ["https://x/api/mcp"] }));
+    await mod.resolveCaller(req("Bearer eyJ.token.sig"), {
+      expectedAudience: ["https://x/api/mcp", "devresponse-api"],
+    });
+    expect(verifyAccessToken).toHaveBeenCalledWith("eyJ.token.sig", {
+      expectedAudience: ["https://x/api/mcp", "devresponse-api"],
+    });
+    // No option → the default (v1) audience is left to jwt.server.
+    await mod.resolveCaller(req("Bearer eyJ.token.sig"));
+    expect(verifyAccessToken).toHaveBeenLastCalledWith("eyJ.token.sig", {
+      expectedAudience: undefined,
+    });
+  });
+
+  it("reports a wrong-audience token as audience_mismatch, distinct from an invalid one", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockRejectedValueOnce(new AccessTokenAudienceError());
+    expect(await mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"))).toEqual({
+      ok: false,
+      reason: "audience_mismatch",
+    });
+    verifyAccessToken.mockRejectedValueOnce(new Error("signature verification failed"));
+    expect(await mod.resolveCallerDetailed(req("Bearer eyJ.bad.sig"))).toEqual({
+      ok: false,
+      reason: "invalid_credential",
+    });
   });
 
   it("returns null when the token subject is banned (AUTH-1)", async () => {
     env.API_JWT_ENABLED = true;
-    verifyAccessToken.mockResolvedValue({ subject: "ba1", jti: "j1", scopes: [] });
-    isJtiRevoked.mockResolvedValue(false);
+    verifyAccessToken.mockResolvedValue(verifiedToken());
     isBetterAuthUserBanned.mockResolvedValue(true);
-    expect(await mod.resolveCaller(req("Bearer eyJ.token.sig"))).toBeNull();
+    expect(await mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"))).toEqual({
+      ok: false,
+      reason: "principal_banned",
+    });
     expect(isBetterAuthUserBanned).toHaveBeenCalledWith("ba1");
     expect(getUserAccessContext).not.toHaveBeenCalled();
   });
@@ -226,5 +315,35 @@ describe("resolveCaller — JWT path", () => {
     env.API_JWT_ENABLED = true;
     verifyAccessToken.mockRejectedValue(new Error("expired"));
     expect(await mod.resolveCaller(req("Bearer eyJ.bad.sig"))).toBeNull();
+  });
+});
+
+describe("resolveCallerDetailed — rejection reasons for the other paths", () => {
+  it("names a disabled path, an invalid key, a banned key owner and a missing credential", async () => {
+    expect(await mod.resolveCallerDetailed(req("Bearer drk_live_abc"))).toEqual({
+      ok: false,
+      reason: "path_disabled",
+    });
+    expect(await mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"))).toEqual({
+      ok: false,
+      reason: "path_disabled",
+    });
+    env.API_KEYS_ENABLED = true;
+    verifyApiKey.mockResolvedValue(null);
+    expect(await mod.resolveCallerDetailed(req("Bearer drk_live_bad"))).toEqual({
+      ok: false,
+      reason: "invalid_credential",
+    });
+    verifyApiKey.mockResolvedValue({ id: "k1", betterAuthUserId: "ba1", scopes: [] });
+    isBetterAuthUserBanned.mockResolvedValue(true);
+    expect(await mod.resolveCallerDetailed(req("Bearer drk_live_abc"))).toEqual({
+      ok: false,
+      reason: "principal_banned",
+    });
+    getCurrentSession.mockResolvedValue(null);
+    expect(await mod.resolveCallerDetailed(req())).toEqual({
+      ok: false,
+      reason: "no_credential",
+    });
   });
 });

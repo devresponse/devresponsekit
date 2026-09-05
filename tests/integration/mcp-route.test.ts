@@ -7,12 +7,28 @@ import { NextRequest } from "next/server";
  * transport contract: the dark gate, bearer-only auth (401 + resource
  * metadata), JSON-RPC routing, and generated-tool dispatch.
  */
-const env = vi.hoisted(() => ({ MCP_ENABLED: true, BETTER_AUTH_URL: "https://app.example.com" }));
+const env = vi.hoisted(() => ({
+  MCP_ENABLED: true,
+  MCP_AUDIENCE_GRACE: false,
+  BETTER_AUTH_URL: "https://app.example.com",
+  API_JWT_AUDIENCE: "devresponse-api",
+}));
+const MCP_AUD = "https://app.example.com/api/mcp";
 const resolveCaller = vi.fn();
+const mintAccessToken = vi.fn();
 
 vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
 vi.mock("@/lib/api-auth/resolve-caller.server", () => ({
-  resolveCaller: (...args: unknown[]) => resolveCaller(...args),
+  // The route consumes the detailed form (review #50/#53); the mock accepts a
+  // plain caller / null for the legacy cases or an explicit resolution.
+  resolveCallerDetailed: async (...args: unknown[]) => {
+    const r = (await resolveCaller(...args)) as unknown;
+    if (r && typeof r === "object" && "ok" in r) return r;
+    return r ? { ok: true, caller: r } : { ok: false, reason: "invalid_credential" };
+  },
+}));
+vi.mock("@/lib/api-auth/jwt.server", () => ({
+  mintAccessToken: (...args: unknown[]) => mintAccessToken(...args),
 }));
 
 import { GET, POST } from "@/app/api/mcp/route";
@@ -34,15 +50,136 @@ function apiResponse(status: number, body: unknown): Response {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/** A resolved MCP-audience JWT caller, as resolveCallerDetailed returns it. */
+function jwtCaller(audience: string[], over: Record<string, unknown> = {}) {
+  return {
+    kind: "jwt",
+    betterAuthUserId: "u1",
+    isBearer: true,
+    credentialId: "jti-1",
+    grantedScopes: ["account.read"],
+    access: { organizationId: "org-1" },
+    jwt: {
+      organizationId: "org-1",
+      expiresAt: new Date(Date.now() + 600_000),
+      audience,
+      credential: { kind: "oauth_client", id: "client-1" },
+    },
+    ...over,
+  };
+}
+
+/** The audience set the route asked the resolver to accept on its last call. */
+function lastExpectedAudience(): unknown {
+  const call = resolveCaller.mock.calls.at(-1);
+  return (call?.[1] as { expectedAudience?: unknown } | undefined)?.expectedAudience;
+}
+
 beforeEach(() => {
   env.MCP_ENABLED = true;
+  env.MCP_AUDIENCE_GRACE = false;
   resolveCaller
     .mockReset()
     .mockResolvedValue({ kind: "api_key", betterAuthUserId: "u1", isBearer: true });
+  mintAccessToken.mockReset().mockResolvedValue({ token: "eyJ.exchanged.v1", audience: "x" });
   fetchMock = vi.fn().mockResolvedValue(apiResponse(200, { ok: true }));
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => vi.unstubAllGlobals());
+
+describe("/api/mcp audience binding (RFC 8707, review #50/#53)", () => {
+  const call = (headers?: Record<string, string>) =>
+    POST(
+      post(
+        { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "getMe", arguments: {} } },
+        headers,
+      ),
+    );
+
+  it("requires ONLY the MCP audience by default", async () => {
+    await call({ authorization: "Bearer eyJ.mcp" });
+    expect(lastExpectedAudience()).toEqual([MCP_AUD]);
+  });
+
+  it("also accepts the legacy v1 audience while MCP_AUDIENCE_GRACE is on", async () => {
+    env.MCP_AUDIENCE_GRACE = true;
+    await call({ authorization: "Bearer eyJ.v1" });
+    expect(lastExpectedAudience()).toEqual([MCP_AUD, "devresponse-api"]);
+  });
+
+  it("401s a wrong-audience token with an RFC 6750 invalid_token challenge naming the resource", async () => {
+    resolveCaller.mockResolvedValue({ ok: false, reason: "audience_mismatch" });
+    const res = await call({ authorization: "Bearer eyJ.v1" });
+    expect(res.status).toBe(401);
+    const wwwAuth = res.headers.get("WWW-Authenticate") ?? "";
+    expect(wwwAuth).toContain('error="invalid_token"');
+    expect(wwwAuth).toContain(`resource=${MCP_AUD}`);
+    expect(wwwAuth).toContain("resource_metadata=");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not add the invalid_token challenge for other rejections", async () => {
+    resolveCaller.mockResolvedValue({ ok: false, reason: "credential_revoked" });
+    const res = await call({ authorization: "Bearer eyJ.dead" });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).not.toContain("error=");
+  });
+
+  it("exchanges an MCP-audience JWT for a short v1-audience token on the self-call (same sub/scopes/org/jti/cid)", async () => {
+    resolveCaller.mockResolvedValue(jwtCaller([MCP_AUD]));
+    const res = await call({ authorization: "Bearer eyJ.mcp" });
+    expect(res.status).toBe(200);
+    // The v1 guard would reject the MCP-audience token, so the gateway (also
+    // the AS) re-mints — narrowing, never widening.
+    expect(mintAccessToken).toHaveBeenCalledTimes(1);
+    const input = mintAccessToken.mock.calls[0]![0] as Record<string, unknown>;
+    expect(input).toMatchObject({
+      subject: "u1",
+      scopes: ["account.read"],
+      organizationId: "org-1",
+      jti: "jti-1",
+      audience: "devresponse-api",
+      credential: { kind: "oauth_client", id: "client-1" },
+    });
+    expect(input.ttlSeconds).toBeLessThanOrEqual(60);
+    expect(input.ttlSeconds).toBeGreaterThanOrEqual(1);
+    const init = fetchMock.mock.calls[0]![1] as { headers: Record<string, string> };
+    expect(init.headers.authorization).toBe("Bearer eyJ.exchanged.v1");
+  });
+
+  it("caps the exchanged token at the original token's remaining life", async () => {
+    resolveCaller.mockResolvedValue(
+      jwtCaller([MCP_AUD], {
+        jwt: {
+          organizationId: null,
+          expiresAt: new Date(Date.now() + 5_000),
+          audience: [MCP_AUD],
+          credential: null,
+        },
+      }),
+    );
+    await call({ authorization: "Bearer eyJ.mcp" });
+    const input = mintAccessToken.mock.calls[0]![0] as { ttlSeconds: number };
+    expect(input.ttlSeconds).toBeLessThanOrEqual(5);
+    expect(input.ttlSeconds).toBeGreaterThanOrEqual(1);
+  });
+
+  it("forwards a legacy v1-audience JWT (grace) and an API key untouched — no exchange", async () => {
+    env.MCP_AUDIENCE_GRACE = true;
+    resolveCaller.mockResolvedValue(jwtCaller(["devresponse-api"]));
+    await call({ authorization: "Bearer eyJ.v1" });
+    expect(mintAccessToken).not.toHaveBeenCalled();
+    let init = fetchMock.mock.calls[0]![1] as { headers: Record<string, string> };
+    expect(init.headers.authorization).toBe("Bearer eyJ.v1");
+
+    fetchMock.mockClear();
+    resolveCaller.mockResolvedValue({ kind: "api_key", betterAuthUserId: "u1", isBearer: true });
+    await call({ authorization: "Bearer drk_live_x" });
+    expect(mintAccessToken).not.toHaveBeenCalled();
+    init = fetchMock.mock.calls[0]![1] as { headers: Record<string, string> };
+    expect(init.headers.authorization).toBe("Bearer drk_live_x");
+  });
+});
 
 describe("/api/mcp", () => {
   it("404s (dark) when MCP is disabled", async () => {

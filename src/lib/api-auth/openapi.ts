@@ -197,7 +197,11 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           properties: {
             access_token: { type: "string" },
             token_type: { type: "string", const: "Bearer" },
-            expires_in: { type: "integer", description: "Token lifetime in seconds." },
+            expires_in: {
+              type: "integer",
+              description:
+                "Token lifetime in seconds: the configured access-token TTL, capped at the API key's own `expires_at` for the `api_key` grant so a token never outlives its key.",
+            },
             scope: { type: "string", description: "Space-delimited granted scopes." },
           },
           required: ["access_token", "token_type", "expires_in", "scope"],
@@ -210,6 +214,12 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
             client_secret: { type: "string" },
             api_key: { type: "string" },
             scope: { type: "string", description: "Optional space-delimited down-scoping." },
+            resource: {
+              type: "string",
+              format: "uri",
+              description:
+                "Optional RFC 8707 resource indicator selecting the token's audience: `<origin>/api/v1` (the default when omitted) or `<origin>/api/mcp` (required for the MCP gateway). Any other value is rejected with `invalid_target`. The accepted values are advertised as `resources_supported` in the authorization-server metadata.",
+            },
           },
           required: ["grant_type"],
         },
@@ -454,7 +464,11 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           },
           responses: {
             "200": { description: "Access token issued", ...json(ref("TokenResponse")) },
-            "400": errRef("BadRequest"),
+            "400": {
+              description:
+                "Invalid request (`unsupported_grant_type`, `invalid_scope`, or `invalid_target` for a `resource` this server does not issue tokens for)",
+              ...problemContent(),
+            },
             "401": errRef("Unauthorized"),
             "429": errRef("RateLimited"),
           },

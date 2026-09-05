@@ -9,7 +9,8 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
 import { verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
-import { mintAccessToken } from "@/lib/api-auth/jwt.server";
+import { mintAccessToken, type TokenCredentialRef } from "@/lib/api-auth/jwt.server";
+import { audienceForResource, resolveRequestedResource } from "@/lib/api-auth/resources";
 import { normalizeScopes, scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
@@ -27,9 +28,12 @@ export const dynamic = "force-dynamic";
  *   - `api_key`            — `api_key` (a `drk_…` key).
  *
  * Optional `scope` down-scopes the token to a subset of the credential's
- * scopes. The endpoint is itself unauthenticated (the credential IS the
- * auth) and rate-limited per trusted client IP, per VERIFIED credential,
- * and deployment-wide. Sets `Cache-Control: no-store`.
+ * scopes. Optional `resource` (RFC 8707, review #50/#53) selects the
+ * audience: `<origin>/api/v1` (the default when omitted) or
+ * `<origin>/api/mcp`; anything else is `invalid_target`. The endpoint is
+ * itself unauthenticated (the credential IS the auth) and rate-limited per
+ * trusted client IP, per VERIFIED credential, and deployment-wide. Sets
+ * `Cache-Control: no-store`.
  */
 // Pre-auth bucket, keyed on the trusted client IP (P2-4). Never keyed on a
 // client-supplied value: `client_id` is public and unauthenticated, so a
@@ -106,6 +110,12 @@ export async function POST(request: NextRequest) {
   let credentialScopes: string[];
   let organizationId: string | null;
   let credentialLabel: string;
+  // Source credential → `cid` claim, so the resolver can retire the token the
+  // moment the key / client is revoked or rotated (review #43).
+  let credential: TokenCredentialRef;
+  // A token must never outlive the key it was minted from (review #48).
+  // `null` = the credential carries no expiry of its own (clients never do).
+  let credentialExpiresAt: Date | null = null;
 
   if (grantType === "client_credentials") {
     if (!body.client_id || !body.client_secret) {
@@ -117,6 +127,7 @@ export async function POST(request: NextRequest) {
     credentialScopes = verified.scopes;
     organizationId = verified.organizationId;
     credentialLabel = body.client_id;
+    credential = { kind: "oauth_client", id: verified.clientRowId };
   } else if (grantType === "api_key") {
     if (!env.API_KEYS_ENABLED) {
       return problemResponse("unsupported_grant_type", 400, request, {
@@ -133,6 +144,8 @@ export async function POST(request: NextRequest) {
     credentialScopes = verified.scopes;
     organizationId = verified.organizationId;
     credentialLabel = verified.id;
+    credential = { kind: "api_key", id: verified.id };
+    credentialExpiresAt = verified.expiresAt;
   } else {
     return problemResponse("unsupported_grant_type", 400, request, { headers: NO_STORE });
   }
@@ -198,12 +211,47 @@ export async function POST(request: NextRequest) {
     effectiveScopes = requested;
   }
 
+  // RFC 8707 resource indicator → audience (review #50/#53). The allow-list
+  // is derived from the deployment's own origin, never from the request, and
+  // an unknown resource is refused with the RFC's `invalid_target` rather
+  // than silently minted for the default. Omitted → the v1 API audience,
+  // exactly what every pre-existing client already receives.
+  const resource = resolveRequestedResource(body.resource, env.BETTER_AUTH_URL);
+  if (!resource) {
+    return problemResponse("invalid_target", 400, request, {
+      detail: "The requested resource is not one this authorization server issues tokens for.",
+      headers: NO_STORE,
+    });
+  }
+  const audience = audienceForResource(resource.kind, env);
+
+  // Cap the token's lifetime at the key's own expiry (review #48): a JWT that
+  // outlives its source key would let a "this key expires at midnight" policy
+  // leak by up to a full TTL. `verifyApiKey` already refused a key past its
+  // `expires_at`; the remaining edge is a key expiring within the next second,
+  // whose floor()'d remaining life is 0 — never mint a 0/negative TTL, refuse
+  // it the same way an expired key is refused.
+  let ttlSeconds = env.API_JWT_ACCESS_TTL_SECONDS;
+  if (credentialExpiresAt) {
+    const remaining = Math.floor((credentialExpiresAt.getTime() - Date.now()) / 1000);
+    if (remaining < 1) {
+      return problemResponse("invalid_client", 401, request, {
+        detail: "The API key has expired.",
+        headers: NO_STORE,
+      });
+    }
+    ttlSeconds = Math.min(ttlSeconds, remaining);
+  }
+
   const jti = crypto.randomUUID();
   const minted = await mintAccessToken({
     subject: principalBetterAuthUserId,
     scopes: effectiveScopes,
     organizationId,
     jti,
+    ttlSeconds,
+    audience,
+    credential,
   });
 
   await auditEvent({
@@ -213,7 +261,15 @@ export async function POST(request: NextRequest) {
     appUserId: access.appUserId,
     organizationId,
     request,
-    metadata: { grantType, credential: credentialLabel, jti, scopes: effectiveScopes },
+    metadata: {
+      grantType,
+      credential: credentialLabel,
+      jti,
+      scopes: effectiveScopes,
+      resource: resource.resource,
+      audience,
+      expiresIn: minted.expiresInSeconds,
+    },
   });
 
   return v1JsonResponse(

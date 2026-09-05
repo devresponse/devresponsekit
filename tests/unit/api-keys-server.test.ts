@@ -104,6 +104,17 @@ describe("verifyApiKey", () => {
     state.takeFirst = activeRow;
     const v = await mod.verifyApiKey("drk_live_whatever");
     expect(v).toMatchObject({ id: "k1", betterAuthUserId: "ba1", scopes: ["admin.users.read"] });
+    // A key without an expiry reports none (the token endpoint then applies
+    // only the configured TTL, review #48).
+    expect(v?.expiresAt).toBeNull();
+  });
+
+  it("surfaces a future expires_at as a Date so the token TTL can be capped (review #48)", async () => {
+    const expiresAt = new Date(Date.now() + 120_000);
+    state.takeFirst = { ...activeRow, expires_at: expiresAt.toISOString() };
+    const v = await mod.verifyApiKey("drk_live_whatever");
+    expect(v?.expiresAt).toBeInstanceOf(Date);
+    expect(v?.expiresAt?.getTime()).toBe(expiresAt.getTime());
   });
 
   it("rejects an unknown key", async () => {

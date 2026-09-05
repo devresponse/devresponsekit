@@ -212,6 +212,12 @@ export interface VerifiedApiKey {
   betterAuthUserId: string;
   organizationId: string | null;
   scopes: string[];
+  /**
+   * The key's own expiry (null = never). The token endpoint caps a minted
+   * JWT's lifetime at this instant so a token can never outlive the key it
+   * came from (review #48).
+   */
+  expiresAt: Date | null;
 }
 
 /**
@@ -246,6 +252,7 @@ export async function verifyApiKey(plaintext: string): Promise<VerifiedApiKey | 
     betterAuthUserId: row.better_auth_user_id,
     organizationId: row.organization_id,
     scopes: row.scopes,
+    expiresAt: row.expires_at ? new Date(row.expires_at) : null,
   };
 }
 

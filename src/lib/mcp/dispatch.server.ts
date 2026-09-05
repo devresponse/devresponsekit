@@ -1,5 +1,4 @@
 import "server-only";
-import type { NextRequest } from "next/server";
 import {
   type JsonRpcMessage,
   type JsonRpcResponse,
@@ -13,14 +12,17 @@ import {
 import { findTool, toolDefinitions } from "./tools.server";
 
 /**
- * Routes one JSON-RPC request to its MCP method handler. The original
- * request is threaded through so tools can forward the caller's bearer
- * credential to the v1 routes. Only invoked for id-bearing requests
- * (notifications get no response and are handled by the route).
+ * Routes one JSON-RPC request to its MCP method handler. `forward` carries
+ * the headers tools send to the v1 routes — the caller's bearer credential
+ * (or the v1-audience token the route exchanged it for, review #50/#53) and
+ * the trusted client-IP hop. Only the headers are needed, so the route can
+ * hand over a rebuilt header set rather than the original NextRequest. Only
+ * invoked for id-bearing requests (notifications get no response and are
+ * handled by the route).
  */
 export async function handleMcpRequest(
   message: JsonRpcMessage & { method: string },
-  request: NextRequest,
+  forward: { headers: Headers },
 ): Promise<JsonRpcResponse> {
   const id = message.id ?? null;
 
@@ -45,7 +47,7 @@ export async function handleMcpRequest(
           ? (params.arguments as Record<string, unknown>)
           : {};
       try {
-        return rpcResult(id, await tool.run(request, args));
+        return rpcResult(id, await tool.run(forward, args));
       } catch (error) {
         // Tool failures surface as an error *result*, not a protocol error,
         // so the agent sees which tool failed and why.

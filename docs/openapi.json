@@ -387,7 +387,7 @@
           },
           "expires_in": {
             "type": "integer",
-            "description": "Token lifetime in seconds."
+            "description": "Token lifetime in seconds: the configured access-token TTL, capped at the API key's own `expires_at` for the `api_key` grant so a token never outlives its key."
           },
           "scope": {
             "type": "string",
@@ -423,6 +423,11 @@
           "scope": {
             "type": "string",
             "description": "Optional space-delimited down-scoping."
+          },
+          "resource": {
+            "type": "string",
+            "format": "uri",
+            "description": "Optional RFC 8707 resource indicator selecting the token's audience: `<origin>/api/v1` (the default when omitted) or `<origin>/api/mcp` (required for the MCP gateway). Any other value is rejected with `invalid_target`. The accepted values are advertised as `resources_supported` in the authorization-server metadata."
           }
         },
         "required": [
@@ -1260,7 +1265,14 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "description": "Invalid request (`unsupported_grant_type`, `invalid_scope`, or `invalid_target` for a `resource` this server does not issue tokens for)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

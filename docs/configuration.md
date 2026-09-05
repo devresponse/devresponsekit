@@ -192,9 +192,9 @@ The machine API (`/api/v1`) is the bearer-authenticated surface for scripts, ser
 | Server-side setup | none beyond the switch | generate an Ed25519 signing key (below) |
 | The bearer looks like | `drk_live_…` (opaque) | `eyJ…` (a signed EdDSA JWT) |
 | Where the credential comes from | minted per-user **at runtime** (console / API) | **exchanged for** at `POST /api/v1/auth/token` |
-| Lifetime | long-lived (until revoked or its optional expiry) | short (default **900 s**, capped ≤ 1 h) |
-| How the server checks it | SHA-256 **hash lookup in the DB**, every request | **signature check** against the public JWKS — no DB hit |
-| Revoked by | deleting the key | `jti` denylist (until the token expires) |
+| Lifetime | long-lived (until revoked or its optional expiry) | short (default **900 s**, capped ≤ 1 h, and never past the source API key's own `expires_at`) |
+| How the server checks it | SHA-256 **hash lookup in the DB**, every request | **signature check** against the public JWKS, plus one primary-key read confirming the key/client it was minted from is still active |
+| Revoked by | revoking or rotating the key | revoking or rotating the key/client it was minted from (`cid` claim) — outstanding tokens die on the next request |
 | Best for | the simplest setup: CLIs, cron, low-to-moderate volume | high-throughput services, third-party verifiers, or handing a short-lived down-scoped token to another process |
 
 Both paths resolve to the **same authority model**: a credential's effective access is the **intersection of its scopes and its owner's live permissions** — it can never exceed the authority of whoever created it. Enabling a path does not grant anyone new powers; it only opens a way to authenticate as an existing principal.
@@ -252,7 +252,7 @@ Both paths resolve to the **same authority model**: a credential's effective acc
 | `API_KEY_DEFAULT_TTL_DAYS` | Default key expiry (empty = never expire; UI warns). |
 | `API_JWT_ENABLED` | Enable JWT access tokens (`1`/`true`). |
 | `API_JWT_ISSUER` | `iss` claim (defaults to `BETTER_AUTH_URL`). |
-| `API_JWT_AUDIENCE` | Expected `aud` (e.g. `devresponse-api`). |
+| `API_JWT_AUDIENCE` | `aud` of tokens minted for the v1 machine API — the default when a token request omits `resource` (e.g. `devresponse-api`). A request with `resource=<BETTER_AUTH_URL>/api/mcp` mints that identifier as `aud` instead (RFC 8707); the allow-list is derived from `BETTER_AUTH_URL`, not configurable. |
 | `API_JWT_PRIVATE_KEY` | Ed25519 private JWK as a JSON string. **Required** when JWT enabled. |
 | `API_JWT_KID` | Key id (defaults to the JWK thumbprint). |
 | `API_JWT_PREVIOUS_PRIVATE_KEY` | Verify-only previous signing key (the prior `API_JWT_PRIVATE_KEY`) kept during a rotation overlap — its public half stays in JWKS so tokens minted before the rotation keep verifying until they expire. Never used to mint; remove once that window drains. |
@@ -266,6 +266,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | Variable | Controls |
 | --- | --- |
 | `MCP_ENABLED` | Enable the `/api/mcp` Model Context Protocol endpoint (`1`/`true`). **Dark by default.** It authenticates with the same bearer credential as the machine API, so it also needs `API_KEYS_ENABLED` / `API_JWT_ENABLED`. See [design-mcp-agent-gateway.md](./design-mcp-agent-gateway.md). |
+| `MCP_AUDIENCE_GRACE` | RFC 8707 rollout grace. **Off by default:** `/api/mcp` accepts only JWTs minted with `resource=<BETTER_AUTH_URL>/api/mcp` (an MCP audience). Set to `1`/`true` for a migration window so legacy tokens carrying the plain v1 audience (`API_JWT_AUDIENCE`) are also accepted; unset it once every agent requests the MCP resource. API keys are not audience-bound and are unaffected. |
 | `MCP_REGISTRATION_ENABLED` | Enable `POST /api/mcp/register` — RFC 7591 agent self-registration (`1`/`true`). **Dark by default.** |
 | `MCP_REGISTRATION_MODE` | `approval` (default — new agents park pending admin activation) or `open` (active but scopeless). |
 | `MCP_REGISTRATION_DEFAULT_ORG` | Target org slug/id used when a registration request omits `organization`. |

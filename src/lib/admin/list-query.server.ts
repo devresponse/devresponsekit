@@ -78,7 +78,8 @@ export function likeContains(term: string): string {
  *   - `page` defaults to 1 and is clamped to >= 1.
  *   - `pageSize` defaults to {@link ParseListQueryOptions.defaultPageSize}
  *     (or 25), clamped to `[1, maxPageSize]`.
- *   - `sort` accepts repeated `field:dir` values; unknown fields are
+ *   - `sort` accepts repeated `field.dir` values (e.g. `created_at.desc`
+ *     — dot, not colon; see the separator note below); unknown fields are
  *     dropped, invalid directions fall back to `asc`.
  *   - `q` is trimmed; empty becomes `null`.
  *   - `filter[<name>]=v` becomes `filters[name]=v`. Repeated values

@@ -52,7 +52,12 @@ async function dispatch(
   // rate-limits against it, not the gateway's own address (audit #14). We
   // resolve it here (honoring TRUSTED_PROXY_COUNT at the MCP boundary) and pass
   // it as `x-forwarded-for` — the same trusted channel v1's getClientIp reads —
-  // rather than a bespoke header an external v1 caller could spoof.
+  // rather than a bespoke header an external v1 caller could spoof. This
+  // assumes the self-fetch reaches the app directly: if it re-enters through a
+  // proxy that APPENDS its own hop, v1's getClientIp (with the same
+  // TRUSTED_PROXY_COUNT) would select the gateway's address instead — the
+  // deployment must either route the self-fetch past the proxy or account for
+  // the extra hop (review #231, #55).
   const clientIp = getClientIp(request.headers);
   if (clientIp) headers["x-forwarded-for"] = clientIp;
 

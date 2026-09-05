@@ -9,9 +9,11 @@ import { seedDefaultAdminUser } from "@/db/seeds/default-admin";
  * Local development seed.
  *
  * Inserts the default organization, baseline roles and permissions, the
- * three placeholder enterprise applications referenced by the
- * application switcher, and the default local Better Auth admin user
- * described in `.env.example`.
+ * platform sign-up policy, the default local Better Auth admin user
+ * described in `.env.example`, and — only outside `NODE_ENV=production`,
+ * or with `SEED_DEMO_APPS=1` — the three demo satellite enterprise
+ * applications (the reference Option A/B/C rigs) that the application
+ * switcher lists.
  *
  * Tests use their own dedicated factories under `tests/helpers/`.
  */
@@ -58,9 +60,10 @@ async function main() {
     }
 
     // Administrator-app permission catalog (docs/admin-manager.md §6.1).
-    // Sourced from the single canonical list in
-    // `src/lib/admin/permissions.server.ts` so the seed cannot drift
-    // from the runtime check. Idempotent — `on conflict (key) do nothing`.
+    // Sourced from the single canonical list in `src/lib/admin/permissions.ts`
+    // (the neutral catalog module — the `.server` module is `server-only` and
+    // cannot be imported by this tsx script) so the seed cannot drift from the
+    // runtime check. Idempotent — `on conflict (key) do nothing`.
     for (const { key, description } of ADMIN_PERMISSION_CATALOG) {
       await pool.query(
         `insert into app_permissions (key, description) values ($1, $2)

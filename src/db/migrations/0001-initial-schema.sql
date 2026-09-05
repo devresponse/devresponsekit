@@ -2,9 +2,10 @@
 --
 -- COMPLETE initial application database schema.
 --
--- This single script provisions EVERY application-owned table, index,
--- trigger, and baseline row needed for a first-time database setup — there is
--- exactly ONE application schema file and ONE setup process. It covers the
+-- This script provisions EVERY application-owned table, index, trigger, and
+-- baseline row needed for a first-time database setup — it is the FROZEN
+-- baseline of a single setup process; later `NNNN-*.sql` files (0002 onward)
+-- add forward changes on top of it (see run-migrations.ts). It covers the
 -- tenancy / identity / RBAC tables and their indexes; the audit log and its
 -- append-only trigger; the SSO handoff-nonce and outbox delivery
 -- infrastructure; the per-organization signup/auth settings; organization
@@ -430,10 +431,12 @@ values ('default', 'Default Organization', 'active', true)
 on conflict (slug) do nothing;
 
 -- Permission catalog. The `superuser` marker is not individually checked
--- at runtime (the role's power comes from holding every other key); the
--- canonical `admin.*` catalog MUST stay in sync with
--- `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts` — the
--- runtime check, the seed script, and this schema share the same keys.
+-- at runtime (the role's power comes from holding every other key). This
+-- frozen baseline predates the `admin.groups.*` keys (backfilled by 0002),
+-- so the rule is: the UNION of every core migration's seeded rows (this file
+-- + 0002 onward) MUST equal `ADMIN_PERMISSION_CATALOG` in
+-- `src/lib/admin/permissions.ts` — pinned by
+-- tests/unit/migration-permission-catalog-sync.test.ts.
 insert into app_permissions (key, description) values
   ('superuser', 'Superuser access level — full unrestricted access to every part of the application'),
   ('admin.users.read', 'Read administrator user lists and details'),
@@ -847,7 +850,8 @@ alter table app_audit_events
 --
 -- ON DELETE CASCADE: a policy row is wholly owned by its organization and
 -- must never block org deletion (unlike roles/keys, which mean the org is
--- genuinely "in use" and correctly RESTRICT - see 0005).
+-- genuinely "in use" and correctly RESTRICT - see the "Organization
+-- deletion: audit-tombstone FK" section above).
 
 create table if not exists app_organization_auth_settings (
   id uuid primary key default gen_random_uuid(),
@@ -859,8 +863,9 @@ create table if not exists app_organization_auth_settings (
   allowed_auth_methods text[]
     check (allowed_auth_methods <@ array['email', 'google', 'microsoft', 'github']::text[]),
   auto_approve_email_domains text[],
-  -- Better Auth user id of the last editor (admin UI/API arrives in a
-  -- follow-up; seeds and migrations leave this NULL).
+  -- Better Auth user id of the last editor, set by the administrator
+  -- auth-settings API (`upsertOrgAuthSettings`); seeds and migrations leave
+  -- this NULL.
   updated_by text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

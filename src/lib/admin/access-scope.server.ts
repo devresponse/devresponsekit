@@ -10,18 +10,24 @@ import type { UserAccessContext } from "@/lib/auth-status";
  *   SUPERADMIN — holds the `superuser` marker; manages EVERY organization.
  *                Org scoping is bypassed.
  *   ORG ADMIN  — holds `admin.*` permissions but NOT `superuser`; manages
- *                exactly ONE organization (their membership org). Every
- *                tenant-data query is confined to that org.
+ *                ONE organization per request — the ACTIVE org resolved by
+ *                `getUserAccessContext`. Every tenant-data query is
+ *                confined to that org.
  *   USER       — no `admin.*` permission; self-service only.
  *
  * This module is the single source of truth for "which organization may
  * this caller act on". Every administrator / `/api/v1/admin` data query
  * MUST derive its org boundary from here so the rule cannot drift.
  *
- * Design decision (ADR-0001): an org admin belongs to exactly ONE
- * organization, so their org is unambiguous (`access.organizationId`) and
- * needs no per-request org selector. Cross-org administration is a
- * SUPERADMIN-only capability.
+ * Design decision (ADR-0001): an org admin's scope is the ACTIVE
+ * organization as resolved by `getUserAccessContext` — a user may hold
+ * several memberships, and the active one is selected per request by the
+ * `active_org` cookie (earliest membership as the fallback); bearer
+ * credentials are pinned to the org they were minted for and never read the
+ * cookie (MACHINE-1). Every tenant query derives from `access.organizationId`;
+ * acting on any OTHER org requires switching the active org. Cross-org
+ * administration (several orgs in one request) is a SUPERADMIN-only
+ * capability. (review #30)
  */
 
 /**
@@ -42,7 +48,7 @@ export function isSuperadmin(access: Pick<UserAccessContext, "permissions">): bo
 /**
  * The org boundary for a caller:
  *   - SUPERADMIN → `{ kind: "all" }` (no scoping; every org).
- *   - ORG ADMIN  → `{ kind: "org", organizationId }` (their single org).
+ *   - ORG ADMIN  → `{ kind: "org", organizationId }` (their ACTIVE org).
  *   - `null` when an org admin has no resolvable active org — callers MUST
  *     treat null as "deny / empty result", never as "all".
  */

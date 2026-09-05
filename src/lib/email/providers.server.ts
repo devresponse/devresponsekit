@@ -22,10 +22,12 @@ export interface OutboundEmail {
   text?: string;
   /**
    * Stable per-email key (the outbox row id) used to make delivery
-   * effectively-once despite the at-least-once outbox (audit #11). The worker
-   * holds no lock across the provider call, so a crash after a successful send
-   * but before the row is marked `sent` re-attempts the SAME row — this key
-   * lets the provider dedupe that retry. Resend honors it natively via
+   * effectively-once despite the at-least-once outbox (audit #11). The
+   * provider call runs INSIDE the worker's `FOR UPDATE SKIP LOCKED` claim
+   * transaction (so the row lock is held for the duration of the call), but a
+   * crash after a successful send and before the `sent` UPDATE commits rolls
+   * the claim back and re-attempts the SAME row — this key lets the provider
+   * dedupe that retry (review #93). Resend honors it natively via
    * `Idempotency-Key`; Mailgun has no idempotency API, so it only rides as a
    * stable `Message-Id` (best-effort — Mailgun stays at-least-once).
    */
@@ -45,8 +47,10 @@ export interface EmailProvider {
  * Per-call timeout for a provider HTTP request. `sendAppEmail` runs inline on
  * the request path (e.g. the password-reset flow), so without an abort a hung
  * provider connection would hold the request open until the platform's own
- * timeout. `AbortSignal.timeout` rejects the fetch, which the caller records as
- * a failed outbox row (and a future retry worker can re-attempt).
+ * timeout. `AbortSignal.timeout` rejects the fetch; the caller leaves the
+ * outbox row `pending` with a backoff `next_attempt_at`, and `drainOutbox`
+ * (outbox-worker.server.ts) re-attempts it — a row becomes terminally
+ * `failed` only after OUTBOX_MAX_ATTEMPTS (review #82).
  */
 const PROVIDER_TIMEOUT_MS = 10_000;
 

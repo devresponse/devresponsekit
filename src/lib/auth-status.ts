@@ -81,20 +81,6 @@ export function decideSecureAccess(
 }
 
 /**
- * Loads application-level access context for a Better Auth user id.
- *
- * Returns a synthetic `pending_approval` context when the user has not yet
- * been provisioned into the application tables — this happens between
- * sign-up and the first call to the user-provisioning service. Pages that
- * call this function MUST treat any non-`active` status as a hard block.
- *
- * Wrapped in React `cache()` so the secure layout, nested layouts, and
- * page-level guards resolving the same user within one request share a
- * single set of DB round-trips. The memoization is per-request (and a
- * no-op outside React rendering), so it never serves stale permissions
- * across requests.
- */
-/**
  * Selects which organization a bearer credential (API key / JWT) acts in.
  *
  * `organizationId` is the org the credential was MINTED for
@@ -109,6 +95,20 @@ export interface BoundOrg {
   organizationId: string | null;
 }
 
+/**
+ * Loads application-level access context for a Better Auth user id.
+ *
+ * Returns a synthetic `pending_approval` context when the user has not yet
+ * been provisioned into the application tables — this happens between
+ * sign-up and the first call to the user-provisioning service. Pages that
+ * call this function MUST treat any non-`active` status as a hard block.
+ *
+ * Wrapped in React `cache()` so the secure layout, nested layouts, and
+ * page-level guards resolving the same user within one request share a
+ * single set of DB round-trips. The memoization is per-request (and a
+ * no-op outside React rendering), so it never serves stale permissions
+ * across requests.
+ */
 export const getUserAccessContext = cache(async function getUserAccessContext(
   betterAuthUserId: string,
   boundOrg?: BoundOrg,

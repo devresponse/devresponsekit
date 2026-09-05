@@ -120,6 +120,8 @@ The first increment, shipped behind `MCP_ENABLED` (off by default):
 - **Two read-only tools**, each a thin **proxy to the corresponding v1 route handler** (so authorization, org-scoping, and projections are identical — zero duplication):
   - `whoami` → `GET /api/v1/me` (scope `account.read`) — the caller's identity + effective scopes.
   - `users_list` → `GET /api/v1/users` (scope `admin.users.read`) — a filtered user page (`q`, `status`, `page`, `page_size`).
+
+  These hand-written Phase 0 names no longer exist: since Phase 3 (§11) every tool is named by its OpenAPI `operationId`, so the same two calls are `getMe` and `listUsers` today, and the server's `initialize` instructions point at `getMe`.
   Insufficient scope surfaces as an MCP tool error result, not a transport failure.
 
 Phase 0 deliberately excludes self-registration, OAuth discovery metadata, and generated tools — those are Phases 1–3. It exists to prove the transport + auth wiring end to end.

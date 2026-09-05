@@ -13,13 +13,14 @@ import { planMigrations, shouldIncludeLocales } from "./migration-plan";
  * (owned by Better Auth's own tooling) and tracking applied ids in an
  * `app_schema_migrations` table so each runs at most once:
  *
- *   1. CORE — every top-level `*.sql` (lexical). Today that is the single
- *      `0001-initial-schema.sql`: the complete baseline (every `app_*` table,
- *      index, trigger, and non-language baseline row — but NOT email templates,
- *      which live under `locales/`). It is FROZEN and never renamed, so its
- *      ledger id (the bare filename) is stable and an existing database skips
- *      it. Further schema changes are added as new numbered `NNNN-*.sql` files,
- *      applied in lexical order after `0001`, each recorded once in the ledger.
+ *   1. CORE — every top-level `*.sql` (lexical). `0001-initial-schema.sql`
+ *      is the complete baseline (every `app_*` table, index, trigger, and
+ *      non-language baseline row — but NOT email templates, which live under
+ *      `locales/`). It is FROZEN and never renamed, so its ledger id (the bare
+ *      filename) is stable and an existing database skips it. Further schema
+ *      changes are the forward migrations that follow it — numbered
+ *      `NNNN-*.sql` files (0002, 0003, …) applied in lexical order after
+ *      `0001`, each recorded once in the ledger.
  *
  *   2. LOCALES — `locales/*.sql` (lexical): the email templates, one file per
  *      locale. `0000-email-templates-en.sql` is the English BASE and is ALWAYS

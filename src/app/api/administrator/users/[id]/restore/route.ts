@@ -23,7 +23,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * POST /api/administrator/users/[id]/restore
  *
- * Inverse of the soft-delete (plan §4.1):
+ * Inverse of the soft-delete (docs/admin-manager.md §8.1):
  *   1. Unban the Better Auth user.
  *   2. Set `app_users.status` back to `pending_approval` and clear the
  *      `deactivated_*` columns. We deliberately do NOT auto-restore to
@@ -36,7 +36,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  *      not access anything.
  *
  * Caller MUST hold `admin.users.delete` (same permission gates both
- * directions of the soft-delete lifecycle, per plan §4.1).
+ * directions of the soft-delete lifecycle, docs/admin-manager.md §8.1).
  */
 export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.delete");

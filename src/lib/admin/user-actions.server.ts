@@ -255,7 +255,7 @@ async function performSoftDelete(
         .updateTable("app_organization_memberships")
         .set({
           // Snapshot prior status so `restore` can reverse the cascade
-          // (plan §4.1). `where status != 'blocked'` keeps double-deletes
+          // (docs/admin-manager.md §8.1). `where status != 'blocked'` keeps double-deletes
           // from clobbering the snapshot with the cascaded value.
           pre_deactivation_status: sql`status`,
           status: "blocked",

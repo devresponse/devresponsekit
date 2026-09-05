@@ -19,7 +19,7 @@ import { createUserSchema, type CreateUserInput } from "@/lib/validation/users";
 import { locales, LOCALE_LABELS } from "@/config/i18n-config";
 
 /**
- * Client-side new-user form (plan §8.3; docs/form-validation.md).
+ * Client-side new-user form (docs/admin-manager.md §8.1; docs/form-validation.md).
  *
  * Reference implementation for the app-wide validation pattern: React Hook
  * Form + the SHARED `createUserSchema` (the same schema the API route

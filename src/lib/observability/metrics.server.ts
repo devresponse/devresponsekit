@@ -16,7 +16,7 @@ import { Counter, Registry, collectDefaultMetrics } from "prom-client";
  *   - `…_rate_limit_denials_total{scope}` — the first business counter, fed from
  *     the limiter's deny path.
  *
- * Next increments (tracked in docs/observability.md §5): request latency/status
+ * Next increments (tracked in docs/observability.md §6): request latency/status
  * by route, DB latency, auth failures, and outbox delivery.
  *
  * Per-instance, like the limiter: each process keeps its own counters, scraped

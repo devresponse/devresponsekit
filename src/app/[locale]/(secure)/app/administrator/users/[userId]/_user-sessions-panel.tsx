@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
- * Sessions tab for the user detail page (plan §8.4 — Sessions).
+ * Sessions tab for the user detail page (docs/admin-manager.md §8.1 — Sessions).
  *
  * Owns its own fetch against `GET /api/administrator/users/[id]/sessions`
  * so the heavier auth-side query only runs when the user opens the tab.

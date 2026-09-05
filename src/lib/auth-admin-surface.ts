@@ -22,9 +22,9 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
  * hook pipeline for HTTP traffic and for `auth.api.*` calls; the two are told
  * apart by `ctx.request`, which better-call's router sets from the incoming
  * `Request` and which a server-side `auth.api.*` call (headers + body, no
- * `request`) never carries. Rejecting with 404 (not 403) matches the §6.2
- * "404, not 403" posture and makes the surface indistinguishable from an
- * unmounted route.
+ * `request`) never carries. Rejecting with 404 (not 403) matches the
+ * "404, not 403" posture of docs/admin-manager.md §6.2 and makes the surface
+ * indistinguishable from an unmounted route.
  *
  * Invariant for callers: NEVER pass `request` to an `auth.api.*` admin call —
  * forward `headers` only (as `auth-admin.server.ts` does), or the guard will

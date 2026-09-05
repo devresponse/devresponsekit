@@ -17,8 +17,9 @@ type RouteContext = { params: Promise<{ id: string }> };
  * POST /api/administrator/users/[id]/role
  *
  * Sets the Better Auth role for a user (`user` or `admin`). This is
- * distinct from app roles managed via `app_user_roles` — see plan §4
- * row "admin.setRole" and §6.1 for the separation of concerns.
+ * distinct from app roles managed via `app_user_roles` — see the
+ * `admin.users.setRole` row in docs/admin-manager.md §8.1 and §6.1 for the
+ * separation of concerns.
  *
  * Caller MUST hold `admin.users.setRole`.
  */

@@ -21,7 +21,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  *
  * Applies one of the status transitions (`approve` | `block` |
  * `suspend` | `reactivate`) to the target user via the shared
- * `performAdminStatusChange` core (plan §4 + §5.2), which also backs
+ * `performAdminStatusChange` core (docs/admin-manager.md §8.1, §13), which also backs
  * the bulk endpoint so both paths emit identical audit events.
  */
 const statusSchema = z

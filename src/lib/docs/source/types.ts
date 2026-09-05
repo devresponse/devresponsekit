@@ -26,7 +26,7 @@ export type DocFormat = "md" | "mdx";
  * reading the document body.
  */
 export interface DocCatalogEntry {
-  /** URL path (locale-less, no extension), e.g. `"setup-better-auth"`. */
+  /** URL path (locale-less, no extension), e.g. `"observability"`. */
   slug: string;
   title: string;
   description?: string;

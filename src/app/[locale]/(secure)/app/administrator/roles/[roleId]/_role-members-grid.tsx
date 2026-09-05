@@ -7,7 +7,7 @@ import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid } from "../../_components/grid/data-grid";
 
 /**
- * Members tab for the role detail (plan §8.6 — Members).
+ * Members tab for the role detail (docs/admin-manager.md §8.4 — Members).
  *
  * Reuses the shared `DataGrid` so URL-state, pagination and a11y
  * behave identically to the parent users grid. Each row's email is a

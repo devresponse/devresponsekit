@@ -37,10 +37,10 @@ export const dynamic = "force-dynamic";
  *     `primary_email` and `display_name`.
  *
  * Joining with the Better Auth `user` table is intentionally out of
- * scope for this endpoint per plan §13 — that join happens in the
- * higher-level Phase-3 endpoints once we need the auth `banned` /
- * `role` columns. Here we ship the application view only, which keeps
- * the endpoint cheap and indexable.
+ * scope for this endpoint — the auth `banned` / `role` columns are read
+ * by the detail page and the ban / role endpoints instead
+ * (docs/admin-manager.md §8.1). Here we ship the application view only,
+ * which keeps the endpoint cheap and indexable.
  */
 const ALLOWED_STATUS = new Set([
   "active",

@@ -233,7 +233,7 @@ export async function stopBetterAuthImpersonating(actor?: Headers | { headers: H
 /**
  * Triggers Better Auth's password-reset email flow for the given email.
  * Used by the "Send reset email" mode of the set-password endpoint
- * (plan §4 / §5.2). The actor's request headers are forwarded so Better
+ * (docs/admin-manager.md §8.1). The actor's request headers are forwarded so Better
  * Auth's CSRF / origin checks pass.
  */
 export async function sendBetterAuthPasswordResetEmail(

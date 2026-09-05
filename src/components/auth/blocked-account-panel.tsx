@@ -19,7 +19,7 @@ export interface BlockedAccountPanelProps {
  * why — to avoid leaking moderation context to end users.
  *
  * Includes a `SignOutButton` so the user can clear their local session
- * (sign-out is local-only per spec §10) and try again under a different
+ * (sign-out is local-only per spec §21) and try again under a different
  * account if applicable.
  */
 export function BlockedAccountPanel({ locale, className }: BlockedAccountPanelProps) {

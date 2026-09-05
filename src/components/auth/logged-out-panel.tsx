@@ -14,7 +14,7 @@ export interface LoggedOutPanelProps {
  * Server-compatible panel rendered by the localized `/logged-out` page
  * after `SignOutButton` completes the local-only sign-out. Lives under
  * the `(public)` route group so it never re-engages the secure shell or
- * hits secure menu APIs (spec §10).
+ * hits secure menu APIs (spec §28.2 rule 2; §21 rule 5).
  */
 export function LoggedOutPanel({ locale, className }: LoggedOutPanelProps) {
   const t = useTranslations("auth");

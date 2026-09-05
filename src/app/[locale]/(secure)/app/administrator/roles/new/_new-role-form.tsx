@@ -18,7 +18,7 @@ import { createRoleSchema, type CreateRoleInput } from "@/lib/validation/roles";
 import { OrganizationPicker } from "../../_components/organization-picker";
 
 /**
- * Client-side new-role form (plan §8.5; docs/form-validation.md). React Hook
+ * Client-side new-role form (docs/admin-manager.md §8.4; docs/form-validation.md). React Hook
  * Form + the shared `createRoleSchema` (same schema the API route enforces):
  * schema-derived required markers, field-level errors with a red border, and
  * a 409 mapped onto the key field.

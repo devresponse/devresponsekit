@@ -7,7 +7,7 @@ import { RoleMembersGrid } from "./_role-members-grid";
 import { RoleSettingsForm } from "./_role-settings-form";
 
 /**
- * Client-side tab container for the role detail (plan §8.6).
+ * Client-side tab container for the role detail (docs/admin-manager.md §8.4).
  *
  * Each tab owns its own data fetch except for the Permissions tab,
  * which is hydrated from the server-rendered initial set so the dual-

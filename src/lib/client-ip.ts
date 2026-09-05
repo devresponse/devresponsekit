@@ -56,6 +56,15 @@ export function getClientIp(headers: Headers): string | null {
  * — always overwriting (or deleting) whatever the client sent — and Better
  * Auth is configured to read ONLY this header (`advanced.ipAddress.
  * ipAddressHeaders` in `src/lib/auth.ts`). One derivation, one trust model.
+ *
+ * The proxy is NOT the only line: its matcher covers page renders and
+ * `/api/auth/*`, but server-side `auth.api.*` calls happen on other routes
+ * too (`/api/sso/consume` establishes a session, the admin console
+ * impersonates, …) and a client holding its own request could inject the
+ * header there. Every such caller therefore passes its headers through
+ * {@link withTrustedClientIp} first, and the catch-all route re-stamps the
+ * header itself — so correctness never depends on the matcher covering a
+ * given path, and the proxy is defence in depth.
  */
 export const CLIENT_IP_HEADER = "x-drk-client-ip";
 
@@ -74,6 +83,26 @@ export function applyClientIpHeader(headers: Headers): void {
   } else {
     headers.delete(CLIENT_IP_HEADER);
   }
+}
+
+/**
+ * The headers to hand a server-side `auth.api.*` call: a COPY of `headers`
+ * with {@link CLIENT_IP_HEADER} derived from the trusted hop exactly as
+ * {@link applyClientIpHeader} does (overwritten or removed, never passed
+ * through). Use this at EVERY call site that forwards request headers to
+ * Better Auth — session creation (`createSsoSession`, `impersonateUser`),
+ * session reads, account updates — whether or not the proxy matched the
+ * route: the input may be a client-controlled `request.headers` on a path the
+ * proxy never saw, or a read-only `next/headers()` store, so the original is
+ * never mutated.
+ *
+ * Idempotent: re-stamping headers the proxy already stamped yields the same
+ * value, because both derive from the same forwarded chain.
+ */
+export function withTrustedClientIp(headers: Headers): Headers {
+  const copy = new Headers(headers);
+  applyClientIpHeader(copy);
+  return copy;
 }
 
 /**

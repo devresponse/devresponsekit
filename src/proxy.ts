@@ -131,7 +131,11 @@ function generateNonce(): string {
  *      (`/api/auth/*`, matched explicitly below), which reads ONLY that
  *      header for its sign-in/reset limiter and `session.ipAddress`. A client
  *      cannot inject it, and multi-hop chains resolve to the same hop the
- *      app's own limiter trusts.
+ *      app's own limiter trusts. This is defence in depth, not the only
+ *      line: every server-side `auth.api.*` call site (SSO consume, the
+ *      admin wrappers, session reads) and the catch-all route itself
+ *      re-derive the header via `withTrustedClientIp`, so routes outside
+ *      this matcher (`/api/sso/*`, `/api/administrator/*`) are covered too.
  *   1. A per-request CSP nonce: an enforcing `Content-Security-Policy` is set
  *      on every response, and the nonce is threaded into the request headers
  *      (`x-nonce` + the CSP itself) so Next.js — and the root layout, which

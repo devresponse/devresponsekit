@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AuthGuardModule from "@/lib/auth-guard";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import { CLIENT_IP_HEADER } from "@/lib/client-ip";
 
 /**
  * Unit tests for `auth-guard.ts` (`getCurrentSession` and
@@ -19,8 +20,10 @@ const redirectMock = vi.fn((url: string) => {
   throw new Error(`__REDIRECT__:${url}`);
 });
 
+const ambient = vi.hoisted(() => ({ headers: new Headers() }));
+
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers(),
+  headers: async () => ambient.headers,
 }));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => redirectMock(url),
@@ -42,6 +45,7 @@ beforeEach(async () => {
   getSessionMock.mockReset();
   accessGetter.mockReset();
   redirectMock.mockClear();
+  ambient.headers = new Headers();
   mod = await import("@/lib/auth-guard");
 });
 afterEach(() => vi.resetModules());
@@ -49,9 +53,26 @@ afterEach(() => vi.resetModules());
 describe("getCurrentSession", () => {
   it("forwards the request headers to Better Auth", async () => {
     getSessionMock.mockResolvedValue({ user: { id: "ba-1" } });
+    ambient.headers = new Headers({ cookie: "ba.session=x" });
     const result = await mod.getCurrentSession();
     expect(getSessionMock).toHaveBeenCalledWith({ headers: expect.any(Headers) });
+    expect((getSessionMock.mock.calls[0]![0] as { headers: Headers }).headers.get("cookie")).toBe(
+      "ba.session=x",
+    );
     expect(result).toEqual({ user: { id: "ba-1" } });
+  });
+
+  it("hands Better Auth a copy stamped with the trusted client IP, never an injected one (review #35)", async () => {
+    getSessionMock.mockResolvedValue(null);
+    ambient.headers = new Headers({
+      [CLIENT_IP_HEADER]: "6.6.6.6",
+      "x-forwarded-for": "6.6.6.6, 203.0.113.9",
+    });
+    await mod.getCurrentSession();
+    const passed = (getSessionMock.mock.calls[0]![0] as { headers: Headers }).headers;
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    // The ambient (read-only in Next) store is not mutated.
+    expect(ambient.headers.get(CLIENT_IP_HEADER)).toBe("6.6.6.6");
   });
 });
 

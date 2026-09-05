@@ -1,6 +1,7 @@
 import "server-only";
 import { headers as nextHeaders } from "next/headers";
 import { auth } from "@/lib/auth";
+import { withTrustedClientIp } from "@/lib/client-ip";
 
 /**
  * Server-side wrappers around the Better Auth `admin()` plugin
@@ -10,7 +11,13 @@ import { auth } from "@/lib/auth";
  *     route handlers stay declarative.
  *   - Forwards the incoming request's headers to Better Auth so cookie /
  *     IP / user-agent context is preserved (impersonation in particular
- *     refuses to operate without a valid actor session).
+ *     refuses to operate without a valid actor session). The forwarded copy
+ *     ALWAYS carries the trusted client-IP header (`withTrustedClientIp`,
+ *     review #35): `/api/administrator/*` is outside the proxy matcher, so
+ *     the header Better Auth reads for `session.ipAddress` (impersonation
+ *     creates a session) is derived HERE from the trusted hop — an actor
+ *     cannot inject it, and the ambient `next/headers()` store is stamped
+ *     the same way.
  *   - Lets us add cross-cutting behaviour later (rate-limit hooks,
  *     telemetry) in one place.
  *
@@ -31,11 +38,12 @@ function asActorHeaders(input?: Headers | { headers: Headers }): Headers | undef
 }
 
 async function actorHeaders(input?: Headers | { headers: Headers }): Promise<Headers> {
-  const provided = asActorHeaders(input);
-  if (provided) return provided;
   // Fall back to the ambient request headers for RSC callers that did
   // not pass an explicit handle. `next/headers()` is async in Next 15+.
-  return await nextHeaders();
+  const source = asActorHeaders(input) ?? (await nextHeaders());
+  // A stamped COPY: the trusted client IP is (re)derived from the forwarded
+  // chain, never taken from the caller (review #35).
+  return withTrustedClientIp(source);
 }
 
 /* -------------------------------------------------------------------------- */

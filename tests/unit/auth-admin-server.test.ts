@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Mod from "@/lib/admin/auth-admin.server";
+import { CLIENT_IP_HEADER, getClientIp } from "@/lib/client-ip";
 
 /**
  * Unit tests for the Better Auth admin wrappers (was 0% covered). Each
@@ -114,19 +115,86 @@ describe("body + method routing", () => {
 });
 
 describe("actor header forwarding", () => {
-  it("forwards an explicit Headers instance", async () => {
+  it("forwards an explicit Headers instance (as a stamped copy)", async () => {
     await M.unbanBetterAuthUser("u1", actor);
-    expect(api.unbanUser.mock.calls[0]![0].headers).toBe(actor);
+    const passed = api.unbanUser.mock.calls[0]![0].headers as Headers;
+    expect(passed.get("x-actor")).toBe("1");
+    expect(passed).not.toBe(actor);
   });
 
   it("unwraps a { headers } request handle", async () => {
     await M.unbanBetterAuthUser("u1", { headers: actor });
-    expect(api.unbanUser.mock.calls[0]![0].headers).toBe(actor);
+    expect((api.unbanUser.mock.calls[0]![0].headers as Headers).get("x-actor")).toBe("1");
   });
 
   it("falls back to ambient next/headers() when no actor is given", async () => {
     await M.unbanBetterAuthUser("u1");
-    expect(api.unbanUser.mock.calls[0]![0].headers).toBe(ambientHeaders);
+    expect((api.unbanUser.mock.calls[0]![0].headers as Headers).get("x-ambient")).toBe("1");
+  });
+});
+
+/**
+ * Review #35 (follow-up): `/api/administrator/*` is outside the proxy
+ * matcher, and `impersonateUser` CREATES a session whose `ipAddress` Better
+ * Auth reads from `x-drk-client-ip` only. The wrappers must derive that
+ * header from the trusted hop themselves — never forward an actor-supplied
+ * value — and must not mutate the (read-only) source headers.
+ */
+describe("trusted client-IP header on every forwarded call (review #35)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("impersonateUser: overwrites an actor-injected x-drk-client-ip with the trusted hop", async () => {
+    const request = {
+      headers: new Headers({
+        cookie: "ba.session=x",
+        [CLIENT_IP_HEADER]: "6.6.6.6",
+        "x-forwarded-for": "6.6.6.6, 203.0.113.9",
+      }),
+    };
+    await M.impersonateBetterAuthUser("u1", request);
+    const passed = api.impersonateUser.mock.calls[0]![0].headers as Headers;
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    expect(passed.get("cookie")).toBe("ba.session=x");
+    // Same address the audit row for this action records.
+    expect(passed.get(CLIENT_IP_HEADER)).toBe(getClientIp(request.headers));
+    // The route's request headers are left as they arrived.
+    expect(request.headers.get(CLIENT_IP_HEADER)).toBe("6.6.6.6");
+  });
+
+  it("impersonateUser: an honest single-hop XFF still yields a real session IP", async () => {
+    await M.impersonateBetterAuthUser("u1", new Headers({ "x-forwarded-for": "203.0.113.9" }));
+    const passed = api.impersonateUser.mock.calls[0]![0].headers as Headers;
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+  });
+
+  it("strips an injected header when nothing trustworthy is present (fail closed)", async () => {
+    await M.impersonateBetterAuthUser("u1", new Headers({ [CLIENT_IP_HEADER]: "6.6.6.6" }));
+    const passed = api.impersonateUser.mock.calls[0]![0].headers as Headers;
+    expect(passed.has(CLIENT_IP_HEADER)).toBe(false);
+  });
+
+  it("honors TRUSTED_PROXY_COUNT like the app's own limiter", async () => {
+    vi.stubEnv("TRUSTED_PROXY_COUNT", "2");
+    await M.stopBetterAuthImpersonating(
+      new Headers({ "x-forwarded-for": "spoof, 203.0.113.9, 10.0.0.2" }),
+    );
+    const passed = api.stopImpersonating.mock.calls[0]![0].headers as Headers;
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+  });
+
+  it("stamps the ambient next/headers() store too, without mutating it", async () => {
+    ambientHeaders.set(CLIENT_IP_HEADER, "6.6.6.6");
+    ambientHeaders.set("x-forwarded-for", "6.6.6.6, 203.0.113.9");
+    try {
+      await M.impersonateBetterAuthUser("u1");
+      const passed = api.impersonateUser.mock.calls[0]![0].headers as Headers;
+      expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+      expect(passed.get("x-ambient")).toBe("1");
+      expect(ambientHeaders.get(CLIENT_IP_HEADER)).toBe("6.6.6.6");
+    } finally {
+      ambientHeaders.delete(CLIENT_IP_HEADER);
+      ambientHeaders.delete("x-forwarded-for");
+    }
   });
 });
 

@@ -1,10 +1,16 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { CLIENT_IP_HEADER, applyClientIpHeader, getClientIp, clientIpKey } from "@/lib/client-ip";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import {
+  CLIENT_IP_HEADER,
+  applyClientIpHeader,
+  getClientIp,
+  clientIpKey,
+  withTrustedClientIp,
+} from "@/lib/client-ip";
 
 const h = (map: Record<string, string>) => new Headers(map);
 
 afterEach(() => {
-  delete process.env.TRUSTED_PROXY_COUNT;
+  vi.unstubAllEnvs();
 });
 
 /**
@@ -23,7 +29,7 @@ describe("getClientIp", () => {
   });
 
   it("honors TRUSTED_PROXY_COUNT (2 proxies → second from the right)", () => {
-    process.env.TRUSTED_PROXY_COUNT = "2";
+    vi.stubEnv("TRUSTED_PROXY_COUNT", "2");
     expect(getClientIp(h({ "x-forwarded-for": "1.1.1.1, 7.7.7.7, 2.2.2.2" }))).toBe("7.7.7.7");
   });
 
@@ -61,11 +67,59 @@ describe("applyClientIpHeader", () => {
   });
 
   it("honors TRUSTED_PROXY_COUNT like getClientIp", () => {
-    process.env.TRUSTED_PROXY_COUNT = "2";
+    vi.stubEnv("TRUSTED_PROXY_COUNT", "2");
     const headers = h({ "x-forwarded-for": "1.1.1.1, 7.7.7.7, 2.2.2.2" });
     applyClientIpHeader(headers);
     expect(headers.get(CLIENT_IP_HEADER)).toBe(getClientIp(headers));
     expect(headers.get(CLIENT_IP_HEADER)).toBe("7.7.7.7");
+  });
+});
+
+/**
+ * Review #35 (follow-up): server-side `auth.api.*` callers on routes the proxy
+ * never matched (`/api/sso/consume`, `/api/administrator/*`) hand Better Auth
+ * a stamped COPY of their headers, so an injected header is neutralised there
+ * too and a read-only `next/headers()` store is never mutated.
+ */
+describe("withTrustedClientIp", () => {
+  it("returns a copy stamped from the trusted hop and leaves the input untouched", () => {
+    const input = h({ [CLIENT_IP_HEADER]: "6.6.6.6", "x-forwarded-for": "6.6.6.6, 9.9.9.9" });
+    const out = withTrustedClientIp(input);
+    expect(out).not.toBe(input);
+    expect(out.get(CLIENT_IP_HEADER)).toBe("9.9.9.9");
+    // The caller's object (possibly a read-only Next store) is not mutated.
+    expect(input.get(CLIENT_IP_HEADER)).toBe("6.6.6.6");
+  });
+
+  it("carries every other header through unchanged (cookies, user-agent)", () => {
+    const out = withTrustedClientIp(
+      h({ cookie: "ba.session=x", "user-agent": "ua", "x-forwarded-for": "9.9.9.9" }),
+    );
+    expect(out.get("cookie")).toBe("ba.session=x");
+    expect(out.get("user-agent")).toBe("ua");
+    expect(out.get(CLIENT_IP_HEADER)).toBe("9.9.9.9");
+  });
+
+  it("removes an injected header when nothing trustworthy is present (fail closed)", () => {
+    const out = withTrustedClientIp(h({ [CLIENT_IP_HEADER]: "6.6.6.6" }));
+    expect(out.has(CLIENT_IP_HEADER)).toBe(false);
+  });
+
+  it("is idempotent over headers the proxy already stamped", () => {
+    const once = withTrustedClientIp(h({ "x-forwarded-for": "spoof, 9.9.9.9" }));
+    const twice = withTrustedClientIp(once);
+    expect(twice.get(CLIENT_IP_HEADER)).toBe(once.get(CLIENT_IP_HEADER));
+    expect(twice.get(CLIENT_IP_HEADER)).toBe("9.9.9.9");
+  });
+
+  it("agrees with getClientIp — the audit row's derivation — for the same input", () => {
+    vi.stubEnv("TRUSTED_PROXY_COUNT", "2");
+    const input = h({
+      [CLIENT_IP_HEADER]: "6.6.6.6",
+      "x-forwarded-for": "6.6.6.6, 7.7.7.7, 2.2.2.2",
+    });
+    expect(withTrustedClientIp(input).get(CLIENT_IP_HEADER)).toBe(getClientIp(input));
+    expect(getClientIp(input)).toBe("7.7.7.7");
   });
 });
 

@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
+import { withTrustedClientIp } from "@/lib/client-ip";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 /**
@@ -11,10 +12,15 @@ import { getSafeReturnTo } from "@/lib/safe-return-to";
  * Returns `null` when the user is not authenticated or the session has
  * expired. This function is safe to call from layouts, route handlers,
  * server components, and server actions.
+ *
+ * The headers handed to Better Auth are a copy stamped with the trusted
+ * client-IP header (`withTrustedClientIp`, review #35) — the ambient store
+ * may come from a route the proxy never matched, so the derivation is
+ * applied here rather than trusted from the request.
  */
 export async function getCurrentSession() {
   const requestHeaders = await headers();
-  return auth.api.getSession({ headers: requestHeaders });
+  return auth.api.getSession({ headers: withTrustedClientIp(requestHeaders) });
 }
 
 /**

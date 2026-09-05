@@ -119,21 +119,43 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 | `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. |
 | `ADMIN_EXPORT_MAX_ROWS` | 100000 | Hard row cap for a single CSV export; the file is marked truncated past the cap. |
 
-**One client-IP derivation.** `src/proxy.ts` computes the trusted client IP with
-the `TRUSTED_PROXY_COUNT` rule above and **always overwrites** the private request
-header `x-drk-client-ip` (set when a trustworthy IP exists, removed otherwise) for
-page renders and for the Better Auth catch-all (`/api/auth/*`, matched
-explicitly). Better Auth is configured to read **only** that header
-(`advanced.ipAddress.ipAddressHeaders` in `src/lib/auth.ts`), so its limiter keys
-on the same hop the app trusts: a client cannot inject the header to land in
-another user's bucket, and a multi-hop chain (CDN + load balancer) no longer
-collapses every request into Better Auth's shared `no-trusted-ip` bucket
-(review #35). Do **not** allow the header through from the public edge — the
-proxy discards whatever arrives — and do not add `x-forwarded-for` back to
-`ipAddressHeaders`: Better Auth trusts a single-value header verbatim, which lets a
-client rotate buckets where the edge sets no chain. When no IP can be trusted,
-requests share one bounded bucket (`anon` in the app, `no-trusted-ip` in Better
-Auth) — fail closed, never fail open.
+**One client-IP derivation.** The app computes the trusted client IP with the
+`TRUSTED_PROXY_COUNT` rule above and **always overwrites** the private request
+header `x-drk-client-ip` (set when a trustworthy IP exists, removed otherwise)
+before Better Auth sees a request. Better Auth is configured to read **only** that
+header (`advanced.ipAddress.ipAddressHeaders` in `src/lib/auth.ts`), so its limiter
+keys on the same hop the app trusts: a client cannot inject the header to land in
+another user's bucket or forge `session.ipAddress`, and a multi-hop chain (CDN +
+load balancer) no longer collapses every request into Better Auth's shared
+`no-trusted-ip` bucket (review #35). The header is stamped at every point Better
+Auth reads it, so no route depends on the proxy matcher covering it:
+
+- `src/proxy.ts` stamps it on page renders and on `/api/auth/*` (defence in depth);
+- the `/api/auth/[...all]` route re-derives it in the handler itself;
+- every server-side `auth.api.*` call — SSO consume (`createSsoSession`), the
+  admin wrappers (`impersonateUser`, …), session reads, account updates — passes
+  its headers through `withTrustedClientIp` (`src/lib/client-ip.ts`), which returns a
+  stamped **copy** rather than trusting `request.headers` or `next/headers()`.
+
+The session's `ipAddress` and the audit row for the same event therefore hold the
+same address. Do **not** add `x-forwarded-for` back to `ipAddressHeaders`: Better
+Auth trusts a single-value header verbatim, which lets a client rotate buckets
+where the edge sets no chain. When no IP can be trusted, requests share one
+bounded bucket (`anon` in the app, `no-trusted-ip` in Better Auth) — fail closed,
+never fail open.
+
+Requirements on the edge in front of the app:
+
+- It must **set** `X-Forwarded-For` (appending the address it observed) or
+  `X-Real-IP`. Without either, every session and sign-in lands in the shared
+  bucket. Next.js fills `X-Forwarded-For` from the socket address only when the
+  header is absent, so a deployment with **no** proxy still gets per-client
+  buckets — but only through the in-handler stamping above; do not rely on it
+  behind a proxy that strips the header.
+- It must **overwrite or strip** `X-Real-IP` (the no-chain fallback) as well as
+  `x-drk-client-ip` — the app discards whatever arrives in the latter, but a
+  client-supplied `X-Real-IP` that reaches the app with no `X-Forwarded-For`
+  chain would be trusted as the client's address.
 
 ### Email
 

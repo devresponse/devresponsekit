@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import { auth } from "@/lib/auth";
+import { withTrustedClientIp } from "@/lib/client-ip";
 import { auditEvent } from "@/lib/audit.server";
 import { requireAccountUser } from "@/lib/account/guard.server";
 import { updateProfileSchema } from "@/lib/validation/account";
@@ -48,7 +49,9 @@ export async function PATCH(request: NextRequest) {
   try {
     await auth.api.updateUser({
       body: { name: parsed.data.name },
-      headers: request.headers,
+      // Every server-side `auth.api.*` call shares the trusted client-IP
+      // derivation (review #35) — this route is outside the proxy matcher.
+      headers: withTrustedClientIp(request.headers),
     } as Parameters<typeof auth.api.updateUser>[0]);
   } catch (err) {
     await auditEvent({

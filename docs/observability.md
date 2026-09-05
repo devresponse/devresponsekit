@@ -60,7 +60,7 @@ Two layers, both fail-safe (redact-by-default):
   `url.query`, `http.request.header.*`, …), span descriptions, and the transaction name.
   The **client IP** is treated as user info and never sent: the IP-bearing proxy headers
   the app itself reads for rate limiting (`x-forwarded-for`, `x-real-ip`, the
-  proxy-derived `x-drk-client-ip` that Better Auth's limiter keys on — review #35 —
+  app-derived `x-drk-client-ip` that Better Auth's limiter keys on — review #35 —
   `cf-connecting-ip`, `true-client-ip`, `x-vercel-forwarded-for`, `forwarded`, `via`, …)
   are denied at write time and dropped by the hooks, as are the `http.client_ip` /
   `user.ip_address` / `client.address` span attributes the Node HTTP instrumentation sets.

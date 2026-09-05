@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ConsumeRouteModule from "@/app/api/sso/consume/route";
 import type { NextRequest } from "next/server";
+import type { BetterAuthOptions } from "better-auth";
+import { getIp } from "better-auth/api";
+import { CLIENT_IP_HEADER, getClientIp } from "@/lib/client-ip";
 
 /**
  * Route integration tests for `/api/sso/consume` (§29.6.10 + §29.7.5, P2-2).
@@ -101,6 +104,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   vi.resetModules();
+  vi.unstubAllEnvs();
   delete process.env.SSO_HANDOFF_APPLICATION_ID;
 });
 
@@ -258,6 +262,89 @@ describe("application-id binding — token minted for another app (review #15)",
     const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("/sso/confirm");
+  });
+});
+
+/**
+ * Review #35 / #190: `/api/sso/consume` is NOT behind the proxy matcher, and
+ * Better Auth reads the client IP for `session.ipAddress` from
+ * `x-drk-client-ip` ONLY. The route must therefore derive that header itself
+ * from the trusted hop — a client replaying its own handoff (curl) can
+ * otherwise inject it — and the value must be the one the audit row records
+ * (`getClientIp`, the same TRUSTED_PROXY_COUNT rule).
+ */
+describe("trusted client IP on session creation (review #35 / #190)", () => {
+  /** What Better Auth's own resolver will record, given the headers the route passes. */
+  function betterAuthIp(headers: Headers): string | null {
+    return getIp(headers, {
+      advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
+    } as BetterAuthOptions);
+  }
+
+  it("overwrites a client-injected x-drk-client-ip with the trusted hop; session IP === audit IP", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    const request = postRequest("abc", {
+      [CLIENT_IP_HEADER]: "6.6.6.6",
+      "x-forwarded-for": "6.6.6.6, 203.0.113.9",
+    });
+    expect((await POST(request)).status).toBe(303);
+
+    const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
+    // The attacker's value never reaches Better Auth; the edge-observed hop does.
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    expect(betterAuthIp(passed)).toBe("203.0.113.9");
+    // The route's own request object is not mutated (audit reads it later).
+    expect(request.headers.get(CLIENT_IP_HEADER)).toBe("6.6.6.6");
+
+    // The success audit row derives its ip from the SAME request with
+    // `getClientIp` — the two must agree (the #190 divergence).
+    const success = auditMock.mock.calls.find(
+      (c) => (c[0] as { eventType: string }).eventType === "sso.consume.success",
+    )!;
+    const auditRequest = (success[0] as { request: NextRequest }).request;
+    expect(getClientIp(auditRequest.headers)).toBe(passed.get(CLIENT_IP_HEADER));
+  });
+
+  it("an honest single-hop XFF (Vercel edge) still yields a real session IP", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    expect((await POST(postRequest("abc", { "x-forwarded-for": "203.0.113.9" }))).status).toBe(303);
+    const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    expect(betterAuthIp(passed)).toBe("203.0.113.9");
+  });
+
+  it("honors TRUSTED_PROXY_COUNT for a CDN + LB chain, like the audit row", async () => {
+    vi.stubEnv("TRUSTED_PROXY_COUNT", "2");
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    const request = postRequest("abc", { "x-forwarded-for": "spoof, 203.0.113.9, 10.0.0.2" });
+    expect((await POST(request)).status).toBe(303);
+    const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    expect(getClientIp(request.headers)).toBe("203.0.113.9");
+  });
+
+  it("strips an injected header when nothing trustworthy is present (fail closed, never the client's value)", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    expect((await POST(postRequest("abc", { [CLIENT_IP_HEADER]: "6.6.6.6" }))).status).toBe(303);
+    const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
+    expect(passed.has(CLIENT_IP_HEADER)).toBe(false);
+    expect(betterAuthIp(passed)).not.toBe("6.6.6.6");
+  });
+
+  it("keeps the cookies / user-agent Better Auth needs on the forwarded copy", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    await POST(
+      postRequest("abc", { cookie: "a=b", "user-agent": "ua", "x-real-ip": "203.0.113.9" }),
+    );
+    const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
+    expect(passed.get("cookie")).toBe("a=b");
+    expect(passed.get("user-agent")).toBe("ua");
+    expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
   });
 });
 

@@ -296,6 +296,50 @@ describe("#218 — same-organization invariant for group roles and user roles", 
       .execute();
   });
 
+  it("app_group_roles: an insert WITHOUT organization_id (the pre-0004 build's shape) succeeds and lands in the group's org", async () => {
+    // Deployment §2 promises migrate-first + rollback safety: the build that
+    // is live while 0004 runs inserts `{group_id, role_id}` only. NOT NULL
+    // without the bind trigger turned that into a 23502 and a 500 on
+    // POST /api/administrator/groups/[id]/roles for the whole window.
+    const orgA = await newOrg("a");
+    const roleA = await newRole(orgA, "a-role");
+    const group = await db
+      .insertInto("app_groups")
+      .values({ organization_id: orgA, key: `${PREFIX}grp`, name: "g" })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    await sql`insert into app_group_roles (group_id, role_id) values (${group.id}, ${roleA})`.execute(
+      db,
+    );
+    const row = await db
+      .selectFrom("app_group_roles")
+      .select("organization_id")
+      .where("group_id", "=", group.id)
+      .where("role_id", "=", roleA)
+      .executeTakeFirstOrThrow();
+    expect(row.organization_id).toBe(orgA);
+    // The trigger fills a gap; it never launders a cross-org role — the
+    // derived org still has to satisfy the role-side composite FK.
+    const orgB = await newOrg("b");
+    const roleB = await newRole(orgB, "b-role");
+    const err = await expectPgError(
+      sql`insert into app_group_roles (group_id, role_id) values (${group.id}, ${roleB})`.execute(
+        db,
+      ),
+    );
+    expect(err.code).toBe("23503");
+    expect(err.constraint).toBe("app_group_roles_role_org_fkey");
+    // An unknown group is reported as the group FK (the trigger raises it —
+    // NOT NULL runs before FK checks and would otherwise mask it as a 23502).
+    const ghost = await expectPgError(
+      sql`insert into app_group_roles (group_id, role_id) values (gen_random_uuid(), ${roleA})`.execute(
+        db,
+      ),
+    );
+    expect(ghost.code).toBe("23503");
+    expect(ghost.constraint).toBe("app_group_roles_group_id_fkey");
+  });
+
   it("app_group_roles: a GLOBAL role cannot be bundled (ADR-0002)", async () => {
     const orgA = await newOrg("a");
     const globalRole = await newRole(null, "global");
@@ -382,6 +426,36 @@ describe("#83 — audit table: append-only trigger, SECURITY DEFINER prune, runt
     expect(err.message).toMatch(
       /append-only: DELETE is not permitted \(session_user=\w+, current_user=\w+\)/,
     );
+  });
+
+  it("the OWNER role with the marker on can still delete — the residual gap the runtime-role switch closes", async () => {
+    // The honest negative (review #83): the trigger's owner half is what a
+    // runtime-role session can never satisfy, but the test suite — like the
+    // application until Deployment §8 is followed — connects as the owner.
+    // Documented in admin-manager §12.1; do not "fix" this by weakening the
+    // owner path, the fix is the role switch.
+    const id = await oldAuditRow(101);
+    const client = await pgPool.connect();
+    try {
+      await client.query("begin");
+      const who = await client.query<{ owner: string; me: string }>(
+        `select pg_get_userbyid(c.relowner) as owner, current_user as me
+           from pg_class c
+          where c.oid = 'app_audit_events'::regclass`,
+      );
+      expect(who.rows[0]!.me).toBe(who.rows[0]!.owner);
+      await client.query(`set local app.audit_retention = 'on'`);
+      const del = await client.query(`delete from app_audit_events where id = $1`, [id]);
+      expect(del.rowCount).toBe(1);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+    // Rolled back: the row is still there, and without the marker it stays.
+    const err = await expectPgError(
+      db.deleteFrom("app_audit_events").where("id", "=", id).execute(),
+    );
+    expect(err.code).toBe("23514");
   });
 
   it("pruneAuditEvents deletes ONLY aged rows, through app_audit_events_prune(), in batches", async () => {

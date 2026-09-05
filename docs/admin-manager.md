@@ -705,7 +705,12 @@ What the trigger does and does not guarantee (review #83):
   trigger lets a DELETE through only when the **effective** role is the table
   owner _and_ the transaction-local marker that function sets is on — the
   marker alone (the pre-0004 escape hatch) no longer suffices, so setting
-  `app.audit_retention` from an application session does nothing.
+  `app.audit_retention` from a session connected as the **runtime role** does
+  nothing. It still works from a session connected as the **owner** — which is
+  what the application does by default, until the operator switches
+  `DATABASE_URL` to the runtime role (next bullet); that residual gap is
+  documented, tested (`tests/db/schema-integrity.db.test.ts`), and closed only
+  by the role switch.
 - **The privilege boundary is the runtime role, not the trigger.** When the
   application connects as the least-privilege `<DB_SCHEMA>_runtime` role
   ([Deployment §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended))

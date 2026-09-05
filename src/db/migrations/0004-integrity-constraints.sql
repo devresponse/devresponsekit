@@ -23,16 +23,24 @@
 --   #218 The same-organization invariant for app_group_roles / app_user_roles
 --        moves into the schema: `unique (id, organization_id)` on groups and
 --        roles, a backfilled `organization_id` on app_group_roles with
---        composite FKs, and on app_user_roles a trigger-maintained
---        `role_organization_id` with a composite FK for org-scoped roles
---        (global roles, organization_id IS NULL, are exempt from the FK by
---        MATCH SIMPLE and checked by the trigger instead).
+--        composite FKs (derived by a trigger from the group when a writer
+--        omits it, so the pre-0004 build keeps working — see 4b), and on
+--        app_user_roles a trigger-maintained `role_organization_id` with a
+--        composite FK for org-scoped roles (global roles, organization_id IS
+--        NULL, are exempt from the FK by MATCH SIMPLE and checked by the
+--        trigger instead).
 --   #83  Audit-table role split: a NOLOGIN runtime role (`<schema>_runtime`)
 --        with INSERT/SELECT only on app_audit_events, retention as a
 --        SECURITY DEFINER function owned by the migration/owner role, and an
 --        append-only trigger that permits a DELETE only when the effective
---        role is the table OWNER inside that function — no longer a bare GUC
---        any session could SET.
+--        role is the table OWNER *and* the transaction-local marker is on.
+--        The marker alone (a bare GUC any session could SET) no longer
+--        suffices, and a session connected as the runtime role can never
+--        satisfy the owner half. A session connected AS THE OWNER — which is
+--        what the application does until the operator switches DATABASE_URL
+--        to the runtime role (Deployment §8) — can still set the marker and
+--        delete: the guarantee is against the runtime credential, not the
+--        schema owner (see 5c).
 --
 -- Rollout shape: every CHECK is added NOT VALID and then VALIDATEd (an
 -- online pattern — VALIDATE takes only SHARE UPDATE EXCLUSIVE), and the
@@ -268,12 +276,52 @@ end $$;
 --     satisfy `(role_id, organization_id)` against app_roles(id, organization_id)
 --     because organization_id is NOT NULL here — ADR-0002 says groups bundle
 --     org roles only. Cascades mirror the original single-column FKs.
+--
+--     FORWARD-COMPAT (Deployment §2 promises migrate-first + rollback safety:
+--     the build that is live while this file runs, and any build rolled back
+--     to afterwards, inserts `{group_id, role_id}` only). A NOT NULL column
+--     with no default would make that insert fail with 23502, so the column
+--     is DERIVED in the database: the BEFORE trigger below fills
+--     organization_id from the group whenever a writer leaves it NULL —
+--     the mirror of the app_user_roles bind trigger in 4c. A writer that
+--     does supply it (the post-0004 route) is left alone, and a wrong value
+--     still fails on the composite FKs; the trigger fills a gap, it never
+--     overrides an explicit claim. NOT NULL is then safe to add.
 alter table app_group_roles add column if not exists organization_id uuid;
 update app_group_roles gr
    set organization_id = g.organization_id
   from app_groups g
  where g.id = gr.group_id
    and gr.organization_id is null;
+
+create or replace function app_group_roles_bind_org()
+  returns trigger
+  language plpgsql
+as $$
+begin
+  if new.organization_id is null then
+    select g.organization_id into new.organization_id
+      from app_groups g
+     where g.id = new.group_id;
+    if not found then
+      -- NOT NULL is checked right after BEFORE triggers, before any FK, so
+      -- an unknown group would otherwise surface as a misleading 23502 on
+      -- organization_id. Report the real cause with the FK's own identity.
+      raise exception 'app_group_roles: group % does not exist', new.group_id
+        using errcode = 'foreign_key_violation',
+              constraint = 'app_group_roles_group_id_fkey';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_app_group_roles_bind_org on app_group_roles;
+create trigger trg_app_group_roles_bind_org
+  before insert or update of group_id, organization_id on app_group_roles
+  for each row
+  execute function app_group_roles_bind_org();
+
 alter table app_group_roles alter column organization_id set not null;
 do $$ begin
   if not exists (select 1 from pg_constraint where conrelid = 'app_group_roles'::regclass and conname = 'app_group_roles_group_org_fkey') then

@@ -169,12 +169,15 @@ export interface AppGroupsTable {
  * the role — composite FKs to `app_groups (id, organization_id)` and
  * `app_roles (id, organization_id)` (migration 0004, review #218) make a
  * cross-org or global role unrepresentable; the route layer's same-org check
- * is now the first line of defence, not the only one.
+ * is now the first line of defence, not the only one. It is `Generated`
+ * because a BEFORE trigger derives it from the group when an insert omits it
+ * (the pre-0004 build's shape — Deployment §2 forward-compat); the route
+ * still writes it explicitly so a wrong value fails on the FK, not silently.
  */
 export interface AppGroupRolesTable {
   group_id: string;
   role_id: string;
-  organization_id: string;
+  organization_id: Generated<string>;
 }
 
 /** Users that belong to a group. */

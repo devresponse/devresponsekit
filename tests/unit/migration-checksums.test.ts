@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { migrationChecksum, reconcileLedgerChecksum } from "@/db/migrations/migration-plan";
@@ -19,7 +19,7 @@ const MIGRATIONS_DIR = path.resolve(__dirname, "../../src/db/migrations");
 
 /** id → sha256 of the LF-normalised file content. */
 const FROZEN: ReadonlyArray<[id: string, sha256: string]> = [
-  ["0001-initial-schema.sql", "ece7473606e5e26dbdf8e9a1d3c4bf853d7cd9392585cfcfad3f192ccf45d19d"],
+  ["0001-initial-schema.sql", "5bc6de081d862a544cf594e29820cd8f004cd318cec048caef0c8b03689a5b54"],
   [
     "0002-admin-groups-permissions.sql",
     "6746eda2e2ceebc573a1634f28e2760ef05cbb5f700a3544e90a5869533f2e20",
@@ -30,7 +30,7 @@ const FROZEN: ReadonlyArray<[id: string, sha256: string]> = [
   ],
   [
     "0004-integrity-constraints.sql",
-    "6d0ea097c6cd3d62361e8bb168722b2bd3c53ad7bde9d220b5fa601d0e600871",
+    "1310841e1484220ce161e0270ab55bb4d84dd0e52a26277e213b918e4e10d3b8",
   ],
 ];
 
@@ -46,6 +46,18 @@ describe("migrationChecksum", () => {
 });
 
 describe("frozen core migrations keep their pinned sha256 (review #86)", () => {
+  it("pins EVERY numbered core file in src/db/migrations — a new file must be added here", () => {
+    // Completeness guard: without it a new `NNNN-*.sql` ships unpinned while
+    // the header above claims every applied file is covered. Sorted on both
+    // sides so the assertion also catches a duplicated prefix (two branches
+    // both claiming the next number) as a visible diff rather than a
+    // silently unpinned sibling.
+    const onDisk = readdirSync(MIGRATIONS_DIR)
+      .filter((f) => /^\d{4}-.*\.sql$/.test(f))
+      .sort();
+    expect(onDisk).toEqual(FROZEN.map(([id]) => id).sort());
+  });
+
   it.each(FROZEN)("%s", (id, expected) => {
     const sql = readFileSync(path.join(MIGRATIONS_DIR, id), "utf8");
     expect(

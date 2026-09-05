@@ -18,11 +18,11 @@
 # Debian "slim" (not Alpine) so native modules like `sharp` (Next image
 # optimization) use prebuilt glibc binaries. Digest-pinned for reproducibility
 # + supply-chain integrity; bump the tag AND digest together (see docs/docker.md
-# "Hardening"). Digest is the multi-arch index for `node:22-bookworm-slim`
+# "Hardening"). Digest is the multi-arch index for `node:24-bookworm-slim`
 # (22.23.2, 2026-08-25). Dependabot's `docker` ecosystem (.github/dependabot.yml)
 # proposes digest bumps; keep BOTH stages on the same digest.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS builder
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS builder
 
 ENV PNPM_HOME="/pnpm" \
     PATH="/pnpm:$PATH" \
@@ -50,7 +50,7 @@ RUN pnpm build
 # Stage 2 — runner: copy only the standalone server + static assets and
 # run as an unprivileged user.
 # ─────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runner
+FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runner
 
 ENV NODE_ENV="production" \
     NEXT_TELEMETRY_DISABLED="1" \
@@ -93,7 +93,7 @@ EXPOSE 3000
 # runs `select 1` and returns 503 when the DB is unreachable, so this reports
 # the container healthy only when it can actually serve — not the instant the
 # process starts (Compose `service_healthy`, Swarm, and `docker run` all read
-# this). Node 22 ships a global `fetch`; Docker's `--timeout` bounds the probe,
+# this). Node 24 ships a global `fetch`; Docker's `--timeout` bounds the probe,
 # and `--start-period` keeps boot-time failures from counting.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

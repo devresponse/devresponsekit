@@ -37,7 +37,7 @@ The point of this shape is the **migrate-first contract**: the new build goes li
 
 CI runs **only `db:app:migrate`** on each deploy. The Better Auth tables (`user`, `session`, `account`, `verification`) and the baseline seed are **not** created by CI — you run them **once** against a fresh database. This is the most common first-deploy mistake.
 
-Run it from your own machine (laptop or a one-off runner) with the repo checked out, **Node 22+ / pnpm 10+**, and the Neon **direct (unpooled)** connection string — it connects over the network; it is not SQL you paste into Neon's console.
+Run it from your own machine (laptop or a one-off runner) with the repo checked out, **Node 24 / pnpm 10+**, and the Neon **direct (unpooled)** connection string — it connects over the network; it is not SQL you paste into Neon's console.
 
 ```bash
 pnpm install --frozen-lockfile

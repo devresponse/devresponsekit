@@ -11,7 +11,7 @@
 # The npm updates burn down the dependency backlog so we can eventually lower
 # the audit gate from `high` to `moderate` (see F4 / package.json auditConfig).
 #
-# The `docker` ecosystem tracks the digest-pinned `node:22-bookworm-slim` base
+# The `docker` ecosystem tracks the digest-pinned `node:24-bookworm-slim` base
 # image in the Dockerfile (both stages share one digest), so base-image CVE
 # fixes arrive as reviewable PRs instead of accumulating until the weekly Trivy
 # scan (docker-scan.yml, a required check) goes red.

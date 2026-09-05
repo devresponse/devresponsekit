@@ -140,15 +140,46 @@ describe("dependency governance: lockfile floors from the 2026-09 sweep", () => 
   });
 });
 
+/**
+ * The Node major every runtime must agree on. `.nvmrc` is the source of
+ * truth; CI, the Docker image and `engines.node` (which is what Vercel reads
+ * to pick production's runtime) are asserted against it. #397 shipped a bug
+ * that fails only inside the Next runtime on Node >= 24 while CI ran 22 —
+ * every check stayed green and production auth went down (#400/#401).
+ */
+const nodeMajor = read(".nvmrc").trim();
+
+describe("dependency governance: Node runtime major", () => {
+  it(".nvmrc pins a bare major", () => {
+    expect(nodeMajor).toMatch(/^\d+$/);
+  });
+
+  it("every workflow's node-version equals .nvmrc", () => {
+    for (const wf of ["ci.yml", "deploy.yml", "mutation.yml"]) {
+      const versions = [...read(`.github/workflows/${wf}`).matchAll(/node-version:\s*(\S+)/g)].map(
+        (m) => m[1],
+      );
+      expect(versions.length, wf).toBeGreaterThan(0);
+      expect(new Set(versions), wf).toEqual(new Set([nodeMajor]));
+    }
+  });
+
+  it("engines.node is >= the same major (Vercel resolves this to production's runtime)", () => {
+    const engines = (JSON.parse(read("package.json")) as { engines?: { node?: string } }).engines;
+    expect(engines?.node).toBe(`>=${nodeMajor}`);
+  });
+});
+
 describe("dependency governance: production image", () => {
   const fromLines = dockerfile.split("\n").filter((line) => line.startsWith("FROM "));
 
-  it("both stages build from the same digest-pinned node:22-bookworm-slim image", () => {
+  it(`both stages build from the same digest-pinned node:${nodeMajor}-bookworm-slim image`, () => {
     expect(fromLines).toHaveLength(2);
+    const re = new RegExp(
+      `^FROM node:${nodeMajor}-bookworm-slim@(sha256:[0-9a-f]{64}) AS (builder|runner)$`,
+    );
     const digests = fromLines.map((line) => {
-      const m = line.match(
-        /^FROM node:22-bookworm-slim@(sha256:[0-9a-f]{64}) AS (builder|runner)$/,
-      );
+      const m = line.match(re);
       expect(m, line).not.toBeNull();
       return m![1];
     });

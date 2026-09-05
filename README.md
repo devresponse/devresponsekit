@@ -32,7 +32,7 @@ handoff.
 
 ## Quick start
 
-Prerequisites: Node 22+, pnpm 10, Docker (for local PostgreSQL).
+Prerequisites: Node 24 (what CI, the Docker image and Vercel run), pnpm 10, Docker (for local PostgreSQL).
 
 ```bash
 pnpm install

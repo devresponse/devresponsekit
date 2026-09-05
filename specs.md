@@ -3801,7 +3801,7 @@ documented in [docs/api.md](docs/api.md) and
 A credential carries **scopes**, but its effective authority is the
 **intersection** of its scopes with its owner's permissions
 (`src/lib/api-auth/scopes.ts`) — a credential can never exceed its owner.
-Scope strings are the 30 `admin.*` catalog keys plus four account scopes
+Scope strings are the `admin.*` catalog keys (`ADMIN_PERMISSION_CATALOG`) plus four account scopes
 (`account.read`, `account.profile.write`, `account.preferences.write`,
 `account.apikeys.manage`).
 

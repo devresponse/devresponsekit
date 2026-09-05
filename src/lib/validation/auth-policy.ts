@@ -29,14 +29,6 @@ export const EMAIL_DOMAIN_RE =
   /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 
 /**
- * Wire contract for PATCH: a COMPLETE policy (no partial update — an org row
- * either exists in full or the org inherits the platform default; see 0007).
- * `null` array semantics: `allowedAuthMethods` null = every enabled method;
- * `autoApproveEmailDomains` null = no domain auto-approval. An EMPTY
- * `allowedAuthMethods` is legal and means "no new sign-ups auto-place here"
- * (every method parks in pending_approval).
- */
-/**
  * Refinement predicate: is the (verification, domains) combination allowed?
  * `true` when verification is on OR there are no auto-approve domains.
  *
@@ -55,6 +47,14 @@ function isDomainVerificationComboValid(input: {
   return input.requireEmailVerification || !input.autoApproveEmailDomains?.length;
 }
 
+/**
+ * Wire contract for PATCH: a COMPLETE policy (no partial update — an org row
+ * either exists in full or the org inherits the platform default; see 0007).
+ * `null` array semantics: `allowedAuthMethods` null = every enabled method;
+ * `autoApproveEmailDomains` null = no domain auto-approval. An EMPTY
+ * `allowedAuthMethods` is legal and means "no new sign-ups auto-place here"
+ * (every method parks in pending_approval).
+ */
 export const authPolicySettingsSchema = z
   .object({
     requireEmailVerification: z.boolean(),

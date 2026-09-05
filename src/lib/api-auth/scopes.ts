@@ -2,9 +2,9 @@
  * API credential scope vocabulary and matching (design
  * docs/design-api-keys-and-tokens.md §7).
  *
- * Scopes ARE the existing permission vocabulary — the 26-key admin
- * catalog plus a small set of user-level `account.*` scopes for the
- * self-service surface. Reusing the permission keys means a credential's
+ * Scopes ARE the existing permission vocabulary — the admin permission
+ * catalog (`ADMIN_PERMISSION_CATALOG`, every `admin.*` key) plus a small
+ * set of user-level `account.*` scopes for the self-service surface. Reusing the permission keys means a credential's
  * authority is expressed in the same terms `requireAdminPermission`
  * already enforces, so a credential can never invent authority that the
  * permission model doesn't understand.

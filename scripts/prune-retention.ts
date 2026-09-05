@@ -10,9 +10,13 @@ import { pgPool } from "@/db/database";
  *
  *   pnpm db:prune        # one pass
  *
- * Windows are AUDIT_RETENTION_DAYS (default 365) and OUTBOX_RETENTION_DAYS
- * (default 90); set either to 0 to disable that table's time-based prune.
- * Exits non-zero only on an unexpected error.
+ * Windows are AUDIT_RETENTION_DAYS (default 365), OUTBOX_RETENTION_DAYS
+ * (default 90, terminal outbox rows) and OUTBOX_MAX_PENDING_DAYS (default 7:
+ * `pending` rows older than this are marked `failed` — reported as
+ * `staleOutboxFailed` — so orphans queued for a since-removed provider become
+ * prunable); set any of them to 0 to disable that prune / sweep. Defaults and
+ * semantics mirror `src/lib/retention.server.ts`. Exits non-zero only on an
+ * unexpected error.
  */
 async function main(): Promise<void> {
   const result = await pruneAll();

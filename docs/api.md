@@ -204,7 +204,7 @@ This is the cookie-session console surface (users, roles, permissions, groups, o
 | Groups | `GET/POST /groups`; `GET/PATCH/DELETE …/[id]`; `…/[id]/roles`, `/members` | `admin.groups.*`, `admin.roles.assign` |
 | Organizations | `GET/POST /organizations`; `GET/PATCH/DELETE …/[id]`; `…/[id]/members`, `/provider-bindings`, `/auth-settings`, `/invitations`, `/invitations/[invitationId]`, `/invitations/[invitationId]/resend` | `admin.orgs.*` |
 | Sign-up policy (platform) | `GET/PATCH /auth-settings/defaults` | `admin.orgs.*` + **superadmin** |
-| API keys | `GET/POST /api-keys`; `GET/PATCH/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
+| API keys | `GET/POST /api-keys`; `GET/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
 | Email | `GET /email/outbox` (metadata), `…/outbox/[id]` (redacted bodies); `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
 | MCP agents | `GET /mcp-agents`; `POST …/[id]/approve`; `PATCH`/`DELETE …/[id]` | `admin.clients.read` / `admin.clients.manage` |
 | Audit | `GET /audit` | `admin.audit.read` |

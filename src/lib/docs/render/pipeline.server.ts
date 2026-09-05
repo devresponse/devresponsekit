@@ -19,8 +19,10 @@ import type { DocSpace } from "../source/types";
  * Shiki highlighting, link/image rewriting) run on the already-safe
  * tree. Because the highlighter runs after sanitize, the only inline
  * styles in the output come from the trusted theme — never from author
- * input. No author JavaScript is ever executed (`allowDangerousHtml:
- * false` keeps raw HTML out; MDX expressions are dropped, not run).
+ * input. No author JavaScript is ever executed: `allowDangerousHtml:
+ * false` drops raw HTML/JSX tags, and MDX expressions are never evaluated —
+ * there is no MDX parser in the chain, so `{expr}` and `import` lines
+ * render as literal text (review #171).
  */
 
 export interface DocHeading {

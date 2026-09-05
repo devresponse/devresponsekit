@@ -7,7 +7,8 @@ import { spawnSync } from "node:child_process";
  *
  *   1. pnpm db:auth:migrate  — Better Auth tables (user/session/account/verification)
  *   2. pnpm db:app:migrate   — extensions (pgcrypto, pg_trgm) + app schema
- *                              (0001 … 0010), ledgered in `app_schema_migrations`
+ *                              (0001 baseline + forward migrations + locale
+ *                              email templates), ledgered in `app_schema_migrations`
  *   3. pnpm db:seed          — default org, the `admin.*` permission catalog,
  *                              baseline roles, and the first admin (from
  *                              SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD)
@@ -28,7 +29,10 @@ import { spawnSync } from "node:child_process";
 
 const STEPS: ReadonlyArray<{ label: string; command: string }> = [
   { label: "Better Auth tables", command: "pnpm db:auth:migrate" },
-  { label: "application schema (extensions + 0001 … 0010)", command: "pnpm db:app:migrate" },
+  {
+    label: "application schema (extensions + 0001 baseline + forward migrations)",
+    command: "pnpm db:app:migrate",
+  },
   { label: "baseline seed (org, permissions, roles, admin)", command: "pnpm db:seed" },
 ];
 

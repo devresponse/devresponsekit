@@ -17,7 +17,11 @@ import { z } from "zod";
  *   - The caller MUST have verified the handoff token AND consumed its
  *     nonce atomically BEFORE calling this. This endpoint only re-checks
  *     user-level state (exists, not banned) — it cannot see the token.
- *   - Banned users are rejected exactly like Better Auth's own sign-in.
+ *   - Any truthy `banned` flag rejects (403), even when a temporary ban's
+ *     `banExpires` has already elapsed — unlike Better Auth's own sign-in
+ *     and `isBetterAuthUserBanned` (ban-status.server.ts), which treat an
+ *     elapsed expiry as not-banned. Such a user must sign in normally so
+ *     Better Auth's hook clears the stale flag (review #126).
  *   - The session cookie is signed and set through Better Auth's own
  *     `setSessionCookie`, so attributes (httpOnly, secure, sameSite,
  *     maxAge) stay consistent with every other sign-in path.

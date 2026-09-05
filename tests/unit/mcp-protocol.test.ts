@@ -53,3 +53,25 @@ describe("MCP protocol", () => {
     expect(isNotification({ method: "initialize", id: 1 })).toBe(false);
   });
 });
+
+/**
+ * The `initialize` instructions name a tool for the client to call first.
+ * Tools are named by OpenAPI operationId and `findTool` is an exact match,
+ * so a stale name (the pre-Phase-3 `whoami`) silently sends every agent to
+ * `Unknown tool` (review #127). Pin every backticked name against the real
+ * derived tool set.
+ */
+describe("MCP initialize instructions", () => {
+  it("only name tools that exist in the generated tool surface", async () => {
+    const { buildOpenApiDocument } = await import("@/lib/api-auth/openapi");
+    const { deriveMcpTools } = await import("@/lib/mcp/openapi-tools");
+    const toolNames = new Set(
+      deriveMcpTools(buildOpenApiDocument("https://x.example")).map((t) => t.name),
+    );
+    const named = [...buildInitializeResult("2025-06-18").instructions.matchAll(/`([^`]+)`/g)].map(
+      (m) => m[1] ?? "",
+    );
+    expect(named.length).toBeGreaterThan(0);
+    for (const name of named) expect(toolNames.has(name), `tool ${name} exists`).toBe(true);
+  });
+});

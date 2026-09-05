@@ -133,6 +133,9 @@ export function buildInitializeResult(requestedVersion: unknown): InitializeResu
     capabilities: { tools: {} },
     serverInfo: MCP_SERVER_INFO,
     instructions:
-      "DevResponseKit machine API over MCP. Call `whoami` to see the calling credential's effective scopes before invoking scoped tools.",
+      // Tools are named by OpenAPI operationId and `findTool` is an exact
+      // match, so the tool named here MUST exist (review #127; pinned by
+      // tests/unit/mcp-protocol.test.ts).
+      "DevResponseKit machine API over MCP. Call `getMe` to see the calling credential's effective scopes before invoking scoped tools.",
   };
 }

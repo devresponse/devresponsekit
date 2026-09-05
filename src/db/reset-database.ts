@@ -56,7 +56,7 @@ function parseArgs(argv: string[]): { yes: boolean; force: boolean; reload: bool
 function runReloadSteps(): void {
   const steps: Array<{ label: string; command: string }> = [
     { label: "Better Auth migrations", command: "pnpm db:auth:migrate" },
-    { label: "application schema (0001-initial-schema.sql)", command: "pnpm db:app:migrate" },
+    { label: "application schema (core + locale migrations)", command: "pnpm db:app:migrate" },
     { label: "local seed", command: "pnpm db:seed" },
   ];
   for (const { label, command } of steps) {

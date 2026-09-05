@@ -27,7 +27,8 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
  *   - The limiter is a soft floor: a process restart resets all
  *     buckets, and the budget is NOT shared across processes. The
  *     supported 1.0 deployment topology is therefore a SINGLE application
- *     instance (see docs/deployment.md "Supported topology for 1.0");
+ *     instance (see docs/deployment.md §5 "Operations & gotchas" —
+ *     "Single application instance (1.0)");
  *     multi-instance is best-effort until a shared backend lands post-1.0.
  *   - Deny responses include a `Retry-After` header (seconds) and a
  *     standard error envelope `{ error: "rate_limited", retryAfter }`.

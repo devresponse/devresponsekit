@@ -266,8 +266,9 @@ describe("registerMcpAgent (atomic quota, review #51)", () => {
       // Always drain org A's registration so a failed assertion above cannot
       // leak its rows past `afterEach` (a leaked membership would block the
       // org delete in `afterAll` and poison the next run on a shared dev DB).
-      const a = await orgA;
-      if (a.ok) createdUserIds.push(a.agent.appUserId);
+      // `orgA` is unassigned if `begin` / the lock acquisition threw.
+      const a = orgA ? await orgA : undefined;
+      if (a?.ok) createdUserIds.push(a.agent.appUserId);
     }
 
     // Releasing the lock lets org A through; each org holds exactly one slot.

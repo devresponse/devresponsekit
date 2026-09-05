@@ -57,8 +57,12 @@ A PR must pass all of these; run them locally before pushing:
 
 CI additionally runs **CodeQL** and **gitleaks** secret scanning (a required
 check; rules, allowlist policy, and the local command are in
-[SECURITY.md → Secret scanning](SECURITY.md#secret-scanning)). `test:all`
-runs typecheck + lint + format check + coverage + e2e + a11y locally.
+[SECURITY.md → Secret scanning](SECURITY.md#secret-scanning)). The dependency
+audit is its own workflow (`dependency-audit.yml`) so it can also run on a
+weekly schedule; a failed scheduled run opens a tracking issue. `test:all`
+runs typecheck + lint + format check + coverage + e2e + a11y locally. The
+full workflow → required-check map is in
+[docs/testing.md → CI workflows](docs/testing.md#9-ci-workflows-and-required-checks).
 
 ## Regenerating the help walkthrough screenshots
 

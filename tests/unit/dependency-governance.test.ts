@@ -155,7 +155,7 @@ describe("dependency governance: Node runtime major", () => {
   });
 
   it("every workflow's node-version equals .nvmrc", () => {
-    for (const wf of ["ci.yml", "deploy.yml", "mutation.yml"]) {
+    for (const wf of ["ci.yml", "deploy.yml", "mutation.yml", "dependency-audit.yml"]) {
       const versions = [...read(`.github/workflows/${wf}`).matchAll(/node-version:\s*(\S+)/g)].map(
         (m) => m[1],
       );
@@ -234,5 +234,76 @@ describe("dependency governance: production image", () => {
   it("Dependabot tracks the base-image digest via the docker ecosystem", () => {
     const dependabot = read(".github/dependabot.yml");
     expect(dependabot).toMatch(/- package-ecosystem: docker\n\s+directory: \/\n/);
+  });
+});
+
+/**
+ * The dependency audit is its own workflow (review #227). Inside ci.yml it
+ * only ran when a commit landed, so an idle `main` was never re-audited and
+ * went red silently (last main run 2026-07-13; 28 high advisories found weeks
+ * later). These pin the split: the job name branch protection requires, the
+ * pull_request trigger that makes it report, the weekly cron, the unchanged
+ * gate command, SHA-pinned actions, and a notify job that can only touch
+ * issues and only after a scheduled failure.
+ */
+describe("dependency governance: the audit workflow runs on a schedule", () => {
+  const audit = read(".github/workflows/dependency-audit.yml");
+  const ci = read(".github/workflows/ci.yml");
+  const triggers = audit.slice(audit.indexOf("\non:\n"), audit.indexOf("\nconcurrency:\n"));
+  const auditJob = audit.slice(audit.indexOf("\njobs:\n"), audit.indexOf("\n  notify:\n"));
+  const notifyJob = audit.slice(audit.indexOf("\n  notify:\n"));
+
+  it("keeps the required-check context `Dependency audit` and moves it out of ci.yml", () => {
+    // Branch protection requires the job NAME; the check stops reporting if
+    // either the name or the pull_request trigger goes.
+    expect(auditJob).toContain("\n  audit:\n    name: Dependency audit\n");
+    expect(ci).not.toContain("name: Dependency audit");
+    expect(ci).not.toContain("pnpm audit");
+  });
+
+  it("runs on pull_request, push to main, a weekly cron, and manual dispatch", () => {
+    expect(triggers).toMatch(/^  pull_request:\s*$/m);
+    expect(triggers).toMatch(/^  push:\n    branches: \[main\]$/m);
+    expect(triggers).toMatch(/^  workflow_dispatch:\s*$/m);
+    const cron = triggers.match(/- cron: "([^"]+)"/)?.[1];
+    expect(cron, "a schedule trigger").toBeDefined();
+    // Weekly (day-of-week fixed, day-of-month/month wildcards) and NOT the
+    // same minute as codeql.yml / docker-scan.yml, which also run Mondays.
+    const [minute, hour, dom, month, dow] = cron!.split(" ");
+    expect(dom).toBe("*");
+    expect(month).toBe("*");
+    expect(dow).toMatch(/^[0-6]$/);
+    expect(`${hour}:${minute}`).not.toBe("4:27");
+    expect(`${hour}:${minute}`).not.toBe("6:0");
+  });
+
+  it("gates with the same command and allowlist as before the split", () => {
+    expect(auditJob).toContain("run: pnpm audit --audit-level high");
+    expect(auditJob).toContain("run: pnpm install --frozen-lockfile");
+    expect(auditJob).toContain("pnpm.auditConfig.ignoreGhsas");
+  });
+
+  it("pins every action by commit SHA with a version comment", () => {
+    const uses = [...audit.matchAll(/uses: (\S+)(.*)$/gm)];
+    expect(uses.length).toBeGreaterThanOrEqual(4);
+    for (const [line, ref, rest] of uses) {
+      expect(ref, line).toMatch(/@[0-9a-f]{40}$/);
+      expect(rest, line).toMatch(/# v\d+\.\d+\.\d+$/);
+    }
+  });
+
+  it("notifies only on a failed SCHEDULED run, with issues: write scoped to that job", () => {
+    expect(audit).toMatch(/^permissions:\n  contents: read\n/m);
+    expect(notifyJob).toContain("needs: audit");
+    expect(notifyJob).toContain("if: failure() && github.event_name == 'schedule'");
+    expect(notifyJob).toMatch(/permissions:\n      issues: write\n    steps:/);
+    expect(auditJob).not.toContain("issues: write");
+    // The issue title is the dedupe key — documented in SECURITY.md and
+    // docs/testing.md, so a rename here must update both.
+    expect(notifyJob).toContain('const title = "Dependency audit failing on main";');
+    expect(read("SECURITY.md")).toContain('"Dependency audit failing on main"');
+    expect(read("docs/testing.md")).toContain('"Dependency audit failing on main"');
+    expect(notifyJob).toContain("github.rest.issues.createComment");
+    expect(notifyJob).toContain("github.rest.issues.create(");
   });
 });

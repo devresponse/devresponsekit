@@ -26,6 +26,11 @@ vi.mock("@/lib/observability/logger.server", () => ({
   logServerError: (...a: unknown[]) => logMock(...a),
 }));
 
+const resolveOrgMock = vi.fn();
+vi.mock("@/lib/org-lookup.server", () => ({
+  resolveOrganizationByIdentifier: (...a: unknown[]) => resolveOrgMock(...a),
+}));
+
 interface Stubs {
   policyRows: () => unknown[];
   orgBySlug: () => unknown;
@@ -74,6 +79,8 @@ const DEFAULT_ROW = {
 
 beforeEach(() => {
   logMock.mockReset();
+  resolveOrgMock.mockReset();
+  resolveOrgMock.mockResolvedValue(null);
   stubs = {
     policyRows: () => [DEFAULT_ROW],
     orgBySlug: () => Promise.resolve({ id: "org-default" }),
@@ -245,6 +252,91 @@ describe("resolveSignupPolicy", () => {
     expect(policy).toBe(FAIL_CLOSED_AUTH_POLICY);
     expect(logMock).toHaveBeenCalled();
   });
+
+  /**
+   * Review 2026-09-04 #2: the sign-up hint (`?org=`, `/sign-in/<org>`) must
+   * govern the verification decision with the SAME precedence provisioning
+   * gives it for placement — otherwise a lax default/domain-routed org waives
+   * verification for an account that lands in a strict hinted org.
+   */
+  describe("organization hint (review #2)", () => {
+    const STRICT_HINTED = {
+      ...DEFAULT_ROW,
+      organization_id: "org-hinted",
+      require_email_verification: true,
+      auto_approve_email_domains: ["acme.com"],
+    };
+
+    it("resolves the HINTED org's policy ahead of email-domain routing and the default org", async () => {
+      resolveOrgMock.mockResolvedValue({ id: "org-hinted", slug: "victim", name: "Victim" });
+      // Both the domain-routed org and the default org waive verification —
+      // the pre-fix inputs of the finding.
+      stubs.emailMapping = () =>
+        Promise.resolve({ organization_id: "org-acme", provider_organization_key: "acme.com" });
+      stubs.policyRows = () => [
+        { ...DEFAULT_ROW, require_email_verification: false },
+        { ...DEFAULT_ROW, organization_id: "org-acme", require_email_verification: false },
+        { ...DEFAULT_ROW, organization_id: "org-default", require_email_verification: false },
+        STRICT_HINTED,
+      ];
+
+      const policy = await resolveSignupPolicy(
+        { provider: "email", email: "ceo@acme.com", emailVerified: false },
+        { organizationHint: "victim" },
+      );
+
+      expect(resolveOrgMock).toHaveBeenCalledWith("victim");
+      expect(policy.source).toBe("organization");
+      expect(policy.requireEmailVerification).toBe(true);
+      expect(policy.autoApproveEmailDomains).toEqual(["acme.com"]);
+    });
+
+    it("a hinted org that waives verification still waives it (legitimate scoped sign-up)", async () => {
+      resolveOrgMock.mockResolvedValue({ id: "org-hinted", slug: "open", name: "Open" });
+      stubs.policyRows = () => [
+        DEFAULT_ROW,
+        { ...DEFAULT_ROW, organization_id: "org-hinted", require_email_verification: false },
+      ];
+      const policy = await resolveSignupPolicy(
+        { provider: "email", email: "new@example.com", emailVerified: false },
+        { organizationHint: "open" },
+      );
+      expect(policy.source).toBe("organization");
+      expect(policy.requireEmailVerification).toBe(false);
+    });
+
+    it("an unknown/inactive hint falls through to normal resolution (matches provisioning)", async () => {
+      resolveOrgMock.mockResolvedValue(null);
+      stubs.emailMapping = () =>
+        Promise.resolve({ organization_id: "org-acme", provider_organization_key: "acme.com" });
+      stubs.policyRows = () => [
+        DEFAULT_ROW,
+        { ...DEFAULT_ROW, organization_id: "org-acme", signup_approval_mode: "invite_only" },
+      ];
+      const policy = await resolveSignupPolicy(
+        { provider: "email", email: "eve@acme.com", emailVerified: false },
+        { organizationHint: "does-not-exist" },
+      );
+      expect(resolveOrgMock).toHaveBeenCalledWith("does-not-exist");
+      expect(policy.signupApprovalMode).toBe("invite_only");
+    });
+
+    it("never consults the hint lookup when no hint was supplied", async () => {
+      await resolveSignupPolicy({ provider: "email", email: "eve@acme.com", emailVerified: false });
+      expect(resolveOrgMock).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when the hint lookup throws (a DB hiccup must not relax the workflow)", async () => {
+      resolveOrgMock.mockRejectedValue(new Error("db down"));
+      stubs.policyRows = () => [{ ...DEFAULT_ROW, require_email_verification: false }];
+      const policy = await resolveSignupPolicy(
+        { provider: "email", email: "eve@acme.com", emailVerified: false },
+        { organizationHint: "victim" },
+      );
+      expect(policy).toBe(FAIL_CLOSED_AUTH_POLICY);
+      expect(logMock).toHaveBeenCalled();
+    });
+  });
 });
 
 describe("decideInitialStatus", () => {
@@ -316,6 +408,55 @@ describe("decideInitialStatus", () => {
         { ...input, emailVerified: true },
       ),
     ).toEqual({ status: "pending_approval", reason: "admin_approval" });
+  });
+
+  /**
+   * Review 2026-09-04 #2: a verification the sign-up policy WAIVED carries a
+   * distinct marker and is never mailbox proof — even inside an org that
+   * requires verification (the hinted-placement / policy-tightened cases the
+   * `requireEmailVerification` backstop alone cannot see).
+   */
+  it("does NOT domain-approve a policy-WAIVED verification, even under a strict org (review #2)", () => {
+    expect(
+      decideInitialStatus(
+        { ...base, requireEmailVerification: true, autoApproveEmailDomains: ["example.com"] },
+        { ...input, emailVerified: true, emailVerificationWaived: true },
+      ),
+    ).toEqual({ status: "pending_approval", reason: "admin_approval" });
+  });
+
+  it("a waived flag under invite_only still parks as invite_required", () => {
+    expect(
+      decideInitialStatus(
+        {
+          ...base,
+          signupApprovalMode: "invite_only",
+          autoApproveEmailDomains: ["example.com"],
+        },
+        { ...input, emailVerified: true, emailVerificationWaived: true },
+      ),
+    ).toEqual({ status: "pending_approval", reason: "invite_required" });
+  });
+
+  it("a GENUINE verification (marker false) on an auto-approve domain still activates", () => {
+    expect(
+      decideInitialStatus(
+        { ...base, autoApproveEmailDomains: ["example.com"] },
+        { ...input, emailVerified: true, emailVerificationWaived: false },
+      ),
+    ).toEqual({ status: "active", reason: "domain_auto_approved" });
+  });
+
+  it("the waiver marker does not disturb auto_active or an invitation (they never claimed proof)", () => {
+    const waived = { ...input, emailVerified: true, emailVerificationWaived: true };
+    expect(decideInitialStatus({ ...base, signupApprovalMode: "auto_active" }, waived)).toEqual({
+      status: "active",
+      reason: "auto_active",
+    });
+    expect(decideInitialStatus(base, { ...waived, hasValidInvitation: true })).toEqual({
+      status: "active",
+      reason: "invitation",
+    });
   });
 
   it("matches domains case-insensitively", () => {

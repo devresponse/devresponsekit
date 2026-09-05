@@ -5,6 +5,11 @@ import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
 import { ADMIN_PLUGIN_OPTIONS, rejectAdminPluginOverHttp } from "@/lib/auth-admin-surface";
 import { ssoSession } from "@/lib/auth-sso-session";
+import {
+  EMAIL_VERIFICATION_WAIVED_FIELD,
+  EMAIL_VERIFICATION_WAIVED_USER_FIELD,
+  isEmailVerificationWaived,
+} from "@/lib/auth-verification-waiver";
 import { CLIENT_IP_HEADER } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { ORG_SIGNUP_HINT_COOKIE, readCookieValue } from "@/lib/scoped-auth";
@@ -76,6 +81,18 @@ export const auth = betterAuth({
   // run against `next start` and sign in far faster than that from one
   // IP, so CI disables the limiter via this test-only env escape hatch.
   ...(env.AUTH_RATE_LIMIT_DISABLED ? { rateLimit: { enabled: false } } : {}),
+
+  // Review 2026-09-04 #2: a verification the sign-up policy WAIVED is recorded
+  // as a distinct, server-only user field so it is never mistaken for a
+  // mailbox proof (`decideInitialStatus` refuses domain auto-approval for
+  // it). `input: false` makes Better Auth replace any client-supplied value
+  // with the default — only the `user.create.before` hook below sets it.
+  // Rationale and the read helper live in `auth-verification-waiver.ts`.
+  user: {
+    additionalFields: {
+      [EMAIL_VERIFICATION_WAIVED_FIELD]: EMAIL_VERIFICATION_WAIVED_USER_FIELD,
+    },
+  },
 
   emailAndPassword: {
     enabled: true,
@@ -224,6 +241,19 @@ export const auth = betterAuth({
         // `shouldProvisionSelfSignup` excludes OAuth callbacks (verification
         // state belongs to the provider), admin/machine creation (which sets
         // `emailVerified` explicitly), and suppressed seed runs.
+        //
+        // Review 2026-09-04 #2 — two invariants this hook upholds:
+        //   1. "The organization that will receive this sign-up" is resolved
+        //      with the SAME precedence the `after` hook's provisioning uses
+        //      (organization hint → provider metadata → email-domain routing
+        //      → default), so the org whose policy waives verification is
+        //      always the org the account lands in. Without the hint, a lax
+        //      default org could waive verification for an account that
+        //      `organizationHint` then placed in a strict org.
+        //   2. The waiver is stamped as `emailVerified: true` PLUS the
+        //      distinct `emailVerificationWaived: true` marker, so downstream
+        //      activation logic (domain auto-approval, sign-in re-evaluation)
+        //      can never mistake a policy waiver for a mailbox proof.
         before: async (user, context) => {
           const { shouldProvisionSelfSignup } = await import("@/lib/auth-signup-provisioning");
           if (!shouldProvisionSelfSignup(context)) {
@@ -249,15 +279,22 @@ export const auth = betterAuth({
             }
           }
           const { resolveSignupPolicy } = await import("@/lib/auth-policy.server");
-          const policy = await resolveSignupPolicy({
-            provider: "email",
-            email: user.email,
-            emailVerified: false,
-          });
+          const policy = await resolveSignupPolicy(
+            {
+              provider: "email",
+              email: user.email,
+              emailVerified: false,
+            },
+            // Same hint, same channel, same precedence as the `after` hook's
+            // `provisionUserFromAuth` call — the two must resolve one org.
+            { organizationHint: getSignupOrganizationHint(context) },
+          );
           if (policy.requireEmailVerification) {
             return;
           }
-          return { data: { emailVerified: true } };
+          return {
+            data: { emailVerified: true, [EMAIL_VERIFICATION_WAIVED_FIELD]: true },
+          };
         },
         after: async (user, context) => {
           if (!context) {
@@ -282,6 +319,7 @@ export const auth = betterAuth({
               betterAuthUserId: user.id,
               email: user.email,
               emailVerified: user.emailVerified,
+              emailVerificationWaived: isEmailVerificationWaived(user),
               displayName: user.name,
               provider: getProvisioningProvider(context),
               preferredLocale: getPreferredLocale(context),
@@ -365,6 +403,7 @@ export const auth = betterAuth({
                   betterAuthUserId: authUser.id,
                   email: authUser.email,
                   emailVerified: authUser.emailVerified,
+                  emailVerificationWaived: isEmailVerificationWaived(authUser),
                   provider: getProvisioningProvider(context),
                 });
               } catch (error) {
@@ -390,6 +429,7 @@ export const auth = betterAuth({
             betterAuthUserId: authUser.id,
             email: authUser.email,
             emailVerified: authUser.emailVerified,
+            emailVerificationWaived: isEmailVerificationWaived(authUser),
             displayName: authUser.name,
             provider: getProvisioningProvider(context),
             preferredLocale: getPreferredLocale(context),

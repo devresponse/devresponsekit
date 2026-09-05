@@ -678,6 +678,95 @@ describe("provisionUserFromAuth", () => {
   });
 });
 
+/**
+ * Review 2026-09-04 #2 — the finding's exact topology: the account arrives
+ * `emailVerified: true` because a LAX org's policy waived verification, but
+ * the sign-up hint places it in a STRICT org that auto-approves the address's
+ * domain. The waiver marker must keep it out of `active`.
+ */
+describe("policy-waived verification vs domain auto-approval (review #2)", () => {
+  const STRICT_AUTO_APPROVE: PolicyRow = {
+    organization_id: "org-hinted",
+    require_email_verification: true,
+    signup_approval_mode: "admin_approval",
+    allowed_auth_methods: null,
+    auto_approve_email_domains: ["victim.com"],
+  };
+
+  beforeEach(() => {
+    resolveOrgMock.mockResolvedValue({ id: "org-hinted", slug: "victim", name: "Victim" });
+    stubs.policyRows = () => [DEFAULT_POLICY_ROW, STRICT_AUTO_APPROVE];
+  });
+
+  it("a WAIVED verification hinted into a strict auto-approve org lands pending, never active", async () => {
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-spoof",
+      email: "ceo@victim.com",
+      emailVerified: true,
+      emailVerificationWaived: true,
+      provider: "email",
+      organizationHint: "victim",
+    });
+
+    expect(result.organizationId).toBe("org-hinted");
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe(
+      "pending_approval",
+    );
+    expect(insertCalls.find((c) => c.table === "app_organization_memberships")?.values.status).toBe(
+      "pending_approval",
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.pending_approval",
+        metadata: expect.objectContaining({
+          organizationHintApplied: true,
+          emailVerificationWaived: true,
+          decisionReason: "admin_approval",
+        }),
+      }),
+    );
+  });
+
+  it("a GENUINE verification hinted into the same org still activates by domain (legitimate path)", async () => {
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-real",
+      email: "colleague@victim.com",
+      emailVerified: true,
+      emailVerificationWaived: false,
+      provider: "email",
+      organizationHint: "victim",
+    });
+
+    expect(result.organizationId).toBe("org-hinted");
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        metadata: expect.objectContaining({ decisionReason: "domain_auto_approved" }),
+      }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.not.objectContaining({ emailVerificationWaived: true }),
+      }),
+    );
+  });
+
+  it("an omitted marker means NOT waived (OAuth / admin / legacy rows keep today's behaviour)", async () => {
+    stubs.userInsert = Promise.resolve({ id: "user-1", status: "active" });
+    await provisionUserFromAuth({
+      betterAuthUserId: "ba-oauth",
+      email: "colleague@victim.com",
+      emailVerified: true,
+      provider: "google",
+      organizationHint: "victim",
+    });
+    expect(insertCalls.find((c) => c.table === "app_users")?.values.status).toBe("active");
+  });
+});
+
 describe("reevaluatePendingActivation", () => {
   it("activates a pending user + membership when the org policy now says active", async () => {
     stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
@@ -800,6 +889,36 @@ describe("reevaluatePendingActivation", () => {
         metadata: expect.objectContaining({ decisionReason: "domain_auto_approved" }),
       }),
     );
+  });
+
+  it("does NOT activate a policy-WAIVED verification by domain, even after the org tightened its policy (review #2)", async () => {
+    // Sign-up happened while the org waived verification (flag fabricated,
+    // marker set); the admin has since turned verification on and listed the
+    // domain. The next sign-in must not treat the fabricated flag as proof.
+    stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
+    stubs.membershipList = () => [
+      { id: "m-1", organization_id: "org-default", source_provider: "email" },
+    ];
+    stubs.policyRows = () => [
+      {
+        organization_id: "org-default",
+        require_email_verification: true,
+        signup_approval_mode: "admin_approval",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: ["example.com"],
+      },
+    ];
+
+    await reevaluatePendingActivation({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: true,
+      emailVerificationWaived: true,
+      provider: "email",
+    });
+
+    expect(updateCalls).toEqual([]);
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("leaves a pending user untouched while policy still requires admin approval", async () => {

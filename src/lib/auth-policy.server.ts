@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
+import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import {
   resolveProviderOrganization,
   type ProviderOrganizationInput,
@@ -24,9 +25,17 @@ import {
  *     signup-time resolution) must degrade to the STRICTEST policy, never a
  *     more permissive one. Fail-closed here means "verification + admin
  *     approval", which is exactly the pre-0007 hardcoded workflow.
- *   - `auto_approve_email_domains` is only honored for VERIFIED emails
- *     (see `decideInitialStatus`), so an unproven address can never ride a
+ *   - `auto_approve_email_domains` is only honored for GENUINELY verified
+ *     emails (see `decideInitialStatus`): a flag stamped by a
+ *     waived-verification policy carries a distinct `emailVerificationWaived`
+ *     marker and is never proof, so an unproven address can never ride a
  *     domain match into an active membership.
+ *   - The sign-up-time verification decision (`resolveSignupPolicy`) and the
+ *     provisioning-time placement (`provisionUserFromAuth`) resolve the
+ *     target organization with the SAME precedence — organization hint,
+ *     provider metadata, email-domain routing, `default` — so the org whose
+ *     policy waived verification is always the org that receives the account
+ *     (review 2026-09-04 #2).
  *   - `signup_approval_mode = 'auto_active'` intentionally activates anyone
  *     who completes signup for that org — the org admin's explicit choice.
  */
@@ -168,9 +177,18 @@ export async function findEmailDomainOrganization(
 /**
  * Resolves the policy that governs a sign-up BEFORE the user exists — used by
  * the `user.create.before` database hook to decide whether the new identity
- * needs email verification. Mirrors provisioning's org resolution (provider
- * metadata → email-domain routing → default org) so the verification decision
- * and the eventual membership always follow the same organization's policy.
+ * needs email verification. Mirrors provisioning's org resolution EXACTLY
+ * (`provisionUserFromAuth`): the organization-scoped sign-up hint
+ * (`/sign-in/<org>`, `?org=`) when it names an existing ACTIVE org → provider
+ * metadata → email-domain routing → the `default` org — so the verification
+ * decision and the eventual membership always follow the same organization's
+ * policy. (An invitation, which outranks all of these in provisioning, is
+ * handled by the hook itself before this is consulted: a live token for the
+ * address is mailbox proof, not a policy question.)
+ *
+ * Review 2026-09-04 #2: the hint MUST be consulted here. Before it was, a lax
+ * default/domain-routed org could waive verification for an account that the
+ * hint then placed in a strict org — arriving "verified" with no proof.
  *
  * Never throws: any resolution error degrades to `FAIL_CLOSED_AUTH_POLICY`
  * (and is logged), because a DB hiccup during signup must strengthen the
@@ -178,8 +196,18 @@ export async function findEmailDomainOrganization(
  */
 export async function resolveSignupPolicy(
   input: ProviderOrganizationInput,
+  options: { organizationHint?: string } = {},
 ): Promise<OrgAuthPolicy> {
   try {
+    if (options.organizationHint) {
+      const hinted = await resolveOrganizationByIdentifier(options.organizationHint);
+      if (hinted) {
+        return await getAuthPolicyForOrg(hinted.id);
+      }
+      // An unknown/inactive hint degrades to normal resolution — the same
+      // fall-through provisioning applies, so the two still agree.
+    }
+
     const resolution = resolveProviderOrganization(input);
 
     if (resolution.providerOrganizationKey !== "default") {
@@ -242,7 +270,9 @@ export interface SignupStatusDecision {
  *      (visible to admins, never silently dropped) — even under
  *      `auto_active`;
  *   3. `auto_active` activates immediately;
- *   4. a VERIFIED email on an auto-approve domain activates immediately;
+ *   4. a GENUINELY verified email on an auto-approve domain activates
+ *      immediately — a policy-waived flag (`emailVerificationWaived`) never
+ *      counts;
  *   5. `invite_only` parks everything else in `pending_approval`
  *      (`invite_required`) — uninvited signups are never silently dropped;
  *   6. everything else awaits admin approval.
@@ -253,6 +283,13 @@ export function decideInitialStatus(
     provider: AuthMethod;
     email: string;
     emailVerified: boolean;
+    /**
+     * True when `emailVerified` was stamped by a waived-verification policy
+     * rather than a mailbox proof (the `emailVerificationWaived` user field,
+     * see `auth-verification-waiver.ts`). Callers read it off the Better Auth
+     * user row; omitted = not waived.
+     */
+    emailVerificationWaived?: boolean;
     hasValidInvitation?: boolean;
   },
 ): SignupStatusDecision {
@@ -271,12 +308,18 @@ export function decideInitialStatus(
     // Domain auto-approval trusts `emailVerified` as PROOF the mailbox is
     // owned — but when an org waives verification the sign-up hook stamps
     // `emailVerified: true` WITHOUT any proof (auth.ts user.create.before).
-    // Requiring `requireEmailVerification` here means the flag can only be a
-    // genuine verification (a clicked link, re-evaluated at sign-in, or an
-    // OAuth provider assertion), never the waiver fabrication — so nobody can
-    // ride `anyone@acme.com` into an active membership by disabling
-    // verification. `authPolicySettingsSchema` also rejects that combination
-    // outright; this is the defense-in-depth backstop for legacy/raw rows.
+    // That stamp carries a distinct `emailVerificationWaived` marker, and a
+    // waived flag is refused here outright — whatever org it later meets (a
+    // hinted placement into a strict org, or a policy tightened between
+    // sign-up and the next sign-in re-evaluation; review 2026-09-04 #2).
+    !input.emailVerificationWaived &&
+    // Backstop for rows created before the marker existed: requiring
+    // `requireEmailVerification` on the deciding org means a legacy flag can
+    // only pass inside an org that would have demanded a genuine
+    // verification (a clicked link, re-evaluated at sign-in, or an OAuth
+    // provider assertion) — so nobody can ride `anyone@acme.com` into an
+    // active membership by disabling verification. `authPolicySettingsSchema`
+    // also rejects that combination outright.
     policy.requireEmailVerification &&
     domain &&
     policy.autoApproveEmailDomains !== null &&

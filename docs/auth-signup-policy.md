@@ -26,7 +26,7 @@ Everything downstream (the `pending-approval` and `blocked` gates, `decideSecure
 
 | Setting | Values (default in bold) | Effect |
 | --- | --- | --- |
-| `requireEmailVerification` | **`true`** / `false` | Off ⇒ email/password sign-ups are pre-verified at creation and signed in immediately. Social sign-ins (Google, Microsoft, GitHub) arrive provider-verified and are unaffected. |
+| `requireEmailVerification` | **`true`** / `false` | Off ⇒ email/password sign-ups are pre-verified at creation and signed in immediately. The waiver is recorded distinctly (the Better Auth user field `emailVerificationWaived`) — a waived address is never treated as a **proven** one, see [§9](#9-security-notes). Social sign-ins (Google, Microsoft, GitHub) arrive provider-verified and are unaffected. |
 | `signupApprovalMode` | **`admin_approval`** / `auto_active` / `invite_only` | `admin_approval`: new members start `pending_approval`. `auto_active`: new members are activated on provisioning. `invite_only`: uninvited sign-ups park in `pending_approval`; [invited](#6-invitations) ones activate. |
 | `allowedAuthMethods` | **`null`** (all) or a subset of `email`, `google`, `microsoft`, `github` | A sign-up via an excluded method still provisions but parks in `pending_approval` — visible to admins, never silently dropped. Applies even under `auto_active`; a valid [invitation](#6-invitations) overrides it. |
 | `autoApproveEmailDomains` | **`null`** (none) or a domain list | **Verified** addresses on a listed domain activate immediately, even under `admin_approval` or `invite_only`. An unverified address never rides a domain match. Requires `requireEmailVerification = true` — the combination with verification waived is rejected (with it off, no address is proven, so a domain rule would auto-activate anyone claiming the domain). |
@@ -54,24 +54,27 @@ For any organization the effective policy resolves as:
 
 Every failure mode — missing rows, malformed values, a database error during signup-time resolution — degrades to the *strictest* policy, never a more permissive one. Policy reads happen at signup time (the verification decision) and at provisioning time (the activation decision), so edits apply to the next registration with no restart.
 
+**Both reads resolve the same organization.** The verification decision (`resolveSignupPolicy`, in the `user.create.before` hook) and the placement + activation decision (`provisionUserFromAuth`, in the `user.create.after` hook) determine "the organization the account will land in" with one shared precedence — see [§4](#4-which-organization-governs-a-sign-up). Because the organization-scoped hint ranks first in both, the organization whose policy waives verification is always the organization that receives the account; a lax default (or domain-routed) organization can never waive verification for an account that a `?org=` hint then places in a strict one.
+
 ## 4. Which organization governs a sign-up?
 
-The policy consulted is the policy of the organization the account will land in:
+The policy consulted is the policy of the organization the account will land in, resolved in this order (the same order at sign-up time and at provisioning time):
 
-- **Microsoft** — the Entra tenant id (`tid`) resolves to its bound organization.
-- **Google** — the hosted domain (`hd`) resolves to its bound organization.
-- **GitHub** — the verified email's domain.
-- **Email/password** — an admin-curated **email-domain binding** (a provider binding with provider `email`, managed on the organization's Providers tab or via `…/provider-bindings`) routes the domain's sign-ups to that organization; otherwise they land in the `default` organization, governed by its policy.
+1. a live **invitation** for the address (§6) — the inviting organization;
+2. an **organization-scoped sign-in** hint (`/sign-in/<org>` or `?org=`, §7) that names an existing **active** organization; an unknown or inactive hint is ignored and resolution continues;
+3. **provider metadata** — **Microsoft**: the Entra tenant id (`tid`) resolves to its bound organization; **Google**: the hosted domain (`hd`); **GitHub**: the verified email's domain;
+4. **Email/password** — an admin-curated **email-domain binding** (a provider binding with provider `email`, managed on the organization's Providers tab or via `…/provider-bindings`) routes the domain's sign-ups to that organization;
+5. otherwise the `default` organization, governed by its policy.
 
 An organization auto-created by a first OAuth sign-in has no policy row yet, so the platform default governs its first member.
 
-A visitor who arrives through an **organization-scoped sign-in** (`/sign-in/<org>` or `?org=`) targets that organization directly — ranked above provider/domain inference and below an invitation. See §7.
+For email/password sign-ups the verification decision is made by the `user.create.before` hook with steps 2–5 (an invitation is handled by the hook itself: presenting a live token for the address is mailbox proof, so it pre-verifies regardless of policy); provisioning then applies the full order for placement and activation.
 
 ## 5. Activation re-evaluation at sign-in
 
 A still-pending account is re-evaluated against the **current** policy when it signs in, and activated when the policy now says active:
 
-- the account's email is now verified and matches an auto-approve domain (this is how a "verify + approve-by-domain" org activates its members right after they confirm their email and sign in), or
+- the account's email is now **genuinely** verified and matches an auto-approve domain (this is how a "verify + approve-by-domain" org activates its members right after they confirm their email and sign in) — a verification the sign-up policy *waived* (`emailVerificationWaived`) never qualifies, so tightening an organization's policy after a waived sign-up cannot auto-activate an unproven address, or
 - the organization has switched to `auto_active` (a brand-new registration would be active anyway, so keeping the old row pending protects nothing and only clutters the approval queue).
 
 This is the **only** automatic upgrade path, it only ever touches `pending_approval` rows, and a concurrent admin action wins. `blocked`, `suspended`, and `deactivated` are explicit administrator denials and are never changed by policy.
@@ -109,7 +112,7 @@ What the scope does:
 
 - **Branding** — the screen reads "Sign in to _Org_".
 - **Existing members** — after authentication the active organization is pinned to the scoped org, via a membership-checked applicator (`GET /api/preferences/active-org/apply`). This covers **both** email and social sign-in, since both redirect through the post-auth `callbackURL`. A non-member falls through untouched to their own organization — the cookie is a selector among the caller's own memberships, never a grant.
-- **New users** — the scope also **targets** a brand-new account at the scoped org (placement only: the initial status is still decided by that org's signup policy, §3, so it can never self-activate anyone). The identifier reaches provisioning by two channels: **email/password** carries it in the sign-up body as `organizationHint`; **social** — whose OAuth callback has no sign-up body — carries it in a short-lived `org_signup_hint` cookie the proxy sets on the scoped page (and clears on a plain one) and the sign-in provisioning hook reads on the provider callback. A brand-new social sign-up therefore lands in the scoped org (and, being its member, is then pinned there by the applicator above). Provider-identity routing (§4) still applies when there is no scope.
+- **New users** — the scope also **targets** a brand-new account at the scoped org (placement only: the initial status is still decided by that org's signup policy, §3, so it can never self-activate anyone). The scoped org's policy also decides whether the email/password sign-up must verify its address — the verification waiver and the placement always follow the same organization (§4). The identifier reaches provisioning by two channels: **email/password** carries it in the sign-up body as `organizationHint`; **social** — whose OAuth callback has no sign-up body — carries it in a short-lived `org_signup_hint` cookie the proxy sets on the scoped page (and clears on a plain one) and the sign-in provisioning hook reads on the provider callback. A brand-new social sign-up therefore lands in the scoped org (and, being its member, is then pinned there by the applicator above). Provider-identity routing (§4) still applies when there is no scope.
 
 Precedence: a live **invitation** overrides the scope (§6). The scope is carried between screens — a scoped sign-in's _Create account_ link opens `/sign-up?org=<slug>`, and its _Have an account?_ counterpart points back to the scoped sign-in.
 
@@ -124,7 +127,8 @@ Changes are audited with previous→next values: `admin.organization.auth_policy
 ## 9. Security notes
 
 - **Fail closed, always.** Absent or unreadable policy means verification + admin approval; an invitation lookup failure during sign-up degrades to the uninvited path, never blocks the registration and never activates.
-- **Domain auto-approval requires proof.** Only a VERIFIED address can activate via `autoApproveEmailDomains`, so claiming `ceo@acme.com` at registration grants nothing until the mailbox is proven. Because a waived-verification org marks sign-ups verified without proof, that combination is rejected at write time and the decision layer additionally refuses domain approval whenever verification is not required — defense in depth against an unproven address riding a domain into an active membership.
+- **Domain auto-approval requires proof.** Only a GENUINELY verified address can activate via `autoApproveEmailDomains`, so claiming `ceo@acme.com` at registration grants nothing until the mailbox is proven. A waived-verification org marks sign-ups verified without proof, so that stamp also carries a distinct, server-only marker (`emailVerificationWaived`, a Better Auth user field a client cannot set) and the decision layer refuses domain approval for any waived flag — whatever organization it later meets, whether through a scoped-sign-in hint or a policy tightened after the sign-up. Two further layers stand behind it: the waived + auto-approve combination is rejected at write time, and domain approval additionally requires the deciding organization to require verification (the backstop for rows created before the marker existed).
+- **The waiver follows the target organization.** The sign-up hook resolves the organization the account will land in with the same precedence provisioning uses (§4) — scoped-sign-in hint first — so a lax default or domain-routed organization can never waive verification for an account that then lands in a strict one.
 - **Invitations are mailbox-bound.** Acceptance demands an exact email match, so a forwarded link cannot move the seat to another mailbox.
 - **`auto_active` without verification is open signup.** Anyone who registers gets access without proving mailbox ownership — the editor warns about this combination; choose it only for deliberately open organizations.
 - **Method restriction never hides accounts.** Excluded-method sign-ups are parked pending rather than rejected, so administrators can see and triage them. A valid invitation overrides the restriction — inviting an address IS the sanction, and the explicit accept path is method-agnostic anyway, so a first-ranked allow-list would only be an inconsistent speed bump, not a gate.
@@ -134,5 +138,7 @@ Changes are audited with previous→next values: `admin.organization.auth_policy
 ## 10. Data model (reference)
 
 `app_organization_auth_settings` — one row per organization plus one platform-default row (`organization_id IS NULL`, pinned unique by a partial index). `signup_approval_mode` and `allowed_auth_methods` are CHECK-constrained; rows are removed by `ON DELETE CASCADE` with their organization. Resolution and the pure status decision live in `src/lib/auth-policy.server.ts`; enforcement lives in the Better Auth hooks (`src/lib/auth.ts`) and `src/lib/user-provisioning.server.ts`.
+
+`user.emailVerificationWaived` — a Better Auth **additional user field** (declared in `src/lib/auth.ts`, defined in `src/lib/auth-verification-waiver.ts`) on the vendor `user` table: `true` when `emailVerified` was stamped by a waived-verification policy rather than a mailbox proof. Server-only (`input: false`), default `false`; written solely by the `user.create.before` hook. The column is part of the committed `better-auth-schema.sql` snapshot and is added to an existing database by `pnpm db:auth:migrate` (rows created before it existed read `NULL`, i.e. not waived).
 
 `app_organization_invitations` — one row per invitation (`token_hash` unique; one *pending* row per (organization, email) via a partial unique index; `role_id` degrades to NULL if the role is deleted; rows cascade with their organization). Lifecycle: `pending` → `accepted` | `revoked`, with expiry enforced at read time. The server core lives in `src/lib/invitations.server.ts`.

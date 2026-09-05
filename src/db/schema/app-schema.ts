@@ -382,6 +382,14 @@ export interface BetterAuthUserTable {
   id: ColumnType<string, never, never>;
   name: ColumnType<string, never, never>;
   email: ColumnType<string, never, never>;
+  emailVerified: ColumnType<boolean, never, never>;
+  /**
+   * App-declared additional field (`user.additionalFields` in auth.ts):
+   * true when `emailVerified` was stamped by a waived-verification sign-up
+   * policy rather than a mailbox proof (review 2026-09-04 #2). Written only
+   * by the `user.create.before` hook; see `auth-verification-waiver.ts`.
+   */
+  emailVerificationWaived: ColumnType<boolean | null, never, never>;
   createdAt: ColumnType<Date, never, never>;
 }
 

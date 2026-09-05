@@ -18,6 +18,7 @@ vi.mock("@/lib/auth-sso-session", () => ({ ssoSession: () => ({ id: "sso-session
 
 interface CapturedOptions {
   emailAndPassword: { enabled?: boolean; revokeSessionsOnPasswordReset?: boolean };
+  user?: { additionalFields?: Record<string, Record<string, unknown>> };
   advanced?: {
     ipAddress?: { ipAddressHeaders?: string[]; disableIpTracking?: boolean };
     crossSubDomainCookies?: { enabled?: boolean; domain?: string };
@@ -45,6 +46,24 @@ describe("Better Auth emailAndPassword config", () => {
     const opts = betterAuthMock.mock.calls[0]?.[0] as CapturedOptions;
     expect(opts.emailAndPassword.enabled).toBe(true);
     expect(opts.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
+  });
+});
+
+/**
+ * Review #2: the policy-waived verification marker must be a Better Auth
+ * user field that clients cannot set (`input: false`) and that every other
+ * creation path leaves at `false` — otherwise the marker is worthless as a
+ * distinction between "waived" and "proven".
+ */
+describe("Better Auth user.additionalFields (review #2)", () => {
+  it("declares emailVerificationWaived as a server-only boolean defaulting to false", async () => {
+    const opts = await capture();
+    expect(opts.user?.additionalFields?.emailVerificationWaived).toEqual({
+      type: "boolean",
+      required: false,
+      defaultValue: false,
+      input: false,
+    });
   });
 });
 

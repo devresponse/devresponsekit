@@ -26,6 +26,13 @@ export interface ProvisionUserInput {
   betterAuthUserId: string;
   email: string;
   emailVerified: boolean;
+  /**
+   * True when `emailVerified` was stamped by a waived-verification sign-up
+   * policy rather than a mailbox proof (the Better Auth user field
+   * `emailVerificationWaived`, review 2026-09-04 #2). Read off the user row
+   * by the hooks; a waived flag never satisfies domain auto-approval.
+   */
+  emailVerificationWaived?: boolean;
   provider: ProviderOrganizationInput["provider"];
   profile?: Record<string, unknown>;
   account?: Record<string, unknown>;
@@ -218,6 +225,7 @@ export async function provisionUserFromAuth(
       provider: input.provider,
       email: input.email,
       emailVerified: input.emailVerified,
+      emailVerificationWaived: input.emailVerificationWaived === true,
       hasValidInvitation: invitation !== null,
     });
     policySource = policy.source;
@@ -334,6 +342,9 @@ export async function provisionUserFromAuth(
       providerOrganizationKey: membershipOrgKey,
       ...(emailDomainRouted ? { emailDomainRouted: true } : {}),
       ...(organizationHintApplied ? { organizationHintApplied: true } : {}),
+      // A policy-waived verification is recorded so the approval queue and
+      // audit reviewers can tell "verified" from "waived" (review #2).
+      ...(input.emailVerificationWaived === true ? { emailVerificationWaived: true } : {}),
       ...(linkedExisting ? {} : { decisionReason: decision.reason, policySource }),
     },
   });
@@ -356,9 +367,12 @@ export async function provisionUserFromAuth(
  *   - the org now runs `signup_approval_mode = 'auto_active'` (a brand-new
  *     signup would be active anyway, so keeping the old row pending protects
  *     nothing and only confuses the approval queue), or
- *   - the user's email is now VERIFIED and matches an auto-approve domain —
- *     this is how a verify-then-approve-by-domain org activates its
- *     email/password users the moment they click the verification link.
+ *   - the user's email is now GENUINELY verified and matches an auto-approve
+ *     domain — this is how a verify-then-approve-by-domain org activates its
+ *     email/password users the moment they click the verification link. A
+ *     verification the sign-up policy WAIVED (`emailVerificationWaived`)
+ *     never qualifies, so tightening an org's policy after a waived sign-up
+ *     cannot auto-activate the unproven address (review 2026-09-04 #2).
  *
  * Guards:
  *   - Runs only for `app_users.status = 'pending_approval'`; blocked /
@@ -371,6 +385,8 @@ export async function reevaluatePendingActivation(input: {
   betterAuthUserId: string;
   email: string;
   emailVerified: boolean;
+  /** See {@link ProvisionUserInput.emailVerificationWaived}. */
+  emailVerificationWaived?: boolean;
   provider: AuthMethod;
 }): Promise<void> {
   const user = await db
@@ -408,6 +424,7 @@ export async function reevaluatePendingActivation(input: {
         : input.provider,
       email: input.email,
       emailVerified: input.emailVerified,
+      emailVerificationWaived: input.emailVerificationWaived === true,
     });
     if (decision.status !== "active") {
       continue;

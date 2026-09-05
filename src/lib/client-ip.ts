@@ -44,6 +44,39 @@ export function getClientIp(headers: Headers): string | null {
 }
 
 /**
+ * The request header that carries the trusted client IP to Better Auth.
+ *
+ * Better Auth's own resolver (`getIp` in `@better-auth/core/utils/ip`) trusts
+ * a forwarded header only when it holds exactly ONE value, so behind a
+ * multi-hop chain every request collapsed into its shared `no-trusted-ip`
+ * bucket (3 sign-ins / 10 s for the whole deployment), and where the edge
+ * sets no chain at all a client-supplied single value was trusted verbatim
+ * (review #35). Instead, the proxy (`src/proxy.ts`) derives the IP with the
+ * SAME `TRUSTED_PROXY_COUNT` model as {@link getClientIp} and writes it here
+ * — always overwriting (or deleting) whatever the client sent — and Better
+ * Auth is configured to read ONLY this header (`advanced.ipAddress.
+ * ipAddressHeaders` in `src/lib/auth.ts`). One derivation, one trust model.
+ */
+export const CLIENT_IP_HEADER = "x-drk-client-ip";
+
+/**
+ * Stamps {@link CLIENT_IP_HEADER} onto `headers` from the trusted hop of the
+ * forwarded chain. The header is UNCONDITIONALLY overwritten: a value the
+ * client injected is replaced when a trustworthy IP exists and removed when
+ * none does, so it can never reach Better Auth unless this app set it.
+ * Absent ⇒ Better Auth keys the request to its shared bucket, mirroring
+ * {@link clientIpKey}'s `"anon"` — fail closed, never fail open.
+ */
+export function applyClientIpHeader(headers: Headers): void {
+  const ip = getClientIp(headers);
+  if (ip) {
+    headers.set(CLIENT_IP_HEADER, ip);
+  } else {
+    headers.delete(CLIENT_IP_HEADER);
+  }
+}
+
+/**
  * A rate-limit actor key derived from the client IP, or `"anon"` when no
  * trustworthy IP is available (so requests still share one bounded bucket
  * rather than each getting a fresh one).

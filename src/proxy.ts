@@ -4,6 +4,7 @@ import createIntlMiddleware from "next-intl/middleware";
 import { routing } from "@/i18n/routing";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { isLocalizedSecurePath } from "@/config/route-regions";
+import { applyClientIpHeader } from "@/lib/client-ip";
 import { ORG_SIGNUP_HINT_COOKIE } from "@/lib/scoped-auth";
 
 const intlMiddleware = createIntlMiddleware(routing);
@@ -122,7 +123,15 @@ function generateNonce(): string {
 /**
  * proxy
  *
- * Combines three concerns:
+ * Combines four concerns:
+ *   0. The trusted client IP (review #35): `x-drk-client-ip` is derived from
+ *      `X-Forwarded-For` with the app's `TRUSTED_PROXY_COUNT` model and
+ *      ALWAYS overwritten on the forwarded request — for page renders (whose
+ *      server actions call `auth.api.*`) and for the Better Auth catch-all
+ *      (`/api/auth/*`, matched explicitly below), which reads ONLY that
+ *      header for its sign-in/reset limiter and `session.ipAddress`. A client
+ *      cannot inject it, and multi-hop chains resolve to the same hop the
+ *      app's own limiter trusts.
  *   1. A per-request CSP nonce: an enforcing `Content-Security-Policy` is set
  *      on every response, and the nonce is threaded into the request headers
  *      (`x-nonce` + the CSP itself) so Next.js — and the root layout, which
@@ -146,9 +155,15 @@ export function proxy(request: NextRequest) {
   const nonce = generateNonce();
   const csp = buildContentSecurityPolicy(nonce);
 
-  // API routes are excluded by the matcher, but defend in depth.
+  // Forwarded request headers: the trusted client IP is stamped first so
+  // every branch below hands Better Auth the same derivation.
+  const requestHeaders = new Headers(request.headers);
+  applyClientIpHeader(requestHeaders);
+
+  // Only `/api/auth/*` is matched (Better Auth needs the client-IP header);
+  // other API routes are excluded by the matcher, but defend in depth.
   if (pathname.startsWith("/api/")) {
-    const response = NextResponse.next();
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
     response.headers.set("Content-Security-Policy", csp);
     return response;
   }
@@ -169,7 +184,6 @@ export function proxy(request: NextRequest) {
   // nonce to its injected scripts (next-intl copies these request headers onto
   // the rewrite/next it returns — see its middleware), then enforce the policy
   // on the outgoing response.
-  const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
   const response = intlMiddleware(new NextRequest(request, { headers: requestHeaders }));
@@ -179,5 +193,10 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)"],
+  matcher: [
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+    // Better Auth's catch-all must pass through the proxy so the trusted
+    // client-IP header is set before its rate limiter runs (review #35).
+    "/api/auth/:path*",
+  ],
 };

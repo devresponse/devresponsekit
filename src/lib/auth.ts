@@ -5,6 +5,7 @@ import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
 import { ADMIN_PLUGIN_OPTIONS, rejectAdminPluginOverHttp } from "@/lib/auth-admin-surface";
 import { ssoSession } from "@/lib/auth-sso-session";
+import { CLIENT_IP_HEADER } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { ORG_SIGNUP_HINT_COOKIE, readCookieValue } from "@/lib/scoped-auth";
 import { SOCIAL_PROVIDERS, type SocialProvider } from "@/lib/social-providers";
@@ -183,19 +184,25 @@ export const auth = betterAuth({
     updateAge: 60 * 15,
   },
 
-  // Shared-session (Option C) support: with COOKIE_DOMAIN set, the session
-  // cookie is issued on the parent domain (e.g. `.devresponse.com`) so
-  // co-trusted satellites sharing this deployment's `auth` schema + secret
-  // validate the same session with zero redirects. Unset (the default), the
-  // cookie stays host-only and per-app isolation is preserved — see the env
-  // schema docstring and docs/integration-satellite-apps.md §5.
-  ...(env.COOKIE_DOMAIN
-    ? {
-        advanced: {
-          crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN },
-        },
-      }
-    : {}),
+  advanced: {
+    // Client IP for the built-in limiter (sign-in 3/10 s, reset 3/60 s) and
+    // `session.ipAddress`: read ONLY the header `src/proxy.ts` derives with
+    // the app's TRUSTED_PROXY_COUNT model and always overwrites (review #35).
+    // Better Auth's default `x-forwarded-for` read trusts a single-value
+    // header only, so multi-hop chains collapsed into one deployment-wide
+    // `no-trusted-ip` bucket and a bare client-supplied value was trusted.
+    ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
+
+    // Shared-session (Option C) support: with COOKIE_DOMAIN set, the session
+    // cookie is issued on the parent domain (e.g. `.devresponse.com`) so
+    // co-trusted satellites sharing this deployment's `auth` schema + secret
+    // validate the same session with zero redirects. Unset (the default), the
+    // cookie stays host-only and per-app isolation is preserved — see the env
+    // schema docstring and docs/integration-satellite-apps.md §5.
+    ...(env.COOKIE_DOMAIN
+      ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } }
+      : {}),
+  },
 
   databaseHooks: {
     // AUTH-5: provision the app_users row at SIGN-UP (email/password), so a

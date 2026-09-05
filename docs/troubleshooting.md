@@ -113,6 +113,14 @@ warrant a comms channel and an owner before deep debugging.
 - The limiter is in-memory per instance (single-instance is the supported 1.0
   topology); a process restart resets buckets. A shared (Redis/Postgres) backend
   is post-1.0 — see [deployment.md §5](./deployment.md#5-operations--gotchas).
+- Sign-in / password-reset floods hit Better Auth's built-in limiter (3 req / 10 s
+  and 3 req / 60 s per client IP) on `/api/auth/*`. It keys on the same client IP
+  as the app's limiters — the proxy-derived `x-drk-client-ip`, `TRUSTED_PROXY_COUNT`
+  hops from the right of `X-Forwarded-For` (review #35) — so one abuser cannot
+  exhaust everyone's bucket by spoofing headers. **If every user is rate-limited
+  at once**, your edge depth is wrong: fix `TRUSTED_PROXY_COUNT` (see
+  [Deployment issues](#deployment-issues)); do not disable the limiter
+  (`AUTH_RATE_LIMIT_DISABLED` is refused in production).
 - CSP violations report to `POST /api/security/csp-report` (rate-limited +
   aggregated); a spike can indicate an injection attempt or a broken third-party
   asset.
@@ -323,7 +331,13 @@ HSTS is inert over plain HTTP. Confirm the proxy forwards the headers emitted by
 
 **Wrong client IP in rate limiting / logs behind a CDN.** Set
 `TRUSTED_PROXY_COUNT` to your actual proxy depth so the client IP is read
-correctly from `X-Forwarded-For`.
+correctly from `X-Forwarded-For`. The same setting drives Better Auth's sign-in /
+reset limiter and the `ipAddress` recorded on sessions: `src/proxy.ts` derives the
+IP once and overwrites the `x-drk-client-ip` request header that Better Auth reads
+(review #35), so a wrong depth shows up as **all** sign-ins sharing one bucket
+(too deep ⇒ no trustworthy hop ⇒ the shared `no-trusted-ip` bucket) or as a
+spoofable IP (too shallow ⇒ the leftmost, client-supplied entry). Check the
+`ip_address` on a fresh session row against the real client address.
 
 **Rate limits behave inconsistently across instances.** The limiter is in-process
 per instance, so the **supported 1.0 topology is a single application instance**

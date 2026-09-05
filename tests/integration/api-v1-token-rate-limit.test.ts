@@ -20,7 +20,10 @@ import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
  *
  * The REAL token-bucket limiter runs (wrapped in a recording spy so the
  * exact keys can be asserted); credential verification, persistence and
- * minting are mocked.
+ * minting are mocked. The pre-auth floors consume from the SHARED Postgres
+ * bucket in production (review #98); here `consumeSharedToken` is routed
+ * through the same in-memory bucket + spy, so the KEYING contract this suite
+ * pins is asserted across both primitives without a database.
  */
 const env = vi.hoisted(() => ({
   API_JWT_ENABLED: true,
@@ -54,6 +57,9 @@ vi.mock("@/lib/admin/rate-limit.server", async () => {
   consumeToken.mockImplementation(actual.consumeToken);
   return { ...actual, consumeToken: (...a: unknown[]) => consumeToken(...a) };
 });
+vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+  consumeSharedToken: async (...a: unknown[]) => consumeToken(...a),
+}));
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
   verifyClientCredentials: (...a: unknown[]) => verifyClientCredentials(...a),
 }));

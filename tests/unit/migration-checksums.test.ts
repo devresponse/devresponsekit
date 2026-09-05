@@ -44,6 +44,10 @@ const FROZEN: ReadonlyArray<[id: string, sha256: string]> = [
     "0005-integrity-constraints.sql",
     "ac34b3d715be75c70ed4629a69ad84e127851e0a24c44dbedf721c3bac2ff8f4",
   ],
+  [
+    "0006-rate-limit-buckets.sql",
+    "9b8eb96e149bf1fa4f3ae632c33237786775ede08da864910fc0b2641b237f40",
+  ],
 ];
 
 describe("normalizeMigrationSql", () => {

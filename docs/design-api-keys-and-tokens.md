@@ -146,7 +146,7 @@ JWTs let high-throughput clients verify by signature instead of a per-request DB
 
 ### 6.1 Token endpoint — `POST /api/v1/auth/token`
 
-OAuth2-style. Exchanges a long-lived credential for a short-lived JWT. The endpoint is itself unauthenticated (the credential _is_ the auth), rate-limited per client/IP plus a global floor, and sets `Cache-Control: no-store`.
+OAuth2-style. Exchanges a long-lived credential for a short-lived JWT. The endpoint is itself unauthenticated (the credential _is_ the auth), rate-limited per client/IP plus a global floor (the pre-auth buckets are shared across instances via Postgres — §10.2), and sets `Cache-Control: no-store`.
 
 Grants:
 
@@ -306,6 +306,7 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 
 - **Per-credential mutations** — `enforceApiRateLimit` keys the bucket on the credential id (`api_key` id / `jti` / `client_id`) when bearer, else the principal, so one noisy key cannot exhaust the principal's whole budget. Returns a problem+json `429` with `Retry-After`.
 - **Token endpoint** — three layers, none keyed on an unverified client-supplied value (P2-4, review #11). Before any crypto or DB work: a coarse **global floor** independent of the request, then a **per-trusted-IP** bucket (the IP is derived from a trusted proxy hop, `TRUSTED_PROXY_COUNT`, not the spoofable leftmost `X-Forwarded-For`). Only **after** the credential verifies does a **per-credential** bucket (keyed on the verified `client_id` / API-key id) apply, giving each credential a fair share behind a shared egress IP. Because the public `client_id` never reaches a limiter key before verification, a remote party who merely knows a victim's id cannot drain the victim's budget with wrong secrets, rotating ids cannot escape the per-IP bucket, and unknown ids never allocate limiter entries. Denials return a problem+json `429` with `Retry-After` and count toward the `devresponsekit_rate_limit_denials_total{scope="api.token"}` metric.
+- **Where the buckets live (review #98).** The two **pre-auth** buckets (global floor, per-IP) are **shared across instances**: `consumeSharedToken` (`src/lib/admin/rate-limit-shared.server.ts`) refills and consumes in one atomic `INSERT … ON CONFLICT DO UPDATE … WHERE … RETURNING` against `app_rate_limits` (migration `0006`), so on a serverless platform — one process per invocation — the floor is still one floor. An in-memory bucket there was per lambda, which multiplied the "deployment-wide" budget by the invocation count. The **per-credential** bucket stays in-process: it only exists after the credential verified, so its fan-out is bounded by the credentials the caller holds. If the database is unreachable the shared primitive falls back to the in-process bucket for a 30 s cool-down, logs a structured warning and increments `devresponsekit_rate_limit_shared_fallbacks_total{scope}` — it never fails open silently and never turns a DB blip into a 5xx on the token endpoint.
 
 ### 10.3 Security properties (summary)
 

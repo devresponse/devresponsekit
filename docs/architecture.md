@@ -189,7 +189,9 @@ Two layers, two jobs:
 
 ### Rate limiting
 
-Administrator mutations pass through an in-memory **per-actor token bucket** (`src/lib/admin/rate-limit.server.ts`):
+Two stores, chosen by who controls the fan-out. **Pre-auth floors** — where an unauthenticated caller chooses how many instances it hits — consume from a **Postgres-backed bucket** (`src/lib/admin/rate-limit-shared.server.ts`, table `app_rate_limits`, migration `0006`; review #98): the token endpoint's global floor and per-IP bucket, MCP registration's global floor and per-IP bucket, the CSP report sink's global floor and per-IP bucket, and invitation acceptance (per user). Refill-and-consume is one atomic `INSERT … ON CONFLICT DO UPDATE … WHERE … RETURNING`, so N concurrent consumers of one key across any number of instances get exactly the budgeted number of allows; a backend error falls back to the in-process bucket for a 30 s cool-down with a structured warning and a `devresponsekit_rate_limit_shared_fallbacks_total{scope}` increment. An invariant test greps those call sites so a pre-auth floor can never quietly move back into memory. Better Auth's own sign-in / password-reset limiter is likewise database-backed (`rateLimit: { storage: "database" }`, review #199).
+
+**Authenticated per-actor limits** pass through an in-memory **per-actor token bucket** (`src/lib/admin/rate-limit.server.ts`) — the actor already holds a credential, so the fan-out is bounded:
 
 | Budget | Capacity | Refill | Applies to |
 | --- | --- | --- | --- |
@@ -199,7 +201,7 @@ Administrator mutations pass through an in-memory **per-actor token bucket** (`s
 | `DEFAULT_SSO_LAUNCH_LIMIT` | 30 | 1 / sec | `GET /api/sso/launch`, keyed per principal (session user id, else trusted client IP) |
 | `DEFAULT_SSO_CONSUME_LIMIT` | 30 | 1 / sec | `GET`/`POST /api/sso/consume`, keyed per trusted client IP |
 
-The store is in-process (resets on restart). A distributed (e.g. Redis) backend is a noted follow-up — see `TODO` in [Deployment](./deployment.md).
+This per-actor store is in-process (resets on restart, per instance under horizontal scaling) — see [Deployment §5](./deployment.md#5-operations--gotchas) for the topology statement.
 
 ### Single Sign-On handoff
 
@@ -290,7 +292,7 @@ The org filter on **both** branches is what keeps groups inside the ADR-0001 bou
 
 ## 5. Data model
 
-PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The schema is provisioned by a **frozen baseline plus append-only migrations**: `src/db/migrations/0001-initial-schema.sql` is the complete, idempotent baseline (FROZEN — `CREATE … IF NOT EXISTS`, so re-running it never alters a provisioned database); further schema changes are added as new numbered `NNNN-*.sql` files — today that is `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql` and `0005-integrity-constraints.sql`, and the next core migration is `0006`. A lightweight runner (`src/db/migrations/run-migrations.ts`) records applied filenames — with a sha256 checksum of each file's comment-stripped, whitespace-normalised content, verified on every run — in an `app_schema_migrations` ledger and applies each not-yet-recorded file, in lexical order, inside its own transaction, holding a session advisory lock for the whole run so concurrent runners serialise. It runs in two passes: the **core** top-level files, then the **email-template `locales/`** pass — one file per locale, of which the English base `locales/0000-email-templates-en.sql` is ALWAYS applied while the localized files are excludable via `DB_MIGRATE_LOCALES`. (Better Auth's own `better-auth*` files are owned by its tooling and skipped by this runner.) TypeScript types live in `src/db/schema/app-schema.ts`. See [Deployment](./deployment.md).
+PostgreSQL accessed through **Kysely** with a shared `pg` pool (`src/db/database.ts`). The schema is provisioned by a **frozen baseline plus append-only migrations**: `src/db/migrations/0001-initial-schema.sql` is the complete, idempotent baseline (FROZEN — `CREATE … IF NOT EXISTS`, so re-running it never alters a provisioned database); further schema changes are added as new numbered `NNNN-*.sql` files — today that is `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql`, `0005-integrity-constraints.sql` and `0006-rate-limit-buckets.sql`, and the next core migration is `0007`. A lightweight runner (`src/db/migrations/run-migrations.ts`) records applied filenames — with a sha256 checksum of each file's comment-stripped, whitespace-normalised content, verified on every run — in an `app_schema_migrations` ledger and applies each not-yet-recorded file, in lexical order, inside its own transaction, holding a session advisory lock for the whole run so concurrent runners serialise. It runs in two passes: the **core** top-level files, then the **email-template `locales/`** pass — one file per locale, of which the English base `locales/0000-email-templates-en.sql` is ALWAYS applied while the localized files are excludable via `DB_MIGRATE_LOCALES`. (Better Auth's own `better-auth*` files are owned by its tooling and skipped by this runner.) TypeScript types live in `src/db/schema/app-schema.ts`. See [Deployment](./deployment.md).
 
 **Schema:** every table — the `app_*` tables **and** the Better Auth vendor tables — is deployed into one schema, **`auth`** by default, configurable via `DB_SCHEMA` (`src/db/schema-config.ts`). The schema is applied at the **connection level** via `search_path=<DB_SCHEMA>,public`, so all (unqualified) Kysely queries resolve to it with no per-query qualification; the shared extensions (`pgcrypto`, `pg_trgm`) stay in `public`. Setting a different `DB_SCHEMA` per deployment isolates applications by schema with no code changes. See [Configuration → `DB_SCHEMA`](./configuration.md#database-postgresql).
 
@@ -322,6 +324,7 @@ erDiagram
 | Machine credentials | `app_api_keys`, `app_oauth_clients`, `app_revoked_tokens` |
 | Messaging & audit | `app_email_templates`, `app_outbox`, `app_audit_events` |
 | Localization | `app_user_locale_preferences` |
+| Shared rate-limit buckets (0006) | `app_rate_limits` — the pre-auth floors' token buckets, one row per key; Better Auth's sign-in limiter uses its own `rateLimit` table |
 | Migration bookkeeping | `app_schema_migrations` |
 | Better Auth (vendor-owned) | `user`, `session`, `account`, `verification` |
 
@@ -344,7 +347,7 @@ The application tables link to Better Auth's `user` table logically via `app_use
 | **Request correlation** | `request-id.server.ts` + audit + Sentry | One `x-request-id` ties a response, its audit rows, and any error event together. |
 | **Uniform list envelope** | `list-query.server.ts` | Admin/v1 list endpoints share pagination, sorting, filtering, and response shape. |
 | **Guard-returns-response** | `requireAdminPermission`, `requireAccountUser` | Guards return either a typed grant or a ready-to-send `NextResponse`, keeping handlers linear. |
-| **Frozen baseline + append-only migrations** | `0001-initial-schema.sql` + numbered `NNNN-*.sql` (today: `0002`, `0003`, `0004`, `0005`) via `run-migrations.ts` | Idempotent baseline is frozen and safe to re-run; further changes are append-only numbered files applied once each and tracked (id + normalised sha256 checksum) in the `app_schema_migrations` ledger under an advisory lock. Email templates live in `locales/` (en base always applied). |
+| **Frozen baseline + append-only migrations** | `0001-initial-schema.sql` + numbered `NNNN-*.sql` (today: `0002`, `0003`, `0004`, `0005`, `0006`) via `run-migrations.ts` | Idempotent baseline is frozen and safe to re-run; further changes are append-only numbered files applied once each and tracked (id + normalised sha256 checksum) in the `app_schema_migrations` ledger under an advisory lock. Email templates live in `locales/` (en base always applied). |
 
 ---
 

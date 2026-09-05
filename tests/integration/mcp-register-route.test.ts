@@ -23,8 +23,12 @@ const auditEvent = vi.fn();
 
 vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
 vi.mock("@/lib/admin/rate-limit.server", () => ({
-  consumeToken: (...a: unknown[]) => consumeToken(...a),
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
+}));
+// The route's floors consume from the SHARED bucket (review #98); the mock
+// keeps the same recording spy so the 429 contract is asserted unchanged.
+vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+  consumeSharedToken: async (...a: unknown[]) => consumeToken(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
 vi.mock("@/lib/client-ip", () => ({ clientIpKey: () => "ip-1" }));

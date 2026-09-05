@@ -20,6 +20,16 @@ const selectFirst = vi.fn();
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
 }));
+// The per-user floor consumes from the SHARED Postgres bucket (review #98);
+// no database here, so it is routed through the in-memory helper, which
+// answers the same 429 envelope.
+vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
+  const { enforceRateLimit } = await import("@/lib/admin/rate-limit.server");
+  return {
+    enforceSharedRateLimit: async (...a: Parameters<typeof enforceRateLimit>) =>
+      enforceRateLimit(...a),
+  };
+});
 vi.mock("@/lib/invitations.server", () => ({
   findValidInvitationByToken: (...a: unknown[]) => findInvitationMock(...a),
   consumeInvitation: (...a: unknown[]) => consumeMock(...a),

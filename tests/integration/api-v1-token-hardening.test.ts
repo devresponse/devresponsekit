@@ -44,6 +44,9 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
   consumeToken: () => ({ ok: true }),
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
 }));
+vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+  consumeSharedToken: async () => ({ ok: true }),
+}));
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
   verifyClientCredentials: (...a: unknown[]) => verifyClientCredentials(...a),
 }));

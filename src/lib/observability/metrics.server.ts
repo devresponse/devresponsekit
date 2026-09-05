@@ -47,6 +47,20 @@ export const rateLimitDenialsTotal = new Counter({
 });
 
 /**
+ * Times the Postgres-backed pre-auth limiter (review #98) could not reach its
+ * table and fell back to the in-process bucket, by scope. Non-zero means the
+ * "deployment-wide" floors are per-instance right now — either the database
+ * is unhealthy or migration 0006 has not been applied; the paired structured
+ * warning in the log stream carries the error.
+ */
+export const rateLimitSharedFallbacksTotal = new Counter({
+  name: "devresponsekit_rate_limit_shared_fallbacks_total",
+  help: "Times the shared (Postgres) pre-auth rate limiter fell back to the in-process bucket, by scope.",
+  labelNames: ["scope"],
+  registers: [registry],
+});
+
+/**
  * Test-only: zero every counter/gauge value between cases.
  *
  * Deliberately does NOT flip `defaultsStarted` back to `false`: the default

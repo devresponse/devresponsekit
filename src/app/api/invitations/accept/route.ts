@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { consumeInvitation, findValidInvitationByToken } from "@/lib/invitations.server";
 import { acceptInvitationSchema } from "@/lib/validation/invitations";
@@ -31,7 +32,11 @@ export const dynamic = "force-dynamic";
  *     invited address — 403 `invitation_email_mismatch`; unknown, expired,
  *     revoked, and consumed tokens all collapse into one 404
  *     `invitation_invalid` so nothing leaks to token guessers.
- *   - Per-user rate bucket on top of the ~190-bit token entropy.
+ *   - Per-user rate bucket on top of the ~190-bit token entropy — consumed
+ *     from the SHARED Postgres bucket (review #98): the session is any
+ *     signed-in account, including a self-registered `pending_approval` one,
+ *     so this is a token-guessing floor, not an authenticated-actor UX
+ *     limit, and an in-memory bucket was per lambda.
  */
 export async function POST(request: NextRequest) {
   const origin = checkTrustedOrigin(request);
@@ -50,7 +55,7 @@ export async function POST(request: NextRequest) {
     return adminErrorResponse("unauthenticated", 401, request);
   }
 
-  const limited = enforceRateLimit(
+  const limited = await enforceSharedRateLimit(
     "invitations.accept",
     session.user.id,
     DEFAULT_ADMIN_MUTATION_LIMIT,

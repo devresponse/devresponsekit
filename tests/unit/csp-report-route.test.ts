@@ -11,6 +11,17 @@ const warnSpy = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/observability/logger.server", () => ({
   logger: { warn: warnSpy, error: vi.fn(), info: vi.fn() },
 }));
+// The flood floor consumes from the SHARED Postgres bucket (review #98); this
+// suite has no database, so the shared primitive is routed through the real
+// in-memory bucket — the per-IP exhaustion below still exercises real
+// token-bucket arithmetic, only the store differs.
+vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
+  const { consumeToken } = await import("@/lib/admin/rate-limit.server");
+  return {
+    consumeSharedToken: async (key: string, options: never, nowMs?: number) =>
+      consumeToken(key, options, nowMs),
+  };
+});
 
 const URL = "https://app.test/api/security/csp-report";
 

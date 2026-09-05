@@ -46,7 +46,7 @@ Register once (step 1), operate per call (steps 2–3), governed throughout. The
 | Token format & validation | EdDSA JWT (short-lived) + `/api/v1/jwks.json` for stateless signature checks | **exists** |
 | Per-tool authorization | `requireApiPermission` = `permission ∩ scope`, plus status/membership gate | **exists** |
 | Operation surface (the tools) | `/api/v1` — 16 paths / 21 ops, already mirrored 1:1 by the `my dr` CLI (external `mycli` repo) | **exists** |
-| Rate limiting | Token-bucket per credential + a global floor (`consumeToken`) | **exists** |
+| Rate limiting | Token-bucket per credential (`consumeToken`, in-process) + a global floor and per-IP bucket on the token endpoint and on registration shared across instances via Postgres (`consumeSharedToken`, review #98) | **exists** |
 | Audit & revocation | `audit_events`; client revoke / secret rotation (outstanding tokens retired via the `cid` claim), service-user revoke | **exists** |
 | Self-registration gating | Per-org sign-up policy (open / invite / domain), status-gated, "assigns no role" default | **template** |
 | MCP transport (Streamable HTTP) | new `/api/mcp` route | **new** |

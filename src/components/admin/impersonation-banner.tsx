@@ -12,9 +12,9 @@ import { StopImpersonationButton } from "./impersonation-banner-client";
  * email (best effort — falls back to the Better Auth id) so the banner shows
  * "you are impersonating target@x.com" with a "Stop impersonating"
  * client-side button (review #166). The original actor's id is only the
- * gate; it is never displayed. Renders
- * `null` when no impersonation is active so callers can drop it into
- * any layout without paying for the markup.
+ * gate; it is never displayed. Renders `null` when no impersonation is
+ * active so callers can drop it into any layout without paying for the
+ * markup.
  *
  * The "stop" action is a small client component — see
  * {@link StopImpersonationButton}. The cookie clearing is owned by the

@@ -8,8 +8,7 @@ import { cn } from "@/lib/utils";
  * secure layout renders the sidebar trigger, brand, application/organization
  * switchers, theme + locale toggles and sign-out; the public layout renders
  * the brand, locale switcher and sign-in/sign-up links (review #179).
- * Server-compatible by default;
- * interactive children opt-in to "use client".
+ * Server-compatible by default; interactive children opt-in to "use client".
  *
  * Theme: the bar is PERMANENTLY DARK. The `dark` class scopes the app's
  * dark palette (globals.css `.dark { --… }`) onto the header subtree, so

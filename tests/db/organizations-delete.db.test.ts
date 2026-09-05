@@ -9,7 +9,7 @@ import { db, pgPool } from "@/db/database";
  * proving the subtle interaction the unit/integration mocks can't reach:
  *
  *   1. Deleting an org that has audit history SUCCEEDS — the audit row survives
- *      with a null organization_id (ON DELETE SET NULL), and the 0004
+ *      with a null organization_id (ON DELETE SET NULL), and the 0005
  *      append-only trigger PERMITS that exact tombstone UPDATE.
  *   2. Deleting an org that still owns a role raises a FK violation (the row
  *      the route catches and maps to a 409 `organization_in_use`).

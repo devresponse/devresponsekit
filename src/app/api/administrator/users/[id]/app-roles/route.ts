@@ -142,6 +142,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (!canAccessOrg(guard.access, role.organization_id)) {
     return adminErrorResponse("role_not_found", 404, request);
   }
+  // Review #218: an org-scoped role may only be assigned INSIDE its own org —
+  // for EVERY caller. The scope checks above let a SUPERADMIN (who can access
+  // every org) pair an org-B role with an org-A membership; that row is now
+  // unrepresentable (composite FK + trigger in migration 0005), so refuse it
+  // here with a specific 409 instead of surfacing the DB error. A global role
+  // (organization_id null) is assignable in any org.
+  if (role.organization_id !== null && role.organization_id !== parsed.data.organizationId) {
+    return adminErrorResponse("role_organization_mismatch", 409, request);
+  }
   // Privilege-escalation guard (AUTHZ-3): a non-SUPERADMIN may assign only a
   // role whose conferred permissions are a subset of their own — otherwise
   // they could grant a user (including themselves) authority they lack. This

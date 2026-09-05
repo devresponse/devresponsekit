@@ -297,6 +297,55 @@ describe("POST /api/administrator/enterprise-apps", () => {
     expect(await res.json()).toMatchObject({ error: "id_taken" });
   });
 
+  it("maps a 23505 on the sso_audience UNIQUE index to 409 audience_taken, not id_taken (review #15)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    // The pre-check saw no owner (a concurrent create won the race); the
+    // index in migration 0005 is the second line of defence.
+    selectFirst.mockResolvedValue(null);
+    insertExecute.mockRejectedValue(
+      Object.assign(new Error('duplicate key value violates unique constraint "idx_…"'), {
+        code: "23505",
+        constraint: "idx_app_enterprise_applications_sso_audience",
+      }),
+    );
+    const res = await POST(
+      jsonReq({
+        id: "docs",
+        label: "Docs",
+        origin: "https://docs.example.com",
+        subdomain: "docs",
+        sso_audience: "devresponse-app:victim",
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "audience_taken" });
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("still maps a 23505 on the primary key to id_taken", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue(null);
+    insertExecute.mockRejectedValue(
+      Object.assign(new Error("duplicate key value violates unique constraint"), {
+        code: "23505",
+        constraint: "app_enterprise_applications_pkey",
+      }),
+    );
+    const res = await POST(
+      jsonReq({
+        id: "docs",
+        label: "Docs",
+        origin: "https://docs.example.com",
+        subdomain: "docs",
+        sso_audience: "audience",
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "id_taken" });
+  });
+
   it("returns 201 on successful creation and writes an audit row", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
@@ -420,6 +469,26 @@ describe("PATCH /api/administrator/enterprise-apps/:id", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.app.updated", outcome: "success" }),
     );
+  });
+
+  it("maps a 23505 from the sso_audience UNIQUE index on UPDATE to 409 audience_taken (review #15)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst
+      .mockResolvedValueOnce({ id: "docs", organization_id: null }) // existing row
+      .mockResolvedValueOnce(null); // pre-check: nobody owns it (yet)
+    updateExecute.mockRejectedValue(
+      Object.assign(new Error("duplicate key value violates unique constraint"), {
+        code: "23505",
+        constraint: "idx_app_enterprise_applications_sso_audience",
+      }),
+    );
+    const res = await PATCH(idReq("docs", { sso_audience: "devresponse-app:victim" }), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "audience_taken" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("returns 409 audience_taken when moving sso_audience onto another app's value (review #15)", async () => {

@@ -254,13 +254,16 @@ describe("seedDefaultAdminUser (DB-backed, review #18)", () => {
     const email = `blocked-${RUN}@${EMAIL_DOMAIN}`;
     await run(email);
     const { appUser } = await snapshot(email);
-    // What the admin block / membership-deactivate paths write.
+    // What the admin block path writes (user-actions.server.ts / admin-status
+    // .server.ts): user AND membership both go to `blocked`. Every production
+    // path writes `blocked`; `deactivated` is not a membership status at all
+    // (MEMBERSHIP_STATUS_VALUES), and 0005's CHECK now rejects it.
     await pgPool.query(
       `update app_users set status = 'blocked', status_reason = 'abuse' where id = $1`,
       [appUser!.id],
     );
     await pgPool.query(
-      `update app_organization_memberships set status = 'deactivated'
+      `update app_organization_memberships set status = 'blocked'
         where organization_id = $1 and app_user_id = $2`,
       [organizationId, appUser!.id],
     );
@@ -272,7 +275,7 @@ describe("seedDefaultAdminUser (DB-backed, review #18)", () => {
     const after = await snapshot(email);
     expect(after).toEqual(before);
     expect(after.appUser).toMatchObject({ status: "blocked", status_reason: "abuse" });
-    expect(after.membership).toMatchObject({ status: "deactivated" });
+    expect(after.membership).toMatchObject({ status: "blocked" });
     expect(logs.join("\n")).toContain(`admin ${email} left as configured (status=blocked)`);
   });
 
@@ -314,9 +317,11 @@ describe("seedDefaultAdminUser (DB-backed, review #18)", () => {
   it("SEED_ADMIN_ADOPT_EXISTING=1: confers the grants but leaves emailVerified and status as found", async () => {
     const email = `adopt-${RUN}@${EMAIL_DOMAIN}`;
     const authUser = await insertAuthUser({ email, name: "Owner", emailVerified: false });
+    // `pending_approval` is the real not-yet-active status (APP_USER_STATUS_VALUES,
+    // pinned by 0005's CHECK); the previous `pending_verification` never existed.
     await pgPool.query(
       `insert into app_users (better_auth_user_id, primary_email, display_name, status, status_reason)
-       values ($1, $2, $3, 'pending_verification', 'awaiting email')`,
+       values ($1, $2, $3, 'pending_approval', 'awaiting email')`,
       [authUser.id, email, "Owner"],
     );
 
@@ -326,7 +331,7 @@ describe("seedDefaultAdminUser (DB-backed, review #18)", () => {
     const { user, appUser, membership, roles } = await snapshot(email);
     expect(user).toMatchObject({ emailVerified: false, role: "admin", name: "Owner" });
     expect(appUser).toMatchObject({
-      status: "pending_verification",
+      status: "pending_approval",
       status_reason: "awaiting email",
       display_name: "Owner",
     });

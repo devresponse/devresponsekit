@@ -1,3 +1,5 @@
+import type { AppStatus } from "@/lib/admin/enterprise-apps";
+
 /**
  * Navigation menu envelope and item types.
  *
@@ -30,6 +32,11 @@ export interface EnterpriseApplicationMenuItem {
   subdomain: string;
   origin: string;
   ssoLaunchUrl: string;
-  status: "available" | "degraded" | "offline";
+  /**
+   * Derived from `APP_STATUS_VALUES` — ONE state model (review #63). The
+   * switcher only ever lists `available` apps (launch rejects anything else),
+   * and the column's CHECK (migration 0005) admits `available` | `disabled`.
+   */
+  status: AppStatus;
   active?: boolean;
 }

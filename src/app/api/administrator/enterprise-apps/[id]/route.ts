@@ -9,7 +9,10 @@ import {
   isAllowedEnterpriseOrigin,
   isHttpsOrigin,
 } from "@/lib/admin/enterprise-apps.server";
-import { isSsoAudienceTaken } from "@/lib/admin/enterprise-apps-audience.server";
+import {
+  isSsoAudienceTaken,
+  isSsoAudienceUniqueViolation,
+} from "@/lib/admin/enterprise-apps-audience.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
@@ -151,6 +154,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     await db.updateTable("app_enterprise_applications").set(updates).where("id", "=", id).execute();
   } catch (err) {
+    // Review #15: the UNIQUE index on sso_audience (migration 0005) is the
+    // second line of defence behind the pre-check above — same 409 code.
+    if (isSsoAudienceUniqueViolation(err)) {
+      return adminErrorResponse("audience_taken", 409, request);
+    }
     const message = err instanceof Error ? err.message : "unknown";
     if (/foreign key/i.test(message)) {
       return adminErrorResponse("organization_not_found", 409, request);

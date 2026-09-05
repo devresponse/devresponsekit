@@ -70,10 +70,14 @@ export async function loadApplicationsMenu(
   access: UserAccessContext,
   locale: string,
 ): Promise<NavigationMenuResponse<EnterpriseApplicationMenuItem>> {
+  // Review #63: ONE state model. `degraded` was listed here but rejected by
+  // launch (`APP_STATUS_VALUES` never contained it); the column's CHECK
+  // (migration 0005) now admits only `available` | `disabled`, and the
+  // switcher shows exactly what launch will accept.
   const rows = await db
     .selectFrom("app_enterprise_applications")
     .selectAll()
-    .where("status", "in", ["available", "degraded"])
+    .where("status", "=", "available")
     .where((eb) =>
       eb.or([
         eb("organization_id", "is", null),
@@ -93,7 +97,8 @@ export async function loadApplicationsMenu(
     subdomain: row.subdomain,
     origin: row.origin,
     ssoLaunchUrl: `/api/sso/launch?applicationId=${encodeURIComponent(row.id)}&locale=${encodeURIComponent(locale)}`,
-    status: row.status as EnterpriseApplicationMenuItem["status"],
+    // The `=` filter above guarantees the literal; no cast needed (review #63).
+    status: "available",
   }));
 
   return {

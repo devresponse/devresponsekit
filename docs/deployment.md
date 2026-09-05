@@ -94,7 +94,7 @@ Push to `main` (or run the workflow from the Actions tab). After it completes, v
 - [ ] `GET https://<domain>/` → the landing page returns **200**.
 - [ ] Sign in with the seed admin from §2; the session persists.
 - [ ] `GET https://<domain>/api/internal/outbox-drain` **without** the bearer header → **401** (confirms the cron endpoint is fail-closed).
-- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `000N-*.sql` files (`0001-initial-schema.sql`, `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql`, …), the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
+- [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `000N-*.sql` files (`0001-initial-schema.sql`, `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql`, `0005-integrity-constraints.sql`, …), the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.
 - [ ] If Sentry is configured, trigger a test error and confirm it lands ([Observability](./observability.md)).
 - [ ] If `METRICS_TOKEN` is set, `GET /api/metrics` with `Authorization: Bearer <token>` returns Prometheus text.
 
@@ -144,6 +144,30 @@ A production-ready multi-stage `Dockerfile` (built from the Next.js standalone o
 ## 7. CI
 
 CI is **[`.github/workflows/`](../.github/workflows/)** (source of truth). [`ci.yml`](../.github/workflows/ci.yml) runs on push + pull_request and validates quality and behavior — typecheck, lint, format, build, tests + coverage gate, DB-backed integration tests, Playwright e2e + accessibility, a `pnpm audit` hard gate, SDK/schema/doc-link drift checks — but does **not** itself deploy: [`deploy.yml`](../.github/workflows/deploy.yml) fires only after this workflow **succeeds** on `main` (§1). Separate workflows run Trivy, CodeQL, gitleaks, and an advisory Stryker mutation-testing pass on the security core (`mutation.yml`). See [Testing](./testing.md).
+
+---
+
+## 8. Least-privilege runtime role (optional, recommended)
+
+By default the application connects as the same role that runs migrations and owns every table (Neon's `neondb_owner`, the local `devresponse`). That role can do anything to the schema — including deleting audit rows — so the audit log's append-only trigger is a guard against accidents, not a privilege boundary. Migration `0005-integrity-constraints.sql` (review #83) splits the two:
+
+- **Owner / migration role** — whatever `DATABASE_URL` you run `pnpm db:app:migrate` / `db:provision` with. Owns the tables, the trigger and the `SECURITY DEFINER` retention function `app_audit_events_prune(days, batch)`.
+- **Runtime role `<DB_SCHEMA>_runtime`** (`auth_runtime` by default) — created by 0005 as `NOLOGIN` with **no password**, holding `USAGE` on the schema, `SELECT/INSERT/UPDATE/DELETE` on every table **except** `UPDATE/DELETE/TRUNCATE` on `app_audit_events` (`INSERT`/`SELECT` only), and `EXECUTE` on the retention function. Default privileges are set so tables a later migration creates are covered automatically. The append-only trigger permits a `DELETE` only when the **effective** role is the table owner _and_ the transaction-local `app.audit_retention` marker is on — both hold inside that function whoever calls it; the owner half never holds for the runtime role — so a stolen runtime credential cannot purge or rewrite audit history even by setting the marker itself. Until you switch, the app connects as the owner and a session that sets the marker _can_ delete: the trigger guards against accidents, the role switch is the privilege boundary. The function itself clamps the requested window to a **30-day floor** and each batch to 10 000 rows, so even through its one sanctioned path the runtime credential cannot purge recent history.
+
+Nothing changes until you switch the app's connection string. To adopt it, once, against the **direct** endpoint as the owner role:
+
+```sql
+alter role auth_runtime login password '<a strong secret>';
+-- Only if the runtime uses the POOLED endpoint (§5): the pooler drops the
+-- startup search_path, so pin it on the role as well.
+alter role auth_runtime set search_path = "auth", public;
+```
+
+Then set the **runtime** `DATABASE_URL` (Vercel → Environment Variables, or the container's env) to the same host/database with `auth_runtime` as the user, redeploy, and verify: sign in, open an admin page, and confirm `select count(*) from auth.app_audit_events` keeps growing. Keep the owner role's connection string for `pnpm db:app:migrate` / `db:provision` / `db:seed` / `db:reset` (the deploy pipeline and CI keep using it). `pnpm db:prune` works under either role — the retention job goes through the definer function.
+
+If the migrating role lacks `CREATEROLE` (some managed providers), 0005 prints a `NOTICE` with the manual steps instead of failing: create the role yourself (`create role auth_runtime nologin;`) and re-run `pnpm db:app:migrate` — the grant block is idempotent and runs on any later pass. (Neon's `neondb_owner` can create roles.)
+
+**Ledger checksums (review #86).** `app_schema_migrations` now records a sha256 `checksum` per applied file; the runner refuses to proceed if an applied file's hash differs from the ledger, printing the id and both hashes. Rows ledgered before this column existed are backfilled on the next run (logged as `[migrate] backfilled checksum for …`). A deliberate comment-only fix to a frozen file therefore needs the pinned hash in `tests/unit/migration-checksums.test.ts` AND the ledger row in every migrated database updated on purpose — the error message prints the exact `update … set checksum = …` statement. The runner also holds `pg_advisory_lock(hashtext('app_schema_migrations'))` for the whole run (review #85), so a redeploy racing a manual migrate serialises instead of colliding.
 
 ---
 

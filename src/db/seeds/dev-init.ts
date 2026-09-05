@@ -507,11 +507,12 @@ async function ensureGroups(pool: Pool, orgIdBySlug: Map<string, string>): Promi
     ).rows[0]?.id;
     if (!groupId) throw new Error(`group ${group.key} missing after insert`);
 
-    // Role the group confers (same org as the group — the route layer's invariant).
+    // Role the group confers (same org as the group — an invariant the
+    // composite FKs enforce since migration 0005, review #218).
     const roleId = await roleIdFor(pool, orgId, group.roleKey);
     await pool.query(
-      `insert into app_group_roles (group_id, role_id) values ($1, $2) on conflict do nothing`,
-      [groupId, roleId],
+      `insert into app_group_roles (group_id, role_id, organization_id) values ($1, $2, $3) on conflict do nothing`,
+      [groupId, roleId, orgId],
     );
 
     for (const email of group.memberEmails) {

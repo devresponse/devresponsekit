@@ -8,12 +8,13 @@ import {
   SUPERADMIN_PERMISSION,
   SUPERUSER_PERMISSIONS,
 } from "@/lib/admin/permissions";
+import { APP_USER_STATUS_VALUES, MEMBERSHIP_STATUS_VALUES } from "@/lib/status-values";
 
-/** Possible application-level user statuses. */
-export type AppUserStatus = "active" | "pending_approval" | "blocked" | "suspended" | "deactivated";
+/** Possible application-level user statuses (mirrored by a DB CHECK, review #217). */
+export type AppUserStatus = (typeof APP_USER_STATUS_VALUES)[number];
 
-/** Possible membership statuses inside an organization. */
-export type MembershipStatus = "active" | "pending_approval" | "blocked" | "suspended";
+/** Possible membership statuses inside an organization (mirrored by a DB CHECK, review #217). */
+export type MembershipStatus = (typeof MEMBERSHIP_STATUS_VALUES)[number];
 
 export interface UserAccessContext {
   appUserId: string | null;
@@ -29,19 +30,8 @@ export interface UserAccessContext {
 const BLOCKED_USER_STATUSES = new Set<AppUserStatus>(["blocked", "suspended", "deactivated"]);
 
 /** Every recognized app/membership status, for boundary validation. */
-const USER_STATUSES = new Set<AppUserStatus>([
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-  "deactivated",
-]);
-const MEMBERSHIP_STATUSES = new Set<MembershipStatus>([
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-]);
+const USER_STATUSES = new Set<AppUserStatus>(APP_USER_STATUS_VALUES);
+const MEMBERSHIP_STATUSES = new Set<MembershipStatus>(MEMBERSHIP_STATUS_VALUES);
 
 /**
  * Coerce a raw DB status to {@link AppUserStatus}, failing CLOSED on an

@@ -1262,6 +1262,7 @@
     "rate_limited": "リクエストが多すぎます。ペースを落としてください。",
     "role_in_use": "このロールは使用中です。",
     "role_not_found": "ロールが見つかりません。",
+    "role_organization_mismatch": "このロールは別の組織に属しています。",
     "slug_taken": "このスラッグはすでに使用されています。",
     "soft_delete_failed": "ソフト削除に失敗しました。もう一度お試しください。",
     "unauthenticated": "サインインが必要です。",

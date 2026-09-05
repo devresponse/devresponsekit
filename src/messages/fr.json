@@ -1262,6 +1262,7 @@
     "rate_limited": "Trop de requêtes. Ralentissez s’il vous plaît.",
     "role_in_use": "Ce rôle est utilisé.",
     "role_not_found": "Rôle introuvable.",
+    "role_organization_mismatch": "Ce rôle appartient à une autre organisation.",
     "slug_taken": "Ce slug est déjà utilisé.",
     "soft_delete_failed": "La suppression douce a échoué ; réessayez.",
     "unauthenticated": "Connexion requise.",

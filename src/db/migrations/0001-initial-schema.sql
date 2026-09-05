@@ -683,19 +683,23 @@ create index if not exists idx_app_outbox_due
 -- Audit log: append-only enforcement
 -- ---------------------------------------------------------------------------
 --
--- B3: make app_audit_events tamper-evident. The audit log is a compliance
--- record, so the application database role must not be able to silently UPDATE
--- or DELETE rows. A row-level BEFORE trigger raises on any UPDATE/DELETE,
--- enforcing append-only semantics at the database — independent of any
--- application-layer discipline.
+-- B3: make app_audit_events append-only by trigger. A row-level BEFORE trigger
+-- raises on any UPDATE/DELETE, so a stray UPDATE or an ad-hoc DELETE issued
+-- through the application is rejected; INSERTs are unaffected.
 --
--- The ONE sanctioned exception is the D3 retention job
--- (src/lib/retention.server.ts), which sets `app.audit_retention = 'on'` (via
--- SET LOCAL, transaction-scoped) immediately before pruning rows older than the
--- retention window. So aged rows can still be reaped, but only by that explicit
--- path — a stray UPDATE or an ad-hoc DELETE is rejected. INSERTs are unaffected.
--- The two changes are order-independent: until this trigger exists, the D3 flag
--- is a harmless no-op.
+-- What this baseline version does NOT provide (review #83): the escape hatch
+-- is the custom GUC `app.audit_retention`, which any session may SET, and the
+-- application connects as the role that OWNS the table — so this trigger is a
+-- guard against accidental mutation, not a privilege boundary. Migration
+-- 0005-integrity-constraints.sql replaces the function: a DELETE is permitted
+-- only when the EFFECTIVE role is the table owner AND the marker is on — both
+-- hold inside the SECURITY DEFINER `app_audit_events_prune()` function (the
+-- retention job's path) whoever calls it, and neither can hold for the
+-- separate least-privilege runtime role, which holds INSERT/SELECT only. A
+-- session connected AS THE OWNER can still set the marker and delete; the
+-- boundary is the role split, not the trigger. The retention job
+-- (src/lib/retention.server.ts) calls that function; the GUC-only bypass
+-- below is what 0005 supersedes.
 
 create or replace function app_audit_events_block_mutation()
   returns trigger

@@ -1262,6 +1262,7 @@
     "rate_limited": "Too many requests. Please slow down.",
     "role_in_use": "This role is in use.",
     "role_not_found": "Role not found.",
+    "role_organization_mismatch": "This role belongs to a different organization.",
     "slug_taken": "This slug is already in use.",
     "soft_delete_failed": "Soft delete failed; please retry.",
     "unauthenticated": "Sign-in is required.",

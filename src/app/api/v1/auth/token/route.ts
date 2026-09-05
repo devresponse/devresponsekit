@@ -3,7 +3,9 @@ import { auditEvent } from "@/lib/audit.server";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { getServerEnv } from "@/lib/env";
 import { consumeToken, rateLimitKey } from "@/lib/admin/rate-limit.server";
+import type { RateLimitResult } from "@/lib/admin/rate-limit.server";
 import { clientIpKey } from "@/lib/client-ip";
+import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
 import { verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
@@ -26,14 +28,41 @@ export const dynamic = "force-dynamic";
  *
  * Optional `scope` down-scopes the token to a subset of the credential's
  * scopes. The endpoint is itself unauthenticated (the credential IS the
- * auth) and rate-limited per client/IP. Sets `Cache-Control: no-store`.
+ * auth) and rate-limited per trusted client IP, per VERIFIED credential,
+ * and deployment-wide. Sets `Cache-Control: no-store`.
  */
-const TOKEN_LIMIT = { capacity: 10, refillPerSec: 0.5 };
+// Pre-auth bucket, keyed on the trusted client IP (P2-4). Never keyed on a
+// client-supplied value: `client_id` is public and unauthenticated, so a
+// client_id-keyed pre-auth bucket let anyone who knew a victim's id drain it
+// from any network, let an attacker escape per-IP throttling by rotating
+// ids, and turned attacker-chosen strings into limiter keys (review #11).
+const TOKEN_IP_LIMIT = { capacity: 10, refillPerSec: 0.5 };
+// Post-auth bucket, keyed on the credential ONLY AFTER it verified. Gives a
+// fair per-credential share behind a shared egress IP without letting an
+// unverified request allocate a bucket for an id it does not hold.
+const TOKEN_CREDENTIAL_LIMIT = { capacity: 10, refillPerSec: 0.5 };
 // P2-4: a coarse GLOBAL floor independent of any client-supplied value, so
-// a distributed credential-stuffing run rotating client_ids / spoofing XFF
-// still hits a deployment-wide ceiling (~5 req/s sustained, 300 burst).
+// a distributed credential-stuffing run spoofing XFF still hits a
+// deployment-wide ceiling (~5 req/s sustained, 300 burst).
 const TOKEN_GLOBAL_LIMIT = { capacity: 300, refillPerSec: 5 };
 const NO_STORE = { "Cache-Control": "no-store" };
+
+/**
+ * Problem+json 429 for a denied limiter check. Counts the denial for the
+ * `/api/metrics` scrape (the route calls `consumeToken` directly because
+ * `enforceRateLimit` speaks the AdminError envelope, not problem+json) and
+ * carries the bucket's real `Retry-After`.
+ */
+function rateLimitedResponse(
+  request: NextRequest,
+  result: Extract<RateLimitResult, { ok: false }>,
+) {
+  rateLimitDenialsTotal.inc({ scope: "api.token" });
+  return problemResponse("rate_limited", 429, request, {
+    extra: { retryAfter: result.retryAfterSeconds },
+    headers: { ...NO_STORE, "Retry-After": String(result.retryAfterSeconds) },
+  });
+}
 
 async function parseBody(request: NextRequest): Promise<Record<string, string>> {
   const contentType = request.headers.get("content-type") ?? "";
@@ -61,20 +90,17 @@ export async function POST(request: NextRequest) {
   const body = await parseBody(request);
   const grantType = body.grant_type;
 
-  // Rate-limit before any crypto / DB work. Two layers: a per-credential/IP
-  // bucket (keyed on the trusted client IP, P2-4) AND a global floor that a
-  // spoofed XFF / rotating client_id cannot escape.
-  if (!consumeToken(rateLimitKey("api.token", "__global__"), TOKEN_GLOBAL_LIMIT).ok) {
-    return problemResponse("rate_limited", 429, request, {
-      headers: { ...NO_STORE, "Retry-After": "2" },
-    });
-  }
-  const limiterId = body.client_id ?? clientIpKey(request.headers);
-  if (!consumeToken(rateLimitKey("api.token", limiterId), TOKEN_LIMIT).ok) {
-    return problemResponse("rate_limited", 429, request, {
-      headers: { ...NO_STORE, "Retry-After": "2" },
-    });
-  }
+  // Rate-limit before any crypto / DB work. Two pre-auth layers: a global
+  // floor that a spoofed XFF cannot escape, AND a per-IP bucket keyed on the
+  // trusted proxy hop (P2-4). Nothing the client sends in the body reaches a
+  // limiter key before the credential verifies (review #11).
+  const globalCheck = consumeToken(rateLimitKey("api.token", "__global__"), TOKEN_GLOBAL_LIMIT);
+  if (!globalCheck.ok) return rateLimitedResponse(request, globalCheck);
+  const ipCheck = consumeToken(
+    rateLimitKey("api.token", clientIpKey(request.headers)),
+    TOKEN_IP_LIMIT,
+  );
+  if (!ipCheck.ok) return rateLimitedResponse(request, ipCheck);
 
   let principalBetterAuthUserId: string;
   let credentialScopes: string[];
@@ -110,6 +136,16 @@ export async function POST(request: NextRequest) {
   } else {
     return problemResponse("unsupported_grant_type", 400, request, { headers: NO_STORE });
   }
+
+  // Per-credential bucket, allocated only now that the credential verified:
+  // a wrong-secret request never touches it, so a remote party holding only
+  // a victim's public client_id cannot drain the victim's budget, and
+  // unknown ids never create limiter entries (review #11).
+  const credentialCheck = consumeToken(
+    rateLimitKey("api.token.credential", credentialLabel),
+    TOKEN_CREDENTIAL_LIMIT,
+  );
+  if (!credentialCheck.ok) return rateLimitedResponse(request, credentialCheck);
 
   // The principal must still be an active member OF THE CREDENTIAL'S BOUND
   // ORG — evaluate the issuance gate against that org, not the active_org

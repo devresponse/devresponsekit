@@ -546,12 +546,27 @@ describe("#83 — audit table: append-only trigger, SECURITY DEFINER prune, runt
       // The 2-day-old row survived a request for a 1-day window; the
       // 101-year-old row is gone, proving the function did run and delete.
       expect(rows.map((r) => r.id)).toEqual([recent.id]);
-      // The batch cap: asking for a million rows per call is honoured as at
-      // most 10000 — the function's own limit, not the caller's.
+      // The batch cap (`c_max_batch`), proven rather than assumed (must-fix
+      // review of #411): after the drain above NOTHING older than the floor
+      // is left, so a bare `prune(36500, 1000000) <= 10000` would be true
+      // even with the cap removed. Seed 10001 century-old probes here — the
+      // runtime role may INSERT, and the transaction rolls back below — and
+      // demand that one call with a million-row budget deletes EXACTLY the
+      // cap, leaving exactly one for the next call.
+      await client.query(
+        `insert into app_audit_events (event_type, outcome, created_at)
+         select $1, 'success', now() - make_interval(years => 101)
+           from generate_series(1, 10001)`,
+        [`${PREFIX}probe`],
+      );
       const cap = await client.query<{ n: number }>(
         `select app_audit_events_prune(36500, 1000000) as n`,
       );
-      expect(Number(cap.rows[0]!.n)).toBeLessThanOrEqual(10000);
+      expect(Number(cap.rows[0]!.n)).toBe(10000);
+      const rest = await client.query<{ n: number }>(
+        `select app_audit_events_prune(36500, 1000000) as n`,
+      );
+      expect(Number(rest.rows[0]!.n)).toBe(1);
     } finally {
       await client.query("rollback");
       client.release();

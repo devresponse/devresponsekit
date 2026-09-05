@@ -9,9 +9,11 @@ import { pruneExpiredRevocations } from "@/lib/api-auth/revocation.server";
  * Run it on a schedule via `pnpm db:prune` (cron / Kubernetes CronJob / init
  * job) — the same "no new scheduler infra" approach as the outbox drainer.
  *
- *   - `app_revoked_tokens`  → rows are pruned the moment they expire (also
- *     done opportunistically on each `revokeJti`, since that is the only
- *     writer — see revocation.server.ts).
+ *   - `app_revoked_tokens`  → rows are pruned the moment they expire. The
+ *     table has had NO writer since review #43 retired the `jti` denylist in
+ *     favour of the per-request credential check (see revocation.server.ts),
+ *     so this scheduled prune is the only thing that touches it until a
+ *     later core migration drops the table.
  *   - `app_audit_events`    → retained AUDIT_RETENTION_DAYS (default 365);
  *     a compliance record, so the window is long and configurable. Deleted in
  *     BATCHES (audit #21) so a backlog can't stall against statement_timeout.

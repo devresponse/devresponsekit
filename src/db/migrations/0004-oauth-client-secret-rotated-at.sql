@@ -12,6 +12,18 @@
 -- refuses a token whose `iat` precedes it. Null (never rotated) means every
 -- token from an active client is honoured, so existing rows need no backfill.
 --
--- Idempotent: `add column if not exists`.
+-- Idempotent: `add column if not exists`. Nullable, no default, no backfill:
+-- a metadata-only lock, safe to run against a live database.
+--
+-- LANDING ORDER (operator gate): apply this file to production BEFORE the
+-- branch that ships it is merged — not "with" the deploy. Production deploys
+-- from every push to `main` through Vercel's git integration and no automated
+-- migrate step runs ahead of it (docs/deployment.md), while the resolver reads
+-- `secret_rotated_at` on EVERY request bearing an OAuth-client JWT and
+-- `rotateOauthClientSecret` writes it. On a database without the column those
+-- reads fail closed as 500s (an outage for every client_credentials caller)
+-- and admin secret rotation 500s. Run `pnpm db:app:migrate` against the
+-- production DATABASE_URL, confirm `secret_rotated_at` exists on
+-- `app_oauth_clients`, then merge.
 
 alter table app_oauth_clients add column if not exists secret_rotated_at timestamptz;

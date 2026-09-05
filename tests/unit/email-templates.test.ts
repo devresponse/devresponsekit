@@ -5,6 +5,7 @@ import {
   getDefaultEmailTemplate,
   renderEmailTemplate,
 } from "@/lib/email/templates";
+import { defaultLocale, locales } from "@/config/i18n-config";
 
 /**
  * Unit tests for the email template catalog + renderer (specs.md §35).
@@ -83,7 +84,10 @@ describe("DEFAULT_EMAIL_TEMPLATES", () => {
 });
 
 describe("localized templates (P3-8)", () => {
-  const LOCALES = ["fr", "es", "uk", "pt", "zh", "hi", "ja"] as const;
+  // Derived from the supported-locale list rather than hard-coded (review
+  // #110): `translations` is an untyped Record, so a locale added to
+  // i18n-config.ts with no email translations would otherwise pass silently.
+  const LOCALES = locales.filter((l) => l !== defaultLocale);
 
   it("overlays the requested locale's content, falling back to en for unknown locales", () => {
     const en = getDefaultEmailTemplate("password_reset", "en");

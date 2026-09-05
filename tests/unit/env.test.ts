@@ -25,15 +25,15 @@ describe("getServerEnv", () => {
 
   it("throws with invalid_keys list when a required variable is missing", async () => {
     // Re-import the module fresh so the internal cache is empty.
-    const original = process.env.SSO_HANDOFF_JWT_SECRET;
-    delete process.env.SSO_HANDOFF_JWT_SECRET;
+    const original = process.env.SSO_HANDOFF_ISSUER;
+    delete process.env.SSO_HANDOFF_ISSUER;
     // Use a query-string suffix on the import specifier so vitest treats
     // it as a distinct module and does not return the already-cached one.
     const fresh = (await import("@/lib/env" + "?fresh")) as typeof EnvModule;
     try {
-      expect(() => fresh.getServerEnv()).toThrow(/SSO_HANDOFF_JWT_SECRET/);
+      expect(() => fresh.getServerEnv()).toThrow(/SSO_HANDOFF_ISSUER/);
     } finally {
-      process.env.SSO_HANDOFF_JWT_SECRET = original;
+      process.env.SSO_HANDOFF_ISSUER = original;
     }
   });
 
@@ -66,7 +66,9 @@ const TOUCHED_KEYS = [
   "SKIP_ENV_VALIDATION",
   "NEXT_PHASE",
   "BETTER_AUTH_SECRET",
-  "SSO_HANDOFF_JWT_SECRET",
+  "SSO_HANDOFF_PRIVATE_KEY",
+  "SSO_HANDOFF_PREVIOUS_PRIVATE_KEY",
+  "API_JWT_PRIVATE_KEY",
   "PGPOOL_MAX",
   "CRON_SECRET",
   "METRICS_TOKEN",
@@ -290,6 +292,14 @@ describe("SKIP_ENV_VALIDATION build-phase escape (OPS-6)", () => {
 describe("signing-secret hygiene (audit #12/#22)", () => {
   const VALID = "a".repeat(40);
   const VALID2 = "b".repeat(40);
+  // A syntactically valid Ed25519 private JWK shape (NOT a real key — the
+  // schema checks members, not the curve point).
+  const ED25519_JWK = JSON.stringify({
+    kty: "OKP",
+    crv: "Ed25519",
+    x: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+    d: "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A",
+  });
 
   it("rejects a BETTER_AUTH_SECRET shorter than 32 chars", async () => {
     const { mod, restore } = await loadEnvWith({ BETTER_AUTH_SECRET: "short-secret" });
@@ -300,25 +310,80 @@ describe("signing-secret hygiene (audit #12/#22)", () => {
     }
   });
 
-  it("rejects reusing one value for both signing secrets", async () => {
+  it("accepts a >=32-char BETTER_AUTH_SECRET with no SSO signing key (SSO is optional, review #5)", async () => {
     const { mod, restore } = await loadEnvWith({
       BETTER_AUTH_SECRET: VALID,
-      SSO_HANDOFF_JWT_SECRET: VALID,
+      SSO_HANDOFF_PRIVATE_KEY: undefined,
     });
     try {
-      expect(() => mod.getServerEnv()).toThrow(/SSO_HANDOFF_JWT_SECRET/);
+      expect(mod.getServerEnv().SSO_HANDOFF_PRIVATE_KEY).toBeUndefined();
     } finally {
       restore();
     }
   });
 
-  it("accepts distinct >=32-char secrets", async () => {
+  it("treats an empty SSO_HANDOFF_PRIVATE_KEY as unset", async () => {
     const { mod, restore } = await loadEnvWith({
       BETTER_AUTH_SECRET: VALID,
-      SSO_HANDOFF_JWT_SECRET: VALID2,
+      SSO_HANDOFF_PRIVATE_KEY: "",
     });
     try {
-      expect(() => mod.getServerEnv()).not.toThrow();
+      expect(mod.getServerEnv().SSO_HANDOFF_PRIVATE_KEY).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it("accepts a well-formed Ed25519 private JWK as SSO_HANDOFF_PRIVATE_KEY", async () => {
+    const { mod, restore } = await loadEnvWith({
+      BETTER_AUTH_SECRET: VALID,
+      SSO_HANDOFF_PRIVATE_KEY: ED25519_JWK,
+    });
+    try {
+      expect(mod.getServerEnv().SSO_HANDOFF_PRIVATE_KEY).toBe(ED25519_JWK);
+    } finally {
+      restore();
+    }
+  });
+
+  it.each([
+    ["not JSON", VALID2],
+    ["a symmetric-looking secret", JSON.stringify({ kty: "oct", k: VALID2 })],
+    ["a public-only JWK (no d)", JSON.stringify({ kty: "OKP", crv: "Ed25519", x: "abc" })],
+    ["the wrong curve", JSON.stringify({ kty: "OKP", crv: "X25519", x: "abc", d: "def" })],
+  ])("fails at boot on a malformed SSO_HANDOFF_PRIVATE_KEY (%s)", async (_label, raw) => {
+    const { mod, restore } = await loadEnvWith({
+      BETTER_AUTH_SECRET: VALID,
+      SSO_HANDOFF_PRIVATE_KEY: raw,
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/SSO_HANDOFF_PRIVATE_KEY/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("fails at boot on a malformed SSO_HANDOFF_PREVIOUS_PRIVATE_KEY", async () => {
+    const { mod, restore } = await loadEnvWith({
+      BETTER_AUTH_SECRET: VALID,
+      SSO_HANDOFF_PRIVATE_KEY: ED25519_JWK,
+      SSO_HANDOFF_PREVIOUS_PRIVATE_KEY: "{}",
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/SSO_HANDOFF_PREVIOUS_PRIVATE_KEY/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("rejects one keypair doing double duty as SSO handoff AND API JWT signer", async () => {
+    const { mod, restore } = await loadEnvWith({
+      BETTER_AUTH_SECRET: VALID,
+      SSO_HANDOFF_PRIVATE_KEY: ED25519_JWK,
+      API_JWT_PRIVATE_KEY: ED25519_JWK,
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/SSO_HANDOFF_PRIVATE_KEY/);
     } finally {
       restore();
     }
@@ -328,7 +393,6 @@ describe("signing-secret hygiene (audit #12/#22)", () => {
     const { mod, restore } = await loadEnvWith({
       NODE_ENV: "production",
       BETTER_AUTH_SECRET: "replace-with-strong-random-secret",
-      SSO_HANDOFF_JWT_SECRET: VALID2,
     });
     try {
       expect(() => mod.getServerEnv()).toThrow(/BETTER_AUTH_SECRET/);

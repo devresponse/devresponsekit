@@ -34,10 +34,16 @@ pnpm install             # installs from the frozen lockfile
 cp .env.example .env      # PowerShell: Copy-Item .env.example .env
 ```
 
-Then set, at minimum, `BETTER_AUTH_SECRET` and `SSO_HANDOFF_JWT_SECRET` in `.env` to strong random values (the defaults are placeholders). Generate one with:
+Then set, at minimum, `BETTER_AUTH_SECRET` in `.env` to a strong random value (the default is a placeholder). Generate one with:
 
 ```bash
 openssl rand -base64 32
+```
+
+To *launch* SSO handoffs locally (the satellite rig, or the SSO e2e) the primary also needs `SSO_HANDOFF_PRIVATE_KEY` — an Ed25519 private JWK:
+
+```bash
+node -e "import('jose').then(async j=>{const {privateKey}=await j.generateKeyPair('EdDSA',{extractable:true});console.log(JSON.stringify(await j.exportJWK(privateKey)))})"
 ```
 
 See [Configuration](./configuration.md) for the full variable list.
@@ -241,7 +247,8 @@ To debug cross-subdomain SSO (or any multi-app flow) on one machine, use the **s
 | --- | --- |
 | `pnpm install` fails on version | Run `corepack enable` so the pinned pnpm 10.33.2 is used. |
 | App can't reach the database | Is `pnpm db:up` running? Is the port `5444` (not 5432)? Check `DATABASE_URL`. |
-| Boot error about a secret/JWK | `BETTER_AUTH_SECRET` / `SSO_HANDOFF_JWT_SECRET` unset, or `API_JWT_ENABLED=1` without `API_JWT_PRIVATE_KEY`. |
+| Boot error about a secret/JWK | `BETTER_AUTH_SECRET` unset, a malformed `SSO_HANDOFF_PRIVATE_KEY`, or `API_JWT_ENABLED=1` without `API_JWT_PRIVATE_KEY`. |
+| `/api/sso/launch` returns `503 sso_not_configured` | No `SSO_HANDOFF_PRIVATE_KEY` on this instance — it can consume handoffs but not issue them. |
 | `403`/`404` on an admin call you expected to work | Tenant scope — a non-superadmin only sees their own org; out-of-scope resources return **404 by design**. |
 | Tables ended up in `public` instead of `auth` | `DB_SEARCH_PATH_VIA_OPTIONS=0` is set locally — a pooler-only setting. Unset it, drop the strays, re-run `pnpm db:reset:reload` (see §9.2). |
 | Locale-parity test fails | A new text key is missing from one of the 8 locale files (en, fr, es, uk, pt, zh, hi, ja). Add it everywhere. |

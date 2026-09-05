@@ -216,16 +216,17 @@ sequenceDiagram
     Hub->>Hub: validate app id shape, rate-limit per principal
     Hub->>Hub: verify session (refuse impersonated) + membership + app access
     Hub->>DB: write one-time nonce (jti, target app id)
-    Hub->>Hub: sign JWT (HS256, ≤60s, aud=app, targetApplicationId=app)
+    Hub->>Hub: sign JWT (EdDSA + kid, ≤60s, aud=app, targetApplicationId=app)
     Hub-->>U: 302 → satellite /api/sso/consume?token=…
     U->>Sat: GET /api/sso/consume?token=… (rate-limited per IP)
-    Sat->>Sat: verify signature, issuer, audience, expiry,<br/>targetApplicationId == SSO_HANDOFF_APPLICATION_ID
+    Sat->>Hub: GET /api/sso/jwks.json (public keys, cached; skipped when self-issuing)
+    Sat->>Sat: verify EdDSA signature (by kid), issuer, audience,<br/>expiry + maxTokenAge 60s, targetApplicationId == SSO_HANDOFF_APPLICATION_ID
     Sat->>DB: atomically burn nonce (jti + target app id)
     Sat->>Sat: establish satellite session (ssoSession plugin)
     Sat-->>U: 302 → /app/dashboard (token stripped from URL)
 ```
 
-The handoff JWT is symmetric (HS256) and signed with `SSO_HANDOFF_JWT_SECRET` — a **separate** secret from `BETTER_AUTH_SECRET` and from the machine-API signing key. Destination origins must fall under the configured allow-list. See [Configuration](./configuration.md#single-sign-on-handoff).
+The handoff JWT is **asymmetric (EdDSA / Ed25519)**: the hub signs with `SSO_HANDOFF_PRIVATE_KEY` and publishes the public half at `/api/sso/jwks.json`; a satellite verifies against that document and holds **no signing material**, so a compromised satellite cannot mint tokens for its siblings (review #5). The key is **independent** from `BETTER_AUTH_SECRET` and from the machine-API key `API_JWT_PRIVATE_KEY`. The token's claims are minimal (`sub`, `email`, `locale`, `targetApplicationId`, `jti`) because it rides in a query string; a satellite resolves membership, roles and permissions from its own store. Destination origins must fall under the configured allow-list. See [Configuration](./configuration.md#single-sign-on-handoff).
 
 Three guards sit around the diagram above:
 

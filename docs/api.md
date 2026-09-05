@@ -270,8 +270,9 @@ The two surfaces overlap (both can manage users) but differ in **auth** (bearer 
 | `/api/sso/launch` | GET | Cookie session (not impersonated) | Verify access to a registered app, mint a one-time handoff token, redirect to the destination |
 | `/api/sso/consume` | GET | Signed token | Verify the token and redirect to the confirmation interstitial (no nonce burn, no session) |
 | `/api/sso/consume` | POST | Signed token + trusted origin | Burn the token, establish the destination session, redirect to the dashboard |
+| `/api/sso/jwks.json` | GET | Public | The issuer's public handoff keys (Ed25519 JWKS, `Cache-Control: public, max-age=300`). Always mounted; `{ "keys": [] }` when this deployment issues no handoffs |
 
-Query parameters for `launch`: `applicationId` (required; must match the app-id shape `^[a-z0-9][a-z0-9._-]{0,127}$` — anything else is a `400 invalid_application_id` with no database work), `locale` (optional). The token is HS256, single-use, valid ≤60s, with an audience bound to the destination application. See [Architecture → SSO](./architecture.md#single-sign-on-handoff) and [Configuration](./configuration.md#single-sign-on-handoff).
+Query parameters for `launch`: `applicationId` (required; must match the app-id shape `^[a-z0-9][a-z0-9._-]{0,127}$` — anything else is a `400 invalid_application_id` with no database work), `locale` (optional). The token is an **EdDSA (Ed25519)** JWT signed by the issuer's `SSO_HANDOFF_PRIVATE_KEY` and verified by the consumer against the issuer's `/api/sso/jwks.json` — single-use, valid ≤60s (enforced on both sides), with an audience bound to the destination application. Its claims are minimal — `sub`, `email`, `locale`, `targetApplicationId`, `jti` plus `iss`/`aud`/`iat`/`exp`; **no roles, organization or app-user ids** — because the token rides in a query string. A deployment without a signing key answers `503 sso_not_configured` on `launch`. See [Architecture → SSO](./architecture.md#single-sign-on-handoff) and [Configuration](./configuration.md#single-sign-on-handoff).
 
 Contract details that matter to a caller:
 

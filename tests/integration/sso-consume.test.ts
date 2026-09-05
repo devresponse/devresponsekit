@@ -68,15 +68,13 @@ function postRequest(token: string | null, headers: Record<string, string> = {})
   } as unknown as NextRequest;
 }
 
+// The minimised claim set (review #60): no organizationId / appUserId / roles.
 const PAYLOAD = {
   jti: "j1",
   sub: "ba-1",
   targetApplicationId: "portal",
   email: "u@x.com",
-  organizationId: "o-1",
-  appUserId: "u-1",
   locale: "fr",
-  roles: ["member"],
   iat: 0,
   exp: 60,
 };

@@ -60,23 +60,26 @@ else.
 
 ## 2. The delegated-auth model (default: SSO handoff)
 
-By default a satellite is a **consumer** of the HS256 SSO handoff — it never
-*launches* handoffs, only *consumes* them:
+By default a satellite is a **consumer** of the EdDSA SSO handoff — it never
+*launches* handoffs, only *consumes* them, and holds **no signing key** (it
+verifies against the main app's public JWKS at `/api/sso/jwks.json`):
 
 ```mermaid
 flowchart LR
   U["User (already signed in<br/>on the main app)"] -->|"opens satellite"| S1
   subgraph Main["Main app (issuer)"]
-    L["GET /api/sso/launch<br/>mint HS256 JWT<br/>(sub, email, locale, roles, jti, aud, ≤60s)"]
+    L["GET /api/sso/launch<br/>mint EdDSA JWT (kid)<br/>(sub, email, locale, targetApplicationId, jti, aud, ≤60s)"]
+    K["GET /api/sso/jwks.json<br/>public keys"]
   end
   subgraph Sat["Satellite app (consumer)"]
-    S1["GET /api/sso/consume<br/>verify sig+aud+exp<br/>(no session yet)"]
+    S1["GET /api/sso/consume<br/>verify sig (JWKS)+aud+exp+age<br/>(no session yet)"]
     S2["/[locale]/sso/confirm<br/>show account · same-origin POST"]
     S3["POST /api/sso/consume<br/>replay-check jti → upsert user<br/>→ create Better Auth session"]
     SH["Shell<br/>(/[locale]/app/…)"]
   end
   U -->|"no session → bounce"| L
   L -->|"302 with token"| S1
+  S1 -.->|"fetch + cache"| K
   S1 -->|"307"| S2
   S2 -->|"POST token"| S3
   S3 -->|"303 + session cookie"| SH
@@ -146,7 +149,7 @@ main app's *own* session instead of minting its own. Two facets:
 | Auth code to build/maintain | consume + confirm + nonce + provision | same | **least** — Better Auth validate-only |
 | Login provisioning | upsert BA `user` + `app_users` | upsert BA `user` | none |
 | Session cookie | per-subdomain (isolated) | per-subdomain (isolated) | **shared parent-domain cookie** (`.root`) |
-| Shared secret | HS256 handoff secret (≤60s tokens) | same | **full `BETTER_AUTH_SECRET`** (long-lived sessions) |
+| Shared secret | **none** — verifies EdDSA tokens (≤60s) against the primary's public JWKS | same | **full `BETTER_AUTH_SECRET`** (long-lived sessions) |
 | Blast radius if a satellite is compromised | contained to that app | contained | **platform-wide** (cookie + secret + sessions) |
 | Coupling to the main app | stable JWT claim contract | JWT contract | **tight** — `auth` schema shape + Better Auth version |
 | Revocation | ≤8h lag (or instant via local `status`) | ≤8h lag | **instant, central** |
@@ -251,9 +254,9 @@ and keeps any app-only tables in its own schema.
 
 | | Main app (issuer) | Satellite (consumer) |
 |---|---|---|
-| `SSO_HANDOFF_ISSUER` | `https://<main-host>` | **same** |
+| `SSO_HANDOFF_ISSUER` | `https://<main-host>` | **same** (the satellite fetches `<issuer>/api/sso/jwks.json`) |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | `devresponse-app` | **same** |
-| `SSO_HANDOFF_JWT_SECRET` | shared secret | **same** (HS256 symmetric) |
+| `SSO_HANDOFF_PRIVATE_KEY` | Ed25519 private JWK (issuer only) | **unset** — no signing material on a satellite |
 | `SSO_HANDOFF_APPLICATION_ID` | — | **unique**, e.g. `apps` |
 | Enterprise-app row | registers the satellite: `origin`, `sso_audience = devresponse-app:apps` | — (issuer-only) |
 | `SSO_ALLOWED_ORIGIN_SUFFIXES` | must cover the subdomain | — |
@@ -349,7 +352,8 @@ next-intl 8 locales, in-house theme, Tailwind 4, pnpm).
 
 GOAL: a minimal, easily-deployable subdomain app that IS ONLY the shell (secure
 layout, sidebar/nav, theme, i18n, providers) and DELEGATES all authentication to
-devresponsekit via its existing HS256 SSO handoff. NO sign-up/sign-in UI, NO admin
+devresponsekit via its existing EdDSA SSO handoff (verified against the primary's
+/api/sso/jwks.json; the satellite holds no signing key). NO sign-up/sign-in UI, NO admin
 console, NO account/self-service management, NO machine API (v1/MCP), NO
 roles/permissions/orgs/groups/invitations authoring.
 
@@ -454,8 +458,9 @@ P4 — DB, env, deps, deploy, CI
   authority (accepting up-to-8h session lag on revocation).
 - src/lib/env.ts + .env.example: reduce to NEXT_PUBLIC_APP_NAME/URL, NEXT_PUBLIC_PRODUCTION_HOST,
   BETTER_AUTH_SECRET/URL, DATABASE_URL, DB_SCHEMA, SSO_HANDOFF_ISSUER,
-  SSO_HANDOFF_AUDIENCE_PREFIX, SSO_HANDOFF_APPLICATION_ID, SSO_HANDOFF_JWT_SECRET,
-  SSO_HANDOFF_TTL_SECONDS, ADMIN_TRUSTED_ORIGINS (= main app origin). Drop all
+  SSO_HANDOFF_AUDIENCE_PREFIX, SSO_HANDOFF_APPLICATION_ID, SSO_HANDOFF_TTL_SECONDS,
+  ADMIN_TRUSTED_ORIGINS (= main app origin) — NO SSO_HANDOFF_PRIVATE_KEY (a satellite
+  verifies against the main app's /api/sso/jwks.json and holds no key). Drop all
   API_*/MCP_*/EMAIL_*/social/SENTRY_*/METRICS_*/retention vars.
 - Prune package.json deps not used by the shell (react-table, recharts, gray-matter,
   shiki, mermaid, unified, remark-*, rehype-*, dompurify) — verify none are imported.
@@ -470,8 +475,10 @@ P5 — Validate & document
   against a local DB.
 - Smoke test the handoff manually: document the exact steps to (a) register this app as
   an enterprise app on the main devresponsekit (origin + sso_audience = devresponse-app:<app id>,
-  add the subdomain to SSO_ALLOWED_ORIGIN_SUFFIXES), (b) share SSO_HANDOFF_JWT_SECRET +
-  ISSUER + AUDIENCE_PREFIX, (c) hit /api/sso/launch on the main app → confirm you land
+  add the subdomain to SSO_ALLOWED_ORIGIN_SUFFIXES), (b) point the satellite at the main
+  app via SSO_HANDOFF_ISSUER + AUDIENCE_PREFIX (no secret changes hands — the main app
+  holds SSO_HANDOFF_PRIVATE_KEY, the satellite reads its JWKS), (c) hit /api/sso/launch
+  on the main app → confirm you land
   signed-in in the shell.
 - Write README.md: the two-app config contract, the unauth bounce, the minimal DB, and
   "add your pages under (secure)/app/**".

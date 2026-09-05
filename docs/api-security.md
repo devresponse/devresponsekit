@@ -37,7 +37,7 @@ Match the integration shape to the credential — don't default everything to a 
 | A web app on one of your subdomains reusing platform sign-in | A **satellite app** on the SSO handoff (Options A/B) | Per-app cookie, per-app secret, ≤60s single-use handoff tokens — compromise stays contained | [§8 below](#8-third-party-and-satellite-web-apps), [Satellite Apps Integration Guide](./integration-satellite-apps.md) |
 | An end user automating their own account | Their own key with **`account.*` scopes** only | Self-service surface; needs no `admin.*` grant at all | [design §5.4](./design-api-keys-and-tokens.md#54-the-accountapikeysmanage-scope) |
 
-**Never** hand a third party: a human user's credentials, a cookie session, the `BETTER_AUTH_SECRET`, the `SSO_HANDOFF_JWT_SECRET`, or a wildcard-scoped credential you wouldn't grant them permission-by-permission.
+**Never** hand a third party: a human user's credentials, a cookie session, the `BETTER_AUTH_SECRET`, the `SSO_HANDOFF_PRIVATE_KEY` (a satellite never needs it — it verifies handoffs against the public JWKS), or a wildcard-scoped credential you wouldn't grant them permission-by-permission.
 
 ## 3. Operator playbook — granting access safely
 
@@ -114,7 +114,7 @@ The MCP gateway (`/api/mcp`) is the same machine API behind a protocol adapter �
 
 For a web application on one of your subdomains that should reuse platform sign-in, the load-bearing decision is the **trust boundary** — full guide: [Satellite Apps — Integration Guide](./integration-satellite-apps.md); design rationale: [Design: Satellite Apps](./design-satellite-apps.md).
 
-- **Third-party or mixed-trust app → SSO handoff (Options A/B).** The satellite keeps its **own** session store, cookie (scoped to its own subdomain), and `BETTER_AUTH_SECRET`; the only shared secret is the HS256 handoff secret, and the only bridge is a **single-use, audience-bound, ≤60-second** token. A compromised satellite can impersonate no one on the primary or on sibling apps.
+- **Third-party or mixed-trust app → SSO handoff (Options A/B).** The satellite keeps its **own** session store, cookie (scoped to its own subdomain), and `BETTER_AUTH_SECRET`; there is **no shared secret at all** — handoff tokens are EdDSA-signed by the primary's private key and the satellite verifies them against the primary's public JWKS (`/api/sso/jwks.json`), and the only bridge is a **single-use, audience-bound, ≤60-second** token. A compromised satellite holds no signing capability and can impersonate no one on the primary or on sibling apps.
 - **Option C (shared `auth` schema) is for first-party, co-trusted apps only.** It shares the parent-domain session cookie and the full `BETTER_AUTH_SECRET` — an XSS or subdomain takeover on *any* app in the fleet then impersonates users everywhere. Never give this model to a third party.
 - **The primary stays in control** either way: satellites are registered as enterprise apps (origin + audience allow-listed via `SSO_ALLOWED_ORIGIN_SUFFIXES`), handoff tokens are minted only for registered audiences, and access is revocable centrally.
 - A satellite that also needs to *call the machine API* is just another API client — give it its own credential per [§2](#2-which-credential-should-a-third-party-get); never let it reuse SSO artifacts as API credentials (different keys, different algorithms, different audiences — deliberately).
@@ -151,7 +151,7 @@ Baseline expectations around the credential layer:
 
 - [ ] Handoff model (A/B), not the shared schema, unless first-party and co-trusted
 - [ ] Registered as an enterprise app; subdomain covered by `SSO_ALLOWED_ORIGIN_SUFFIXES`
-- [ ] `SSO_HANDOFF_JWT_SECRET` ≠ `BETTER_AUTH_SECRET`, and distinct per environment
+- [ ] The satellite has **no** `SSO_HANDOFF_PRIVATE_KEY` (issuer only); the primary's key is distinct from its `API_JWT_PRIVATE_KEY` and per environment
 - [ ] Its own `DATABASE_URL` + `BETTER_AUTH_SECRET` (A/B); machine-API credential separate from SSO artifacts
 
 ---

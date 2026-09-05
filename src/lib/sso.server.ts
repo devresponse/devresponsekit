@@ -19,7 +19,6 @@ interface SsoAccessContext {
   email: string;
   organizationId: string;
   locale: string;
-  roles: string[];
 }
 
 /**
@@ -42,15 +41,6 @@ async function loadSsoAccessContext(
     throw new Error("sso_denied:missing_context");
   }
 
-  // Look up roles assigned to this user inside the resolved organization.
-  const roleRows = await db
-    .selectFrom("app_user_roles as ur")
-    .innerJoin("app_roles as r", "r.id", "ur.role_id")
-    .select(["r.key as key"])
-    .where("ur.app_user_id", "=", access.appUserId)
-    .where("ur.organization_id", "=", access.organizationId)
-    .execute();
-
   // Verify access to the target application: either the application is
   // global (no organization_id) or it belongs to the user's organization.
   if (targetApp.organization_id && targetApp.organization_id !== access.organizationId) {
@@ -62,7 +52,6 @@ async function loadSsoAccessContext(
     email: access.primaryEmail,
     organizationId: access.organizationId,
     locale: access.preferredLocale,
-    roles: roleRows.map((r) => r.key),
   };
 }
 
@@ -70,11 +59,18 @@ async function loadSsoAccessContext(
  * Creates a short-lived JWT handoff redirect URL for cross-subdomain SSO.
  *
  * Threat / contract:
- *   - JWT is at most 60 seconds and signed with `SSO_HANDOFF_JWT_SECRET`.
+ *   - JWT is at most 60 seconds, EdDSA-signed with this deployment's
+ *     `SSO_HANDOFF_PRIVATE_KEY` (review #5); consumers verify against the
+ *     public JWKS and hold no signing capability.
  *   - A one-time `jti` is persisted before signing so a replayed token
  *     can be detected by the consumer atomically.
  *   - The URL is returned to the route handler which then issues the
  *     redirect with `Referrer-Policy: no-referrer`.
+ *   - Claims are minimised (review #60): the token rides in a query string,
+ *     so it carries only `email`, `locale` and `targetApplicationId` beyond
+ *     the registered claims. `organizationId`, `appUserId` and `roles[]` are
+ *     NOT sent — no consumer reads them, and satellites resolve membership,
+ *     roles and permissions from their own store.
  */
 export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectInput): Promise<URL> {
   const targetApp = await db
@@ -113,11 +109,8 @@ export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectIn
 
   const claims: SsoHandoffClaims = {
     email: context.email,
-    organizationId: context.organizationId,
-    appUserId: context.appUserId,
     targetApplicationId: input.applicationId,
     locale: context.locale,
-    roles: context.roles,
   };
 
   const token = await signSsoHandoff({

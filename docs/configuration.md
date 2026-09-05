@@ -101,16 +101,28 @@ Wired as **multi-tenant** (`tenantId: "organizations"`): any Entra work/school a
 
 ### Single Sign-On handoff
 
-> **Required at boot for every deployment.** Despite the "SSO" name, `src/lib/env.ts` validates `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, and `SSO_HANDOFF_JWT_SECRET` **unconditionally** (`.min(1)` / `.min(32)`). The app **fails fast at boot** if any is missing — even on a deployment that never uses SSO. Set all four everywhere (placeholder values are fine when SSO is unused).
+> **Required at boot for every deployment.** Despite the "SSO" name, `src/lib/env.ts` validates `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, and `SSO_HANDOFF_APPLICATION_ID` **unconditionally** (`.min(1)`). The app **fails fast at boot** if any is missing — even on a deployment that never uses SSO. Set all three everywhere (placeholder values are fine when SSO is unused). The signing key (`SSO_HANDOFF_PRIVATE_KEY`) is **optional** and belongs on the **issuer only**.
+
+> **Asymmetric since review #5.** Handoff tokens are **EdDSA (Ed25519)**-signed by the issuer's private JWK and verified by consumers against the issuer's public key set at **`GET <SSO_HANDOFF_ISSUER>/api/sso/jwks.json`**. A consumer (satellite) holds **no signing material** — the former fleet-wide symmetric `SSO_HANDOFF_JWT_SECRET` is gone, so a compromised satellite can forge nothing for its siblings.
 
 | Variable | Required | Controls |
 | --- | --- | --- |
-| `SSO_HANDOFF_ISSUER` | **yes (at boot)** | `iss` claim of handoff tokens. |
+| `SSO_HANDOFF_ISSUER` | **yes (at boot)** | `iss` claim of handoff tokens — the **issuer's origin URL** (e.g. `https://app.example.com`). Consumers fetch the issuer's public keys from `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json`, so it must be a URL. |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | **yes (at boot)** | Audience is built as `<prefix>:<applicationId>`. |
 | `SSO_HANDOFF_APPLICATION_ID` | **yes (at boot)** | This deployment's application id — it MUST equal the `id` of the enterprise-application row registered on the issuer. The consumer requires the token's `targetApplicationId` claim to equal it (in addition to the `<prefix>:<id>` audience check) and burns the nonce only for that id, so a token minted for another registered app is never accepted here; the value is never derived from the Host header. |
-| `SSO_HANDOFF_JWT_SECRET` | **yes (at boot)** | HS256 signing secret (≥32 chars). **Must differ** from `BETTER_AUTH_SECRET`. |
-| `SSO_HANDOFF_TTL_SECONDS` | no | Token lifetime (default 60). Values above 300 are rejected at boot, and the signer **clamps the effective TTL to ≤60s** (`SSO_HANDOFF_MAX_TTL_SECONDS`), so a handoff token never outlives its nonce row. |
+| `SSO_HANDOFF_PRIVATE_KEY` | no (issuer only) | Ed25519 **private JWK** (JSON string) that signs handoff tokens (`alg: EdDSA`). Set it **only on the issuer**; consumers verify against the published JWKS. Unset ⇒ `/api/sso/launch` answers `503 sso_not_configured` (audited) while `/api/sso/consume` keeps working. Validated at boot when present (must be `kty: OKP`, `crv: Ed25519`, with `d`). **Must differ** from `API_JWT_PRIVATE_KEY` — the two are independent trust domains. |
+| `SSO_HANDOFF_KID` | no | Fixed `kid` for the handoff key; defaults to the JWK thumbprint (so it changes with the key material). |
+| `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY` / `SSO_HANDOFF_PREVIOUS_KID` | no | Zero-downtime rotation: the **previous** private key (public half stays published + accepted) while tokens minted under it expire (≤60s). See the rotation steps below. |
+| `SSO_HANDOFF_TTL_SECONDS` | no | Token lifetime (default 60). Values above 300 are rejected at boot, and the signer **clamps the effective TTL to ≤60s** (`SSO_HANDOFF_MAX_TTL_SECONDS`), so a handoff token never outlives its nonce row. The **verifier independently enforces** the same ceiling (`maxTokenAge: 60s`, 5s clock tolerance), so a signer that failed to clamp gains nothing. |
 | `SSO_ALLOWED_ORIGIN_SUFFIXES` | **yes in production** (to register apps) | Comma-separated allow-list of host suffixes a registered enterprise-app origin may use (`devresponse.com,partner.example`). **Every entry must be a registrable domain** — at least one label beyond its public suffix, checked at boot against the Public Suffix List (ICANN + private sections, via `tldts`): a bare TLD (`com`) or a public-suffix entry (`co.uk`, `github.io`) **fails boot**, because it would let an org admin register a token-harvesting origin anyone can obtain under it. **Unset in production ⇒ fails closed**: no origin can be registered (`origin_not_allowed`) and a warning is logged at boot — there is no host-derived fallback there. Outside production (dev/test) an unset value is derived from `NEXT_PUBLIC_PRODUCTION_HOST` as its registrable domain (`app.example.co.uk` → `example.co.uk`), and the literal `localhost` is tolerated for the local satellite rig. |
+
+**Generating the handoff key** (the issuer only — `jose` is already a dependency):
+
+```bash
+node -e "import('jose').then(async j=>{const {privateKey}=await j.generateKeyPair('EdDSA',{extractable:true});console.log(JSON.stringify(await j.exportJWK(privateKey)))})"
+```
+
+Paste the printed JSON as `SSO_HANDOFF_PRIVATE_KEY`. Only the public half is ever served (`/api/sso/jwks.json` strips `d`). **Rotation without downtime:** generate a new key, move the current value to `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY`, set the new one as `SSO_HANDOFF_PRIVATE_KEY`, deploy; consumers pick the new `kid` up from the JWKS automatically (jose refetches on an unknown `kid`), and tokens minted seconds before the deploy still verify under the previous key. Remove `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY` once the ≤60s window has passed. Satellites need **no change** during a rotation.
 
 ### Reverse proxy / limits
 
@@ -206,7 +218,7 @@ Both paths resolve to the **same authority model**: a credential's effective acc
    - the **private** half (`API_JWT_PRIVATE_KEY`, an Ed25519 JWK JSON string) stays on the server and **signs** tokens;
    - the **public** half is derived from it automatically and published at **`GET /api/v1/jwks.json`**, so any client or resource server verifies a token by its **signature alone** — no call back to this app. That statelessness is the entire reason to use JWTs.
 
-   (This keypair is deliberately separate from `SSO_HANDOFF_JWT_SECRET`, which is a symmetric HS256 secret for the subdomain handoff — a different mechanism with its own secret.)
+   (This keypair is deliberately separate from `SSO_HANDOFF_PRIVATE_KEY`, the Ed25519 key behind the subdomain SSO handoff — same algorithm, **different key, different audience, different purpose**, and the env schema refuses one JWK doing both jobs.)
 3. **Generate the signing key** — an Ed25519 private JWK, using `jose` (already a dependency):
 
    ```bash
@@ -344,8 +356,9 @@ DB_SCHEMA=auth
 # --- Required if using SSO handoff ---
 SSO_HANDOFF_ISSUER=http://localhost:3000
 SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app
-SSO_HANDOFF_JWT_SECRET=<different 32+ random bytes>
 SSO_HANDOFF_APPLICATION_ID=portal
+# Issuer only — an Ed25519 private JWK (see "Generating the handoff key" above)
+SSO_HANDOFF_PRIVATE_KEY={"kty":"OKP","crv":"Ed25519","x":"…","d":"…"}
 
 # --- Local seed admin ---
 SEED_ADMIN_EMAIL=admin@devresponse.local
@@ -364,7 +377,7 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 ## 6. Secrets checklist
 
 - [ ] `BETTER_AUTH_SECRET` — unique, ≥32 bytes, rotated on a schedule.
-- [ ] `SSO_HANDOFF_JWT_SECRET` — **different** from `BETTER_AUTH_SECRET`.
+- [ ] `SSO_HANDOFF_PRIVATE_KEY` — Ed25519 JWK, **issuer only**, never on a satellite; **different** from `API_JWT_PRIVATE_KEY`.
 - [ ] `API_JWT_PRIVATE_KEY` — Ed25519 JWK, only if JWT enabled.
 - [ ] OAuth client secrets — per provider, only if social login enabled.
 - [ ] `RESEND_API_KEY` / `MAILGUN_API_KEY` — only if email enabled.

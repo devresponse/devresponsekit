@@ -17,6 +17,9 @@ import type { NextRequest } from "next/server";
 const sessionGetter = vi.fn();
 const createRedirect = vi.fn();
 const auditMock = vi.fn();
+const logErrMock = vi.fn();
+const captureMock = vi.fn();
+const signerConfigured = vi.hoisted(() => ({ value: true }));
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -33,6 +36,15 @@ vi.mock("@/lib/sso.server", () => ({
 }));
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
+}));
+vi.mock("@/lib/jwt-handoff.server", () => ({
+  isSsoHandoffSignerConfigured: () => signerConfigured.value,
+}));
+vi.mock("@/lib/observability/logger.server", () => ({
+  logServerError: (...args: unknown[]) => logErrMock(...args),
+}));
+vi.mock("@/lib/observability/server", () => ({
+  captureServerError: (...args: unknown[]) => captureMock(...args),
 }));
 
 function makeRequest(url: string, headers: Record<string, string> = {}): NextRequest {
@@ -51,6 +63,9 @@ beforeEach(async () => {
   sessionGetter.mockReset();
   createRedirect.mockReset();
   auditMock.mockReset();
+  logErrMock.mockReset();
+  captureMock.mockReset();
+  signerConfigured.value = true;
   // A fresh module graph per test also resets the in-memory limiter buckets.
   ({ GET } = await import("@/app/api/sso/launch/route"));
 });
@@ -159,6 +174,43 @@ describe("GET /api/sso/launch", () => {
         reason: "sso_denied:application_unavailable",
       }),
     );
+  });
+});
+
+describe("GET /api/sso/launch — no signing key configured (review #5)", () => {
+  it("fails closed with 503 sso_not_configured, audits + logs, and never touches the nonce table", async () => {
+    signerConfigured.value = false;
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+
+    const res = await GET(
+      makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=en"),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "sso_not_configured" });
+    expect(createRedirect).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "sso.launch.failure",
+        outcome: "error",
+        reason: "signing_key_not_configured",
+        actorBetterAuthUserId: "ba-1",
+        targetApplicationId: "portal",
+      }),
+    );
+    expect(logErrMock).toHaveBeenCalledWith(
+      "sso.launch.config_error",
+      expect.objectContaining({ reason: "signing_key_not_configured" }),
+    );
+    expect(captureMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("is checked AFTER authentication so an anonymous probe learns nothing about the config", async () => {
+    signerConfigured.value = false;
+    sessionGetter.mockResolvedValue(null);
+    const res = await GET(makeRequest("http://localhost/api/sso/launch?applicationId=portal"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/sign-in");
   });
 });
 

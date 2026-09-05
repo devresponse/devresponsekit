@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it } from "vitest";
 import { signSsoHandoff, verifySsoHandoff } from "@/lib/jwt-handoff.server";
 
 /**
@@ -10,20 +10,13 @@ import { signSsoHandoff, verifySsoHandoff } from "@/lib/jwt-handoff.server";
  * Note: nonce *persistence* is the responsibility of `sso.server.ts`
  * which calls into the database; that integration is exercised by the
  * route-integration tests. Here we only assert the JWT-layer contract.
+ * The EdDSA signing key + self-issuer config come from the global setup.
  */
 describe("SSO handoff JWT one-time jti contract", () => {
-  beforeAll(() => {
-    process.env.SSO_HANDOFF_JWT_SECRET = "unit-test-secret-unit-test-secret";
-    process.env.SSO_HANDOFF_ISSUER = "https://issuer.test";
-  });
-
   const claims = {
     email: "user@example.com",
-    organizationId: "org-1",
-    appUserId: "app-user-1",
     targetApplicationId: "portal",
     locale: "en",
-    roles: ["member"],
   };
 
   it("round-trips the supplied jti so the consumer can mark it consumed", async () => {

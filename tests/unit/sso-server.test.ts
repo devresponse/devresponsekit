@@ -16,7 +16,6 @@ const accessGetter = vi.fn();
 const signMock = vi.fn();
 
 const enterpriseTakeFirst = vi.fn();
-const rolesExecute = vi.fn();
 const nonceInsertExecute = vi.fn().mockResolvedValue(undefined);
 const nonceDeleteExecute = vi.fn().mockResolvedValue(undefined);
 const nonceUpdateExecute = vi.fn();
@@ -53,14 +52,9 @@ vi.mock("@/db/database", () => ({
           }),
         };
       }
-      // app_user_roles join chain
-      return {
-        innerJoin: () => ({
-          select: () => ({
-            where: () => ({ where: () => ({ execute: rolesExecute }) }),
-          }),
-        }),
-      };
+      // Review #60: the handoff no longer queries roles — any other table
+      // read from here is a regression.
+      throw new Error(`unexpected selectFrom(${table})`);
     },
     insertInto: () => ({ values: () => ({ execute: nonceInsertExecute }) }),
     deleteFrom: () => ({ where: () => ({ execute: nonceDeleteExecute }) }),
@@ -97,7 +91,6 @@ beforeEach(async () => {
   accessGetter.mockReset();
   signMock.mockReset();
   enterpriseTakeFirst.mockReset();
-  rolesExecute.mockReset().mockResolvedValue([]);
   nonceInsertExecute.mockClear();
   nonceDeleteExecute.mockClear();
   nonceUpdateExecute.mockReset();
@@ -174,7 +167,6 @@ describe("createSsoHandoffRedirect", () => {
       organization_id: null,
       status: "available",
     });
-    rolesExecute.mockResolvedValue([{ key: "member" }]);
     signMock.mockResolvedValue("signed-token");
 
     const url = await mod.createSsoHandoffRedirect({
@@ -191,9 +183,19 @@ describe("createSsoHandoffRedirect", () => {
       expect.objectContaining({
         audience: "devresponse-app:portal",
         ttlSeconds: expect.any(Number),
-        claims: expect.objectContaining({ targetApplicationId: "portal", roles: ["member"] }),
+        claims: expect.objectContaining({ targetApplicationId: "portal" }),
       }),
     );
+    // Review #60: the URL-borne token carries ONLY what a consumer needs.
+    const [signInput] = signMock.mock.calls[0] as [{ claims: Record<string, unknown> }];
+    expect(signInput.claims).toEqual({
+      email: "u@x.com",
+      targetApplicationId: "portal",
+      locale: "en",
+    });
+    expect(signInput.claims).not.toHaveProperty("roles");
+    expect(signInput.claims).not.toHaveProperty("organizationId");
+    expect(signInput.claims).not.toHaveProperty("appUserId");
   });
 });
 

@@ -226,6 +226,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | Variable | Controls |
 | --- | --- |
 | `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | Local seed admin credentials. |
+| `SEED_ADMIN_ADOPT_EXISTING` | Set `1` to let `db:seed` confer the admin grants on a **pre-existing** Better Auth account matching `SEED_ADMIN_EMAIL` that the seed did not create and cannot recognise as its own (not yet email-verified, or not already `superuser`). Off by default: such an account makes the seed **refuse** with exit code 1 and nothing written. Even when set, the account's password, `emailVerified` flag and status are left as found. See [Deployment §2](./deployment.md#2-one-time-database-bootstrap). |
 | `SEED_DEFAULT_ORGANIZATION_SLUG` | Default org slug (e.g. `default`). |
 | `DEV_SEED_PASSWORD` | Shared password for the multi-org dev fixture. |
 | `DEV_SEED_ALLOW_PROD` | Set `1` to allow the dev fixture under `NODE_ENV=production` (otherwise it refuses). |

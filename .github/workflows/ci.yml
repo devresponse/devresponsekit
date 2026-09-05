@@ -8,6 +8,10 @@ on:
 # Least privilege in-file (review 2026-09-04 #113): every job here only reads
 # the checkout and talks to services with their own credentials. Raise per job
 # if a step ever needs more — never at workflow level.
+#
+# Not here: the `Dependency audit` gate lives in dependency-audit.yml (review
+# #227) because it also needs a weekly cron — this workflow only runs when a
+# commit lands, so a red audit on an idle `main` was never re-checked.
 permissions:
   contents: read
 
@@ -214,36 +218,6 @@ jobs:
           path: test-results/
           retention-days: 7
           if-no-files-found: ignore
-
-  audit:
-    name: Dependency audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # HARD GATE (BUILD-1). A high or critical advisory fails this job. Enforced
-    # as a REQUIRED status check on `main` (branch protection), so the failure
-    # actually blocks the merge — do not drop it from the required set. The
-    # known dev/build-only advisories are pinned in an
-    # explicit allowlist (package.json -> pnpm.auditConfig.ignoreGhsas), so a
-    # NEW high+ that nobody has reviewed is what trips the gate — not the
-    # existing, triaged backlog. Prune the allowlist as upstream fixes land.
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Fails the job on any high or critical advisory not in the
-      # pnpm.auditConfig.ignoreGhsas allowlist. Lower the threshold to
-      # `moderate` once the moderate backlog is clear.
-      - name: Audit dependencies (high and above)
-        run: pnpm audit --audit-level high
 
   sdk-drift:
     name: OpenAPI + admin SDK drift

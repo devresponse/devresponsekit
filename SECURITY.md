@@ -63,8 +63,14 @@ dependencies (report those upstream — though we welcome a heads-up).
 
 ## Dependency advisory allowlist
 
-CI's `audit` job fails the build on any **high or critical** advisory
-(`pnpm audit --audit-level high` — a BUILD-1 hard gate). A small, explicit
+The `Dependency audit` workflow
+([`.github/workflows/dependency-audit.yml`](.github/workflows/dependency-audit.yml),
+a required status check on `main`) fails the build on any **high or critical**
+advisory (`pnpm audit --audit-level high` — a BUILD-1 hard gate). It also
+runs weekly (Mondays 05:13 UTC) so an idle `main` is re-audited as new
+advisories are published, and a failed scheduled run opens — or comments on —
+a GitHub issue titled **"Dependency audit failing on main"** (review #227:
+the gate had been red for weeks with no commit to surface it). A small, explicit
 allowlist in `package.json` (`pnpm.auditConfig.ignoreGhsas`) mutes advisories
 that are confined to **dev/build/test tooling** and are not reachable in the
 shipped application. Each entry is justified below and carries a **review-by

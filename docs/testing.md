@@ -171,6 +171,25 @@ When automated coverage isn't enough (e.g. a visual or flow change), walk these:
 - [ ] Keyboard navigation through forms and the admin grid.
 - [ ] Dark mode and small-viewport layouts render correctly.
 
+## 9. CI workflows and required checks
+
+Every workflow lives in [`.github/workflows/`](../.github/workflows/) and pins its actions by commit SHA (Dependabot proposes the bumps). The **check name** column is the job `name:` — it is what branch protection on `main` requires, so renaming a job silently un-gates it.
+
+| Workflow | Check name | Required | Runs on |
+| --- | --- | --- | --- |
+| [`ci.yml`](../.github/workflows/ci.yml) | `Typecheck, lint, format, tests` | yes | pull_request, push to `main` |
+| [`ci.yml`](../.github/workflows/ci.yml) | `E2E + accessibility (Playwright)` | yes | pull_request, push to `main` |
+| [`ci.yml`](../.github/workflows/ci.yml) | `OpenAPI + admin SDK drift` | yes | pull_request, push to `main` |
+| [`ci.yml`](../.github/workflows/ci.yml) | `Better Auth schema drift` | yes | pull_request, push to `main` |
+| [`ci.yml`](../.github/workflows/ci.yml) | `Markdown links` | — | pull_request, push to `main` |
+| [`dependency-audit.yml`](../.github/workflows/dependency-audit.yml) | `Dependency audit` | yes | pull_request, push to `main`, **weekly** (Mon 05:13 UTC), manual |
+| [`codeql.yml`](../.github/workflows/codeql.yml) | `Analyze (javascript-typescript)` | yes | pull_request, push to `main`, weekly (Mon 04:27 UTC) |
+| [`secret-scan.yml`](../.github/workflows/secret-scan.yml) | `gitleaks` | yes | pull_request, push to `main` |
+| [`docker-scan.yml`](../.github/workflows/docker-scan.yml) | `trivy` | yes | pull_request, push to `main`, weekly (Mon 06:00 UTC), manual |
+| [`mutation.yml`](../.github/workflows/mutation.yml) | `Stryker (security core)` | advisory | pull_request touching the security core, manual |
+
+The three scheduled workflows exist because a gate that only runs when a commit lands never re-checks an **idle** `main`: the dependency audit sat red for weeks in mid-2026 with nobody the wiser (review #227). The weekly `pnpm audit --audit-level high` run re-audits the unchanged tree, and a **failed scheduled run** opens a GitHub issue titled "Dependency audit failing on main" (or comments on the open one) — a PR or push failure is already in front of its author, so only the schedule notifies. Fix it the way [SECURITY.md → Dependency advisory allowlist](../SECURITY.md#dependency-advisory-allowlist) describes: bump or floor the package; mute only a dev/build/test-only advisory with no fix. `tests/unit/dependency-governance.test.ts` pins that the audit workflow keeps its schedule, its job name, and its SHA-pinned actions.
+
 ---
 
 _Next: [Troubleshooting](./troubleshooting.md)_

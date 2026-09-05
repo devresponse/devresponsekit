@@ -9,7 +9,8 @@
 # of silently floating on a mutable tag.
 #
 # The npm updates burn down the dependency backlog so we can eventually lower
-# the audit gate from `high` to `moderate` (see F4 / package.json auditConfig).
+# the audit gate (dependency-audit.yml) from `high` to `moderate` (see F4 /
+# package.json auditConfig).
 #
 # The `docker` ecosystem tracks the digest-pinned `node:24-bookworm-slim` base
 # image in the Dockerfile (both stages share one digest), so base-image CVE

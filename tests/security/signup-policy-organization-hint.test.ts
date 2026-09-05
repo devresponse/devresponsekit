@@ -133,7 +133,7 @@ function signUp(
       name: "Sign-up",
       password: PASSWORD,
       ...body,
-    } as Parameters<typeof auth.api.signUpEmail>[0]["body"],
+    } as NonNullable<Parameters<typeof auth.api.signUpEmail>[0]>["body"],
   });
 }
 

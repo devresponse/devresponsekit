@@ -135,9 +135,18 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
+  // Review #218: the row carries the org of both ends; the composite FKs
+  // (migration 0004) reject a role from any other org even if the same-org
+  // check above were bypassed.
   await db
     .insertInto("app_group_roles")
-    .values(parsed.data.roleIds.map((roleId) => ({ group_id: id, role_id: roleId })))
+    .values(
+      parsed.data.roleIds.map((roleId) => ({
+        group_id: id,
+        role_id: roleId,
+        organization_id: group.organization_id,
+      })),
+    )
     .onConflict((oc) => oc.doNothing())
     .execute();
 

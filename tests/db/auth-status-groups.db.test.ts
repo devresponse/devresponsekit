@@ -97,7 +97,10 @@ async function newGroup(orgId: string, key: string, roleId: string): Promise<str
     .values({ organization_id: orgId, key: `${PREFIX}${key}`, name: `DBTest ${key}` })
     .returning("id")
     .executeTakeFirstOrThrow();
-  await db.insertInto("app_group_roles").values({ group_id: group.id, role_id: roleId }).execute();
+  await db
+    .insertInto("app_group_roles")
+    .values({ group_id: group.id, role_id: roleId, organization_id: orgId })
+    .execute();
   return group.id;
 }
 

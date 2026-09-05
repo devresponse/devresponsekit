@@ -45,9 +45,13 @@ export function retentionDays(value: string | undefined, fallback: number): numb
  * Deletes audit rows older than `days` (a no-op when `days <= 0`).
  *
  * B3 makes `app_audit_events` append-only via a trigger that blocks UPDATE and
- * DELETE — EXCEPT inside a transaction that has set the `app.audit_retention`
- * flag, which ONLY this path does. Setting the flag is a harmless no-op if the
- * trigger is not installed yet, so D3 and B3 are order-independent.
+ * DELETE. The ONE sanctioned path is `app_audit_events_prune(days, batch)`
+ * (migration 0004, review #83): a SECURITY DEFINER function owned by the
+ * schema owner, so it runs with the owner's privileges whoever calls it — the
+ * least-privilege runtime role has no DELETE on the table at all, and the
+ * trigger only lets a DELETE through when the effective role IS the owner
+ * inside that function. Nothing here sets a GUC any more; the marker the
+ * trigger checks is set inside the function, transaction-locally.
  */
 export async function pruneAuditEvents(
   days: number,
@@ -55,22 +59,15 @@ export async function pruneAuditEvents(
 ): Promise<number> {
   if (days <= 0) return 0;
   let total = 0;
-  // Delete in bounded batches (audit #21): a single unbatched DELETE against a
-  // large backlog — with the per-row B3 append-only trigger firing on every
-  // row — can exceed statement_timeout and never make progress. Each batch is
-  // its own short transaction that sets the `app.audit_retention` flag the
-  // trigger requires, and `ctid in (… limit N)` bounds the row count.
+  // Delete in bounded batches (audit #21): the function deletes at most
+  // `batchSize` rows per call (`ctid in (… limit N)`), each call its own
+  // short statement, so a large backlog can't stall against
+  // statement_timeout — loop until a short batch says it is drained.
   for (;;) {
-    const deleted = await db.transaction().execute(async (trx) => {
-      await trx.executeQuery(CompiledQuery.raw("set local app.audit_retention = 'on'"));
-      const res = await trx
-        .deleteFrom("app_audit_events")
-        .where(
-          sql<boolean>`ctid in (select ctid from app_audit_events where created_at < now() - ${sql.lit(days)} * interval '1 day' limit ${sql.lit(batchSize)})`,
-        )
-        .executeTakeFirst();
-      return Number(res.numDeletedRows ?? 0);
-    });
+    const res = await db.executeQuery(
+      CompiledQuery.raw("select app_audit_events_prune($1, $2) as n", [days, batchSize]),
+    );
+    const deleted = Number((res.rows[0] as { n?: number | string } | undefined)?.n ?? 0);
     total += deleted;
     if (deleted < batchSize) break; // a short/empty batch means we drained it
   }

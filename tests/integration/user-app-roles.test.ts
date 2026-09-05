@@ -214,6 +214,34 @@ describe("POST /users/[id]/app-roles — assignment scoping", () => {
     expect(res.status).toBe(201);
   });
 
+  it("409 role_organization_mismatch when a SUPERADMIN pairs an org-B role with an org-A membership (review #218)", async () => {
+    // A SUPERADMIN can access every org, so the scope checks alone let this
+    // through; the row is unrepresentable since migration 0004, and the
+    // route must say why instead of surfacing the trigger's error.
+    state.role = { id: ROLE, key: "editor", organization_id: ORG_B };
+    state.org = { id: ORG_A };
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.assign"]));
+    const res = await POST(jsonReq(body(ORG_A)), ctx);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "role_organization_mismatch",
+      message: "errors.role_organization_mismatch",
+    });
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.user.role_assigned",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("SUPERADMIN assigns an org-B role INSIDE org B (201) — same-org is the rule, not superadmin-ness", async () => {
+    state.role = { id: ROLE, key: "editor", organization_id: ORG_B };
+    state.org = { id: ORG_B };
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.assign"]));
+    const res = await POST(jsonReq(body(ORG_B)), ctx);
+    expect(res.status).toBe(201);
+  });
+
   it("400 on an invalid body", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
     const res = await POST(jsonReq({ roleId: "not-a-uuid" }), ctx);

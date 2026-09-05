@@ -342,6 +342,20 @@ idempotent (ledgered in `app_schema_migrations`) and safe to re-run; the deploy
 pipeline applies them against the **direct** (non-pooled) endpoint before
 promotion.
 
+**`[migrate] checksum mismatch for applied migration "…"`.** The runner hashes
+every applied file and compares it with the ledger (review #86); an applied
+file changed on disk. Restore the file from `main` — applied migrations are
+frozen. If the change was a deliberate comment-only fix that landed with an
+updated pin in `tests/unit/migration-checksums.test.ts`, update the ledger row
+on purpose with the `update … set checksum = …` statement the error prints.
+
+**`[0004] refusing to apply: N row group(s) violate a constraint`.** Migration
+0004 adds CHECK/uniqueness constraints and first lists every row that would
+violate them (`table.column = value (count)`), changing nothing. Correct or
+remove those rows (e.g. an enterprise app still in the removed `degraded`
+status, two apps sharing an `sso_audience`, a group bundling a role from
+another organization) and re-run `pnpm db:app:migrate`.
+
 **HSTS/headers not present or mixed-content warnings.** Terminate TLS upstream;
 HSTS is inert over plain HTTP. Confirm the proxy forwards the headers emitted by
 `next.config.mjs`.

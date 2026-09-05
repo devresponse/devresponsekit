@@ -1262,6 +1262,7 @@
     "rate_limited": "请求过多。请放慢速度。",
     "role_in_use": "此角色正在使用中。",
     "role_not_found": "未找到角色。",
+    "role_organization_mismatch": "此角色属于另一个组织。",
     "slug_taken": "此标识已被使用。",
     "soft_delete_failed": "软删除失败；请重试。",
     "unauthenticated": "需要登录。",

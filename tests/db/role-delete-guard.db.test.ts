@@ -73,7 +73,7 @@ describe("assertRoleNotInUse (DB-backed, DB-2)", () => {
       .executeTakeFirstOrThrow();
     await db
       .insertInto("app_group_roles")
-      .values({ group_id: group.id, role_id: roleId })
+      .values({ group_id: group.id, role_id: roleId, organization_id: orgId })
       .execute();
 
     await expect(assertRoleNotInUse(roleId)).rejects.toMatchObject({ code: "role_in_use" });

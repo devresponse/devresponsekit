@@ -690,20 +690,34 @@ privilege-ordering guard (§8.1) writes `admin.user.action_denied` with
 
 ### 12.1 Audit posture (append-only + retention)
 
-The audit log is a tamper-evident compliance record. `0001-initial-schema.sql`
-installs a row-level `BEFORE UPDATE OR DELETE` trigger
-(`app_audit_events_block_mutation`) that **raises on any UPDATE or DELETE** —
-the application database role cannot silently mutate or remove audit
-rows. INSERTs are unaffected.
+The audit log is a tamper-evident compliance record. A row-level
+`BEFORE UPDATE OR DELETE` trigger (`app_audit_events_block_mutation`, installed
+by `0001-initial-schema.sql` and replaced by `0004-integrity-constraints.sql`)
+**raises on any UPDATE or DELETE**; INSERTs are unaffected. The one UPDATE it
+permits is the org-deletion `SET NULL` tombstone (organization_id → null with
+every other column unchanged).
 
-The single sanctioned exception is the **retention job**
-(`src/lib/retention.server.ts`), which sets the transaction-local GUC
-`app.audit_retention = 'on'` immediately before pruning rows older than the
-retention window; the trigger permits a DELETE only under that flag. (The
-folded-in `0005` section also extends the trigger to permit the org-deletion
-`SET NULL` tombstone.)
-Append-only enforcement therefore lives in the database, independent of any
-application-layer discipline.
+What the trigger does and does not guarantee (review #83):
+
+- **DELETE is allowed only through the retention function.**
+  `app_audit_events_prune(days, batch)` is a `SECURITY DEFINER` function owned
+  by the schema owner; `src/lib/retention.server.ts` calls it in batches. The
+  trigger lets a DELETE through only when the **effective** role is the table
+  owner _and_ the transaction-local marker that function sets is on — the
+  marker alone (the pre-0004 escape hatch) no longer suffices, so setting
+  `app.audit_retention` from an application session does nothing.
+- **The privilege boundary is the runtime role, not the trigger.** When the
+  application connects as the least-privilege `<DB_SCHEMA>_runtime` role
+  ([Deployment §8](./deployment.md#8-least-privilege-runtime-role-optional-recommended))
+  it holds `INSERT`/`SELECT` only on `app_audit_events` — no `UPDATE`,
+  `DELETE` or `TRUNCATE` — and executes the prune function by grant. Until an
+  operator switches the runtime to that role, the application still connects
+  as the owner, which can disable the trigger like any owner; the trigger then
+  guards against accidental or scripted mutation, not against a compromised
+  owner credential.
+
+Rejected attempts name the login and effective roles in the error
+(`session_user=…, current_user=…`).
 
 ---
 

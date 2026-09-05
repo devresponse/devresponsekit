@@ -1262,6 +1262,7 @@
     "rate_limited": "Demasiadas solicitudes. Más despacio.",
     "role_in_use": "Este rol está en uso.",
     "role_not_found": "Rol no encontrado.",
+    "role_organization_mismatch": "Este rol pertenece a otra organización.",
     "slug_taken": "Este identificador ya está en uso.",
     "soft_delete_failed": "El borrado lógico falló; reintenta.",
     "unauthenticated": "Se requiere inicio de sesión.",

@@ -1262,6 +1262,7 @@
     "rate_limited": "Demasiados pedidos. Abrande, por favor.",
     "role_in_use": "Esta função está em utilização.",
     "role_not_found": "Função não encontrada.",
+    "role_organization_mismatch": "Esta função pertence a outra organização.",
     "slug_taken": "Este slug já está a ser utilizado.",
     "soft_delete_failed": "A eliminação suave falhou; tente novamente.",
     "unauthenticated": "É necessário iniciar sessão.",

@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
+
 /**
  * Pure migration-planning helpers — deliberately side-effect-free (no fs, no
- * db) so the ordering + locale-inclusion logic is unit-testable without a
- * database. The runner (`run-migrations.ts`) supplies the raw directory
- * listings and the flag; this module decides WHAT to apply and in WHAT order.
+ * db) so the ordering + locale-inclusion + ledger-checksum logic is
+ * unit-testable without a database. The runner (`run-migrations.ts`) supplies
+ * the raw directory listings and the flag; this module decides WHAT to apply
+ * and in WHAT order, and how a ledgered checksum is reconciled.
  */
 
 export interface PlannedMigration {
@@ -77,4 +80,44 @@ export function planMigrations(
     .map((file) => ({ id: `locales/${file}`, subdir: "locales", file }));
 
   return [...core, ...locales];
+}
+
+/**
+ * Content checksum recorded in the `app_schema_migrations.checksum` ledger
+ * column (review #86). Line endings are normalised to `\n` first so a CRLF
+ * checkout (Windows without `.gitattributes` honoured) and CI's LF checkout
+ * hash the same file — otherwise one database migrated from two machines
+ * would report a false mismatch.
+ */
+export function migrationChecksum(sql: string): string {
+  return createHash("sha256").update(sql.replace(/\r\n/g, "\n"), "utf8").digest("hex");
+}
+
+export type LedgerChecksumVerdict = "match" | "backfill";
+
+/**
+ * Reconciles the ledgered checksum of an ALREADY-APPLIED migration with the
+ * hash of the file on disk (review #86).
+ *
+ *   - `null` stored (a row written before the column existed) → `backfill`:
+ *     the runner records the current hash and logs that it did.
+ *   - equal → `match`.
+ *   - different → throws. A frozen file edited after being applied silently
+ *     diverges environments (an existing database skips it, a fresh one gets
+ *     the edited DDL), so the runner MUST fail loudly with the id and both
+ *     hashes rather than proceed.
+ */
+export function reconcileLedgerChecksum(
+  id: string,
+  stored: string | null,
+  actual: string,
+): LedgerChecksumVerdict {
+  if (stored === null) return "backfill";
+  if (stored === actual) return "match";
+  throw new Error(
+    `[migrate] checksum mismatch for applied migration "${id}": ledger has ${stored}, ` +
+      `file on disk hashes to ${actual}. Applied migrations are frozen — restore the file, ` +
+      `or, if the edit was deliberate and comment-only, update the ledger row on purpose ` +
+      `(update app_schema_migrations set checksum = '${actual}' where id = '${id}').`,
+  );
 }

@@ -142,6 +142,14 @@ export interface AppUserRolesTable {
   app_user_id: string;
   organization_id: string;
   role_id: string;
+  /**
+   * Mirror of the role's own `app_roles.organization_id`, maintained by the
+   * `trg_app_user_roles_bind_role_org` trigger (migration 0004, review #218)
+   * — never set by application code. Pinned to `app_roles (id, organization_id)`
+   * by a composite FK and to `organization_id` by a CHECK, so an org-scoped
+   * role cannot be assigned inside another org; NULL for a global role.
+   */
+  role_organization_id: Generated<string | null>;
   created_at: Generated<Timestamp>;
 }
 
@@ -156,10 +164,17 @@ export interface AppGroupsTable {
   updated_at: Generated<Timestamp>;
 }
 
-/** Roles a group confers (route layer enforces same-org roles). */
+/**
+ * Roles a group confers. `organization_id` is the org of BOTH the group and
+ * the role — composite FKs to `app_groups (id, organization_id)` and
+ * `app_roles (id, organization_id)` (migration 0004, review #218) make a
+ * cross-org or global role unrepresentable; the route layer's same-org check
+ * is now the first line of defence, not the only one.
+ */
 export interface AppGroupRolesTable {
   group_id: string;
   role_id: string;
+  organization_id: string;
 }
 
 /** Users that belong to a group. */

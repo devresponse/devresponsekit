@@ -6,7 +6,10 @@ import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { createEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
 import { isAllowedEnterpriseOrigin, isHttpsOrigin } from "@/lib/admin/enterprise-apps.server";
-import { isSsoAudienceTaken } from "@/lib/admin/enterprise-apps-audience.server";
+import {
+  isSsoAudienceTaken,
+  isSsoAudienceUniqueViolation,
+} from "@/lib/admin/enterprise-apps-audience.server";
 import {
   likeContains,
   applySortAndPagination,
@@ -206,6 +209,12 @@ export async function POST(request: NextRequest) {
       })
       .execute();
   } catch (err) {
+    // Review #15: the UNIQUE index on sso_audience (migration 0004) closes the
+    // race the pre-check above leaves open; its 23505 is an audience
+    // collision, so it must NOT be reported as `id_taken`.
+    if (isSsoAudienceUniqueViolation(err)) {
+      return adminErrorResponse("audience_taken", 409, request);
+    }
     const message = err instanceof Error ? err.message : "unknown";
     if (/duplicate key|unique constraint/i.test(message)) {
       return adminErrorResponse("id_taken", 409, request);

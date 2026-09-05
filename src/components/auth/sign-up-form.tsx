@@ -36,10 +36,14 @@ export interface SignUpFormProps {
 /**
  * SignUpForm
  *
- * Mirror of `SignInForm` but for self-registration. Email verification is
- * required (AUTH-4): after sign-up the user is sent to `/verify-email` to
- * confirm their address; once verified they land in the app and the
- * provisioning service places non-seed users into `pending_approval`.
+ * Mirror of `SignInForm` but for self-registration. The workflow follows the
+ * organization's signup policy (0007, review #32). Under the fail-closed
+ * default, email verification is required (AUTH-4): after sign-up the user is
+ * sent to `/verify-email` to confirm their address, and once verified the
+ * provisioning service places non-seed users into `pending_approval`. An
+ * org's policy can waive verification (the child form then signs the user in
+ * immediately) and/or activate the account without approval (`auto_active` or
+ * an auto-approved email domain).
  *
  * With an `invitation` (0008) the email field is pre-filled and locked to
  * the invited address and the token rides the sign-up body — the account is

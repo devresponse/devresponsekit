@@ -61,7 +61,6 @@ const nextConfig = {
   // would otherwise block. Dev-only setting; ignored by production builds.
   // See docs/integration-satellite-apps.md §6.6.
   allowedDevOrigins: ["devresponse.local", "*.devresponse.local", "*.localtest.me"],
-  // The proxy.ts (formerly middleware.ts) file lives under src/.
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

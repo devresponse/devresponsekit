@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
  * §8.8). Gated on `admin.apikeys.manage`. The scope catalog is passed
  * down from the server so the client never imports the `server-only`
  * permission graph; the server route re-validates every scope against
- * the OWNER's authority regardless.
+ * BOTH the owner's authority and the acting admin's own permissions /
+ * granted scopes (`ungrantableScopesForCaller`, P0-2) regardless.
  */
 export default async function AdministratorNewApiKeyPage({
   params,

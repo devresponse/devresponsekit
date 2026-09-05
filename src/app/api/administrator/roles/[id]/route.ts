@@ -118,7 +118,8 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
  * DELETE /api/administrator/roles/[id]
  *
  * Refuses with `role_in_use` (HTTP 409) when the role is still
- * referenced by `app_user_roles`. On success: deletes
+ * referenced by `app_user_roles` or `app_group_roles` (DB-2, review #149).
+ * On success: deletes
  * `app_role_permissions` and the `app_roles` row in one transaction so
  * the constraint cannot leave orphan permission rows behind.
  */

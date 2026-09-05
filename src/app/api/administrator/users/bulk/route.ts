@@ -294,8 +294,6 @@ export async function POST(request: NextRequest) {
     },
   );
 
-  // Touch the parsed action once so the audit row records the original
-  // batch surface. Per-row events written by the helpers cover detail.
   return NextResponse.json({
     ok: true,
     action,

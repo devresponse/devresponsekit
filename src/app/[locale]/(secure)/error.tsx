@@ -4,11 +4,16 @@ import { RouteError } from "@/components/observability/route-error";
 
 /**
  * Error boundary at the (secure) GROUP level. The existing
- * (secure)/app/error.tsx only catches errors thrown by pages under /app/*.
- * The (secure)/layout.tsx fetches the session + the user's organizations
- * ABOVE that boundary, so a failure there would otherwise skip the
- * app-level boundary and hit the English-only global-error.tsx. This catches
- * those layout-level throws and keeps them localized (P2-13).
+ * (secure)/app/error.tsx only catches errors thrown by pages under /app/*;
+ * this one covers the whole (secure) subtree BELOW (secure)/layout.tsx, so
+ * a throw from any nested layout or page in the group renders the localized
+ * RouteError instead of the English-only global-error.tsx (P2-13).
+ *
+ * NOTE (review #31): a segment's error.tsx cannot catch throws from its OWN
+ * segment's layout. (secure)/layout.tsx fetches the session + the user's
+ * organizations, and a failure there still lands on global-error.tsx —
+ * catching it would need an error.tsx in the parent [locale] segment, which
+ * does not exist today.
  */
 export default function SecureError(props: {
   error: Error & { digest?: string };

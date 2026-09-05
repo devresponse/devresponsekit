@@ -44,9 +44,12 @@ export const dynamic = "force-dynamic";
  * first paint without a client round-trip.
  *
  * Tabs (rendered client-side):
- *   - Members   — paginated grid of memberships
- *   - Providers — paginated grid of provider bindings
- *   - Settings  — name/slug/status editor
+ *   - Members        — paginated grid of memberships, with the pending
+ *                      Invitations panel underneath (0008)
+ *   - Providers      — paginated grid of provider bindings
+ *   - Authentication — per-org sign-up policy editor (0007); this page
+ *                      also loads the org's auth settings + platform defaults
+ *   - Settings       — name/slug/status editor
  */
 export default async function AdministratorOrganizationDetailPage({
   params,

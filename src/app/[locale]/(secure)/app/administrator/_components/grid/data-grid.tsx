@@ -47,15 +47,18 @@ import {
  * false` (used by row-action columns).
  */
 export interface DataGridProps<TItem> {
-  /** Stable name used for local-storage / a11y (`administrator.users`, etc.). */
+  /** Stable name emitted as the root `data-grid` attribute (`administrator.users`, etc.). */
   name: string;
   /** API endpoint; receives URL state appended as query string. */
   endpoint: string;
-  /** TanStack column definitions. `header` may be a translation key. */
+  /** TanStack column definitions. `header` renders verbatim, so it must already be translated. */
   columns: ColumnDef<TItem, unknown>[];
   /** Hook options forwarded to {@link useGridState}. */
   options?: UseGridStateOptions;
-  /** Optional initial server-rendered page (saves first round-trip). */
+  /**
+   * Optional initial page shown (instead of the skeleton) while the first
+   * fetch is in flight — the fetch still runs (review #160).
+   */
   initialData?: { items: TItem[]; total: number };
   /**
    * Optional row selection. When provided, a leading checkbox column

@@ -6,9 +6,10 @@ import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Select primitive (Radix-backed). Used by the locale switcher and any
- * compact-mode toggle. Keyboard navigation and focus trapping are
- * provided by Radix.
+ * Select primitive (Radix-backed). Used by the locale switcher, the
+ * organization switcher and the admin form pickers (auth-policy form, org
+ * settings form, invitations panel). Keyboard navigation and focus trapping
+ * are provided by Radix.
  */
 const Select = SelectPrimitive.Root;
 const SelectGroup = SelectPrimitive.Group;

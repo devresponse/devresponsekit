@@ -163,9 +163,12 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 /**
  * DELETE /api/administrator/users/[id]
  *
- * Soft-delete only (plan §4.1). Performs in a single Kysely tx:
- *   1. Indefinite Better Auth ban (so the user cannot sign in).
- *   2. `app_users.status = 'deactivated'` + `deactivated_*` columns.
+ * Soft-delete only (plan §4.1). Two steps (review #137):
+ *   1. Indefinite Better Auth ban — an auth-API call, NOT transactional;
+ *      a failure aborts with 502 before anything app-side changes.
+ *   2. App-side bookkeeping (`app_users.status = 'deactivated'` +
+ *      `deactivated_*` columns) and the membership cascade in ONE Kysely
+ *      tx, with a compensating unban if that tx fails (#B6).
  *
  * Hard delete via `auth.api.removeUser` is intentionally NOT exposed in
  * v1 (decision §20.1.11). A `restore` endpoint inverts this action.

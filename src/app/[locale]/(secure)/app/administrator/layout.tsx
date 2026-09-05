@@ -19,9 +19,9 @@ export const dynamic = "force-dynamic";
  *     the caller holds *some* `admin.*` permission. If not, we render
  *     `notFound()` so the route is indistinguishable from a missing
  *     page (plan §6.2 layer 1).
- *   - Per-page guards (Phase 2+) call the more specific
- *     `requireAdminPermission(<exact perm>)` to enforce the read needed
- *     by that page.
+ *   - Per-page guards call the more specific
+ *     `checkAdminPermissionServer(<exact perm>)` to enforce the read needed
+ *     by that page (`requireAdminPermission` is the route-handler guard).
  *
  * Shell rules:
  *   - Renders a nested `ApplicationShell` only — never a second

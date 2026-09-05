@@ -2,10 +2,11 @@
  * Account section registry.
  *
  * Single source of truth for the self-service Account app's navigation.
- * Both the {@link AccountSidebar} and the account landing page render
- * from this list, so adding a future personal-data area (Notifications,
- * Connected accounts, API tokens, Data export, …) is a ONE-entry change:
- * append a descriptor here and add the matching route folder.
+ * The {@link AccountSidebar} renders from this list (the account landing
+ * page hardcodes its own copy and does not consume it — review #173), so
+ * adding a future personal-data area (Notifications, Connected accounts,
+ * API tokens, Data export, …) is a ONE-entry change: append a descriptor
+ * here and add the matching route folder.
  *
  * Every section requires only the baseline secure permission
  * (`shell.view`) — the Account app is user-level and never gates on any
@@ -19,7 +20,10 @@ export interface AccountSection {
   href: `/${string}`;
   /** `account` message-namespace key for the section title. */
   labelKey: string;
-  /** `account` message-namespace key for the short description. */
+  /**
+   * `account` message-namespace key for the short description. Reserved:
+   * no renderer reads it yet (the sidebar shows labels only).
+   */
   descriptionKey: string;
   /**
    * Icon NAME resolved client-side through the allow-list in

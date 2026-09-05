@@ -10,8 +10,10 @@ export const dynamic = "force-dynamic";
  *
  * RSC entry point that gates on `admin.users.create` and renders a
  * client-side form (`NewUserForm`). The form `POST`s to
- * `/api/administrator/users` which performs the Better Auth + app
- * insert in a single transaction.
+ * `/api/administrator/users`, which creates the Better Auth user and then
+ * inserts the `app_users` row as a second, non-transactional step (a
+ * duplicate-email race maps to 409 and leaves the auth user behind for
+ * reconciliation — review #33/#136).
  */
 export default async function AdministratorNewUserPage({
   params,

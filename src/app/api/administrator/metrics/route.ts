@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
  * the caller may see — an org admin never receives system-wide or other-org
  * data:
  *   - SUPERADMIN  → most-active-orgs + system daily registrations + system
- *     daily logins.
+ *     daily logins + system daily audit-event volume (SUPERADMIN-only, no
+ *     org-scoped variant).
  *   - ORG ADMIN   → daily registrations + logins for THEIR active org only.
  *
  * Gated on `admin.users.read` (registrations are the core metric, matching the

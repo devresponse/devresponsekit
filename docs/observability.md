@@ -22,7 +22,7 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. Append-only; retention is an ops concern — see the note below. |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
 | **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` business counter. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
-| **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Events are scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process. |
+| **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Errors, transactions, and spans are all scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process — see [§3](#3-redaction--scrubbing-policy). |
 | **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the database is reachable, `503` otherwise. Wire both to your orchestrator probes (see [deployment.md §4](./deployment.md#4-deploy--post-deploy-verification) and [docker.md §7](./docker.md)). |
 | **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged (not swallowed) so a crashing worker is visible in the log stream. |
 
@@ -52,8 +52,16 @@ Two layers, both fail-safe (redact-by-default):
   `cookie` field (and their nested `*.` variants) to `[redacted]` before serialization —
   covering session tokens, API-key secrets, and the Better Auth secret. Never log a
   plaintext credential; the audit log records **metadata only**.
-- **Sentry** — `sentry-shared.ts` strips cookies, query strings, emails, bearer/API tokens,
-  and secret-like values from events. Reset URLs and other one-time tokens are never sent.
+- **Sentry** — `sentry-shared.ts` strips cookies, query strings, request bodies, the
+  `referer` header, emails, bearer/API tokens, and secret-like values from **every event
+  kind**: error events (`beforeSend`), sampled **transactions** (`beforeSendTransaction`),
+  and their **spans** (`beforeSendSpan`) — including the root-span attributes in
+  `contexts.trace.data` and each `spans[].data` (`url.full`, `url.query`,
+  `http.request.header.*`, …), span descriptions, and the transaction name. Reset URLs
+  (`/reset-password/<token>`) and other one-time tokens are never sent. The SDK is also told
+  not to _record_ cookies, query parameters, bodies, or user info in the first place
+  (`dataCollection` in all three `Sentry.init` calls); the hooks are the backstop
+  (review #22).
 - **Email outbox** — `src/lib/email/outbox-secrets.ts` redacts one-time links (the
   `/reset-password/<token>` path segment and every `token=` query value → `[redacted]`) from
   the `app_outbox` columns the administrator API can read (`subject`, `body_html`,

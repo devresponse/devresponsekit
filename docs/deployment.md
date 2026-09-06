@@ -29,6 +29,8 @@ The point of this shape is the **migrate-first contract**: the new build goes li
 | **GitHub Actions secrets** (the `production` environment) | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `PRODUCTION_DIRECT_DATABASE_URL` (optional var `DB_SCHEMA`) | the deploy pipeline |
 | **Vercel env** (Project → Settings → Environment Variables → Production) | runtime + build vars (`DATABASE_URL`, auth secrets, feature flags, `NEXT_PUBLIC_*`, …) | `vercel build` and the deployed functions at runtime |
 
+> **Current state (2026-09).** The `production` GitHub Environment secrets are **not configured**, so `deploy.yml` fails at its migrate step and the live site (`demo.devresponse.ca`) is deployed by **Vercel's git integration on every push to `main`** — i.e. the migrate-first contract above is **not** in force today. Until the Actions path is configured, every core migration must be applied **by hand, before its branch merges** (`pnpm db:app:migrate` against the production `DATABASE_URL`), and the state is verifiable without credentials: `GET https://<domain>/api/health/ready` returns **503 `schema_behind`** while a build is live ahead of one of its migrations and **200 `ready`** once the ledger is complete (see §4). Migration `0004-oauth-client-secret-rotated-at.sql` documents the worked case (review #43).
+>
 > **Do NOT also enable Vercel's native Git auto-deploy.** Connecting the repo for Vercel to build on push would **double-deploy and skip the migration step**. Leave the project unconnected to Git, or disable production auto-builds (Vercel → Project → Settings → Git) so this workflow is the sole path to production. The `output: "standalone"` setting in [`next.config.mjs`](../next.config.mjs) is for the Docker image only — Vercel ignores it; no action needed.
 
 ---
@@ -92,6 +94,7 @@ Notes:
 Push to `main` (or run the workflow from the Actions tab). After it completes, verify:
 
 - [ ] `GET https://<domain>/` → the landing page returns **200**.
+- [ ] `GET https://<domain>/api/health/ready` → **200 `{"status":"ready"}`**. This proves the database is reachable **and** the ledger holds every core migration the live build depends on (`REQUIRED_CORE_MIGRATIONS` in `src/db/migrations/migration-plan.ts`). A **503 `{"status":"unavailable","reason":"schema_behind"}`** means the build went live ahead of one of its migrations — run `pnpm db:app:migrate` against production now; the missing ids are in the server log (`kind: "schema-behind"`), never in the response.
 - [ ] Sign in with the seed admin from §2; the session persists.
 - [ ] `GET https://<domain>/api/internal/outbox-drain` and `/api/internal/mcp-registration-reap` **without** the bearer header → **401** (confirms both cron endpoints are fail-closed).
 - [ ] In Neon's SQL editor, `select id from auth.app_schema_migrations order by id` lists the applied ids — the core `000N-*.sql` files (`0001-initial-schema.sql`, `0002-admin-groups-permissions.sql`, `0003-outbox-delivery-payload.sql`, `0004-oauth-client-secret-rotated-at.sql`, `0005-integrity-constraints.sql`, `0006-rate-limit-buckets.sql`, …), the always-applied `locales/0000-email-templates-en.sql`, and (unless `DB_MIGRATE_LOCALES=0`) the localized `locales/0001-…` files.

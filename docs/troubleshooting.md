@@ -33,8 +33,10 @@ warrant a comms channel and an owner before deep debugging.
 
 1. **Liveness / readiness.** `GET /api/health` → `200 {"status":"ok"}` means the
    process is up. `GET /api/health/ready` → `200` means it can reach the
-   database; `503` means it cannot. Both are unauthenticated and `no-store`, so
-   a curl from anywhere works.
+   database **and** the schema carries every core migration this build needs;
+   `503` carries a `reason`: `database_unreachable` or `schema_behind` (a
+   build went live ahead of its migration — see §4). Both are unauthenticated
+   and `no-store`, so a curl from anywhere works.
 2. **Get a correlation id.** Reproduce the failure (or take one from a user
    report) and capture the `x-request-id` response header. It is the join key
    across logs, audit rows, and Sentry — see [observability.md §4](./observability.md#4-correlating-an-incident).
@@ -80,6 +82,22 @@ warrant a comms channel and an owner before deep debugging.
   pool, so look for the timing-out query in the logs.
 - Mitigation: scale the DB / pooler, or roll back a migration that changed a hot
   query plan (§5).
+
+### Schema behind (`/api/health/ready` → 503 `schema_behind`)
+- The running build depends on a core migration the database has not
+  recorded in `app_schema_migrations` (the ids are in the server log under
+  `kind: "schema-behind"`; the response deliberately does not list them).
+  Symptoms before anyone looks at the probe: 500s confined to the routes that
+  touch the new column/table — e.g. every `/api/v1` call bearing an
+  OAuth-client JWT and admin secret rotation when `0004-oauth-client-secret-rotated-at.sql`
+  is missing (review #43).
+- Fix forward, not back: run `pnpm db:app:migrate` against the production
+  `DATABASE_URL` (migrations are additive and idempotent), then re-curl
+  `/api/health/ready` for `200`. Rolling the app back also works (the older
+  build does not read the column) but leaves the gap for the next deploy.
+- Root cause is the deploy path: see [deployment.md §1](./deployment.md#1-how-this-repo-deploys)
+  ("current state") — until the migrate-first Actions pipeline is configured,
+  migrations must be applied by hand **before** their branch merges.
 
 ### Elevated 5xx
 - Every uncaught 5xx is logged (`onRequestError` → `logServerError`) and, if

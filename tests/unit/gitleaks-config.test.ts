@@ -343,6 +343,36 @@ describe(".gitleaks.toml — detection rules for the app's own credential format
   });
 });
 
+describe(".gitleaks.toml — migration filenames are not credentials (review #43 landing gate)", () => {
+  const entry = CONFIG.globalAllowlists.find((a) =>
+    a.regexes.join("\n").includes("secret[a-z0-9-]*"),
+  );
+
+  it("exists and is fenced to the bundled generic rule, never the app's own rules", () => {
+    expect(entry, "migration-filename allowlist missing from .gitleaks.toml").toBeDefined();
+    expect(entry!.targetRules).toEqual(["generic-api-key"]);
+  });
+
+  it("matches the ledger filename that trips the scan and nothing credential-shaped", () => {
+    const [regex] = entry!.regexes.map(goRegex);
+    // The match gitleaks actually reports: the filename abutting the next entry.
+    expect(
+      regex!.test('"0004-oauth-client-secret-rotated-at.sql", "0005-integrity-constraints.sql"'),
+    ).toBe(true);
+    // Not a blanket pass for the word "secret" or for real credential shapes.
+    expect(regex!.test('BETTER_AUTH_SECRET="' + synthetic("", 40) + '"')).toBe(false);
+    expect(regex!.test(synthetic("drkcsec_", 40))).toBe(false);
+    expect(regex!.test('const clientSecret = "' + synthetic("", 32) + '";')).toBe(false);
+  });
+
+  it("still describes a file that exists (no dead fence)", () => {
+    const [regex] = entry!.regexes.map(goRegex);
+    const dir = path.join(ROOT, "src", "db", "migrations");
+    const named = fs.readdirSync(dir).filter((f) => f.endsWith(".sql") && regex!.test(f));
+    expect(named.length).toBeGreaterThan(0);
+  });
+});
+
 describe(".gitleaks.toml — the seed-admin default password is path-scoped, not global (#1)", () => {
   const rule = ruleById("devresponse-seed-default-password");
   const allowed = (rel: string): boolean => rule.allowPaths.some((p) => p.test(rel));

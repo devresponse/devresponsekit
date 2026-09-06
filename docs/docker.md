@@ -219,8 +219,13 @@ volumes:
   or committed env files.
 - **Health probes:** wire the orchestrator's `livenessProbe` to
   `GET /api/health` (200, no DB) and its `readinessProbe` to
-  `GET /api/health/ready` (`select 1` → 200, or 503 when the database is
-  unreachable). Both are unauthenticated and `no-store`.
+  `GET /api/health/ready` (200 when the database is reachable **and** the
+  `app_schema_migrations` ledger holds every core migration the image was
+  built with; 503 `database_unreachable` or 503 `schema_behind` otherwise).
+  Because readiness covers the schema, a rolling update of an image whose
+  migration has not been applied **stalls** on unready pods instead of
+  routing traffic to code that would 500 — run the migrate init step and the
+  pods become ready. Both probes are unauthenticated and `no-store`.
 - **Graceful shutdown:** on `SIGTERM`/`SIGINT` two things run, in this order
   (review #24). **(1)** Next's own signal cleanup (`node server.js` →
   `start-server.js`) stops accepting connections, waits for every in-flight

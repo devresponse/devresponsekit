@@ -38,7 +38,10 @@ export type ApiGuardResult = { ok: true; grant: ApiGrant } | { ok: false; respon
  * Requires an authenticated caller holding `requiredPermission` (a single
  * admin permission key or an array, any of which satisfies). Account-level
  * scopes are not checked here — the self-service `/api/v1/me*` surface uses
- * `requireAccountUser` (src/lib/account/guard.server.ts) instead.
+ * {@link requireApiAccount} (src/lib/account/guard.server.ts) instead, which
+ * makes the same decision and speaks the same problem+json contract
+ * (review #45; the reference this comment used to carry was #128's dangling
+ * `requireApiAccount`, now a real symbol).
  */
 export async function requireApiPermission(
   request: NextRequest,

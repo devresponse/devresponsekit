@@ -18,6 +18,8 @@ const resolveCaller = vi.fn();
 const hasBearerCredential = vi.fn();
 const auditMock = vi.fn();
 const updateUserMock = vi.fn();
+/** Better Auth's internal adapter — the bearer write path (review #185). */
+const adapterUpdateUserMock = vi.fn();
 const updateSets: Record<string, unknown>[] = [];
 const insertValues: Record<string, unknown>[] = [];
 
@@ -29,7 +31,18 @@ vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
 vi.mock("@/lib/auth", () => ({
-  auth: { api: { updateUser: (...args: unknown[]) => updateUserMock(...args) } },
+  auth: {
+    api: { updateUser: (...args: unknown[]) => updateUserMock(...args) },
+    // `auth.api.updateUser` acts on the CURRENT SESSION user and so needs a
+    // cookie; a bearer caller has none. The route branches to Better Auth's
+    // own internal adapter for those (review #185) — this stub is what makes
+    // the difference observable, and its absence is exactly why the previous
+    // "200 for a key carrying account.profile.write" case passed against a
+    // route that 502'd in production.
+    $context: Promise.resolve({
+      internalAdapter: { updateUser: (...args: unknown[]) => adapterUpdateUserMock(...args) },
+    }),
+  },
 }));
 vi.mock("@/db/database", () => ({
   db: {
@@ -95,11 +108,19 @@ let profilePATCH: typeof ProfileRouteModule.PATCH;
 let preferencesPUT: typeof PreferencesRouteModule.PUT;
 
 beforeEach(async () => {
-  for (const m of [resolveCaller, hasBearerCredential, auditMock, updateUserMock]) m.mockReset();
+  for (const m of [
+    resolveCaller,
+    hasBearerCredential,
+    auditMock,
+    updateUserMock,
+    adapterUpdateUserMock,
+  ])
+    m.mockReset();
   updateSets.length = 0;
   insertValues.length = 0;
   hasBearerCredential.mockImplementation((h: Headers) => h.has("authorization"));
   updateUserMock.mockResolvedValue({});
+  adapterUpdateUserMock.mockResolvedValue({});
   ({ PATCH: profilePATCH } = await import("@/app/api/account/profile/route"));
   ({ PUT: preferencesPUT } = await import("@/app/api/account/preferences/route"));
 });
@@ -183,17 +204,26 @@ describe("PATCH /api/account/profile — bearer scope gate (review #184)", () =>
     expect(updateUserMock).not.toHaveBeenCalled();
   });
 
-  it("200 for a key carrying account.profile.write", async () => {
+  it("200 for a key carrying account.profile.write — writes via the internal adapter (#185)", async () => {
     resolveCaller.mockResolvedValue(caller(["account.profile.write"]));
     const res = await profilePATCH(makeReq({ name: "Ada" }, "PATCH", true));
     expect(res.status).toBe(200);
-    expect(updateUserMock).toHaveBeenCalledTimes(1);
+    // The session-scoped endpoint is NOT used for a bearer caller: it needs a
+    // cookie and would throw UNAUTHORIZED -> the old blanket 502.
+    expect(updateUserMock).not.toHaveBeenCalled();
+    expect(adapterUpdateUserMock).toHaveBeenCalledWith("ba-self", { name: "Ada" });
     expect(updateSets).toHaveLength(1);
+    // ...and no bogus `error` audit row for a request that succeeded.
+    expect(auditMock.mock.calls.map((c) => (c[0] as { outcome: string }).outcome)).not.toContain(
+      "error",
+    );
   });
 
-  it("cookie session (null scopes) keeps full user authority", async () => {
+  it("cookie session (null scopes) keeps full user authority and the session endpoint", async () => {
     resolveCaller.mockResolvedValue(caller(null));
     const res = await profilePATCH(makeReq({ name: "Ada" }, "PATCH", false));
     expect(res.status).toBe(200);
+    expect(updateUserMock).toHaveBeenCalledTimes(1);
+    expect(adapterUpdateUserMock).not.toHaveBeenCalled();
   });
 });

@@ -66,4 +66,35 @@ describe("problemResponse", () => {
     expect(logErr).not.toHaveBeenCalled();
     expect(capErr).not.toHaveBeenCalled();
   });
+
+  it("review #204: `extra` can never override a reserved problem member", async () => {
+    // A caller passing any of these — by accident, or because a value it is
+    // forwarding happens to be named `status` — used to rewrite the document:
+    // `extra` was spread LAST. A `status` that disagrees with the HTTP status,
+    // or a `type` pointing somewhere else, silently breaks every client that
+    // switches on them, and a rewritten `requestId` breaks log correlation.
+    const res = problemResponse("not_found", 404, req, {
+      detail: "the real detail",
+      extra: {
+        type: "https://evil.example/problems/spoofed",
+        title: "Spoofed",
+        status: 200,
+        code: "spoofed",
+        detail: "spoofed detail",
+        requestId: "spoofed-request-id",
+        // A genuinely extra member still rides along.
+        resourceId: "abc",
+      },
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.type).toBe("https://devresponse.com/problems/not_found");
+    expect(body.title).toBe("Resource not found");
+    expect(body.status).toBe(404);
+    expect(body.code).toBe("not_found");
+    expect(body.detail).toBe("the real detail");
+    expect(body.requestId).toBe(res.headers.get("x-request-id"));
+    expect(body.requestId).not.toBe("spoofed-request-id");
+    expect(body.resourceId).toBe("abc");
+  });
 });

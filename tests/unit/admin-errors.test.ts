@@ -49,3 +49,19 @@ describe("adminErrorResponse observability", () => {
     expect(capture).not.toHaveBeenCalled();
   });
 });
+
+describe("review #204: adminErrorResponse reserved members", () => {
+  it("`extra` can never override error / message / requestId", async () => {
+    const res = adminErrorResponse("not_found", 404, req(), {
+      extra: { error: "spoofed", message: "arbitrary text", requestId: "spoofed", detail: "kept" },
+    });
+    const body = (await res.json()) as Record<string, unknown>;
+    // The machine code the client switches on and the `errors.*` i18n key the
+    // frontend looks up must come from the CODE, never from caller data.
+    expect(body.error).toBe("not_found");
+    expect(body.message).toBe("errors.not_found");
+    expect(body.requestId).toBe(res.headers.get("x-request-id"));
+    expect(body.requestId).not.toBe("spoofed");
+    expect(body.detail).toBe("kept");
+  });
+});

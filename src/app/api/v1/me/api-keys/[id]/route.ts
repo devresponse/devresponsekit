@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
-import { requireAccountUser } from "@/lib/account/guard.server";
+import { requireApiAccount } from "@/lib/account/guard.server";
 import { getApiKeyById, revokeApiKey } from "@/lib/api-auth/api-keys.server";
 import {
   consumeToken,
@@ -22,7 +22,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * another user's key. Idempotent.
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
-  const guard = await requireAccountUser(request, "account.apikeys.manage");
+  const guard = await requireApiAccount(request, "account.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

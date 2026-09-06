@@ -61,10 +61,15 @@ export function adminErrorResponse(
     logServerError(`admin.${code}`, { requestId, status, code, err: options.cause });
   }
   const body = {
+    // review #204 (the `problemResponse` twin): `extra` is spread FIRST so a
+    // caller-supplied member can never override the reserved envelope members
+    // (`error`/`message`/`requestId`). Spread last, an `extra.error` would
+    // rewrite the machine code the client switches on, and an `extra.message`
+    // would replace the `errors.*` i18n key with arbitrary text.
+    ...(options.extra ?? {}),
     error: code,
     message: `errors.${code}`,
     requestId,
-    ...(options.extra ?? {}),
   };
   return NextResponse.json(body, {
     status,

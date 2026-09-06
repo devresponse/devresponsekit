@@ -83,13 +83,19 @@ export function problemResponse(
     logServerError(`v1.${code}`, { requestId, status, code, err: options.cause });
   }
   const body = {
+    // review #204: `extra` is spread FIRST so a caller-supplied member can
+    // never override a reserved RFC 7807 member (`type`/`title`/`status`/
+    // `detail`) or the correlation fields (`code`/`requestId`). Spread last it
+    // silently produced a malformed problem document — e.g. a `status` in
+    // `extra` that disagrees with the HTTP status — which breaks every client
+    // that switches on `type`/`status` and poisons log correlation.
+    ...(options.extra ?? {}),
     type: `https://devresponse.com/problems/${code}`,
     title: TITLES[code] ?? "Error",
     status,
     code,
     detail: options.detail,
     requestId,
-    ...(options.extra ?? {}),
   };
   return new NextResponse(JSON.stringify(body), {
     status,

@@ -39,7 +39,12 @@ export default defineConfig({
     globals: true,
     environment: "node",
     setupFiles: ["tests/setup/vitest.setup.ts"],
-    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    // `sdk/admin/client.test.ts` lives next to the hand-written SDK entry
+    // point (review #240): importing the generated `runtime.ts` from under
+    // tests/ would pull it into the root `tsc` program, where the generated
+    // code trips `noImplicitOverride`; under sdk/ it is type-checked by the
+    // SDK's own tsconfig (`pnpm sdk:admin:typecheck`) instead.
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "sdk/admin/*.test.ts"],
     // tests/db/** are DB-backed (live Postgres) and run via vitest.db.config.ts
     // (`pnpm test:db`), not in this mocked-DB default run.
     exclude: ["tests/e2e/**", "tests/accessibility/**", "tests/db/**", "node_modules/**"],

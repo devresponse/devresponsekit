@@ -37,6 +37,10 @@ test-results
 # Generated
 src/db/schema/generated.ts
 
+# openapi-generator JAR cache (openapitools.json storageDir); every copy is
+# SHA-256-verified by scripts/verify-openapi-generator-jar.ts before use.
+.cache/
+
 # TypeScript
 *.tsbuildinfo
 

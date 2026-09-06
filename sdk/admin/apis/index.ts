@@ -6,6 +6,7 @@ export * from './EmailApi';
 export * from './EnterpriseAppsApi';
 export * from './ExportApi';
 export * from './GroupsApi';
+export * from './MCPAgentsApi';
 export * from './MembershipsApi';
 export * from './OrganizationsApi';
 export * from './PermissionsApi';

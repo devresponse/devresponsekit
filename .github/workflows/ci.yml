@@ -231,9 +231,17 @@ jobs:
     # (sdk/admin) are GENERATED artifacts. Regenerate them from source and fail
     # if anything changed — so a new or edited admin route can never ship with
     # a stale spec or SDK. A REQUIRED status check on `main` (branch
-    # protection), so drift blocks the merge. Deterministic: the generator
-    # version is pinned in openapitools.json (7.12.0) and .gitattributes
-    # normalizes output to LF.
+    # protection), so drift blocks the merge.
+    #
+    # Deterministic AND pinned end to end (review #111/#197): the npm wrapper
+    # `@openapitools/openapi-generator-cli` is an exact-pinned devDependency
+    # resolved from the lockfile and run via `pnpm exec` (no floating `npx`);
+    # the generator JAR version is pinned in openapitools.json (7.12.0) and
+    # its SHA-256 is verified by scripts/verify-openapi-generator-jar.ts
+    # before the wrapper ever executes it (a mismatching download or cache is
+    # deleted and fails the job); .gitattributes normalizes output to LF.
+    # `pnpm sdk:admin:generate` locally must therefore produce byte-identical
+    # files to this job, whatever JDK runs the JAR.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

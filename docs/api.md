@@ -26,7 +26,7 @@ Two related references carry the deeper detail this page links to rather than re
 | Navigation | `/api/navigation/*` | Cookie session | The web UI |
 | SSO handoff | `/api/sso/launch`, `/api/sso/consume` | Cookie session / signed token | Cross-subdomain SSO |
 | Docs assets | `/api/docs/asset/[...path]` | Cookie session + `shell.view` | In-app docs viewer |
-| Administrator | `/api/administrator/*` | **Cookie session** + `admin.*` permission | The admin console |
+| Administrator | `/api/administrator/*` | **Cookie session** (+ `Origin` on mutations) **or Bearer** (API key / JWT, scope-bound) + `admin.*` permission | The admin console |
 | Machine API (v1) | `/api/v1/*` | **Bearer** (API key or JWT) or cookie | Integrations & the user's own self-service |
 | MCP agent gateway | `/api/mcp`, `/api/mcp/register` | **Bearer** (API key or JWT); registration public | AI agents (Model Context Protocol) — dark by default |
 | Discovery | `/api/v1/openapi.json`, `/api/v1/jwks.json`, `/.well-known/oauth-*` | Public | Tooling · MCP / OAuth clients |
@@ -44,7 +44,7 @@ flowchart TB
         A["admin SDK (sdk/admin)"]
     end
     V -- "Authorization: Bearer drk_… / JWT" --> V1["/api/v1/*"]
-    A -- "Cookie + Origin header" --> ADM["/api/administrator/*"]
+    A -- "Cookie (+ Origin on mutations) or Bearer" --> ADM["/api/administrator/*"]
     V1 & ADM --> APP["DevResponse app"]
 ```
 
@@ -59,15 +59,17 @@ List endpoints across both surfaces share one envelope and one set of query para
 
 ## 2. Authentication
 
-There are two auth models. **Cookie session** gates the admin console and account endpoints; **bearer credentials** gate the machine API. The `/api/v1` surface accepts either.
+There are two auth models. **Cookie session** is what the browser uses everywhere; **bearer credentials** are the machine path. Both `/api/v1` and `/api/administrator` accept either (one `resolveCaller` behind both guards); the account and navigation endpoints are cookie-only except where noted in §1.
 
 ### Cookie session (browser & admin console)
 
-Better Auth sets a session cookie on sign-in. Cross-site mutations (`POST`/`PATCH`/`PUT`/`DELETE`) are additionally protected by an **origin guard**: the request's `Origin` (or `Referer`) must be a trusted origin. The guard covers every cookie-session mutation — `/api/administrator/*`, `/api/account/*`, `/api/preferences/*` (active-org and locale switches), and `/api/invitations/accept` — so a non-browser caller must send **both** the session cookie and a matching `Origin` header; a miss is `403 untrusted_origin`.
+Better Auth sets a session cookie on sign-in: **`__Secure-better-auth.session_token`** on any https origin (Better Auth's `useSecureCookies` prefix — production always), and the bare `better-auth.session_token` only on a plain-http dev origin such as `http://localhost:3000`. Its value is the **signed cookie value** exactly as the browser holds it — a session `id` or a row from the `session` table is rejected — so a server-side caller obtains it from a real sign-in, never by minting one.
 
-### Bearer credentials (machine API)
+Cross-site mutations (`POST`/`PATCH`/`PUT`/`DELETE`) are additionally protected by an **origin guard**: the request's `Origin` (or `Referer`) must be a trusted origin. The guard covers every cookie-session mutation — `/api/administrator/*`, `/api/account/*`, `/api/preferences/*` (active-org and locale switches), and `/api/invitations/accept` — so a non-browser caller must send **both** the session cookie and a matching `Origin` header; a miss is `403 untrusted_origin`. (A browser sets `Origin` itself; it is a forbidden header name, so setting it from script is a no-op.)
 
-`/api/v1/**` accepts either credential in an `Authorization: Bearer …` header. **Both paths are disabled by default** and enabled per environment (`API_KEYS_ENABLED`, `API_JWT_ENABLED` — see [Configuration](./configuration.md#machine-api-credentials-both-paths-dark-by-default)).
+### Bearer credentials (machine API — and the admin API)
+
+`/api/v1/**` and `/api/administrator/**` accept either credential in an `Authorization: Bearer …` header. **Both paths are disabled by default** and enabled per environment (`API_KEYS_ENABLED`, `API_JWT_ENABLED` — see [Configuration](./configuration.md#machine-api-credentials-both-paths-dark-by-default)). A bearer caller is exempt from the origin guard (a cross-site page cannot attach one) and is bounded by its scopes — see the authority rule below; on the admin surface that means the credential needs a scope covering the operation's `admin.*` permission (e.g. `admin.users.read` or `admin.users.*`), else `403 forbidden`.
 
 | Type | Looks like | Enabled by | At rest |
 | --- | --- | --- | --- |
@@ -200,46 +202,48 @@ console.log(page.items, page.total);
 
 ## 6. Administrator API (`/api/administrator`) & the committed admin SDK
 
-This is the cookie-session console surface (users, roles, permissions, groups, organizations, memberships, sign-up policy, invitations, enterprise apps, API keys, email, audit, CSV export). It is **internal tooling that mirrors the admin console — not a public/integration API**; prefer the v1 surface for integrations. All endpoints require a cookie session and the noted permission; mutations are rate-limited and audited.
+This is the console surface (users, roles, permissions, groups, organizations, memberships, sign-up policy, invitations, enterprise apps, API keys, email, MCP agents, audit, CSV export). It is **internal tooling that mirrors the admin console — not a public/integration API**; prefer the v1 surface for integrations. Every endpoint accepts a cookie session (+ `Origin` on mutations) or a scope-bound bearer credential, and requires the noted permission; mutations are rate-limited (`429` with `Retry-After` / `retryAfter`) and audited.
 
+The table below is **generated from the spec** by `pnpm docs:admin-table` (one row per tag; `tests/unit/docs-admin-api-table.test.ts` fails when it is stale) — edit `openapi-admin.ts`, not the table:
+
+<!-- admin-api-table:start (generated by pnpm docs:admin-table) -->
 | Resource | Methods & paths | Permissions |
 | --- | --- | --- |
-| Users | `GET/POST /users`; `GET/PATCH/DELETE …/[id]`; `…/[id]/status`, `/password`, `/role`, `/sessions`, `/ban`, `/unban`, `/restore`, `/impersonate`, `/memberships`, `/app-roles`, `/groups`; `POST …/users/bulk` | `admin.users.*` (per action) |
-| Roles | `GET/POST /roles`; `GET/PATCH/DELETE …/[id]`; `…/[id]/permissions`, `/members`, `/duplicate` | `admin.roles.*` |
-| Permissions | `GET/POST /permissions`; `…/[id]` | `admin.roles.read`, `admin.permissions.manage` |
-| Groups | `GET/POST /groups`; `GET/PATCH/DELETE …/[id]`; `…/[id]/roles`, `/members` | `admin.groups.*`, `admin.roles.assign` |
-| Organizations | `GET/POST /organizations`; `GET/PATCH/DELETE …/[id]`; `…/[id]/members`, `/provider-bindings`, `/auth-settings`, `/invitations`, `/invitations/[invitationId]`, `/invitations/[invitationId]/resend` | `admin.orgs.*` |
-| Sign-up policy (platform) | `GET/PATCH /auth-settings/defaults` | `admin.orgs.*` + **superadmin** |
-| API keys | `GET/POST /api-keys`; `GET/DELETE …/[id]`; `…/[id]/rotate` | `admin.apikeys.*` |
-| Email | `GET /email/outbox` (metadata), `…/outbox/[id]` (redacted bodies); `…/templates`, `…/templates/[id]`; `POST …/email/test` | `admin.email.*` |
-| MCP agents | `GET /mcp-agents`; `POST …/[id]/approve`; `PATCH`/`DELETE …/[id]` | `admin.clients.read` / `admin.clients.manage` |
+| Users | `GET/POST /users`; `GET/PATCH/DELETE /users/[id]`; `POST /users/[id]/status`; `POST /users/[id]/password`; `POST /users/[id]/role`; `POST /users/[id]/ban`; `POST /users/[id]/unban`; `POST /users/[id]/restore`; `POST/DELETE /users/[id]/impersonate`; `GET/DELETE /users/[id]/sessions`; `DELETE /users/[id]/sessions/[sessionId]`; `GET/POST/PATCH/DELETE /users/[id]/memberships`; `GET/POST/DELETE /users/[id]/app-roles`; `GET /users/[id]/roles`; `GET /users/[id]/audit`; `GET/POST/DELETE /users/[id]/groups`; `POST /users/bulk` | `admin.users.*` (per action) |
+| Roles | `GET/POST /roles`; `GET/PATCH/DELETE /roles/[id]`; `POST /roles/[id]/duplicate`; `GET/POST/DELETE /roles/[id]/permissions`; `GET /roles/[id]/members` | `admin.roles.*` |
+| Permissions | `GET/POST /permissions`; `PATCH/DELETE /permissions/[id]` | `admin.roles.read`, `admin.permissions.manage` |
+| Groups | `GET/POST /groups`; `GET/PATCH/DELETE /groups/[id]`; `GET/POST/DELETE /groups/[id]/members`; `GET/POST/DELETE /groups/[id]/roles` | `admin.groups.*` (`.assign` for members and roles) |
+| Organizations | `GET/POST /organizations`; `GET/PATCH/DELETE /organizations/[id]`; `GET/POST/PATCH/DELETE /organizations/[id]/members`; `GET/POST/DELETE /organizations/[id]/provider-bindings`; `GET/POST /organizations/[id]/invitations`; `DELETE /organizations/[id]/invitations/[invitationId]`; `POST /organizations/[id]/invitations/[invitationId]/resend`; `GET/PATCH/DELETE /organizations/[id]/auth-settings`; `GET/PATCH /auth-settings/defaults` | `admin.orgs.*` (`/auth-settings/defaults`: + **superadmin**) |
+| Memberships | `GET /memberships` | `admin.orgs.read` |
+| Enterprise apps | `GET/POST /enterprise-apps`; `GET/PATCH/DELETE /enterprise-apps/[id]` | `admin.apps.*` |
+| API keys | `GET/POST /api-keys`; `GET/DELETE /api-keys/[id]`; `POST /api-keys/[id]/rotate` | `admin.apikeys.*` |
+| Email | `GET /email/outbox`; `GET /email/outbox/[id]`; `GET /email/templates`; `GET/PUT /email/templates/[id]`; `POST /email/test` | `admin.email.*` |
+| MCP agents | `GET /mcp-agents`; `PATCH/DELETE /mcp-agents/[id]`; `POST /mcp-agents/[id]/approve` | `admin.clients.read` / `admin.clients.manage` |
 | Audit | `GET /audit` | `admin.audit.read` |
-| Export | `GET /export/[resource]` | export permission |
+| Export | `GET /export/[resource]` | the exported resource's read permission |
+<!-- admin-api-table:end -->
 
-> The exact permission per action and request/response shapes live in [`docs/openapi-admin.json`](./openapi-admin.json) and [`admin-manager.md`](./admin-manager.md). `GET /api/administrator/metrics` exists but is **intentionally excluded** from the spec/SDK — it backs the console home dashboard only. The `mcp-agents` routes are **not yet modeled** in the spec or the committed SDK either — drive them from the console UI (or plain `fetch`) per [Admin Manager §8.13](./admin-manager.md#813-mcp-agents).
+> The exact permission per action and request/response shapes live in [`docs/openapi-admin.json`](./openapi-admin.json) and [`admin-manager.md`](./admin-manager.md). `GET /api/administrator/metrics` exists but is **intentionally excluded** from the spec/SDK — it backs the console home dashboard only; it is the **only** exclusion (`tests/unit/api-route-spec-parity.test.ts` fails for any other admin route missing from the spec). A user's sessions are returned as a `SessionItem` projection (never the session token) and revoked by `id`.
 
 ### The committed admin SDK
 
-Unlike the v1 client, the admin SDK is **already generated and committed** at [`sdk/admin/`](../sdk/admin/) (openapi-generator `typescript-fetch`, zero runtime dependencies — it uses the global `fetch`). Import it directly. Authenticate with the **session cookie**, plus an **`Origin` header on every mutation** (the CSRF guard); a non-browser caller must supply both.
+Unlike the v1 client, the admin SDK is **already generated and committed** at [`sdk/admin/`](../sdk/admin/) (openapi-generator `typescript-fetch`, zero runtime dependencies — it uses the global `fetch`). Import it directly, and build the `Configuration` with the hand-written [`createAdminClient`](../sdk/admin/client.ts) — it sets `basePath` from your origin and the right credential shape for each mode (the generated `apiKey`/`username`/`password` knobs are unused by this API):
 
 ```ts
-import { Configuration, UsersApi, OrganizationsApi } from "../sdk/admin";
+import { createAdminClient } from "../sdk/admin/client";
+import { UsersApi, OrganizationsApi, MCPAgentsApi } from "../sdk/admin";
 
-// In the browser: cookies are sent automatically with credentials:"include".
-const browser = new Configuration({
-  basePath: "https://app.example.com/api/administrator",
-  credentials: "include",
-  headers: { Origin: "https://app.example.com" }, // required on mutations
-});
+// Browser: the session cookie rides along (credentials: "include"); the
+// browser sets Origin on mutations itself — it cannot be set from script.
+const browser = createAdminClient({ origin: "https://app.example.com" });
 
-// On the server: forward the session cookie + an Origin header explicitly.
-const server = new Configuration({
-  basePath: "https://app.example.com/api/administrator",
-  headers: {
-    Cookie: `better-auth.session_token=${sessionToken}`,
-    Origin: "https://app.example.com",
-  },
-});
+// Server-side with a session: forwards the Cookie header and adds Origin.
+// `cookie` is the SIGNED value of the __Secure-better-auth.session_token
+// cookie from a real sign-in (or the full "name=value" header).
+const server = createAdminClient({ origin: "https://app.example.com", cookie: signedCookieValue });
+
+// Bearer: an API key or JWT — scope-bound, exempt from the Origin guard.
+const machine = createAdminClient({ origin: "https://app.example.com", bearerToken: apiKey });
 
 const users = new UsersApi(browser);
 const page = await users.listUsers({ page: 1, pageSize: 25, filterStatus: ["active"] });
@@ -247,16 +251,18 @@ const created = await users.createUser({
   createUserRequest: { email: "new.user@example.com", password: "<temp>", name: "New User" },
 });
 const orgs = await new OrganizationsApi(server).listOrganizations({ q: "acme" });
+const agents = await new MCPAgentsApi(machine).listMcpAgents({ filterStatus: "pending" });
 ```
 
-Failed requests reject with a `ResponseError` carrying the `AdminError` envelope (`message` is an i18n key). Regenerate after editing the admin API — a drift-guard test fails otherwise:
+Failed requests reject with a `ResponseError` carrying the `AdminError` envelope (`message` is an i18n key; a `429` body is `RateLimitedError`, a `422` scope grant is `UnprocessableError`). Regenerate after editing the admin API — a drift-guard test fails otherwise:
 
 ```bash
 pnpm sdk:admin:typecheck   # type-check the committed client (sdk/admin/tsconfig.json)
-pnpm sdk:admin:generate    # re-export docs/openapi-admin.json + regenerate sdk/admin
+pnpm sdk:admin:generate    # re-export docs/openapi-admin.json, verify the generator JAR, regenerate sdk/admin
+pnpm docs:admin-table      # refresh the resource table above from the spec
 ```
 
-> **Regenerating needs Java + network** (openapi-generator runs on a JVM, pinned in `openapitools.json`); the **committed** client itself has no dependencies. See [`sdk/admin/README.md`](../sdk/admin/README.md).
+> **Regenerating needs Java + network.** openapi-generator runs on a JVM: the JAR version is pinned in `openapitools.json`, its SHA-256 is verified by `scripts/verify-openapi-generator-jar.ts` before it runs (the cache lives in the gitignored `.cache/openapi-generator/`), and the npm wrapper is an exact-pinned devDependency run via `pnpm exec`. The **committed** client itself has no dependencies. See [`sdk/admin/README.md`](../sdk/admin/README.md).
 
 ### Which surface should I use?
 
@@ -264,10 +270,10 @@ pnpm sdk:admin:generate    # re-export docs/openapi-admin.json + regenerate sdk/
 | --- | --- |
 | Integrating from another service / script / language | **v1 machine API** (bearer auth, generate from `docs/openapi.json`) |
 | Letting a user manage *their own* resources programmatically | **v1 machine API** (`account.*` scopes, `/api/v1/me/*`) |
-| Building internal tooling that mirrors the admin console | **Admin SDK** (`sdk/admin/`, cookie + Origin) |
+| Building internal tooling that mirrors the admin console | **Admin SDK** (`sdk/admin/`, cookie + Origin, or a scope-bound bearer) |
 | Unsure | **v1** — it's the supported integration surface; the admin SDK is an internal convenience |
 
-The two surfaces overlap (both can manage users) but differ in **auth** (bearer vs cookie+Origin) and **error format** (RFC 7807 vs `{ error, message, requestId }`).
+The two surfaces overlap (both can manage users, both take a bearer) but differ in **the browser path** (only the admin surface is cookie + Origin), **error format** (RFC 7807 vs `{ error, message, requestId }`) and **stability** (v1 is the supported contract).
 
 ## 7. SSO handoff endpoints
 
@@ -297,7 +303,7 @@ Contract details that matter to a caller:
 | --- | --- |
 | `401` from `/api/v1/*` | Missing/invalid bearer; or the path is disabled (`API_KEYS_ENABLED` / `API_JWT_ENABLED` are off by default). |
 | `403` with an unexpected scope error | The credential's scope doesn't cover the endpoint, **or** exceeds the owner's permissions (it's capped to the creator). |
-| `401`/`403` from `/api/administrator/*` | No session cookie, or (on a mutation) a missing/untrusted `Origin` header — add it (CSRF guard). |
+| `401`/`403` from `/api/administrator/*` | `401 unauthenticated`: no session cookie and no bearer (or a revoked/expired one). `403 untrusted_origin`: a cookie-session mutation without a trusted `Origin` header — add it (CSRF guard). `403 forbidden`: missing permission, or a bearer whose scopes don't cover it. |
 | `404` for a resource you know exists | Tenant scoping — an org admin can't see other orgs; out-of-scope is 404 by design. |
 | `412` from a v1 mutation | Stale `If-Match` ETag — re-`GET` the resource and retry with the fresh ETag. |
 | `429` | Rate-limited; respect the `Retry-After` header. |

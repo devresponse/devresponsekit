@@ -28,7 +28,8 @@
     "outbox:drain": "tsx --conditions=react-server scripts/drain-outbox.ts",
     "mcp:reap": "tsx --conditions=react-server scripts/reap-mcp-registrations.ts",
     "openapi:export": "tsx scripts/export-openapi.ts",
-    "sdk:admin:generate": "pnpm openapi:export && npx --yes @openapitools/openapi-generator-cli generate -i docs/openapi-admin.json -g typescript-fetch -o sdk/admin --additional-properties=supportsES6=true,typescriptThreePlus=true",
+    "docs:admin-table": "tsx scripts/admin-api-table.ts",
+    "sdk:admin:generate": "pnpm openapi:export && tsx scripts/verify-openapi-generator-jar.ts && pnpm exec openapi-generator-cli generate -i docs/openapi-admin.json -g typescript-fetch -o sdk/admin --additional-properties=supportsES6=true,typescriptThreePlus=true",
     "sdk:admin:typecheck": "tsc -p sdk/admin/tsconfig.json",
     "test": "node scripts/test-shards.mjs",
     "test:serial": "vitest run",
@@ -119,6 +120,7 @@
   "devDependencies": {
     "@axe-core/playwright": "4.12.1",
     "@eslint/eslintrc": "^3.3.7",
+    "@openapitools/openapi-generator-cli": "2.41.0",
     "@playwright/test": "1.61.1",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",

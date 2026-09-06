@@ -21,3 +21,10 @@
 #docs/*.md
 # Then explicitly reverse the ignore rule for a single file:
 #!docs/README.md
+
+# Hand-written files that live next to the generated client (review #240).
+# `pnpm sdk:admin:generate` must never overwrite them.
+client.ts
+client.test.ts
+README.md
+tsconfig.json

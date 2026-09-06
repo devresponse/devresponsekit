@@ -2,7 +2,7 @@
 /* eslint-disable */
 /**
  * DevResponse Administrator API
- * Cookie-session Administrator console API (`/api/administrator`). Authenticate with the Better Auth **session cookie** (send credentials with the request). Every **mutation** also requires an `Origin` (or `Referer`) header matching a trusted origin — the CSRF guard — so a non-browser client must set it explicitly. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
+ * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
  *
  * The version of the OpenAPI document: 1.0.0
  * 
@@ -16,16 +16,32 @@
 import * as runtime from '../runtime';
 import type {
   AdminError,
+  RateLimitedError,
 } from '../models/index';
 import {
     AdminErrorFromJSON,
     AdminErrorToJSON,
+    RateLimitedErrorFromJSON,
+    RateLimitedErrorToJSON,
 } from '../models/index';
 
 export interface ExportResourceRequest {
     resource: ExportResourceResourceEnum;
     sort?: Array<string>;
     q?: string;
+    filterStatus?: Array<string>;
+    filterIsDefault?: Array<string>;
+    filterEventType?: Array<string>;
+    filterOutcome?: Array<string>;
+    filterActor?: Array<string>;
+    filterAppUserId?: Array<string>;
+    filterOrganizationId?: Array<string>;
+    filterTargetApplicationId?: Array<string>;
+    filterOrganization?: Array<string>;
+    filterScope?: Array<string>;
+    filterSourceProvider?: Array<string>;
+    filterCreatedAtFrom?: Date;
+    filterCreatedAtTo?: Date;
 }
 
 /**
@@ -34,6 +50,7 @@ export interface ExportResourceRequest {
 export class ExportApi extends runtime.BaseAPI {
 
     /**
+     * Streams the resource as CSV (capped at `X-Export-Limit` rows). Filters are the SAME `filter[...]` parameters the resource\'s list endpoint accepts — the route allow-lists them per resource (`ALLOWED_FILTERS_BY_RESOURCE`) and silently drops any other: `users` → status; `audit` → event_type, outcome, actor, app_user_id, organization_id, target_application_id, created_at[from|to]; `organizations` → status, is_default; `roles` → organization, scope; `permissions` → none; `memberships` → status, organization_id, source_provider; `enterprise-apps` → status, organization_id. Rate-limited per actor (3 burst / one per 20 s).
      * Export a resource as CSV
      */
     async exportResourceRaw(requestParameters: ExportResourceRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<string>> {
@@ -54,8 +71,68 @@ export class ExportApi extends runtime.BaseAPI {
             queryParameters['q'] = requestParameters['q'];
         }
 
+        if (requestParameters['filterStatus'] != null) {
+            queryParameters['filter[status]'] = requestParameters['filterStatus'];
+        }
+
+        if (requestParameters['filterIsDefault'] != null) {
+            queryParameters['filter[is_default]'] = requestParameters['filterIsDefault'];
+        }
+
+        if (requestParameters['filterEventType'] != null) {
+            queryParameters['filter[event_type]'] = requestParameters['filterEventType'];
+        }
+
+        if (requestParameters['filterOutcome'] != null) {
+            queryParameters['filter[outcome]'] = requestParameters['filterOutcome'];
+        }
+
+        if (requestParameters['filterActor'] != null) {
+            queryParameters['filter[actor]'] = requestParameters['filterActor'];
+        }
+
+        if (requestParameters['filterAppUserId'] != null) {
+            queryParameters['filter[app_user_id]'] = requestParameters['filterAppUserId'];
+        }
+
+        if (requestParameters['filterOrganizationId'] != null) {
+            queryParameters['filter[organization_id]'] = requestParameters['filterOrganizationId'];
+        }
+
+        if (requestParameters['filterTargetApplicationId'] != null) {
+            queryParameters['filter[target_application_id]'] = requestParameters['filterTargetApplicationId'];
+        }
+
+        if (requestParameters['filterOrganization'] != null) {
+            queryParameters['filter[organization]'] = requestParameters['filterOrganization'];
+        }
+
+        if (requestParameters['filterScope'] != null) {
+            queryParameters['filter[scope]'] = requestParameters['filterScope'];
+        }
+
+        if (requestParameters['filterSourceProvider'] != null) {
+            queryParameters['filter[source_provider]'] = requestParameters['filterSourceProvider'];
+        }
+
+        if (requestParameters['filterCreatedAtFrom'] != null) {
+            queryParameters['filter[created_at][from]'] = (requestParameters['filterCreatedAtFrom'] as any).toISOString();
+        }
+
+        if (requestParameters['filterCreatedAtTo'] != null) {
+            queryParameters['filter[created_at][to]'] = (requestParameters['filterCreatedAtTo'] as any).toISOString();
+        }
+
         const headerParameters: runtime.HTTPHeaders = {};
 
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
         const response = await this.request({
             path: `/export/{resource}`.replace(`{${"resource"}}`, encodeURIComponent(String(requestParameters['resource']))),
             method: 'GET',
@@ -71,6 +148,7 @@ export class ExportApi extends runtime.BaseAPI {
     }
 
     /**
+     * Streams the resource as CSV (capped at `X-Export-Limit` rows). Filters are the SAME `filter[...]` parameters the resource\'s list endpoint accepts — the route allow-lists them per resource (`ALLOWED_FILTERS_BY_RESOURCE`) and silently drops any other: `users` → status; `audit` → event_type, outcome, actor, app_user_id, organization_id, target_application_id, created_at[from|to]; `organizations` → status, is_default; `roles` → organization, scope; `permissions` → none; `memberships` → status, organization_id, source_provider; `enterprise-apps` → status, organization_id. Rate-limited per actor (3 burst / one per 20 s).
      * Export a resource as CSV
      */
     async exportResource(requestParameters: ExportResourceRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<string> {

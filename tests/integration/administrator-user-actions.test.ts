@@ -478,34 +478,118 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
   });
 });
 
-describe("DELETE /api/administrator/users/[id]/sessions/[sessionId]", () => {
-  it("does not log the raw session token in audit metadata", async () => {
+describe("GET /api/administrator/users/[id]/sessions — SessionItem projection (review #67/#194)", () => {
+  it("returns id + metadata only: no `token` (or any other raw key) ever leaves the server", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.sessions"));
+    dbMock.mockResolvedValue(targetRow);
+    authListSessions.mockResolvedValue({ sessions: [RAW_SESSION, { ...RAW_SESSION, id: "s2" }] });
+    const { GET } = await import("@/app/api/administrator/users/[id]/sessions/route");
+    const res = await GET(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/sessions`),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain(SESSION_TOKEN_SECRET);
+    const body = JSON.parse(text) as { sessions: Array<Record<string, unknown>> };
+    expect(body.sessions).toHaveLength(2);
+    for (const item of body.sessions) {
+      expect(Object.keys(item).sort()).toEqual([
+        "createdAt",
+        "expiresAt",
+        "id",
+        "impersonatedBy",
+        "ipAddress",
+        "updatedAt",
+        "userAgent",
+      ]);
+      expect(item).not.toHaveProperty("token");
+      expect(item).not.toHaveProperty("userId");
+    }
+    expect(body.sessions[0]).toEqual({
+      id: SESSION_ID,
+      createdAt: "2026-09-05T10:00:00.000Z",
+      updatedAt: "2026-09-05T10:05:00.000Z",
+      expiresAt: "2026-09-05T18:00:00.000Z",
+      ipAddress: "203.0.113.9",
+      userAgent: "UA/1",
+      impersonatedBy: null,
+    });
+  });
+});
+
+describe("DELETE /api/administrator/users/[id]/sessions/[sessionId] (revoke by id, review #67/#194)", () => {
+  beforeEach(() => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.sessions"));
     dbMock.mockResolvedValue(targetRow);
     authRevokeSession.mockResolvedValue({ ok: true });
+  });
+
+  async function revoke(sessionId: string) {
     const { DELETE } =
       await import("@/app/api/administrator/users/[id]/sessions/[sessionId]/route");
-    const sessionToken = "sup3r-secret-session-token-AbCdEf";
-    const res = await DELETE(
-      makeRequest(
-        `http://test.local/api/administrator/users/${TARGET_ID}/sessions/${sessionToken}`,
-        { method: "DELETE" },
-      ),
-      { params: Promise.resolve({ id: TARGET_ID, sessionId: sessionToken }) },
+    return DELETE(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/sessions/${sessionId}`, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: TARGET_ID, sessionId }) },
     );
+  }
+
+  it("resolves the id to the token server-side (scoped to the target's own sessions) and revokes it", async () => {
+    authListSessions.mockResolvedValue([
+      { ...RAW_SESSION, id: "other", token: "other-token" },
+      RAW_SESSION,
+    ]);
+    const res = await revoke(SESSION_ID);
     expect(res.status).toBe(200);
-    // The contract is: the session token must not appear in the
-    // `metadata` field (the only field `auditEvent` persists as JSON
-    // in `app_audit_events.metadata`). The `request` field is consumed
-    // by `auditEvent` to extract IP / user-agent and never serialized
-    // verbatim into the audit row, so we scope the assertion to
-    // `metadata` to match what actually hits the database.
+    expect(authListSessions).toHaveBeenCalledWith("ba-target", expect.anything());
+    expect(authRevokeSession).toHaveBeenCalledTimes(1);
+    expect(authRevokeSession.mock.calls[0]![0]).toBe(SESSION_TOKEN_SECRET);
+    // The session token must not appear in `metadata` (the only field
+    // `auditEvent` persists as JSON in `app_audit_events.metadata`); the
+    // opaque id is recorded instead.
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.session_revoked",
+        metadata: { sessionId: SESSION_ID },
+      }),
+    );
     for (const call of auditMock.mock.calls) {
       const arg = call[0] as { metadata?: Record<string, unknown> };
-      const metaBlob = JSON.stringify(arg?.metadata ?? {});
-      expect(metaBlob).not.toContain(sessionToken);
+      expect(JSON.stringify(arg?.metadata ?? {})).not.toContain(SESSION_TOKEN_SECRET);
     }
+  });
+
+  it("an id that is not one of the target's sessions is 404 and nothing is revoked", async () => {
+    authListSessions.mockResolvedValue([RAW_SESSION]);
+    const res = await revoke("sess-of-someone-else");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "session_not_found" }));
+    expect(authRevokeSession).not.toHaveBeenCalled();
+  });
+
+  it("the OLD contract is closed: passing the token itself as the id no longer revokes", async () => {
+    authListSessions.mockResolvedValue([RAW_SESSION]);
+    const res = await revoke(SESSION_TOKEN_SECRET);
+    expect(res.status).toBe(404);
+    expect(authRevokeSession).not.toHaveBeenCalled();
+  });
+
+  it("a failed session lookup is a 502 with an audited failure, before any revoke", async () => {
+    authListSessions.mockRejectedValue(new Error("auth down"));
+    const res = await revoke(SESSION_ID);
+    expect(res.status).toBe(502);
+    expect(authRevokeSession).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.session_revoke_failed",
+        outcome: "failure",
+        reason: "auth_list_sessions_failed",
+      }),
+    );
   });
 });
 
@@ -538,7 +622,21 @@ interface GuardedRoute {
   invoke: () => Promise<Response>;
 }
 
-const SESSION_TOKEN = "sess-token-abc";
+// A session ID (what the route takes since review #67/#194) — never a token.
+const SESSION_ID = "sess-id-abc";
+const SESSION_TOKEN_SECRET = "sup3r-secret-session-token-AbCdEf";
+/** A raw Better Auth row as `listUserSessions` returns it — token included. */
+const RAW_SESSION = {
+  id: SESSION_ID,
+  token: SESSION_TOKEN_SECRET,
+  userId: "ba-target",
+  createdAt: new Date("2026-09-05T10:00:00.000Z"),
+  updatedAt: new Date("2026-09-05T10:05:00.000Z"),
+  expiresAt: new Date("2026-09-05T18:00:00.000Z"),
+  ipAddress: "203.0.113.9",
+  userAgent: "UA/1",
+  impersonatedBy: null,
+};
 
 const guardedRoutes: GuardedRoute[] = [
   {
@@ -683,10 +781,10 @@ const guardedRoutes: GuardedRoute[] = [
         await import("@/app/api/administrator/users/[id]/sessions/[sessionId]/route");
       return DELETE(
         makeRequest(
-          `http://test.local/api/administrator/users/${TARGET_ID}/sessions/${SESSION_TOKEN}`,
+          `http://test.local/api/administrator/users/${TARGET_ID}/sessions/${SESSION_ID}`,
           { method: "DELETE" },
         ),
-        { params: Promise.resolve({ id: TARGET_ID, sessionId: SESSION_TOKEN }) },
+        { params: Promise.resolve({ id: TARGET_ID, sessionId: SESSION_ID }) },
       );
     },
   },
@@ -703,7 +801,8 @@ function armEffects() {
   authForget.mockResolvedValue({ ok: true });
   authBan.mockResolvedValue({ ok: true });
   authUnban.mockResolvedValue({ ok: true });
-  authListSessions.mockResolvedValue([]);
+  // The single-session revoke resolves SESSION_ID → token through this list.
+  authListSessions.mockResolvedValue([RAW_SESSION]);
   authRevokeSessions.mockResolvedValue({ ok: true });
   authRevokeSession.mockResolvedValue({ ok: true });
 }

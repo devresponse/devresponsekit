@@ -429,7 +429,7 @@ Manages the application user lifecycle and per-user administration.
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email; `admin.user.password_set` / `.password_reset_email_sent` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`) |
-| `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions; `admin.user.sessions_revoked_all` |
+| `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
 | `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs |
 | `POST /users/bulk` | per-action key | Batch actions; see §13, §19 |
@@ -579,7 +579,7 @@ This is the counterpart to the machine `/api/v1/admin/api-keys` surface and
 | --- | --- | --- |
 | `GET /api-keys` | `admin.apikeys.read` | List; filters `status`, `app_user_id`, `organization_id` |
 | `POST /api-keys` | `admin.apikeys.manage` | Issue **on behalf of** a user; plaintext returned **once**; `admin.api_key.created` |
-| `GET/PATCH/DELETE /api-keys/[id]`, `…/[id]/rotate` | `.read` / `.manage` | Inspect / revoke / rotate |
+| `GET/DELETE /api-keys/[id]`, `POST …/[id]/rotate` | `.read` / `.manage` | Inspect / revoke / rotate (there is no PATCH — a key's name and scopes are immutable; rotate or reissue) |
 
 Requested scopes are validated against the **owner's** authority
 (`ungrantableScopes`), never the admin's — an admin-minted key can never

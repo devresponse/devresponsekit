@@ -1,16 +1,26 @@
 /**
- * OpenAPI 3.1 document for the cookie-session `/api/administrator/*` console
- * API — the basis for the committed internal admin SDK
+ * OpenAPI 3.1 document for the `/api/administrator/*` console API — the
+ * basis for the committed internal admin SDK
  * (`pnpm openapi:export` → `docs/openapi-admin.json`, then `pnpm sdk:admin:generate`).
  *
- * This surface is NOT the public machine API (`/api/v1`, see `openapi.ts`):
- * it authenticates with the Better Auth **session cookie**, and every
- * mutation additionally requires an `Origin`/`Referer` header matching a
- * trusted origin (CSRF guard). Errors use the admin envelope
+ * This surface is NOT the public machine API (`/api/v1`, see `openapi.ts`).
+ * It authenticates with the Better Auth **session cookie** — in which case
+ * every mutation additionally requires an `Origin`/`Referer` header matching
+ * a trusted origin (CSRF guard) — OR with a scope-bounded **bearer**
+ * credential (API key / JWT), which `requireAdminPermission` accepts and
+ * exempts from the origin guard (review #193). Errors use the admin envelope
  * `{ error, message, requestId }`. List endpoints share the
  * `{ items, page, pageSize, total, sort }` envelope; mutations mostly return
  * `{ ok: true, … }`. Responses are raw snake_case rows.
+ *
+ * Every admin route file must be modeled here: the route ⇄ spec parity test
+ * (`tests/unit/api-route-spec-parity.test.ts`, review #192) fails CI for an
+ * admin route without a path entry, and the source-derived test in
+ * `tests/unit/api-openapi-admin.test.ts` (review #195) checks that every
+ * `enforceRateLimit(` call site documents a 429 and every `allowedFilters`
+ * entry is a documented `filter[...]` parameter.
  */
+import { MCP_AGENT_STATUSES } from "@/lib/mcp/agents";
 import {
   AUTH_POLICY_APPROVAL_MODES as AUTH_POLICY_APPROVAL_MODE_VALUES,
   AUTH_POLICY_METHODS as AUTH_POLICY_METHOD_VALUES,
@@ -55,6 +65,18 @@ const CREDENTIAL_STATUS = ["active", "revoked"];
 // the OpenAPI builder treats these as plain JSON.
 const AUTH_POLICY_METHODS = [...AUTH_POLICY_METHOD_VALUES];
 const AUTH_POLICY_MODES = [...AUTH_POLICY_APPROVAL_MODE_VALUES];
+// Same reasoning for the derived agent lifecycle status (review #192): the
+// console filter, the SQL predicates and this enum share one definition.
+const MCP_AGENT_STATUS = [...MCP_AGENT_STATUSES];
+
+/**
+ * The cookie the Better Auth session rides in. Better Auth prefixes the
+ * cookie with `__Secure-` whenever `baseURL` is https (its `useSecureCookies`
+ * default), so that is the production name; the bare name only appears on a
+ * plain-http dev origin (review #196).
+ */
+export const ADMIN_SESSION_COOKIE_NAME = "__Secure-better-auth.session_token";
+export const ADMIN_SESSION_COOKIE_NAME_HTTP = "better-auth.session_token";
 
 /** A path id parameter. */
 const idParam = (name = "id", format: "uuid" | "string" = "uuid"): Obj => ({
@@ -64,21 +86,38 @@ const idParam = (name = "id", format: "uuid" | "string" = "uuid"): Obj => ({
   schema: format === "uuid" ? uuid() : { type: "string" },
 });
 
+/** An exact-match `filter[<name>]` query parameter (repeatable). */
+const filterParam = (
+  name: string,
+  description = "Exact-match filter; repeat for multiple values.",
+): Obj => ({
+  name,
+  in: "query",
+  required: false,
+  explode: true,
+  style: "form",
+  schema: { type: "array", items: { type: "string" } },
+  description,
+});
+
+/**
+ * The two halves of a `filter[<name>][from]` / `[to]` ISO-8601 range filter
+ * (`parseListQuery` range syntax, review #195).
+ */
+const rangeFilterParams = (name: string): Obj[] =>
+  (["from", "to"] as const).map((bound) => ({
+    name: `filter[${name}][${bound}]`,
+    in: "query",
+    required: false,
+    schema: { type: "string", format: "date-time" },
+    description: `${bound === "from" ? "Inclusive lower" : "Inclusive upper"} bound of the \`${name}\` range (ISO-8601).`,
+  }));
+
 /** Shared list-query params for an endpoint. */
 const listParams = (filters: string[] = [], q = true): Obj[] => {
   const out: Obj[] = [paramRef("Page"), paramRef("PageSize"), paramRef("Sort")];
   if (q) out.push(paramRef("Q"));
-  for (const f of filters) {
-    out.push({
-      name: f,
-      in: "query",
-      required: false,
-      explode: true,
-      style: "form",
-      schema: { type: "array", items: { type: "string" } },
-      description: "Exact-match filter; repeat for multiple values.",
-    });
-  }
+  for (const f of filters) out.push(filterParam(f));
   return out;
 };
 
@@ -110,15 +149,26 @@ const createdResp = (schemaName: string): Obj => ({
   ...json(ref(schemaName)),
 });
 
+// Every operation runs through `requireAdminPermission`, which answers 401
+// for a missing/invalid credential before anything else — so 401 belongs on
+// EVERY operation, not on none of them (review #195).
+/** Standard error responses for a collection read (no `{id}` → no 404). */
+const listErrors = (): Obj => ({
+  "400": errRef("BadRequest"),
+  "401": errRef("Unauthorized"),
+  "403": errRef("Forbidden"),
+});
 /** Standard error responses for a read endpoint. */
 const readErrors = (): Obj => ({
   "400": errRef("BadRequest"),
+  "401": errRef("Unauthorized"),
   "403": errRef("Forbidden"),
   "404": errRef("NotFound"),
 });
 /** Standard error responses for a mutating endpoint. */
 const writeErrors = (extra: Record<string, Obj> = {}): Obj => ({
   "400": errRef("BadRequest"),
+  "401": errRef("Unauthorized"),
   "403": errRef("Forbidden"),
   "404": errRef("NotFound"),
   "409": errRef("Conflict"),
@@ -133,37 +183,101 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
       title: "DevResponse Administrator API",
       version: "1.0.0",
       description:
-        "Cookie-session Administrator console API (`/api/administrator`). Authenticate with the " +
-        "Better Auth **session cookie** (send credentials with the request). Every **mutation** also " +
-        "requires an `Origin` (or `Referer`) header matching a trusted origin — the CSRF guard — so a " +
-        "non-browser client must set it explicitly. Org admins are scoped to their own organization " +
+        "Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth " +
+        "**session cookie** (send credentials with the request; every **mutation** then also requires " +
+        "an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser " +
+        "sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose " +
+        "effective authority is the intersection of its scopes and the permissions of its owner and which " +
+        "is exempt from the origin guard. Org admins are scoped to their own organization " +
         "(out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; " +
         "every response carries an `x-request-id` header.",
     },
     servers: [{ url: `${baseUrl}/api/administrator` }],
-    security: [{ cookieSession: [] }],
+    // Two alternative requirements (OR), mirroring `resolveCaller`: a cookie
+    // session, or a scope-bounded bearer credential (review #193).
+    security: [{ cookieSession: [] }, { bearerAuth: [] }],
+    // `x-permissions` is the per-group permission summary the generated
+    // docs/api.md table prints (review #198); the per-operation key is in each
+    // operation's summary / the route handler.
     tags: [
-      { name: "Users", description: "User administration." },
-      { name: "Roles", description: "Roles and their permissions." },
-      { name: "Permissions", description: "The permission catalog." },
-      { name: "Groups", description: "Organization groups (ADR-0002)." },
-      { name: "Organizations", description: "Tenants and their members / provider bindings." },
-      { name: "Memberships", description: "User↔organization memberships." },
-      { name: "Enterprise apps", description: "SSO application registry." },
-      { name: "API keys", description: "API-key governance." },
-      { name: "Email", description: "Outbox and templates." },
-      { name: "Audit", description: "The audit log." },
-      { name: "Export", description: "CSV exports." },
+      {
+        name: "Users",
+        description: "User administration.",
+        "x-permissions": "`admin.users.*` (per action)",
+      },
+      {
+        name: "Roles",
+        description: "Roles and their permissions.",
+        "x-permissions": "`admin.roles.*`",
+      },
+      {
+        name: "Permissions",
+        description: "The permission catalog.",
+        "x-permissions": "`admin.roles.read`, `admin.permissions.manage`",
+      },
+      {
+        name: "Groups",
+        description: "Organization groups (ADR-0002).",
+        "x-permissions": "`admin.groups.*` (`.assign` for members and roles)",
+      },
+      {
+        name: "Organizations",
+        description: "Tenants and their members / provider bindings / sign-up policy.",
+        "x-permissions": "`admin.orgs.*` (`/auth-settings/defaults`: + **superadmin**)",
+      },
+      {
+        name: "Memberships",
+        description: "User↔organization memberships.",
+        "x-permissions": "`admin.orgs.read`",
+      },
+      {
+        name: "Enterprise apps",
+        description: "SSO application registry.",
+        "x-permissions": "`admin.apps.*`",
+      },
+      {
+        name: "API keys",
+        description: "API-key governance.",
+        "x-permissions": "`admin.apikeys.*`",
+      },
+      { name: "Email", description: "Outbox and templates.", "x-permissions": "`admin.email.*`" },
+      {
+        name: "MCP agents",
+        description: "Self-registered MCP agents (OAuth clients with an `mcp` service membership).",
+        "x-permissions": "`admin.clients.read` / `admin.clients.manage`",
+      },
+      { name: "Audit", description: "The audit log.", "x-permissions": "`admin.audit.read`" },
+      {
+        name: "Export",
+        description: "CSV exports.",
+        "x-permissions": "the exported resource's read permission",
+      },
     ],
     components: {
       securitySchemes: {
         cookieSession: {
           type: "apiKey",
           in: "cookie",
-          name: "better-auth.session_token",
+          name: ADMIN_SESSION_COOKIE_NAME,
           description:
-            "Better Auth session cookie. Browser clients send it automatically; server clients must " +
-            "forward it (and an `Origin` header on mutations).",
+            "Better Auth session cookie. The name carries Better Auth's `__Secure-` prefix on any " +
+            `https origin (production); only a plain-http dev origin uses the bare \`${ADMIN_SESSION_COOKIE_NAME_HTTP}\`. ` +
+            "The value is the SIGNED cookie value exactly as a real browser session holds it — not a " +
+            "session id or token from the `session` table, which Better Auth will reject. Browser " +
+            'clients send it automatically (`credentials: "include"`); a server-side caller forwards ' +
+            "the `Cookie` header and, on every mutation, adds a trusted `Origin` header (the CSRF guard).",
+        },
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          description:
+            "A DevResponse API key (`drk_…`) or a JWT minted at `POST /api/v1/auth/token`, in " +
+            "`Authorization: Bearer …`. Accepted on every administrator operation (both credential " +
+            "paths are disabled by default: `API_KEYS_ENABLED` / `API_JWT_ENABLED`). The credential's " +
+            "effective authority is `scopes ∩ owner permissions`: an operation needs the owner to hold " +
+            "the permission AND the credential to carry a scope covering it (e.g. `admin.users.read`, " +
+            "or a prefix scope such as `admin.users.*`), else `403 forbidden`. Bearer callers are " +
+            "exempt from the `Origin` guard (a bearer cannot be attached by a cross-site page).",
         },
       },
       parameters: {
@@ -200,33 +314,86 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
       },
       responses: {
         BadRequest: { description: "Invalid request", ...json(ref("AdminError")) },
-        Unauthorized: { description: "Not signed in", ...json(ref("AdminError")) },
+        Unauthorized: {
+          description:
+            "No session cookie and no bearer credential resolved (`unauthenticated`) — also the " +
+            "answer for a revoked/expired bearer or a disabled credential path.",
+          ...json(ref("AdminError")),
+        },
         Forbidden: {
-          description: "Insufficient permission (or out of org scope)",
+          description:
+            "`forbidden`: the caller lacks the permission (or, for a bearer, a covering scope), " +
+            "their account/membership is not active, or the action is out of their org scope. " +
+            "`untrusted_origin`: a cookie-session MUTATION arrived without an `Origin`/`Referer` " +
+            "header matching a trusted origin (CSRF guard; never returned to bearer callers).",
           ...json(ref("AdminError")),
         },
         NotFound: { description: "Not found (or out of org scope)", ...json(ref("AdminError")) },
         Conflict: { description: "Conflict", ...json(ref("AdminError")) },
         Unprocessable: {
-          description: "Unprocessable (e.g. ungrantable scopes)",
-          ...json(ref("AdminError")),
+          description: "Unprocessable — `invalid_scope` with the scopes the caller may not grant",
+          ...json(ref("UnprocessableError")),
         },
         RateLimited: {
-          description: "Too many requests",
-          headers: { "Retry-After": { schema: { type: "string" } } },
-          ...json(ref("AdminError")),
+          description: "Too many requests (`rate_limited`); retry after `retryAfter` seconds",
+          headers: {
+            "Retry-After": {
+              description: "Seconds to wait — the same value as the body's `retryAfter`.",
+              schema: { type: "string" },
+            },
+          },
+          ...json(ref("RateLimitedError")),
         },
       },
       schemas: {
         AdminError: {
           type: "object",
-          description: "Administrator error envelope.",
+          description:
+            "Administrator error envelope. `adminErrorResponse` may spread extra non-secret " +
+            "fields for specific codes — see `RateLimitedError` / `UnprocessableError`.",
           properties: {
             error: { type: "string", description: "Machine-readable code." },
             message: { type: "string", description: "i18n message key." },
             requestId: { type: "string" },
           },
           required: ["error", "message", "requestId"],
+          additionalProperties: true,
+        },
+        // Per-code envelopes (review #195): the 429 and 422 bodies carry fields
+        // a client acts on, so they are modeled rather than hidden in
+        // `additionalProperties`.
+        RateLimitedError: {
+          allOf: [
+            ref("AdminError"),
+            {
+              type: "object",
+              properties: {
+                retryAfter: {
+                  type: "integer",
+                  minimum: 1,
+                  description: "Seconds until the bucket refills enough to retry.",
+                },
+              },
+              required: ["retryAfter"],
+            },
+          ],
+        },
+        UnprocessableError: {
+          allOf: [
+            ref("AdminError"),
+            {
+              type: "object",
+              properties: {
+                ungrantableScopes: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Requested scopes outside the caller's own authority (permissions ∩ credential scopes).",
+                },
+              },
+              required: ["ungrantableScopes"],
+            },
+          ],
         },
         SortSpec: {
           type: "object",
@@ -379,11 +546,41 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           },
           required: ["reason"],
         },
+        // A PROJECTION of the Better Auth session row (review #67/#194): the
+        // raw `token` (the bearer credential of that session) is never
+        // returned; `id` is what `DELETE …/sessions/{sessionId}` takes.
+        SessionItem: {
+          type: "object",
+          description:
+            "One active Better Auth session, projected to non-secret metadata. The session token is " +
+            "never exposed; revoke by `id`.",
+          properties: {
+            id: { type: "string", description: "Session id — the `sessionId` path parameter." },
+            createdAt: dateTime(),
+            updatedAt: dateTime(),
+            expiresAt: dateTime(),
+            ipAddress: nullableString(),
+            userAgent: nullableString(),
+            impersonatedBy: {
+              type: ["string", "null"],
+              description:
+                "Better Auth user id of the impersonating admin, when this is an impersonation session.",
+            },
+          },
+          required: [
+            "id",
+            "createdAt",
+            "updatedAt",
+            "expiresAt",
+            "ipAddress",
+            "userAgent",
+            "impersonatedBy",
+          ],
+          additionalProperties: false,
+        },
         SessionList: {
           type: "object",
-          properties: {
-            sessions: { type: "array", items: { type: "object", additionalProperties: true } },
-          },
+          properties: { sessions: { type: "array", items: ref("SessionItem") } },
           required: ["sessions"],
         },
         MembershipListItem: {
@@ -480,18 +677,41 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
                 "restore",
               ],
             },
-            ids: { oneOf: [{ type: "array", items: uuid(), maxItems: 500 }, { const: "*" }] },
+            // Mirrors `bulkSchema` in users/bulk/route.ts (review #195): a
+            // non-empty capped id list, or `"*"` for "every user matching
+            // `filters`"; both objects are Zod `.strict()`. Expressed as a
+            // 3.1 multi-type rather than `oneOf`: typescript-fetch 7.12
+            // emits an uncompilable model for a `oneOf` of primitives.
+            ids: {
+              type: ["array", "string"],
+              items: uuid(),
+              minItems: 1,
+              maxItems: 500,
+              description:
+                "1–500 app user ids, or the string `*` (the only accepted string) to select by `filters`.",
+            },
             reason: { type: "string", minLength: 1, maxLength: 500 },
             expiresInSeconds: { type: "integer", minimum: 1, maximum: 31_536_000 },
             filters: {
               type: "object",
+              description: 'Selection filters for `ids: "*"` (ignored for an explicit id list).',
               properties: {
-                status: { type: "array", items: { type: "string" } },
+                // Zod: `z.union([z.string(), z.array(z.string())])` — same
+                // multi-type encoding as `ids` (see above). typescript-fetch
+                // types a multi-type by its FIRST entry, so `array` leads to
+                // keep the generated client's `Array<string>`.
+                status: {
+                  type: ["array", "string"],
+                  items: { type: "string" },
+                  description: "A list of statuses, or one status as a bare string.",
+                },
                 q: { type: "string", minLength: 1, maxLength: 200 },
               },
+              additionalProperties: false,
             },
           },
           required: ["action", "ids"],
+          additionalProperties: false,
         },
         BulkUserResult: {
           type: "object",
@@ -1165,6 +1385,103 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           required: ["id", "event_type", "outcome", "created_at"],
         },
         AuditEventList: listOf("AuditEventItem"),
+
+        // ---- MCP agents (review #192) --------------------------------------
+        // Mirrors `McpAgentSummary` (src/lib/mcp/agents.ts) — camelCase, not a
+        // raw row: the list is a join projection the console renders as-is.
+        McpAgentItem: {
+          type: "object",
+          properties: {
+            clientRowId: {
+              ...uuid(),
+              description: "OAuth-client row id — the `{id}` of the agent operations.",
+            },
+            clientId: { type: "string", description: "Public OAuth `client_id`." },
+            name: { type: "string" },
+            scopes: {
+              ...stringArray(),
+              description: "Scope ceiling (effective = scopes ∩ permissions).",
+            },
+            clientStatus: { type: "string", description: "Raw `app_oauth_clients.status`." },
+            appUserId: { ...uuid(), description: "The agent's service account." },
+            userStatus: {
+              type: "string",
+              description: "Raw `app_users.status` of the service account.",
+            },
+            email: { type: "string" },
+            organizationId: { type: ["string", "null"], format: "uuid" },
+            createdAt: dateTime(),
+            status: {
+              type: "string",
+              enum: MCP_AGENT_STATUS,
+              description:
+                "Derived lifecycle status (pending ⇒ awaiting approval; revoked ⇒ client inactive).",
+            },
+          },
+          required: [
+            "clientRowId",
+            "clientId",
+            "name",
+            "scopes",
+            "clientStatus",
+            "appUserId",
+            "userStatus",
+            "email",
+            "organizationId",
+            "createdAt",
+            "status",
+          ],
+        },
+        McpAgentList: {
+          allOf: [
+            listOf("McpAgentItem"),
+            {
+              type: "object",
+              properties: {
+                pendingCount: {
+                  type: "integer",
+                  minimum: 0,
+                  description:
+                    "Agents awaiting approval across the caller's WHOLE scope — independent of the page and filter.",
+                },
+              },
+              required: ["pendingCount"],
+            },
+          ],
+        },
+        McpAgentApproved: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean", const: true },
+            activated: {
+              type: "boolean",
+              description: "false when the agent was already active (idempotent).",
+            },
+          },
+          required: ["ok", "activated"],
+        },
+        UpdateMcpAgentScopesRequest: {
+          type: "object",
+          properties: { scopes: { type: "array", items: { type: "string" }, maxItems: 64 } },
+          required: ["scopes"],
+          additionalProperties: false,
+        },
+        McpAgentScopesResult: {
+          type: "object",
+          properties: { ok: { type: "boolean", const: true }, scopes: stringArray() },
+          required: ["ok", "scopes"],
+        },
+        McpAgentRevoked: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean", const: true },
+            alreadyRevoked: {
+              type: "boolean",
+              description: "Present (true) when the client was not active any more — a no-op.",
+            },
+          },
+          required: ["ok"],
+        },
       },
     },
     paths: {
@@ -1175,11 +1492,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Users"],
           summary: "List users",
           parameters: listParams(["filter[status]"]),
-          responses: {
-            "200": okResp("UserList"),
-            "400": errRef("BadRequest"),
-            "403": errRef("Forbidden"),
-          },
+          responses: { "200": okResp("UserList"), ...listErrors() },
         },
         post: {
           operationId: "createUser",
@@ -1326,8 +1639,18 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         delete: {
           operationId: "revokeUserSession",
           tags: ["Users"],
-          summary: "Revoke a single session",
-          parameters: [idParam(), idParam("sessionId", "string")],
+          summary: "Revoke a single session by its id",
+          description:
+            "`sessionId` is the `id` of a `SessionItem` from the list — never the session token. " +
+            "The server resolves the id to the token itself (review #67/#194); an id that is not one " +
+            "of the target user's active sessions is `404 session_not_found`.",
+          parameters: [
+            idParam(),
+            {
+              ...idParam("sessionId", "string"),
+              description: "`SessionItem.id` from `GET /users/{id}/sessions`.",
+            },
+          ],
           responses: { "200": okResp(), ...writeErrors() },
         },
       },
@@ -1443,8 +1766,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           requestBody: { required: true, ...json(ref("BulkUserRequest")) },
           responses: {
             "200": okResp("BulkUserResult"),
-            "400": errRef("BadRequest"),
-            "403": errRef("Forbidden"),
+            ...listErrors(),
             "429": errRef("RateLimited"),
           },
         },
@@ -1457,11 +1779,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Roles"],
           summary: "List roles",
           parameters: listParams(["filter[organization]", "filter[scope]", "filter[permission]"]),
-          responses: {
-            "200": okResp("RoleList"),
-            "400": errRef("BadRequest"),
-            "403": errRef("Forbidden"),
-          },
+          responses: { "200": okResp("RoleList"), ...listErrors() },
         },
         post: {
           operationId: "createRole",
@@ -1546,11 +1864,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Permissions"],
           summary: "List the permission catalog",
           parameters: listParams([]),
-          responses: {
-            "200": okResp("PermissionList"),
-            "400": errRef("BadRequest"),
-            "403": errRef("Forbidden"),
-          },
+          responses: { "200": okResp("PermissionList"), ...listErrors() },
         },
         post: {
           operationId: "createPermission",
@@ -1585,11 +1899,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Groups"],
           summary: "List groups",
           parameters: listParams(["filter[organization]"]),
-          responses: {
-            "200": okResp("GroupList"),
-            "400": errRef("BadRequest"),
-            "403": errRef("Forbidden"),
-          },
+          responses: { "200": okResp("GroupList"), ...listErrors() },
         },
         post: {
           operationId: "createGroup",
@@ -1681,7 +1991,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Organizations"],
           summary: "List organizations",
           parameters: listParams(["filter[status]", "filter[is_default]"]),
-          responses: { "200": okResp("OrganizationList"), "403": errRef("Forbidden") },
+          responses: { "200": okResp("OrganizationList"), ...listErrors() },
         },
         post: {
           operationId: "createOrganization",
@@ -1840,7 +2150,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           operationId: "getPlatformAuthSettings",
           tags: ["Organizations"],
           summary: "Read the platform-default signup policy (superadmin only)",
-          responses: { "200": okResp("AuthPolicyEnvelope"), "403": errRef("Forbidden") },
+          responses: { "200": okResp("AuthPolicyEnvelope"), ...listErrors() },
         },
         patch: {
           operationId: "updatePlatformAuthSettings",
@@ -1862,7 +2172,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             "filter[organization_id]",
             "filter[source_provider]",
           ]),
-          responses: { "200": okResp("GlobalMembershipList"), "403": errRef("Forbidden") },
+          responses: { "200": okResp("GlobalMembershipList"), ...listErrors() },
         },
       },
 
@@ -1873,7 +2183,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Enterprise apps"],
           summary: "List enterprise applications",
           parameters: listParams(["filter[status]", "filter[organization_id]"]),
-          responses: { "200": okResp("EnterpriseAppList"), "403": errRef("Forbidden") },
+          responses: { "200": okResp("EnterpriseAppList"), ...listErrors() },
         },
         post: {
           operationId: "createEnterpriseApp",
@@ -1919,7 +2229,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             "filter[app_user_id]",
             "filter[organization_id]",
           ]),
-          responses: { "200": okResp("AdminApiKeyList"), "403": errRef("Forbidden") },
+          responses: { "200": okResp("AdminApiKeyList"), ...listErrors() },
         },
         post: {
           operationId: "createAdminApiKey",
@@ -1966,7 +2276,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Email"],
           summary: "List the email outbox (metadata only)",
           parameters: listParams(["filter[status]", "filter[template_key]"]),
-          responses: { "200": okResp("OutboxList"), "403": errRef("Forbidden") },
+          responses: { "200": okResp("OutboxList"), ...listErrors() },
         },
       },
       "/email/outbox/{id}": {
@@ -1983,7 +2293,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           operationId: "listEmailTemplates",
           tags: ["Email"],
           summary: "List email templates",
-          responses: { "200": okResp("EmailTemplateListEnvelope"), "403": errRef("Forbidden") },
+          responses: { "200": okResp("EmailTemplateListEnvelope"), ...listErrors() },
         },
       },
       "/email/templates/{id}": {
@@ -2009,10 +2319,12 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           tags: ["Email"],
           summary: "Send a test email",
           requestBody: { required: true, ...json(ref("SendTestEmailRequest")) },
+          // Rate-limited like every other mutation (review #195); no 404/409
+          // since there is no target resource.
           responses: {
             "200": okResp("SendTestEmailResult"),
-            "400": errRef("BadRequest"),
-            "403": errRef("Forbidden"),
+            ...listErrors(),
+            "429": errRef("RateLimited"),
           },
         },
       },
@@ -2023,15 +2335,20 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           operationId: "listAuditEvents",
           tags: ["Audit"],
           summary: "Read the audit log",
-          parameters: listParams([
-            "filter[event_type]",
-            "filter[outcome]",
-            "filter[actor]",
-            "filter[app_user_id]",
-            "filter[organization_id]",
-            "filter[target_application_id]",
-          ]),
-          responses: { "200": okResp("AuditEventList"), "403": errRef("Forbidden") },
+          parameters: [
+            ...listParams([
+              "filter[event_type]",
+              "filter[outcome]",
+              "filter[actor]",
+              "filter[app_user_id]",
+              "filter[organization_id]",
+              "filter[target_application_id]",
+            ]),
+            // `filter[created_at][from|to]` — the audit explorer's date range
+            // (route `allowedFilters` includes `created_at`; review #195).
+            ...rangeFilterParams("created_at"),
+          ],
+          responses: { "200": okResp("AuditEventList"), ...listErrors() },
         },
       },
 
@@ -2041,6 +2358,15 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           operationId: "exportResource",
           tags: ["Export"],
           summary: "Export a resource as CSV",
+          description:
+            "Streams the resource as CSV (capped at `X-Export-Limit` rows). Filters are the SAME " +
+            "`filter[...]` parameters the resource's list endpoint accepts — the route allow-lists " +
+            "them per resource (`ALLOWED_FILTERS_BY_RESOURCE`) and silently drops any other: " +
+            "`users` → status; `audit` → event_type, outcome, actor, app_user_id, organization_id, " +
+            "target_application_id, created_at[from|to]; `organizations` → status, is_default; " +
+            "`roles` → organization, scope; `permissions` → none; `memberships` → status, " +
+            "organization_id, source_provider; `enterprise-apps` → status, organization_id. " +
+            "Rate-limited per actor (3 burst / one per 20 s).",
           parameters: [
             {
               name: "resource",
@@ -2061,6 +2387,26 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             },
             paramRef("Sort"),
             paramRef("Q"),
+            // Union of every per-resource allow-list (review #195); which
+            // resource honours which is spelled out in `description`.
+            filterParam("filter[status]", "users, organizations, memberships, enterprise-apps."),
+            filterParam("filter[is_default]", "organizations."),
+            filterParam("filter[event_type]", "audit."),
+            filterParam("filter[outcome]", "audit."),
+            filterParam("filter[actor]", "audit — Better Auth actor user id."),
+            filterParam("filter[app_user_id]", "audit."),
+            filterParam(
+              "filter[organization_id]",
+              "audit, memberships, enterprise-apps (roles use `filter[organization]`).",
+            ),
+            filterParam("filter[target_application_id]", "audit."),
+            filterParam("filter[organization]", "roles — organization id, or `global`."),
+            filterParam("filter[scope]", "roles — `global` | `organization`."),
+            filterParam("filter[source_provider]", "memberships."),
+            ...rangeFilterParams("created_at").map((p) => ({
+              ...p,
+              description: `audit — ${String(p.description)}`,
+            })),
           ],
           responses: {
             "200": {
@@ -2071,9 +2417,82 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
               },
               content: { "text/csv": { schema: { type: "string" } } },
             },
+            "400": errRef("BadRequest"),
+            "401": errRef("Unauthorized"),
             "403": errRef("Forbidden"),
             "404": errRef("NotFound"),
+            "429": errRef("RateLimited"),
           },
+        },
+      },
+
+      // ---- MCP agents (review #192) --------------------------------------
+      // Console counterpart of `/api/v1/admin/oauth-clients`, confined to
+      // self-registered agents. `{id}` is the OAuth-client ROW id.
+      "/mcp-agents": {
+        get: {
+          operationId: "listMcpAgents",
+          tags: ["MCP agents"],
+          summary:
+            "List self-registered MCP agents (pending first) with the scope-wide pending count",
+          description:
+            "Requires `admin.clients.read`. Pending agents always sort first, then `sort` " +
+            "(`created_at` | `name`, default `created_at.desc`). `q` is not supported here. " +
+            "`pendingCount` counts every pending agent in the caller's scope regardless of " +
+            "page/filter, so a badge stays truthful on any view.",
+          parameters: [
+            paramRef("Page"),
+            paramRef("PageSize"),
+            paramRef("Sort"),
+            {
+              name: "filter[status]",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: MCP_AGENT_STATUS },
+              description: "Derived lifecycle status; an unrecognised value applies no filter.",
+            },
+          ],
+          responses: { "200": okResp("McpAgentList"), ...listErrors() },
+        },
+      },
+      "/mcp-agents/{id}": {
+        patch: {
+          operationId: "updateMcpAgentScopes",
+          tags: ["MCP agents"],
+          summary: "Set an agent's scope ceiling",
+          description:
+            "Requires `admin.clients.manage`. Scopes are validated against the caller's own " +
+            "authority (permissions, and for a bearer caller its own scopes) — over-granting is " +
+            "`422 invalid_scope` listing `ungrantableScopes`. A granted scope only takes effect " +
+            "where the service account also holds the matching permission.",
+          parameters: [idParam()],
+          requestBody: { required: true, ...json(ref("UpdateMcpAgentScopesRequest")) },
+          responses: {
+            "200": okResp("McpAgentScopesResult"),
+            ...writeErrors({ "422": errRef("Unprocessable") }),
+          },
+        },
+        delete: {
+          operationId: "revokeMcpAgent",
+          tags: ["MCP agents"],
+          summary: "Revoke an agent's OAuth client (idempotent)",
+          description:
+            "Requires `admin.clients.manage`. The service account is left intact for the audit " +
+            "trail; an already-revoked client answers `{ ok: true, alreadyRevoked: true }`.",
+          parameters: [idParam()],
+          responses: { "200": okResp("McpAgentRevoked"), ...writeErrors() },
+        },
+      },
+      "/mcp-agents/{id}/approve": {
+        post: {
+          operationId: "approveMcpAgent",
+          tags: ["MCP agents"],
+          summary: "Approve a pending agent (activate its service account)",
+          description:
+            "Requires `admin.clients.manage`. Idempotent — an already-active agent answers " +
+            "`{ ok: true, activated: false }`.",
+          parameters: [idParam()],
+          responses: { "200": okResp("McpAgentApproved"), ...writeErrors() },
         },
       },
     },

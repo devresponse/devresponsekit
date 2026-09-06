@@ -302,6 +302,10 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     );
     expect(sendInvitationEmailMock).toHaveBeenCalledWith({
       to: "ada@example.com",
+      // ADR-0001 / review #220: the outbox row is attributed to the inviting
+      // org, so its admins can see the invitation in their own Email workspace
+      // (the accept token in that row is redacted — review #21).
+      organizationId: ORG_ID,
       organizationName: "Test Org",
       inviterAppUserId: "admin-app-user",
       plaintextToken: "tok-plain",

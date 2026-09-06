@@ -42,6 +42,42 @@ describe("renderEmailTemplate", () => {
   it("leaves unknown placeholders verbatim so template typos stay visible", () => {
     expect(renderEmailTemplate("Hi {{typo}}", { name: "Ada" }, "text")).toBe("Hi {{typo}}");
   });
+
+  /**
+   * review #78: lookup was `variables[name]`, which resolves INHERITED
+   * `Object.prototype` members. A template row an org admin can edit could
+   * therefore reach `escapeHtml` with a function (`{{constructor}}`) — which
+   * has no `.replaceAll`, so the send THREW before the outbox insert and took
+   * the flow (e.g. password reset) with it — or render engine internals into
+   * a real email (`{{toString}}`).
+   */
+  describe("prototype-chain placeholders (review #78)", () => {
+    const inherited = ["constructor", "__proto__", "toString", "valueOf", "hasOwnProperty"];
+
+    for (const name of inherited) {
+      it(`leaves {{${name}}} verbatim instead of resolving the inherited member`, () => {
+        for (const mode of ["text", "html"] as const) {
+          const out = renderEmailTemplate(`x {{${name}}} y`, { name: "Ada" }, mode);
+          expect(out).toBe(`x {{${name}}} y`);
+        }
+      });
+    }
+
+    it("does not throw when every inherited member is referenced at once", () => {
+      const template = inherited.map((n) => `{{${n}}}`).join(" ");
+      expect(() => renderEmailTemplate(template, {}, "html")).not.toThrow();
+    });
+
+    it("still resolves an OWN property that shadows an inherited name", () => {
+      const vars = { toString: "shadowed" } as unknown as Record<string, string>;
+      expect(renderEmailTemplate("{{toString}}", vars, "text")).toBe("shadowed");
+    });
+
+    it("ignores an own property whose value is not a string", () => {
+      const vars = { n: 42 } as unknown as Record<string, string>;
+      expect(renderEmailTemplate("{{n}}", vars, "html")).toBe("{{n}}");
+    });
+  });
 });
 
 describe("escapeHtml", () => {

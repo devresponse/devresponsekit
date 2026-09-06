@@ -1132,6 +1132,7 @@
         "result": {
           "sent": "E-mail de teste enviado.",
           "failed": "A entrega falhou — consulte a linha da caixa de saída.",
+          "pending": "A entrega não foi concluída — em fila para nova tentativa; consulte a linha da caixa de saída.",
           "logged": "Registado na caixa de saída (nenhum fornecedor de entrega configurado)."
         }
       },

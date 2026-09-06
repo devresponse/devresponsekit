@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ProvidersModule from "@/lib/email/providers.server";
 
 /**
  * DB-BACKED test for the P3-8 outbox drainer edges.
@@ -23,9 +24,13 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/lib/email/providers.server", () => ({
-  getConfiguredEmailProvider: () => state.provider,
-}));
+// Only the provider LOOKUP is stubbed; the real failure classification
+// (`isRetryableDeliveryError`, review #219) stays in play so the terminal-vs-
+// retry decision exercised here is the one that ships.
+vi.mock("@/lib/email/providers.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof ProvidersModule>();
+  return { ...actual, getConfiguredEmailProvider: () => state.provider };
+});
 
 const { db, pgPool } = await import("@/db/database");
 const { drainOutbox } = await import("@/lib/email/outbox-worker.server");

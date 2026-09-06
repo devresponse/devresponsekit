@@ -18,7 +18,7 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | --- | --- | --- |
 | **Structured logs** | `src/lib/observability/logger.server.ts` | Pino, JSON to stdout. Ships regardless of whether Sentry is configured — your platform's log drain is the primary sink. |
 | **Server-error logging** | `logServerError(...)` + `onRequestError` (`src/instrumentation.ts`) | Every uncaught 5xx is logged with its `x-request-id`; also forwarded to Sentry when enabled. |
-| **Request-id correlation** | `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) | Accepts a valid inbound `x-request-id` (UUID) or mints one. Echoed on every admin (`adminErrorResponse`) and RFC 7807 (`problemResponse`) error response. |
+| **Request-id correlation** | `src/lib/request-id.ts` (`normalizeInboundRequestId`) + `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) | Accepts an inbound `x-request-id` only from a trusted proxy hop and only as a UUID; otherwise mints one. Echoed on every admin (`adminErrorResponse`) and RFC 7807 (`problemResponse`) error response. |
 | **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. Append-only; retention is an ops concern — see the note below. |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
 | **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` business counter. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
@@ -91,8 +91,13 @@ same change.
    action that triggered it.
 4. If Sentry is enabled, the event carries the id as a tag for a fourth view with breadcrumbs.
 
-If a caller supplies their own valid `x-request-id`, it is preserved end-to-end, so a
-client-side trace id flows straight into server logs and audit rows.
+An inbound `x-request-id` is preserved end-to-end **only when it arrives through the
+deployment's trusted proxy hops** (`TRUSTED_PROXY_COUNT`) **and** is a UUID — so an
+edge/CDN trace id flows straight into server logs and audit rows, while a direct
+client's chosen id is discarded and the server mints its own (`src/lib/request-id.ts`,
+review #99/#224). Honouring any client's value let a caller collide or replay the ids
+operators search by; the audit column is not unique, so a request id is a correlation
+aid, never proof of a single request.
 
 ## 5. Metrics
 

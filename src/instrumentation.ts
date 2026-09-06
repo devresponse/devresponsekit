@@ -1,4 +1,9 @@
 import * as Sentry from "@sentry/nextjs";
+import {
+  REQUEST_ID_HEADER,
+  headerValueFromRecord,
+  normalizeInboundRequestId,
+} from "@/lib/request-id";
 
 /**
  * Next.js server instrumentation entry point.
@@ -41,17 +46,34 @@ export async function register() {
  * `app_audit_events.request_id` row written by `auditEvent`. That is the
  * whole point of wiring Sentry to the existing correlation id rather than
  * bolting on a parallel one.
+ *
+ * Review #99: this hook used to tag Sentry and stdout with the RAW inbound
+ * header — no UUID check, no provenance check — while every other producer
+ * ran it through the admin helper's validation. So the ONE id that reached
+ * the error sinks was the one a client could choose: a forged value split the
+ * correlation it exists to provide, and a malformed one (control characters,
+ * markup, kilobytes of junk) went straight into a log line and a Sentry tag.
+ * It now goes through the shared {@link normalizeInboundRequestId}, so both
+ * producers answer "which inbound ids are trustworthy" identically; an
+ * untrusted or malformed id yields NO tag rather than a poisoned one.
+ *
+ * The tag is set inside `Sentry.withScope` so it applies to THIS capture only
+ * — `getCurrentScope()` mutated the scope the whole request shares, which on
+ * a runtime that reuses an isolation scope let one request's id linger on a
+ * later event.
  */
 export const onRequestError = async (
   ...args: Parameters<typeof Sentry.captureRequestError>
 ): Promise<void> => {
   const [error, request] = args;
-  const raw = request.headers?.["x-request-id"];
-  const requestId = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : undefined;
-  if (requestId) {
-    Sentry.getCurrentScope().setTag("request_id", requestId);
-  }
-  Sentry.captureRequestError(...args);
+  const requestId = normalizeInboundRequestId(
+    headerValueFromRecord(request.headers, REQUEST_ID_HEADER),
+    headerValueFromRecord(request.headers, "x-forwarded-for"),
+  );
+  Sentry.withScope((scope) => {
+    if (requestId) scope.setTag("request_id", requestId);
+    Sentry.captureRequestError(...args);
+  });
 
   // OPS-OBS-1: also write the uncaught error to the always-on stdout stream so a
   // default (no-DSN) deploy isn't blind to its own 500s. The logger pulls in

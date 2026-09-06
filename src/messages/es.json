@@ -1132,6 +1132,7 @@
         "result": {
           "sent": "Correo de prueba enviado.",
           "failed": "La entrega falló — consulta la fila de la bandeja de salida.",
+          "pending": "La entrega no se completó — en cola para reintentar; consulta la fila de la bandeja de salida.",
           "logged": "Registrado en la bandeja de salida (sin proveedor configurado)."
         }
       },

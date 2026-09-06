@@ -379,6 +379,19 @@ describe("scrubSpanData", () => {
     });
   });
 
+  // review #77 exported `stripQuery` for the CSP sink and made it cut the
+  // FRAGMENT as well — a hash can carry an implicit-flow token or a returnTo,
+  // and a `document-uri` really does arrive with one.
+  it("cuts a fragment that is attached directly to a URL attribute", () => {
+    const d: Record<string, unknown> = {
+      "url.full": "https://app/en/callback#access_token=abc.def.ghi&state=x",
+      "http.route": "/en/callback#frag",
+    };
+    scrubSpanData(d);
+    expect(d["url.full"]).toBe("https://app/en/callback");
+    expect(d["http.route"]).toBe("/en/callback");
+  });
+
   it("drops every client-IP attribute spelling the SDK / OTel write", () => {
     const d: Record<string, unknown> = {
       "http.client_ip": "203.0.113.9",

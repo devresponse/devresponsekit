@@ -486,6 +486,16 @@ export function escapeHtml(value: string): string {
  *     users, and survive escaping intact inside `href="..."`.
  *   - Unknown placeholders are left verbatim so an admin editing a
  *     template sees `{{typo}}` in the outbox instead of silent loss.
+ *   - Lookup is OWN-PROPERTY ONLY (review #78). A plain-object `variables`
+ *     bag inherits `constructor`, `toString`, `valueOf`, `__proto__`, … from
+ *     `Object.prototype`, and a bare `variables[name]` resolves those: a
+ *     saved template containing `{{constructor}}` reached `escapeHtml` with a
+ *     FUNCTION, whose `.replaceAll` does not exist — so every send of that
+ *     template threw before the outbox insert (a template an org admin can
+ *     edit could therefore break the password-reset flow), and `{{toString}}`
+ *     would have rendered engine internals into the email. `Object.hasOwn`
+ *     plus a `typeof === "string"` check makes an inherited or non-string
+ *     value indistinguishable from an unknown placeholder.
  */
 export function renderEmailTemplate(
   template: string,
@@ -493,8 +503,9 @@ export function renderEmailTemplate(
   mode: "html" | "text",
 ): string {
   return template.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (placeholder, name: string) => {
-    const value = variables[name];
-    if (value === undefined) return placeholder;
+    if (!Object.hasOwn(variables, name)) return placeholder;
+    const value: unknown = variables[name];
+    if (typeof value !== "string") return placeholder;
     return mode === "html" ? escapeHtml(value) : value;
   });
 }

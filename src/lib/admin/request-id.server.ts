@@ -1,4 +1,5 @@
 import "server-only";
+import { REQUEST_ID_HEADER, normalizeInboundRequestId } from "@/lib/request-id";
 
 /**
  * Request-id correlation (docs/admin-manager.md §12).
@@ -9,10 +10,12 @@ import "server-only";
  * the same request that 502'd?").
  *
  * Contract:
- *   - If the caller already supplied an `x-request-id` header (e.g. a
- *     load balancer or front-door tagged it), we honour it. We do NOT
- *     trust arbitrary user-supplied values for security decisions, but
- *     they are safe for correlation.
+ *   - An inbound `x-request-id` is honoured ONLY when it came through the
+ *     deployment's trusted proxy hops AND is a well-formed UUID — see
+ *     {@link normalizeInboundRequestId} (review #224). Honouring it from any
+ *     client let a caller replay or collide the Support IDs operators search
+ *     by (the audit column is not unique), so an id from a direct caller is
+ *     now discarded, not trusted.
  *   - Otherwise we generate a v4 UUID.
  *   - The same id MUST be echoed back via the `x-request-id` response
  *     header AND included in the JSON error body so a UI can surface
@@ -21,14 +24,7 @@ import "server-only";
  *     so a handler that calls audit + error + JSON helpers all share
  *     the same id without explicit threading.
  */
-const HEADER = "x-request-id";
-
-// RFC 4122 UUID (any version) — the canonical hex/dash form. Anything
-// else is treated as untrusted and replaced. We deliberately reject
-// inbound values that don't look like a UUID so a typo or hostile
-// header (`x-request-id: <script>`) cannot poison logs or response
-// headers.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEADER = REQUEST_ID_HEADER;
 
 /**
  * Per-request memoisation. We key on the carrier object (NextRequest
@@ -53,12 +49,13 @@ export function getOrCreateRequestId(request: { headers: Headers } | Headers | u
     return cachedByHeaders;
   }
 
-  const inbound = headers?.get(HEADER)?.trim();
-  const id = inbound && UUID_RE.test(inbound) ? inbound.toLowerCase() : crypto.randomUUID();
+  const id =
+    normalizeInboundRequestId(headers?.get(HEADER), headers?.get("x-forwarded-for")) ??
+    crypto.randomUUID();
 
   requestIds.set(request as object, id);
   requestIds.set(headers, id);
   return id;
 }
 
-export const REQUEST_ID_HEADER = HEADER;
+export { REQUEST_ID_HEADER };

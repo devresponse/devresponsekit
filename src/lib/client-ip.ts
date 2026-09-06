@@ -21,6 +21,28 @@ function trustedProxyCount(): number {
   return intFromEnv("TRUSTED_PROXY_COUNT", 1);
 }
 
+/**
+ * Whether the request demonstrably reached us through the app's own proxy
+ * layer — i.e. the forwarded chain is at least as long as the
+ * `TRUSTED_PROXY_COUNT` hops we are configured to sit behind, so the hop this
+ * app trusts actually appended an entry.
+ *
+ * This is the SAME trust model {@link getClientIp} uses, and it inherits the
+ * same ceiling: it says "a trusted hop wrote into this chain", not "every
+ * entry in it is honest" — a client can still prepend a value that the edge
+ * proxy then appends to. That is exactly why callers must also VALIDATE the
+ * header they are about to trust. Used by the request-id normaliser
+ * (review #99/#224) so a direct client cannot choose its own correlation id,
+ * and by nothing that makes a security decision on the value itself.
+ */
+export function isFromTrustedProxy(xForwardedFor: string | null | undefined): boolean {
+  const hops = (xForwardedFor ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean).length;
+  return hops >= trustedProxyCount();
+}
+
 /** Returns the best-effort real client IP, or null when none can be trusted. */
 export function getClientIp(headers: Headers): string | null {
   const xff = headers.get("x-forwarded-for");

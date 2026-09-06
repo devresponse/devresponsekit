@@ -128,7 +128,7 @@ Paste the printed JSON as `SSO_HANDOFF_PRIVATE_KEY`. Only the public half is eve
 
 | Variable | Default | Controls |
 | --- | --- | --- |
-| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. |
+| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below — **and** whether an inbound `x-request-id` is honoured (review #99/#224). |
 | `ADMIN_EXPORT_MAX_ROWS` | 100000 | Hard row cap for a single CSV export; the file is marked truncated past the cap. |
 
 **One client-IP derivation.** The app computes the trusted client IP with the
@@ -155,6 +155,20 @@ Auth trusts a single-value header verbatim, which lets a client rotate buckets
 where the edge sets no chain. When no IP can be trusted, requests share one
 bounded bucket (`anon` in the app, `no-trusted-ip` in Better Auth) — fail closed,
 never fail open.
+
+**Same trust model for the correlation id.** An inbound `x-request-id` is honoured
+only when the forwarded chain shows at least `TRUSTED_PROXY_COUNT` hops **and** the
+value is a UUID; otherwise the server mints its own (`src/lib/request-id.ts`,
+review #99/#224). Without the provenance check any client could choose the
+"Support ID" that appears in logs, Sentry and `app_audit_events.request_id`, and
+collide or replay the ids operators search by. Consequences of the setting:
+
+- a front door that tags requests keeps end-to-end correlation, as long as it also
+  sets `X-Forwarded-For`;
+- with no proxy (local development, a direct origin) every request gets a
+  server-minted id — the response header still carries it, so support flows are
+  unaffected;
+- a request id is a correlation aid, never an authorization or uniqueness proof.
 
 Requirements on the edge in front of the app:
 

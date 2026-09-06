@@ -81,9 +81,25 @@ export function buildInvitationAcceptUrl(plaintextToken: string): string {
  * routes. Resolves the inviter's display name (falling back to their email,
  * then a generic label so the template never renders blank) and renders the
  * one-time accept link from the plaintext token.
+ *
+ * ADR-0001 / review #220: the mail is attributed to the INVITING organization
+ * via `organizationId`. Without it `sendAppEmail` fell through to
+ * `relatedBetterAuthUserId`-based resolution — and an invitation has no
+ * related Better Auth user (the invitee has no account yet) — so every
+ * invitation landed as an org-less, SUPERADMIN-only outbox row: the org admin
+ * who sent it could not see whether it was delivered, in their own Email
+ * workspace, for their own org. The inviting org is not a guess, it is the
+ * subject of the invitation, so passing it explicitly is both correct and
+ * safe: the outbox list route filters on exactly this column
+ * (`o.organization_id = <caller's org>`), so the row becomes visible to that
+ * org and to no other. What those admins see is the REDACTED rendering —
+ * `sendAppEmail` replaces the `?token=` value before the row is written
+ * (review #21, `outbox-secrets.ts`) — so attribution buys delivery visibility
+ * without handing anyone a usable accept link.
  */
 export async function sendInvitationEmail(input: {
   to: string;
+  organizationId: string;
   organizationName: string;
   inviterAppUserId: string | null;
   plaintextToken: string;
@@ -99,6 +115,7 @@ export async function sendInvitationEmail(input: {
   await sendAppEmail({
     to: input.to,
     templateKey: "organization_invitation",
+    organizationId: input.organizationId,
     variables: {
       inviterName: inviter?.display_name || inviter?.primary_email || "An administrator",
       organizationName: input.organizationName,

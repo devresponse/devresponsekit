@@ -147,6 +147,80 @@ describe("POST /api/security/csp-report", () => {
     );
   });
 
+  // review #77: the URL fields a browser reports name the page the user was
+  // on — which for this app can be a one-time-token page. Logging them
+  // verbatim copied a live reset / invite / verification token into the log
+  // stream (and any aggregator).
+  describe("token redaction in reported URLs (review #77)", () => {
+    it("strips the query string carrying a reset token from document-uri", async () => {
+      const body = JSON.stringify({
+        "csp-report": {
+          "document-uri": "https://app.test/en/reset-password?token=s3cret-reset-token",
+          "effective-directive": "script-src",
+        },
+      });
+      await POST(post(body, "application/csp-report"));
+      const line = warnSpy.mock.calls[0]?.[0] as { documentUri?: string };
+      expect(line.documentUri).toBe("https://app.test/en/reset-password");
+      expect(line.documentUri).not.toContain("s3cret-reset-token");
+      expect(JSON.stringify(warnSpy.mock.calls[0])).not.toContain("s3cret-reset-token");
+    });
+
+    it("redacts a reset token carried as a PATH segment", async () => {
+      const body = JSON.stringify({
+        "csp-report": {
+          "document-uri": "https://app.test/reset-password/p4th-token-value",
+          "effective-directive": "style-src",
+        },
+      });
+      await POST(post(body, "application/csp-report"));
+      const line = warnSpy.mock.calls[0]?.[0] as { documentUri?: string };
+      expect(line.documentUri).toBe("https://app.test/reset-password/[redacted-token]");
+    });
+
+    it("strips a fragment and redacts blocked-uri / source-file too", async () => {
+      const body = JSON.stringify({
+        "csp-report": {
+          "document-uri": "https://app.test/en/invite?token=invite-tok#frag",
+          "effective-directive": "img-src",
+          "blocked-uri": "https://cdn.test/x.png?token=blocked-tok",
+          "source-file": "https://app.test/en/verify-email?token=source-tok#h",
+        },
+      });
+      await POST(post(body, "application/csp-report"));
+      const line = warnSpy.mock.calls[0]?.[0] as {
+        documentUri?: string;
+        blockedUri?: string;
+        sourceFile?: string;
+      };
+      expect(line.documentUri).toBe("https://app.test/en/invite");
+      expect(line.blockedUri).toBe("https://cdn.test/x.png");
+      expect(line.sourceFile).toBe("https://app.test/en/verify-email");
+      const logged = JSON.stringify(warnSpy.mock.calls[0]);
+      for (const secret of ["invite-tok", "blocked-tok", "source-tok", "frag"]) {
+        expect(logged).not.toContain(secret);
+      }
+    });
+
+    it("redacts an email in the reported URL and leaves CSP sentinels alone", async () => {
+      const body = JSON.stringify([
+        {
+          type: "csp-violation",
+          body: {
+            documentURL: "https://app.test/en/sign-in?email=victim@example.com",
+            effectiveDirective: "script-src-elem",
+            blockedURL: "inline",
+          },
+        },
+      ]);
+      await POST(post(body, "application/reports+json"));
+      const line = warnSpy.mock.calls[0]?.[0] as { documentUri?: string; blockedUri?: string };
+      expect(line.documentUri).toBe("https://app.test/en/sign-in");
+      // `inline` / `eval` / `data` are spec sentinels, not URLs — untouched.
+      expect(line.blockedUri).toBe("inline");
+    });
+  });
+
   it("applies a per-IP flood floor — drops reports once the bucket is exhausted (P2-5)", async () => {
     const body = JSON.stringify({ "csp-report": { "effective-directive": "img-src" } });
     for (let i = 0; i < 40; i += 1) {

@@ -163,8 +163,9 @@ export async function requireAdminPermission(
 /**
  * Server-component variant of {@link requireAdminPermission}. Returns
  * either a grant or a sentinel value so layouts can decide whether to
- * call `notFound()` (giving 404 indistinguishability per §6.2 of the
- * plan) instead of leaking the existence of the route.
+ * call `notFound()` (giving 404 indistinguishability per
+ * docs/admin-manager.md §6.2) instead of leaking the existence of the
+ * route.
  */
 export async function checkAdminPermissionServer(
   requiredPermission: string | string[],
@@ -187,8 +188,8 @@ export async function checkAdminPermissionServer(
 }
 
 /**
- * The full set of administrator permission keys (plan §6.1) and the
- * "any admin" superset used by the layout. Sourced from the
+ * The full set of administrator permission keys (docs/admin-manager.md
+ * §6.1) and the "any admin" superset used by the layout. Sourced from the
  * non-`server-only` catalog module so seed scripts can share the same
  * definitions without resolving the `server-only` sentinel.
  */

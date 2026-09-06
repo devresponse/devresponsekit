@@ -27,7 +27,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * justification is the kind of action ops will want to look up later);
  * `expiresInSeconds` is optional — omit for indefinite per Better Auth
  * semantics. The reason is persisted in the audit row's `reason` column
- * (plan §5.2).
+ * (docs/admin-manager.md §12).
  *
  * Caller MUST hold `admin.users.ban`.
  */

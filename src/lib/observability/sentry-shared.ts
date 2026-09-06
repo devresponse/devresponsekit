@@ -300,8 +300,8 @@ function scrubEventInPlace(event: Event): void {
  * app, so we strip everything that could carry a credential or personal
  * data before an event leaves the process — even though the SDK's own
  * collection policy ({@link SENTRY_DATA_COLLECTION}) is already closed.
- * Mirrors the audit layer's "no secrets in logs" rule
- * (setup-better-auth.md §7).
+ * Mirrors the logging layer's "never log a plaintext credential" rule
+ * (docs/observability.md §3 "Redaction & scrubbing policy").
  *
  *   - request cookies + auth/cookie/referer headers + body → dropped
  *   - IP-bearing proxy headers (`x-forwarded-for`, `x-real-ip`, …) → dropped

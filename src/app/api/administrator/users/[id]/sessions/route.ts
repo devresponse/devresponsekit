@@ -25,9 +25,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * GET /api/administrator/users/[id]/sessions
  *
- * Returns the active Better Auth sessions for the target user (plan
- * §5.2). Pagination is not exposed here — Better Auth's session list
- * is naturally bounded by `expiresIn` (8h rolling) and the number of
+ * Returns the active Better Auth sessions for the target user
+ * (docs/admin-manager.md §8.1). Pagination is not exposed here — Better
+ * Auth's session list is naturally bounded by `expiresIn` (8h rolling) and the number of
  * concurrent devices a single user can be signed in on.
  *
  * Caller MUST hold `admin.users.sessions`.

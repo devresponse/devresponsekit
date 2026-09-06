@@ -17,7 +17,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * DELETE /api/v1/me/api-keys/[id]
  *
- * Revokes one of the CALLER'S OWN keys (design §9.1). Ownership is
+ * Revokes one of the CALLER'S OWN keys (design §5.3, §5.4). Ownership is
  * re-checked against the session principal — a caller can never revoke
  * another user's key. Idempotent.
  */

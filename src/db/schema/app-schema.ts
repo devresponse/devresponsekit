@@ -109,7 +109,7 @@ export interface AppOrganizationMembershipsTable {
   provider_organization_key: string | null;
   /**
    * Snapshot of the membership status taken when an admin soft-deleted
-   * the owning user (plan §4.1). Set by the cascade in DELETE
+   * the owning user (docs/admin-manager.md §8.1). Set by the cascade in DELETE
    * `/api/administrator/users/[id]` and cleared by `/restore`. NULL
    * outside that lifecycle.
    */

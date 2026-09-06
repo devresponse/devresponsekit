@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/v1/admin/api-keys
  *
- * API-key governance listing (design §9.2, ADR-0001). Requires
+ * API-key governance listing (design §5.4, §8.2; ADR-0001). Requires
  * `admin.apikeys.read`. SUPERADMIN sees every org; an ORG ADMIN sees only
  * their own org. Never returns secrets or hashes. Supports
  * `?page&pageSize&status&appUserId`.

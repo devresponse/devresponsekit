@@ -11,7 +11,7 @@ import { UserGroupsPanel } from "./_user-groups-panel";
 import { UserAuditPanel } from "./_user-audit-panel";
 
 /**
- * Client-side tab container for the user detail page (plan §8.4).
+ * Client-side tab container for the user detail page (docs/admin-manager.md §8.1).
  *
  * The Overview tab renders read-only metadata that the parent RSC has
  * already streamed in (no client fetch). The Roles, Memberships, Sessions,

@@ -13,7 +13,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * DELETE /api/v1/admin/api-keys/[id]
  *
- * Revokes ANY user's API key (design §9.2). Requires
+ * Revokes ANY user's API key (design §5.3, §8.2). Requires
  * `admin.apikeys.manage`. The acting admin's app-user id is recorded as
  * the revoker. Idempotent; rate-limited per credential.
  */

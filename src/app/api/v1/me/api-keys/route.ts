@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/v1/me/api-keys
  *
- * Lists the CALLER'S OWN API keys (design §9.1). Strictly self-scoped via
+ * Lists the CALLER'S OWN API keys (design §5.4). Strictly self-scoped via
  * the account guard — no id is accepted; rows are keyed on the session/
  * credential principal. The secret and hash are never returned.
  */
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
  *     session.
  *   - Requested scopes are checked against the caller's OWN authority
  *     ({@link ungrantableScopesForCaller}) so a credential can never mint
- *     a broader credential than itself (design §7, §10.2).
+ *     a broader credential than itself (design §7, §10.3).
  */
 const createSchema = z
   .object({

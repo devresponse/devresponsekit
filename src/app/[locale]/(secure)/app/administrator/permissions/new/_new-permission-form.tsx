@@ -17,7 +17,8 @@ import { useZodForm } from "@/lib/forms/use-zod-form";
 import { createPermissionSchema, type CreatePermissionInput } from "@/lib/validation/permissions";
 
 /**
- * Client-side new-permission form (plan §8.7; docs/form-validation.md).
+ * Client-side new-permission form (docs/admin-manager.md §8.5;
+ * docs/form-validation.md).
  * React Hook Form + the shared `createPermissionSchema` (the same schema the
  * API route enforces): schema-derived required marker, field-level errors with
  * a red border, and a 409 mapped onto the key field.

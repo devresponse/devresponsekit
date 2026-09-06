@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  *   - Defense-in-depth on top of `(secure)/layout.tsx` — re-validates
  *     the caller holds *some* `admin.*` permission. If not, we render
  *     `notFound()` so the route is indistinguishable from a missing
- *     page (plan §6.2 layer 1).
+ *     page (docs/admin-manager.md §6.2).
  *   - Per-page guards call the more specific
  *     `checkAdminPermissionServer(<exact perm>)` to enforce the read needed
  *     by that page (`requireAdminPermission` is the route-handler guard).

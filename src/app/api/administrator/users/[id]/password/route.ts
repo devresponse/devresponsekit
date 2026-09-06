@@ -26,7 +26,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * POST /api/administrator/users/[id]/password
  *
- * Two modes (plan §4 + §5.2):
+ * Two modes (docs/admin-manager.md §8.1):
  *   - `mode: "set"`     — admin sets a new password directly.
  *   - `mode: "reset_email"` — triggers a password-reset email via
  *                             Better Auth's `requestPasswordReset`

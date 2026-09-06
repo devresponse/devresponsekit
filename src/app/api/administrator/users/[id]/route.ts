@@ -29,9 +29,14 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * GET /api/administrator/users/[id]
  *
- * Fetches a single application user by id. Returns the same column set
- * the list endpoint exposes. Joining with the Better Auth user table is
- * intentionally a separate fetch (kept in the page layer) per plan §13.
+ * Fetches a single application user by id: the list endpoint's
+ * application columns (minus the `organization_names` aggregate, which is
+ * computed only for the list view) plus the deactivation bookkeeping
+ * (`status_reason`, `deactivated_*`), and — like the list endpoint — no
+ * join against the Better Auth `user`
+ * table. The auth-side `banned` / `role` flags are written by the
+ * dedicated `/ban` and `/role` endpoints and never read back here
+ * (docs/admin-manager.md §8.1).
  */
 export async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.read");
@@ -72,9 +77,9 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  *   - `preferredLocale` — application-only, used by next-intl.
  *
  * Status changes go through `/status`; ban/role/password each have
- * their own dedicated endpoints (plan §5.2). We deliberately do NOT
- * allow editing `primary_email` here in v1 — email changes need a
- * verification flow, which is not yet built.
+ * their own dedicated endpoints (docs/admin-manager.md §8.1). We
+ * deliberately do NOT allow editing `primary_email` here in v1 — email
+ * changes need a verification flow, which is not yet built.
  */
 const patchSchema = z
   .object({
@@ -163,7 +168,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 /**
  * DELETE /api/administrator/users/[id]
  *
- * Soft-delete only (plan §4.1). Two steps (review #137):
+ * Soft-delete only (docs/admin-manager.md §8.1). Two steps (review #137):
  *   1. Indefinite Better Auth ban — an auth-API call, NOT transactional;
  *      a failure aborts with 502 before anything app-side changes.
  *   2. App-side bookkeeping (`app_users.status = 'deactivated'` +
@@ -171,7 +176,8 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
  *      tx, with a compensating unban if that tx fails (#B6).
  *
  * Hard delete via `auth.api.removeUser` is intentionally NOT exposed in
- * v1 (decision §20.1.11). A `restore` endpoint inverts this action.
+ * v1: soft-delete keeps the row restorable and its audit trail intact. A
+ * `restore` endpoint inverts this action (docs/admin-manager.md §8.1).
  */
 const deleteSchema = z.object({ reason: z.string().min(1).max(500).optional() }).strict();
 
@@ -272,7 +278,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       // they belonged to. Snapshot the prior status into
       // `pre_deactivation_status` so the matching `restore` endpoint
       // can return each membership to its original state instead of
-      // leaving them silently inaccessible (plan §4.1).
+      // leaving them silently inaccessible (docs/admin-manager.md §8.1).
       await trx
         .updateTable("app_organization_memberships")
         .set({

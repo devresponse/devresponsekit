@@ -135,7 +135,7 @@ function unauthenticatedResponse(
  * Per-credential rate limiting for `/api/v1` mutations. Keys the bucket on
  * the credential id (api_key id / jwt jti / client id) when bearer, else
  * the principal — so one noisy key cannot exhaust the principal's whole
- * budget (design §10.4). Returns a problem+json 429 on deny, else null.
+ * budget (design §10.2). Returns a problem+json 429 on deny, else null.
  */
 export function enforceApiRateLimit(
   scope: string,

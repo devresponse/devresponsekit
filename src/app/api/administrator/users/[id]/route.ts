@@ -29,10 +29,12 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * GET /api/administrator/users/[id]
  *
- * Fetches a single application user by id. Returns the same column set
- * the list endpoint exposes. Joining with the Better Auth user table is
- * intentionally a separate fetch (kept in the page layer;
- * docs/admin-manager.md §8.1).
+ * Fetches a single application user by id: the list endpoint's columns
+ * plus the deactivation bookkeeping (`status_reason`, `deactivated_*`),
+ * and — like the list endpoint — no join against the Better Auth `user`
+ * table. The auth-side `banned` / `role` flags are written by the
+ * dedicated `/ban` and `/role` endpoints and never read back here
+ * (docs/admin-manager.md §8.1).
  */
 export async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.read");
@@ -73,9 +75,9 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  *   - `preferredLocale` — application-only, used by next-intl.
  *
  * Status changes go through `/status`; ban/role/password each have
- * their own dedicated endpoints (docs/admin-manager.md §8.1). We deliberately do NOT
- * allow editing `primary_email` here in v1 — email changes need a
- * verification flow, which is not yet built.
+ * their own dedicated endpoints (docs/admin-manager.md §8.1). We
+ * deliberately do NOT allow editing `primary_email` here in v1 — email
+ * changes need a verification flow, which is not yet built.
  */
 const patchSchema = z
   .object({

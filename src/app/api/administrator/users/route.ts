@@ -37,10 +37,12 @@ export const dynamic = "force-dynamic";
  *     `primary_email` and `display_name`.
  *
  * Joining with the Better Auth `user` table is intentionally out of
- * scope for this endpoint — the auth `banned` / `role` columns are read
- * by the detail page and the ban / role endpoints instead
- * (docs/admin-manager.md §8.1). Here we ship the application view only,
- * which keeps the endpoint cheap and indexable.
+ * scope for this endpoint: we ship the application view only (plus each
+ * user's org names), which keeps the query cheap and indexable. Nothing
+ * in the console reads the auth-side `banned` / `role` columns back —
+ * `/users/[id]/ban` and `/users/[id]/role` write them through
+ * `auth.api.*` without a read (docs/admin-manager.md §8.1), and the ban
+ * flag is consulted on the machine-API path (`isBetterAuthUserBanned`).
  */
 const ALLOWED_STATUS = new Set([
   "active",

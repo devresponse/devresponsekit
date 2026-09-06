@@ -187,8 +187,8 @@ export async function checkAdminPermissionServer(
 }
 
 /**
- * The full set of administrator permission keys (docs/admin-manager.md §6.1) and the
- * "any admin" superset used by the layout. Sourced from the
+ * The full set of administrator permission keys (docs/admin-manager.md
+ * §6.1) and the "any admin" superset used by the layout. Sourced from the
  * non-`server-only` catalog module so seed scripts can share the same
  * definitions without resolving the `server-only` sentinel.
  */

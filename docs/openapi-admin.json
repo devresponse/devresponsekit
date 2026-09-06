@@ -3,7 +3,7 @@
   "info": {
     "title": "DevResponse Administrator API",
     "version": "1.0.0",
-    "description": "Cookie-session Administrator console API (`/api/administrator`). Authenticate with the Better Auth **session cookie** (send credentials with the request). Every **mutation** also requires an `Origin` (or `Referer`) header matching a trusted origin — the CSRF guard — so a non-browser client must set it explicitly. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header."
+    "description": "Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** (see that operation). Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header."
   },
   "servers": [
     {
@@ -13,52 +13,71 @@
   "security": [
     {
       "cookieSession": []
+    },
+    {
+      "bearerAuth": []
     }
   ],
   "tags": [
     {
       "name": "Users",
-      "description": "User administration."
+      "description": "User administration.",
+      "x-permissions": "`admin.users.*` (per action)"
     },
     {
       "name": "Roles",
-      "description": "Roles and their permissions."
+      "description": "Roles and their permissions.",
+      "x-permissions": "`admin.roles.*`"
     },
     {
       "name": "Permissions",
-      "description": "The permission catalog."
+      "description": "The permission catalog.",
+      "x-permissions": "`admin.roles.read`, `admin.permissions.manage`"
     },
     {
       "name": "Groups",
-      "description": "Organization groups (ADR-0002)."
+      "description": "Organization groups (ADR-0002).",
+      "x-permissions": "`admin.groups.*` (`.assign` for members and roles)"
     },
     {
       "name": "Organizations",
-      "description": "Tenants and their members / provider bindings."
+      "description": "Tenants and their members / provider bindings / sign-up policy.",
+      "x-permissions": "`admin.orgs.*` (`/auth-settings/defaults`: + **superadmin**)"
     },
     {
       "name": "Memberships",
-      "description": "User↔organization memberships."
+      "description": "User↔organization memberships.",
+      "x-permissions": "`admin.orgs.read`"
     },
     {
       "name": "Enterprise apps",
-      "description": "SSO application registry."
+      "description": "SSO application registry.",
+      "x-permissions": "`admin.apps.*`"
     },
     {
       "name": "API keys",
-      "description": "API-key governance."
+      "description": "API-key governance.",
+      "x-permissions": "`admin.apikeys.*`"
     },
     {
       "name": "Email",
-      "description": "Outbox and templates."
+      "description": "Outbox and templates.",
+      "x-permissions": "`admin.email.*`"
+    },
+    {
+      "name": "MCP agents",
+      "description": "Self-registered MCP agents (OAuth clients with an `mcp` service membership).",
+      "x-permissions": "`admin.clients.read` / `admin.clients.manage`"
     },
     {
       "name": "Audit",
-      "description": "The audit log."
+      "description": "The audit log.",
+      "x-permissions": "`admin.audit.read`"
     },
     {
       "name": "Export",
-      "description": "CSV exports."
+      "description": "CSV exports.",
+      "x-permissions": "the exported resource's read permission"
     }
   ],
   "components": {
@@ -66,8 +85,13 @@
       "cookieSession": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "better-auth.session_token",
-        "description": "Better Auth session cookie. Browser clients send it automatically; server clients must forward it (and an `Origin` header on mutations)."
+        "name": "__Secure-better-auth.session_token",
+        "description": "Better Auth session cookie. The name carries Better Auth's `__Secure-` prefix on any https origin (production); only a plain-http dev origin uses the bare `better-auth.session_token`. The value is the SIGNED cookie value exactly as a real browser session holds it — not a session id or token from the `session` table, which Better Auth will reject. Browser clients send it automatically (`credentials: \"include\"`); a server-side caller forwards the `Cookie` header and, on every mutation, adds a trusted `Origin` header (the CSRF guard)."
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A DevResponse API key (`drk_…`) or a JWT minted at `POST /api/v1/auth/token`, in `Authorization: Bearer …`. Accepted on every administrator operation that lists it (all of them except `DELETE /users/{id}/impersonate`, which is cookie-only; both credential paths are disabled by default: `API_KEYS_ENABLED` / `API_JWT_ENABLED`). The credential's effective authority is `scopes ∩ owner permissions`: an operation needs the owner to hold the permission AND the credential to carry a scope covering it (e.g. `admin.users.read`, or a prefix scope such as `admin.users.*`), else `403 forbidden`. Bearer callers are exempt from the `Origin` guard (a bearer cannot be attached by a cross-site page)."
       }
     },
     "parameters": {
@@ -129,7 +153,7 @@
         }
       },
       "Unauthorized": {
-        "description": "Not signed in",
+        "description": "No session cookie and no bearer credential resolved (`unauthenticated`) — also the answer for a revoked/expired bearer or a disabled credential path.",
         "content": {
           "application/json": {
             "schema": {
@@ -139,7 +163,7 @@
         }
       },
       "Forbidden": {
-        "description": "Insufficient permission (or out of org scope)",
+        "description": "`forbidden`: the caller lacks the permission (or, for a bearer, a covering scope), their account/membership is not active, or the action is out of their org scope. `untrusted_origin`: a cookie-session MUTATION arrived without an `Origin`/`Referer` header matching a trusted origin (CSRF guard; never returned to bearer callers).",
         "content": {
           "application/json": {
             "schema": {
@@ -169,19 +193,20 @@
         }
       },
       "Unprocessable": {
-        "description": "Unprocessable (e.g. ungrantable scopes)",
+        "description": "Unprocessable — `invalid_scope` with the scopes the caller may not grant",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/AdminError"
+              "$ref": "#/components/schemas/UnprocessableError"
             }
           }
         }
       },
       "RateLimited": {
-        "description": "Too many requests",
+        "description": "Too many requests (`rate_limited`); retry after `retryAfter` seconds",
         "headers": {
           "Retry-After": {
+            "description": "Seconds to wait — the same value as the body's `retryAfter`.",
             "schema": {
               "type": "string"
             }
@@ -190,7 +215,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/AdminError"
+              "$ref": "#/components/schemas/RateLimitedError"
             }
           }
         }
@@ -199,7 +224,7 @@
     "schemas": {
       "AdminError": {
         "type": "object",
-        "description": "Administrator error envelope.",
+        "description": "Administrator error envelope. `adminErrorResponse` may spread extra non-secret fields for specific codes — see `RateLimitedError` / `UnprocessableError`.",
         "properties": {
           "error": {
             "type": "string",
@@ -217,6 +242,49 @@
           "error",
           "message",
           "requestId"
+        ],
+        "additionalProperties": true
+      },
+      "RateLimitedError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AdminError"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "retryAfter": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Seconds until the bucket refills enough to retry."
+              }
+            },
+            "required": [
+              "retryAfter"
+            ]
+          }
+        ]
+      },
+      "UnprocessableError": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AdminError"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ungrantableScopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Requested scopes outside the caller's own authority (permissions ∩ credential scopes)."
+              }
+            },
+            "required": [
+              "ungrantableScopes"
+            ]
+          }
         ]
       },
       "SortSpec": {
@@ -669,14 +737,64 @@
           "reason"
         ]
       },
+      "SessionItem": {
+        "type": "object",
+        "description": "One active Better Auth session, projected to non-secret metadata. The session token is never exposed; revoke by `id`.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Session id — the `sessionId` path parameter."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ipAddress": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userAgent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "impersonatedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Better Auth user id of the impersonating admin, when this is an impersonation session."
+          }
+        },
+        "required": [
+          "id",
+          "createdAt",
+          "updatedAt",
+          "expiresAt",
+          "ipAddress",
+          "userAgent",
+          "impersonatedBy"
+        ],
+        "additionalProperties": false
+      },
       "SessionList": {
         "type": "object",
         "properties": {
           "sessions": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/SessionItem"
             }
           }
         },
@@ -962,19 +1080,17 @@
             ]
           },
           "ids": {
-            "oneOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "maxItems": 500
-              },
-              {
-                "const": "*"
-              }
-            ]
+            "type": [
+              "array",
+              "string"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 500,
+            "description": "1–500 app user ids, or the string `*` (the only accepted string) to select by `filters`."
           },
           "reason": {
             "type": "string",
@@ -988,25 +1104,32 @@
           },
           "filters": {
             "type": "object",
+            "description": "Selection filters for `ids: \"*\"` (ignored for an explicit id list).",
             "properties": {
               "status": {
-                "type": "array",
+                "type": [
+                  "array",
+                  "string"
+                ],
                 "items": {
                   "type": "string"
-                }
+                },
+                "description": "A list of statuses, or one status as a bare string."
               },
               "q": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
               }
-            }
+            },
+            "additionalProperties": false
           }
         },
         "required": [
           "action",
           "ids"
-        ]
+        ],
+        "additionalProperties": false
       },
       "BulkUserResult": {
         "type": "object",
@@ -3633,6 +3756,200 @@
           "pageSize",
           "total"
         ]
+      },
+      "McpAgentItem": {
+        "type": "object",
+        "properties": {
+          "clientRowId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "OAuth-client row id — the `{id}` of the agent operations."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "Public OAuth `client_id`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scope ceiling (effective = scopes ∩ permissions)."
+          },
+          "clientStatus": {
+            "type": "string",
+            "description": "Raw `app_oauth_clients.status`."
+          },
+          "appUserId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The agent's service account."
+          },
+          "userStatus": {
+            "type": "string",
+            "description": "Raw `app_users.status` of the service account."
+          },
+          "email": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "revoked"
+            ],
+            "description": "Derived lifecycle status (pending ⇒ awaiting approval; revoked ⇒ client inactive)."
+          }
+        },
+        "required": [
+          "clientRowId",
+          "clientId",
+          "name",
+          "scopes",
+          "clientStatus",
+          "appUserId",
+          "userStatus",
+          "email",
+          "organizationId",
+          "createdAt",
+          "status"
+        ]
+      },
+      "McpAgentList": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/McpAgentItem"
+                }
+              },
+              "page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "pageSize": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sort": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SortSpec"
+                }
+              }
+            },
+            "required": [
+              "items",
+              "page",
+              "pageSize",
+              "total"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pendingCount": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Agents awaiting approval across the caller's WHOLE scope — independent of the page and filter."
+              }
+            },
+            "required": [
+              "pendingCount"
+            ]
+          }
+        ]
+      },
+      "McpAgentApproved": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "activated": {
+            "type": "boolean",
+            "description": "false when the agent was already active (idempotent)."
+          }
+        },
+        "required": [
+          "ok",
+          "activated"
+        ]
+      },
+      "UpdateMcpAgentScopesRequest": {
+        "type": "object",
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "scopes"
+        ],
+        "additionalProperties": false
+      },
+      "McpAgentScopesResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "scopes"
+        ]
+      },
+      "McpAgentRevoked": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "alreadyRevoked": {
+            "type": "boolean",
+            "description": "Present (true) when the client was not active any more — a no-op."
+          }
+        },
+        "required": [
+          "ok"
+        ]
       }
     }
   },
@@ -3686,6 +4003,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -3720,6 +4040,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -3767,6 +4090,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -3816,6 +4142,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -3870,6 +4199,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -3927,6 +4259,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -3993,6 +4328,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4058,6 +4396,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4115,6 +4456,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4161,6 +4505,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4209,6 +4556,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4256,6 +4606,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4276,6 +4629,12 @@
           "Users"
         ],
         "summary": "Stop impersonating",
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "description": "Cookie session only. Unlike every other administrator operation this one does not go through the permission guard — the authority to stop derives from the live session BEING an impersonation session — so it always enforces the `Origin`/`Referer` (CSRF) check and always requires a session cookie. A bearer credential cannot authenticate here: it answers `403 untrusted_origin` (no `Origin`) or `401 unauthenticated`. `400 not_impersonating` when the session is real but not an impersonation.",
         "parameters": [
           {
             "name": "id",
@@ -4300,6 +4659,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4348,6 +4710,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4387,6 +4752,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4408,7 +4776,8 @@
         "tags": [
           "Users"
         ],
-        "summary": "Revoke a single session",
+        "summary": "Revoke a single session by its id",
+        "description": "`sessionId` is the `id` of a `SessionItem` from the list — never the session token. The server resolves the id to the token itself (review #67/#194); an id that is not one of the target user's active sessions is `404 session_not_found`.",
         "parameters": [
           {
             "name": "id",
@@ -4425,7 +4794,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "`SessionItem.id` from `GET /users/{id}/sessions`."
           }
         ],
         "responses": {
@@ -4441,6 +4811,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4526,6 +4899,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4574,6 +4950,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4630,6 +5009,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4685,6 +5067,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -4731,6 +5116,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4780,6 +5168,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4835,6 +5226,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4905,6 +5299,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -4984,6 +5381,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -5024,6 +5424,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5073,6 +5476,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5129,6 +5535,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -5174,6 +5583,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5261,6 +5673,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -5295,6 +5710,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5342,6 +5760,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5392,6 +5813,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -5436,6 +5860,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5484,6 +5911,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -5530,6 +5960,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5579,6 +6012,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5634,6 +6070,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5694,6 +6133,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -5738,6 +6180,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -5772,6 +6217,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5830,6 +6278,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -5874,6 +6325,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -5939,6 +6393,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -5973,6 +6430,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6020,6 +6480,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6070,6 +6533,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -6114,6 +6580,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6171,6 +6640,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -6219,6 +6691,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6275,6 +6750,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -6321,6 +6799,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6370,6 +6851,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6425,6 +6909,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6501,6 +6988,12 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -6535,6 +7028,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6582,6 +7078,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6632,6 +7131,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -6676,6 +7178,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6750,6 +7255,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -6798,6 +7306,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6854,6 +7365,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -6908,6 +7422,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -6979,6 +7496,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -7027,6 +7547,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7082,6 +7605,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7156,6 +7682,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -7204,6 +7733,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7261,6 +7793,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -7317,6 +7852,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -7363,6 +7901,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7413,6 +7954,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -7458,6 +8002,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -7490,6 +8037,12 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7525,6 +8078,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7615,6 +8171,12 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -7681,6 +8243,12 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -7715,6 +8283,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7761,6 +8332,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7810,6 +8384,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -7853,6 +8430,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7943,6 +8523,12 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -7977,6 +8563,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -8028,6 +8617,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -8076,6 +8668,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -8122,6 +8717,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -8198,6 +8796,12 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
@@ -8236,6 +8840,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -8262,6 +8869,12 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -8300,6 +8913,9 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -8350,6 +8966,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
@@ -8396,8 +9015,14 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -8505,6 +9130,26 @@
               }
             },
             "description": "Exact-match filter; repeat for multiple values."
+          },
+          {
+            "name": "filter[created_at][from]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Inclusive lower bound of the `created_at` range (ISO-8601)."
+          },
+          {
+            "name": "filter[created_at][to]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Inclusive upper bound of the `created_at` range (ISO-8601)."
           }
         ],
         "responses": {
@@ -8517,6 +9162,12 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -8531,6 +9182,7 @@
           "Export"
         ],
         "summary": "Export a resource as CSV",
+        "description": "Streams the resource as CSV (capped at `X-Export-Limit` rows). Filters are the SAME `filter[...]` parameters the resource's list endpoint accepts — the route allow-lists them per resource (`ALLOWED_FILTERS_BY_RESOURCE`) and silently drops any other: `users` → status; `audit` → event_type, outcome, actor, app_user_id, organization_id, target_application_id, created_at[from|to]; `organizations` → status, is_default; `roles` → organization, scope; `permissions` → none; `memberships` → status, organization_id, source_provider; `enterprise-apps` → status, organization_id. Rate-limited per actor (3 burst / one per 20 s).",
         "parameters": [
           {
             "name": "resource",
@@ -8554,6 +9206,180 @@
           },
           {
             "$ref": "#/components/parameters/Q"
+          },
+          {
+            "name": "filter[status]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "users, organizations, memberships, enterprise-apps."
+          },
+          {
+            "name": "filter[is_default]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "organizations."
+          },
+          {
+            "name": "filter[event_type]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "audit."
+          },
+          {
+            "name": "filter[outcome]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "audit."
+          },
+          {
+            "name": "filter[actor]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "audit — Better Auth actor user id."
+          },
+          {
+            "name": "filter[app_user_id]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "audit."
+          },
+          {
+            "name": "filter[organization_id]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "audit, memberships, enterprise-apps (roles use `filter[organization]`)."
+          },
+          {
+            "name": "filter[target_application_id]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "audit."
+          },
+          {
+            "name": "filter[organization]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "roles — organization id, or `global`."
+          },
+          {
+            "name": "filter[scope]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "roles — `global` | `organization`."
+          },
+          {
+            "name": "filter[source_provider]",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "memberships."
+          },
+          {
+            "name": "filter[created_at][from]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "audit — Inclusive lower bound of the `created_at` range (ISO-8601)."
+          },
+          {
+            "name": "filter[created_at][to]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "audit — Inclusive upper bound of the `created_at` range (ISO-8601)."
           }
         ],
         "responses": {
@@ -8579,11 +9405,240 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/mcp-agents": {
+      "get": {
+        "operationId": "listMcpAgents",
+        "tags": [
+          "MCP agents"
+        ],
+        "summary": "List self-registered MCP agents (pending first) with the scope-wide pending count",
+        "description": "Requires `admin.clients.read`. Pending agents always sort first, then `sort` (`created_at` | `name`, default `created_at.desc`). `q` is not supported here. `pendingCount` counts every pending agent in the caller's scope regardless of page/filter, so a badge stays truthful on any view.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/Sort"
+          },
+          {
+            "name": "filter[status]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "active",
+                "revoked"
+              ]
+            },
+            "description": "Derived lifecycle status; an unrecognised value applies no filter."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpAgentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/mcp-agents/{id}": {
+      "patch": {
+        "operationId": "updateMcpAgentScopes",
+        "tags": [
+          "MCP agents"
+        ],
+        "summary": "Set an agent's scope ceiling",
+        "description": "Requires `admin.clients.manage`. Scopes are validated against the caller's own authority (permissions, and for a bearer caller its own scopes) — over-granting is `422 invalid_scope` listing `ungrantableScopes`. A granted scope only takes effect where the service account also holds the matching permission.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMcpAgentScopesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpAgentScopesResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeMcpAgent",
+        "tags": [
+          "MCP agents"
+        ],
+        "summary": "Revoke an agent's OAuth client (idempotent)",
+        "description": "Requires `admin.clients.manage`. The service account is left intact for the audit trail; an already-revoked client answers `{ ok: true, alreadyRevoked: true }`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpAgentRevoked"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/mcp-agents/{id}/approve": {
+      "post": {
+        "operationId": "approveMcpAgent",
+        "tags": [
+          "MCP agents"
+        ],
+        "summary": "Approve a pending agent (activate its service account)",
+        "description": "Requires `admin.clients.manage`. Idempotent — an already-active agent answers `{ ok: true, activated: false }`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpAgentApproved"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }

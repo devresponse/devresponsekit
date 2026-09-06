@@ -1,10 +1,14 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
-import { revokeBetterAuthUserSession } from "@/lib/admin/auth-admin.server";
+import {
+  listBetterAuthUserSessions,
+  revokeBetterAuthUserSession,
+} from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { findSessionToken } from "@/lib/admin/session-item";
 import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
@@ -19,13 +23,13 @@ type RouteContext = { params: Promise<{ id: string; sessionId: string }> };
  * DELETE /api/administrator/users/[id]/sessions/[sessionId]
  *
  * Revokes one specific Better Auth session for the target user. The
- * `sessionId` here is the Better Auth session token. Caller MUST hold
- * `admin.users.sessions`.
- *
- * The user `id` parameter exists for URL clarity and audit grouping;
- * Better Auth's revoke API only requires the session token. We still
- * validate the user resolves so callers cannot probe by guessing only
- * a session token.
+ * `sessionId` is the session's `id` as returned by `GET …/sessions`
+ * (`SessionItem.id`) — NOT the session token. Better Auth's revoke API only
+ * understands tokens, so the handler resolves the id to its token
+ * server-side, scoped to the TARGET user's own sessions (review #67/#194):
+ * the token never crosses the wire in either direction, and an id that is
+ * not one of this user's sessions is a 404 (no cross-user revocation, no
+ * probing by id). Caller MUST hold `admin.users.sessions`.
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.sessions");
@@ -52,8 +56,27 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const outranked = await refuseOutrankingTarget(guard, target, request, "session_revoke");
   if (outranked) return outranked;
 
+  let sessionToken: string | null;
   try {
-    await revokeBetterAuthUserSession(sessionId, request);
+    const sessions = await listBetterAuthUserSessions(target.betterAuthUserId, request);
+    sessionToken = findSessionToken(sessions, sessionId);
+  } catch (err) {
+    await auditUserAction("admin.user.session_revoke_failed", "failure", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      reason: "auth_list_sessions_failed",
+      metadata: { message: err instanceof Error ? err.message : "unknown", sessionId },
+    });
+    return adminErrorResponse("auth_list_sessions_failed", 502, request, { cause: err });
+  }
+  if (sessionToken === null) {
+    return adminErrorResponse("session_not_found", 404, request);
+  }
+
+  try {
+    await revokeBetterAuthUserSession(sessionToken, request);
   } catch (err) {
     await auditUserAction("admin.user.session_revoke_failed", "failure", {
       request,
@@ -61,12 +84,9 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
       appUserId: target.appUserId,
       email: target.primaryEmail,
       reason: "auth_revoke_session_failed",
-      // Do NOT log the raw session token in metadata — fingerprint
-      // length only so ops can debug shape issues without leaking it.
-      metadata: {
-        message: err instanceof Error ? err.message : "unknown",
-        sessionTokenLength: sessionId.length,
-      },
+      // The session id is an opaque identifier, safe to record; the token
+      // resolved above is a credential and is NEVER written to metadata.
+      metadata: { message: err instanceof Error ? err.message : "unknown", sessionId },
     });
     return adminErrorResponse("auth_revoke_session_failed", 502, request, { cause: err });
   }
@@ -76,7 +96,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
     email: target.primaryEmail,
-    metadata: { sessionTokenLength: sessionId.length },
+    metadata: { sessionId },
   });
 
   return NextResponse.json({ ok: true });

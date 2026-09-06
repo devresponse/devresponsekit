@@ -2,7 +2,7 @@
 /* eslint-disable */
 /**
  * DevResponse Administrator API
- * Cookie-session Administrator console API (`/api/administrator`). Authenticate with the Better Auth **session cookie** (send credentials with the request). Every **mutation** also requires an `Origin` (or `Referer`) header matching a trusted origin — the CSRF guard — so a non-browser client must set it explicitly. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
+ * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** (see that operation). Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
  *
  * The version of the OpenAPI document: 1.0.0
  * 
@@ -14,11 +14,12 @@
 
 import { mapValues } from '../runtime';
 /**
- * Administrator error envelope.
+ * Administrator error envelope. `adminErrorResponse` may spread extra non-secret fields for specific codes — see `RateLimitedError` / `UnprocessableError`.
  * @export
  * @interface AdminError
  */
 export interface AdminError {
+    [key: string]: any | any;
     /**
      * Machine-readable code.
      * @type {string}
@@ -59,6 +60,7 @@ export function AdminErrorFromJSONTyped(json: any, ignoreDiscriminator: boolean)
     }
     return {
         
+            ...json,
         'error': json['error'],
         'message': json['message'],
         'requestId': json['requestId'],
@@ -76,6 +78,7 @@ export function AdminErrorToJSONTyped(value?: AdminError | null, ignoreDiscrimin
 
     return {
         
+            ...value,
         'error': value['error'],
         'message': value['message'],
         'requestId': value['requestId'],

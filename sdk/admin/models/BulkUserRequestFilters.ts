@@ -2,7 +2,7 @@
 /* eslint-disable */
 /**
  * DevResponse Administrator API
- * Cookie-session Administrator console API (`/api/administrator`). Authenticate with the Better Auth **session cookie** (send credentials with the request). Every **mutation** also requires an `Origin` (or `Referer`) header matching a trusted origin — the CSRF guard — so a non-browser client must set it explicitly. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
+ * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** (see that operation). Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
  *
  * The version of the OpenAPI document: 1.0.0
  * 
@@ -14,13 +14,14 @@
 
 import { mapValues } from '../runtime';
 /**
- * 
+ * Selection filters for `ids: "*"` (ignored for an explicit id list).
  * @export
  * @interface BulkUserRequestFilters
  */
 export interface BulkUserRequestFilters {
+    [key: string]: any | any;
     /**
-     * 
+     * A list of statuses, or one status as a bare string.
      * @type {Array<string>}
      * @memberof BulkUserRequestFilters
      */
@@ -50,6 +51,7 @@ export function BulkUserRequestFiltersFromJSONTyped(json: any, ignoreDiscriminat
     }
     return {
         
+            ...json,
         'status': json['status'] == null ? undefined : json['status'],
         'q': json['q'] == null ? undefined : json['q'],
     };
@@ -66,6 +68,7 @@ export function BulkUserRequestFiltersToJSONTyped(value?: BulkUserRequestFilters
 
     return {
         
+            ...value,
         'status': value['status'],
         'q': value['q'],
     };

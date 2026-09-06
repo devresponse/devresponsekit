@@ -17,6 +17,7 @@ import {
   refuseOutrankingTarget,
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
+import { normalizeSessionList, toSessionItem } from "@/lib/admin/session-item";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,12 @@ type RouteContext = { params: Promise<{ id: string }> };
  * GET /api/administrator/users/[id]/sessions
  *
  * Returns the active Better Auth sessions for the target user
- * (docs/admin-manager.md §8.1). Pagination is not exposed here — Better
- * Auth's session list is naturally bounded by `expiresIn` (8h rolling) and the number of
- * concurrent devices a single user can be signed in on.
+ * (docs/admin-manager.md §8.1), PROJECTED to `SessionItem` (id + timestamps +
+ * ip/user-agent + impersonatedBy). The raw rows carry `token` — the session's
+ * bearer credential — which must never leave the server (review #67/#194);
+ * clients revoke by `id`. Pagination is not exposed here — Better Auth's
+ * session list is naturally bounded by `expiresIn` (8h rolling) and the
+ * number of concurrent devices a single user can be signed in on.
  *
  * Caller MUST hold `admin.users.sessions`.
  */
@@ -60,13 +64,10 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("auth_list_sessions_failed", 502, request, { cause: err });
   }
 
-  // Better Auth returns `{ sessions: [...] }` or a bare array depending
-  // on plugin version; normalize to `{ sessions: [...] }`.
-  const items = Array.isArray(sessions)
-    ? sessions
-    : ((sessions as { sessions?: unknown[] } | null | undefined)?.sessions ?? []);
-
-  return NextResponse.json({ sessions: items });
+  // Better Auth returns `{ sessions: [...] }` or a bare array depending on
+  // plugin version; normalize, then project each row to the allow-listed
+  // `SessionItem` shape (drops `token`, review #67/#194).
+  return NextResponse.json({ sessions: normalizeSessionList(sessions).map(toSessionItem) });
 }
 
 /**

@@ -2,7 +2,7 @@
 /* eslint-disable */
 /**
  * DevResponse Administrator API
- * Cookie-session Administrator console API (`/api/administrator`). Authenticate with the Better Auth **session cookie** (send credentials with the request). Every **mutation** also requires an `Origin` (or `Referer`) header matching a trusted origin — the CSRF guard — so a non-browser client must set it explicitly. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
+ * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** (see that operation). Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
  *
  * The version of the OpenAPI document: 1.0.0
  * 
@@ -22,7 +22,9 @@ import type {
   AdminApiKeyRotated,
   AdminError,
   CreateAdminApiKeyRequest,
+  RateLimitedError,
   ReasonRequest,
+  UnprocessableError,
 } from '../models/index';
 import {
     AdminApiKeyCreatedFromJSON,
@@ -39,8 +41,12 @@ import {
     AdminErrorToJSON,
     CreateAdminApiKeyRequestFromJSON,
     CreateAdminApiKeyRequestToJSON,
+    RateLimitedErrorFromJSON,
+    RateLimitedErrorToJSON,
     ReasonRequestFromJSON,
     ReasonRequestToJSON,
+    UnprocessableErrorFromJSON,
+    UnprocessableErrorToJSON,
 } from '../models/index';
 
 export interface CreateAdminApiKeyOperationRequest {
@@ -92,6 +98,14 @@ export class APIKeysApi extends runtime.BaseAPI {
 
         headerParameters['Content-Type'] = 'application/json';
 
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
         const response = await this.request({
             path: `/api-keys`,
             method: 'POST',
@@ -126,6 +140,14 @@ export class APIKeysApi extends runtime.BaseAPI {
 
         const headerParameters: runtime.HTTPHeaders = {};
 
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
         const response = await this.request({
             path: `/api-keys/{id}`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
             method: 'GET',
@@ -180,6 +202,14 @@ export class APIKeysApi extends runtime.BaseAPI {
 
         const headerParameters: runtime.HTTPHeaders = {};
 
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
         const response = await this.request({
             path: `/api-keys`,
             method: 'GET',
@@ -215,6 +245,14 @@ export class APIKeysApi extends runtime.BaseAPI {
 
         headerParameters['Content-Type'] = 'application/json';
 
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
         const response = await this.request({
             path: `/api-keys/{id}`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
             method: 'DELETE',
@@ -249,6 +287,14 @@ export class APIKeysApi extends runtime.BaseAPI {
 
         const headerParameters: runtime.HTTPHeaders = {};
 
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
         const response = await this.request({
             path: `/api-keys/{id}/rotate`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
             method: 'POST',

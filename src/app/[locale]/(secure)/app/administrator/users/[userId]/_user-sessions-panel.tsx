@@ -11,15 +11,15 @@ import { Skeleton } from "@/components/ui/skeleton";
  * Owns its own fetch against `GET /api/administrator/users/[id]/sessions`
  * so the heavier auth-side query only runs when the user opens the tab.
  *
- * Per-row "Revoke" calls `DELETE .../sessions/[sessionId]`; the
- * "Revoke all" button calls `DELETE .../sessions`. Both refresh the
- * list on success and surface API errors inline (no toast dependency
- * is added here — the existing UI surface intentionally keeps the
- * dependency footprint of this slice small).
+ * Per-row "Revoke" calls `DELETE .../sessions/[sessionId]` with the
+ * session's `id` — the API projects rows to `SessionItem` and never returns
+ * the session token (review #67/#194). The "Revoke all" button calls
+ * `DELETE .../sessions`. Both refresh the list on success and surface API
+ * errors inline (no toast dependency is added here — the existing UI surface
+ * intentionally keeps the dependency footprint of this slice small).
  */
 interface RawSession {
   id?: string;
-  token?: string;
   expiresAt?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
@@ -82,13 +82,13 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
     };
   }, [userId, tGrid, reloadToken]);
 
-  const revokeOne = async (token: string | undefined) => {
-    if (!token) return;
+  const revokeOne = async (sessionId: string | undefined) => {
+    if (!sessionId) return;
     setBusy(true);
     setError(null);
     try {
       const res = await fetch(
-        `/api/administrator/users/${userId}/sessions/${encodeURIComponent(token)}`,
+        `/api/administrator/users/${userId}/sessions/${encodeURIComponent(sessionId)}`,
         { method: "DELETE", credentials: "same-origin" },
       );
       if (!res.ok) setError(tGrid("error"));
@@ -144,9 +144,9 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
       ) : (
         <ul className="divide-y rounded-md border text-sm">
           {sessions.map((s, idx) => {
-            const token = s.token ?? s.id;
+            const sessionId = s.id;
             return (
-              <li key={token ?? idx} className="flex items-start justify-between gap-3 p-3">
+              <li key={sessionId ?? idx} className="flex items-start justify-between gap-3 p-3">
                 <div className="space-y-1">
                   <p>
                     <span className="text-muted-foreground">
@@ -167,8 +167,8 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => revokeOne(token)}
-                  disabled={busy || !token}
+                  onClick={() => revokeOne(sessionId)}
+                  disabled={busy || !sessionId}
                 >
                   {t("sessions.revokeOne")}
                 </Button>

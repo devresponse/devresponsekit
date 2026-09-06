@@ -4,6 +4,7 @@ apis/EmailApi.ts
 apis/EnterpriseAppsApi.ts
 apis/ExportApi.ts
 apis/GroupsApi.ts
+apis/MCPAgentsApi.ts
 apis/MembershipsApi.ts
 apis/OrganizationsApi.ts
 apis/PermissionsApi.ts
@@ -68,6 +69,11 @@ models/InvitationItem.ts
 models/InvitationList.ts
 models/InvitationResent.ts
 models/KeyCreated.ts
+models/McpAgentApproved.ts
+models/McpAgentItem.ts
+models/McpAgentList.ts
+models/McpAgentRevoked.ts
+models/McpAgentScopesResult.ts
 models/MembershipList.ts
 models/MembershipListItem.ts
 models/Ok.ts
@@ -88,6 +94,7 @@ models/PermissionsList.ts
 models/PermissionsResult.ts
 models/ProviderBindingItem.ts
 models/ProviderBindingList.ts
+models/RateLimitedError.ts
 models/ReasonRequest.ts
 models/RoleDetail.ts
 models/RoleDetailEnvelope.ts
@@ -97,6 +104,7 @@ models/RoleMemberItem.ts
 models/RoleMemberList.ts
 models/SendTestEmailRequest.ts
 models/SendTestEmailResult.ts
+models/SessionItem.ts
 models/SessionList.ts
 models/SetPasswordRequest.ts
 models/SetPasswordRequestOneOf.ts
@@ -105,10 +113,12 @@ models/SetRoleRequest.ts
 models/SetUserPassword200Response.ts
 models/SetUserPlatformRole200Response.ts
 models/SortSpec.ts
+models/UnprocessableError.ts
 models/UpdateAuthPolicyRequest.ts
 models/UpdateEmailTemplateRequest.ts
 models/UpdateEnterpriseAppRequest.ts
 models/UpdateGroupRequest.ts
+models/UpdateMcpAgentScopesRequest.ts
 models/UpdateMembershipsRequest.ts
 models/UpdateOrganizationRequest.ts
 models/UpdatePermissionRequest.ts

@@ -19,6 +19,9 @@ import {
  */
 type Operation = {
   operationId?: string;
+  description?: string;
+  /** Per-operation narrowing of the document-level `security` (see below). */
+  security?: Array<Record<string, unknown[]>>;
   parameters?: Array<{ name: string; in: string; schema?: Record<string, unknown> }>;
   responses: Record<string, { $ref?: string }>;
 };
@@ -134,11 +137,58 @@ describe("documented security schemes ⇔ the credential kinds resolveCaller acc
 
   it("the document-level security is cookie OR bearer (two alternative requirements)", () => {
     expect(doc.security).toEqual([{ cookieSession: [] }, { bearerAuth: [] }]);
-    // No operation narrows it back to cookie-only: the guard accepts a bearer
-    // on every admin route.
+  });
+
+  // `DELETE /users/{id}/impersonate` is the only admin route that does NOT go
+  // through `requireAdminPermission`/`resolveCaller`: it applies
+  // `checkTrustedOrigin` unconditionally (no `hasBearerCredential` bypass) and
+  // then requires `getCurrentSession()`, so a bearer caller can only get
+  // 403/401 there. The spec must narrow that ONE operation to cookie-only and
+  // leave every other operation on the document default — an allow-list, not
+  // "no operation may narrow", so that a future guard-bypassing route is
+  // forced to declare itself here rather than silently inheriting a bearer
+  // requirement the server does not honour (must-fix review of #193).
+  const COOKIE_ONLY_OPERATIONS = new Set(["DELETE /users/{id}/impersonate"]);
+
+  it("only the guard-bypassing operations narrow the document security, and they narrow to cookie-only", () => {
+    const narrowed = new Map<string, unknown>();
     for (const { op, method, path } of operations()) {
-      expect((op as { security?: unknown }).security, `${method} ${path}`).toBeUndefined();
+      if (op.security !== undefined) narrowed.set(`${method.toUpperCase()} ${path}`, op.security);
     }
+    expect([...narrowed.keys()].sort()).toEqual([...COOKIE_ONLY_OPERATIONS].sort());
+    for (const [key, security] of narrowed) {
+      expect(security, key).toEqual([{ cookieSession: [] }]);
+    }
+  });
+
+  it("the cookie-only operations say why a bearer cannot authenticate there", () => {
+    for (const { op, method, path } of operations()) {
+      if (!COOKIE_ONLY_OPERATIONS.has(`${method.toUpperCase()} ${path}`)) continue;
+      expect(String(op.description ?? ""), `${method} ${path}`).toMatch(/cookie session only/i);
+    }
+  });
+
+  it("the allow-list matches the routes that skip requireAdminPermission", () => {
+    // The spec's narrowing is only correct while the route really does bypass
+    // the guard: pin the source fact rather than trusting the comment.
+    const route = readFileSync(
+      join(
+        process.cwd(),
+        "src",
+        "app",
+        "api",
+        "administrator",
+        "users",
+        "[id]",
+        "impersonate",
+        "route.ts",
+      ),
+      "utf8",
+    );
+    const del = route.slice(route.indexOf("export async function DELETE"));
+    expect(del).not.toMatch(/requireAdminPermission/);
+    expect(del).toMatch(/checkTrustedOrigin\(request\)/);
+    expect(del).toMatch(/getCurrentSession\(\)/);
   });
 
   it("bearerAuth is an HTTP bearer scheme whose description states the scope bound", () => {

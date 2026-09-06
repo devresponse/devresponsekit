@@ -2,7 +2,7 @@
 /* eslint-disable */
 /**
  * DevResponse Administrator API
- * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
+ * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** (see that operation). Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
  *
  * The version of the OpenAPI document: 1.0.0
  * 

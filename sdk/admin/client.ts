@@ -50,8 +50,10 @@ export interface AdminClientOptions {
   /**
    * Server-side callers only: the session to act as. Either a complete
    * `Cookie` header value (`__Secure-better-auth.session_token=…`) or just the
-   * signed cookie VALUE, in which case the cookie name is derived from the
-   * origin's scheme. Never a session id or a row from the `session` table.
+   * signed cookie VALUE (`<token>.<44-char base64 signature ending in "=">`),
+   * in which case the cookie name is derived from the origin's scheme — see
+   * `isCookieHeader` for how the two are told apart. Never a session id or a
+   * row from the `session` table.
    */
   cookie?: string;
   /** A DevResponse API key or access-token JWT (mutually exclusive with `cookie`). */
@@ -65,6 +67,27 @@ export interface AdminClientOptions {
 /** `https://app.example.com` → `https://app.example.com/api/administrator`. */
 export function adminBasePath(origin: string): string {
   return `${normalizeOrigin(origin)}${ADMIN_API_PATH}`;
+}
+
+/**
+ * True when `value` is already a complete `Cookie` HEADER (`name=value; …`)
+ * rather than a bare cookie value.
+ *
+ * `value.includes("=")` is NOT a usable test here: Better Auth signs the
+ * session cookie as `<token>.<base64(HMAC-SHA256)>`, and base64 of a 32-byte
+ * digest is always 44 characters ending in exactly one `=` pad char (better-call
+ * rejects anything else: `signature.length !== 44 || !signature.endsWith("=")`).
+ * So EVERY real signed value contains an `=` and used to take the "already a
+ * header" branch — sending `Cookie: <token>.<sig>=` with no cookie name at all,
+ * which the server reads as no session → 401.
+ *
+ * The discriminator is instead "starts with an RFC 6265 cookie NAME followed by
+ * `=` and then something": a cookie name is a `token`, so it cannot contain
+ * `=`, `;`, `,` or whitespace, and a bare signed value only ever carries its
+ * `=` as the final character with nothing after it.
+ */
+function isCookieHeader(value: string): boolean {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+=./.test(value);
 }
 
 /** The cookie name Better Auth uses for a deployment at `origin`. */
@@ -119,7 +142,7 @@ export function createAdminClient(options: AdminClientOptions): Configuration {
     if (options.cookie.length === 0) {
       throw new Error("createAdminClient: cookie must not be empty");
     }
-    headers.Cookie = options.cookie.includes("=")
+    headers.Cookie = isCookieHeader(options.cookie)
       ? options.cookie
       : `${sessionCookieNameFor(origin)}=${options.cookie}`;
     // Cookie-session mutations must carry a trusted Origin (CSRF guard); a

@@ -202,7 +202,7 @@ console.log(page.items, page.total);
 
 ## 6. Administrator API (`/api/administrator`) & the committed admin SDK
 
-This is the console surface (users, roles, permissions, groups, organizations, memberships, sign-up policy, invitations, enterprise apps, API keys, email, MCP agents, audit, CSV export). It is **internal tooling that mirrors the admin console — not a public/integration API**; prefer the v1 surface for integrations. Every endpoint accepts a cookie session (+ `Origin` on mutations) or a scope-bound bearer credential, and requires the noted permission; mutations are rate-limited (`429` with `Retry-After` / `retryAfter`) and audited.
+This is the console surface (users, roles, permissions, groups, organizations, memberships, sign-up policy, invitations, enterprise apps, API keys, email, MCP agents, audit, CSV export). It is **internal tooling that mirrors the admin console — not a public/integration API**; prefer the v1 surface for integrations. Every endpoint accepts a cookie session (+ `Origin` on mutations) or a scope-bound bearer credential — the one exception is `DELETE /users/[id]/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** — and requires the noted permission; mutations are rate-limited (`429` with `Retry-After` / `retryAfter`) and audited.
 
 The table below is **generated from the spec** by `pnpm docs:admin-table` (one row per tag; `tests/unit/docs-admin-api-table.test.ts` fails when it is stale) — edit `openapi-admin.ts`, not the table:
 
@@ -239,7 +239,9 @@ const browser = createAdminClient({ origin: "https://app.example.com" });
 
 // Server-side with a session: forwards the Cookie header and adds Origin.
 // `cookie` is the SIGNED value of the __Secure-better-auth.session_token
-// cookie from a real sign-in (or the full "name=value" header).
+// cookie from a real sign-in — `<token>.<44-char base64 signature>`, whose
+// trailing "=" pad is why the SDK matches a leading "name=" rather than just
+// looking for an "=" — or the full "name=value; …" header.
 const server = createAdminClient({ origin: "https://app.example.com", cookie: signedCookieValue });
 
 // Bearer: an API key or JWT — scope-bound, exempt from the Origin guard.

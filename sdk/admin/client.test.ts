@@ -21,6 +21,18 @@ import {
 const ORIGIN = "https://app.example.com";
 const EMPTY_PAGE = JSON.stringify({ items: [], page: 1, pageSize: 25, total: 0 });
 
+/**
+ * A REALISTICALLY SHAPED Better Auth signed cookie value: `<token>.<signature>`
+ * where the signature is base64 of the 32-byte HMAC-SHA256 digest. base64 of 32
+ * bytes is ALWAYS 44 characters ending in exactly one `=` pad — better-call
+ * refuses to verify anything else (`signature.length !== 44 ||
+ * !signature.endsWith("=")`) — so every real signed value contains an `=`.
+ * Built from a fixed low-entropy string rather than pasted as a literal blob,
+ * both to keep the invariant visible and to keep secret scanners quiet.
+ */
+const SIGNATURE = btoa("test-signature-test-signature-tt");
+const SIGNED_COOKIE_VALUE = `testtokentesttokentesttokentesttoken.${SIGNATURE}`;
+
 /** Runs one `listUsers` through the generated client and returns the captured request. */
 async function capture(options: AdminClientOptions) {
   const fetchApi = vi.fn(
@@ -73,6 +85,39 @@ describe("createAdminClient", () => {
     expect(req.headers.get("origin")).toBe(ORIGIN);
     expect(req.credentials).toBeUndefined();
     expect(req.headers.has("authorization")).toBe(false);
+  });
+
+  // The fixture above has no `=`, which a real sign-in NEVER produces: the
+  // signature is base64 of a 32-byte digest, so it always ends in a `=` pad.
+  // The old `cookie.includes("=")` discriminator therefore mis-read every
+  // genuine signed value as a complete header and sent it with no cookie name
+  // at all — the server saw no session token and answered 401.
+  it("a real signed value (base64 signature, trailing '=' pad) still gets the cookie name", async () => {
+    expect(SIGNATURE).toHaveLength(44);
+    expect(SIGNATURE.endsWith("=")).toBe(true);
+    expect(SIGNED_COOKIE_VALUE).toContain("=");
+
+    const req = await capture({ origin: ORIGIN, cookie: SIGNED_COOKIE_VALUE });
+    expect(req.headers.get("cookie")).toBe(
+      `${SESSION_COOKIE_NAME_HTTPS}=${SIGNED_COOKIE_VALUE}`,
+    );
+    expect(req.headers.get("origin")).toBe(ORIGIN);
+
+    // The percent-encoded form (the bytes a browser actually stores and sends,
+    // `=` → `%3D`) has no literal `=` and must be named too.
+    const encoded = await capture({
+      origin: ORIGIN,
+      cookie: encodeURIComponent(SIGNED_COOKIE_VALUE),
+    });
+    expect(encoded.headers.get("cookie")).toBe(
+      `${SESSION_COOKIE_NAME_HTTPS}=${encodeURIComponent(SIGNED_COOKIE_VALUE)}`,
+    );
+  });
+
+  it("a full header carrying a real signed value is passed through unchanged", async () => {
+    const header = `${SESSION_COOKIE_NAME_HTTPS}=${SIGNED_COOKIE_VALUE}; other=1`;
+    const req = await capture({ origin: ORIGIN, cookie: header });
+    expect(req.headers.get("cookie")).toBe(header);
   });
 
   it("server mode accepts a full Cookie header and uses the plain name on an http dev origin", async () => {

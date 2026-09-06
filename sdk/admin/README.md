@@ -13,8 +13,9 @@ hand-written entry point (`client.ts`).
 
 ## Authentication
 
-This is the **admin console** API, not the public machine API (`/api/v1`). Every operation
-accepts either credential the server's `resolveCaller` understands:
+This is the **admin console** API, not the public machine API (`/api/v1`). Every operation that
+goes through the server's `resolveCaller` — all of them except `stopImpersonation`, see below —
+accepts either credential it understands:
 
 - the **Better Auth session cookie** — `__Secure-better-auth.session_token` on any https
   origin (the bare `better-auth.session_token` only on a plain-http dev origin). The value is
@@ -26,6 +27,12 @@ accepts either credential the server's `resolveCaller` understands:
 - a **bearer** API key (`drk_…`) or JWT from `POST /api/v1/auth/token`, scope-bounded
   (effective authority = credential scopes ∩ owner permissions) and exempt from the origin
   guard.
+
+`DELETE /users/{id}/impersonate` (`stopImpersonation`) is the one exception: it deliberately does
+not run through the permission guard — stopping must work from the impersonated identity, which
+holds no admin permission — so it always enforces the `Origin` check and always requires a session
+cookie. A bearer credential gets `403 untrusted_origin` / `401 unauthenticated` there; use the
+`cookie` mode below.
 
 `createAdminClient` builds the right `Configuration` for each mode:
 
@@ -41,7 +48,9 @@ const browser = createAdminClient({ origin: "https://app.example.com" });
 // Server-side with a session: forwards the cookie + adds the Origin header.
 const server = createAdminClient({
   origin: "https://app.example.com",
-  cookie: signedSessionCookieValue, // or a full "__Secure-better-auth.session_token=…" header
+  // The signed value from a real sign-in (`<token>.<44-char base64 signature>`, which
+  // always ends in an "=" pad), or a full "__Secure-better-auth.session_token=…; …" header.
+  cookie: signedSessionCookieValue,
 });
 
 // Bearer (API key or JWT): Authorization header, no Origin needed.

@@ -149,9 +149,10 @@ const createdResp = (schemaName: string): Obj => ({
   ...json(ref(schemaName)),
 });
 
-// Every operation runs through `requireAdminPermission`, which answers 401
-// for a missing/invalid credential before anything else — so 401 belongs on
-// EVERY operation, not on none of them (review #195).
+// Every operation answers 401 for a missing/invalid credential before anything
+// else — `requireAdminPermission` does it for all but one, and the guard-free
+// `DELETE /users/{id}/impersonate` does it itself via `getCurrentSession()` —
+// so 401 belongs on EVERY operation, not on none of them (review #195).
 /** Standard error responses for a collection read (no `{id}` → no 404). */
 const listErrors = (): Obj => ({
   "400": errRef("BadRequest"),
@@ -188,13 +189,17 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         "an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser " +
         "sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose " +
         "effective authority is the intersection of its scopes and the permissions of its owner and which " +
-        "is exempt from the origin guard. Org admins are scoped to their own organization " +
+        "is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, " +
+        "which bypasses the permission guard by design and is therefore **cookie-session only** " +
+        "(see that operation). Org admins are scoped to their own organization " +
         "(out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; " +
         "every response carries an `x-request-id` header.",
     },
     servers: [{ url: `${baseUrl}/api/administrator` }],
     // Two alternative requirements (OR), mirroring `resolveCaller`: a cookie
-    // session, or a scope-bounded bearer credential (review #193).
+    // session, or a scope-bounded bearer credential (review #193). Operations
+    // that do NOT run through `resolveCaller` must narrow this per-operation —
+    // today that is only `DELETE /users/{id}/impersonate` (cookie-only).
     security: [{ cookieSession: [] }, { bearerAuth: [] }],
     // `x-permissions` is the per-group permission summary the generated
     // docs/api.md table prints (review #198); the per-operation key is in each
@@ -272,8 +277,9 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           scheme: "bearer",
           description:
             "A DevResponse API key (`drk_…`) or a JWT minted at `POST /api/v1/auth/token`, in " +
-            "`Authorization: Bearer …`. Accepted on every administrator operation (both credential " +
-            "paths are disabled by default: `API_KEYS_ENABLED` / `API_JWT_ENABLED`). The credential's " +
+            "`Authorization: Bearer …`. Accepted on every administrator operation that lists it " +
+            "(all of them except `DELETE /users/{id}/impersonate`, which is cookie-only; both " +
+            "credential paths are disabled by default: `API_KEYS_ENABLED` / `API_JWT_ENABLED`). The credential's " +
             "effective authority is `scopes ∩ owner permissions`: an operation needs the owner to hold " +
             "the permission AND the credential to carry a scope covering it (e.g. `admin.users.read`, " +
             "or a prefix scope such as `admin.users.*`), else `403 forbidden`. Bearer callers are " +
@@ -1615,6 +1621,22 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           operationId: "stopImpersonation",
           tags: ["Users"],
           summary: "Stop impersonating",
+          // The ONE admin operation that narrows the document-level
+          // `cookie OR bearer` back to cookie-only: it deliberately does not
+          // run through `requireAdminPermission`/`resolveCaller` (stopping must
+          // work from the impersonated identity, which holds no admin
+          // permission), so it applies `checkTrustedOrigin` UNCONDITIONALLY —
+          // there is no `hasBearerCredential` bypass — and then demands a live
+          // `getCurrentSession()`. A bearer caller can only ever get
+          // `403 untrusted_origin` or `401 unauthenticated` here.
+          security: [{ cookieSession: [] }],
+          description:
+            "Cookie session only. Unlike every other administrator operation this one does not go " +
+            "through the permission guard — the authority to stop derives from the live session " +
+            "BEING an impersonation session — so it always enforces the `Origin`/`Referer` (CSRF) " +
+            "check and always requires a session cookie. A bearer credential cannot authenticate " +
+            "here: it answers `403 untrusted_origin` (no `Origin`) or `401 unauthenticated`. " +
+            "`400 not_impersonating` when the session is real but not an impersonation.",
           parameters: [idParam()],
           responses: { "200": okResp(), ...writeErrors() },
         },

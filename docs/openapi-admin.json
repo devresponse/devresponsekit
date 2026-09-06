@@ -3,7 +3,7 @@
   "info": {
     "title": "DevResponse Administrator API",
     "version": "1.0.0",
-    "description": "Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header."
+    "description": "Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** (see that operation). Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header."
   },
   "servers": [
     {
@@ -91,7 +91,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "A DevResponse API key (`drk_…`) or a JWT minted at `POST /api/v1/auth/token`, in `Authorization: Bearer …`. Accepted on every administrator operation (both credential paths are disabled by default: `API_KEYS_ENABLED` / `API_JWT_ENABLED`). The credential's effective authority is `scopes ∩ owner permissions`: an operation needs the owner to hold the permission AND the credential to carry a scope covering it (e.g. `admin.users.read`, or a prefix scope such as `admin.users.*`), else `403 forbidden`. Bearer callers are exempt from the `Origin` guard (a bearer cannot be attached by a cross-site page)."
+        "description": "A DevResponse API key (`drk_…`) or a JWT minted at `POST /api/v1/auth/token`, in `Authorization: Bearer …`. Accepted on every administrator operation that lists it (all of them except `DELETE /users/{id}/impersonate`, which is cookie-only; both credential paths are disabled by default: `API_KEYS_ENABLED` / `API_JWT_ENABLED`). The credential's effective authority is `scopes ∩ owner permissions`: an operation needs the owner to hold the permission AND the credential to carry a scope covering it (e.g. `admin.users.read`, or a prefix scope such as `admin.users.*`), else `403 forbidden`. Bearer callers are exempt from the `Origin` guard (a bearer cannot be attached by a cross-site page)."
       }
     },
     "parameters": {
@@ -4629,6 +4629,12 @@
           "Users"
         ],
         "summary": "Stop impersonating",
+        "security": [
+          {
+            "cookieSession": []
+          }
+        ],
+        "description": "Cookie session only. Unlike every other administrator operation this one does not go through the permission guard — the authority to stop derives from the live session BEING an impersonation session — so it always enforces the `Origin`/`Referer` (CSRF) check and always requires a session cookie. A bearer credential cannot authenticate here: it answers `403 untrusted_origin` (no `Origin`) or `401 unauthenticated`. `400 not_impersonating` when the session is real but not an impersonation.",
         "parameters": [
           {
             "name": "id",

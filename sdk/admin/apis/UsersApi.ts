@@ -2,7 +2,7 @@
 /* eslint-disable */
 /**
  * DevResponse Administrator API
- * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
+ * Administrator console API (`/api/administrator`). Authenticate EITHER with the Better Auth **session cookie** (send credentials with the request; every **mutation** then also requires an `Origin` or `Referer` header matching a trusted origin — the CSRF guard — which a browser sets itself and a server-side caller must add) OR with a **bearer** API key / JWT, whose effective authority is the intersection of its scopes and the permissions of its owner and which is exempt from the origin guard. The one exception is `DELETE /users/{id}/impersonate`, which bypasses the permission guard by design and is therefore **cookie-session only** (see that operation). Org admins are scoped to their own organization (out-of-scope resources return 404, not 403). Errors use `{ error, message, requestId }`; every response carries an `x-request-id` header.
  *
  * The version of the OpenAPI document: 1.0.0
  * 
@@ -1478,6 +1478,7 @@ export class UsersApi extends runtime.BaseAPI {
     }
 
     /**
+     * Cookie session only. Unlike every other administrator operation this one does not go through the permission guard — the authority to stop derives from the live session BEING an impersonation session — so it always enforces the `Origin`/`Referer` (CSRF) check and always requires a session cookie. A bearer credential cannot authenticate here: it answers `403 untrusted_origin` (no `Origin`) or `401 unauthenticated`. `400 not_impersonating` when the session is real but not an impersonation.
      * Stop impersonating
      */
     async stopImpersonationRaw(requestParameters: StopImpersonationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<Ok>> {
@@ -1492,14 +1493,6 @@ export class UsersApi extends runtime.BaseAPI {
 
         const headerParameters: runtime.HTTPHeaders = {};
 
-        if (this.configuration && this.configuration.accessToken) {
-            const token = this.configuration.accessToken;
-            const tokenString = await token("bearerAuth", []);
-
-            if (tokenString) {
-                headerParameters["Authorization"] = `Bearer ${tokenString}`;
-            }
-        }
         const response = await this.request({
             path: `/users/{id}/impersonate`.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id']))),
             method: 'DELETE',
@@ -1511,6 +1504,7 @@ export class UsersApi extends runtime.BaseAPI {
     }
 
     /**
+     * Cookie session only. Unlike every other administrator operation this one does not go through the permission guard — the authority to stop derives from the live session BEING an impersonation session — so it always enforces the `Origin`/`Referer` (CSRF) check and always requires a session cookie. A bearer credential cannot authenticate here: it answers `403 untrusted_origin` (no `Origin`) or `401 unauthenticated`. `400 not_impersonating` when the session is real but not an impersonation.
      * Stop impersonating
      */
     async stopImpersonation(requestParameters: StopImpersonationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<Ok> {

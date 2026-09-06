@@ -47,6 +47,16 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SCAN_DIRS = ["src", "scripts"];
+/**
+ * Corpus for the "no `plan §` / `decision §` survives" assertion (review
+ * #147, #177). It is deliberately WIDER than {@link SCAN_DIRS}: test names
+ * and fixtures cite documents too, and a stale citation there is just as
+ * misleading as one in `src/`. Only this file is excluded, because it
+ * necessarily spells the stale forms out — in the doc comment above and in
+ * the scanner's own negative-sample strings.
+ */
+const STALE_CITATION_SCAN_DIRS = ["src", "scripts", "tests"];
+const STALE_CITATION_SELF = "tests/unit/comment-citations-resolve.test.ts";
 const SCAN_EXTENSIONS = new Set([".ts", ".tsx", ".mjs", ".cjs", ".js", ".sql"]);
 const SKIP_FILES = new Set([
   // Generated Kysely types — no hand-written prose.
@@ -216,7 +226,7 @@ function resolveDocName(name: string): string | null {
 // Source side: scanning
 // ---------------------------------------------------------------------------
 
-function listSourceFiles(): string[] {
+function listSourceFiles(dirs: readonly string[] = SCAN_DIRS): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
@@ -232,7 +242,7 @@ function listSourceFiles(): string[] {
       if (!SKIP_FILES.has(rel)) out.push(rel);
     }
   };
-  for (const dir of SCAN_DIRS) walk(join(REPO_ROOT, dir));
+  for (const dir of dirs) walk(join(REPO_ROOT, dir));
   return out.sort();
 }
 
@@ -440,10 +450,17 @@ describe("comment citations resolve (review #130/#131/#147/#165/#172/#174–#177
     expect(formatFailures(failures)).toBe("");
   });
 
-  it("no `plan §` / `decision §` citation survives (review #147, #177)", () => {
-    // Normalised so a line-split `plan\n * §5.2` (which the raw grep in the
-    // sweep missed) is caught too.
-    const offenders = files.filter((rel) =>
+  it("no `plan §` / `decision §` citation survives in src/**, scripts/** or tests/** (review #147, #177)", () => {
+    // Scanned over STALE_CITATION_SCAN_DIRS rather than `files`: the
+    // resolver corpus stops at src/ + scripts/, which let a live
+    // `plan §6.1` sit in a test NAME while this assertion claimed none
+    // existed anywhere. Normalised so a line-split `plan\n * §5.2` (which
+    // the raw grep in the sweep missed) is caught too.
+    const wide = listSourceFiles(STALE_CITATION_SCAN_DIRS).filter(
+      (rel) => rel !== STALE_CITATION_SELF,
+    );
+    expect(wide).toContain("tests/unit/admin-permissions.test.ts");
+    const offenders = wide.filter((rel) =>
       /\b(plan|decision) §/.test(normalise(readFileSync(join(REPO_ROOT, rel), "utf8"))),
     );
     expect(offenders).toEqual([]);

@@ -230,7 +230,7 @@ describe("requireAdminPermission", () => {
 });
 
 describe("ADMIN_PERMISSION_CATALOG", () => {
-  it("has 35 entries with unique keys (plan §6.1 + email + credential + group governance)", async () => {
+  it("has 35 entries with unique keys (docs/admin-manager.md §6.1 + email + credential + group governance)", async () => {
     // Import from the canonical, non-server-only source so the test
     // asserts the source of truth rather than the re-export surface.
     const { ADMIN_PERMISSION_CATALOG } = await import("@/lib/admin/permissions");

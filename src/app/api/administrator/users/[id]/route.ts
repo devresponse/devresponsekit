@@ -29,9 +29,11 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * GET /api/administrator/users/[id]
  *
- * Fetches a single application user by id: the list endpoint's columns
- * plus the deactivation bookkeeping (`status_reason`, `deactivated_*`),
- * and — like the list endpoint — no join against the Better Auth `user`
+ * Fetches a single application user by id: the list endpoint's
+ * application columns (minus the `organization_names` aggregate, which is
+ * computed only for the list view) plus the deactivation bookkeeping
+ * (`status_reason`, `deactivated_*`), and — like the list endpoint — no
+ * join against the Better Auth `user`
  * table. The auth-side `banned` / `role` flags are written by the
  * dedicated `/ban` and `/role` endpoints and never read back here
  * (docs/admin-manager.md §8.1).

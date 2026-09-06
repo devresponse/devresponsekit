@@ -151,6 +151,23 @@ paths = [
   '''(^|/)docs/uat/uat-stories\.csv$''',
 ]
 
+# A core migration FILENAME is a source path, not a credential.
+# `0004-oauth-client-secret-rotated-at.sql` names the `secret_rotated_at`
+# COLUMN (review #43), and the bundled generic-api-key rule pairs that
+# "secret" keyword with the ADJACENT line's high-entropy filename — the same
+# adjacent-line false positive as the generated UAT CSV above. It fires
+# wherever the ledger is enumerated in order (the readiness gate's
+# `REQUIRED_CORE_MIGRATIONS`, the runner's pin list, deployment docs).
+# The filename cannot be renamed away: it is recorded in the
+# `app_schema_migrations` ledger of every environment that has applied it.
+# Fenced to the bundled rule and to the `NNNN-…secret….sql` filename shape,
+# so a real credential in those same files still fails the gate.
+[[allowlists]]
+description = "Core migration filenames containing the word secret (a column name, not a credential)"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = ['''\d{4}-[a-z0-9-]*secret[a-z0-9-]*\.sql''']
+
 [[allowlists]]
 description = "Documented CI-only / test-only dummy literals (self-describing, not credential shapes)"
 regexes = [

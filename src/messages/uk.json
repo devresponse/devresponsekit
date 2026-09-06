@@ -24,7 +24,9 @@
       "confirm": "Підтвердити",
       "cancel": "Скасувати",
       "close": "Закрити"
-    }
+    },
+    "switchToLightTheme": "Перейти до світлої теми",
+    "switchToDarkTheme": "Перейти до темної теми"
   },
   "auth": {
     "verifyEmailTitle": "Підтвердьте свою електронну пошту",
@@ -197,6 +199,14 @@
     "footer": {
       "githubLink": "GitHub",
       "rights": "Безкоштовно та з відкритим кодом за ліцензією MIT."
+    },
+    "docs": {
+      "title": "Документація",
+      "body": "Публічний покажчик документації продукту. Повні посібники доступні в робочій області документації після входу."
+    },
+    "about": {
+      "title": "Про нас",
+      "body": "{brand} — це оболонка корпоративного застосунку. Огляд продукту дивіться на головній сторінці."
     }
   },
   "shell": {
@@ -206,7 +216,20 @@
       "workspaceNavigation": "Робоча область",
       "workspaceShell": "Оболонка робочої області",
       "skipLinks": "Посилання для пропуску",
-      "toggleSidebar": "Перемкнути бічну панель"
+      "toggleSidebar": "Перемкнути бічну панель",
+      "publicSite": "Публічний сайт",
+      "sidebar": "Бічна панель",
+      "sidebarDescription": "Показує мобільну бічну панель.",
+      "breadcrumb": "Навігаційний ланцюжок",
+      "loadingNavigation": "Завантаження навігації",
+      "accountShell": "Робоча область облікового запису",
+      "accountNavigation": "Навігація облікового запису",
+      "administratorShell": "Робоча область адміністратора",
+      "administratorNavigation": "Навігація адміністратора",
+      "documentationShell": "Робоча область документації",
+      "documentationNavigation": "Навігація документації",
+      "helpShell": "Робоча область довідки",
+      "helpNavigation": "Навігація довідки"
     },
     "applications": "Додатки",
     "dashboard": "Панель",
@@ -548,7 +571,8 @@
         "successToast": "{action} застосовано до {succeeded} користувача(ів).",
         "partialFailureToast": "{action} застосовано до {succeeded}/{attempted} користувача(ів); {failed} не вдалося.",
         "errorToast": "Масова дія не вдалася.",
-        "rateLimitedToast": "Забагато масових запитів. Спробуйте трохи пізніше."
+        "rateLimitedToast": "Забагато масових запитів. Спробуйте трохи пізніше.",
+        "tooManyToast": "Виберіть щонайбільше {max} користувачів для масової дії."
       },
       "impersonation": {
         "confirmTitle": "Уособити {email}?",
@@ -1375,7 +1399,10 @@
       "expiresAt": "Діє до {value}",
       "ipAddress": "IP",
       "userAgent": "Пристрій",
-      "revoke": "Відкликати"
+      "revoke": "Відкликати",
+      "currentSession": "Цей пристрій",
+      "currentSessionHint": "Скористайтеся «Вийти», щоб завершити цей сеанс.",
+      "revokeSession": "Відкликати сеанс {session}"
     },
     "errors": {
       "nameRequired": "Ім'я обов'язкове.",
@@ -1403,7 +1430,9 @@
       "expires": "Спливає {value}",
       "actions": {
         "rotate": "Ротувати",
-        "revoke": "Відкликати"
+        "revoke": "Відкликати",
+        "rotateNamed": "Оновити {name}",
+        "revokeNamed": "Відкликати {name}"
       },
       "rotateError": "Не вдалося ротувати ключ.",
       "revokeError": "Не вдалося відкликати ключ.",

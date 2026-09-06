@@ -22,8 +22,11 @@ export async function DocsBreadcrumbs({
   space?: DocSpace;
 }) {
   const t = await getTranslations({ locale, namespace: space });
+  // The landmark name is announced text, so it is localized like the rest
+  // of the shell rather than hardcoded English (review #106).
+  const tRegions = await getTranslations({ locale, namespace: "shell.regions" });
   return (
-    <nav aria-label="Breadcrumb" className="text-muted-foreground mb-4 text-sm">
+    <nav aria-label={tRegions("breadcrumb")} className="text-muted-foreground mb-4 text-sm">
       <ol className="flex flex-wrap items-center gap-1.5">
         <li>
           <LocaleLink

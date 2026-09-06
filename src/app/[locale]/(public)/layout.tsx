@@ -5,7 +5,6 @@ import { ShellContainer } from "@/components/app-shell/shell-container";
 import { ShellSkipLinks } from "@/components/app-shell/shell-skip-links";
 import { TopShellBar } from "@/components/app-shell/top-shell-bar";
 import { BrandLogo } from "@/components/brand/brand-logo";
-import { getBrand } from "@/config/brand";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import type { ReactNode } from "react";
 
@@ -25,6 +24,10 @@ import type { ReactNode } from "react";
  * Authentication is not required to render any descendant; the proxy
  * (`src/proxy.ts`) leaves public paths untouched and only the secure
  * group enforces a session.
+ *
+ * Landmarks (review #104): `ShellContainer` renders the ONE `<main>` of
+ * the document, so every `(public)` page root is a plain element — a page
+ * that opened with its own `<main>` produced nested main landmarks.
  */
 export default async function PublicLayout({
   children,
@@ -36,18 +39,22 @@ export default async function PublicLayout({
   const { locale: rawLocale } = await params;
   const safeLocale: SupportedLocale = isSupportedLocale(rawLocale) ? rawLocale : "en";
   const tCommon = await getTranslations({ locale: safeLocale, namespace: "common" });
-  const brand = getBrand();
+  // Localized landmark labels (review #106) — the shell components are
+  // Server Components and cannot call `useTranslations` themselves.
+  const tRegions = await getTranslations({ locale: safeLocale, namespace: "shell.regions" });
 
   return (
     <div className="min-h-screen">
-      <ShellSkipLinks />
+      {/* The public shell has no left region, so `#navigation` never mounts
+          and the skip link would be dead (review #104). */}
+      <ShellSkipLinks hasNavigation={false} />
       <ShellContainer
-        ariaLabel={`${brand.shortName} public site`}
+        ariaLabel={tRegions("publicSite")}
         leftVisible={false}
         rightVisible={false}
         footerVisible={false}
         branding={
-          <TopShellBar>
+          <TopShellBar ariaLabel={tRegions("banner")}>
             <LocaleLink href="/" locale={safeLocale} className="text-sm font-semibold">
               <BrandLogo />
             </LocaleLink>

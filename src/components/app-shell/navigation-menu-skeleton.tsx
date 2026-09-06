@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
@@ -5,7 +8,11 @@ import { Skeleton } from "@/components/ui/skeleton";
  *
  * Heights approximate the resolved menu so the grid does not shift when
  * data arrives. `aria-busy` ensures screen readers announce the loading
- * state instead of an empty list.
+ * state instead of an empty list, and the status region's accessible name
+ * comes from the message catalog rather than hardcoded English — this is
+ * announced text in a fully localized shell (review #106). Both call sites
+ * (`SecureSidebar`, `ApplicationSwitcherSheet`) are already Client
+ * Components, so the boundary costs nothing.
  */
 
 export interface NavigationMenuSkeletonProps {
@@ -14,8 +21,14 @@ export interface NavigationMenuSkeletonProps {
 }
 
 export function NavigationMenuSkeleton({ rows = 5, compact = false }: NavigationMenuSkeletonProps) {
+  const t = useTranslations("shell.regions");
   return (
-    <div className="space-y-2 p-2" aria-label="Loading navigation" aria-busy="true" role="status">
+    <div
+      className="space-y-2 p-2"
+      aria-label={t("loadingNavigation")}
+      aria-busy="true"
+      role="status"
+    >
       {Array.from({ length: rows }).map((_, index) => (
         <div key={index} className="flex items-center gap-3 rounded-md p-2">
           <Skeleton className="h-4 w-4 rounded-sm" />

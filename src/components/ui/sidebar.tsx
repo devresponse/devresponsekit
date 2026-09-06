@@ -20,6 +20,7 @@ import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeft } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -200,6 +201,11 @@ SidebarStatic.displayName = "SidebarStatic";
 /**
  * Shared mobile branch: the sidebar rendered as a Sheet drawer. Used by
  * both `Sidebar` and `FlexSidebar`; reads open state from the provider.
+ *
+ * The Radix dialog REQUIRES a title and a description; both are visually
+ * hidden, but they are the drawer's accessible name and description, so
+ * they come from the message catalog rather than the hardcoded English the
+ * upstream shadcn source ships with (review #106).
  */
 function SidebarMobileSheet({
   side = "left",
@@ -207,6 +213,7 @@ function SidebarMobileSheet({
   ...props
 }: React.ComponentProps<"div"> & { side?: "left" | "right" }) {
   const { openMobile, setOpenMobile } = useSidebar();
+  const t = useTranslations("shell.regions");
 
   return (
     <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
@@ -222,8 +229,8 @@ function SidebarMobileSheet({
         side={side}
       >
         <SheetHeader className="sr-only">
-          <SheetTitle>Sidebar</SheetTitle>
-          <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+          <SheetTitle>{t("sidebar")}</SheetTitle>
+          <SheetDescription>{t("sidebarDescription")}</SheetDescription>
         </SheetHeader>
         <div className="flex h-full w-full flex-col">{children}</div>
       </SheetContent>
@@ -318,8 +325,9 @@ Sidebar.displayName = "Sidebar";
 const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
   React.ComponentProps<typeof Button> & { srLabel?: string }
->(({ className, onClick, srLabel = "Toggle Sidebar", ...props }, ref) => {
+>(({ className, onClick, srLabel, ...props }, ref) => {
   const { toggleSidebar } = useSidebar();
+  const t = useTranslations("shell.regions");
 
   return (
     <Button
@@ -335,9 +343,10 @@ const SidebarTrigger = React.forwardRef<
       {...props}
     >
       <PanelLeft />
-      {/* Localized by the caller (P2-15); English default keeps unlocalized
-          callers working. */}
-      <span className="sr-only">{srLabel}</span>
+      {/* The caller may override the label (P2-15); the DEFAULT is localized
+          too, so an unlocalized caller no longer leaks English into a
+          non-en shell (review #106). */}
+      <span className="sr-only">{srLabel ?? t("toggleSidebar")}</span>
     </Button>
   );
 });
@@ -346,15 +355,17 @@ SidebarTrigger.displayName = "SidebarTrigger";
 const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(
   ({ className, ...props }, ref) => {
     const { toggleSidebar } = useSidebar();
+    // Localized accessible name + tooltip (review #106).
+    const t = useTranslations("shell.regions");
 
     return (
       <button
         ref={ref}
         data-sidebar="rail"
-        aria-label="Toggle Sidebar"
+        aria-label={t("toggleSidebar")}
         tabIndex={-1}
         onClick={toggleSidebar}
-        title="Toggle Sidebar"
+        title={t("toggleSidebar")}
         className={cn(
           "hover:after:bg-sidebar-border absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] sm:flex",
           "[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize",

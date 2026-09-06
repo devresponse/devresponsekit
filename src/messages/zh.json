@@ -24,7 +24,9 @@
       "confirm": "确认",
       "cancel": "取消",
       "close": "关闭"
-    }
+    },
+    "switchToLightTheme": "切换到浅色主题",
+    "switchToDarkTheme": "切换到深色主题"
   },
   "auth": {
     "verifyEmailTitle": "验证您的电子邮件",
@@ -197,6 +199,14 @@
     "footer": {
       "githubLink": "GitHub",
       "rights": "基于 MIT 许可证免费开源。"
+    },
+    "docs": {
+      "title": "文档",
+      "body": "产品文档的公开索引。登录后可在文档工作区查看完整指南。"
+    },
+    "about": {
+      "title": "关于",
+      "body": "{brand} 是一个企业级应用外壳。产品概览请见首页。"
     }
   },
   "shell": {
@@ -206,7 +216,20 @@
       "workspaceNavigation": "工作区",
       "workspaceShell": "工作区框架",
       "skipLinks": "跳转链接",
-      "toggleSidebar": "切换侧边栏"
+      "toggleSidebar": "切换侧边栏",
+      "publicSite": "公开站点",
+      "sidebar": "侧边栏",
+      "sidebarDescription": "显示移动端侧边栏。",
+      "breadcrumb": "面包屑导航",
+      "loadingNavigation": "正在加载导航",
+      "accountShell": "账户工作区",
+      "accountNavigation": "账户导航",
+      "administratorShell": "管理员工作区",
+      "administratorNavigation": "管理员导航",
+      "documentationShell": "文档工作区",
+      "documentationNavigation": "文档导航",
+      "helpShell": "帮助工作区",
+      "helpNavigation": "帮助导航"
     },
     "applications": "应用",
     "dashboard": "仪表板",
@@ -488,7 +511,8 @@
         "successToast": "已对 {succeeded} 名用户执行“{action}”。",
         "partialFailureToast": "已对 {succeeded}/{attempted} 名用户执行“{action}”；{failed} 个失败。",
         "errorToast": "批量操作失败。",
-        "rateLimitedToast": "批量请求过多。请稍后重试。"
+        "rateLimitedToast": "批量请求过多。请稍后重试。",
+        "tooManyToast": "批量操作最多可选择 {max} 个用户。"
       },
       "impersonation": {
         "confirmTitle": "模拟登录 {email}？",
@@ -1375,7 +1399,10 @@
       "expiresAt": "{value} 过期",
       "ipAddress": "IP",
       "userAgent": "设备",
-      "revoke": "吊销"
+      "revoke": "吊销",
+      "currentSession": "当前设备",
+      "currentSessionHint": "请使用“退出登录”结束此会话。",
+      "revokeSession": "撤销会话 {session}"
     },
     "errors": {
       "nameRequired": "姓名为必填项。",
@@ -1403,7 +1430,9 @@
       "expires": "{value} 过期",
       "actions": {
         "rotate": "轮换",
-        "revoke": "吊销"
+        "revoke": "吊销",
+        "rotateNamed": "轮换 {name}",
+        "revokeNamed": "撤销 {name}"
       },
       "rotateError": "无法轮换该密钥。",
       "revokeError": "无法吊销该密钥。",

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
@@ -57,8 +58,6 @@ export const dynamic = "force-dynamic";
  *     addition to the per-row events so the audit explorer can show
  *     "X bulk-banned 247 users at Y" without scanning per-row events.
  */
-const MAX_BULK_IDS = 500;
-
 const ALLOWED_STATUS = new Set([
   "active",
   "pending_approval",

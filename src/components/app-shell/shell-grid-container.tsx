@@ -19,10 +19,17 @@ import type { ShellGridContainerProps } from "./shell-types";
  *   - Bounded viewport. The grid uses `min-height: 0` so internal
  *     regions own their scrolling.
  *   - Long content cannot resize columns or rows.
+ *
+ * Landmark ids (review #105): the ROOT shell owns `#main` / `#navigation`,
+ * the two `ShellSkipLinks` targets. A nested shell renders inside the root
+ * `<main>`, so it derives depth-suffixed ids (`main-1`, `navigation-1`)
+ * instead of repeating them — duplicate ids made the skip links jump to
+ * whichever element the browser found first.
  */
 export function ShellGridContainer(props: ShellGridContainerProps) {
   const {
     variant,
+    depth,
     layout = "header-first",
     header,
     left,
@@ -38,13 +45,19 @@ export function ShellGridContainer(props: ShellGridContainerProps) {
     rightVisible = true,
     footerVisible = true,
     ariaLabel,
-    mainId = "main",
+    mainId,
+    leftId,
+    leftAriaLabel,
   } = props;
 
   // Resolve final visibility according to spec §17.5.
   const hasLeft = Boolean(left) && leftMode !== "hidden" && leftVisible;
   const hasRight = Boolean(right) && rightMode !== "hidden" && rightVisible;
   const hasFooter = Boolean(footer) && footerMode !== "hidden" && footerVisible;
+
+  const isNested = variant === "nested";
+  const resolvedMainId = mainId ?? (isNested ? `main-${depth}` : "main");
+  const resolvedLeftId = leftId ?? (isNested ? `navigation-${depth}` : "navigation");
 
   return (
     <div
@@ -56,8 +69,17 @@ export function ShellGridContainer(props: ShellGridContainerProps) {
       data-footer-hidden={(!hasFooter).toString()}
     >
       {header ? <ShellHeader>{header}</ShellHeader> : null}
-      {hasLeft ? <ShellLeft>{left}</ShellLeft> : null}
-      <ShellMain id={mainId} className={mainClassName} ariaLabel={ariaLabel}>
+      {hasLeft ? (
+        <ShellLeft id={resolvedLeftId} ariaLabel={leftAriaLabel}>
+          {left}
+        </ShellLeft>
+      ) : null}
+      <ShellMain
+        id={resolvedMainId}
+        className={mainClassName}
+        ariaLabel={ariaLabel}
+        nested={isNested}
+      >
         {children}
       </ShellMain>
       {hasRight ? <ShellRight>{right}</ShellRight> : null}

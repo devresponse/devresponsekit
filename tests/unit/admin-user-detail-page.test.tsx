@@ -128,6 +128,59 @@ describe("administrator/users/[userId] page — tenant scope (ADR-0001, review #
     expect(canAccessUser).not.toHaveBeenCalled();
   });
 
+  /**
+   * Review #212 — `deactivated_by` stores the actor's BETTER AUTH id, which
+   * the Overview tab rendered verbatim ("Deactivated by ba-admin-7"). The
+   * RSC now resolves it to a display name, falling back to the raw id.
+   */
+  describe("deactivated_by resolution (review #212)", () => {
+    /** Depth-first search for the `user` prop handed to UserDetailTabs. */
+    function findUserProp(node: unknown): Record<string, unknown> | undefined {
+      if (!node || typeof node !== "object") return undefined;
+      const el = node as { props?: Record<string, unknown> };
+      const user = el.props?.user;
+      if (user && typeof user === "object") return user as Record<string, unknown>;
+      const children = el.props?.children;
+      for (const child of Array.isArray(children) ? children : [children]) {
+        const found = findUserProp(child);
+        if (found) return found;
+      }
+      return undefined;
+    }
+
+    beforeEach(() => canAccessUser.mockResolvedValue(true));
+
+    it("resolves the actor id to a display name", async () => {
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-admin-7" })
+        .mockResolvedValueOnce({ display_name: "Grace Hopper", primary_email: "grace@x.com" });
+
+      const user = findUserProp(await Page(params(USER_ID)))!;
+      expect(user.deactivated_by).toBe("ba-admin-7");
+      expect(user.deactivated_by_label).toBe("Grace Hopper");
+    });
+
+    it("falls back to the actor's email, then to the raw id", async () => {
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-admin-7" })
+        .mockResolvedValueOnce({ display_name: null, primary_email: "grace@x.com" });
+      expect(findUserProp(await Page(params(USER_ID)))!.deactivated_by_label).toBe("grace@x.com");
+
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-ghost" })
+        .mockResolvedValueOnce(undefined);
+      expect(findUserProp(await Page(params(USER_ID)))!.deactivated_by_label).toBe("ba-ghost");
+    });
+
+    it("does not run the lookup when the user was never deactivated", async () => {
+      executeTakeFirst.mockReset();
+      executeTakeFirst.mockResolvedValue(USER_ROW); // deactivated_by is null
+      const user = findUserProp(await Page(params(USER_ID)))!;
+      expect(user.deactivated_by_label).toBeNull();
+      expect(executeTakeFirst).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it.each(["denied", "unauthenticated"] as const)(
     "calls notFound() when the permission guard returns %s, before any read",
     async (verdict) => {

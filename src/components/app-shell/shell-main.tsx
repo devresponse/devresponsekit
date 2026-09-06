@@ -18,23 +18,34 @@ import { cn } from "@/lib/utils";
  * scrollable region a keyboard user cannot reach or scroll — an axe
  * `scrollable-region-focusable` (WCAG 2.1.1) violation. 0 also still serves
  * as the skip-link target. Pages with focusable content are unaffected.
+ *
+ * `nested` picks the LANDMARK (review #104/#105). A document has exactly
+ * one `main`: a nested `ApplicationShell` (Account, Administrator, Docs,
+ * Help, Workspace) lives inside the root shell's `<main>`, so it renders a
+ * labelled `<section>` — a `region` landmark, navigable by name, without
+ * duplicating `main` or its `id`.
  */
 export function ShellMain({
   children,
   className,
   id = "main",
   ariaLabel,
+  nested = false,
 }: {
   children: ReactNode;
   className?: string;
   id?: string;
-  /** Accessible name for the `<main>` landmark — helps distinguish the
-   *  root vs a nested shell's main region for assistive tech. */
+  /** Accessible name for the landmark — helps distinguish the root vs a
+   *  nested shell's main region for assistive tech. Required for a nested
+   *  shell: an unlabelled `<section>` is not a landmark at all. */
   ariaLabel?: string;
+  /** Render a labelled `<section>` instead of `<main>` (nested shells). */
+  nested?: boolean;
 }) {
+  const Tag = nested ? "section" : "main";
   return (
-    <main id={id} className={cn("sh-main", className)} tabIndex={0} aria-label={ariaLabel}>
+    <Tag id={id} className={cn("sh-main", className)} tabIndex={0} aria-label={ariaLabel}>
       {children}
-    </main>
+    </Tag>
   );
 }

@@ -10,6 +10,12 @@ import { cn } from "@/lib/utils";
  * parent (typically `ShellGridContainer`); when hidden the wrapper is
  * not rendered at all.
  *
+ * `id` and `ariaLabel` are both overridable because a NESTED shell renders
+ * a second aside INSIDE the root one: reusing `id="navigation"` there put
+ * two elements with the same id in one document and broke the skip link
+ * (review #105). `ShellGridContainer` derives a depth-suffixed id for
+ * nested shells, and callers pass a localized label (review #106).
+ *
  * Layout: width is driven by the `--sh-left-w` CSS variable on
  * `.sh-grid` and shrinks for nested shells per spec §17.2.
  */

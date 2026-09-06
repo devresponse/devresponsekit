@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { getTranslations } from "next-intl/server";
 import type { ReactNode } from "react";
 import { ApplicationShell } from "@/components/app-shell/application-shell";
 import { SidebarProvider } from "@/components/ui/flexsidebar";
@@ -43,6 +44,8 @@ export default async function HelpLayout({
 
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get(SIDEBAR_COOKIE)?.value !== "false";
+  // Localized landmark names (review #106) for the nested shell regions.
+  const tRegions = await getTranslations({ locale, namespace: "shell.regions" });
 
   return (
     <SidebarProvider
@@ -54,7 +57,8 @@ export default async function HelpLayout({
       <ApplicationShell
         layout="sidebar-first"
         className="w-full"
-        ariaLabel="Help"
+        ariaLabel={tRegions("helpShell")}
+        leftAriaLabel={tRegions("helpNavigation")}
         header={<DocsTopHeader space="help" />}
         left={<DocsSidebar locale={locale} groups={groups} space="help" />}
       >

@@ -203,11 +203,16 @@ export function AccountApiKeysPanel({ grantableScopes }: { grantableScopes: stri
                   </p>
                 </div>
                 {key.status === "active" ? (
+                  // Per-row buttons carry the KEY NAME in their accessible
+                  // name; the visible label stays the short verb. Without
+                  // this every row announced the same "Rotate"/"Revoke"
+                  // (review #107).
                   <div className="flex shrink-0 gap-2">
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={busy}
+                      aria-label={t("actions.rotateNamed", { name: key.name })}
                       onClick={() => onRotate(key)}
                     >
                       {t("actions.rotate")}
@@ -216,6 +221,7 @@ export function AccountApiKeysPanel({ grantableScopes }: { grantableScopes: stri
                       size="sm"
                       variant="outline"
                       disabled={busy}
+                      aria-label={t("actions.revokeNamed", { name: key.name })}
                       onClick={() => onRevoke(key)}
                     >
                       {t("actions.revoke")}

@@ -31,7 +31,7 @@ function renderSidebar(ui: React.ReactElement) {
 
 describe("SecureSidebar", () => {
   it("renders an empty list and skips the fetch when permissions are empty", async () => {
-    renderSidebar(<SecureSidebar locale="en" permissions={[]} />);
+    renderSidebar(<SecureSidebar locale="en" hasPermissions={false} />);
     // No skeleton, no error, no fetch.
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("status")).toBeNull();
@@ -54,7 +54,7 @@ describe("SecureSidebar", () => {
       ),
     );
 
-    renderSidebar(<SecureSidebar locale="en" permissions={["shell.view"]} />);
+    renderSidebar(<SecureSidebar locale="en" hasPermissions />);
     expect(await screen.findByRole("link", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Workspace" })).toBeInTheDocument();
   });
@@ -76,7 +76,7 @@ describe("SecureSidebar", () => {
       ),
     );
 
-    renderSidebar(<SecureSidebar locale="en" permissions={["shell.view"]} />);
+    renderSidebar(<SecureSidebar locale="en" hasPermissions />);
     const dashboard = await screen.findByRole("link", { name: "Dashboard" });
     expect(dashboard.getAttribute("data-active")).toBe("true");
     expect(screen.getByRole("link", { name: "Workspace" }).getAttribute("data-active")).toBe(
@@ -112,7 +112,7 @@ describe("SecureSidebar", () => {
       ),
     );
 
-    renderSidebar(<SecureSidebar locale="en" permissions={["shell.view"]} />);
+    renderSidebar(<SecureSidebar locale="en" hasPermissions />);
 
     // Known icon name renders an svg inside the link; it is decorative
     // (aria-hidden) so the accessible name stays the text label.
@@ -144,7 +144,7 @@ describe("SecureSidebar", () => {
       ),
     );
 
-    const { container } = renderSidebar(<SecureSidebar locale="en" permissions={["shell.view"]} />);
+    const { container } = renderSidebar(<SecureSidebar locale="en" hasPermissions />);
     await screen.findByRole("link", { name: "Dashboard" });
     const offenders = [...container.querySelectorAll("[class]")].filter((el) => {
       const cls = el.getAttribute("class") ?? "";
@@ -155,7 +155,7 @@ describe("SecureSidebar", () => {
 
   it("renders a translated unauthorized message + retry on 403", async () => {
     fetchMock.mockResolvedValueOnce(new Response("forbidden", { status: 403 }));
-    renderSidebar(<SecureSidebar locale="en" permissions={["shell.view"]} />);
+    renderSidebar(<SecureSidebar locale="en" hasPermissions />);
     expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
@@ -173,7 +173,7 @@ describe("SecureSidebar", () => {
       ),
     );
 
-    renderSidebar(<SecureSidebar locale="en" permissions={["shell.view"]} />);
+    renderSidebar(<SecureSidebar locale="en" hasPermissions />);
     const retry = await screen.findByRole("button", { name: /retry/i });
     await userEvent.setup().click(retry);
     expect(await screen.findByRole("link", { name: "Dashboard" })).toBeInTheDocument();

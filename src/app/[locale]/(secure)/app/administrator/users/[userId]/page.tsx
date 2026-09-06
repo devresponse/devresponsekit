@@ -72,6 +72,18 @@ export default async function AdministratorUserDetailPage({
 
   const t = await getTranslations({ locale, namespace: "administrator.users" });
 
+  // `deactivated_by` stores the ACTOR'S Better Auth user id (see
+  // `user-actions.server.ts`), which is meaningless to a human reader
+  // (review #212). Resolve it to a display name here — a single indexed
+  // lookup, only when the field is set — and fall back to the raw id when
+  // the actor has no app_users row (a platform/seed actor, or a record
+  // deleted since). The lookup is deliberately NOT org-scoped: the caller
+  // is already authorized to read this record, and withholding the name of
+  // whoever deactivated it would leave the id on screen anyway.
+  const deactivatedByLabel = user.deactivated_by
+    ? await resolveActorLabel(user.deactivated_by)
+    : null;
+
   const canAssignRoles = guard.access.permissions.includes("admin.roles.assign");
   const canManageGroups = guard.access.permissions.includes("admin.groups.assign");
   const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
@@ -94,6 +106,7 @@ export default async function AdministratorUserDetailPage({
     updated_at: toIso(user.updated_at),
     deactivated_at: toIso(user.deactivated_at),
     deactivated_by: user.deactivated_by,
+    deactivated_by_label: deactivatedByLabel,
     deactivated_reason: user.deactivated_reason,
   };
 
@@ -125,6 +138,20 @@ export default async function AdministratorUserDetailPage({
       />
     </section>
   );
+}
+
+/**
+ * Best-effort display name for a Better Auth user id (review #212).
+ * Returns the display name, else the primary email, else the id itself so
+ * the UI never renders an empty "Deactivated by".
+ */
+async function resolveActorLabel(betterAuthUserId: string): Promise<string> {
+  const actor = await db
+    .selectFrom("app_users")
+    .select(["display_name", "primary_email"])
+    .where("better_auth_user_id", "=", betterAuthUserId)
+    .executeTakeFirst();
+  return actor?.display_name ?? actor?.primary_email ?? betterAuthUserId;
 }
 
 function toIso(value: unknown): string | null {

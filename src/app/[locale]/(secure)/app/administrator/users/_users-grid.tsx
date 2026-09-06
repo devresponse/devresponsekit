@@ -6,6 +6,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
 import { DataGrid } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import type { BulkActionDescriptor } from "../_components/grid/data-grid-toolbar";
@@ -127,11 +128,24 @@ export function AdministratorUsersGrid({
     async (action: BulkActionKey, options: { reason?: string } = {}) => {
       if (busy) return;
       // Nothing to send in page mode with an empty selection (the server
-      // rejects an empty ids array). The 500-id cap (MAX_BULK_IDS) is NOT
-      // mirrored here — the bulk route enforces it and answers 400, which the
-      // generic error toast below reports (review #34).
+      // rejects an empty ids array).
       const explicitIds = Array.from(selection.selectedIds);
       if (selection.mode === "page" && explicitIds.length === 0) return;
+
+      // Mirror the server cap so the UI cannot submit a batch the server
+      // will reject (review #34). `MAX_BULK_IDS` is imported from the same
+      // module the route's Zod schema uses, so the two cannot drift, and
+      // the operator gets an actionable message naming the limit instead of
+      // the generic "Bulk action failed." a 400 would produce. Only page
+      // mode enumerates ids; "select all matching" sends `ids: "*"` and the
+      // server applies the cap while expanding the filter set.
+      if (selection.mode === "page" && explicitIds.length > MAX_BULK_IDS) {
+        await dialogs.notify({
+          description: tBulk("tooManyToast", { max: MAX_BULK_IDS }),
+          variant: "destructive",
+        });
+        return;
+      }
 
       setBusy(true);
       try {

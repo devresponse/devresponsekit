@@ -12,6 +12,17 @@ import { authClient } from "@/lib/auth-client";
  * them individually or all-but-current. The client is bound to the
  * current session, so every call is inherently self-scoped — there is no
  * user id and no way to reach another account's sessions.
+ *
+ * The CURRENT session is identified by fetching `getSession()` alongside
+ * `listSessions()` and matching on the session token (review #239). Before
+ * that, "Revoke" on the caller's own row destroyed the live session: the
+ * follow-up `listSessions()` came back 401 and the panel showed a generic
+ * "could not load sessions" error, with the rest of the app silently
+ * signed out until the next navigation. That row is now labelled and its
+ * Revoke button DISABLED rather than merely confirmed — the deliberate way
+ * to end your own session is Sign out in the brand bar, which also clears
+ * client state and lands on the logged-out page; a confirm dialog would
+ * still leave the user staring at a broken panel afterwards.
  */
 interface ClientSession {
   id?: string;
@@ -26,6 +37,7 @@ export function AccountSessionsPanel() {
   const locale = useLocale();
 
   const [sessions, setSessions] = useState<ClientSession[] | null>(null);
+  const [currentToken, setCurrentToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [reloadToken, setReloadToken] = useState(0);
@@ -43,18 +55,28 @@ export function AccountSessionsPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    authClient
-      .listSessions()
-      .then((res) => {
+    // `getSession()` rides along so the caller's own row can be marked.
+    // Its failure is NOT fatal: an unmarked list is still usable, so it is
+    // resolved to `null` rather than rejecting the pair (review #239).
+    Promise.all([
+      authClient.listSessions(),
+      authClient
+        .getSession()
+        .then((res) => (res as { data?: { session?: { token?: string } } }).data?.session?.token)
+        .catch(() => undefined),
+    ])
+      .then(([list, token]) => {
         if (cancelled) return;
-        const data = (res as { data?: ClientSession[] }).data ?? [];
+        const data = (list as { data?: ClientSession[] }).data ?? [];
         setSessions(data);
+        setCurrentToken(token ?? null);
         setBusy(false);
       })
       .catch(() => {
         if (cancelled) return;
         setError(t("errors.sessionsLoadFailed"));
         setSessions([]);
+        setCurrentToken(null);
         setBusy(false);
       });
     return () => {
@@ -63,7 +85,9 @@ export function AccountSessionsPanel() {
   }, [t, reloadToken]);
 
   const revokeOne = async (token: string | undefined) => {
-    if (!token) return;
+    // Guard in the handler too, not only on the disabled button: the
+    // current session must never be revoked from here (review #239).
+    if (!token || token === currentToken) return;
     setBusy(true);
     setError(null);
     try {
@@ -121,11 +145,22 @@ export function AccountSessionsPanel() {
         <ul className="divide-y rounded-md border text-sm">
           {sessions.map((s, idx) => {
             const token = s.token ?? s.id;
+            const isCurrent = token !== undefined && token === currentToken;
+            // Every row's Revoke button used to expose the same accessible
+            // name, so a screen-reader user heard "Revoke" N times with no
+            // way to tell the rows apart (review #107). Name each button by
+            // whatever identifies its row: IP first, else the expiry.
+            const rowLabel = s.ipAddress ?? formatExpires(s.expiresAt);
             return (
               <li key={token ?? idx} className="flex items-start justify-between gap-3 p-3">
                 <div className="min-w-0 flex-1 space-y-1">
                   <p className="text-muted-foreground">
                     {t("security.expiresAt", { value: formatExpires(s.expiresAt) })}
+                    {isCurrent ? (
+                      <span className="text-foreground ml-2 rounded-md border px-1.5 py-0.5 text-xs">
+                        {t("security.currentSession")}
+                      </span>
+                    ) : null}
                   </p>
                   {s.ipAddress ? (
                     <p className="text-muted-foreground text-xs break-all">
@@ -138,15 +173,22 @@ export function AccountSessionsPanel() {
                     </p>
                   ) : null}
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  onClick={() => revokeOne(token)}
-                  disabled={busy || !token}
-                >
-                  {t("security.revoke")}
-                </Button>
+                {isCurrent ? (
+                  <p className="text-muted-foreground shrink-0 text-xs">
+                    {t("security.currentSessionHint")}
+                  </p>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    aria-label={t("security.revokeSession", { session: rowLabel })}
+                    onClick={() => revokeOne(token)}
+                    disabled={busy || !token}
+                  >
+                    {t("security.revoke")}
+                  </Button>
+                )}
               </li>
             );
           })}

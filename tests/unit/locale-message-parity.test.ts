@@ -33,6 +33,77 @@ function leafPaths(value: unknown, prefix = ""): string[] {
   return [prefix];
 }
 
+/** key-path -> leaf value, for the whole tree. */
+function leafValues(value: unknown, prefix = "", out: Record<string, unknown> = {}) {
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => leafValues(v, `${prefix}[${i}]`, out));
+    return out;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) leafValues(v, prefix ? `${prefix}.${k}` : k, out);
+    return out;
+  }
+  out[prefix] = value;
+  return out;
+}
+
+/**
+ * Every ICU ARGUMENT NAME referenced by a message, sorted.
+ *
+ * Key-path parity alone does not catch a translation that dropped a
+ * placeholder: `"Revoke session {session}"` translated as `"Révoquer la
+ * session"` keeps the key, passes the parity check above, and silently
+ * renders an accessible name with no row identity in it (review #106).
+ *
+ * Hand-rolled rather than pulled from `@formatjs/icu-messageformat-parser`
+ * (a transitive of next-intl, not a declared dependency): a full ICU parse
+ * is not needed, only the argument names. The one subtlety is that a
+ * plural/select OPTION body is itself a message — `{count, plural, =0 {No
+ * members} other {# members}}` must yield `count`, not `No` — so option
+ * bodies are recursed into as messages, never read as arguments.
+ */
+function icuArguments(message: unknown): string[] {
+  if (typeof message !== "string") return [];
+  const names = new Set<string>();
+  readMessage(message, 0, names);
+  return [...names].sort();
+}
+
+/** Reads a message body; returns the index of its terminating `}` or EOF. */
+function readMessage(src: string, start: number, names: Set<string>): number {
+  let i = start;
+  while (i < src.length) {
+    if (src[i] === "}") return i;
+    if (src[i] === "{") {
+      i = readArgument(src, i + 1, names);
+      continue;
+    }
+    i++;
+  }
+  return i;
+}
+
+/** Reads `<name>[, <type>[, <options>]]}`; returns the index after its `}`. */
+function readArgument(src: string, start: number, names: Set<string>): number {
+  let i = start;
+  while (i < src.length && /\s/.test(src[i]!)) i++;
+  const nameStart = i;
+  while (i < src.length && !/[,}\s]/.test(src[i]!)) i++;
+  if (i > nameStart) names.add(src.slice(nameStart, i));
+  while (i < src.length && /\s/.test(src[i]!)) i++;
+  if (src[i] === "}") return i + 1;
+  if (src[i] !== ",") return i; // malformed — stop rather than loop
+  // Skip the type, then walk the option bodies as nested messages.
+  while (i < src.length && src[i] !== "}") {
+    if (src[i] === "{") {
+      i = readMessage(src, i + 1, names) + 1;
+      continue;
+    }
+    i++;
+  }
+  return i + 1;
+}
+
 /** Length of `public.<group>.items`, or -1 if absent/not an array. */
 function itemsLength(messages: unknown, group: string): number {
   const pub = (messages as { public?: Record<string, { items?: unknown[] }> }).public;
@@ -70,6 +141,37 @@ describe("locale message parity (vs en)", () => {
     const extra = paths.filter((p) => !enPaths.includes(p));
     // Compare with surrounding context so a failure names the exact drift.
     expect({ locale: name, missing, extra }).toEqual({ locale: name, missing: [], extra: [] });
+  });
+
+  // Review #106: the a11y strings added for the shell landmarks and the
+  // per-row action buttons interpolate values ({session}, {name}, {max},
+  // {brand}). A translation that drops one still passes the key-path check
+  // above while rendering an accessible name with the identifying part
+  // missing — exactly the defect those keys were added to fix.
+  const enValues = leafValues(en);
+  it.each(LOCALES)("%s uses the same ICU arguments as en in every message", (name, messages) => {
+    const values = leafValues(messages);
+    const drift = Object.keys(enValues)
+      .filter((path) => path in values)
+      .map((path) => ({
+        path,
+        en: icuArguments(enValues[path]),
+        locale: icuArguments(values[path]),
+      }))
+      .filter((row) => row.en.join(",") !== row.locale.join(","));
+    expect({ locale: name, drift }).toEqual({ locale: name, drift: [] });
+  });
+
+  it("extracts ICU argument names without mistaking plural option bodies for arguments", () => {
+    // Self-check for the hand-rolled extractor above.
+    expect(icuArguments("Expires {value}")).toEqual(["value"]);
+    expect(icuArguments("{count, plural, =0 {No members} other {# members}}")).toEqual(["count"]);
+    expect(icuArguments("{s, select, active {Active} other {Other}} — {name}")).toEqual([
+      "name",
+      "s",
+    ]);
+    expect(icuArguments("no placeholders here")).toEqual([]);
+    expect(icuArguments(42)).toEqual([]);
   });
 
   it.each(LOCALES)("%s landing public.*.items arrays match en lengths", (name, messages) => {

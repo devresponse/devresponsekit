@@ -30,13 +30,21 @@ import type { NavigationMenuItem } from "@/components/navigation/menu-types";
  * by role/permission. Icon names from the API resolve through the
  * `menu-icons` allow-list.
  *
- * `permissions` is only used to decide whether to bother fetching at all
- * (an unprivileged caller would receive an empty list anyway, but
- * skipping the fetch saves a round-trip).
+ * `hasPermissions` only decides whether to bother fetching at all (an
+ * unprivileged caller would receive an empty list anyway, but skipping the
+ * fetch saves a round-trip). It is a BOOLEAN, not the permission array:
+ * the layout used to serialize the caller's entire grant list into the RSC
+ * payload for a single `length > 0` test (review #213).
  *
  * Requires an ancestor `SidebarProvider` (mounted by the secure layout).
  */
-export function SecureSidebar({ locale, permissions }: { locale: string; permissions: string[] }) {
+export function SecureSidebar({
+  locale,
+  hasPermissions,
+}: {
+  locale: string;
+  hasPermissions: boolean;
+}) {
   const t = useTranslations("shell");
   const tCommon = useTranslations("common");
   const pathname = usePathname();
@@ -44,9 +52,8 @@ export function SecureSidebar({ locale, permissions }: { locale: string; permiss
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  // An unprivileged caller would receive an empty list anyway; derive
-  // it instead of fetching (and instead of setState inside the effect).
-  const hasPermissions = permissions.length > 0;
+  // An unprivileged caller would receive an empty list anyway; skip the
+  // fetch (and avoid setState inside the effect).
   const items = hasPermissions ? fetchedItems : [];
 
   useEffect(() => {

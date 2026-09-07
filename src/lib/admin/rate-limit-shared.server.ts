@@ -4,6 +4,7 @@ import { sql, type Kysely } from "kysely";
 import type { AppDatabase } from "@/db/schema/app-schema";
 import {
   consumeToken,
+  normalizeBucketKey,
   rateLimitDeniedResponse,
   rateLimitKey,
   type RateLimitOptions,
@@ -229,10 +230,15 @@ function scopeOf(key: string): string {
  * `consumeToken`; see the module comment for the failure policy.
  */
 export async function consumeSharedToken(
-  key: string,
+  rawKey: string,
   options: RateLimitOptions,
   nowMs: number = Date.now(),
 ): Promise<RateLimitResult> {
+  // Same key bound as the in-memory store (review #223): the shared bucket
+  // persists one ROW per key, so an unbounded key would be an unbounded
+  // column value too. Normalising here (rather than only in the fallback)
+  // keeps the DB row and the in-process fallback on the SAME bucket identity.
+  const key = normalizeBucketKey(rawKey);
   assertPrunable(options);
   if (nowMs < backendUnavailableUntilMs) {
     // Inside the cool-down after a backend error: per-instance, deliberately.

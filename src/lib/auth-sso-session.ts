@@ -2,6 +2,7 @@ import { createAuthEndpoint, APIError } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import type { BetterAuthPlugin } from "better-auth";
 import { z } from "zod";
+import { isBanActive } from "@/lib/ban-status";
 
 /**
  * Server-only Better Auth plugin that lets the SSO consume route
@@ -17,11 +18,12 @@ import { z } from "zod";
  *   - The caller MUST have verified the handoff token AND consumed its
  *     nonce atomically BEFORE calling this. This endpoint only re-checks
  *     user-level state (exists, not banned) — it cannot see the token.
- *   - Any truthy `banned` flag rejects (403), even when a temporary ban's
- *     `banExpires` has already elapsed — unlike Better Auth's own sign-in
- *     and `isBetterAuthUserBanned` (ban-status.server.ts), which treat an
- *     elapsed expiry as not-banned. Such a user must sign in normally so
- *     Better Auth's hook clears the stale flag (review #126).
+ *   - A CURRENTLY banned user is rejected (403) through the very same
+ *     predicate the machine-API paths use (`isBanActive`, review #126), so an
+ *     elapsed `banExpires` is honoured here exactly as Better Auth's own
+ *     sign-in and `isBetterAuthUserBanned` honour it: a lapsed temporary ban
+ *     no longer blocks the handoff, while an indefinite ban (or one that is
+ *     still running, or one whose expiry is unparseable) always does.
  *   - The session cookie is signed and set through Better Auth's own
  *     `setSessionCookie`, so attributes (httpOnly, secure, sameSite,
  *     maxAge) stay consistent with every other sign-in path.
@@ -46,8 +48,7 @@ export const ssoSession = () => {
           if (!user) {
             throw new APIError("UNAUTHORIZED", { message: "unknown user" });
           }
-          const banned = (user as { banned?: boolean | null }).banned;
-          if (banned) {
+          if (isBanActive(user as { banned?: boolean | null; banExpires?: Date | string | null })) {
             throw new APIError("FORBIDDEN", { message: "user is banned" });
           }
 

@@ -79,6 +79,8 @@ const TOUCHED_KEYS = [
   "MCP_DISPATCH_BASE_URL",
   "API_JWT_ISSUER",
   "BETTER_AUTH_URL",
+  "SESSION_ABSOLUTE_LIFETIME_HOURS",
+  "API_KEY_USAGE_TOUCH_INTERVAL_SECONDS",
 ] as const;
 
 async function loadEnvWith(patch: Record<string, string | undefined>) {
@@ -511,6 +513,68 @@ describe("signing-secret hygiene (audit #12/#22)", () => {
     });
     try {
       expect(() => mod.getServerEnv()).toThrow(/BETTER_AUTH_SECRET/);
+    } finally {
+      restore();
+    }
+  });
+});
+
+/**
+ * The two knobs added by reviews #200 and #201. Both MUST leave today's
+ * behaviour alone when unset — an absolute session cap and a coarser
+ * `last_used_at` are policy changes an operator opts into, not defaults this
+ * change set imposes.
+ */
+describe("session + credential hygiene knobs (#200, #201)", () => {
+  it("leaves SESSION_ABSOLUTE_LIFETIME_HOURS undefined when unset (no cap)", async () => {
+    const { mod, restore } = await loadEnvWith({ SESSION_ABSOLUTE_LIFETIME_HOURS: undefined });
+    try {
+      expect(mod.getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it("coerces a configured SESSION_ABSOLUTE_LIFETIME_HOURS to a number", async () => {
+    const { mod, restore } = await loadEnvWith({ SESSION_ABSOLUTE_LIFETIME_HOURS: "168" });
+    try {
+      expect(mod.getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS).toBe(168);
+    } finally {
+      restore();
+    }
+  });
+
+  it.each(["0", "-1", "abc", "9000"])(
+    "rejects an out-of-range SESSION_ABSOLUTE_LIFETIME_HOURS (%s) at boot",
+    async (value) => {
+      const { mod, restore } = await loadEnvWith({ SESSION_ABSOLUTE_LIFETIME_HOURS: value });
+      try {
+        expect(() => mod.getServerEnv()).toThrow(/SESSION_ABSOLUTE_LIFETIME_HOURS/);
+      } finally {
+        restore();
+      }
+    },
+  );
+
+  it("defaults API_KEY_USAGE_TOUCH_INTERVAL_SECONDS to 60 and accepts 0", async () => {
+    const unset = await loadEnvWith({ API_KEY_USAGE_TOUCH_INTERVAL_SECONDS: undefined });
+    try {
+      expect(unset.mod.getServerEnv().API_KEY_USAGE_TOUCH_INTERVAL_SECONDS).toBe(60);
+    } finally {
+      unset.restore();
+    }
+    const zero = await loadEnvWith({ API_KEY_USAGE_TOUCH_INTERVAL_SECONDS: "0" });
+    try {
+      expect(zero.mod.getServerEnv().API_KEY_USAGE_TOUCH_INTERVAL_SECONDS).toBe(0);
+    } finally {
+      zero.restore();
+    }
+  });
+
+  it("rejects a negative API_KEY_USAGE_TOUCH_INTERVAL_SECONDS at boot", async () => {
+    const { mod, restore } = await loadEnvWith({ API_KEY_USAGE_TOUCH_INTERVAL_SECONDS: "-1" });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/API_KEY_USAGE_TOUCH_INTERVAL_SECONDS/);
     } finally {
       restore();
     }

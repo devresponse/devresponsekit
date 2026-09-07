@@ -1,23 +1,36 @@
 /**
  * Provider-organization input shape.
  *
- * `profile` and `account` are loosely typed because each identity provider
- * returns a different shape (Google `hd`, Microsoft `tid`, GitHub varies).
- * Down-stream code uses safe accessors instead of casting.
+ * Review #38 — this used to carry loosely-typed `profile` / `account` bags so
+ * the resolver could read a Microsoft `tid` or a Google `hd` claim. Nothing
+ * ever populated them: neither `provisionUserFromAuth` call site passed
+ * either field, so both branches were unreachable and every social sign-up
+ * resolved to `default`. The branches are GONE rather than wired up, because
+ * wiring them would have been a silent policy change, not a fix: the caller
+ * routes an unknown key by creating an organization whose slug IS the key
+ * (`user-provisioning.server.ts`), so switching the claims on would have
+ * repointed every existing Google Workspace / Entra sign-up out of `default`
+ * and spawned GUID-slugged organizations from raw tenant ids.
+ *
+ * The supported ways to place a sign-up in a specific organization are all
+ * admin-curated and already live: a live invitation (0008), an
+ * organization-scoped sign-up hint (`/sign-in/<org>`), and the email-domain
+ * mapping in `app_provider_organizations` (0007). Tenant-claim routing can be
+ * reintroduced on top of that curated table — where an unmatched tenant id
+ * resolves to nothing instead of creating an organization — if an operator
+ * ever asks for it.
  */
 export interface ProviderOrganizationInput {
   provider: "google" | "microsoft" | "github" | "email";
   email: string;
   emailVerified: boolean;
-  profile?: Record<string, unknown>;
-  account?: Record<string, unknown>;
 }
 
 export interface ProviderOrganizationResolution {
   provider: string;
   providerOrganizationKey: string;
   displayName: string;
-  confidence: "high" | "medium" | "fallback";
+  confidence: "medium" | "fallback";
 }
 
 /**
@@ -26,43 +39,16 @@ export interface ProviderOrganizationResolution {
  * Threat / contract:
  *   - Returning `default` is always safe; downstream membership creation
  *     keeps the user in `pending_approval` until an admin approves them.
- *   - Provider-specific keys are only accepted when present and trimmed.
  *   - GitHub uses email domain only when the email is verified, since
  *     GitHub does not surface organization data in the OAuth profile by
  *     default and we do not query its API.
+ *   - Google and Microsoft resolve to `default`; see the input docstring
+ *     (review #38) for why their tenant claims are deliberately not read.
  */
 export function resolveProviderOrganization(
   input: ProviderOrganizationInput,
 ): ProviderOrganizationResolution {
   const emailDomain = input.email.split("@")[1]?.toLowerCase() ?? "unknown";
-
-  if (input.provider === "microsoft") {
-    const tenantId =
-      readString(input.profile?.["tid"]) ??
-      readString(input.account?.["tenantId"]) ??
-      readString(input.account?.["tid"]);
-
-    if (tenantId) {
-      return {
-        provider: "microsoft",
-        providerOrganizationKey: tenantId,
-        displayName: `Microsoft Entra tenant ${tenantId}`,
-        confidence: "high",
-      };
-    }
-  }
-
-  if (input.provider === "google") {
-    const hostedDomain = readString(input.profile?.["hd"]);
-    if (hostedDomain) {
-      return {
-        provider: "google",
-        providerOrganizationKey: hostedDomain.toLowerCase(),
-        displayName: hostedDomain.toLowerCase(),
-        confidence: "high",
-      };
-    }
-  }
 
   if (input.provider === "github" && input.emailVerified) {
     return {
@@ -79,8 +65,4 @@ export function resolveProviderOrganization(
     displayName: "Default Organization",
     confidence: "fallback",
   };
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }

@@ -189,11 +189,12 @@ describe("resolveSignupPolicy", () => {
       DEFAULT_ROW,
       { ...DEFAULT_ROW, organization_id: "org-hd", signup_approval_mode: "auto_active" },
     ];
+    // A verified GitHub sign-in is the remaining provider-keyed path (the
+    // Google `hd` / Microsoft `tid` branches were dead code — review #38).
     const policy = await resolveSignupPolicy({
-      provider: "google",
+      provider: "github",
       email: "u@corp.example",
       emailVerified: true,
-      profile: { hd: "corp.example" },
     });
     expect(policy.source).toBe("organization");
     expect(policy.signupApprovalMode).toBe("auto_active");
@@ -202,10 +203,9 @@ describe("resolveSignupPolicy", () => {
   it("uses the platform default when the provider org does not exist yet", async () => {
     stubs.orgBySlug = () => Promise.resolve(undefined);
     const policy = await resolveSignupPolicy({
-      provider: "google",
+      provider: "github",
       email: "u@corp.example",
       emailVerified: true,
-      profile: { hd: "corp.example" },
     });
     expect(policy.source).toBe("platform_default");
   });

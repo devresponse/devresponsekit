@@ -38,6 +38,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `BETTER_AUTH_URL` | **yes** | Origin where `/api/auth/*` is reachable. Must match the browser origin. Also the base origin baked into links in outbound emails — verification, password reset, and invitation accept links. |
 | `ADMIN_TRUSTED_ORIGINS` | no | Extra comma-separated trusted origins for Better Auth and the admin origin guard (the app's own origin is always trusted). |
 | `COOKIE_DOMAIN` | no | Parent domain for the session cookie (e.g. `.devresponse.com`). **Unset = host-only cookie (per-app isolation — the safe default).** Set only for co-trusted shared-`auth`-schema satellites (Option C), on the primary **and** every satellite alike — see [Satellite Apps §5](./integration-satellite-apps.md#5-option-c-in-detail--shared-auth-schema). |
+| `SESSION_ABSOLUTE_LIFETIME_HOURS` | no | **Absolute** session lifetime in hours, measured from session **creation** (ASVS V3 absolute timeout). **Unset = no cap — the shipped default, unchanged.** Sessions here are *rolling* (an 8-hour window refreshed after 15 minutes of activity), so an actively-used session — including a stolen cookie — never ages out by itself. Set e.g. `168` (7 days) or `336` (14 days) to force a re-authentication regardless of activity; a session past the cap is reported as absent by `getCurrentSession()` and its row is revoked, so browser guards redirect to sign-in and cookie-authenticated `/api/v1` calls 401. Max `8760`. |
 
 ### Database (PostgreSQL)
 
@@ -232,7 +233,7 @@ Both paths resolve to the **same authority model**: a credential's effective acc
    The `drk_…` plaintext is shown **once** — only its SHA-256 hash is stored — so capture it immediately. Losing it means minting a new one.
 3. Use it directly as the bearer: `Authorization: Bearer drk_live_…`.
 
-`API_KEY_ENV_TAG` stamps the prefix (`drk_live_…` vs `drk_test_…`) so you can tell environments apart at a glance; `API_KEY_DEFAULT_TTL_DAYS` sets the console's default expiry (unset = never expire, and the UI warns you).
+`API_KEY_ENV_TAG` stamps the prefix (`drk_live_…` vs `drk_test_…`) so you can tell environments apart at a glance; `API_KEY_DEFAULT_TTL_DAYS` sets the console's default expiry (unset = never expire, and the UI warns you). A key's `last_used_at` is deliberately coarse — see `API_KEY_USAGE_TOUCH_INTERVAL_SECONDS` below.
 
 #### Path 2 — JWT access tokens (the stateless path)
 
@@ -273,6 +274,7 @@ Both paths resolve to the **same authority model**: a credential's effective acc
 | `API_KEYS_ENABLED` | Enable API-key auth (`1`/`true`). |
 | `API_KEY_ENV_TAG` | `live` \| `test` — stamped into `drk_<tag>_…`. |
 | `API_KEY_DEFAULT_TTL_DAYS` | Default key expiry (empty = never expire; UI warns). |
+| `API_KEY_USAGE_TOUCH_INTERVAL_SECONDS` | Minimum seconds between two `last_used_at` stamps for the same key (default `60`, max `86400`). The stamp is coarse "is this key still in use?" telemetry — the audit trail is `app_audit_events` — so it is throttled rather than written on every request. Lower it for finer granularity at the cost of one write per key per interval; `0` writes on every request (the pre-throttle behaviour). |
 | `API_JWT_ENABLED` | Enable JWT access tokens (`1`/`true`). |
 | `API_JWT_ISSUER` | `iss` claim (defaults to `BETTER_AUTH_URL`). |
 | `API_JWT_AUDIENCE` | `aud` of tokens minted for the v1 machine API — the default when a token request omits `resource` (e.g. `devresponse-api`). A request with `resource=<BETTER_AUTH_URL>/api/mcp` mints that identifier as `aud` instead (RFC 8707); the allow-list is derived from `BETTER_AUTH_URL`, not configurable. |

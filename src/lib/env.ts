@@ -196,6 +196,19 @@ const serverEnvSchema = z
      */
     COOKIE_DOMAIN: z.string().optional(),
     /**
+     * OPTIONAL absolute session lifetime in HOURS (review #200, ASVS V3
+     * "absolute timeout"). Better Auth's session is ROLLING — an active
+     * session refreshes forever — so without this a stolen cookie that keeps
+     * being used never ages out.
+     *
+     * UNSET IS THE DEFAULT AND MEANS "NO ABSOLUTE CAP", which is exactly the
+     * behaviour that shipped before the knob existed; setting it is an
+     * opt-in policy change. When set, `getCurrentSession()` refuses any
+     * session created more than this many hours ago (and revokes the row), so
+     * the user must sign in again. Typical values: 168 (7 days) to 336 (14).
+     */
+    SESSION_ABSOLUTE_LIFETIME_HOURS: z.coerce.number().int().positive().max(8760).optional(),
+    /**
      * Outbound email delivery provider. Unset = no delivery: every email
      * is still rendered and recorded in `app_outbox` with status `logged`
      * (specs.md §35), which is the right mode for local dev and CI.
@@ -246,6 +259,16 @@ const serverEnvSchema = z
     API_KEY_ENV_TAG: z.enum(["live", "test"]).default("live"),
     /** Default key lifetime in days; unset = no default expiry (UI warns). */
     API_KEY_DEFAULT_TTL_DAYS: z.coerce.number().int().positive().optional(),
+    /**
+     * Minimum seconds between two `last_used_at` stamps for the SAME API key
+     * (review #201). Every authenticated API-key request used to issue an
+     * UPDATE — a write per read, one dead tuple per request. The stamp is
+     * telemetry, so it is throttled: in-process per key (skipping the round
+     * trip entirely) and again in the UPDATE's own WHERE clause (so a
+     * multi-instance deployment cannot write more often than this either).
+     * "Last used" therefore has this much granularity, which is the point.
+     */
+    API_KEY_USAGE_TOUCH_INTERVAL_SECONDS: z.coerce.number().int().min(0).max(86400).default(60),
     /** Master switch for JWT access tokens + JWKS. */
     API_JWT_ENABLED: z
       .string()

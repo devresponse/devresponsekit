@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { clientIpKey } from "@/lib/client-ip";
@@ -68,21 +69,69 @@ export type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: num
 const buckets = new Map<string, TokenBucket>();
 
 /**
- * Eviction guard: once the store grows past this size, stale buckets
- * (idle long enough to be fully refilled) are swept on the next
- * consume. Keeps the map bounded by the set of recently active actors
- * instead of growing one entry per actor x scope forever.
+ * Eviction policy (review #223).
+ *
+ * The previous policy was a FULL O(n) SWEEP of the map on every `consume`
+ * once it held more than 1000 entries, with no hard cap: a caller able to
+ * mint many distinct keys made every subsequent request — including every
+ * other actor's — pay a walk of the whole map, and the map itself could grow
+ * without limit between sweeps. That is a self-inflicted amplifier on the
+ * path whose entire job is to survive abuse.
+ *
+ * The replacement is O(1) amortised and hard-bounded:
+ *   - `MAX_BUCKETS` is a HARD CAP. A new key inserted at the cap evicts from
+ *     the FRONT of the map, which is the least-recently-used entry because
+ *     `consume` re-inserts the key it touched (JS Map preserves insertion
+ *     order). Evicting a bucket only ever RESTORES a full budget to that key,
+ *     never grants more than the configured burst, and the victim of an
+ *     eviction is by construction the actor who has been quiet the longest.
+ *   - Each consume additionally retires up to `MAX_EVICTIONS_PER_CONSUME`
+ *     entries from the front while they are stale (idle long enough to have
+ *     refilled to full, so their state carries no information). Bounded work
+ *     per call replaces the unbounded sweep; a large idle population drains
+ *     over the next few calls instead of in one stall.
  */
-const EVICTION_THRESHOLD = 1_000;
+const MAX_BUCKETS = 10_000;
 const STALE_AFTER_MS = 10 * 60 * 1000;
+const MAX_EVICTIONS_PER_CONSUME = 8;
 
-function evictStaleBuckets(nowMs: number): void {
-  if (buckets.size <= EVICTION_THRESHOLD) return;
+/**
+ * Longest key stored verbatim. Anything longer is folded to a fixed-size
+ * digest so the map's memory is a function of the ENTRY COUNT alone and a
+ * hostile key space cannot inflate it (review #223). SHA-256 (not a cheap
+ * 32-bit fold) because two actors sharing a bucket means one can starve the
+ * other: the hash must not be collidable on purpose. Real keys — `scope:` +
+ * a uuid, an IP, or a credential id — are far below the bound and are stored
+ * as-is, so this never changes an existing bucket's identity.
+ */
+const MAX_KEY_LENGTH = 128;
+
+export function normalizeBucketKey(key: string): string {
+  if (key.length <= MAX_KEY_LENGTH) return key;
+  // Keep a readable scope prefix for debugging, then the digest of the WHOLE
+  // key so distinct long keys stay distinct.
+  return `${key.slice(0, 32)}#${createHash("sha256").update(key).digest("hex")}`;
+}
+
+/**
+ * Retires up to {@link MAX_EVICTIONS_PER_CONSUME} stale buckets from the
+ * front of the map (oldest first). Stops at the first non-stale entry: the
+ * front is the least-recently-touched, so everything behind it is fresher.
+ */
+function retireStaleBuckets(nowMs: number): void {
+  let examined = 0;
   for (const [key, bucket] of buckets) {
-    if (nowMs - bucket.lastRefillMs > STALE_AFTER_MS) {
-      buckets.delete(key);
-    }
+    if (examined >= MAX_EVICTIONS_PER_CONSUME) return;
+    if (nowMs - bucket.lastRefillMs <= STALE_AFTER_MS) return;
+    buckets.delete(key);
+    examined++;
   }
+}
+
+/** Drops the least-recently-used bucket to keep the map at the hard cap. */
+function evictLeastRecentlyUsed(): void {
+  // `size >= MAX_BUCKETS` guarantees a first entry, so no empty check.
+  buckets.delete(buckets.keys().next().value!);
 }
 
 /**
@@ -104,18 +153,25 @@ export function __resetRateLimitForTests(): void {
  * advance time deterministically without faking the global Date.
  */
 export function consumeToken(
-  key: string,
+  rawKey: string,
   options: RateLimitOptions,
   nowMs: number = Date.now(),
 ): RateLimitResult {
-  evictStaleBuckets(nowMs);
+  const key = normalizeBucketKey(rawKey);
+  retireStaleBuckets(nowMs);
   const existing = buckets.get(key);
+  if (!existing && buckets.size >= MAX_BUCKETS) {
+    evictLeastRecentlyUsed();
+  }
   const bucket: TokenBucket = existing ?? {
     tokens: options.capacity,
     lastRefillMs: nowMs,
     capacity: options.capacity,
     refillPerSec: options.refillPerSec,
   };
+  // Re-insert on every touch so map order stays least-recently-used first
+  // (a plain `set` on an existing key would leave it where it was).
+  buckets.delete(key);
 
   // Allow callers to lower / raise the limit between requests
   // (e.g. different endpoints sharing one key). Re-set the per-bucket

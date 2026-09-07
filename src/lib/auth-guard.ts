@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { withTrustedClientIp } from "@/lib/client-ip";
+import { getServerEnv } from "@/lib/env";
+import { isSessionPastAbsoluteLifetime } from "@/lib/session-lifetime";
 import { readImpersonatorId } from "@/lib/impersonation";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
@@ -18,10 +20,41 @@ import { getSafeReturnTo } from "@/lib/safe-return-to";
  * client-IP header (`withTrustedClientIp`, review #35) — the ambient store
  * may come from a route the proxy never matched, so the derivation is
  * applied here rather than trusted from the request.
+ *
+ * ABSOLUTE LIFETIME (review #200): Better Auth's window is rolling, so an
+ * active session refreshes indefinitely. When the operator sets
+ * `SESSION_ABSOLUTE_LIFETIME_HOURS`, a session older than that — measured
+ * from CREATION, not last activity — is reported as absent here and revoked,
+ * so every caller (browser guards, server actions, the `/api/v1` cookie path)
+ * inherits the cap from this one chokepoint. The variable is UNSET by
+ * default, which keeps the pre-existing "rolls forever" behaviour exactly.
  */
 export async function getCurrentSession() {
   const requestHeaders = await headers();
-  return auth.api.getSession({ headers: withTrustedClientIp(requestHeaders) });
+  const session = await auth.api.getSession({ headers: withTrustedClientIp(requestHeaders) });
+  if (!session) return null;
+
+  if (
+    !isSessionPastAbsoluteLifetime(session.session, getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS)
+  ) {
+    return session;
+  }
+
+  // Best-effort revocation: the cap holds even if this fails (we already
+  // decided to report the session as absent), but deleting the row stops the
+  // cookie from being replayed against every subsequent request and from
+  // being refreshed back to life by Better Auth.
+  try {
+    const ctx = await auth.$context;
+    await ctx.internalAdapter.deleteSession(session.session.token);
+  } catch (error) {
+    const { logServerError } = await import("@/lib/observability/logger.server");
+    logServerError("absolute-lifetime session revocation failed", {
+      err: error,
+      betterAuthUserId: session.user.id,
+    });
+  }
+  return null;
 }
 
 /**

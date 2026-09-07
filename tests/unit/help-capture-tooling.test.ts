@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+// @ts-expect-error — operator tooling, plain ESM with no type declarations.
+import { assertOk, pickIdFromHrefs } from "../../help/capture-lib.mjs";
 
 /**
  * `help/capture.mjs` is the Playwright screenshot tool behind the in-app help
@@ -71,6 +73,49 @@ describe("help/capture.mjs reads credentials from the environment only (#1)", ()
   });
 });
 
+describe("help/capture.mjs resolves ids at run time and fails on a bad page (#237)", () => {
+  it("hard-codes no entity id", () => {
+    // The demo tenant's UUIDs used to be the defaults; a re-seed then produced
+    // a wall of 404 screenshots that nothing complained about.
+    expect(SOURCE).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  });
+
+  it("reads each detail id off its list page and asserts every navigation", () => {
+    expect(SOURCE).toContain("pickIdFromHrefs(hrefs, segment)");
+    expect(SOURCE).toContain("assertOk(response, route)");
+    // The h1 wait is an assertion now — a swallowed timeout is what let an
+    // error page through.
+    expect(SOURCE).not.toMatch(/waitForSelector\("h1"[^)]*\)\s*\.catch/);
+    expect(SOURCE).toContain("process.exit(1)");
+  });
+
+  it("assertOk accepts a 2xx and rejects anything else", () => {
+    expect(assertOk({ status: () => 200 }, "/en")).toBe(200);
+    expect(assertOk({ status: () => 204 }, "/en")).toBe(204);
+    expect(() => assertOk({ status: () => 404 }, "/en/app/administrator/users/x")).toThrow(
+      /HTTP 404/,
+    );
+    expect(() => assertOk({ status: () => 500 }, "/en")).toThrow(/HTTP 500/);
+    expect(() => assertOk(null, "/en")).toThrow(/no HTTP response/);
+  });
+
+  it("pickIdFromHrefs takes the first detail id for the segment, and throws when there is none", () => {
+    const hrefs = [
+      "/en/app/administrator/users",
+      "/en/app/administrator/roles/c02b9969-bacf-44e6-8ede-d84405121b3a",
+      "/en/app/administrator/users/1ac53f53-dcae-4658-bde3-fd2166fb5d97",
+      "/en/app/administrator/users/3a24bf3a-e9cc-45db-b910-a2237aebd6dd",
+    ];
+    expect(pickIdFromHrefs(hrefs, "users")).toBe("1ac53f53-dcae-4658-bde3-fd2166fb5d97");
+    expect(pickIdFromHrefs(hrefs, "roles")).toBe("c02b9969-bacf-44e6-8ede-d84405121b3a");
+    // An empty (freshly re-seeded) list must abort, never shoot a 404.
+    expect(() => pickIdFromHrefs(["/en/app/administrator/organizations"], "organizations")).toThrow(
+      /no \/organizations\/<id> link/,
+    );
+    expect(() => pickIdFromHrefs(["/en/app/administrator/users/new"], "users")).toThrow();
+  });
+});
+
 describe("help/capture.mjs is not shipped in the runtime image (#182)", () => {
   it(".dockerignore excludes the capture script but keeps the servable help content", () => {
     const lines = fs
@@ -79,6 +124,8 @@ describe("help/capture.mjs is not shipped in the runtime image (#182)", () => {
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith("#"));
     expect(lines).toContain("help/capture.mjs");
+    // The helper module is operator tooling too (#237).
+    expect(lines).toContain("help/capture-lib.mjs");
     expect(lines).not.toContain("help");
     expect(lines).not.toContain("help/");
     expect(lines.some((l) => /^help\/(\*|screenshots)/.test(l))).toBe(false);

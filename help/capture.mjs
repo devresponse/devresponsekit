@@ -2,24 +2,31 @@
 // help/screenshots/). Produces 1440x900 PNGs in help/screenshots/.
 //
 // This is OPERATOR TOOLING, not servable help content: the help viewer serves
-// only *.md and images, and .dockerignore keeps this file out of the runtime
-// image. It holds NO credentials — everything it needs comes from the
-// environment and it exits early (non-zero) when something is missing:
+// only *.md and images, and .dockerignore keeps this file (and capture-lib.mjs)
+// out of the runtime image. It holds NO credentials — everything it needs comes
+// from the environment and it exits early (non-zero) when something is missing:
 //
 //   CAPTURE_BASE_URL   origin to capture, e.g. https://demo.example.com
 //   CAPTURE_EMAIL      account to sign in as (needs the admin-console
 //                      permissions for the /administrator screens)
 //   CAPTURE_PASSWORD   that account's password — inject it from a secret
 //                      store; never paste it into a script or a commit
-//   CAPTURE_USER_ID    (optional) ids of the representative user / role /
-//   CAPTURE_ROLE_ID    organization whose detail pages are captured; the
-//   CAPTURE_ORG_ID     defaults are the public demo tenant's rows
+//   CAPTURE_USER_ID    (optional) pin the representative user / role /
+//   CAPTURE_ROLE_ID    organization whose detail pages are captured. Left
+//   CAPTURE_ORG_ID     unset, each id is READ AT RUN TIME off the matching
+//                      list page (review #237: hard-coded demo-database
+//                      UUIDs turned every re-seed into a wall of silent 404
+//                      screenshots).
+//
+// Every navigation asserts a 2xx and a rendered `h1`, and the run exits
+// non-zero listing whatever failed — a bad screenshot must never pass quietly.
 //
 // Run from the repo root (uses the repo's Playwright):
 //   CAPTURE_BASE_URL=... CAPTURE_EMAIL=... CAPTURE_PASSWORD=... node help/capture.mjs
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { assertOk, pickIdFromHrefs } from "./capture-lib.mjs";
 
 /** Reads a required setting from the environment or exits with a clear message. */
 function requireEnv(name) {
@@ -37,9 +44,6 @@ function requireEnv(name) {
 const BASE = new URL(requireEnv("CAPTURE_BASE_URL")).origin;
 const EMAIL = requireEnv("CAPTURE_EMAIL");
 const PASSWORD = requireEnv("CAPTURE_PASSWORD");
-const USER_ID = process.env.CAPTURE_USER_ID?.trim() || "1ac53f53-dcae-4658-bde3-fd2166fb5d97";
-const ROLE_ID = process.env.CAPTURE_ROLE_ID?.trim() || "c02b9969-bacf-44e6-8ede-d84405121b3a";
-const ORG_ID = process.env.CAPTURE_ORG_ID?.trim() || "3a24bf3a-e9cc-45db-b910-a2237aebd6dd";
 const OUT = path.join("help", "screenshots");
 
 // [slug, route, options]
@@ -52,6 +56,7 @@ const PUBLIC_SHOTS = [
   ["04-forgot-password", "/en/forgot-password"],
 ];
 
+/** Signed-in screens that need no entity id. */
 const APP_SHOTS = [
   ["10-dashboard", "/en/app/dashboard"],
   ["11-workspace", "/en/app/workspace"],
@@ -64,14 +69,11 @@ const APP_SHOTS = [
   ["18-docs-architecture", "/en/app/docs/architecture", { extraScrolls: 1, settleMs: 2500 }],
   ["30-admin-overview", "/en/app/administrator", { extraScrolls: 2 }],
   ["31-admin-users", "/en/app/administrator/users"],
-  ["32-admin-user-detail", `/en/app/administrator/users/${USER_ID}`],
   ["33-admin-user-create", "/en/app/administrator/users/new"],
   ["34-admin-roles", "/en/app/administrator/roles"],
-  ["35-admin-role-detail", `/en/app/administrator/roles/${ROLE_ID}`, { extraScrolls: 1 }],
   ["36-admin-permissions", "/en/app/administrator/permissions", { extraScrolls: 1 }],
   ["37-admin-groups", "/en/app/administrator/groups"],
   ["38-admin-organizations", "/en/app/administrator/organizations", { extraScrolls: 1 }],
-  ["39-admin-org-detail", `/en/app/administrator/organizations/${ORG_ID}`],
   ["40-admin-memberships", "/en/app/administrator/memberships"],
   ["41-admin-enterprise-apps", "/en/app/administrator/enterprise-apps"],
   ["42-admin-api-keys", "/en/app/administrator/api-keys"],
@@ -82,14 +84,45 @@ const APP_SHOTS = [
   ["46-admin-audit", "/en/app/administrator/audit", { settleMs: 6000 }],
 ];
 
-async function settle(page, opts = {}) {
-  await page.waitForSelector("h1", { timeout: 12_000 }).catch(() => {});
+/**
+ * Detail screens, keyed by the list page whose first row supplies the id
+ * (review #237). [slug, segment, listRoute, envOverride, options]
+ */
+const DETAIL_SHOTS = [
+  ["32-admin-user-detail", "users", "/en/app/administrator/users", "CAPTURE_USER_ID", {}],
+  [
+    "35-admin-role-detail",
+    "roles",
+    "/en/app/administrator/roles",
+    "CAPTURE_ROLE_ID",
+    {
+      extraScrolls: 1,
+    },
+  ],
+  [
+    "39-admin-org-detail",
+    "organizations",
+    "/en/app/administrator/organizations",
+    "CAPTURE_ORG_ID",
+    {},
+  ],
+];
+
+/** Navigates and REFUSES anything that is not a 2xx with a rendered heading. */
+async function visit(page, route, opts = {}) {
+  const response = await page.goto(BASE + route, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  assertOk(response, route);
+  // A not-found or error boundary can still return 200 while rendering no
+  // heading, so the `h1` wait is an assertion here, not a best-effort wait.
+  await page.waitForSelector("h1", { timeout: 12_000 });
   await page.waitForTimeout(opts.settleMs ?? 1200);
 }
 
 async function shoot(page, slug, route, opts = {}) {
-  await page.goto(BASE + route, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await settle(page, opts);
+  await visit(page, route, opts);
   await page.screenshot({ path: path.join(OUT, `${slug}.png`) });
   console.log(`ok  ${slug}  ${route}`);
   for (let i = 0; i < (opts.extraScrolls ?? 0); i++) {
@@ -101,9 +134,15 @@ async function shoot(page, slug, route, opts = {}) {
   }
 }
 
-function pngSize(file) {
-  const b = fs.readFileSync(file);
-  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+/** Reads a representative entity id off its list page (review #237). */
+async function resolveId(page, segment, listRoute, envName) {
+  const pinned = process.env[envName]?.trim();
+  if (pinned) return pinned;
+  await visit(page, listRoute);
+  const hrefs = await page.$$eval("a[href]", (as) => as.map((a) => a.getAttribute("href")));
+  const id = pickIdFromHrefs(hrefs, segment);
+  console.log(`id  ${segment} -> ${id} (from ${listRoute})`);
+  return id;
 }
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -115,26 +154,59 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 
-for (const [slug, route, opts] of PUBLIC_SHOTS) await shoot(page, slug, route, opts);
-
-console.log("signing in…");
-await page.goto(`${BASE}/en/sign-in`, { waitUntil: "domcontentloaded" });
-await page.fill('input[type="email"]', EMAIL);
-await page.fill('input[type="password"]', PASSWORD);
-await page.click('button[type="submit"]');
-await page.waitForURL("**/app/**", { timeout: 30_000 });
-console.log("signed in:", page.url());
-
-for (const [slug, route, opts] of APP_SHOTS) await shoot(page, slug, route, opts);
-
-await browser.close();
-
-let bad = 0;
-for (const f of fs.readdirSync(OUT).filter((f) => f.endsWith(".png"))) {
-  const { w, h } = pngSize(path.join(OUT, f));
-  if (w !== 1440 || h !== 900) {
-    console.error(`WRONG SIZE ${f}: ${w}x${h}`);
-    bad++;
+/** Everything that went wrong; the process exits non-zero if it is non-empty. */
+const failures = [];
+async function step(label, fn) {
+  try {
+    await fn();
+  } catch (error) {
+    failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`FAIL  ${label}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
-console.log(bad === 0 ? "all screenshots are 1440x900" : `${bad} screenshots have wrong size`);
+
+try {
+  for (const [slug, route, opts] of PUBLIC_SHOTS) {
+    await step(slug, () => shoot(page, slug, route, opts));
+  }
+
+  console.log("signing in…");
+  await page.goto(`${BASE}/en/sign-in`, { waitUntil: "domcontentloaded" });
+  await page.fill('input[type="email"]', EMAIL);
+  await page.fill('input[type="password"]', PASSWORD);
+  await page.click('button[type="submit"]');
+  // Throws (and skips every signed-in shot) rather than capturing the shell
+  // logged out — the failure is loud instead of 20 wrong screenshots.
+  await page.waitForURL("**/app/**", { timeout: 30_000 });
+  console.log("signed in:", page.url());
+
+  for (const [slug, route, opts] of APP_SHOTS) {
+    await step(slug, () => shoot(page, slug, route, opts));
+  }
+
+  for (const [slug, segment, listRoute, envName, opts] of DETAIL_SHOTS) {
+    await step(slug, async () => {
+      const id = await resolveId(page, segment, listRoute, envName);
+      await shoot(page, slug, `/en/app/administrator/${segment}/${id}`, opts);
+    });
+  }
+} finally {
+  await browser.close();
+}
+
+function pngSize(file) {
+  const b = fs.readFileSync(file);
+  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+}
+
+for (const f of fs.readdirSync(OUT).filter((f) => f.endsWith(".png"))) {
+  const { w, h } = pngSize(path.join(OUT, f));
+  if (w !== 1440 || h !== 900) failures.push(`WRONG SIZE ${f}: ${w}x${h}`);
+}
+
+if (failures.length > 0) {
+  console.error(`\n${failures.length} capture failure(s):`);
+  for (const failure of failures) console.error(`  - ${failure}`);
+  process.exit(1);
+}
+console.log("all screenshots captured at 1440x900");

@@ -35,7 +35,7 @@ Vitest unit/component/integration/security tests **mock** the database and auth 
 - **Playwright** + **axe-core** for browser e2e and accessibility.
 - **MSW** and **supertest** are available for HTTP mocking/assertions.
 - **fast-check** — property-based/fuzz testing, used in the security suites (permission algebra, credential codec, injection surfaces).
-- **Stryker** — mutation testing on the security core (`pnpm test:mutation`); runs as an **advisory** CI workflow ([`mutation.yml`](../.github/workflows/mutation.yml)) that proves the security tests actually assert (not just execute). Its sandbox (`.stryker-tmp/`) is gitignored.
+- **Stryker** — mutation testing on the security core (`pnpm test:mutation`); runs as an **advisory** CI workflow ([`mutation.yml`](../.github/workflows/mutation.yml)) that proves the security tests actually assert (not just execute). The scope is the PURE security algebra — scope matching, the safe-return-to guard, admin list-query parsing, the API-key codec, trusted-origin parsing + the admin origin guard, and the SSO handoff codec (review #229); a module joins it only when no DB/network/Next plumbing stands between its unit tests and its logic. Besides Stryker's aggregate `break` threshold, `scripts/check-mutation-floors.mjs` enforces a **per-file floor** at each file's measured score, so one module cannot hide behind another. Its sandbox (`.stryker-tmp/`) and the JSON report (`reports/`) are gitignored.
 
 ## 3. Running tests
 
@@ -128,7 +128,9 @@ These encode project rules and will fail the build if violated:
 | Locale message parity | Every text key exists in **all eight** locales (`en`/`fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`). |
 | Permission catalog count | The `ADMIN_PERMISSION_CATALOG` has the expected number of keys (currently **35**). |
 | `tests/unit/gitleaks-config.test.ts` | The secret-scan config (`.gitleaks.toml`) detects the app's own credential formats at their real lengths, no fixture in the tree reaches those lengths, and the seed-admin default password is allowlisted only in the files that document it (never globally). See [SECURITY.md → Secret scanning](../SECURITY.md#secret-scanning). |
-| `tests/unit/help-capture-tooling.test.ts` | `help/capture.mjs` takes credentials from `CAPTURE_*` env vars only (fails fast when unset), holds no credential literal, and is excluded from the Docker build context. |
+| `tests/unit/help-capture-tooling.test.ts` | `help/capture.mjs` takes credentials from `CAPTURE_*` env vars only (fails fast when unset), holds no credential literal, resolves entity ids at run time and refuses a non-2xx page (#237), and is excluded from the Docker build context. |
+| `tests/unit/db-transaction-discipline.test.ts` | The migration runner, seed and reset scripts open every transaction on a **checked-out** client, never through the pool (#84). The behavioural half is `tests/db/migration-transaction.db.test.ts` — a failing migration leaves neither DDL nor a ledger row. |
+| `tests/unit/migration-catalog-scoping.test.ts` | Every migration's system-catalog lookup is schema-scoped (`conrelid = '…'::regclass`, an `nspname` join, or `table_schema = current_schema()`), with one documented exception in the frozen `0001` (#88). |
 
 When you add a route, permission, or string, expect to update the corresponding invariant.
 

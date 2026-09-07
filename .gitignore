@@ -47,3 +47,6 @@ src/db/schema/generated.ts
 # Sentry (build plugin artifacts)
 .env.sentry-build-plugin
 .sentryclirc
+
+# Mutation reports (Stryker JSON/HTML output)
+reports/

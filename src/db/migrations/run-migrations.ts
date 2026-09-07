@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PoolClient } from "pg";
 import { createAppPool, ensureSchema } from "../schema-config";
+import { applyMigrationInTransaction } from "./apply-migration";
 import {
   migrationChecksum,
   planMigrations,
@@ -56,9 +57,11 @@ import {
  *
  * Each not-yet-applied file runs inside its own transaction on the SAME
  * dedicated client (review #84: `begin`/`commit` on a pool would only be
- * atomic by accident of connection reuse) and is ledgered on success. The
- * planning/ordering/checksum logic lives in `migration-plan.ts` (pure +
- * unit-tested); this module only does the fs + db side effects.
+ * atomic by accident of connection reuse) and is ledgered in that same
+ * transaction — see `apply-migration.ts`, whose rollback path is proven in
+ * `tests/db/migration-transaction.db.test.ts`. The planning/ordering/checksum
+ * logic lives in `migration-plan.ts` (pure + unit-tested); this module only
+ * does the fs + db side effects.
  */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -170,18 +173,7 @@ async function main() {
       }
       const { sql, checksum } = sources.get(migration.id)!;
       console.log(`[migrate] apply  ${migration.id}`);
-      await client.query("begin");
-      try {
-        await client.query(sql);
-        await client.query(`insert into app_schema_migrations (id, checksum) values ($1, $2)`, [
-          migration.id,
-          checksum,
-        ]);
-        await client.query("commit");
-      } catch (error) {
-        await client.query("rollback");
-        throw error;
-      }
+      await applyMigrationInTransaction(client, { id: migration.id, sql, checksum });
     }
 
     console.log("[migrate] done");

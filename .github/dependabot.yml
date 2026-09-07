@@ -53,6 +53,15 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # Supply-chain cooldown (review #226): never propose a version that has
+    # been on the registry for less than a day — long enough for a hijacked
+    # publish to be pulled. Security advisories are exempt (Dependabot always
+    # opens those immediately), so this delays convenience bumps only. It also
+    # keeps Dependabot in step with `.npmrc`'s `minimum-release-age=1440`,
+    # which would otherwise refuse to RE-RESOLVE a bump proposed inside the
+    # cooldown window (e.g. when a maintainer regenerates the lockfile).
+    cooldown:
+      default-days: 1
     # Group routine minor/patch bumps to keep PR volume sane; major updates and
     # security advisories still open as individual PRs for closer review.
     groups:

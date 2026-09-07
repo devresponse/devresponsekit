@@ -238,6 +238,51 @@ describe("dependency governance: production image", () => {
 });
 
 /**
+ * Install-time supply chain (review #226).
+ *
+ * A hijacked publish is usually caught within hours, so refusing to RESOLVE
+ * anything younger than a day closes most of the window; pinning pnpm itself
+ * by hash means Corepack rejects a tampered package manager before it runs.
+ * Neither control may drift silently, and both are documented in SECURITY.md.
+ */
+describe("dependency governance: install-time supply chain", () => {
+  const npmrc = read(".npmrc");
+  const dependabot = read(".github/dependabot.yml");
+  const packageManager = (JSON.parse(read("package.json")) as { packageManager: string })
+    .packageManager;
+
+  it(".npmrc sets a release cooldown of at least 24 hours", () => {
+    const match = /^minimum-release-age=(\d+)$/m.exec(npmrc);
+    expect(match, ".npmrc must set minimum-release-age (minutes)").not.toBeNull();
+    expect(Number(match![1])).toBeGreaterThanOrEqual(1440);
+  });
+
+  it("Dependabot npm updates carry a cooldown so proposals survive that floor", () => {
+    const npmBlock = dependabot.slice(dependabot.indexOf("- package-ecosystem: npm"));
+    expect(npmBlock).toMatch(/\n\s+cooldown:\n\s+default-days: [1-9]\d*\n/);
+  });
+
+  it("packageManager pins pnpm WITH its sha512 integrity hash", () => {
+    // `corepack use pnpm@<version>` writes exactly this shape; Corepack
+    // verifies the downloaded tarball against the hash before executing it.
+    expect(packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+\+sha512\.[0-9a-f]{128}$/);
+  });
+
+  it("the pinned pnpm version still matches engines and the onboarding doc", () => {
+    const version = packageManager.slice("pnpm@".length).split("+")[0]!;
+    expect(read("docs/developer-onboarding.md")).toContain(`| **pnpm** | ${version} |`);
+    expect(version.split(".")[0]).toBe("10"); // package.json engines: pnpm >=10
+  });
+
+  it("SECURITY.md documents both controls", () => {
+    expect(securityMd).toContain("## Install-time supply chain");
+    expect(securityMd).toContain("minimum-release-age=1440");
+    expect(securityMd).toContain("cooldown.default-days");
+    expect(securityMd).toContain("+sha512.<hash>");
+  });
+});
+
+/**
  * The dependency audit is its own workflow (review #227). Inside ci.yml it
  * only ran when a commit landed, so an idle `main` was never re-audited and
  * went red silently (last main run 2026-07-13; 28 high advisories found weeks

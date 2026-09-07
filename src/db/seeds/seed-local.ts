@@ -26,6 +26,12 @@ async function main() {
   // auto-provisioning hook down so signUpEmail below doesn't also run it.
   setSignupProvisioningSuppressed(true);
   const pool = createAppPool();
+  // ONE checked-out session for the whole seed (review #84): `begin` /
+  // `commit` / `rollback` issued through `pool.query` are only atomic by
+  // accident of connection reuse — the pool is free to hand each statement a
+  // different backend, which would leave the `begin` open on one connection
+  // while the writes (and the `commit`) land unrelated on others.
+  const client = await pool.connect();
   let inTransaction = false;
 
   try {
@@ -33,10 +39,10 @@ async function main() {
     // schema was not pre-created. Tables themselves come from the migrations.
     await ensureSchema(pool);
 
-    await pool.query("begin");
+    await client.query("begin");
     inTransaction = true;
 
-    await pool.query(
+    await client.query(
       `insert into app_organizations (slug, name, status, is_default)
        values ('default', 'Default Organization', 'active', true)
        on conflict (slug) do nothing`,
@@ -52,7 +58,7 @@ async function main() {
       ],
     ];
     for (const [key, description] of permissions) {
-      await pool.query(
+      await client.query(
         `insert into app_permissions (key, description) values ($1, $2)
          on conflict (key) do nothing`,
         [key, description],
@@ -65,7 +71,7 @@ async function main() {
     // cannot be imported by this tsx script) so the seed cannot drift from the
     // runtime check. Idempotent — `on conflict (key) do nothing`.
     for (const { key, description } of ADMIN_PERMISSION_CATALOG) {
-      await pool.query(
+      await client.query(
         `insert into app_permissions (key, description) values ($1, $2)
          on conflict (key) do nothing`,
         [key, description],
@@ -73,7 +79,7 @@ async function main() {
     }
 
     const orgId = (
-      await pool.query<{ id: string }>(`select id from app_organizations where slug = 'default'`)
+      await client.query<{ id: string }>(`select id from app_organizations where slug = 'default'`)
     ).rows[0]?.id;
     if (!orgId) throw new Error("default org missing after insert");
 
@@ -92,7 +98,7 @@ async function main() {
     // which the admin API sets on every edit. A re-run after an administrator
     // tightened the policy (admin_approval / invite_only) leaves it untouched
     // and logs a loud notice instead of silently reopening self-registration.
-    await seedPlatformSignupPolicy(pool);
+    await seedPlatformSignupPolicy(client);
 
     const roles: Array<[string, string, string[]]> = [
       ["member", "Member", ["shell.view"]],
@@ -126,13 +132,13 @@ async function main() {
       ],
     ];
     for (const [key, name, permKeys] of roles) {
-      await pool.query(
+      await client.query(
         `insert into app_roles (organization_id, key, name) values ($1, $2, $3)
          on conflict (organization_id, key) do nothing`,
         [orgId, key, name],
       );
       const roleId = (
-        await pool.query<{ id: string }>(
+        await client.query<{ id: string }>(
           `select id from app_roles where organization_id = $1 and key = $2`,
           [orgId, key],
         )
@@ -140,12 +146,12 @@ async function main() {
       if (!roleId) throw new Error(`role ${key} missing after insert`);
       for (const permKey of permKeys) {
         const permId = (
-          await pool.query<{ id: string }>(`select id from app_permissions where key = $1`, [
+          await client.query<{ id: string }>(`select id from app_permissions where key = $1`, [
             permKey,
           ])
         ).rows[0]?.id;
         if (!permId) continue;
-        await pool.query(
+        await client.query(
           `insert into app_role_permissions (role_id, permission_id) values ($1, $2)
            on conflict do nothing`,
           [roleId, permId],
@@ -196,7 +202,7 @@ async function main() {
     ];
     if (seedDemoApps) {
       for (const [i, [id, label, description, origin, subdomain, audience]] of apps.entries()) {
-        await pool.query(
+        await client.query(
           `insert into app_enterprise_applications
              (id, label, description, origin, subdomain, sso_audience, status, sort_order)
            values ($1, $2, $3, $4, $5, $6, 'available', $7)
@@ -211,7 +217,7 @@ async function main() {
       );
     }
 
-    await pool.query("commit");
+    await client.query("commit");
     inTransaction = false;
 
     // Default admin (review #18): escalation is provenance-gated — the seed
@@ -226,7 +232,7 @@ async function main() {
         "[seed] skipping default admin user; SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD not configured",
       );
     } else {
-      await seedDefaultAdminUser(pool, orgId, {
+      await seedDefaultAdminUser(client, orgId, {
         email: adminEmail,
         password: adminPassword,
         adoptExisting: process.env.SEED_ADMIN_ADOPT_EXISTING === "1",
@@ -236,10 +242,12 @@ async function main() {
     console.log("[seed] local seed applied");
   } catch (error) {
     if (inTransaction) {
-      await pool.query("rollback");
+      // Never let a failing rollback mask the error that caused it.
+      await client.query("rollback").catch(() => undefined);
     }
     throw error;
   } finally {
+    client.release();
     await pool.end();
   }
 }

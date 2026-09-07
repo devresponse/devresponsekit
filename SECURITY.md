@@ -61,6 +61,29 @@ Out of scope: findings that require a compromised host or database role,
 denial-of-service via unrealistic load, and issues solely in third-party
 dependencies (report those upstream — though we welcome a heads-up).
 
+## Install-time supply chain
+
+Two settings narrow the window in which a hijacked publish could reach a
+build (source review 2026-09-04, #226):
+
+| Control | Where | What it does |
+| --- | --- | --- |
+| **Release cooldown** | [`.npmrc`](.npmrc) → `minimum-release-age=1440` | pnpm refuses to **resolve** any version published less than 24 h ago. A hijacked publish is typically detected and yanked well inside that window. |
+| **Cooldown for proposals** | [`.github/dependabot.yml`](.github/dependabot.yml) → `cooldown.default-days: 1` | Dependabot does not open npm version-update PRs for releases younger than a day, so it never proposes a bump the `.npmrc` floor would refuse to re-resolve. **Security** advisories are exempt and still arrive immediately. |
+| **Package-manager integrity** | [`package.json`](package.json) → `packageManager: pnpm@<version>+sha512.<hash>` | Corepack verifies the pnpm tarball against this hash before running it (`corepack use pnpm@<version>` regenerates the pair). A tampered pnpm release fails the check instead of executing in CI and in the Docker build. `pnpm/action-setup` ignores the `+sha512…` suffix and installs the pinned version. |
+
+The cooldown applies only where pnpm **resolves** a version. Every automated
+install in this repo — CI, the Dockerfile, the deploy path — runs
+`pnpm install --frozen-lockfile`, which resolves nothing and is therefore
+never delayed, including on a Dependabot PR that pins a release published
+minutes earlier. It bites only when a human adds or updates a dependency; to
+take an urgent security release inside the window, override it for that one
+command:
+
+```bash
+pnpm install --config.minimum-release-age=0   # document why in the PR
+```
+
 ## Dependency advisory allowlist
 
 The `Dependency audit` workflow

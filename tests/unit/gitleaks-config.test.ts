@@ -459,3 +459,60 @@ describe(".gitleaks.toml — global allowlists stay minimal (#116)", () => {
     }
   });
 });
+
+/**
+ * The secret-scan workflow scans the PR's OWN COMMITS as well as the tree
+ * (source review 2026-09-04, #238).
+ *
+ * `detect --no-git` on a shallow checkout sees only what the branch would
+ * merge, so a secret added in one commit and deleted in the next never reaches
+ * the gate — while staying in the branch history (and in every fork and clone
+ * of it) forever. GitHub's push protection does not close the hole: it matches
+ * provider patterns, not this application's own credential formats. Verified
+ * by hand against gitleaks v8.30.1 on a scratch repository: a tree scan of a
+ * "committed then removed" secret reports no leaks, while the commit-range
+ * scan of the same branch reports one.
+ */
+describe(".github/workflows/secret-scan.yml — tree AND commit range (#238)", () => {
+  const workflow = fs.readFileSync(
+    path.join(ROOT, ".github", "workflows", "secret-scan.yml"),
+    "utf8",
+  );
+  const PINNED_IMAGE =
+    "ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f";
+
+  it("keeps the existing tree scan", () => {
+    expect(workflow).toContain("--source=/repo");
+    expect(workflow).toContain("--no-git");
+  });
+
+  it("adds a commit-range scan over the PR's base..head", () => {
+    expect(workflow).toContain("git /repo \\");
+    expect(workflow).toContain(
+      "RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}",
+    );
+    expect(workflow).toContain('--log-opts="--no-merges $RANGE"');
+    // Only meaningful on a pull request — a push to main has no such range.
+    expect(workflow).toMatch(/id: gitleaks_history\n\s+if: github\.event_name == 'pull_request'/);
+  });
+
+  it("checks out full history so both ends of the range exist", () => {
+    expect(workflow).toMatch(
+      /actions\/checkout@[0-9a-f]{40}[^\n]*\n(?:[^\n]*\n)*?\s+fetch-depth: 0\n/,
+    );
+  });
+
+  it("runs BOTH scans on the same pinned scanner and the same config", () => {
+    expect(workflow.split(PINNED_IMAGE).length - 1).toBe(2);
+    // The shared config is what keeps the fenced allowlists (e.g. the core
+    // migration filenames, review #414) working for the history scan too.
+    expect(workflow.split("--config=/repo/.gitleaks.toml").length - 1).toBe(2);
+    expect(workflow.split("--redact").length - 1).toBe(2);
+  });
+
+  it("fails the job when EITHER scan finds something", () => {
+    expect(workflow).toContain(
+      "if: steps.gitleaks.outcome == 'failure' || steps.gitleaks_history.outcome == 'failure'",
+    );
+  });
+});

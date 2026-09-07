@@ -79,6 +79,33 @@ export function isRegistrationOrgPermitted(
   return permitted.has(org.slug.toLowerCase()) || permitted.has(org.id.toLowerCase());
 }
 
+/**
+ * RFC 7592 (Dynamic Client Registration MANAGEMENT) is deliberately NOT
+ * supported — review #206, decided rather than overlooked:
+ *
+ *   - The management API is authorized by a `registration_access_token`: a
+ *     long-lived bearer, handed to an unauthenticated registrant, that can
+ *     read and DELETE the client. Every other credential in this app is
+ *     stored as a SHA-256 hash on its own row with a status and a revoke
+ *     path; giving this one the same treatment needs a column, i.e. a core
+ *     migration — an operator gate — for a capability nobody has asked for.
+ *   - The lifecycle it would provide already exists, gated on an admin:
+ *     approve / set scopes / revoke in the Agents console (§12) and
+ *     `POST /api/v1/admin/oauth-clients/{id}/rotate-secret` for rotation.
+ *     A self-registered agent is scopeless and (in `approval` mode) inert
+ *     until an admin acts, so self-service revocation buys little and
+ *     self-service *mutation* would hand an unapproved registrant a write
+ *     path into the tenant.
+ *
+ * How this is ADVERTISED: RFC 7591 §3.2.1 makes both management members
+ * optional, and RFC 7592 §1 keys the whole API on their presence — so a
+ * response that omits `registration_access_token` and
+ * `registration_client_uri` tells a compliant client, in the protocol's own
+ * terms, that there is no management endpoint to call. {@link
+ * buildRegistrationResponse} therefore omits them on purpose (pinned by
+ * tests/unit/mcp-registration.test.ts), and no `registration_endpoint`
+ * management URI is published in the discovery metadata.
+ */
 export interface RegistrationResponse {
   client_id: string;
   client_secret: string;

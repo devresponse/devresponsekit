@@ -41,6 +41,37 @@ describe("MCP registration (pure)", () => {
     expect(r.token_endpoint_auth_method).toBe("client_secret_post");
     expect(r.client_secret_expires_at).toBe(0);
   });
+
+  /**
+   * RFC 7592 registration management is deliberately NOT offered (review
+   * #206). RFC 7591 §3.2.1 makes both management members optional and RFC
+   * 7592 §1 keys the whole API on their presence, so OMITTING them is how a
+   * server says "no management endpoint" in the protocol's own terms. This
+   * pins the decision: adding either member would advertise an API that does
+   * not exist (and, for the access token, a long-lived unhashed bearer handed
+   * to an unauthenticated registrant). Lifecycle stays admin-side — approve /
+   * scope / revoke in the Agents console, rotate via the v1 admin route.
+   */
+  it("advertises NO RFC 7592 management API (deliberate — review #206)", () => {
+    const r = buildRegistrationResponse({
+      clientId: "drkc_x",
+      clientSecret: "drkcsec_y",
+      clientName: "My Agent",
+      issuedAt: 1_700_000_000,
+    });
+    expect(r).not.toHaveProperty("registration_access_token");
+    expect(r).not.toHaveProperty("registration_client_uri");
+    expect(Object.keys(r).sort()).toEqual([
+      "client_id",
+      "client_id_issued_at",
+      "client_name",
+      "client_secret",
+      "client_secret_expires_at",
+      "grant_types",
+      "scope",
+      "token_endpoint_auth_method",
+    ]);
+  });
 });
 
 /**

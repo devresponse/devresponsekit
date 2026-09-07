@@ -2486,7 +2486,9 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             "Requires `admin.clients.manage`. Scopes are validated against the caller's own " +
             "authority (permissions, and for a bearer caller its own scopes) — over-granting is " +
             "`422 invalid_scope` listing `ungrantableScopes`. A granted scope only takes effect " +
-            "where the service account also holds the matching permission.",
+            "where the service account also holds the matching permission. A revoked or " +
+            "reaper-expired agent is terminal: the scopes cannot be changed and the request is " +
+            "`409 agent_inactive` (review #56).",
           parameters: [idParam()],
           requestBody: { required: true, ...json(ref("UpdateMcpAgentScopesRequest")) },
           responses: {
@@ -2512,7 +2514,8 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           summary: "Approve a pending agent (activate its service account)",
           description:
             "Requires `admin.clients.manage`. Idempotent — an already-active agent answers " +
-            "`{ ok: true, activated: false }`.",
+            "`{ ok: true, activated: false }`. A revoked or reaper-expired agent cannot be " +
+            "brought back: the request is `409 agent_inactive` (review #56).",
           parameters: [idParam()],
           responses: { "200": okResp("McpAgentApproved"), ...writeErrors() },
         },

@@ -170,6 +170,59 @@ describe("POST /api/v1/users/[id]/status", () => {
     expect((await POST(req(USER, { ifMatch: 'W/"stale"' }), ctx(USER))).status).toBe(412);
   });
 
+  /**
+   * Optimistic concurrency wiring (review #44). The stale-tag case above is
+   * only the fast path — it rejects a tag that was already stale at READ time
+   * and would still pass with the compare-and-swap removed. What must be
+   * pinned here is the route's own decision: does a concrete `If-Match` reach
+   * the mutation as `expectedUpdatedAt` (so the UPDATE carries it in its own
+   * WHERE), and does a lost CAS surface as `412` rather than `404`? Without
+   * these, deleting `expectedUpdatedAt` from the `performAdminStatusChange`
+   * call — which fully reverts the fix and restores the check-then-act race —
+   * left the whole suite green; the DB test exercises the core directly and
+   * never goes through the route.
+   */
+  describe("If-Match compare-and-swap wiring (review #44)", () => {
+    const currentTag = `W/"${UPDATED.toISOString()}"`;
+
+    function statusChangeArg() {
+      const [first] = performAdminStatusChange.mock.calls;
+      expect(first).toBeDefined();
+      return (first as [{ expectedUpdatedAt?: Date }])[0];
+    }
+
+    it("hands the pinned version down to the mutation as expectedUpdatedAt", async () => {
+      requireApiPermission.mockResolvedValue(superadmin());
+      const res = await POST(req(USER, { ifMatch: currentTag }), ctx(USER));
+      expect(res.status).toBe(200);
+      expect(statusChangeArg().expectedUpdatedAt).toEqual(UPDATED);
+    });
+
+    it("412 + precondition_failed when the mutation's CAS loses the race", async () => {
+      // Two writers pinned the same tag: both cleared the fast path, the other
+      // one committed first, so our UPDATE matched zero rows.
+      performAdminStatusChange.mockResolvedValue({ ok: false, error: "precondition_failed" });
+      requireApiPermission.mockResolvedValue(superadmin());
+      const res = await POST(req(USER, { ifMatch: currentTag }), ctx(USER));
+      expect(res.status).toBe(412);
+      expect(await res.json()).toEqual(
+        expect.objectContaining({ code: "precondition_failed", requestId: "r1" }),
+      );
+    });
+
+    it("does NOT pin a version for `If-Match: *` (last-write-wins preserved)", async () => {
+      requireApiPermission.mockResolvedValue(superadmin());
+      expect((await POST(req(USER, { ifMatch: "*" }), ctx(USER))).status).toBe(200);
+      expect(statusChangeArg().expectedUpdatedAt).toBeUndefined();
+    });
+
+    it("does NOT pin a version when no If-Match header is sent", async () => {
+      requireApiPermission.mockResolvedValue(superadmin());
+      expect((await POST(req(USER), ctx(USER))).status).toBe(200);
+      expect(statusChangeArg().expectedUpdatedAt).toBeUndefined();
+    });
+  });
+
   it("200 for an ORG ADMIN acting on an in-org user", async () => {
     requireApiPermission.mockResolvedValue(orgAdmin());
     const res = await POST(req(USER), ctx(USER));

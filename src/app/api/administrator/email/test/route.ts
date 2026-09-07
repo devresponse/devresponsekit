@@ -70,6 +70,12 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  // `failed` = the provider rejected the send permanently (a non-retryable
+  // 4xx — review #219). That is the outcome this endpoint exists to surface:
+  // a misconfigured sending domain or API key. `pending` means the attempt
+  // failed transiently and the outbox worker owns it from here, so it is not
+  // an error of this request. (Before #219 `failed` was unreachable and these
+  // branches were dead — review #235.)
   await auditEvent({
     eventType: "admin.email.test_sent",
     outcome: result.status === "failed" ? "error" : "success",

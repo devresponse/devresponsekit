@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as SendModule from "@/lib/email/send.server";
+import type * as ProvidersModule from "@/lib/email/providers.server";
 
 /**
  * Unit tests for the outbox-first sender (specs.md §35). The DB and
@@ -62,9 +63,12 @@ vi.mock("@/db/database", () => ({
   },
 }));
 
-vi.mock("@/lib/email/providers.server", () => ({
-  getConfiguredEmailProvider: () => state.provider,
-}));
+// Only the provider LOOKUP is stubbed; the real failure classification
+// (review #219) decides retryable vs terminal below.
+vi.mock("@/lib/email/providers.server", async () => {
+  const actual = await vi.importActual<typeof ProvidersModule>("@/lib/email/providers.server");
+  return { ...actual, getConfiguredEmailProvider: () => state.provider };
+});
 
 vi.mock("@/lib/env", () => ({
   getServerEnv: () => ({ EMAIL_FROM: "Test <no-reply@test.local>" }),
@@ -363,5 +367,158 @@ describe("sendAppEmail — secret redaction (review #21)", () => {
     // A `logged` row is never delivered by the worker, but the DB-only copy
     // is still the developer's/e2e's only record of the real link.
     expect(row.delivery_payload).toContain("PlainInviteToken");
+  });
+});
+
+/**
+ * review #79: subjects interpolate admin- and user-controlled values (an org
+ * name, an inviter's display name, a profile name). A `\r\n` inside one is
+ * the classic header-injection primitive — it terminates `Subject:` and lets
+ * the rest of the value dictate its own headers or start the body.
+ */
+describe("sendAppEmail — header-bound values are single-line (review #79)", () => {
+  const CRLF_NAME = "Ada\r\nBcc: attacker@evil.example\r\nContent-Type: text/html\r\n\r\n<h1>pwned";
+
+  beforeEach(() => {
+    state.templateRows = [
+      {
+        locale: "en",
+        subject: "Invitation from {{name}}",
+        body_html: "<p>{{name}}</p>",
+        body_text: null,
+      },
+    ];
+  });
+
+  it("strips CR/LF from the rendered subject before it is stored OR delivered", async () => {
+    const deliver = vi.fn().mockResolvedValue({ providerMessageId: "m" });
+    state.provider = { id: "resend", deliver };
+
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: CRLF_NAME, resetUrl: "http://x" },
+    });
+
+    const stored = String(state.insertedValues[0]!.subject);
+    const sentSubject = (deliver.mock.calls[0]![0] as { subject: string }).subject;
+    for (const subject of [stored, sentSubject]) {
+      expect(subject).not.toContain("\r");
+      expect(subject).not.toContain("\n");
+      // Collapsed onto one line — the injected header text is now inert body
+      // text of the subject, not a header of its own.
+      expect(subject.startsWith("Invitation from Ada Bcc:")).toBe(true);
+    }
+    // Row and delivery agree, so the outbox is an honest record of what went out.
+    expect(stored).toBe(sentSubject);
+  });
+
+  it("strips every other control character and the Unicode line separators", async () => {
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: "A\u0000B\tC\u2028D\u2029E\u001bF", resetUrl: "http://x" },
+    });
+    const subject = String(state.insertedValues[0]!.subject);
+    expect(subject).toBe("Invitation from A B C D E F");
+    expect(/[\p{Cc}\u2028\u2029]/u.test(subject)).toBe(false);
+  });
+
+  it("caps a runaway subject instead of emitting an over-long header line", async () => {
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: "x".repeat(5000), resetUrl: "http://x" },
+    });
+    expect(String(state.insertedValues[0]!.subject).length).toBeLessThanOrEqual(901);
+  });
+
+  it("normalises the address fields too", async () => {
+    const deliver = vi.fn().mockResolvedValue({ providerMessageId: "m" });
+    state.provider = { id: "resend", deliver };
+    await sendAppEmail({
+      to: "user@example.com\r\nBcc: attacker@evil.example",
+      templateKey: "password_reset",
+      variables: { name: "Ada", resetUrl: "http://x" },
+    });
+    const to = (deliver.mock.calls[0]![0] as { to: string }).to;
+    expect(to).not.toMatch(/[\r\n]/);
+    expect(String(state.insertedValues[0]!.to_email)).toBe(to);
+  });
+
+  it("leaves an ordinary subject untouched", async () => {
+    await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: "Ada Lovelace", resetUrl: "http://x" },
+    });
+    expect(state.insertedValues[0]!.subject).toBe("Invitation from Ada Lovelace");
+  });
+});
+
+/**
+ * review #219 / #235: a permanent provider rejection is terminal on attempt 1
+ * — and that is what makes `SendAppEmailResult.status === "failed"` reachable
+ * at all. Before this the inline path could only ever return `pending`, so the
+ * `failed` member (and the admin test route's `=== "failed"` branches) were
+ * dead code.
+ */
+describe("sendAppEmail — permanent rejections are terminal (review #219 / #235)", () => {
+  it("returns `failed` and marks the row terminal on a non-retryable 4xx", async () => {
+    const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+    state.provider = {
+      id: "resend",
+      deliver: vi
+        .fn()
+        .mockRejectedValue(new EmailDeliveryError("resend", 403, "domain not verified")),
+    };
+
+    const result = await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "test_email",
+      variables: { appName: "App", sentBy: "ba-1" },
+    });
+
+    expect(result.status).toBe("failed");
+    const upd = state.updateSets[0]!;
+    expect(upd).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      next_attempt_at: null,
+      delivery_payload: null,
+      error: "resend 403: domain not verified",
+    });
+  });
+
+  it("drops the unredacted payload when a token-bearing send fails permanently", async () => {
+    const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+    state.provider = {
+      id: "resend",
+      deliver: vi.fn().mockRejectedValue(new EmailDeliveryError("resend", 422, "invalid `to`")),
+    };
+    const result = await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "password_reset",
+      variables: { name: "Ada", resetUrl: "http://x/reset-password/LiveTok?callbackURL=%2F" },
+    });
+    expect(result.status).toBe("failed");
+    expect(state.insertedValues[0]!.delivery_payload).toContain("LiveTok");
+    expect(state.updateSets[0]!.delivery_payload).toBeNull();
+  });
+
+  it("still keeps a transient 5xx retryable (`pending`, payload preserved)", async () => {
+    const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+    state.provider = {
+      id: "resend",
+      deliver: vi.fn().mockRejectedValue(new EmailDeliveryError("resend", 503, "unavailable")),
+    };
+    const result = await sendAppEmail({
+      to: "user@example.com",
+      templateKey: "test_email",
+      variables: { appName: "App", sentBy: "ba-1" },
+    });
+    expect(result.status).toBe("pending");
+    expect(state.updateSets[0]!.status).toBeUndefined();
+    expect(state.updateSets[0]!.next_attempt_at).toBeInstanceOf(Date);
   });
 });

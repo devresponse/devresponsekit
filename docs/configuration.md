@@ -128,7 +128,7 @@ Paste the printed JSON as `SSO_HANDOFF_PRIVATE_KEY`. Only the public half is eve
 
 | Variable | Default | Controls |
 | --- | --- | --- |
-| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. |
+| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. It is also read (weakly — see below) when deciding whether to reuse an inbound `x-request-id` (review #99/#224). |
 | `ADMIN_EXPORT_MAX_ROWS` | 100000 | Hard row cap for a single CSV export; the file is marked truncated past the cap. |
 
 **One client-IP derivation.** The app computes the trusted client IP with the
@@ -155,6 +155,29 @@ Auth trusts a single-value header verbatim, which lets a client rotate buckets
 where the edge sets no chain. When no IP can be trusted, requests share one
 bounded bucket (`anon` in the app, `no-trusted-ip` in Better Auth) — fail closed,
 never fail open.
+
+**The correlation id reads the same header — with far less to show for it.** An
+inbound `x-request-id` is honoured only when the value is a UUID **and** the
+forwarded chain shows at least `TRUSTED_PROXY_COUNT` entries; otherwise the server
+mints its own (`src/lib/request-id.ts`, review #99/#224). Be precise about what
+that second condition is worth, because it is **not** a provenance check:
+
+- the UUID check is the one that matters — it keeps control characters, markup and
+  multi-kilobyte blobs out of log lines, Sentry tags and `app_audit_events`;
+- `X-Forwarded-For` is client-supplied, so **any caller satisfies the chain
+  condition by sending one extra header**, and behind a real edge (Vercel, any LB)
+  it is true for 100% of requests. It rejects only callers that send no chain at
+  all — an unmodified direct request to a non-proxied origin, and local
+  development. It stops nobody who is trying;
+- consequently a **request id is a correlation aid, never an identity**: a client
+  can pin or collide the "Support ID" that appears in logs, Sentry and
+  `app_audit_events.request_id` (a non-unique column). Never authorize,
+  rate-limit, or de-duplicate on one, and when investigating treat two rows
+  sharing an id as a hint, not a fact;
+- a front door that tags requests does keep end-to-end correlation, as long as it
+  also sets `X-Forwarded-For`. Where forged ids would be unacceptable, the id must
+  be authenticated at the edge (a signed/secret header the origin verifies) or
+  minted server-side unconditionally — neither is implemented here.
 
 Requirements on the edge in front of the app:
 

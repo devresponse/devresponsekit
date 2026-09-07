@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "@/db/database";
 import { getServerEnv } from "@/lib/env";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
-import { getConfiguredEmailProvider } from "./providers.server";
+import { getConfiguredEmailProvider, isRetryableDeliveryError } from "./providers.server";
 import { backoffDelayMs, summarizeDeliveryError } from "./outbox-worker.server";
 import { redactRenderedEmail } from "./outbox-secrets";
 import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
@@ -15,9 +15,12 @@ import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
  * provider configuration or delivery outcome:
  *
  *   - provider configured, delivery ok     → `sent` (+ provider id)
- *   - provider configured, delivery threw  → `pending`, scheduled for retry
- *     (the outbox worker re-attempts with backoff; → `failed` only after the
+ *   - provider configured, transient error → `pending`, scheduled for retry
+ *     (the outbox worker re-attempts with backoff; → `failed` after the
  *     attempt cap, see outbox-worker.server.ts)
+ *   - provider configured, PERMANENT 4xx   → `failed` immediately — retrying
+ *     an invalid recipient / unverified sending domain cannot help
+ *     (review #219, and what makes `failed` reachable here — review #235)
  *   - no provider configured               → `logged` (recorded only)
  *
  * Delivery failures are recorded, never thrown: a password-reset
@@ -49,8 +52,48 @@ export interface SendAppEmailInput {
 
 export interface SendAppEmailResult {
   outboxId: string;
-  /** `pending` = the inline attempt failed but the row is queued for retry. */
+  /**
+   * - `sent`    — the provider accepted it inline.
+   * - `logged`  — no provider configured; recorded only.
+   * - `pending` — the inline attempt failed TRANSIENTLY; queued for retry.
+   * - `failed`  — the provider rejected it permanently (a non-retryable 4xx):
+   *   terminal, no retry. Reachable since review #219 — before that the
+   *   inline path could only ever return `pending`, which made this member
+   *   (and the test route's `=== "failed"` branches) dead code (review #235).
+   */
   status: "sent" | "failed" | "logged" | "pending";
+}
+
+/**
+ * Bound on a rendered `Subject:` (review #79). RFC 5322 caps an unfolded
+ * header line at 998 octets; a subject longer than that is a bug or an
+ * attack, not a subject.
+ */
+const SUBJECT_MAX_LEN = 900;
+
+/**
+ * Makes a rendered value safe to hand to a mail header (review #79).
+ *
+ * Subjects interpolate ADMIN- and USER-controlled values — an organization
+ * name, an inviter's display name, a recipient's own profile name — none of
+ * which are constrained to a single line. A `\r\n` inside one is the classic
+ * header-injection primitive: it terminates `Subject:` and lets the rest of
+ * the value dictate its own headers (`Bcc:`, `Content-Type:`) or start the
+ * body. Our two providers happen to encode the field (Resend takes JSON,
+ * Mailgun form-encodes), so this is defence in depth today — and exactly the
+ * kind of defence that must not depend on the transport a future provider
+ * chooses. U+2028/U+2029 are included because they are line terminators to
+ * some MIME encoders while `\p{Cc}` does not cover them.
+ *
+ * Same normalisation as `summarizeDeliveryError`: control characters become
+ * spaces, runs of whitespace collapse, ends trim, length is capped.
+ */
+export function sanitizeHeaderValue(value: string): string {
+  const oneLine = value
+    .replace(/[\p{Cc}\u2028\u2029]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return oneLine.length > SUBJECT_MAX_LEN ? `${oneLine.slice(0, SUBJECT_MAX_LEN)}…` : oneLine;
 }
 
 interface ResolvedTemplate {
@@ -128,10 +171,22 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
   const organizationId = await resolveOrganizationId(input);
   const template = await resolveTemplate(input.templateKey, locale);
 
+  // review #79: the address fields are header-bound too. Callers reach here
+  // with a zod-validated address or a Better Auth `user.email`, so this is a
+  // no-op for every real recipient — but "the caller validated it" is not a
+  // property this module can check, and one unvalidated caller would be a
+  // header injection. Normalise here, once, for the row AND the delivery.
+  const toEmail = sanitizeHeaderValue(input.to);
+  const fromEmail = sanitizeHeaderValue(env.EMAIL_FROM);
+
   // The deliverable: what the provider receives. Kept in memory for the
   // inline attempt below; never stored in an admin-readable column.
   const rendered = {
-    subject: renderEmailTemplate(template.subject, input.variables, "text"),
+    // review #79: the subject is the one rendered field that becomes a mail
+    // HEADER, so it is normalised to a single line here — before it is stored
+    // AND before it is handed to the provider, so the outbox row and the
+    // delivered message always agree.
+    subject: sanitizeHeaderValue(renderEmailTemplate(template.subject, input.variables, "text")),
     html: renderEmailTemplate(template.bodyHtml, input.variables, "html"),
     text: template.bodyText
       ? renderEmailTemplate(template.bodyText, input.variables, "text")
@@ -152,8 +207,8 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
     .values({
       organization_id: organizationId,
       template_key: input.templateKey,
-      to_email: input.to,
-      from_email: env.EMAIL_FROM,
+      to_email: toEmail,
+      from_email: fromEmail,
       subject: redaction.stored.subject,
       body_html: redaction.stored.html,
       body_text: redaction.stored.text,
@@ -173,8 +228,8 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
 
   try {
     const result = await provider.deliver({
-      to: input.to,
-      from: env.EMAIL_FROM,
+      to: toEmail,
+      from: fromEmail,
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text ?? undefined,
@@ -199,22 +254,33 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
       .execute();
     return { outboxId: inserted.id, status: "sent" };
   } catch (err) {
-    // Attempt #1 failed. Leave the row RETRYABLE (still `pending`, scheduled
-    // for the next attempt) rather than terminally `failed` — the outbox
-    // worker re-attempts with backoff until it succeeds or hits the cap.
+    // Attempt #1 failed. A TRANSIENT failure leaves the row RETRYABLE (still
+    // `pending`, scheduled for the next attempt) — the outbox worker
+    // re-attempts with backoff until it succeeds or hits the cap. A PERMANENT
+    // provider rejection (non-retryable 4xx: invalid recipient, unverified
+    // sending domain, revoked key) is terminal right here (review #219):
+    // four more identical requests over the following days cannot change the
+    // answer, and a `failed` row surfaces the misconfiguration in the admin
+    // Email workspace instead of hiding it behind `pending`. This is also
+    // what makes `status: "failed"` reachable at all (review #235).
+    const terminal = !isRetryableDeliveryError(err);
     const now = new Date();
     await db
       .updateTable("app_outbox")
       .set({
+        ...(terminal ? { status: "failed" as const } : {}),
         attempts: 1,
         last_attempt_at: now,
-        next_attempt_at: new Date(now.getTime() + backoffDelayMs(1)),
+        next_attempt_at: terminal ? null : new Date(now.getTime() + backoffDelayMs(1)),
         // Short, sanitized reason — never the provider's raw response body
         // (P3-8); `app_outbox.error` is surfaced in the admin Email workspace.
         error: summarizeDeliveryError(err),
+        // Terminal: nothing will ever deliver this row, so the unredacted
+        // copy must not outlive it (#21).
+        ...(terminal ? { delivery_payload: null } : {}),
       })
       .where("id", "=", inserted.id)
       .execute();
-    return { outboxId: inserted.id, status: "pending" };
+    return { outboxId: inserted.id, status: terminal ? "failed" : "pending" };
   }
 }

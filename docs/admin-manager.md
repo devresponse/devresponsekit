@@ -115,8 +115,9 @@ ready-to-return `NextResponse`). Callers branch with `isAdminPermissionDenial`.
 The pipeline, in order:
 
 1. **Mint / adopt a request id.** `getOrCreateRequestId` honours an inbound
-   `x-request-id` or generates one. It flows onto the response header and every
-   audit row this request writes (§5.1, §12).
+   `x-request-id` only when it came through a trusted proxy hop and is a UUID
+   (review #99/#224); otherwise it generates one. It flows onto the response
+   header and every audit row this request writes (§5.1, §12).
 2. **Origin / CSRF guard.** For unsafe methods on **ambient (cookie)**
    credentials, `checkTrustedOrigin` requires a trusted `Origin`/`Referer`.
    Bearer callers skip this (a token cannot be attached by an attacker's page).
@@ -616,6 +617,25 @@ a grid, with per-row drill-in to the event metadata.
 | `POST /email/test` | `admin.email.manage` | Send a test email through the outbox pipeline; `admin.email.test_sent` |
 
 **Outbox bodies never carry a live credential (review #21).** Password-reset, email-verification and invitation emails embed a one-time link. `sendAppEmail` stores a **redacted** rendering — the `/reset-password/<token>` path segment and every `token=` query value replaced by `[redacted]` — in `subject` / `body_html` / `body_text` / `variables`, so an org admin holding `admin.email.read` can inspect what was sent to a co-member (a single-org superadmin included) without being able to mint and lift that user's reset link. The real message is delivered from memory on the inline attempt; for a retry it lives only in the DB-only `app_outbox.delivery_payload` column (never selected by any administrator route, nulled once the row is `sent` / `failed`). Consequence for development with no `EMAIL_PROVIDER`: the reset / invite link is no longer readable in the Email workspace — read `delivery_payload` from the database instead (see [Developer onboarding §9.4](./developer-onboarding.md#94-email-in-dev)).
+
+**Why a row can be `failed` (reading the Email workspace).** Three distinct
+causes, all visible in the row's `error`:
+
+- **`token_expired: …` (review #90)** — the row carried a one-time link whose
+  token had already expired when the retry came due, so it was failed **without**
+  a delivery attempt. Delivering it would have handed the recipient a link that
+  cannot work. The tokens are short-lived (1h for password reset / email
+  verification, 7 days for an invitation) while the serverless drain runs **daily**
+  (`vercel.json`), so an inline failure on those templates usually ends here. The
+  remedy is the user's own "forgot password" / "resend verification", or the
+  invitation **Resend** action — each mints a live token; nothing is re-issued
+  automatically by the cron.
+- **A permanent provider rejection (review #219)** — a non-retryable 4xx such as
+  `422` invalid recipient or `403` unverified sending domain. Terminal on the
+  first attempt, because retrying an identical request cannot change the answer.
+  Treat a burst of these as a delivery-configuration alarm.
+- **Retry budget exhausted** — transient failures (`429`, 5xx, timeouts) up to
+  `OUTBOX_MAX_ATTEMPTS`.
 
 ### 8.13 MCP agents
 

@@ -214,6 +214,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // this email; the DB holds the token's hash.
   await sendInvitationEmail({
     to: email,
+    // ADR-0001 / review #220: the outbox row belongs to the inviting org, so
+    // its admins can see the invitation in their own Email workspace.
+    organizationId: org.id,
     organizationName: org.name,
     inviterAppUserId: guard.access.appUserId,
     plaintextToken: created.plaintextToken,

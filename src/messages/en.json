@@ -1132,6 +1132,7 @@
         "result": {
           "sent": "Test email sent.",
           "failed": "Delivery failed — see the outbox row.",
+          "pending": "Delivery did not go through — queued for retry; see the outbox row.",
           "logged": "Recorded in the outbox (no delivery provider configured)."
         }
       },

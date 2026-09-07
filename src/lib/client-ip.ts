@@ -21,6 +21,39 @@ function trustedProxyCount(): number {
   return intFromEnv("TRUSTED_PROXY_COUNT", 1);
 }
 
+/**
+ * Whether the forwarded chain is at least `TRUSTED_PROXY_COUNT` entries long.
+ *
+ * READ THE NAME LITERALLY: this counts entries in `X-Forwarded-For`, a header
+ * the CLIENT sends. It is **not** a provenance proof and must never be treated
+ * as one (review #224):
+ *
+ *   - any direct caller satisfies it by adding one header
+ *     (`x-forwarded-for: 1.2.3.4`), because nothing here distinguishes an
+ *     entry a proxy appended from one the client typed;
+ *   - behind a real edge (Vercel, any LB that sets the header) it is
+ *     unconditionally TRUE, so it stops discriminating at all.
+ *
+ * What it therefore rules out is exactly one population: callers that send no
+ * forwarded chain — i.e. an unmodified direct request to a non-proxied origin
+ * or local development. That is all. The only caller is the request-id
+ * normaliser ({@link import("@/lib/request-id").normalizeInboundRequestId}),
+ * where the load-bearing check is the UUID format one and this is a weak
+ * secondary bar over a value that is a correlation aid only. Nothing may make
+ * a security decision on it, and no new caller should adopt it as one.
+ *
+ * (Contrast {@link getClientIp}, which uses `TRUSTED_PROXY_COUNT` the sound
+ * way: it counts hops from the RIGHT to pick the entry the app's own edge
+ * wrote, which a client cannot displace.)
+ */
+export function hasForwardedHops(xForwardedFor: string | null | undefined): boolean {
+  const hops = (xForwardedFor ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean).length;
+  return hops >= trustedProxyCount();
+}
+
 /** Returns the best-effort real client IP, or null when none can be trusted. */
 export function getClientIp(headers: Headers): string | null {
   const xff = headers.get("x-forwarded-for");

@@ -49,10 +49,72 @@ export interface EmailProvider {
  * provider connection would hold the request open until the platform's own
  * timeout. `AbortSignal.timeout` rejects the fetch; the caller leaves the
  * outbox row `pending` with a backoff `next_attempt_at`, and `drainOutbox`
- * (outbox-worker.server.ts) re-attempts it — a row becomes terminally
- * `failed` only after OUTBOX_MAX_ATTEMPTS (review #82).
+ * (outbox-worker.server.ts) re-attempts it — a TIMED-OUT row becomes
+ * terminally `failed` only after OUTBOX_MAX_ATTEMPTS (review #82); a row the
+ * provider rejected permanently fails on attempt 1 ({@link EmailDeliveryError},
+ * review #219).
  */
 const PROVIDER_TIMEOUT_MS = 10_000;
+
+/**
+ * A provider rejection carrying its HTTP status and a retry verdict
+ * (review #219).
+ *
+ * Before this, EVERY delivery failure was retried up to
+ * `OUTBOX_MAX_ATTEMPTS` — and because the outbox drain runs on a DAILY cron
+ * (`vercel.json`), a permanent rejection like "422 invalid recipient" or
+ * "403 domain not verified" burned four more days of attempts against an
+ * answer that will never change, kept the (unredacted) `delivery_payload`
+ * alive for that whole window, and hid a real configuration error behind a
+ * row that still read `pending`.
+ */
+export class EmailDeliveryError extends Error {
+  readonly provider: string;
+  readonly status: number;
+  readonly retryable: boolean;
+
+  constructor(provider: string, status: number, body: string) {
+    super(`${provider} ${status}: ${body}`);
+    this.name = "EmailDeliveryError";
+    this.provider = provider;
+    this.status = status;
+    this.retryable = isRetryableDeliveryStatus(status);
+  }
+}
+
+/**
+ * Whether an HTTP status from a provider is worth re-attempting.
+ *
+ * Retryable — the same request may succeed later:
+ *   - 5xx (provider fault), 408 request timeout, 425 too early
+ *   - 409 conflict (both Resend and Mailgun use it for transient
+ *     idempotency-key races)
+ *   - 429 rate limited
+ *
+ * Terminal — everything else in the 4xx range. A malformed payload (400/422),
+ * a bad or revoked API key (401), an unverified sending domain or suppressed
+ * recipient (403), a wrong endpoint/domain (404), a body over the provider's
+ * cap (413) and an unsupported media type (415) all describe a request that
+ * is wrong, not a provider that is busy: re-sending it byte-for-byte four
+ * more times cannot change the answer. Statuses below 400 never reach here
+ * (`res.ok` covers 2xx; a redirect is followed by `fetch`), and an unknown
+ * status is treated as retryable so a novel provider response fails safe
+ * toward delivery rather than toward dropping mail.
+ */
+export function isRetryableDeliveryStatus(status: number): boolean {
+  if (status === 408 || status === 409 || status === 425 || status === 429) return true;
+  return !(status >= 400 && status < 500);
+}
+
+/**
+ * Whether a thrown delivery error should be re-attempted. Anything that is
+ * not a classified {@link EmailDeliveryError} — a network reset, a DNS
+ * failure, the `AbortSignal.timeout` above, a JSON parse error — is transient
+ * by nature and stays retryable (review #219).
+ */
+export function isRetryableDeliveryError(err: unknown): boolean {
+  return err instanceof EmailDeliveryError ? err.retryable : true;
+}
 
 /** https://resend.com/docs/api-reference/emails/send-email */
 function createResendProvider(apiKey: string): EmailProvider {
@@ -78,7 +140,7 @@ function createResendProvider(apiKey: string): EmailProvider {
         }),
       });
       if (!res.ok) {
-        throw new Error(`resend ${res.status}: ${truncateBody(await res.text())}`);
+        throw new EmailDeliveryError("resend", res.status, truncateBody(await res.text()));
       }
       const body = (await res.json()) as { id?: string };
       return { providerMessageId: body.id };
@@ -112,7 +174,7 @@ function createMailgunProvider(apiKey: string, domain: string, baseUrl: string):
         body: form.toString(),
       });
       if (!res.ok) {
-        throw new Error(`mailgun ${res.status}: ${truncateBody(await res.text())}`);
+        throw new EmailDeliveryError("mailgun", res.status, truncateBody(await res.text()));
       }
       const body = (await res.json()) as { id?: string };
       return { providerMessageId: body.id };

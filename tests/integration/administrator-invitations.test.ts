@@ -302,6 +302,10 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     );
     expect(sendInvitationEmailMock).toHaveBeenCalledWith({
       to: "ada@example.com",
+      // ADR-0001 / review #220: the outbox row is attributed to the inviting
+      // org, so its admins can see the invitation in their own Email workspace
+      // (the accept token in that row is redacted — review #21).
+      organizationId: ORG_ID,
       organizationName: "Test Org",
       inviterAppUserId: "admin-app-user",
       plaintextToken: "tok-plain",
@@ -355,9 +359,18 @@ describe("POST .../invitations/:invitationId/resend", () => {
       invitationId: INVITATION_ID,
       organizationId: ORG_ID,
     });
-    expect(sendInvitationEmailMock).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "ada@example.com", plaintextToken: "tok-rotated" }),
-    );
+    // Pinned as an EXACT object, like the create case: TypeScript catches a
+    // DROPPED `organizationId` (the input type requires it) but not a WRONG
+    // value, and `app_outbox.organization_id` is exactly what
+    // GET /administrator/email/outbox filters on — a wrong id here surfaces a
+    // resent invitation inside another tenant's Email workspace (review #220).
+    expect(sendInvitationEmailMock).toHaveBeenCalledWith({
+      to: "ada@example.com",
+      organizationId: ORG_ID,
+      organizationName: "Test Org",
+      inviterAppUserId: "admin-app-user",
+      plaintextToken: "tok-rotated",
+    });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.organization.invitation_resent" }),
     );

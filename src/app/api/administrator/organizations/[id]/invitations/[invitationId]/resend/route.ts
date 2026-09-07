@@ -62,6 +62,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   await sendInvitationEmail({
     to: invitation.email,
+    // ADR-0001 / review #220: attribute the resend to the inviting org too.
+    organizationId: org.id,
     organizationName: org.name,
     inviterAppUserId: guard.access.appUserId,
     plaintextToken: rotated.plaintextToken,

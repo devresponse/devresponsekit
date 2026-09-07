@@ -3,6 +3,7 @@ import { logger } from "@/lib/observability/logger.server";
 import { rateLimitKey } from "@/lib/admin/rate-limit.server";
 import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
 import { clientIpKey } from "@/lib/client-ip";
+import { redactText, stripQuery } from "@/lib/observability/sentry-shared";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,16 @@ export const dynamic = "force-dynamic";
  * so it does the minimum work and leaks nothing — body size is capped, parse
  * failures are swallowed, individual fields are truncated, and it ALWAYS answers
  * `204` so a probe can't distinguish accepted from rejected input.
+ *
+ * Token hygiene (review #77): the URL-shaped fields a browser reports
+ * (`document-uri`, `blocked-uri`, `source-file`) name the page the user was on
+ * when the block fired — which for this app can be `/en/reset-password?token=…`,
+ * `/en/invite?token=…` or `/en/verify-email?token=…`. Logging them verbatim
+ * copies a live one-time credential into the log stream (and any aggregator),
+ * so each goes through {@link stripQuery} (query + fragment removed, a
+ * `/reset-password/<token>` path segment redacted) and {@link redactText}
+ * (emails, `drk_…` keys, JWTs) — the same scrubbers the Sentry pipeline
+ * applies, so both sinks share one redaction policy.
  *
  * Flood control (P2-5): the sink is attacker-influenced and potentially
  * high-volume, so beyond the body cap it (1) applies a coarse per-IP + global
@@ -63,6 +74,17 @@ function str(value: unknown): string | undefined {
   return value.length > MAX_FIELD_LEN ? `${value.slice(0, MAX_FIELD_LEN)}…[truncated]` : value;
 }
 
+/**
+ * A URL-shaped report field. Redaction runs BEFORE truncation (review #77) so
+ * a token sitting near the 2 KiB boundary cannot survive by being cut in half.
+ * The non-URL sentinels the CSP spec allows for `blocked-uri` (`inline`,
+ * `eval`, `data`) contain no `?`/`#` and pass through unchanged.
+ */
+function urlField(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return str(stripQuery(redactText(value)));
+}
+
 function num(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -70,11 +92,11 @@ function num(value: unknown): number | undefined {
 /** Legacy `application/csp-report` body (hyphenated keys). */
 function fromLegacy(report: Record<string, unknown>): NormalizedViolation {
   return {
-    documentUri: str(report["document-uri"]),
+    documentUri: urlField(report["document-uri"]),
     // `violated-directive` is the older name; prefer `effective-directive`.
     effectiveDirective: str(report["effective-directive"] ?? report["violated-directive"]),
-    blockedUri: str(report["blocked-uri"]),
-    sourceFile: str(report["source-file"]),
+    blockedUri: urlField(report["blocked-uri"]),
+    sourceFile: urlField(report["source-file"]),
     lineNumber: num(report["line-number"]),
     disposition: str(report["disposition"]),
   };
@@ -83,10 +105,10 @@ function fromLegacy(report: Record<string, unknown>): NormalizedViolation {
 /** Reporting API `application/reports+json` entry body (camelCase keys). */
 function fromReportingApi(body: Record<string, unknown>): NormalizedViolation {
   return {
-    documentUri: str(body["documentURL"]),
+    documentUri: urlField(body["documentURL"]),
     effectiveDirective: str(body["effectiveDirective"] ?? body["violatedDirective"]),
-    blockedUri: str(body["blockedURL"]),
-    sourceFile: str(body["sourceFile"]),
+    blockedUri: urlField(body["blockedURL"]),
+    sourceFile: urlField(body["sourceFile"]),
     lineNumber: num(body["lineNumber"]),
     disposition: str(body["disposition"]),
   };

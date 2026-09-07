@@ -154,12 +154,20 @@ export function redactText(value: string): string {
 }
 
 /**
- * Strips the query string from a URL (may carry tokens, emails, returnTo)
- * and redacts a reset-token path segment.
+ * Strips the query string AND fragment from a URL (either may carry tokens,
+ * emails, `returnTo`) and redacts a reset-token path segment.
+ *
+ * Exported for the CSP violation sink (review #77): a browser reports
+ * `document-uri` verbatim, so a violation raised while the user is on
+ * `/en/reset-password?token=…` or `/en/invite?token=…` would otherwise write
+ * that one-time token into the log stream. The fragment is cut for the same
+ * reason `url.fragment` is dropped from span data — an implicit-flow token or
+ * a `returnTo` can ride there, and a `document-uri` (unlike a server-side
+ * `request.url`) really can carry one.
  */
-function stripQuery(url: string): string {
-  const q = url.indexOf("?");
-  const base = q === -1 ? url : url.slice(0, q);
+export function stripQuery(url: string): string {
+  const cut = url.search(/[?#]/);
+  const base = cut === -1 ? url : url.slice(0, cut);
   return base.replace(RESET_PATH_TOKEN_RE, "$1[redacted-token]");
 }
 

@@ -30,6 +30,13 @@ const accessGetter = vi.fn();
 const auditMock = vi.fn();
 const dbFirst = vi.fn();
 let dbExecuteResult: unknown[] = [];
+/**
+ * Every `.where(...)` argument list the route built, in order. The proxy chain
+ * below is shape-only (it does not execute SQL), so this is how a test proves
+ * a route actually APPLIED its tenant predicate rather than merely returning
+ * 200 — see the outbox suite (review #220).
+ */
+let dbWhereCalls: unknown[][] = [];
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -46,6 +53,12 @@ function makeChain(): unknown {
       if (prop === "executeTakeFirst") return dbFirst;
       if (prop === "executeTakeFirstOrThrow") return dbFirst;
       if (prop === "execute") return () => Promise.resolve(dbExecuteResult);
+      if (prop === "where") {
+        return (...args: unknown[]) => {
+          dbWhereCalls.push(args);
+          return makeChain();
+        };
+      }
       return (..._args: unknown[]) => makeChain();
     },
   };
@@ -116,6 +129,7 @@ let orgInvitationsGet: typeof OrgInvitationsRoute.GET;
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock, dbFirst]) m.mockReset();
   dbExecuteResult = [];
+  dbWhereCalls = [];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ GET: appGet } = await import("@/app/api/administrator/enterprise-apps/[id]/route"));
   ({ GET: roleGet } = await import("@/app/api/administrator/roles/[id]/route"));
@@ -374,6 +388,31 @@ describe("GET /email/outbox — org-scoped after the tenant column was added", (
     dbExecuteResult = [{ id: "o-1", organization_id: null, to_email: "sys@x.com" }];
     dbFirst.mockResolvedValue({ total: "1" });
     expect((await outboxGet(req(url))).status).toBe(200);
+  });
+
+  /**
+   * review #220 made invitation mail visible to the inviting org by writing
+   * `app_outbox.organization_id`. That is only safe while the LIST still
+   * filters on that column — the 200s above would stay green even if the
+   * predicate were dropped, because this suite's DB is shape-only. These two
+   * assert the predicate itself.
+   */
+  it("APPLIES the org predicate for an ORG ADMIN (no cross-tenant leak)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(ORG_A, ["admin.email.read"]));
+    dbExecuteResult = [];
+    dbFirst.mockResolvedValue({ total: "0" });
+    await outboxGet(req(url));
+    expect(dbWhereCalls).toContainEqual(["o.organization_id", "=", ORG_A]);
+    // …and never another tenant's id.
+    expect(dbWhereCalls).not.toContainEqual(["o.organization_id", "=", ORG_B]);
+  });
+
+  it("adds NO org predicate for a SUPERADMIN (platform-wide by design)", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.email.read"]));
+    dbExecuteResult = [];
+    dbFirst.mockResolvedValue({ total: "0" });
+    await outboxGet(req(url));
+    expect(dbWhereCalls.some((c) => c[0] === "o.organization_id")).toBe(false);
   });
 });
 

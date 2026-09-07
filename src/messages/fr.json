@@ -1132,6 +1132,7 @@
         "result": {
           "sent": "E-mail de test envoyé.",
           "failed": "Échec de l'envoi — voir la ligne de la boîte d'envoi.",
+          "pending": "L'envoi n'a pas abouti — en file d'attente pour une nouvelle tentative; voir la ligne de la boîte d'envoi.",
           "logged": "Enregistré dans la boîte d'envoi (aucun fournisseur configuré)."
         }
       },

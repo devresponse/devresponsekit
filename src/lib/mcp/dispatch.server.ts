@@ -42,10 +42,18 @@ export async function handleMcpRequest(
       if (!tool) {
         return rpcError(id, RPC_INVALID_PARAMS, `Unknown tool: ${name || "(missing name)"}`);
       }
-      const args =
-        params.arguments && typeof params.arguments === "object"
-          ? (params.arguments as Record<string, unknown>)
-          : {};
+      if (params.arguments !== undefined && !isPlainObject(params.arguments)) {
+        return rpcError(id, RPC_INVALID_PARAMS, "`arguments` must be an object");
+      }
+      const args = (params.arguments ?? {}) as Record<string, unknown>;
+      // Arguments are checked against the tool's published inputSchema — and
+      // path params against the segment-safety rules — BEFORE the tool can
+      // touch the API (review #54). A refusal is a protocol error, not a tool
+      // result: nothing was executed.
+      const invalid = tool.validate(args);
+      if (invalid) {
+        return rpcError(id, RPC_INVALID_PARAMS, `Invalid arguments for ${name}: ${invalid}`);
+      }
       try {
         return rpcResult(id, await tool.run(forward, args));
       } catch (error) {
@@ -61,4 +69,9 @@ export async function handleMcpRequest(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** `typeof null === "object"` and an array is an object too — neither is a params bag. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

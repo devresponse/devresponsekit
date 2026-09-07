@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAuthorizationServerMetadata,
   buildProtectedResourceMetadata,
+  mcpDiscoveryConfig,
   mcpResourceIdentifier,
   mcpWwwAuthenticate,
   protectedResourceMetadataUrl,
@@ -67,6 +68,47 @@ describe("MCP discovery metadata", () => {
     // can pass the advertised `resource` straight to the token endpoint.
     expect(as.resources_supported).toContain(buildProtectedResourceMetadata(BASE, BASE).resource);
     expect(buildProtectedResourceMetadata(BASE, BASE).resource).toBe(mcpResourceIdentifier(BASE));
+  });
+
+  /**
+   * One source for the pair both documents advertise (review #57). The
+   * divergent-config case — `API_JWT_ISSUER` pointing somewhere else — is
+   * refused at boot (tests/unit/env.test.ts), because this app serves the AS
+   * metadata, the token endpoint and JWKS under `BETTER_AUTH_URL` alone and
+   * RFC 8414 §3.3 requires the issuer to be where its metadata lives.
+   */
+  describe("mcpDiscoveryConfig — one (baseUrl, issuer) source (review #57)", () => {
+    it("falls back to BETTER_AUTH_URL when API_JWT_ISSUER is unset, trimming slashes", () => {
+      expect(mcpDiscoveryConfig({ BETTER_AUTH_URL: `${BASE}/` })).toEqual({
+        baseUrl: BASE,
+        issuer: BASE,
+      });
+      expect(mcpDiscoveryConfig({ BETTER_AUTH_URL: BASE, API_JWT_ISSUER: `${BASE}/` })).toEqual({
+        baseUrl: BASE,
+        issuer: BASE,
+      });
+    });
+
+    it("feeds both documents the SAME pair, so the advertised AS serves this metadata", () => {
+      const { baseUrl, issuer } = mcpDiscoveryConfig({ BETTER_AUTH_URL: BASE });
+      const resource = buildProtectedResourceMetadata(baseUrl, issuer);
+      const as = buildAuthorizationServerMetadata(baseUrl, issuer);
+      expect(resource.authorization_servers).toEqual([as.issuer]);
+      // The AS metadata document lives at <issuer>/.well-known/oauth-
+      // authorization-server, which is only served under BETTER_AUTH_URL.
+      expect(as.issuer).toBe(baseUrl);
+      expect(as.token_endpoint.startsWith(`${as.issuer}/`)).toBe(true);
+      expect(as.jwks_uri.startsWith(`${as.issuer}/`)).toBe(true);
+    });
+
+    it("is the divergence the env schema refuses: the endpoints stay under the base URL", () => {
+      // What a divergent issuer WOULD produce, kept here as the reason the
+      // boot check exists — the client is told to fetch the AS metadata from
+      // an origin this deployment serves nothing at.
+      const as = buildAuthorizationServerMetadata(BASE, "https://issuer.example.net");
+      expect(as.issuer).toBe("https://issuer.example.net");
+      expect(as.token_endpoint.startsWith(as.issuer)).toBe(false);
+    });
   });
 
   it("includes the registration endpoint only when self-registration is enabled", () => {

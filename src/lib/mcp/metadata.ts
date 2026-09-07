@@ -21,6 +21,33 @@ function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+export interface McpDiscoveryConfig {
+  /** Origin the discovery documents and every endpoint they name are served from. */
+  baseUrl: string;
+  /** The authorization-server `issuer` — the same value tokens carry as `iss`. */
+  issuer: string;
+}
+
+/**
+ * The ONE (baseUrl, issuer) pair both discovery documents are built from
+ * (review #57). Before this each route derived the pair itself, so the
+ * protected-resource document could name an authorization server whose own
+ * metadata was never served there.
+ *
+ * RFC 8414 §3.3 requires an issuer to be the URL its metadata is retrieved
+ * from, and this app serves that metadata (plus the token endpoint and JWKS)
+ * under `BETTER_AUTH_URL` alone. `API_JWT_ISSUER` is therefore only allowed
+ * to be unset or the same identifier — enforced at boot by the env schema
+ * when `MCP_ENABLED`, so nothing here has to reconcile a divergence.
+ */
+export function mcpDiscoveryConfig(env: {
+  BETTER_AUTH_URL: string;
+  API_JWT_ISSUER?: string;
+}): McpDiscoveryConfig {
+  const baseUrl = trimTrailingSlash(env.BETTER_AUTH_URL);
+  return { baseUrl, issuer: trimTrailingSlash(env.API_JWT_ISSUER ?? baseUrl) };
+}
+
 /** URL of the protected-resource metadata document (RFC 9728). */
 export function protectedResourceMetadataUrl(baseUrl: string): string {
   return `${trimTrailingSlash(baseUrl)}/.well-known/oauth-protected-resource`;

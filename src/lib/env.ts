@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { invalidOriginSuffixes, splitOriginSuffixList } from "@/lib/admin/origin-suffixes";
+import { isSameIdentifier } from "@/lib/api-auth/resources";
 
 /**
  * Server-side environment variable schema.
@@ -300,6 +301,28 @@ const serverEnvSchema = z
       .string()
       .optional()
       .transform((value) => value === "1" || value === "true"),
+    /**
+     * Origin the MCP gateway self-calls when a tool invokes `/api/v1`
+     * (review #55). Unset (default) it is `BETTER_AUTH_URL` — i.e. the
+     * public origin, which on a proxied deployment (Vercel's edge, an
+     * ingress) re-enters through the proxy. Point this at an origin that
+     * reaches the app DIRECTLY (e.g. `http://127.0.0.1:3000`) to keep the
+     * hop internal; that is also what makes `MCP_FORWARD_CLIENT_IP`
+     * meaningful, since an appending proxy overwrites the forwarded value.
+     */
+    MCP_DISPATCH_BASE_URL: z.string().url().optional(),
+    /**
+     * Whether the gateway forwards the AGENT's resolved client IP to the v1
+     * route on that self-call, as `x-forwarded-for` (review #55). ON by
+     * default (today's behaviour): correct only where the self-fetch reaches
+     * the app without an appending proxy — see `MCP_DISPATCH_BASE_URL`. Set
+     * to `0`/`false` where it does traverse one, so v1 audits the gateway hop
+     * honestly instead of a value the proxy silently discards.
+     */
+    MCP_FORWARD_CLIENT_IP: z
+      .string()
+      .optional()
+      .transform((value) => value !== "0" && value !== "false"),
     /** Master switch for the `/api/mcp/register` self-registration endpoint (RFC 7591). DARK by default. */
     MCP_REGISTRATION_ENABLED: z
       .string()
@@ -401,6 +424,29 @@ const serverEnvSchema = z
         code: "custom",
         path: ["API_JWT_PRIVATE_KEY"],
         message: "required when API_JWT_ENABLED",
+      });
+    }
+    // MCP discovery consistency (review #57). `/.well-known/oauth-
+    // authorization-server` is served from BETTER_AUTH_URL and names the token
+    // + JWKS endpoints under that same origin, but advertises `issuer` =
+    // API_JWT_ISSUER (the value tokens actually carry as `iss`). RFC 8414 §3.3
+    // requires the issuer to be the URL the metadata was retrieved from, so a
+    // divergent API_JWT_ISSUER produces a document a compliant MCP client MUST
+    // reject — and it cannot be fixed by pointing the client elsewhere,
+    // because no metadata is served at the issuer's origin. Fail at boot with
+    // the gateway on, rather than shipping undiscoverable metadata.
+    if (
+      env.MCP_ENABLED &&
+      env.API_JWT_ISSUER &&
+      !isSameIdentifier(env.API_JWT_ISSUER, env.BETTER_AUTH_URL)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_JWT_ISSUER"],
+        message:
+          "must be unset or identical to BETTER_AUTH_URL when MCP_ENABLED — the OAuth discovery " +
+          "documents are served from BETTER_AUTH_URL and RFC 8414 requires the advertised issuer " +
+          "to match that location",
       });
     }
     // Production hardening (AUTH-5): the rate-limit kill switch disables

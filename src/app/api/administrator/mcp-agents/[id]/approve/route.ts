@@ -44,6 +44,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });
   }
 
+  // Approving a REVOKED agent used to activate its service account: the
+  // client stayed dead, but the machine principal came back to life (and the
+  // console filed it under "Active" again). A revoked client is terminal —
+  // refuse the transition (review #56).
+  if (agent.clientStatus !== "active") {
+    return adminErrorResponse("agent_inactive", 409, request, { requestId: guard.requestId });
+  }
+
   const activated = await activateMcpAgent(agent.appUserId);
   if (activated) {
     await auditEvent({

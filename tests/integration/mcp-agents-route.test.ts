@@ -292,4 +292,72 @@ describe("/api/administrator/mcp-agents", () => {
     getMcpAgent.mockResolvedValue(undefined);
     expect((await APPROVE(req(), ctx())).status).toBe(404);
   });
+
+  /**
+   * Lifecycle transitions (review #56). Before this the mutating routes read
+   * the agent, ignored its client status, and reported success: a scopes
+   * PATCH on a REVOKED agent 200'd and wrote a "scopes_updated" audit row
+   * although `updateOauthClient` (which filters on `status = 'active'`)
+   * changed nothing, and Approve reactivated the service account of an agent
+   * whose client was dead — including one the reaper had just expired.
+   */
+  describe("lifecycle transitions (review #56)", () => {
+    /** As `getMcpAgent` projects a revoked / reaper-expired agent. */
+    function inactiveAgent(clientStatus = "revoked") {
+      getMcpAgent.mockResolvedValue({
+        clientRowId: UUID,
+        appUserId: "svc-1",
+        organizationId: "org-1",
+        clientStatus,
+      });
+    }
+
+    it("409s a scopes PATCH on a revoked agent — no write, no audit row", async () => {
+      inactiveAgent();
+      const res = await PATCH(req({ scopes: ["account.read"] }), ctx());
+      expect(res.status).toBe(409);
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "agent_inactive" });
+      expect(updateOauthClient).not.toHaveBeenCalled();
+      expect(auditEvent).not.toHaveBeenCalled();
+    });
+
+    it("409s a scopes PATCH on a reaper-expired agent", async () => {
+      // The reaper leaves the client `revoked`; any non-active status is terminal.
+      inactiveAgent("expired");
+      expect((await PATCH(req({ scopes: [] }), ctx())).status).toBe(409);
+      expect(updateOauthClient).not.toHaveBeenCalled();
+    });
+
+    it("409s when the client is revoked between the read and the write (lost race)", async () => {
+      // getMcpAgent still says active, but the status-filtered UPDATE matches
+      // no row — the audit row must not claim a change that did not happen.
+      updateOauthClient.mockResolvedValue(false);
+      const res = await PATCH(req({ scopes: ["account.read"] }), ctx());
+      expect(res.status).toBe(409);
+      expect(auditEvent).not.toHaveBeenCalled();
+    });
+
+    it("409s Approve on a revoked agent — the service account stays deactivated", async () => {
+      inactiveAgent();
+      const res = await APPROVE(req(), ctx());
+      expect(res.status).toBe(409);
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "agent_inactive" });
+      expect(activateMcpAgent).not.toHaveBeenCalled();
+      expect(auditEvent).not.toHaveBeenCalled();
+    });
+
+    it("still approves and re-scopes an ACTIVE agent (the guard is not a blanket refusal)", async () => {
+      expect((await APPROVE(req(), ctx())).status).toBe(200);
+      expect(activateMcpAgent).toHaveBeenCalledWith("svc-1");
+      expect((await PATCH(req({ scopes: ["account.read"] }), ctx())).status).toBe(200);
+      expect(updateOauthClient).toHaveBeenCalledWith(UUID, { scopes: ["account.read"] });
+    });
+
+    it("keeps DELETE idempotent — revoking an already-revoked agent is not a 409", async () => {
+      inactiveAgent();
+      const res = await DELETE(req(), ctx());
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { alreadyRevoked: boolean }).alreadyRevoked).toBe(true);
+    });
+  });
 });

@@ -34,6 +34,19 @@ import { hasForwardedHops } from "@/lib/client-ip";
 export const REQUEST_ID_HEADER = "x-request-id";
 
 /**
+ * REQUEST-ONLY header carrying the pathname the proxy resolved, so a server
+ * component can name the page it is rendering (review #74 — an RSC permission
+ * denial must say WHICH admin page was probed, and `headers()` is the only
+ * request context an RSC guard has).
+ *
+ * Stamped by `proxy.ts` onto the forwarded request headers and never written
+ * to a response, so it is not client-visible and cannot be spoofed by a
+ * browser: the proxy overwrites whatever arrived. Prefixed like
+ * `x-drk-client-ip` to mark it as ours.
+ */
+export const REQUEST_PATH_HEADER = "x-drk-pathname";
+
+/**
  * RFC 4122 UUID (any version), canonical hex/dash form. Every id this app
  * mints is `crypto.randomUUID()`, so anything else did not come from us.
  */

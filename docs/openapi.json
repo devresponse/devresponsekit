@@ -584,8 +584,16 @@
           },
           "preferredLocale": {
             "type": "string",
-            "minLength": 2,
-            "maxLength": 10
+            "enum": [
+              "en",
+              "fr",
+              "es",
+              "uk",
+              "pt",
+              "zh",
+              "hi",
+              "ja"
+            ]
           }
         },
         "required": [

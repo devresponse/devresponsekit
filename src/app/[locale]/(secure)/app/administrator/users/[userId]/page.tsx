@@ -86,6 +86,13 @@ export default async function AdministratorUserDetailPage({
   const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
   const canImpersonate = guard.access.permissions.includes("admin.users.impersonate");
   const canReadAudit = guard.access.permissions.includes("admin.audit.read");
+  // Review #76: the Sessions and Groups tabs each fetch an API that requires
+  // MORE than `admin.users.read` — `admin.users.sessions` and
+  // `admin.groups.read` respectively — so rendering them for every reader sent
+  // the user into a 403 on click. Gate each tab on the permission its OWN API
+  // enforces, exactly as the Audit tab already does.
+  const canReadSessions = guard.access.permissions.includes("admin.users.sessions");
+  const canReadGroups = guard.access.permissions.includes("admin.groups.read");
   const isSelfTarget = guard.betterAuthUserId === user.better_auth_user_id;
 
   // ISO-string-ify timestamps so the value crosses the RSC/client
@@ -128,6 +135,8 @@ export default async function AdministratorUserDetailPage({
 
       <UserDetailTabs
         user={userJson}
+        canReadSessions={canReadSessions}
+        canReadGroups={canReadGroups}
         canAssignRoles={canAssignRoles}
         canManageGroups={canManageGroups}
         canUpdateMemberships={canUpdateMemberships}

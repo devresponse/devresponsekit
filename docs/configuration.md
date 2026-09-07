@@ -30,6 +30,27 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `NEXT_PUBLIC_DEFAULT_LOCALE` | no | `en` | **Informational only — NOT read at runtime.** The canonical default lives in `src/config/i18n-config.ts`; editing this does not change behavior. |
 | `NEXT_PUBLIC_SUPPORTED_LOCALES` | no | `en,fr,es,uk,pt,zh,hi,ja` | **Informational only — NOT read at runtime.** The canonical locale list lives in `src/config/i18n-config.ts`; editing this does not change behavior. |
 
+#### `app_users.preferred_locale` is constrained on WRITE, tolerant on READ
+
+Every write path for a user's preferred locale — the admin create form and
+`POST /api/administrator/users`, `PATCH /api/administrator/users/{id}`,
+`POST /api/v1/users`, and the self-service preference routes — validates the
+value against `locales` in `src/config/i18n-config.ts` through the one shared
+`preferredLocaleSchema` (`src/lib/validation/users.ts`). An unsupported value
+such as `fr-CA` or `xx` is rejected with a 400; before review #71/#80 the
+admin and v1 paths accepted any 2–10 character string and stored it verbatim.
+
+The column itself is plain `text` with no CHECK constraint, and **existing rows
+are deliberately left alone**: no migration rewrites them and no read rejects
+them. next-intl and the access context already fall back to the default locale
+when a stored value has no catalog, so such a row keeps rendering — it simply
+cannot be saved again as-is; the next edit must pick a supported locale.
+Operators who want to normalise historical rows can do so with a one-off
+`UPDATE`; nothing in the app requires it.
+
+Adding a locale to `locales` widens every write path at once — there is no
+second list to update.
+
 ### Authentication (Better Auth)
 
 | Variable | Required | Controls |

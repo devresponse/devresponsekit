@@ -5,6 +5,7 @@ import { routing } from "@/i18n/routing";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { isLocalizedSecurePath } from "@/config/route-regions";
 import { applyClientIpHeader } from "@/lib/client-ip";
+import { REQUEST_PATH_HEADER } from "@/lib/request-id";
 import { ORG_SIGNUP_HINT_COOKIE } from "@/lib/scoped-auth";
 
 const intlMiddleware = createIntlMiddleware(routing);
@@ -193,6 +194,11 @@ export function proxy(request: NextRequest) {
   // on the outgoing response.
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
+  // Review #74: name the page for server-side guards. An RSC has no request
+  // object, so an audited permission denial can only say WHICH page was probed
+  // if the pathname rides the request headers. Unconditionally overwritten
+  // here, so a browser-supplied value can never be believed.
+  requestHeaders.set(REQUEST_PATH_HEADER, pathname);
   const response = intlMiddleware(new NextRequest(request, { headers: requestHeaders }));
   response.headers.set("Content-Security-Policy", csp);
   applyOrgSignupHint(request, response);

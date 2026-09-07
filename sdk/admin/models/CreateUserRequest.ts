@@ -54,7 +54,7 @@ export interface CreateUserRequest {
      * @type {string}
      * @memberof CreateUserRequest
      */
-    preferredLocale?: string;
+    preferredLocale?: CreateUserRequestPreferredLocaleEnum;
 }
 
 
@@ -75,6 +75,21 @@ export const CreateUserRequestInitialAppStatusEnum = {
     PendingApproval: 'pending_approval'
 } as const;
 export type CreateUserRequestInitialAppStatusEnum = typeof CreateUserRequestInitialAppStatusEnum[keyof typeof CreateUserRequestInitialAppStatusEnum];
+
+/**
+ * @export
+ */
+export const CreateUserRequestPreferredLocaleEnum = {
+    En: 'en',
+    Fr: 'fr',
+    Es: 'es',
+    Uk: 'uk',
+    Pt: 'pt',
+    Zh: 'zh',
+    Hi: 'hi',
+    Ja: 'ja'
+} as const;
+export type CreateUserRequestPreferredLocaleEnum = typeof CreateUserRequestPreferredLocaleEnum[keyof typeof CreateUserRequestPreferredLocaleEnum];
 
 
 /**

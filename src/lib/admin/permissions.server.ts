@@ -1,4 +1,5 @@
 import "server-only";
+import { headers } from "next/headers";
 import type { NextRequest, NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
@@ -10,6 +11,7 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { REQUEST_PATH_HEADER } from "@/lib/request-id";
 import {
   hasBearerCredential,
   resolveCaller,
@@ -177,14 +179,74 @@ export async function checkAdminPermissionServer(
 
   const access = await getUserAccessContext(session.user.id);
   const decision = decideSecureAccess(access.status, access.membershipStatus);
-  if (decision !== "allow") return "denied";
+  if (decision !== "allow") {
+    await auditRscDenial(required, session.user.id, decision);
+    return "denied";
+  }
 
   const granted = required.some(
     (perm) => isSuperadmin(access) || access.permissions.includes(perm),
   );
-  if (!granted) return "denied";
+  if (!granted) {
+    await auditRscDenial(required, session.user.id, "missing_admin_permission");
+    return "denied";
+  }
 
   return { betterAuthUserId: session.user.id, access };
+}
+
+/**
+ * Writes the `administrator.access.denied` row for an RSC denial (review #74).
+ *
+ * The route-handler path in {@link requireAdminPermission} has always audited
+ * its denials, but the RSC path — the one an operator actually walks into by
+ * typing a URL — silently `notFound()`d. Denied navigation is explicitly in
+ * the audit contract (docs/admin-manager.md §12), so a probe of
+ * `/app/administrator/*` left no trace at all while the equivalent `fetch` of
+ * `/api/administrator/*` left one. Same event type, same outcome, same reason
+ * vocabulary; `surface: "rsc"` and the pathname distinguish it from the route
+ * row so an operator can tell a URL probe from an API probe.
+ *
+ * Deduped per request: a single navigation runs the layout guard and the page
+ * guard (and any nested guard), and a denial that fails all of them must be
+ * ONE row, not three. The key is the request's `Headers` object — the same
+ * per-request carrier `getOrCreateRequestId` memoizes on — plus the required
+ * keys and reason, so two genuinely different denials in one render still
+ * both land.
+ */
+const rscDenialsSeen = new WeakMap<object, Set<string>>();
+
+async function auditRscDenial(
+  required: string[],
+  betterAuthUserId: string,
+  reason: string,
+): Promise<void> {
+  const requestHeaders = await headers();
+  const dedupeKey = `${reason}|${required.join(",")}`;
+  let seen = rscDenialsSeen.get(requestHeaders);
+  if (!seen) {
+    seen = new Set();
+    rscDenialsSeen.set(requestHeaders, seen);
+  }
+  if (seen.has(dedupeKey)) return;
+  seen.add(dedupeKey);
+
+  const request = { headers: requestHeaders as unknown as Headers };
+  await auditEvent({
+    eventType: "administrator.access.denied",
+    outcome: "denied",
+    actorBetterAuthUserId: betterAuthUserId,
+    reason,
+    request,
+    requestId: getOrCreateRequestId(request),
+    metadata: {
+      required,
+      surface: "rsc",
+      // `proxy.ts` stamps the resolved pathname on the forwarded request
+      // headers; it is the only thing that says WHICH admin page was probed.
+      path: requestHeaders.get(REQUEST_PATH_HEADER),
+    },
+  });
 }
 
 /**

@@ -87,12 +87,17 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   return NextResponse.json(buildListResponse(items, Number(totalRow?.total ?? 0), query));
 }
 
+/**
+ * Review #70: `appUserIds` are `app_users.id` PRIMARY KEYS. The old
+ * `/^[0-9a-f-]{36}$/i` pattern only counted characters, so a 36-character
+ * run of hyphens passed validation and reached `where("app_user_id", "in", …)`
+ * against a `uuid` column — Postgres 22P02, surfaced as an opaque 500 rather
+ * than a 400. Validate with the shared `isUuid` (`UUID_RE`) so body ids and
+ * path ids accept exactly the same shape.
+ */
 const idsSchema = z
   .object({
-    appUserIds: z
-      .array(z.string().regex(/^[0-9a-f-]{36}$/i))
-      .min(1)
-      .max(500),
+    appUserIds: z.array(z.string().refine(isUuid, "invalid_uuid")).min(1).max(500),
   })
   .strict();
 

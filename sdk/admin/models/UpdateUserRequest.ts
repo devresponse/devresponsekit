@@ -30,8 +30,25 @@ export interface UpdateUserRequest {
      * @type {string}
      * @memberof UpdateUserRequest
      */
-    preferredLocale?: string;
+    preferredLocale?: UpdateUserRequestPreferredLocaleEnum;
 }
+
+
+/**
+ * @export
+ */
+export const UpdateUserRequestPreferredLocaleEnum = {
+    En: 'en',
+    Fr: 'fr',
+    Es: 'es',
+    Uk: 'uk',
+    Pt: 'pt',
+    Zh: 'zh',
+    Hi: 'hi',
+    Ja: 'ja'
+} as const;
+export type UpdateUserRequestPreferredLocaleEnum = typeof UpdateUserRequestPreferredLocaleEnum[keyof typeof UpdateUserRequestPreferredLocaleEnum];
+
 
 /**
  * Check if a given object implements the UpdateUserRequest interface.

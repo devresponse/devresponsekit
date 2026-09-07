@@ -76,9 +76,30 @@ export function canAccessOrg(access: AccessLike, resourceOrgId: string | null): 
 }
 
 /**
- * True when `appUserId` holds an active-or-any membership in
- * `organizationId`. Used to org-scope `app_users` access — a user has no
+ * True when `appUserId` holds a membership in `organizationId` — of ANY
+ * status. Used to org-scope `app_users` access: a user has no
  * `organization_id` column of its own; its tenant IS its membership.
+ *
+ * The missing `status = 'active'` filter is DELIBERATE, and load-bearing
+ * (review #210). A membership row is a TENANT CLAIM, not a grant of access:
+ *   - The admin surfaces that need this predicate are precisely the ones that
+ *     act on a NON-active member — approve a `pending_approval` signup,
+ *     unblock a `blocked` user, reactivate a `suspended` one. Filtering on
+ *     `active` would make every such user invisible to their own org's admin
+ *     (a 404 on the very page that exists to fix them), and would strand them
+ *     permanently: no admin could ever restore an account whose membership is
+ *     not already restored.
+ *   - It does NOT widen anyone's reach, because a non-active membership is
+ *     still confined to ONE org. Whether the TARGET may sign in is decided
+ *     elsewhere, by `decideSecureAccess`; whether the CALLER may administer at
+ *     all is decided by their own status + permissions in
+ *     `requireAdminPermission` / `checkAdminPermissionServer`, which reject a
+ *     caller whose own membership is not active before this is ever reached.
+ *
+ * So: narrowing this to active memberships is a BUG, not a hardening. The
+ * intent is pinned by `tests/db/access-scope.db.test.ts` (real rows, every
+ * membership status) so a future "fix" fails CI instead of silently changing
+ * admin reach in either direction.
  */
 export async function userHasMembershipInOrg(
   appUserId: string,
@@ -98,6 +119,10 @@ export async function userHasMembershipInOrg(
  * always; an org admin only when the target holds a membership in the
  * caller's org. Use for `[id]` user routes — return **404** on false so a
  * user's existence in another tenant is not leaked.
+ *
+ * The target's membership STATUS is deliberately not consulted — see
+ * {@link userHasMembershipInOrg} for why (review #210): the approve / unblock
+ * / reactivate flows exist exactly to act on a non-active member.
  */
 export async function canAccessUser(access: AccessLike, appUserId: string): Promise<boolean> {
   if (isSuperadmin(access)) return true;

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { sql } from "kysely";
 import { z } from "zod";
+import { preferredLocaleSchema } from "@/lib/validation/users";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
@@ -118,7 +119,9 @@ const createSchema = z
     name: z.string().min(1).max(200).optional(),
     role: z.enum(["admin", "user"]).optional(),
     initialAppStatus: z.enum(["active", "pending_approval"]).optional().default("pending_approval"),
-    preferredLocale: z.string().min(2).max(10).optional(),
+    // Review #71/#80: constrained to the app's supported locales via the ONE
+    // shared schema — a free-form 2-10 char string used to be stored verbatim.
+    preferredLocale: preferredLocaleSchema.optional(),
   })
   .strict();
 

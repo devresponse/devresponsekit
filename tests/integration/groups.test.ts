@@ -395,6 +395,72 @@ describe("groups/[id]/members — org-membership constraint", () => {
   });
 });
 
+describe("groups/[id] body-id validation (review #70)", () => {
+  // A body id is used verbatim in `where(... "in", ids)` against a `uuid`
+  // column, so anything that is not UUID-shaped reaches Postgres as a 22P02
+  // and surfaces as an opaque 500. Every one of these must be a 400 instead.
+  const badRoleIds = ["not-a-uuid", "", "------------------------------------"];
+  for (const bad of badRoleIds) {
+    it(`roles POST rejects ${JSON.stringify(bad)} with 400`, async () => {
+      accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+      const res = await roles.POST(
+        req(`groups/${GROUP}/roles`, { method: "POST", body: { roleIds: [bad] } }),
+        groupCtx,
+      );
+      expect(res.status).toBe(400);
+    });
+    it(`roles DELETE rejects ${JSON.stringify(bad)} with 400`, async () => {
+      accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+      const res = await roles.DELETE(
+        req(`groups/${GROUP}/roles`, { method: "DELETE", body: { roleIds: [bad] } }),
+        groupCtx,
+      );
+      expect(res.status).toBe(400);
+    });
+  }
+
+  // The old members schema was /^[0-9a-f-]{36}$/i — 36 hyphens passed it.
+  it("members POST rejects a 36-character non-UUID with 400", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await members.POST(
+      req(`groups/${GROUP}/members`, {
+        method: "POST",
+        body: { appUserIds: ["------------------------------------"] },
+      }),
+      groupCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("members DELETE rejects a 36-character non-UUID with 400", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await members.DELETE(
+      req(`groups/${GROUP}/members`, {
+        method: "DELETE",
+        body: { appUserIds: ["------------------------------------"] },
+      }),
+      groupCtx,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  // The DB returns one row per DISTINCT id, so the pre-#70 length compare
+  // turned a duplicated (but real) role id into a false role_not_found 404.
+  it("roles POST accepts a duplicated role id (no false 404) and audits it once", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await roles.POST(
+      req(`groups/${GROUP}/roles`, { method: "POST", body: { roleIds: [ROLE, ROLE] } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.group.roles_changed",
+      "success",
+      expect.objectContaining({ metadata: expect.objectContaining({ added: [ROLE] }) }),
+    );
+  });
+});
+
 describe("users/[id]/groups", () => {
   it("GET 200 (scoped to the actor's org)", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.read"]));

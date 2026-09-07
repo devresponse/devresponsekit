@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { AdministratorOutboxGrid } from "./_outbox-grid";
 
 export const dynamic = "force-dynamic";
@@ -27,8 +28,12 @@ export default async function AdministratorEmailPage({
   if (guard === "denied" || guard === "unauthenticated") {
     notFound();
   }
-  const manageGuard = await checkAdminPermissionServer("admin.email.manage");
-  const canManage = manageGuard !== "denied" && manageGuard !== "unauthenticated";
+  // Review #75: derive the second permission from the context we already
+  // hold instead of a second checkAdminPermissionServer() — that call repeated
+  // the whole session + access-context resolution for an answer already in
+  // `guard.access`. Mirrors the SUPERADMIN short-circuit the guard applies.
+  const canManage =
+    isSuperadmin(guard.access) || guard.access.permissions.includes("admin.email.manage");
 
   const t = await getTranslations({ locale, namespace: "administrator.email" });
 

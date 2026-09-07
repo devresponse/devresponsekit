@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { z } from "zod";
 import { db } from "@/db/database";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { getDefaultEmailTemplate } from "@/lib/email/templates";
 import { TemplateEditForm } from "./_template-edit-form";
 
@@ -16,7 +17,12 @@ export const dynamic = "force-dynamic";
  * Cancel at the bottom, no back link. `key` and `locale` are shown but
  * immutable — flows send against the key.
  *
- * Caller MUST hold `admin.email.manage`.
+ * Caller MUST hold `admin.email.manage` AND be a SUPERADMIN: the template
+ * catalog is platform-global (one row set shared by every tenant), so the PUT
+ * this form drives is SUPERADMIN-only. Gating the page on `admin.email.manage`
+ * alone handed a permitted org admin a form whose every save 403s (review
+ * #73) — the page guard must equal the mutation's authority, so the extra
+ * `isSuperadmin` check is the page's real gate, not a duplicate.
  */
 export default async function AdministratorEmailTemplateEditPage({
   params,
@@ -26,6 +32,11 @@ export default async function AdministratorEmailTemplateEditPage({
   const { locale, templateId } = await params;
   const guard = await checkAdminPermissionServer("admin.email.manage");
   if (guard === "denied" || guard === "unauthenticated") {
+    notFound();
+  }
+  // Review #73: match the SUPERADMIN-only PUT. notFound() (not 403) keeps the
+  // same indistinguishability the rest of the admin tree uses.
+  if (!isSuperadmin(guard.access)) {
     notFound();
   }
   if (!z.uuid().safeParse(templateId).success) {

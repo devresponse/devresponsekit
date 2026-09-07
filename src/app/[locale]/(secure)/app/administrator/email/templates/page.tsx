@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { isSuperadmin } from "@/lib/admin/access-scope.server";
 import { EmailTemplateFilters } from "./_template-filters";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +33,10 @@ export const dynamic = "force-dynamic";
  * database query — the URL is the single source of truth, matching the
  * grid filter convention (docs/admin-manager.md §10).
  *
- * Caller MUST hold `admin.email.read`; editing additionally requires
- * `admin.email.manage` (enforced again by the edit page and the API).
+ * Caller MUST hold `admin.email.read`. Editing a template is SUPERADMIN-only
+ * (the catalog is platform-global and the PUT enforces it), so the Edit link
+ * is shown only to a SUPERADMIN — review #73: gating it on `admin.email.manage`
+ * pointed permitted org admins at a form that always 403d on save.
  */
 export default async function AdministratorEmailTemplatesPage({
   params,
@@ -47,8 +50,11 @@ export default async function AdministratorEmailTemplatesPage({
   if (guard === "denied" || guard === "unauthenticated") {
     notFound();
   }
-  const manageGuard = await checkAdminPermissionServer("admin.email.manage");
-  const canManage = manageGuard !== "denied" && manageGuard !== "unauthenticated";
+  // Review #73 + #75: the Edit link must match the edit page's guard, which
+  // matches the SUPERADMIN-only PUT. Derived from the guard we already hold —
+  // a second checkAdminPermissionServer() would be another session + access
+  // round-trip for an answer this context already carries.
+  const canManage = isSuperadmin(guard.access);
 
   const t = await getTranslations({ locale, namespace: "administrator.email.templates" });
   const tGrid = await getTranslations({ locale, namespace: "administrator.grid" });

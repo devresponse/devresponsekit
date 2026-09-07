@@ -94,9 +94,42 @@ const EXTERNAL = /^https?:\/\//i;
 const DOC_LINK = /\.mdx?(?=$|[#?])/i;
 
 /**
+ * Turns a remote `<img>` into a visible, working link (review #215).
+ *
+ * The app's CSP is `img-src 'self' data: blob:` — a remote `<img>` that
+ * survives the renderer is BLOCKED by the browser and the reader just sees a
+ * broken-image box with no explanation. Loosening the CSP to fetch third-party
+ * images into an authenticated console is the worse trade (it hands any doc
+ * author a pixel that leaks the reader's IP/`Referer` to an arbitrary host and
+ * widens the exfiltration surface), so we keep the CSP closed and make the
+ * failure visible instead: the node becomes an external anchor whose text is
+ * the alt text (when the author supplied one) plus the URL, so the reader can
+ * still see what was meant and open it deliberately.
+ *
+ * Locale-neutral by construction — the visible text is author content and the
+ * URL, never a UI string — so the render cache stays shareable and no message
+ * catalog has to grow a key.
+ */
+function toExternalImageFallback(node: HastNode, src: string): void {
+  const alt = typeof node.properties?.alt === "string" ? node.properties.alt.trim() : "";
+  node.tagName = "a";
+  node.properties = {
+    href: src,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    className: ["docs-external-image"],
+    // Machine-readable marker so tests (and any future lint) can spot a doc
+    // that ships a remote image without scraping rendered prose.
+    "data-external-image": src,
+  };
+  node.children = [{ type: "text", value: alt ? `${alt} (${src})` : src }];
+}
+
+/**
  * Rewrites links and images on the sanitized tree:
  *   - relative `*.md`/`*.mdx` links → `/{locale}/app/{space}/{slug}` routes
  *   - relative image `src` → the space's path-safe asset route
+ *   - remote image `src` → a visible external-link fallback (review #215)
  *   - external links get `target="_blank"` + `rel="noopener noreferrer"`
  *
  * Hash links and already-absolute in-app links are left untouched. Author
@@ -121,7 +154,9 @@ function rehypeRewriteLinks(locale: string, space: DocSpace) {
 
       if (node.tagName === "img" && typeof props.src === "string") {
         const src = props.src;
-        if (!EXTERNAL.test(src) && !src.startsWith("/")) {
+        if (EXTERNAL.test(src)) {
+          toExternalImageFallback(node, src);
+        } else if (!src.startsWith("/")) {
           const clean = src.replace(/^\.\//, "");
           props.src = `/api/${space}/asset/${clean}`;
         }
@@ -187,9 +222,11 @@ export function clearRenderCache(): void {
 
 export async function renderDocument(body: string, options: RenderOptions): Promise<RenderedDoc> {
   const { locale, cacheKey, space = "docs" } = options;
-  // Scope cache entries by space — a docs and a help document may share a
-  // slug (e.g. `README`) yet must never return each other's HTML.
-  const scopedKey = cacheKey ? `${space}|${cacheKey}` : undefined;
+  // Scope cache entries by space AND locale — a docs and a help document may
+  // share a slug (e.g. `README`) yet must never return each other's HTML, and
+  // the rendered HTML embeds `/{locale}/app/...` hrefs, so an `en` render
+  // handed to an `fr` reader would send every in-doc link to the wrong locale.
+  const scopedKey = cacheKey ? `${space}|${locale}|${cacheKey}` : undefined;
   if (scopedKey) {
     const hit = renderCache.get(scopedKey);
     if (hit) return hit;

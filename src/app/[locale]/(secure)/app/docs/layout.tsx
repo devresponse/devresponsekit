@@ -24,6 +24,11 @@ export const dynamic = "force-dynamic";
  * FlexSidebar provider (separate cookie, no keyboard shortcut so
  * Ctrl/Cmd+B keeps toggling the root sidebar). The catalog tree is built
  * server-side and handed to the sidebar as plain data.
+ *
+ * Design spec: `docs/design-docs-viewer.md` (review #216 — it used to sit in
+ * this directory as `PROMPT.md`, where the App Router tree made it look like a
+ * route and neither the viewer nor the link checker ever saw it —
+ * `tests/unit/docs-content-hygiene.test.ts` keeps it that way).
  */
 const SIDEBAR_COOKIE = "docs_sidebar_state";
 

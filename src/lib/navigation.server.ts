@@ -3,7 +3,7 @@ import { createTranslator, type Messages } from "next-intl";
 import { db } from "@/db/database";
 import type { UserAccessContext } from "@/lib/auth-status";
 import { ANY_ADMIN_PERMISSION } from "@/lib/admin/permissions";
-import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
+import { defaultLocale, isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import type {
   EnterpriseApplicationMenuItem,
   NavigationMenuItem,
@@ -16,18 +16,33 @@ import type {
  * request-scoped `getTranslations`) so the loaders stay callable from
  * any server context, including tests. The loader map uses static
  * specifiers so every bundler/test resolver can see them.
+ *
+ * Review #135: this map used to cover en/fr/es/uk only, so pt/zh/hi/ja
+ * silently fell back to the English catalog and half the supported fleet got
+ * English menu labels in an otherwise fully localized shell. The map is now
+ * typed `Record<SupportedLocale, …>`, which makes a locale added to
+ * `locales` in `@/config/i18n-config` a COMPILE error here until it gets a
+ * loader; `tests/unit/navigation-menu-locales.test.ts` proves each loader
+ * actually resolves that locale's `shell` labels (a wrong-but-present loader
+ * would still typecheck).
  */
-const MESSAGE_LOADERS: Record<string, () => Promise<{ default: Messages }>> = {
+const MESSAGE_LOADERS: Record<SupportedLocale, () => Promise<{ default: Messages }>> = {
   en: () => import("@/messages/en.json"),
   fr: () => import("@/messages/fr.json"),
   es: () => import("@/messages/es.json"),
   uk: () => import("@/messages/uk.json"),
+  pt: () => import("@/messages/pt.json"),
+  zh: () => import("@/messages/zh.json"),
+  hi: () => import("@/messages/hi.json"),
+  ja: () => import("@/messages/ja.json"),
 };
+
+/** Test seam: the locales the menu translator can actually resolve (review #135). */
+export const MENU_MESSAGE_LOCALES = Object.keys(MESSAGE_LOADERS) as SupportedLocale[];
 
 async function shellTranslator(locale: string) {
   const safeLocale = isSupportedLocale(locale) ? locale : defaultLocale;
-  const loader = MESSAGE_LOADERS[safeLocale] ?? MESSAGE_LOADERS[defaultLocale]!;
-  const messages = (await loader()).default;
+  const messages = (await MESSAGE_LOADERS[safeLocale]()).default;
   return createTranslator({ locale: safeLocale, messages, namespace: "shell" });
 }
 

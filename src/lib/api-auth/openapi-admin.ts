@@ -20,6 +20,7 @@
  * `enforceRateLimit(` call site documents a 429 and every `allowedFilters`
  * entry is a documented `filter[...]` parameter.
  */
+import { locales } from "@/config/i18n-config";
 import { MCP_AGENT_STATUSES } from "@/lib/mcp/agents";
 import {
   AUTH_POLICY_APPROVAL_MODES as AUTH_POLICY_APPROVAL_MODE_VALUES,
@@ -482,7 +483,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
             name: { type: "string", minLength: 1, maxLength: 200 },
             role: { type: "string", enum: ["admin", "user"] },
             initialAppStatus: { type: "string", enum: ["active", "pending_approval"] },
-            preferredLocale: { type: "string", minLength: 2, maxLength: 10 },
+            preferredLocale: { type: "string", enum: [...locales] },
           },
           required: ["email", "password"],
         },
@@ -501,7 +502,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           type: "object",
           properties: {
             displayName: { type: "string", minLength: 1, maxLength: 200 },
-            preferredLocale: { type: "string", minLength: 2, maxLength: 10 },
+            preferredLocale: { type: "string", enum: [...locales] },
           },
         },
         ReasonRequest: {

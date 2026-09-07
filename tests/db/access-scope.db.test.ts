@@ -73,10 +73,14 @@ async function newUser(name: string): Promise<string> {
   return row.id;
 }
 
-async function addMembership(appUserId: string, organizationId: string): Promise<void> {
+async function addMembership(
+  appUserId: string,
+  organizationId: string,
+  status = "active",
+): Promise<void> {
   await db
     .insertInto("app_organization_memberships")
-    .values({ organization_id: organizationId, app_user_id: appUserId, status: "active" })
+    .values({ organization_id: organizationId, app_user_id: appUserId, status })
     .execute();
 }
 
@@ -87,6 +91,11 @@ const ids = {
   userShared: "", // member of orgA AND orgB (cross-tenant)
   userOrgB: "", // member of orgB only
   userSuper: "", // member of orgA, holds the superuser marker via a role
+  // Review #210: non-active memberships in orgA. `canAccessUser` must still
+  // reach these users - approve / unblock / reactivate act on exactly them.
+  userPending: "",
+  userBlocked: "",
+  userSuspended: "",
 };
 
 beforeAll(async () => {
@@ -99,12 +108,18 @@ beforeAll(async () => {
   ids.userShared = await newUser("shared");
   ids.userOrgB = await newUser("orgb");
   ids.userSuper = await newUser("super");
+  ids.userPending = await newUser("pending");
+  ids.userBlocked = await newUser("blocked");
+  ids.userSuspended = await newUser("suspended");
 
   await addMembership(ids.userSolo, ids.orgA);
   await addMembership(ids.userShared, ids.orgA);
   await addMembership(ids.userShared, ids.orgB);
   await addMembership(ids.userOrgB, ids.orgB);
   await addMembership(ids.userSuper, ids.orgA);
+  await addMembership(ids.userPending, ids.orgA, "pending_approval");
+  await addMembership(ids.userBlocked, ids.orgA, "blocked");
+  await addMembership(ids.userSuspended, ids.orgA, "suspended");
 
   // Give userSuper the superuser marker via an orgA role.
   await db
@@ -174,6 +189,39 @@ describe("access-scope (DB-backed)", () => {
     expect(await requiresSuperadminForSharedTarget(scope, ids.userShared)).toBe(true);
     expect(await requiresSuperadminForSharedTarget(scope, ids.userSolo)).toBe(false);
     expect(await requiresSuperadminForSharedTarget({ kind: "all" }, ids.userShared)).toBe(false);
+  });
+
+  /**
+   * Review #210 - `canAccessUser` counts a membership of ANY status ON
+   * PURPOSE, and that intent was unwritten, so a future "harden it to active
+   * memberships" would have looked like an improvement.
+   *
+   * It is not. The admin flows that need this predicate are precisely the ones
+   * that act on a NON-active member: approve a pending signup, unblock a
+   * blocked user, reactivate a suspended one. An `active`-only filter would
+   * 404 the org's own admin off the page that exists to fix those users, and
+   * would strand every such account permanently.
+   *
+   * It does not widen reach either: a non-active membership is still confined
+   * to ONE org, so the orgB-only user stays unreachable below.
+   */
+  it.each(["pending", "blocked", "suspended"] as const)(
+    "canAccessUser reaches a %s member of the caller's org (deliberate, review #210)",
+    async (kind) => {
+      const target = {
+        pending: ids.userPending,
+        blocked: ids.userBlocked,
+        suspended: ids.userSuspended,
+      }[kind];
+      expect(await userHasMembershipInOrg(target, ids.orgA)).toBe(true);
+      expect(await canAccessUser(orgAAdmin(), target)).toBe(true);
+    },
+  );
+
+  it("counting non-active memberships does NOT reach across tenants (review #210)", async () => {
+    // The orgB-only user has no orgA membership of ANY status.
+    expect(await userHasMembershipInOrg(ids.userOrgB, ids.orgA)).toBe(false);
+    expect(await canAccessUser(orgAAdmin(), ids.userOrgB)).toBe(false);
   });
 
   it("userIsGlobalSuperuser is true only for a user holding the marker via an active membership", async () => {

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { AdminError, loadOrgOrThrow } from "@/lib/admin/orgs.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -89,10 +89,27 @@ export default async function AdministratorOrganizationDetailPage({
   // Initial rows for the Authentication tab (0007): the org's override (null
   // = inheriting) and the platform default it would inherit. Loaded here —
   // AFTER the canAccessOrg gate above — so the client tab needs no fetch.
-  const [authSettings, platformAuthDefaults] = await Promise.all([
-    getOrgAuthSettingsRow(org.id),
-    getOrgAuthSettingsRow(null),
-  ]);
+  //
+  // Review #72: the platform default is a SUPERADMIN-only resource — GET
+  // /api/administrator/auth-settings/defaults answers 403 to every org admin.
+  // Streaming it into the RSC handed the same rows to any `admin.orgs.read`
+  // holder, so the page out-authorized the API it mirrors. An org admin may
+  // see it only in the one case the API already exposes it: when the org
+  // INHERITS (no override), the org's own auth-settings GET returns exactly
+  // these values as `effective` with `source: "platform_default"`. When the
+  // org has its own override the default is withheld — the editor renders
+  // without the "inherited" hint, which is the correct read of its authority.
+  //
+  // `null` therefore means WITHHELD, not "strict": `AuthPolicyForm` must say
+  // "not shown" rather than substitute its fail-closed baseline (the #72
+  // follow-up finding — Reset used to leave a non-superadmin looking at a
+  // summary claiming verification + admin approval, whatever the platform
+  // default actually is). The form calls `router.refresh()` after a
+  // successful Reset, which re-enters this branch with `authSettings === null`
+  // and streams the real defaults down.
+  const authSettings = await getOrgAuthSettingsRow(org.id);
+  const mayReadPlatformDefaults = isSuperadmin(guard.access) || authSettings === null;
+  const platformAuthDefaults = mayReadPlatformDefaults ? await getOrgAuthSettingsRow(null) : null;
 
   return (
     <section className="space-y-4 p-6">

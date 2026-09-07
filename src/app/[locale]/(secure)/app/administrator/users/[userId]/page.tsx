@@ -21,9 +21,12 @@ export const dynamic = "force-dynamic";
  *      gated the entire `/administrator/*` tree on any admin permission,
  *      so passing this read check means the caller is an admin reader).
  *   3. Renders the static metadata header + a client `UserDetailTabs`
- *      component that owns the interactive tabs (Overview, Roles, Groups,
- *      Memberships, Sessions, and — for callers holding `admin.audit.read`
- *      — Audit, the user's `app_user_id`-filtered audit trail).
+ *      component that owns the interactive tabs. Overview, Roles and
+ *      Memberships need only `admin.users.read`; every other tab is gated on
+ *      the permission ITS OWN API enforces (review #76) — Groups on
+ *      `admin.groups.read`, Sessions on `admin.users.sessions`, Audit on
+ *      `admin.audit.read` — so a permitted reader is never walked into a 403
+ *      by clicking a tab. The flags are derived below and passed down.
  */
 export default async function AdministratorUserDetailPage({
   params,
@@ -86,6 +89,13 @@ export default async function AdministratorUserDetailPage({
   const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
   const canImpersonate = guard.access.permissions.includes("admin.users.impersonate");
   const canReadAudit = guard.access.permissions.includes("admin.audit.read");
+  // Review #76: the Sessions and Groups tabs each fetch an API that requires
+  // MORE than `admin.users.read` — `admin.users.sessions` and
+  // `admin.groups.read` respectively — so rendering them for every reader sent
+  // the user into a 403 on click. Gate each tab on the permission its OWN API
+  // enforces, exactly as the Audit tab already does.
+  const canReadSessions = guard.access.permissions.includes("admin.users.sessions");
+  const canReadGroups = guard.access.permissions.includes("admin.groups.read");
   const isSelfTarget = guard.betterAuthUserId === user.better_auth_user_id;
 
   // ISO-string-ify timestamps so the value crosses the RSC/client
@@ -128,6 +138,8 @@ export default async function AdministratorUserDetailPage({
 
       <UserDetailTabs
         user={userJson}
+        canReadSessions={canReadSessions}
+        canReadGroups={canReadGroups}
         canAssignRoles={canAssignRoles}
         canManageGroups={canManageGroups}
         canUpdateMemberships={canUpdateMemberships}

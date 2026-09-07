@@ -34,6 +34,74 @@ import { hasForwardedHops } from "@/lib/client-ip";
 export const REQUEST_ID_HEADER = "x-request-id";
 
 /**
+ * REQUEST-ONLY header carrying the pathname the proxy resolved, so a server
+ * component can name the page it is rendering (review #74 — an RSC permission
+ * denial must say WHICH admin page was probed, and `headers()` is the only
+ * request context an RSC guard has).
+ *
+ * Stamped by `proxy.ts` onto the forwarded request headers and never written
+ * to a response, so it is not visible to a browser. It is NOT, however, a
+ * value the app may believe blindly, and the original claim here ("cannot be
+ * spoofed … the proxy overwrites whatever arrived") was FALSE:
+ *
+ *   - `proxy.ts` deletes any inbound copy on the request it forwards, so on
+ *     every path the proxy MATCHES the value really is the proxy's own; but
+ *   - the matcher cannot cover literally every path. `/api/*` (other than
+ *     Better Auth's catch-all) is excluded by design, and the exclusion
+ *     `.*\..*` skips ANY path containing a dot — `/en/app/…/a.b` is still
+ *     routed to the RSC, which then sees the RAW client headers.
+ *
+ * The proxy matcher was widened to cover `/:locale/app/:path*` (the localized
+ * secure tree, where every audited RSC guard lives) precisely so a dotted
+ * segment inside an admin URL cannot dodge it. Everything OUTSIDE that tree
+ * remains a client-controllable claim, so every consumer MUST run the value
+ * through {@link normalizeRequestPath} and treat the result as a hint, never
+ * as evidence — the same doctrine `lib/client-ip.ts` applies to
+ * `x-drk-client-ip`. Prefixed like that header to mark it as ours.
+ */
+export const REQUEST_PATH_HEADER = "x-drk-pathname";
+
+/**
+ * Upper bound on a recorded pathname. Real routes are far shorter; the cap
+ * exists because an unmatched path lets a client choose this string and it
+ * lands in `app_audit_events.metadata` — an append-only, trigger-protected
+ * compliance table that must not become a place to park kilobytes.
+ */
+const REQUEST_PATH_MAX_LENGTH = 512;
+
+/**
+ * C0 controls + space, DEL and the C1 block: everything that would let a
+ * chosen value break a log line, smuggle a second field, or masquerade as
+ * two entries in an operator's console. Written as a scan rather than a
+ * regex so the control characters stay readable (and eslint's
+ * `no-control-regex` has nothing to complain about).
+ */
+function hasUnsafePathChar(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code <= 0x20 || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+/**
+ * The `REQUEST_PATH_HEADER` value worth recording, or `null`.
+ *
+ * Shape-only validation — it cannot prove provenance (see the header doc
+ * above), so its job is to bound the damage on the paths the proxy does not
+ * see: a recorded `path` is always a single-line, origin-relative,
+ * length-capped path or nothing at all.
+ */
+export function normalizeRequestPath(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (value.length === 0 || value.length > REQUEST_PATH_MAX_LENGTH) return null;
+  // Origin-relative only: `//host/x` is a protocol-relative URL, not a path.
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  if (hasUnsafePathChar(value)) return null;
+  return value;
+}
+
+/**
  * RFC 4122 UUID (any version), canonical hex/dash form. Every id this app
  * mints is `crypto.randomUUID()`, so anything else did not come from us.
  */

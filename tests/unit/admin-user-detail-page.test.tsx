@@ -246,3 +246,57 @@ describe("administrator/users/[userId] page — tenant scope (ADR-0001, review #
     },
   );
 });
+
+/**
+ * Review #76 — the Sessions and Groups tabs call APIs that require MORE than
+ * `admin.users.read` (`admin.users.sessions` / `admin.groups.read`), so a
+ * reader who only holds `admin.users.read` used to see both tabs and get a
+ * 403 the moment they clicked one. The RSC must derive each flag from the
+ * permission that tab's OWN API enforces, exactly as it already does for
+ * Audit.
+ */
+describe("administrator/users/[userId] page — per-tab permission gating (review #76)", () => {
+  /** Depth-first search for the props handed to UserDetailTabs. */
+  function findTabsProps(node: unknown): Record<string, unknown> | undefined {
+    if (!node || typeof node !== "object") return undefined;
+    const el = node as { props?: Record<string, unknown> };
+    if (el.props && "canReadAudit" in el.props) return el.props;
+    const children = el.props?.children;
+    for (const child of Array.isArray(children) ? children : [children]) {
+      const found = findTabsProps(child);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  async function renderWith(permissions: string[]) {
+    checkAdminPermissionServer.mockResolvedValue({
+      betterAuthUserId: "ba-admin",
+      access: { ...ACCESS, permissions },
+    });
+    canAccessUser.mockResolvedValue(true);
+    return findTabsProps(await Page(params(USER_ID)))!;
+  }
+
+  it("hides Sessions and Groups from a bare admin.users.read holder", async () => {
+    const props = await renderWith(["admin.users.read"]);
+    expect(props.canReadSessions).toBe(false);
+    expect(props.canReadGroups).toBe(false);
+  });
+
+  it("shows Sessions only for admin.users.sessions", async () => {
+    expect((await renderWith(["admin.users.read", "admin.users.sessions"])).canReadSessions).toBe(
+      true,
+    );
+    expect((await renderWith(["admin.users.read", "admin.groups.read"])).canReadSessions).toBe(
+      false,
+    );
+  });
+
+  it("shows Groups only for admin.groups.read", async () => {
+    expect((await renderWith(["admin.users.read", "admin.groups.read"])).canReadGroups).toBe(true);
+    expect((await renderWith(["admin.users.read", "admin.users.sessions"])).canReadGroups).toBe(
+      false,
+    );
+  });
+});

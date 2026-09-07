@@ -16,8 +16,14 @@ import { UserAuditPanel } from "./_user-audit-panel";
  * The Overview tab renders read-only metadata that the parent RSC has
  * already streamed in (no client fetch). The Roles, Memberships, Sessions,
  * and Audit tabs own their own data fetches so heavy reads only happen when
- * the user opens that tab. The Audit tab is shown only to callers holding
- * `admin.audit.read` (audit data is gated separately from the user record).
+ * the user opens that tab.
+ *
+ * A tab whose API demands MORE than `admin.users.read` is rendered only for a
+ * caller who holds that permission (review #76): Sessions needs
+ * `admin.users.sessions`, Groups needs `admin.groups.read`, Audit needs
+ * `admin.audit.read`. The parent RSC derives each flag; showing the tab to
+ * everyone did not leak anything (the API is the boundary) but walked a
+ * permitted reader straight into a 403.
  */
 export interface UserDetailJson {
   id: string;
@@ -39,12 +45,16 @@ export interface UserDetailJson {
 
 export function UserDetailTabs({
   user,
+  canReadSessions,
+  canReadGroups,
   canAssignRoles,
   canManageGroups,
   canUpdateMemberships,
   canReadAudit,
 }: {
   user: UserDetailJson;
+  canReadSessions: boolean;
+  canReadGroups: boolean;
   canAssignRoles: boolean;
   canManageGroups: boolean;
   canUpdateMemberships: boolean;
@@ -73,9 +83,9 @@ export function UserDetailTabs({
       <TabsList>
         <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
         <TabsTrigger value="roles">{t("tabs.roles")}</TabsTrigger>
-        <TabsTrigger value="groups">{t("tabs.groups")}</TabsTrigger>
+        {canReadGroups ? <TabsTrigger value="groups">{t("tabs.groups")}</TabsTrigger> : null}
         <TabsTrigger value="memberships">{t("tabs.memberships")}</TabsTrigger>
-        <TabsTrigger value="sessions">{t("tabs.sessions")}</TabsTrigger>
+        {canReadSessions ? <TabsTrigger value="sessions">{t("tabs.sessions")}</TabsTrigger> : null}
         {canReadAudit ? <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger> : null}
       </TabsList>
 
@@ -120,16 +130,20 @@ export function UserDetailTabs({
       <TabsContent value="roles" className="mt-4">
         <UserRolesPanel userId={user.id} canAssign={canAssignRoles} />
       </TabsContent>
-      <TabsContent value="groups" className="mt-4">
-        <UserGroupsPanel userId={user.id} canManage={canManageGroups} />
-      </TabsContent>
+      {canReadGroups ? (
+        <TabsContent value="groups" className="mt-4">
+          <UserGroupsPanel userId={user.id} canManage={canManageGroups} />
+        </TabsContent>
+      ) : null}
       <TabsContent value="memberships" className="mt-4">
         <UserMembershipsPanel userId={user.id} canUpdate={canUpdateMemberships} />
       </TabsContent>
 
-      <TabsContent value="sessions" className="mt-4">
-        <UserSessionsPanel userId={user.id} />
-      </TabsContent>
+      {canReadSessions ? (
+        <TabsContent value="sessions" className="mt-4">
+          <UserSessionsPanel userId={user.id} />
+        </TabsContent>
+      ) : null}
 
       {canReadAudit ? (
         <TabsContent value="audit" className="mt-4">

@@ -878,6 +878,7 @@
         "platformTitle": "Platform sign-up defaults",
         "platformDescription": "The sign-up policy inherited by every organization without its own override.",
         "inheritBody": "This organization inherits the platform sign-up defaults.",
+        "inheritUnknown": "The platform default is not shown here — only a platform superadmin can view it.",
         "customize": "Customize for this organization",
         "cancel": "Cancel",
         "requireVerification": "Require email verification",

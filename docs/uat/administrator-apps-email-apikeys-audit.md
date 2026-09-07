@@ -289,10 +289,10 @@ i18n: status labels, filter labels, and detail field labels localize in `en` and
 
 - Route: `/app/administrator/email/templates` · Example URL: `/en/app/administrator/email/templates` · Code: `src/app/[locale]/(secure)/app/administrator/email/templates/page.tsx:29`
 - Purpose: The editable email-template catalog, keyed by template key and locale. The set is small and bounded, so the page server-renders the full table; each row (for managers) links to the edit page.
-- Guard / who can access: `admin.email.read` to view; the per-row **Edit** link is shown only when the caller also holds `admin.email.manage` (`templates/page.tsx:35`,`:39`,`:91`).
+- Guard / who can access: `admin.email.read` to view; the per-row **Edit** link is shown only to a **Superadmin** (`templates/page.tsx:49`,`:57`,`:144`). Review #73: the catalog is platform-global, its save PUT is superadmin-only, and the edit page now matches — so gating the link on `admin.email.manage` pointed org admins at a form that always 403d.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can view the catalog (it is platform-global config, no tenant column, so viewing is not a cross-tenant leak) and sees the Edit links, but **saving is superadmin-only** (see the edit screen).
+  - Org Admin -> can view the catalog (it is platform-global config, no tenant column, so viewing is not a cross-tenant leak) but sees **no Edit links** — editing is superadmin-only (see the edit screen).
   - Superadmin -> can view and edit.
 - Preconditions and test data: signed in as the target persona; templates are seeded (e.g. `password_reset`, `test_email`) (`src/lib/email/templates.ts:46`,`:156`).
 
@@ -320,7 +320,7 @@ User stories
 
 Negative and edge cases
 - Empty state: if no templates exist the table shows a localized "empty" row (`templates/page.tsx:70`).
-- Edit visibility: a caller with `admin.email.read` only sees no Edit links (`templates/page.tsx:91`).
+- Edit visibility: a caller who is not a Superadmin — including one holding `admin.email.manage` — sees no Edit links (`templates/page.tsx:57`,`:144`, review #73).
 - The list is not a client grid — no search/sort/pagination controls; it is a full server-rendered table by design.
 
 Accessibility: the table has a `containerLabel`; keys render as code; the Edit control is a labelled link/button.
@@ -330,10 +330,10 @@ i18n: headers, the empty message, and subjects localize; the Locale column shows
 
 - Route: `/app/administrator/email/templates/[templateId]` · Example URL: `/en/app/administrator/email/templates/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/email/templates/[templateId]/page.tsx:21`
 - Purpose: Edit one template's subject, HTML body, text body, and description. `key` and `locale` are shown but immutable (flows send against the key).
-- Guard / who can access: the page requires `admin.email.manage` (`[templateId]/page.tsx:27`). **Important:** the save route (`PUT /api/administrator/email/templates/[id]`) additionally requires the caller be a **Superadmin** — an Org Admin can open the form but the save is refused with `forbidden` 403 (`src/app/api/administrator/email/templates/[id]/route.ts:74`; the form surfaces it at `_template-edit-form.tsx:84`).
+- Guard / who can access: the page requires `admin.email.manage` **and** that the caller be a **Superadmin** (`[templateId]/page.tsx:33`,`:39`) — it matches the authority of the save route it drives (`PUT /api/administrator/email/templates/[id]`, superadmin-only at `src/app/api/administrator/email/templates/[id]/route.ts:74`). Review #73: an Org Admin holding `admin.email.manage` used to reach a form whose every save 403d; the page now answers **Not Found**, the same indistinguishability the rest of the admin tree uses.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
-  - Org Admin -> can open the editor (has `admin.email.manage`) but **cannot save** — Save returns a Forbidden root error.
+  - Org Admin -> **Not Found** (review #73), even holding `admin.email.manage`; the API refuses the save with `forbidden` 403 for anyone who calls it directly.
   - Superadmin -> can open and save (edits affect every tenant, hence superadmin-only).
 - Preconditions and test data: a valid template UUID; an id failing UUID validation returns Not Found (`[templateId]/page.tsx:31`).
 
@@ -351,14 +351,14 @@ User stories
     | 5 | Re-open the same template | Your new subject/body are shown |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
-- UAT-ADMIN-AEK-EMAIL-TEMPLATE-EDIT-S2 — As an Org Admin, I want a clear Forbidden result if I try to save a global template, so that platform config stays superadmin-controlled.
-  - Acceptance criteria: Given I am an Org Admin (no `superuser` marker), when I open the editor and click Save, then a root Forbidden error appears and nothing is persisted (`[id]/route.ts:74`).
+- UAT-ADMIN-AEK-EMAIL-TEMPLATE-EDIT-S2 — As an Org Admin, I want the template editor to be unreachable, so that platform config stays superadmin-controlled and I am not handed a form I can never save.
+  - Acceptance criteria: Given I am an Org Admin (no `superuser` marker), when I open a template's Edit URL, then I get Not Found, no Edit links are offered in the list, and a direct PUT is still refused with `forbidden` 403 (`[templateId]/page.tsx:39`, `[id]/route.ts:74`, review #73).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Sign in as `orgadmin@orga.local` and open a template's Edit page | The editor opens (you hold `admin.email.manage`) |
-    | 2 | Make any valid change and click **Save** | A red "forbidden" alert appears; you are not redirected and the template is unchanged |
-    | 3 | Re-open the template as Superadmin | The original content is intact (your Org Admin save had no effect) |
+    | 1 | Sign in as `orgadmin@orga.local` and open Email templates | The catalog loads; the action cell is empty — **no Edit links** |
+    | 2 | Paste a template's Edit URL (`/en/app/administrator/email/templates/<uuid>`) into the address bar | The Not-Found page (404) — the editor is superadmin-only |
+    | 3 | Re-open the same URL as Superadmin | The editor opens with the template intact |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-EMAIL-TEMPLATE-EDIT-S3 — As a Superadmin, I want required-field validation, so that I cannot ship an empty subject or body.
@@ -598,14 +598,14 @@ Legend: `see` = can open and read · `act` = can perform the screen's mutations 
 | Enterprise app detail | 404 | 404 | 404 | see + act (own org) | see + act (all) |
 | Email outbox | 404 | 404 | 404 | see + act (test send) | see + act |
 | Email templates list | 404 | 404 | 404 | see | see |
-| Email template edit | 404 | 404 | 404 | see, **cannot save (403)** | see + act (save) |
+| Email template edit | 404 | 404 | 404 | **404** (#73) | see + act (save) |
 | API keys list | 404 | 404 | 404 | see + act (own org) | see + act (all) |
 | API key issue (new) | 404 | 404 | 404 | act (own org) | act (all) |
 | Audit log | 404 | 404 | see (own org) | see (own org) | see (all) |
 
 Notes on the matrix:
 - **Limited Admin** (`admin` seed role) holds only `admin.users.*` + `admin.audit.read`, so of this set it can open **Audit** only; everything else is 404 (`src/db/seeds/dev-init.ts:249`).
-- **Org Admin can open the template editor but not save** — the save is superadmin-only (`src/app/api/administrator/email/templates/[id]/route.ts:74`).
+- **The template editor is superadmin-only** — the page guard was raised to match its superadmin-only save, so an Org Admin gets 404 rather than an unsaveable form (`[templateId]/page.tsx:39`, `src/app/api/administrator/email/templates/[id]/route.ts:74`, review #73).
 - Every "act" for an Org Admin is confined to their own org via ADR-0001 org-scoping; out-of-scope ids return 404, not 403.
 
 ## Inventory checklist (definition of done)

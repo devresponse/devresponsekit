@@ -878,6 +878,7 @@
         "platformTitle": "Padrões de cadastro da plataforma",
         "platformDescription": "A política de cadastro herdada por toda organização sem configuração própria.",
         "inheritBody": "Esta organização herda os padrões de cadastro da plataforma.",
+        "inheritUnknown": "O padrão da plataforma não é exibido aqui — apenas um superadministrador da plataforma pode vê-lo.",
         "customize": "Personalizar para esta organização",
         "cancel": "Cancelar",
         "requireVerification": "Exigir verificação de e-mail",

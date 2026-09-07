@@ -11,9 +11,12 @@ import { renderWithIntl } from "../helpers/render-with-intl";
  * conversion, and the reset (DELETE) flow.
  */
 const fetchMock = vi.fn();
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 
 beforeEach(() => {
   fetchMock.mockReset();
+  refresh.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
@@ -148,7 +151,12 @@ describe("AuthPolicyForm", () => {
         endpoint={ENDPOINT}
         scope="organization"
         initialSettings={OVERRIDE}
-        platformDefaults={null}
+        platformDefaults={{
+          requireEmailVerification: false,
+          signupApprovalMode: "auto_active",
+          allowedAuthMethods: null,
+          autoApproveEmailDomains: null,
+        }}
         canUpdate
       />,
     );
@@ -158,6 +166,80 @@ describe("AuthPolicyForm", () => {
     expect(fetchMock).toHaveBeenCalledWith(ENDPOINT, expect.objectContaining({ method: "DELETE" }));
     expect(await screen.findByRole("status")).toHaveTextContent(/inherits/i);
     expect(screen.queryByRole("button", { name: /save policy/i })).not.toBeInTheDocument();
+    // The disclosed default is what the summary shows — not the strict baseline.
+    expect(screen.getByText("Active immediately")).toBeInTheDocument();
+  });
+
+  /**
+   * Review #72 follow-up. #72 stopped streaming the platform defaults to a
+   * non-superadmin whose org has its own override, so `platformDefaults` is
+   * legitimately null — and Reset is the ONLY way into the inherit view while
+   * that is true (the button renders only when `scope === "organization"` and
+   * the org has a row). Falling back to STRICT_DEFAULTS therefore told an org
+   * admin "email verification required / admin approval" as the policy now in
+   * effect, whatever the platform default actually is: on this repo's own
+   * seeded DB it is `auto_active` with no verification, i.e. the summary was
+   * wrong in the permissive→strict direction on the page whose job is to
+   * report the live sign-up policy.
+   */
+  it("does NOT substitute the strict baseline when the platform defaults are withheld", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    const user = userEvent.setup();
+    renderWithIntl(
+      <AuthPolicyForm
+        endpoint={ENDPOINT}
+        scope="organization"
+        initialSettings={OVERRIDE}
+        platformDefaults={null}
+        canUpdate
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /reset to platform defaults/i }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/inherits/i);
+
+    // The summary is replaced by an explicit "not shown" statement: no
+    // verification/approval claim of any kind is made.
+    expect(screen.getByText(/only a platform superadmin can view it/i)).toBeInTheDocument();
+    expect(screen.queryByText("Administrator approval required")).not.toBeInTheDocument();
+    expect(screen.queryByText("Email verification")).not.toBeInTheDocument();
+  });
+
+  it("asks the RSC to re-run after a reset, so the real inherited policy can load", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    const user = userEvent.setup();
+    renderWithIntl(
+      <AuthPolicyForm
+        endpoint={ENDPOINT}
+        scope="organization"
+        initialSettings={OVERRIDE}
+        platformDefaults={null}
+        canUpdate
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /reset to platform defaults/i }));
+    await screen.findByRole("status");
+    // With the override gone the page may load the platform default again;
+    // without this the withheld state persists until a manual reload.
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("still pre-fills Customize from the fail-closed baseline when defaults are withheld", async () => {
+    // A form the admin is about to fill in may start strict — nothing is
+    // saved until Save, so it states nothing about the platform default.
+    const user = userEvent.setup();
+    renderWithIntl(
+      <AuthPolicyForm
+        endpoint={ENDPOINT}
+        scope="organization"
+        initialSettings={null}
+        platformDefaults={null}
+        canUpdate
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /customize/i }));
+    expect(screen.getByRole("checkbox", { name: /require email verification/i })).toBeChecked();
   });
 
   it("platform scope always edits and never offers reset", () => {

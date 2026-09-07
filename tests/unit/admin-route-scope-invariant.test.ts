@@ -58,7 +58,11 @@ const V1_SCOPE_MARKERS = [
 ];
 
 // RSC detail pages enforce the boundary directly before rendering.
-const PAGE_SCOPE_MARKERS = ["canAccessOrg", "canAccessUser"];
+// `isSuperadmin` counts: a PLATFORM-GLOBAL record (no organization column)
+// has no org to compare against, so the strictest possible boundary — "only a
+// superadmin may be here" — is the correct one, and it is a real check in the
+// page source rather than a prose exemption (review #73).
+const PAGE_SCOPE_MARKERS = ["canAccessOrg", "canAccessUser", "isSuperadmin"];
 
 const ADMIN_EXEMPT: Record<string, string> = {
   // The email TEMPLATE catalog is platform-global config — identical for
@@ -117,13 +121,14 @@ const OTHER_EXEMPT: Record<string, string> = {
   "api/security/csp-report/route.ts": "browser CSP violation sink; logs only, no tenant data",
 };
 
-const PAGE_EXEMPT: Record<string, string> = {
-  // Email templates are platform-global (no organization column) and the
-  // detail page is SUPERADMIN-gated via checkAdminPermissionServer — there is
-  // no per-org access to check. Mirrors the templates list-route exemption.
-  "email/templates/[templateId]/page.tsx":
-    "platform-global template (no tenant column); SUPERADMIN-gated via checkAdminPermissionServer, no per-org access to check",
-};
+// Review #73: the email-template edit page USED to sit here, on the claim that
+// it was "SUPERADMIN-gated via checkAdminPermissionServer". It was not — it
+// gated on `admin.email.manage`, which the SUPERADMIN-only PUT rejects, so the
+// exemption's rationale was false and the page handed permitted org admins a
+// form that always 403d. The page now calls `isSuperadmin(...) -> notFound()`
+// and satisfies PAGE_SCOPE_MARKERS on its own. Keep this list empty unless a
+// page genuinely has no boundary to enforce, and state WHY in the value.
+const PAGE_EXEMPT: Record<string, string> = {};
 
 function walkFiles(dir: string, fileName: string): string[] {
   const out: string[] = [];

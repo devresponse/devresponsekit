@@ -33,6 +33,11 @@ vi.mock("@/lib/admin/origin-guard.server", () => ({
   checkTrustedOrigin: (...a: unknown[]) => originCheck(...a),
 }));
 
+// `checkAdminPermissionServer` has no request object: it reads the ambient
+// header store for the audit row it now writes on a denial (review #74).
+const ambient = vi.hoisted(() => ({ headers: new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => ambient.headers }));
+
 function makeRequest(headers?: Record<string, string>): NextRequest {
   return { headers: new Headers(headers) } as unknown as NextRequest;
 }
@@ -42,6 +47,7 @@ beforeEach(() => {
   accessGetter.mockReset();
   auditMock.mockReset();
   originCheck.mockReset().mockReturnValue({ ok: true });
+  ambient.headers = new Headers();
 });
 afterEach(() => vi.resetModules());
 
@@ -325,5 +331,159 @@ describe("checkAdminPermissionServer", () => {
     const result = await checkAdminPermissionServer("admin.users.read");
     expect(result).not.toBe("denied");
     expect(result).not.toBe("unauthenticated");
+  });
+});
+
+/**
+ * Review #74 - the route-handler path has always audited its denials, but the
+ * RSC path (the one an operator walks into by typing a URL) silently
+ * `notFound()`d, so a probe of `/app/administrator/*` left no trace while the
+ * equivalent `fetch` of `/api/administrator/*` left one. Denied navigation is
+ * explicitly in the audit contract (docs/admin-manager.md 12).
+ */
+describe("checkAdminPermissionServer - denials are audited (review #74)", () => {
+  async function load() {
+    return await import("@/lib/admin/permissions.server");
+  }
+
+  const ACTIVE_READER = {
+    appUserId: "u-1",
+    primaryEmail: "x@x.com",
+    status: "active",
+    organizationId: "o-1",
+    membershipStatus: "active",
+    preferredLocale: "en",
+    permissions: ["admin.users.read"],
+  };
+
+  it("writes the same administrator.access.denied row the route path writes", async () => {
+    ambient.headers = new Headers({ "x-drk-pathname": "/en/app/administrator/audit" });
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACTIVE_READER);
+
+    const { checkAdminPermissionServer } = await load();
+    expect(await checkAdminPermissionServer("admin.audit.read")).toBe("denied");
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        outcome: "denied",
+        actorBetterAuthUserId: "ba-1",
+        reason: "missing_admin_permission",
+        metadata: expect.objectContaining({
+          required: ["admin.audit.read"],
+          surface: "rsc",
+          path: "/en/app/administrator/audit",
+        }),
+      }),
+    );
+  });
+
+  it("audits a status/membership denial with the blocking decision as the reason", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({ ...ACTIVE_READER, status: "suspended" });
+
+    const { checkAdminPermissionServer } = await load();
+    expect(await checkAdminPermissionServer("admin.users.read")).toBe("denied");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "blocked" }),
+    );
+  });
+
+  it("writes ONE row per request even though the layout and page both guard", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACTIVE_READER);
+
+    const { checkAdminPermissionServer } = await load();
+    await checkAdminPermissionServer("admin.audit.read");
+    await checkAdminPermissionServer("admin.audit.read");
+    await checkAdminPermissionServer("admin.audit.read");
+    expect(auditMock).toHaveBeenCalledTimes(1);
+
+    // A genuinely different denial in the same request is still recorded.
+    await checkAdminPermissionServer("admin.orgs.read");
+    expect(auditMock).toHaveBeenCalledTimes(2);
+
+    // ...and the next request (new headers object) starts a fresh ledger.
+    ambient.headers = new Headers();
+    await checkAdminPermissionServer("admin.audit.read");
+    expect(auditMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("writes NOTHING when there is no session (no actor to attribute)", async () => {
+    sessionGetter.mockResolvedValue(null);
+    const { checkAdminPermissionServer } = await load();
+    expect(await checkAdminPermissionServer("admin.users.read")).toBe("unauthenticated");
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("writes NOTHING on a grant", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACTIVE_READER);
+    const { checkAdminPermissionServer } = await load();
+    expect(await checkAdminPermissionServer("admin.users.read")).not.toBe("denied");
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The dedupe key is `${reason}|${required}`, so it suppresses a REPEAT of
+   * the SAME guard — not a layout+page navigation. The administrator layout
+   * guards on `[...ANY_ADMIN_PERMISSION]` while each page guards on a single
+   * key, so the two denials carry different required sets and legitimately
+   * write one row each. The docstring used to promise "ONE row, not three"
+   * for exactly this sequence, which is the only one that actually happens;
+   * this pins the real behaviour.
+   */
+  it("writes one row for the LAYOUT guard and one for the PAGE guard (different facts)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({ ...ACTIVE_READER, permissions: [] });
+
+    const { checkAdminPermissionServer, ANY_ADMIN_PERMISSION } = await load();
+    // The real navigation: the layout guard first, then the page it wraps.
+    expect(await checkAdminPermissionServer([...ANY_ADMIN_PERMISSION])).toBe("denied");
+    expect(await checkAdminPermissionServer("admin.audit.read")).toBe("denied");
+
+    expect(auditMock).toHaveBeenCalledTimes(2);
+    expect(auditMock.mock.calls[0]?.[0]).toMatchObject({
+      metadata: expect.objectContaining({ required: [...ANY_ADMIN_PERMISSION] }),
+    });
+    expect(auditMock.mock.calls[1]?.[0]).toMatchObject({
+      metadata: expect.objectContaining({ required: ["admin.audit.read"] }),
+    });
+    // ...and the layout guard re-running under the not-found boundary — the
+    // case the dedupe DOES cover — adds nothing.
+    await checkAdminPermissionServer([...ANY_ADMIN_PERMISSION]);
+    expect(auditMock).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * `x-drk-pathname` is client-reachable on any path the proxy matcher does
+   * not cover, and this row lands in an append-only, trigger-protected table
+   * — so the value is shape-bounded before it is stored (the #74 follow-up
+   * finding: it used to be read raw and written verbatim).
+   */
+  it("records null for a forged pathname that is not a path", async () => {
+    ambient.headers = new Headers({ "x-drk-pathname": "not a path <script>alert(1)</script>" });
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACTIVE_READER);
+
+    const { checkAdminPermissionServer } = await load();
+    await checkAdminPermissionServer("admin.audit.read");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ path: null }) }),
+    );
+  });
+
+  it("records null rather than parking a kilobyte-long forged value in the audit row", async () => {
+    ambient.headers = new Headers({ "x-drk-pathname": "/" + "a".repeat(4096) });
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACTIVE_READER);
+
+    const { checkAdminPermissionServer } = await load();
+    await checkAdminPermissionServer("admin.audit.read");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ path: null }) }),
+    );
   });
 });

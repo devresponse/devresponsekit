@@ -63,8 +63,16 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   return NextResponse.json({ roles });
 }
 
+/**
+ * Review #70: `roleIds` are `app_roles.id` PRIMARY KEYS, so they must be
+ * UUID-shaped BEFORE they reach Postgres — a free-form string used in
+ * `where("id", "in", …)` against a `uuid` column raises 22P02, which the
+ * route surfaces as an opaque 500 instead of the 400 a malformed request
+ * deserves. `isUuid` (the shared `UUID_RE`) is the single source of truth so
+ * body ids and path ids accept exactly the same shape.
+ */
 const idsSchema = z
-  .object({ roleIds: z.array(z.string().min(1).max(120)).min(1).max(500) })
+  .object({ roleIds: z.array(z.string().refine(isUuid, "invalid_uuid")).min(1).max(500) })
   .strict();
 
 /**
@@ -110,14 +118,20 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("not_found", 404, request);
   }
 
+  // Review #70: dedupe BEFORE the count compare. The DB returns one row per
+  // distinct id, so `["r1","r1"]` used to yield 1 row against a length of 2
+  // and produced a false `role_not_found` 404 for a body that names only
+  // real roles. The deduped list is also what we insert and audit.
+  const roleIds = [...new Set(parsed.data.roleIds)];
+
   // Every requested role must exist AND belong to the group's own org.
   const roles = await db
     .selectFrom("app_roles")
     .select(["id", "organization_id"])
-    .where("id", "in", parsed.data.roleIds)
+    .where("id", "in", roleIds)
     .execute();
   const sameOrg = roles.filter((r) => r.organization_id === group.organization_id);
-  if (sameOrg.length !== parsed.data.roleIds.length) {
+  if (sameOrg.length !== roleIds.length) {
     return adminErrorResponse("role_not_found", 404, request);
   }
 
@@ -129,7 +143,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // A bearer credential is bounded by its scopes, not just its owner's
   // permissions, and never takes the SUPERADMIN fast-path (P1-1).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
-    const conferred = await permissionKeysForRoles(parsed.data.roleIds);
+    const conferred = await permissionKeysForRoles(roleIds);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
     if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
@@ -141,7 +155,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   await db
     .insertInto("app_group_roles")
     .values(
-      parsed.data.roleIds.map((roleId) => ({
+      roleIds.map((roleId) => ({
         group_id: id,
         role_id: roleId,
         organization_id: group.organization_id,
@@ -154,7 +168,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     organizationId: group.organization_id,
-    metadata: { groupId: id, key: group.key, added: parsed.data.roleIds },
+    metadata: { groupId: id, key: group.key, added: roleIds },
   });
 
   return NextResponse.json({ ok: true, roleIds: await currentRoleIds(id) });

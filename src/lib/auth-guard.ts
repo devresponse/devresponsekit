@@ -10,27 +10,44 @@ import { readImpersonatorId } from "@/lib/impersonation";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 /**
- * Reads the Better Auth session from incoming request headers.
+ * Per-request memoization of the Better Auth session lookup (review #75).
  *
- * Returns `null` when the user is not authenticated or the session has
- * expired. This function is safe to call from layouts, route handlers,
- * server components, and server actions.
+ * A single admin render resolved the session 4-5 times: the secure layout,
+ * the administrator layout, the page guard and each nested guard all funnel
+ * through here, and `session.cookieCache` is off, so every one of them was a
+ * real Better Auth session read (a DB round-trip). They all read the SAME
+ * incoming headers and therefore always produced the same answer.
  *
- * The headers handed to Better Auth are a copy stamped with the trusted
- * client-IP header (`withTrustedClientIp`, review #35) — the ambient store
- * may come from a route the proxy never matched, so the derivation is
- * applied here rather than trusted from the request.
+ * React `cache()` is the idiomatic per-request memo — it is what
+ * `getUserAccessContext` uses — but it memoizes only inside a React render,
+ * and this function is also the session source for every `/api/*` route
+ * handler (via `resolveCaller`), where the guard can run several times per
+ * request. Keying a `WeakMap` on the per-request `Headers` object gives the
+ * same request scoping uniformly across renders, route handlers and server
+ * actions, and it is the carrier `getOrCreateRequestId` already memoizes on.
  *
- * ABSOLUTE LIFETIME (review #200): Better Auth's window is rolling, so an
- * active session refreshes indefinitely. When the operator sets
- * `SESSION_ABSOLUTE_LIFETIME_HOURS`, a session older than that — measured
- * from CREATION, not last activity — is reported as absent here and revoked,
- * so every caller (browser guards, server actions, the `/api/v1` cookie path)
- * inherits the cap from this one chokepoint. The variable is UNSET by
- * default, which keeps the pre-existing "rolls forever" behaviour exactly.
+ * Correctness:
+ *   - Scope. `headers()` returns a fresh object per request, so an entry can
+ *     never be read by another request; the entry dies with the request
+ *     because nothing else holds the object.
+ *   - Impersonation. The memo is keyed on the INCOMING headers, which never
+ *     change mid-request. Starting or stopping impersonation writes a new
+ *     session cookie on the RESPONSE; the next request carries new headers and
+ *     takes a fresh lookup. Within one request, a second call would have
+ *     re-read the very same cookie and got the very same session — so
+ *     `getImpersonatorId` (and the stop-impersonation authority derived from
+ *     it) sees exactly what it saw before.
+ *   - Ban chokepoint. `resolveCaller` still evaluates the ban state itself on
+ *     every call; this memoizes the session read, not any authorization.
+ *   - Failures are NOT memoized: a rejected lookup is evicted so the request
+ *     can retry rather than being pinned to a transient error.
+ *   - Absolute lifetime (review #200). The cap lives INSIDE the memoized
+ *     value: `readSession` applies it, so a session past the operator cap is
+ *     reported as absent (and revoked once) no matter which guard asks first.
  */
-export async function getCurrentSession() {
-  const requestHeaders = await headers();
+const sessionByRequestHeaders = new WeakMap<object, ReturnType<typeof readSession>>();
+
+async function readSession(requestHeaders: Headers) {
   const session = await auth.api.getSession({ headers: withTrustedClientIp(requestHeaders) });
   if (!session) return null;
 
@@ -55,6 +72,45 @@ export async function getCurrentSession() {
     });
   }
   return null;
+}
+
+/**
+ * Reads the Better Auth session from incoming request headers.
+ *
+ * Returns `null` when the user is not authenticated or the session has
+ * expired. This function is safe to call from layouts, route handlers,
+ * server components, and server actions.
+ *
+ * The headers handed to Better Auth are a copy stamped with the trusted
+ * client-IP header (`withTrustedClientIp`, review #35) — the ambient store
+ * may come from a route the proxy never matched, so the derivation is
+ * applied here rather than trusted from the request.
+ *
+ * ABSOLUTE LIFETIME (review #200): Better Auth's window is rolling, so an
+ * active session refreshes indefinitely. When the operator sets
+ * `SESSION_ABSOLUTE_LIFETIME_HOURS`, a session older than that — measured
+ * from CREATION, not last activity — is reported as absent here and revoked,
+ * so every caller (browser guards, server actions, the `/api/v1` cookie path)
+ * inherits the cap from this one chokepoint. The variable is UNSET by
+ * default, which keeps the pre-existing "rolls forever" behaviour exactly.
+ *
+ * Memoized per request — see {@link sessionByRequestHeaders} (review #75).
+ * The memo holds the CAPPED answer, so the absolute-lifetime check and its
+ * best-effort revocation run at most once per request rather than on each of
+ * the four or five guards a single render walks through.
+ */
+export async function getCurrentSession() {
+  const requestHeaders = await headers();
+
+  const cached = sessionByRequestHeaders.get(requestHeaders);
+  if (cached) return cached;
+
+  const pending = readSession(requestHeaders);
+  sessionByRequestHeaders.set(requestHeaders, pending);
+  // Evict on failure so a transient error is not pinned for the whole
+  // request. The rejection is still delivered to every awaiting caller.
+  void pending.catch(() => sessionByRequestHeaders.delete(requestHeaders));
+  return pending;
 }
 
 /**

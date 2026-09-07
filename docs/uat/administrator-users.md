@@ -328,10 +328,10 @@ i18n: run `en` + `uk`; labels, the password hint, status options, and error mess
 
 - Route: `/app/administrator/users/[userId]` · Example URL: `/en/app/administrator/users/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:28`
 - Purpose: The per-user workspace: a metadata header (name, email, status badge, optional Impersonate button) plus a tabbed container — Overview, Roles, Groups, Memberships, Sessions, and (permission-gated) Audit.
-- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:35`); the `userId` must be a UUID (`:40`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:69`, `access-scope.server.ts:96`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.audit.read` (Audit tab visible), `admin.users.impersonate` (Impersonate button) — `[userId]/page.tsx:75`–`:79`.
+- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:35`); the `userId` must be a UUID (`:40`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:69`, `access-scope.server.ts:96`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.users.impersonate` (Impersonate button) — `[userId]/page.tsx:87`–`:98`. A tab whose API demands MORE than `admin.users.read` is rendered only for a caller who holds that key (review #76): **Groups** needs `admin.groups.read`, **Sessions** needs `admin.users.sessions`, **Audit** needs `admin.audit.read` (`_user-detail-tabs.tsx:86`,`:88`,`:89`). No tab in the bar leads to a 403.
 - Access matrix:
   - Member → **404**.
-  - Limited Admin → header + Overview/Roles/Groups/Memberships/Sessions tabs render, **plus** the Audit tab (holds `admin.audit.read`). Roles/Groups/Memberships show **no** mutate buttons; the Impersonate button is absent.
+  - Limited Admin → header + Overview/Roles/Memberships tabs, **plus** the Audit tab (holds `admin.audit.read`). The **Groups** and **Sessions** tabs are **absent** — the `admin` role holds neither `admin.groups.read` nor `admin.users.sessions` (review #76). Roles/Memberships show **no** mutate buttons; the Impersonate button is absent.
   - Org Admin / Superadmin → all tabs and actions (org admin scoped to ORG A; superadmin across orgs).
 - Preconditions & test data: pick a user from the list (its detail URL carries the `app_users.id` UUID). To test cross-tenant 404, grab an `org-b` user's id while signed in as a superadmin, then re-request it as `orgadmin@orga.local`.
 
@@ -445,10 +445,10 @@ i18n: run `en` + `uk`; column headers, buttons, dialog text, and error messages 
 
 - Route: `/app/administrator/users/[userId]` (Groups tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-groups-panel.tsx:37`
 - Purpose: Lists the groups the user belongs to and, with permission, lets the operator add the user to a group (dialog + picker) or remove them. Group membership confers the union of the group's roles' permissions (ADR-0002).
-- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:35`). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:76`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:82`, `:152`).
+- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:35`), and the tab TRIGGER is gated on the same key so a caller without it never reaches the panel (`_user-detail-tabs.tsx:86`, review #76). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:76`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:82`, `:152`).
 - Access matrix:
   - Member → 404 (page).
-  - Limited Admin → the Groups **tab is present** (tabs are static), but the list fetch **fails** because the `admin` role lacks `admin.groups.read` → the panel shows its load error, and there are no add/remove buttons.
+  - Limited Admin → the Groups tab is **not rendered** at all: the `admin` role lacks `admin.groups.read`, which now gates the tab trigger (review #76). The API is still the boundary — a hand-made `GET …/groups` for that user answers 403.
   - Org Admin / Superadmin → list + Add + Remove. An org admin sees only their org's groups; adding to a group whose conferred permissions exceed the admin's is blocked (`api/.../groups/route.ts:118`).
 - Preconditions & test data: ORG A has the `Engineering` and `Customer Support` groups (`dev-init.ts:135`). Use a user who is not yet a member so the picker has something to add.
 
@@ -466,12 +466,12 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - ADMIN-USERS-DETAIL-GROUPS-S2 — As a Limited Admin, I want the Groups tab to reveal nothing, so that group membership stays confidential when I lack the group-read permission.
-  - Acceptance criteria: Given a Limited Admin (no `admin.groups.read`), when I open the Groups tab, then the list does not load (an inline load error) and no add/remove controls appear.
+  - Acceptance criteria: Given a Limited Admin (no `admin.groups.read`), when I open a user's detail, then the Groups tab is not offered at all, and the underlying API still refuses me (review #76).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Sign in as a Limited Admin; open a user's detail; click **Groups**. | The tab opens. |
-    | 2 | Observe the panel. | A load-error message appears (the `…/groups` fetch is 403 without `admin.groups.read`); no group rows; no Add button. |
+    | 1 | Sign in as a Limited Admin; open a user's detail and read the tab bar. | Overview, Roles, Memberships and Audit are offered. There is **no Groups tab**. |
+    | 2 | With the browser devtools console, request `/api/administrator/users/<that user id>/groups`. | 403 `forbidden` — the tab was a convenience, the API is the boundary. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -531,10 +531,10 @@ i18n: run `en` + `uk`; column headers, the status badge, and the joined date loc
 
 - Route: `/app/administrator/users/[userId]` (Sessions tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-sessions-panel.tsx:28`
 - Purpose: Lists the user's active Better Auth sessions (expiry, IP, user agent) and lets the operator revoke one session or all of them (force sign-out everywhere).
-- Guard / who can access: both the list `GET` and the revoke `DELETE` (single + all) require `admin.users.sessions` (`api/.../users/[id]/sessions/route.ts:32`, `:70`; single-session `DELETE` at `api/.../users/[id]/sessions/[sessionId]/route.ts:27`). The Sessions tab trigger is always rendered (not permission-gated in the tab bar), so the gate is enforced by the API: without `admin.users.sessions`, the list fetch fails and the panel shows its error.
+- Guard / who can access: both the list `GET` and the revoke `DELETE` (single + all) require `admin.users.sessions` (`api/.../users/[id]/sessions/route.ts:32`, `:70`; single-session `DELETE` at `api/.../users/[id]/sessions/[sessionId]/route.ts:27`). The tab TRIGGER is gated on the same key (`_user-detail-tabs.tsx:88`, review #76), so a caller without `admin.users.sessions` is never offered the tab; the API stays the boundary for anyone who calls it directly.
 - Access matrix:
   - Member → 404 (page).
-  - Limited Admin → the Sessions tab is present, but the list fetch **fails** (the `admin` role lacks `admin.users.sessions`) → the panel shows its error; revoke is impossible.
+  - Limited Admin → the Sessions tab is **not rendered** (the `admin` role lacks `admin.users.sessions`, which gates the trigger); a direct call to the sessions API answers 403, so revoke is impossible either way.
   - Org Admin / Superadmin → list + revoke. "Revoke all" is account-global, so for a user shared across tenants it is Superadmin-only; an org admin may revoke-all only for a user confined to their org (`api/.../sessions/route.ts:90`, `access-scope.server.ts:133`).
 - Preconditions & test data: sign the target user in on a second browser/device first so there is a live session to list and revoke.
 
@@ -552,12 +552,12 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - ADMIN-USERS-DETAIL-SESSIONS-S2 — As a Limited Admin, I want session data to stay hidden, so that IPs and devices are not exposed without the sessions permission.
-  - Acceptance criteria: Given a Limited Admin (no `admin.users.sessions`), when I open the Sessions tab, then the list does not load (inline error) and no revoke controls act.
+  - Acceptance criteria: Given a Limited Admin (no `admin.users.sessions`), when I open a user's detail, then no Sessions tab is offered and the API refuses a direct read (review #76).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Sign in as a Limited Admin; open a user's detail; click **Sessions**. | The tab opens. |
-    | 2 | Observe the panel. | An error message appears (the sessions fetch is 403); no session rows are shown. |
+    | 1 | Sign in as a Limited Admin; open a user's detail and read the tab bar. | There is **no Sessions tab**. |
+    | 2 | With the browser devtools console, request `/api/administrator/users/<that user id>/sessions`. | 403 `forbidden`; no IPs or user agents are returned. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -663,9 +663,9 @@ Legend: **view** = can open/read the screen; **act** = can perform the screen's 
 | User detail | `admin.users.read` | 404 | view | view | view |
 | — Overview tab | `admin.users.read` | 404 | view | view | view |
 | — Roles tab | read `admin.users.read`; act `admin.roles.assign` | 404 | view; no act | view + act | view + act |
-| — Groups tab | read `admin.groups.read`; act `admin.groups.assign` | 404 | tab present, list errors; no act | view + act | view + act |
+| — Groups tab | read `admin.groups.read`; act `admin.groups.assign` | 404 | tab absent (#76); API 403 | view + act | view + act |
 | — Memberships tab | read `admin.users.read`; act `admin.users.update` | 404 | view; no act | view + act | view + act |
-| — Sessions tab | `admin.users.sessions` (read + act) | 404 | tab present, list errors; no act | view + act (shared-target caveat) | view + act |
+| — Sessions tab | `admin.users.sessions` (read + act) | 404 | tab absent (#76); API 403 | view + act (shared-target caveat) | view + act |
 | — Audit tab | `admin.audit.read` | 404 | view (tab present) | view | view |
 | Impersonate | `admin.users.impersonate` | 404 | button absent | act | act |
 

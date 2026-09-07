@@ -12,6 +12,7 @@
  * from create endpoints — both are modelled faithfully so a generated client
  * matches the wire format.
  */
+import { locales } from "@/config/i18n-config";
 import { ACCOUNT_SCOPES, API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
 
 type Obj = Record<string, unknown>;
@@ -267,7 +268,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
             name: { type: "string", minLength: 1, maxLength: 200 },
             role: { type: "string", enum: ["admin", "user"] },
             initialAppStatus: { type: "string", enum: ["active", "pending_approval"] },
-            preferredLocale: { type: "string", minLength: 2, maxLength: 10 },
+            preferredLocale: { type: "string", enum: [...locales] },
           },
           required: ["email", "password"],
         },

@@ -77,6 +77,83 @@ describe("getCurrentSession", () => {
 });
 
 /**
+ * Review #75 - an admin render funnels the secure layout, the administrator
+ * layout and every page/nested guard through `getCurrentSession`, and
+ * `session.cookieCache` is off, so each one was a real Better Auth session
+ * read (4-5 per render). They all read the SAME incoming headers, so the
+ * lookup is memoized per request, keyed on the request's `Headers` object.
+ */
+describe("getCurrentSession - per-request memoization (review #75)", () => {
+  it("performs ONE Better Auth lookup for repeated calls in a request", async () => {
+    getSessionMock.mockResolvedValue({ user: { id: "ba-1" } });
+    ambient.headers = new Headers({ cookie: "ba.session=x" });
+
+    const results = [
+      await mod.getCurrentSession(),
+      await mod.getCurrentSession(),
+      await mod.getCurrentSession(),
+      await mod.getCurrentSession(),
+      await mod.getCurrentSession(),
+    ];
+
+    expect(getSessionMock).toHaveBeenCalledTimes(1);
+    for (const r of results) expect(r).toEqual({ user: { id: "ba-1" } });
+  });
+
+  it("shares ONE lookup between concurrent callers (guards run in parallel)", async () => {
+    getSessionMock.mockResolvedValue({ user: { id: "ba-1" } });
+    ambient.headers = new Headers({ cookie: "ba.session=x" });
+
+    await Promise.all([
+      mod.getCurrentSession(),
+      mod.getCurrentSession(),
+      mod.getCurrentSession(),
+      mod.getCurrentSession(),
+    ]);
+
+    expect(getSessionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT reuse the answer across requests - a new Headers object re-reads", async () => {
+    getSessionMock.mockResolvedValueOnce({ user: { id: "ba-1" } });
+    ambient.headers = new Headers({ cookie: "ba.session=first" });
+    expect(await mod.getCurrentSession()).toEqual({ user: { id: "ba-1" } });
+
+    // Next hands every request its own headers object; a session that was
+    // revoked (or an impersonation that was stopped) between requests MUST be
+    // re-read, never served from the previous request's memo.
+    getSessionMock.mockResolvedValueOnce(null);
+    ambient.headers = new Headers({ cookie: "ba.session=revoked" });
+    expect(await mod.getCurrentSession()).toBeNull();
+
+    expect(getSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not pin a transient failure for the rest of the request", async () => {
+    ambient.headers = new Headers({ cookie: "ba.session=x" });
+    getSessionMock.mockRejectedValueOnce(new Error("boom"));
+    await expect(mod.getCurrentSession()).rejects.toThrow("boom");
+
+    getSessionMock.mockResolvedValueOnce({ user: { id: "ba-1" } });
+    expect(await mod.getCurrentSession()).toEqual({ user: { id: "ba-1" } });
+    expect(getSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the impersonation marker visible to every caller in the request", async () => {
+    getSessionMock.mockResolvedValue({
+      user: { id: "target" },
+      session: { id: "s", impersonatedBy: "admin-9" },
+    });
+    ambient.headers = new Headers({ cookie: "ba.session=x" });
+
+    // The stop-impersonation authority derives from the memoized session.
+    expect(mod.getImpersonatorId(await mod.getCurrentSession())).toBe("admin-9");
+    expect(mod.getImpersonatorId(await mod.getCurrentSession())).toBe("admin-9");
+    expect(getSessionMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
  * Review #122: `getImpersonatorId` is the authority for "is this an
  * impersonation session" (STOP-impersonation, the active-org switch, the SSO
  * launch refusal) and had no unit coverage — every consumer suite re-mocked

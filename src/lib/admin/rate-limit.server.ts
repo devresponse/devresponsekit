@@ -110,6 +110,19 @@ export function normalizeBucketKey(key: string): string {
   if (key.length <= MAX_KEY_LENGTH) return key;
   // Keep a readable scope prefix for debugging, then the digest of the WHOLE
   // key so distinct long keys stay distinct.
+  //
+  // CodeQL's `js/insufficient-password-hash` flags this line because the
+  // taint tracker follows the RETURN VALUES of `verifyApiKey`,
+  // `verifyClientCredentials`, `requireApiAccount` and `requireAdminPermission`
+  // here and treats them as password material. They are not: what reaches a
+  // limiter key is an identifier — an api_key ROW ID, a public `client_id`, a
+  // Better Auth user id, or `clientIpKey()` — never a secret. The token route
+  // is explicit that "nothing the client sends in the body reaches a limiter
+  // key before the credential verifies", and no secret is stored, compared or
+  // re-derived from this digest: it is only a fixed-size map key, so a
+  // deliberately slow KDF would buy nothing and would put a work factor on
+  // the hot abuse path. Fenced to this one line.
+  // codeql[js/insufficient-password-hash]
   return `${key.slice(0, 32)}#${createHash("sha256").update(key).digest("hex")}`;
 }
 

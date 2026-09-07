@@ -8,13 +8,16 @@ import type * as AdminRequestIdModule from "@/lib/admin/request-id.server";
  * The correlation id ties the user-facing "Support ID", the `x-request-id`
  * response header, the Sentry tag, the stdout log line and
  * `app_audit_events.request_id` together. Honouring a client-supplied value
- * let a caller collide or replay the ids operators search by (the audit
- * column is NOT unique), and `instrumentation.ts` tagged Sentry/stdout with
- * the RAW header — no format check at all, so control characters and markup
- * reached both sinks.
+ * lets a caller collide or replay the ids operators search by (the audit
+ * column is NOT unique) — a gap this app accepts in exchange for edge↔app
+ * correlation — and `instrumentation.ts` tagged Sentry/stdout with the RAW
+ * header, no format check at all, so control characters and markup reached
+ * both sinks. That second half IS closed.
  *
- * These tests pin the three inputs that matter at every producer: forged
- * (well-formed but from an untrusted hop), malformed, and absent.
+ * These tests pin the four inputs that matter at every producer: a UUID with a
+ * forwarded chain (honoured — INCLUDING when the chain is the client's own
+ * invention, which is #224's remaining gap and is asserted explicitly below),
+ * a UUID with no chain (rejected), malformed (rejected), and absent.
  */
 
 const VALID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -47,7 +50,7 @@ afterEach(() => {
 });
 
 describe("normalizeInboundRequestId", () => {
-  it("honours a UUID that arrived through the trusted proxy hop", () => {
+  it("honours a UUID that arrives with a forwarded chain", () => {
     expect(mod.normalizeInboundRequestId(VALID, "203.0.113.9")).toBe(VALID);
   });
 
@@ -55,12 +58,24 @@ describe("normalizeInboundRequestId", () => {
     expect(mod.normalizeInboundRequestId(VALID.toUpperCase(), "203.0.113.9")).toBe(VALID);
   });
 
-  it("REJECTS a well-formed id that did not come through a trusted proxy", () => {
-    // A direct caller (no forwarded chain) is exactly the forgery case: it
-    // can pick any id, including one already used by another request.
+  it("REJECTS a well-formed id from a caller that sends NO forwarded chain", () => {
+    // The only population the chain check excludes: an unmodified direct
+    // request to a non-proxied origin, and local development.
     expect(mod.normalizeInboundRequestId(VALID, null)).toBeUndefined();
     expect(mod.normalizeInboundRequestId(VALID, "")).toBeUndefined();
     expect(mod.normalizeInboundRequestId(VALID, undefined)).toBeUndefined();
+  });
+
+  it("DOCUMENTED GAP (#224): a forged id is honoured once the client sends any XFF", () => {
+    // `X-Forwarded-For` is client-supplied, so the chain check is not a
+    // provenance check: adding one header defeats it, and behind a real edge
+    // (Vercel, any LB) it is true for every request — making it a constant.
+    // This test exists so the limitation is VISIBLE rather than implied to be
+    // closed: the id below is chosen entirely by an untrusted caller and is
+    // honoured, exactly as documented on `normalizeInboundRequestId`. If a
+    // future change actually closes #224 (authenticate the header at the edge,
+    // or always mint), this expectation must flip — deliberately, not silently.
+    expect(mod.normalizeInboundRequestId(VALID, "1.2.3.4")).toBe(VALID);
   });
 
   it("requires as many hops as TRUSTED_PROXY_COUNT claims", async () => {
@@ -71,7 +86,7 @@ describe("normalizeInboundRequestId", () => {
     expect(m.normalizeInboundRequestId(VALID, "203.0.113.9, 198.51.100.7")).toBe(VALID);
   });
 
-  it("REJECTS malformed ids even from a trusted hop", () => {
+  it("REJECTS malformed ids even with a forwarded chain present", () => {
     for (const bad of [
       "not-a-uuid",
       "<script>alert(1)</script>",
@@ -102,16 +117,25 @@ describe("normalizeInboundRequestId", () => {
 describe("getOrCreateRequestId (review #224)", () => {
   const headers = (init: Record<string, string>) => new Headers(init);
 
-  it("honours a trusted inbound id", () => {
+  it("honours an inbound UUID that arrives with a forwarded chain", () => {
     const h = headers({ "x-request-id": VALID, "x-forwarded-for": "203.0.113.9" });
     expect(adminMod.getOrCreateRequestId(h)).toBe(VALID);
   });
 
-  it("MINTS its own id for a forged one from a direct caller", () => {
+  it("MINTS its own id for a caller that sends no forwarded chain", () => {
     const h = headers({ "x-request-id": VALID });
     const id = adminMod.getOrCreateRequestId(h);
     expect(id).not.toBe(VALID);
     expect(mod.isValidRequestId(id)).toBe(true);
+  });
+
+  it("DOCUMENTED GAP (#224): honours the id when that same caller adds an XFF", () => {
+    // Same untrusted caller as the test above, one extra self-set header. The
+    // Support ID that reaches the audit row, the response header and Sentry is
+    // now the client's choice — it can be replayed or collided with another
+    // request's. Pinned so the residual risk is asserted, not assumed away.
+    const h = headers({ "x-request-id": VALID, "x-forwarded-for": "1.2.3.4" });
+    expect(adminMod.getOrCreateRequestId(h)).toBe(VALID);
   });
 
   it("MINTS its own id for a malformed inbound value", () => {
@@ -149,17 +173,26 @@ describe("onRequestError request_id tag (review #99)", () => {
     );
   }
 
-  it("tags a trusted, well-formed inbound id", async () => {
+  it("tags a well-formed inbound id that arrives with a forwarded chain", async () => {
     await fire({ "x-request-id": VALID, "x-forwarded-for": "203.0.113.9" });
     expect(sentry.tags).toContainEqual(["request_id", VALID]);
     expect(sentry.captured).toHaveLength(1);
   });
 
-  it("tags NOTHING for a forged id from a direct caller", async () => {
+  it("tags NOTHING for an id from a caller that sends no forwarded chain", async () => {
     await fire({ "x-request-id": VALID });
     expect(sentry.tags).toHaveLength(0);
     // The error is still captured — the id is dropped, not the event.
     expect(sentry.captured).toHaveLength(1);
+  });
+
+  it("DOCUMENTED GAP (#224): tags a client-chosen id once an XFF is present", async () => {
+    // The point of #99 was that this hook validated NOTHING; it now shares one
+    // normaliser with the admin helper, so a malformed id can no longer poison
+    // the tag. Forgery is a different question and is still open — asserted
+    // here so the two halves are not confused for each other.
+    await fire({ "x-request-id": VALID, "x-forwarded-for": "1.2.3.4" });
+    expect(sentry.tags).toContainEqual(["request_id", VALID]);
   });
 
   it("tags NOTHING for a malformed id, so no control characters reach a sink", async () => {

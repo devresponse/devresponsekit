@@ -1,4 +1,4 @@
-import { isFromTrustedProxy } from "@/lib/client-ip";
+import { hasForwardedHops } from "@/lib/client-ip";
 
 /**
  * The correlation id every sink agrees on (review #99, #224).
@@ -6,16 +6,23 @@ import { isFromTrustedProxy } from "@/lib/client-ip";
  * A request id ties together: the user-facing "Support ID" rendered by the
  * error boundaries, the `x-request-id` response header, the Sentry issue tag,
  * the stdout log line, and `app_audit_events.request_id`. Because those sinks
- * are read by operators AND because the audit column is not unique, the id has
- * to be something the SERVER chose — otherwise a client can:
+ * are read by operators AND because the audit column is not unique, honouring
+ * a client-supplied id lets a client:
  *
- *   - pick an id already used by someone else's request, so a support lookup
- *     returns two unrelated stories and the audit trail stops being a trail;
- *   - replay one id across thousands of requests to make a specific incident
- *     unfindable;
- *   - hand a non-UUID string to a downstream sink (a raw `x-request-id` used
- *     to reach Sentry and stdout un-validated), injecting control characters
- *     or markup into a log line.
+ *   1. pick an id already used by someone else's request, so a support lookup
+ *      returns two unrelated stories and the audit trail stops being a trail;
+ *   2. replay one id across thousands of requests to make a specific incident
+ *      unfindable;
+ *   3. hand a non-UUID string to a downstream sink (a raw `x-request-id` used
+ *      to reach Sentry and stdout un-validated), injecting control characters
+ *      or markup into a log line.
+ *
+ * This module closes (3) — everywhere, including `instrumentation.ts`, which
+ * validated nothing (#99). It does NOT close (1) or (2): honouring an inbound
+ * id is a deliberate trade for edge↔app correlation, and the bar it puts in
+ * front of that is weak by construction. See
+ * {@link normalizeInboundRequestId} for exactly how weak, and treat every
+ * request id as a correlation aid rather than an identity.
  *
  * This module is deliberately framework-free — no `server-only`, no DB, no
  * `next/*` — so both the App Router helper (`lib/admin/request-id.server.ts`)
@@ -41,26 +48,33 @@ export function isValidRequestId(value: unknown): value is string {
  * The inbound `x-request-id` to honour, or `undefined` when the caller must
  * mint its own.
  *
- * TWO conditions, both required (review #224):
+ * TWO conditions, both required:
  *
- *  1. **Provenance.** The request must have arrived through the trusted proxy
- *     layer the deployment is configured for — `TRUSTED_PROXY_COUNT` hops,
- *     the same model `getClientIp` uses for rate-limit keys. A front door /
- *     load balancer that tags requests is the only reason to honour an
- *     inbound id at all; a client talking to the origin directly gets a
- *     server-minted one. With the default of one proxy this means "the
- *     forwarded chain is non-empty", which is false for a direct call and
- *     for local development.
- *  2. **Format.** The value must be a UUID. This bound existed for the admin
- *     helper already and is repeated here because it is the half that keeps
- *     `<script>`, a newline, or a 4 KB blob out of a log line — and because
- *     `instrumentation.ts` previously applied NO validation at all (#99).
+ *  1. **Format.** The value must be a UUID. This is the load-bearing check
+ *     (review #99): it is what keeps `<script>`, a newline, or a 4 KB blob out
+ *     of a log line and a Sentry tag, and `instrumentation.ts` previously
+ *     applied NO validation at all there.
+ *  2. **A forwarded chain is present** — at least `TRUSTED_PROXY_COUNT`
+ *     entries in `X-Forwarded-For` (see {@link hasForwardedHops}).
  *
- * The provenance check is a bar, not a proof (see {@link isFromTrustedProxy}):
- * behind a real proxy an attacker can still supply a well-formed UUID and have
- * it honoured. That is acceptable for a correlation id and ONLY for a
- * correlation id — nothing may authorize, authenticate, or rate-limit on this
- * value. Callers that need a guaranteed-unique id per request must mint one.
+ * **What condition 2 does NOT do.** It is not a provenance proof and does not
+ * close review #224. `X-Forwarded-For` is client-supplied, so ANY caller
+ * satisfies it by sending one extra header, and behind a real edge (Vercel,
+ * any LB) it is unconditionally true. It rejects exactly one population:
+ * callers that send no chain at all — an unmodified direct request to a
+ * non-proxied origin, and local development. A deliberate forger is not
+ * affected in any deployment.
+ *
+ * **So #224's threat stands, by design.** A determined client can still pin
+ * one UUID across many requests, or reuse an id it saw elsewhere, and that
+ * value lands in `app_audit_events.request_id` (a non-unique column), the
+ * `x-request-id` response header and the Sentry tag. A request id is a
+ * CORRELATION AID and nothing else: it is not proof that two rows belong to
+ * one request, and nothing may authorize, authenticate, rate-limit, or
+ * de-duplicate on it. Callers that need a guaranteed-unique per-request value
+ * must mint their own. Closing the forgery hole would mean never honouring an
+ * inbound id (and losing edge↔app correlation) or authenticating the header
+ * from the edge with a shared secret; neither is implemented.
  */
 export function normalizeInboundRequestId(
   rawRequestId: unknown,
@@ -69,7 +83,7 @@ export function normalizeInboundRequestId(
   if (typeof rawRequestId !== "string") return undefined;
   const candidate = rawRequestId.trim();
   if (!isValidRequestId(candidate)) return undefined;
-  if (!isFromTrustedProxy(xForwardedFor)) return undefined;
+  if (!hasForwardedHops(xForwardedFor)) return undefined;
   return candidate.toLowerCase();
 }
 

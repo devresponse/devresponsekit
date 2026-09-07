@@ -53,9 +53,11 @@ export async function register() {
  * the error sinks was the one a client could choose: a forged value split the
  * correlation it exists to provide, and a malformed one (control characters,
  * markup, kilobytes of junk) went straight into a log line and a Sentry tag.
- * It now goes through the shared {@link normalizeInboundRequestId}, so both
- * producers answer "which inbound ids are trustworthy" identically; an
- * untrusted or malformed id yields NO tag rather than a poisoned one.
+ * It now goes through the shared {@link normalizeInboundRequestId}, so a
+ * malformed id yields NO tag rather than a poisoned one, and this hook and the
+ * admin helper answer "which inbound ids do we honour" identically instead of
+ * disagreeing. A well-formed FORGED id is still honoured here exactly as it is
+ * everywhere else — that gap is #224's and is documented on the normaliser.
  *
  * The tag is set inside `Sentry.withScope` so it applies to THIS capture only
  * — `getCurrentScope()` mutated the scope the whole request shares, which on

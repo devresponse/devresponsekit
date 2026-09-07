@@ -10,12 +10,14 @@ import { REQUEST_ID_HEADER, normalizeInboundRequestId } from "@/lib/request-id";
  * the same request that 502'd?").
  *
  * Contract:
- *   - An inbound `x-request-id` is honoured ONLY when it came through the
- *     deployment's trusted proxy hops AND is a well-formed UUID — see
- *     {@link normalizeInboundRequestId} (review #224). Honouring it from any
- *     client let a caller replay or collide the Support IDs operators search
- *     by (the audit column is not unique), so an id from a direct caller is
- *     now discarded, not trusted.
+ *   - An inbound `x-request-id` is honoured only when it is a well-formed
+ *     UUID and arrives with a forwarded chain — see
+ *     {@link normalizeInboundRequestId}, which spells out how little the
+ *     second half buys: it rejects non-forwarding callers only, so a caller
+ *     that sends `x-forwarded-for` (and every caller behind a real edge) can
+ *     still choose the id. Review #224's replay/collision of Support IDs is
+ *     therefore NOT closed — the id correlates sinks, it does not identify a
+ *     request.
  *   - Otherwise we generate a v4 UUID.
  *   - The same id MUST be echoed back via the `x-request-id` response
  *     header AND included in the JSON error body so a UI can surface

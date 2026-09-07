@@ -202,12 +202,51 @@ describe("POST /api/security/csp-report", () => {
       }
     });
 
-    it("redacts an email in the reported URL and leaves CSP sentinels alone", async () => {
+    // The cases above put the secret in a query, a fragment, or a
+    // `/reset-password/<tok>` segment — all of which `stripQuery` alone
+    // removes, so none of them exercises the `redactText` half of
+    // `urlField` (`stripQuery(redactText(value))`). These do: the secret
+    // sits in an ORDINARY path segment, which survives a query strip and is
+    // only removed by the pattern redactor.
+    it("redacts an API key sitting in a blocked-uri PATH segment", async () => {
+      const body = JSON.stringify({
+        "csp-report": {
+          "document-uri": "https://app.test/en/dashboard",
+          "effective-directive": "img-src",
+          "blocked-uri": "https://cdn.test/drk_live_AbC123xyz/x.png",
+        },
+      });
+      await POST(post(body, "application/csp-report"));
+      const line = warnSpy.mock.calls[0]?.[0] as { blockedUri?: string };
+      expect(line.blockedUri).toBe("https://cdn.test/[redacted-token]/x.png");
+      expect(JSON.stringify(warnSpy.mock.calls[0])).not.toContain("drk_live_AbC123xyz");
+    });
+
+    it("redacts a JWT sitting in a source-file PATH segment", async () => {
+      const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZGEifQ.s1gn4tur3-v4lu3";
       const body = JSON.stringify([
         {
           type: "csp-violation",
           body: {
-            documentURL: "https://app.test/en/sign-in?email=victim@example.com",
+            documentURL: "https://app.test/en/dashboard",
+            effectiveDirective: "script-src",
+            sourceFile: `https://app.test/assets/${jwt}/bundle.js`,
+          },
+        },
+      ]);
+      await POST(post(body, "application/reports+json"));
+      const line = warnSpy.mock.calls[0]?.[0] as { sourceFile?: string };
+      expect(line.sourceFile).toBe("https://app.test/assets/[redacted-token]/bundle.js");
+      expect(JSON.stringify(warnSpy.mock.calls[0])).not.toContain(jwt);
+    });
+
+    it("redacts an email in the reported PATH and leaves CSP sentinels alone", async () => {
+      const body = JSON.stringify([
+        {
+          type: "csp-violation",
+          body: {
+            // In the path, not the query — a query strip cannot save us here.
+            documentURL: "https://app.test/en/u/victim@example.com/settings",
             effectiveDirective: "script-src-elem",
             blockedURL: "inline",
           },
@@ -215,7 +254,8 @@ describe("POST /api/security/csp-report", () => {
       ]);
       await POST(post(body, "application/reports+json"));
       const line = warnSpy.mock.calls[0]?.[0] as { documentUri?: string; blockedUri?: string };
-      expect(line.documentUri).toBe("https://app.test/en/sign-in");
+      expect(line.documentUri).toBe("https://app.test/en/u/[redacted-email]/settings");
+      expect(JSON.stringify(warnSpy.mock.calls[0])).not.toContain("victim@example.com");
       // `inline` / `eval` / `data` are spec sentinels, not URLs — untouched.
       expect(line.blockedUri).toBe("inline");
     });

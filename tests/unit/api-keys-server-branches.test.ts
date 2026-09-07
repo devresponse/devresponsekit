@@ -326,6 +326,112 @@ describe("verifyApiKey — not-yet-expired key resolves", () => {
   });
 });
 
+/**
+ * Review #201 — the usage stamp used to issue one UPDATE per authenticated
+ * request (a write, and a dead tuple, per read). It is now throttled per key:
+ * an in-process gate skips the round trip, and the UPDATE carries the same
+ * interval as a WHERE predicate so other instances cannot beat it either.
+ *
+ * Reverting either layer fails a test here: drop the in-process gate and the
+ * burst writes N times; drop the SQL predicate and the captured WHERE list
+ * loses its `last_used_at` guard.
+ */
+describe("touchApiKeyUsage — throttling (review #201)", () => {
+  const originalInterval = process.env.API_KEY_USAGE_TOUCH_INTERVAL_SECONDS;
+  afterEach(() => {
+    if (originalInterval === undefined) delete process.env.API_KEY_USAGE_TOUCH_INTERVAL_SECONDS;
+    else process.env.API_KEY_USAGE_TOUCH_INTERVAL_SECONDS = originalInterval;
+  });
+
+  it("collapses a burst of requests for one key into a single write", () => {
+    const t0 = Date.UTC(2026, 8, 6, 12, 0, 0);
+    for (let i = 0; i < 250; i++) {
+      mod.touchApiKeyUsage("burst-key", "203.0.113.5", t0 + i * 10);
+    }
+    expect(state.updates).toHaveLength(1);
+  });
+
+  it("writes again once the interval has elapsed, and not a millisecond before", () => {
+    const t0 = Date.UTC(2026, 8, 6, 12, 0, 0);
+    // Default interval is 60s (validated env schema).
+    mod.touchApiKeyUsage("k", null, t0);
+    expect(state.updates).toHaveLength(1);
+    mod.touchApiKeyUsage("k", null, t0 + 59_999);
+    expect(state.updates).toHaveLength(1);
+    mod.touchApiKeyUsage("k", null, t0 + 60_000);
+    expect(state.updates).toHaveLength(2);
+  });
+
+  it("throttles each key independently", () => {
+    const t0 = Date.UTC(2026, 8, 6, 12, 0, 0);
+    mod.touchApiKeyUsage("a", null, t0);
+    mod.touchApiKeyUsage("b", null, t0);
+    mod.touchApiKeyUsage("a", null, t0 + 1);
+    mod.touchApiKeyUsage("b", null, t0 + 1);
+    expect(state.updates).toHaveLength(2);
+  });
+
+  it("guards the UPDATE with the same interval so another instance cannot beat it", () => {
+    mod.touchApiKeyUsage("sql-key", null, Date.UTC(2026, 8, 6, 12, 0, 0));
+    // The predicate is a raw SQL fragment; assert its compiled text.
+    const fragments = state.wheres
+      .flat()
+      .filter(
+        (w): w is { toOperationNode: () => unknown } =>
+          typeof (w as { toOperationNode?: unknown })?.toOperationNode === "function",
+      );
+    expect(fragments).toHaveLength(1);
+    const text = JSON.stringify(fragments[0]!.toOperationNode());
+    expect(text).toContain("last_used_at is null");
+    expect(text).toContain("make_interval");
+    // …parameterised with the SAME interval the in-process gate uses (60s).
+    expect(text).toContain("60");
+  });
+
+  it("honours a configured interval of 0 by writing every time", async () => {
+    process.env.API_KEY_USAGE_TOUCH_INTERVAL_SECONDS = "0";
+    vi.resetModules();
+    const fresh = await import("@/lib/api-auth/api-keys.server");
+    const t0 = Date.UTC(2026, 8, 6, 12, 0, 0);
+    fresh.touchApiKeyUsage("always", null, t0);
+    fresh.touchApiKeyUsage("always", null, t0);
+    fresh.touchApiKeyUsage("always", null, t0);
+    expect(state.updates).toHaveLength(3);
+  });
+
+  it("bounds the throttle map and evicts the oldest key first", () => {
+    const t0 = Date.UTC(2026, 8, 6, 12, 0, 0);
+    mod.touchApiKeyUsage("oldest", null, t0);
+    for (let i = 0; i < mod.MAX_TRACKED_USAGE_KEYS; i++) {
+      mod.touchApiKeyUsage(`filler-${i}`, null, t0);
+    }
+    const writesBefore = state.updates.length;
+    // "oldest" was evicted, so it writes again inside the interval...
+    mod.touchApiKeyUsage("oldest", null, t0 + 1);
+    expect(state.updates).toHaveLength(writesBefore + 1);
+    // ...while the most recent filler is still throttled.
+    mod.touchApiKeyUsage(`filler-${mod.MAX_TRACKED_USAGE_KEYS - 1}`, null, t0 + 1);
+    expect(state.updates).toHaveLength(writesBefore + 1);
+  });
+
+  it("defaults `nowMs` to the wall clock", () => {
+    mod.touchApiKeyUsage("wall-clock", null);
+    expect(state.updates).toHaveLength(1);
+    mod.touchApiKeyUsage("wall-clock", null);
+    expect(state.updates).toHaveLength(1);
+  });
+
+  it("exposes a test-only reset for the throttle map", () => {
+    mod.touchApiKeyUsage("resettable", null, 1_000);
+    expect(state.updates).toHaveLength(1);
+    mod.touchApiKeyUsage("resettable", null, 1_001);
+    expect(state.updates).toHaveLength(1);
+    mod.__resetApiKeyUsageThrottleForTests();
+    mod.touchApiKeyUsage("resettable", null, 1_002);
+    expect(state.updates).toHaveLength(2);
+  });
+});
+
 describe("touchApiKeyUsage — write payload", () => {
   it("stamps last_used_ip with the supplied IP and targets the id", async () => {
     mod.touchApiKeyUsage("k1", "203.0.113.5");

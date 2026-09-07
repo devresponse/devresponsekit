@@ -17,6 +17,7 @@ const signMock = vi.fn();
 
 const enterpriseTakeFirst = vi.fn();
 const nonceInsertExecute = vi.fn().mockResolvedValue(undefined);
+const nonceInsertValues = vi.fn();
 const nonceDeleteExecute = vi.fn().mockResolvedValue(undefined);
 const nonceUpdateExecute = vi.fn();
 const nonceUpdateWhere = vi.fn();
@@ -56,7 +57,12 @@ vi.mock("@/db/database", () => ({
       // read from here is a regression.
       throw new Error(`unexpected selectFrom(${table})`);
     },
-    insertInto: () => ({ values: () => ({ execute: nonceInsertExecute }) }),
+    insertInto: () => ({
+      values: (row: unknown) => {
+        nonceInsertValues(row);
+        return { execute: nonceInsertExecute };
+      },
+    }),
     deleteFrom: () => ({ where: () => ({ execute: nonceDeleteExecute }) }),
     updateTable: () => ({
       set: () => {
@@ -92,6 +98,7 @@ beforeEach(async () => {
   signMock.mockReset();
   enterpriseTakeFirst.mockReset();
   nonceInsertExecute.mockClear();
+  nonceInsertValues.mockClear();
   nonceDeleteExecute.mockClear();
   nonceUpdateExecute.mockReset();
   nonceUpdateWhere.mockReset();
@@ -117,9 +124,6 @@ describe("createSsoHandoffRedirect", () => {
       mod.createSsoHandoffRedirect({
         applicationId: "portal",
         betterAuthUserId: "ba-1",
-        request: { headers: new Headers() } as unknown as Parameters<
-          typeof mod.createSsoHandoffRedirect
-        >[0]["request"],
       }),
     ).rejects.toThrow(/sso_denied:pending_approval/);
   });
@@ -131,9 +135,6 @@ describe("createSsoHandoffRedirect", () => {
       mod.createSsoHandoffRedirect({
         applicationId: "portal",
         betterAuthUserId: "ba-1",
-        request: { headers: new Headers() } as unknown as Parameters<
-          typeof mod.createSsoHandoffRedirect
-        >[0]["request"],
       }),
     ).rejects.toThrow(/application_unavailable/);
   });
@@ -151,9 +152,6 @@ describe("createSsoHandoffRedirect", () => {
       mod.createSsoHandoffRedirect({
         applicationId: "portal",
         betterAuthUserId: "ba-1",
-        request: { headers: new Headers() } as unknown as Parameters<
-          typeof mod.createSsoHandoffRedirect
-        >[0]["request"],
       }),
     ).rejects.toThrow(/application_not_in_organization/);
   });
@@ -172,9 +170,6 @@ describe("createSsoHandoffRedirect", () => {
     const url = await mod.createSsoHandoffRedirect({
       applicationId: "portal",
       betterAuthUserId: "ba-1",
-      request: { headers: new Headers() } as unknown as Parameters<
-        typeof mod.createSsoHandoffRedirect
-      >[0]["request"],
     });
 
     expect(url.toString()).toBe("https://portal.x.com/api/sso/consume?token=signed-token");
@@ -196,6 +191,59 @@ describe("createSsoHandoffRedirect", () => {
     expect(signInput.claims).not.toHaveProperty("roles");
     expect(signInput.claims).not.toHaveProperty("organizationId");
     expect(signInput.claims).not.toHaveProperty("appUserId");
+  });
+});
+
+/**
+ * Review #209: the handoff TTL is read from the VALIDATED env schema, not
+ * raw `process.env`. The old `Number(process.env.SSO_HANDOFF_TTL_SECONDS ?? 60)`
+ * accepted anything: a typo'd value became `NaN`, `clampSsoHandoffTtl(NaN)`
+ * returned `NaN` (Math.min/Math.max propagate it), and the nonce row was
+ * written with `expires_at: Invalid Date` — a handoff that can never be
+ * consumed, discovered only in production. The schema rejects the same value
+ * at the boundary instead.
+ */
+describe("createSsoHandoffRedirect — TTL source (review #209)", () => {
+  const original = process.env.SSO_HANDOFF_TTL_SECONDS;
+  afterEach(() => {
+    if (original === undefined) delete process.env.SSO_HANDOFF_TTL_SECONDS;
+    else process.env.SSO_HANDOFF_TTL_SECONDS = original;
+  });
+
+  async function launch() {
+    accessGetter.mockResolvedValue(ACTIVE_ACCESS_FULL);
+    enterpriseTakeFirst.mockResolvedValue({
+      id: "portal",
+      origin: "https://portal.x.com",
+      sso_audience: "devresponse-app:portal",
+      organization_id: null,
+      status: "available",
+    });
+    signMock.mockResolvedValue("signed-token");
+    vi.resetModules();
+    const fresh = await import("@/lib/sso.server");
+    return fresh.createSsoHandoffRedirect({ applicationId: "portal", betterAuthUserId: "ba-1" });
+  }
+
+  it("uses the configured TTL for the nonce row and the signed token", async () => {
+    process.env.SSO_HANDOFF_TTL_SECONDS = "30";
+    const before = Date.now();
+    await launch();
+    const [row] = nonceInsertValues.mock.calls[0] as [{ expires_at: Date }];
+    expect(Number.isNaN(row.expires_at.getTime())).toBe(false);
+    const ttlMs = row.expires_at.getTime() - before;
+    // `before` is sampled ahead of the module re-import, so allow slack for
+    // it; the point is that the row expires ~30s out (the configured TTL) and
+    // not at the 60s default, nor at an Invalid Date.
+    expect(ttlMs).toBeGreaterThan(25_000);
+    expect(ttlMs).toBeLessThan(40_000);
+    expect(signMock).toHaveBeenCalledWith(expect.objectContaining({ ttlSeconds: 30 }));
+  });
+
+  it("refuses a non-numeric TTL at the env boundary instead of writing an Invalid Date", async () => {
+    process.env.SSO_HANDOFF_TTL_SECONDS = "not-a-number";
+    await expect(launch()).rejects.toThrow(/Invalid server environment variables/);
+    expect(nonceInsertValues).not.toHaveBeenCalled();
   });
 });
 

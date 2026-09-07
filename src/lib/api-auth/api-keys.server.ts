@@ -1,5 +1,5 @@
 import "server-only";
-import { sql, type Selectable } from "kysely";
+import { sql, type Selectable, type SqlBool } from "kysely";
 import { db } from "@/db/database";
 import type { AppApiKeysTable } from "@/db/schema/app-schema";
 import { getServerEnv } from "@/lib/env";
@@ -257,14 +257,76 @@ export async function verifyApiKey(plaintext: string): Promise<VerifiedApiKey | 
 }
 
 /**
+ * Per-process record of when each key was last STAMPED, so a burst of
+ * requests with the same key costs one write instead of one per request
+ * (review #201).
+ *
+ * Bounded on purpose: the key space is `app_api_keys.id` (a uuid the caller
+ * cannot invent — an unknown key never reaches here because `verifyApiKey`
+ * returned null), but a long-lived instance serving many keys should still
+ * not grow this map without limit. Map iteration order is insertion order, so
+ * dropping from the front evicts the oldest entries in O(1) each. An evicted
+ * key simply gets one extra write on its next request.
+ */
+const lastUsageTouchMs = new Map<string, number>();
+/** Hard cap on the throttle map; exported so the eviction test cannot drift. */
+export const MAX_TRACKED_USAGE_KEYS = 5_000;
+
+/** Test-only: forget the in-process throttle state. */
+export function __resetApiKeyUsageThrottleForTests(): void {
+  lastUsageTouchMs.clear();
+}
+
+/**
  * Fire-and-forget usage stamp. Never awaited on the request hot path and
  * never throws into it — usage telemetry must not break authentication.
+ *
+ * THROTTLED (review #201): this used to issue an UPDATE on every
+ * authenticated API-key request — a write (and a dead tuple) per read, on the
+ * hottest path in the machine API. `last_used_at` is coarse telemetry
+ * ("is this key still in use?"), not an audit record — the audit trail is
+ * `app_audit_events` — so it is written at most once per
+ * `API_KEY_USAGE_TOUCH_INTERVAL_SECONDS` per key:
+ *
+ *   1. an in-process check that skips the DB round trip entirely, and
+ *   2. the same interval as a predicate on the UPDATE itself, so a second
+ *      instance (or a restarted one, whose map is empty) cannot write more
+ *      often than the interval either.
+ *
+ * Both layers are needed: (1) without (2), N lambdas each write once per
+ * interval; (2) without (1) still pays a round trip per request.
+ *
+ * `nowMs` is injectable for deterministic tests; production never passes it.
  */
-export function touchApiKeyUsage(id: string, ip: string | null): void {
+export function touchApiKeyUsage(id: string, ip: string | null, nowMs: number = Date.now()): void {
+  const intervalSeconds = getServerEnv().API_KEY_USAGE_TOUCH_INTERVAL_SECONDS;
+
+  const lastTouch = lastUsageTouchMs.get(id);
+  if (lastTouch !== undefined && nowMs - lastTouch < intervalSeconds * 1000) return;
+
+  if (lastTouch === undefined && lastUsageTouchMs.size >= MAX_TRACKED_USAGE_KEYS) {
+    // `size >= MAX_TRACKED_USAGE_KEYS` guarantees a first entry, so no empty check.
+    lastUsageTouchMs.delete(lastUsageTouchMs.keys().next().value!);
+  }
+  // Re-insert so the entry moves to the back of the eviction order.
+  lastUsageTouchMs.delete(id);
+  lastUsageTouchMs.set(id, nowMs);
+
   void db
     .updateTable("app_api_keys")
     .set({ last_used_at: sql`now()`, last_used_ip: ip })
     .where("id", "=", id)
+    // Layer 2 of the throttle: the DB refuses the write itself when the row
+    // was stamped within the interval, so instances that do not share the
+    // in-process map above still cannot write more often than the interval.
+    // The seconds value is an integer from the validated env schema and is
+    // inlined as a literal (no user input reaches this SQL). The fragment is
+    // PARENTHESISED on purpose: Kysely splices a raw `where` in verbatim and
+    // joins clauses with AND, so an unwrapped `a or b` would bind as
+    // `(id = ? and a) or b` and stamp every stale row in the table.
+    .where(
+      sql<SqlBool>`(last_used_at is null or last_used_at < now() - make_interval(secs => ${sql.lit(intervalSeconds)}))`,
+    )
     .execute()
     .catch(() => {
       /* best-effort */

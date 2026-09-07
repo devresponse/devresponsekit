@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { sql, type Kysely, type Selectable } from "kysely";
 import { db } from "@/db/database";
 import type { AppDatabase, AppOauthClientsTable } from "@/db/schema/app-schema";
-import { hashSecret } from "@/lib/api-auth/api-key";
+import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
 
 /**
  * Constant-time comparison of two hex digests (P2-3). A plain `!==` on a
@@ -26,15 +26,11 @@ function timingSafeHexEqual(a: string, b: string): boolean {
  */
 
 const CLIENT_ID_PREFIX = "drkc";
-const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-function randomBase62(length: number): string {
-  const bytes = new Uint8Array(length);
-  globalThis.crypto.getRandomValues(bytes);
-  let out = "";
-  for (let i = 0; i < length; i++) out += BASE62.charAt(bytes[i]! % BASE62.length);
-  return out;
-}
+// Review #203: the CSPRNG base62 generator lives in ONE place
+// (`api-key.ts`, covered at 100%) and is imported here. A second copy beside
+// it was byte-identical, so a future fix to the shared one (alphabet, entropy,
+// modulo-bias handling) would have silently missed client ids and secrets.
 
 /** Non-secret projection of an OAuth client row (never the secret hash). */
 export type OauthClientSummary = Pick<

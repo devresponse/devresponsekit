@@ -115,7 +115,6 @@ export async function GET(request: NextRequest) {
     const redirectUrl = await createSsoHandoffRedirect({
       applicationId,
       betterAuthUserId: session.user.id,
-      request,
     });
 
     await auditEvent({

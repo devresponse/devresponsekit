@@ -34,8 +34,6 @@ export interface ProvisionUserInput {
    */
   emailVerificationWaived?: boolean;
   provider: ProviderOrganizationInput["provider"];
-  profile?: Record<string, unknown>;
-  account?: Record<string, unknown>;
   displayName?: string | null;
   preferredLocale?: string;
   isSeed?: boolean;
@@ -98,12 +96,13 @@ export interface ProvisionUserResult {
 export async function provisionUserFromAuth(
   input: ProvisionUserInput,
 ): Promise<ProvisionUserResult> {
+  // Review #38: `profile` / `account` were accepted here and forwarded to the
+  // resolver, but no call site ever supplied them — the provider-tenant
+  // branches they fed were unreachable. The fields are gone with the branches.
   const resolution = resolveProviderOrganization({
     provider: input.provider,
     email: input.email,
     emailVerified: input.emailVerified,
-    profile: input.profile,
-    account: input.account,
   });
 
   // 0. Resolve an invitation riding the sign-up (0008). Only honored when

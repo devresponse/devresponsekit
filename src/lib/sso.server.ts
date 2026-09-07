@@ -1,6 +1,6 @@
 import "server-only";
-import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
+import { getServerEnv } from "@/lib/env";
 import { getUserAccessContext, decideSecureAccess } from "@/lib/auth-status";
 import {
   signSsoHandoff,
@@ -11,7 +11,6 @@ import {
 export interface CreateSsoHandoffRedirectInput {
   applicationId: string;
   betterAuthUserId: string;
-  request: NextRequest;
 }
 
 interface SsoAccessContext {
@@ -85,7 +84,13 @@ export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectIn
 
   const context = await loadSsoAccessContext(input.betterAuthUserId, targetApp);
 
-  const ttlSeconds = clampSsoHandoffTtl(Number(process.env.SSO_HANDOFF_TTL_SECONDS ?? 60));
+  // Review #209: read the TTL from the VALIDATED env schema, not raw
+  // `process.env`. The schema already coerces, bounds (1..300) and defaults
+  // it at boot; the raw read re-implemented the default and would have
+  // silently produced `NaN` (→ an `Invalid Date` nonce row) for a value the
+  // schema would have rejected outright. `clampSsoHandoffTtl` still applies
+  // the tighter <=60s signing ceiling on top.
+  const ttlSeconds = clampSsoHandoffTtl(getServerEnv().SSO_HANDOFF_TTL_SECONDS);
   const jti = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
 

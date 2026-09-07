@@ -252,18 +252,19 @@ describe("provisionUserFromAuth", () => {
     stubs.orgInsert = Promise.resolve({ id: "new-org" });
     stubs.providerOrgInsert = Promise.resolve(undefined);
 
-    // Microsoft tenants resolve to a tid-keyed organization, so this triggers
-    // the "no existing org" branch.
+    // A verified GitHub sign-in resolves to an email-domain-keyed
+    // organization, so an unknown domain triggers the "no existing org"
+    // branch. (This used to use a Microsoft `tid`; that routing was dead code
+    // and was removed — review #38.)
     const result = await provisionUserFromAuth({
       betterAuthUserId: "ba-2",
       email: "u@contoso.com",
       emailVerified: true,
-      provider: "microsoft",
-      profile: { tid: "tenant-123", name: "Contoso" },
+      provider: "github",
     });
     expect(result.organizationId).toBe("new-org");
     expect(insertCalls.find((c) => c.table === "app_organizations")?.values.slug).toBe(
-      "tenant-123",
+      "contoso.com",
     );
   });
 

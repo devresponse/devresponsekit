@@ -11,6 +11,7 @@ import {
 } from "kysely";
 import type * as SharedModule from "@/lib/admin/rate-limit-shared.server";
 import type * as InMemoryModule from "@/lib/admin/rate-limit.server";
+import { normalizeBucketKey } from "@/lib/admin/rate-limit.server";
 
 /**
  * Unit tests for the Postgres-backed pre-auth limiter (review #98) — the
@@ -284,5 +285,31 @@ describe("enforceSharedRateLimit", () => {
     expect(await denied!.json()).toMatchObject({ error: "rate_limited", retryAfter: 2 });
     // The key the shared bucket saw is the composed scope:actor key.
     expect(consumeCalls()[0]!.parameters).toContain("invitations.accept:ba-1");
+  });
+});
+
+/**
+ * Review #223 — the shared bucket persists one ROW per key, so it applies the
+ * same key bound as the in-memory store. Without it a hostile key would be an
+ * unbounded column value, and the DB row and the in-process fallback would
+ * disagree about which bucket a long key belongs to.
+ */
+describe("consumeSharedToken — key bound", () => {
+  it("stores a long key under its normalized form, matching the in-memory bucket", async () => {
+    const longKey = `floor:${"z".repeat(400)}`;
+    answer([{ tokens_after: 2, prior_tokens: 3, prior_updated_at: new Date(0) }]);
+    await mod.consumeSharedToken(longKey, OPTS);
+
+    const params = consumeCalls()[0]!.parameters;
+    expect(params).not.toContain(longKey);
+    expect(params).toContain(normalizeBucketKey(longKey));
+    const stored = params.find((p) => typeof p === "string" && p.startsWith("floor:")) as string;
+    expect(stored.length).toBeLessThanOrEqual(128 + 64);
+  });
+
+  it("keeps short keys verbatim", async () => {
+    answer([{ tokens_after: 2, prior_tokens: 3, prior_updated_at: new Date(0) }]);
+    await mod.consumeSharedToken("floor:1.2.3.4", OPTS);
+    expect(consumeCalls()[0]!.parameters).toContain("floor:1.2.3.4");
   });
 });

@@ -1,4 +1,5 @@
 import "server-only";
+import { isBanActive } from "@/lib/ban-status";
 
 /**
  * Returns true when the given Better Auth user is currently banned.
@@ -13,15 +14,19 @@ import "server-only";
  * even though their browser sessions are revoked. See AUTH-1.
  *
  * We consult the very same `banned` flag the SSO session plugin already
- * treats as authoritative (`auth-sso-session.ts`), so a single source of
- * ban truth is preserved and an `unban` automatically restores machine
- * access with no extra revocation bookkeeping.
+ * treats as authoritative (`auth-sso-session.ts`), through the very same
+ * predicate ({@link isBanActive}, review #126), so a single source of ban
+ * truth is preserved and an `unban` automatically restores machine access
+ * with no extra revocation bookkeeping.
  *
  * Honors a temporary ban's expiry: an elapsed `banExpires` is treated as
  * not-banned, mirroring Better Auth's own sign-in behavior. Unknown users
  * return `false` here — distinguishing "no such user" from "banned" is the
  * resolver's job (a credential for a missing user fails elsewhere).
  */
+/** The two ban columns Better Auth's admin plugin maintains on the user row. */
+type BannableUserRow = { banned?: boolean | null; banExpires?: Date | string | null };
+
 export async function isBetterAuthUserBanned(betterAuthUserId: string): Promise<boolean> {
   // Lazy import so the heavy Better Auth instance — which eagerly reads
   // `pgPool` at module load (auth.ts) — stays OUT of the static import graph
@@ -33,16 +38,5 @@ export async function isBetterAuthUserBanned(betterAuthUserId: string): Promise<
   const user = await ctx.internalAdapter.findUserById(betterAuthUserId);
   if (!user) return false;
 
-  const banned = (user as { banned?: boolean | null }).banned;
-  if (!banned) return false;
-
-  const banExpires = (user as { banExpires?: Date | string | null }).banExpires;
-  if (banExpires) {
-    const expiresAt = banExpires instanceof Date ? banExpires : new Date(banExpires);
-    // A malformed/zero expiry is treated as an indefinite ban (fail closed).
-    if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() <= Date.now()) {
-      return false;
-    }
-  }
-  return true;
+  return isBanActive(user as BannableUserRow);
 }

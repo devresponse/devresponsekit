@@ -56,6 +56,20 @@ export function mcpAudience(env: { BETTER_AUTH_URL: string }): string {
   return mcpResourceIdentifier(env.BETTER_AUTH_URL);
 }
 
+/**
+ * True when two absolute URLs denote the SAME identifier (WHATWG-normalised
+ * origin + path, trailing slash ignored). Used for RFC 8707 resource matching
+ * and — because RFC 8414 requires an authorization server's `issuer` to be the
+ * URL its metadata is served from — to check that `API_JWT_ISSUER` and
+ * `BETTER_AUTH_URL` agree before the MCP discovery documents advertise them
+ * (review #57). Non-absolute input never matches.
+ */
+export function isSameIdentifier(a: string, b: string): boolean {
+  const left = normalizeIdentifier(a);
+  const right = normalizeIdentifier(b);
+  return left !== null && right !== null && left === right;
+}
+
 export type ResolvedResource = { kind: TokenResourceKind; resource: string };
 
 /**

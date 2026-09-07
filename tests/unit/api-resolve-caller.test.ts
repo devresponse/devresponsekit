@@ -112,6 +112,8 @@ describe("resolveCaller — cookie path", () => {
       betterAuthUserId: "ba1",
       grantedScopes: null,
       isBearer: false,
+      // A cookie is not a bound credential (review #207).
+      boundOrganizationId: null,
       impersonatorId: null,
     });
   });
@@ -155,9 +157,43 @@ describe("resolveCaller — API key path", () => {
       isBearer: true,
       credentialId: "k1",
       grantedScopes: ["admin.users.read"],
+      // The key's own binding rides along, verbatim (review #207).
+      boundOrganizationId: "org-a",
       // A minted credential is never an impersonation (review #28).
       impersonatorId: null,
     });
+  });
+
+  it("carries the KEY's bound org even when the principal is not a member of it (review #207)", async () => {
+    env.API_KEYS_ENABLED = true;
+    verifyApiKey.mockResolvedValue({
+      id: "k1",
+      betterAuthUserId: "ba1",
+      organizationId: "org-a",
+      scopes: ["admin.users.read"],
+    });
+    // The fail-closed case: the principal holds no membership in the bound org,
+    // so getUserAccessContext resolves `access.organizationId` to null.
+    // `boundOrganizationId` must STILL be the credential's binding — the MCP
+    // gateway re-mints it into the token of its own /api/v1 self-call, and
+    // re-deriving it from `access` would turn "bound to an org I am not a
+    // member of" into "bound to nothing", letting the v1 fallback act in the
+    // principal's earliest org instead of denying.
+    getUserAccessContext.mockResolvedValue({ ...ACCESS, organizationId: null });
+    const caller = await mod.resolveCaller(req("Bearer drk_live_abc"));
+    expect(caller?.boundOrganizationId).toBe("org-a");
+    expect(caller?.access.organizationId).toBeNull();
+  });
+
+  it("leaves boundOrganizationId null for an org-less key", async () => {
+    env.API_KEYS_ENABLED = true;
+    verifyApiKey.mockResolvedValue({
+      id: "k1",
+      betterAuthUserId: "ba1",
+      organizationId: null,
+      scopes: ["admin.users.read"],
+    });
+    expect((await mod.resolveCaller(req("Bearer drk_live_abc")))?.boundOrganizationId).toBeNull();
   });
 
   it("resolves against the key's bound org, not the active_org cookie (MACHINE-1)", async () => {
@@ -207,6 +243,8 @@ describe("resolveCaller — JWT path", () => {
       kind: "jwt",
       credentialId: "j1",
       isBearer: true,
+      // The `org` claim is the binding the gateway re-mints (review #207).
+      boundOrganizationId: "org-b",
       impersonatorId: null,
     });
     // The token's own claims ride along for the MCP gateway's exchange.
@@ -223,6 +261,24 @@ describe("resolveCaller — JWT path", () => {
     verifyAccessToken.mockResolvedValue(verifiedToken());
     await mod.resolveCaller(req("Bearer eyJ.token.sig"));
     expect(getUserAccessContext).toHaveBeenCalledWith("ba1", { organizationId: "org-b" });
+  });
+
+  it("carries the TOKEN's `org` claim even when the principal is not a member of it (review #207)", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue(verifiedToken());
+    // Same fail-closed case as the API-key path: no membership in the bound
+    // org → `access.organizationId` is null, but the binding the MCP gateway
+    // re-mints into its self-call token must survive intact.
+    getUserAccessContext.mockResolvedValue({ ...ACCESS, organizationId: null });
+    const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
+    expect(caller?.boundOrganizationId).toBe("org-b");
+    expect(caller?.access.organizationId).toBeNull();
+  });
+
+  it("leaves boundOrganizationId null for a token with no `org` claim", async () => {
+    env.API_JWT_ENABLED = true;
+    verifyAccessToken.mockResolvedValue(verifiedToken({ organizationId: null }));
+    expect((await mod.resolveCaller(req("Bearer eyJ.token.sig")))?.boundOrganizationId).toBeNull();
   });
 
   it("re-checks the SOURCE credential on every request and rejects once it is revoked (review #43)", async () => {

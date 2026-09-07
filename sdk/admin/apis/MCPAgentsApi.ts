@@ -69,7 +69,7 @@ export interface UpdateMcpAgentScopesOperationRequest {
 export class MCPAgentsApi extends runtime.BaseAPI {
 
     /**
-     * Requires `admin.clients.manage`. Idempotent — an already-active agent answers `{ ok: true, activated: false }`.
+     * Requires `admin.clients.manage`. Idempotent — an already-active agent answers `{ ok: true, activated: false }`. A revoked or reaper-expired agent cannot be brought back: the request is `409 agent_inactive` (review #56).
      * Approve a pending agent (activate its service account)
      */
     async approveMcpAgentRaw(requestParameters: ApproveMcpAgentRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<McpAgentApproved>> {
@@ -103,7 +103,7 @@ export class MCPAgentsApi extends runtime.BaseAPI {
     }
 
     /**
-     * Requires `admin.clients.manage`. Idempotent — an already-active agent answers `{ ok: true, activated: false }`.
+     * Requires `admin.clients.manage`. Idempotent — an already-active agent answers `{ ok: true, activated: false }`. A revoked or reaper-expired agent cannot be brought back: the request is `409 agent_inactive` (review #56).
      * Approve a pending agent (activate its service account)
      */
     async approveMcpAgent(requestParameters: ApproveMcpAgentRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<McpAgentApproved> {
@@ -207,7 +207,7 @@ export class MCPAgentsApi extends runtime.BaseAPI {
     }
 
     /**
-     * Requires `admin.clients.manage`. Scopes are validated against the caller\'s own authority (permissions, and for a bearer caller its own scopes) — over-granting is `422 invalid_scope` listing `ungrantableScopes`. A granted scope only takes effect where the service account also holds the matching permission.
+     * Requires `admin.clients.manage`. Scopes are validated against the caller\'s own authority (permissions, and for a bearer caller its own scopes) — over-granting is `422 invalid_scope` listing `ungrantableScopes`. A granted scope only takes effect where the service account also holds the matching permission. A revoked or reaper-expired agent is terminal: the scopes cannot be changed and the request is `409 agent_inactive` (review #56).
      * Set an agent\'s scope ceiling
      */
     async updateMcpAgentScopesRaw(requestParameters: UpdateMcpAgentScopesOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<McpAgentScopesResult>> {
@@ -251,7 +251,7 @@ export class MCPAgentsApi extends runtime.BaseAPI {
     }
 
     /**
-     * Requires `admin.clients.manage`. Scopes are validated against the caller\'s own authority (permissions, and for a bearer caller its own scopes) — over-granting is `422 invalid_scope` listing `ungrantableScopes`. A granted scope only takes effect where the service account also holds the matching permission.
+     * Requires `admin.clients.manage`. Scopes are validated against the caller\'s own authority (permissions, and for a bearer caller its own scopes) — over-granting is `422 invalid_scope` listing `ungrantableScopes`. A granted scope only takes effect where the service account also holds the matching permission. A revoked or reaper-expired agent is terminal: the scopes cannot be changed and the request is `409 agent_inactive` (review #56).
      * Set an agent\'s scope ceiling
      */
     async updateMcpAgentScopes(requestParameters: UpdateMcpAgentScopesOperationRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<McpAgentScopesResult> {

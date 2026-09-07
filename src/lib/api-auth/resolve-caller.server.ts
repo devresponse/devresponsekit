@@ -47,6 +47,21 @@ export interface ResolvedCaller {
   /** api_key id / jwt jti, for audit + per-credential rate limiting. */
   credentialId: string | null;
   /**
+   * The org the BEARER credential is bound to — `app_api_keys.organization_id`
+   * or the JWT `org` claim — before {@link getUserAccessContext} resolves it
+   * against the principal's memberships. `null` for an org-less credential
+   * and for cookie sessions.
+   *
+   * Distinct from `access.organizationId`, which is null when the principal
+   * holds no membership in the bound org (the fail-closed case). The MCP
+   * gateway re-mints this value into the token it hands its own self-call
+   * (review #207), so it MUST be the credential's binding: re-deriving it
+   * from `access` would turn "bound to an org I am not a member of" into
+   * "bound to nothing", and the downstream fallback would then act in the
+   * principal's earliest org instead of denying.
+   */
+  boundOrganizationId: string | null;
+  /**
    * The ORIGINAL actor's id when the cookie session is an impersonation
    * session (admin plugin `impersonatedBy`), else `null`. Always `null` for
    * bearer credentials — a minted key/token is never an impersonation.
@@ -165,6 +180,7 @@ export async function resolveCallerDetailed(
           grantedScopes: verified.scopes,
           isBearer: true,
           credentialId: verified.id,
+          boundOrganizationId: verified.organizationId,
           impersonatorId: null,
         },
       };
@@ -212,6 +228,7 @@ export async function resolveCallerDetailed(
           grantedScopes: verified.scopes,
           isBearer: true,
           credentialId: verified.jti,
+          boundOrganizationId: verified.organizationId,
           impersonatorId: null,
           jwt: {
             organizationId: verified.organizationId,
@@ -240,6 +257,7 @@ export async function resolveCallerDetailed(
       grantedScopes: null,
       isBearer: false,
       credentialId: null,
+      boundOrganizationId: null,
       impersonatorId: readImpersonatorId(session),
     },
   };

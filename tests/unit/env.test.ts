@@ -74,6 +74,11 @@ const TOUCHED_KEYS = [
   "METRICS_TOKEN",
   "SSO_ALLOWED_ORIGIN_SUFFIXES",
   "MCP_AUDIENCE_GRACE",
+  "MCP_ENABLED",
+  "MCP_FORWARD_CLIENT_IP",
+  "MCP_DISPATCH_BASE_URL",
+  "API_JWT_ISSUER",
+  "BETTER_AUTH_URL",
 ] as const;
 
 async function loadEnvWith(patch: Record<string, string | undefined>) {
@@ -121,6 +126,87 @@ describe("MCP_AUDIENCE_GRACE (RFC 8707 rollout flag, review #50/#53)", () => {
       } finally {
         restore();
       }
+    }
+  });
+});
+
+/**
+ * MCP discovery consistency (review #57). `/.well-known/oauth-authorization-
+ * server` is served from BETTER_AUTH_URL and names the token + JWKS endpoints
+ * under that origin, but advertises `issuer` = API_JWT_ISSUER. RFC 8414 §3.3
+ * requires the issuer to be the URL the metadata was retrieved from, so a
+ * divergent issuer yields a document a compliant client MUST reject — and no
+ * metadata is served at the issuer's own origin to fix it. Fail at boot.
+ */
+describe("API_JWT_ISSUER / BETTER_AUTH_URL consistency when MCP_ENABLED (review #57)", () => {
+  it("refuses a divergent issuer while the gateway is on", async () => {
+    const { mod, restore } = await loadEnvWith({
+      MCP_ENABLED: "1",
+      BETTER_AUTH_URL: "https://app.example.com",
+      API_JWT_ISSUER: "https://issuer.example.net",
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/API_JWT_ISSUER/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("accepts an unset issuer, or one that only differs by a trailing slash", async () => {
+    for (const issuer of [undefined, "https://app.example.com", "https://app.example.com/"]) {
+      const { mod, restore } = await loadEnvWith({
+        MCP_ENABLED: "1",
+        BETTER_AUTH_URL: "https://app.example.com",
+        API_JWT_ISSUER: issuer,
+      });
+      try {
+        expect(() => mod.getServerEnv(), String(issuer)).not.toThrow();
+      } finally {
+        restore();
+      }
+    }
+  });
+
+  it("leaves a divergent issuer alone while MCP is dark (nothing advertises it)", async () => {
+    const { mod, restore } = await loadEnvWith({
+      MCP_ENABLED: undefined,
+      BETTER_AUTH_URL: "https://app.example.com",
+      API_JWT_ISSUER: "https://issuer.example.net",
+    });
+    try {
+      expect(mod.getServerEnv().API_JWT_ISSUER).toBe("https://issuer.example.net");
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("MCP self-call knobs (review #55)", () => {
+  it("defaults to forwarding the client IP to BETTER_AUTH_URL (today's behaviour)", async () => {
+    const { mod, restore } = await loadEnvWith({
+      MCP_FORWARD_CLIENT_IP: undefined,
+      MCP_DISPATCH_BASE_URL: undefined,
+    });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.MCP_FORWARD_CLIENT_IP).toBe(true);
+      expect(env.MCP_DISPATCH_BASE_URL).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it("lets an operator turn the forwarding off and point the hop at an internal origin", async () => {
+    const { mod, restore } = await loadEnvWith({
+      MCP_FORWARD_CLIENT_IP: "0",
+      MCP_DISPATCH_BASE_URL: "http://127.0.0.1:3000",
+    });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.MCP_FORWARD_CLIENT_IP).toBe(false);
+      expect(env.MCP_DISPATCH_BASE_URL).toBe("http://127.0.0.1:3000");
+    } finally {
+      restore();
     }
   });
 });

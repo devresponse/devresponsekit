@@ -62,6 +62,119 @@ function refName(ref: string): string {
   return ref.split("/").pop() ?? "";
 }
 
+/**
+ * Path-parameter values that must never reach the self-fetch (review #54).
+ *
+ * A path param is substituted into an OpenAPI template (`/users/{id}`) and
+ * the result is parsed by `new URL(...)`, which RESOLVES dot segments. So an
+ * empty value collapses `/users/{id}` to `/users/` — which the trailing-slash
+ * redirect turns into the *collection* endpoint (`listUsers`) — and `.` /
+ * `..` walk the request to a different route entirely. Neither is a typo the
+ * v1 API would catch: the caller ends up at an endpoint it did not name, with
+ * the tool's own scope. `encodeURIComponent` does NOT encode `.`, so nothing
+ * downstream stops this either.
+ *
+ * Refused: empty/whitespace, `.`, `..`, anything containing a separator
+ * (`/`, `\`) or a percent-encoded separator or dot (`%2f`, `%5c`, `%2e`), and
+ * any control character.
+ */
+const ENCODED_SEPARATOR_RE = /%(2f|5c|2e)/i;
+function hasControlCharacter(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+export function pathParamRejection(name: string, value: unknown): string | null {
+  if (typeof value !== "string") {
+    return `Path parameter \`${name}\` must be a string.`;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return `Path parameter \`${name}\` must not be empty.`;
+  if (trimmed === "." || trimmed === "..") {
+    return `Path parameter \`${name}\` must not be a relative path segment ("." or "..").`;
+  }
+  if (value.includes("/") || value.includes("\\")) {
+    return `Path parameter \`${name}\` must not contain a path separator.`;
+  }
+  if (ENCODED_SEPARATOR_RE.test(value)) {
+    return `Path parameter \`${name}\` must not contain an encoded path separator or dot.`;
+  }
+  if (hasControlCharacter(value)) {
+    return `Path parameter \`${name}\` must not contain control characters.`;
+  }
+  return null;
+}
+
+/** The JSON-Schema `type`(s) a derived property declares, if any. */
+function declaredTypes(schema: unknown): string[] {
+  if (typeof schema !== "object" || schema === null) return [];
+  const type = (schema as { type?: unknown }).type;
+  if (typeof type === "string") return [type];
+  if (Array.isArray(type))
+    return type.filter((entry): entry is string => typeof entry === "string");
+  return [];
+}
+
+function matchesType(value: unknown, type: string): boolean {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "array":
+      return Array.isArray(value);
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "null":
+      return value === null;
+    default:
+      // An unknown/absent type constrains nothing — the v1 route still validates.
+      return true;
+  }
+}
+
+/**
+ * Validates `tools/call` arguments against the tool's own `inputSchema`
+ * BEFORE dispatch (review #54). Returns the first problem, or null.
+ *
+ * Pure and shallow by design: the v1 route remains the authority on business
+ * validation, so this only enforces what the gateway itself publishes and
+ * what it must not get wrong — no unknown keys (`additionalProperties:
+ * false` was advertised but never enforced), required arguments present,
+ * declared primitive types, and the path-segment safety rules above.
+ */
+export function validateToolArguments(
+  tool: Pick<GeneratedTool, "inputSchema" | "pathParams">,
+  args: Record<string, unknown>,
+): string | null {
+  const { properties, required = [] } = tool.inputSchema;
+  for (const key of Object.keys(args)) {
+    if (!Object.hasOwn(properties, key)) return `Unknown argument \`${key}\`.`;
+  }
+  for (const key of required) {
+    if (args[key] === undefined) return `Missing required argument \`${key}\`.`;
+  }
+  for (const [key, value] of Object.entries(args)) {
+    if (value === undefined) continue;
+    const types = declaredTypes(properties[key]);
+    if (types.length > 0 && !types.some((type) => matchesType(value, type))) {
+      return `Argument \`${key}\` must be of type ${types.join(" | ")}.`;
+    }
+  }
+  for (const name of tool.pathParams) {
+    const rejection = pathParamRejection(name, args[name]);
+    if (rejection) return rejection;
+  }
+  return null;
+}
+
 /** Builds the MCP tool for every scoped operation in the document. */
 export function deriveMcpTools(document: Record<string, unknown>): GeneratedTool[] {
   const doc = document as OpenApiDoc;

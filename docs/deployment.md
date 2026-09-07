@@ -85,6 +85,8 @@ Notes:
 
 `NODE_ENV=production` is set by Vercel automatically. The `NEXT_PUBLIC_*` values are inlined at build time, so changing a domain requires a **redeploy**.
 
+> **Operator gate before `MCP_ENABLED` goes on (review #57).** While the gateway is enabled the env schema refuses an `API_JWT_ISSUER` that is not the same identifier as `BETTER_AUTH_URL` (a trailing slash is tolerated; nothing else is) — the OAuth discovery documents are served from `BETTER_AUTH_URL` and RFC 8414 requires the advertised issuer to be that location. `getServerEnv()` throws on **every** server request, so a deployment that already has both set to *different* values turns a 500 on the first request after the deploy rather than merely serving undiscoverable metadata. **CI cannot catch this**: `next build` parses placeholder env (`buildPhasePlaceholders` in `src/lib/env.ts`), so every check stays green and the failure appears only on the deployed instance. It is therefore a manual pre-deploy check — in Vercel → Settings → Environment Variables, for **Production *and* Preview**, confirm `API_JWT_ISSUER` is unset or equal to `BETTER_AUTH_URL` wherever `MCP_ENABLED` is set, and fix the env *before* the deploy. (The gateway is dark by default, so a deployment that never set `MCP_ENABLED` is unaffected.)
+
 **`DATABASE_URL`: direct vs. pooled.** Neon gives two connection strings for the same database. By default point `DATABASE_URL` at the **direct/unpooled** endpoint (no `-pooler` in the host). To use the **pooled** endpoint (better serverless concurrency), make the app pooler-compatible first — see §5. Keep `?sslmode=require` on both. **Migrations always use the direct endpoint.**
 
 ---

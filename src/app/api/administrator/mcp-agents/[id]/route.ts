@@ -50,6 +50,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });
   }
 
+  // A revoked (or reaper-expired) agent is not a mutable resource: before
+  // this, `updateOauthClient` filtered on `status = 'active'`, wrote nothing,
+  // and the route still answered 200 with a success audit row claiming the
+  // scopes had changed (review #56). Refuse the transition instead — 409, the
+  // same shape the API-key console uses for an inactive credential.
+  if (agent.clientStatus !== "active") {
+    return adminErrorResponse("agent_inactive", 409, request, { requestId: guard.requestId });
+  }
+
   let json: unknown;
   try {
     json = await request.json();
@@ -78,7 +87,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
   }
 
-  await updateOauthClient(id, { scopes });
+  // The write re-asserts `status = 'active'`, so a concurrent revoke between
+  // the check above and here loses the race rather than being audited as a
+  // successful change (review #56).
+  if (!(await updateOauthClient(id, { scopes }))) {
+    return adminErrorResponse("agent_inactive", 409, request, { requestId: guard.requestId });
+  }
   await auditEvent({
     eventType: "admin.mcp_agent.scopes_updated",
     outcome: "success",

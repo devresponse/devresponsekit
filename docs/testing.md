@@ -35,7 +35,15 @@ Vitest unit/component/integration/security tests **mock** the database and auth 
 - **Playwright** + **axe-core** for browser e2e and accessibility.
 - **MSW** and **supertest** are available for HTTP mocking/assertions.
 - **fast-check** — property-based/fuzz testing, used in the security suites (permission algebra, credential codec, injection surfaces).
-- **Stryker** — mutation testing on the security core (`pnpm test:mutation`); runs as an **advisory** CI workflow ([`mutation.yml`](../.github/workflows/mutation.yml)) that proves the security tests actually assert (not just execute). The scope is the PURE security algebra — scope matching, the safe-return-to guard, admin list-query parsing, the API-key codec, trusted-origin parsing + the admin origin guard, and the SSO handoff codec (review #229); a module joins it only when no DB/network/Next plumbing stands between its unit tests and its logic. Besides Stryker's aggregate `break` threshold, `scripts/check-mutation-floors.mjs` enforces a **per-file floor** at each file's measured score, so one module cannot hide behind another. Its sandbox (`.stryker-tmp/`) and the JSON report (`reports/`) are gitignored.
+- **Stryker** — mutation testing on the security core (`pnpm test:mutation`); runs as an **advisory** CI workflow ([`mutation.yml`](../.github/workflows/mutation.yml)) that proves the security tests actually assert (not just execute). The scope is the PURE security algebra: a module joins it only when no DB/network/Next plumbing stands between its unit tests and its logic (review #229). The mutated set is exactly ([`stryker.config.mjs`](../stryker.config.mjs) is the source of truth; `tests/unit/mutation-scope.test.ts` pins this list to it):
+  - `src/lib/api-auth/scopes.ts` — scope matching
+  - `src/lib/safe-return-to.ts` — the safe-return-to guard
+  - `src/lib/admin/list-query.server.ts` — admin list-query parsing
+  - `src/lib/api-auth/api-key.ts` — the API-key codec
+  - `src/lib/trusted-origins.ts` — trusted-origin parsing
+  - `src/lib/admin/origin-guard.server.ts` — the admin origin guard
+
+  `src/lib/jwt-handoff.server.ts` (the SSO handoff codec) is **deliberately OUT of scope**: it would more than double the run — already the slowest advisory job in CI — because every one of its mutants re-runs jose Ed25519 sign/verify. Its assertions are covered by dedicated unit suites (`jwt-handoff*`, `sso-server`) plus fast-check property tests instead; `stryker.config.mjs` carries the full rationale and the conditions for revisiting it. Besides Stryker's aggregate `break` threshold, `scripts/check-mutation-floors.mjs` enforces a **per-file floor** at each file's measured score, so one module cannot hide behind another. Its sandbox (`.stryker-tmp/`) and the JSON report (`reports/`) are gitignored.
 
 ## 3. Running tests
 

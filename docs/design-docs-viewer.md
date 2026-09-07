@@ -1,4 +1,21 @@
-# PROMPT — Secure Documentation Viewer (`docs` app)
+---
+title: "Design: secure documentation viewer"
+description: Build spec for the in-app documentation viewer (the docs and help apps).
+group: Design
+order: 90
+visibility: internal
+---
+
+# Design — Secure Documentation Viewer (`docs` app)
+
+> **Where this file lives (review #216).** It used to sit at
+> `src/app/[locale]/(secure)/app/docs/PROMPT.md`, inside the App Router route
+> tree, where it was neither routable nor catalogued nor link-checked. It now
+> lives under `docs/` like every other design document: `visibility: internal`
+> keeps it out of the viewer unless `DOCS_INTERNAL_VISIBLE` is on, and CI's
+> lychee job checks its links. `tests/unit/docs-content-hygiene.test.ts` fails
+> if Markdown reappears under `src/app/`.
+
 
 > Build spec for an in-app, **secure** documentation viewer that reads a
 > catalog of `.md` / `.mdx` files from a configurable filesystem root and
@@ -26,7 +43,7 @@ These were chosen up front; the rest of the spec assumes them.
 
 ## 1. Objective & scope
 
-Phase 1 ships a working viewer over the repo's [`docs/`](../../../../../../docs)
+Phase 1 ships a working viewer over the repo's [`docs/`](./README.md)
 folder:
 
 - A **catalog** sidebar (grouped, collapsible) built by scanning a configured
@@ -90,7 +107,6 @@ input. `<script>` / `<style>` / event handlers / `javascript:` URLs are stripped
 
 ```
 src/app/[locale]/(secure)/app/docs/
-├── PROMPT.md                       # this file
 ├── layout.tsx                      # nested ApplicationShell, requireSecureSession (shell.view)
 ├── page.tsx                        # catalog landing / index
 ├── [...slug]/page.tsx              # render one document

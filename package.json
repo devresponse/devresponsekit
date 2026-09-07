@@ -39,7 +39,7 @@
     "test:db": "vitest run --config vitest.db.config.ts",
     "test:security": "vitest run tests/security",
     "test:coverage": "vitest run --coverage",
-    "test:mutation": "stryker run",
+    "test:mutation": "stryker run && node scripts/check-mutation-floors.mjs",
     "test:e2e": "playwright test --config=playwright.config.ts tests/e2e",
     "test:a11y": "playwright test --config=playwright.config.ts tests/accessibility",
     "test:all": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:coverage && pnpm test:e2e && pnpm test:a11y"
@@ -161,7 +161,7 @@
     "node": ">=24",
     "pnpm": ">=10"
   },
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@10.33.2+sha512.a90faf6feeab71ad6c6e57f94e0fe1a12f5dcc22cd754db40ae9593eb6a3e0b6b12e3540218bb37ae083404b1f2ce6db2a4121e979829b4aff94b99f49da1cf8",
   "pnpm": {
     "overrides": {
       "jsdom>undici": "^8.9.0",

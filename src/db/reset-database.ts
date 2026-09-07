@@ -122,19 +122,29 @@ async function main() {
     // DB_SCHEMA is identifier-validated in schema-config.ts, so it is safe to
     // interpolate into this DDL. `public` is intentionally left untouched so
     // the shared extensions (pgcrypto, pg_trgm) survive the reset.
-    await pool.query("begin");
+    // ONE checked-out session for the drop/recreate (review #84): issued
+    // through `pool.query`, the `begin` and the DDL that follows it can land
+    // on DIFFERENT pooled backends — the drop would then be auto-committed
+    // outside the transaction and a later failure could not roll it back.
+    const client = await pool.connect();
     try {
-      await pool.query(`drop schema if exists "${DB_SCHEMA}" cascade`);
-      await pool.query(`create schema "${DB_SCHEMA}"`);
-      // Grant to the migrating role so it can recreate objects (the role that
-      // created the schema already owns it; this is defensive for split roles).
-      const who = (await pool.query<{ u: string }>("select current_user as u")).rows[0]?.u;
-      if (who)
-        await pool.query(`grant all on schema "${DB_SCHEMA}" to "${who.replace(/"/g, '""')}"`);
-      await pool.query("commit");
-    } catch (error) {
-      await pool.query("rollback");
-      throw error;
+      await client.query("begin");
+      try {
+        await client.query(`drop schema if exists "${DB_SCHEMA}" cascade`);
+        await client.query(`create schema "${DB_SCHEMA}"`);
+        // Grant to the migrating role so it can recreate objects (the role that
+        // created the schema already owns it; this is defensive for split roles).
+        const who = (await client.query<{ u: string }>("select current_user as u")).rows[0]?.u;
+        if (who)
+          await client.query(`grant all on schema "${DB_SCHEMA}" to "${who.replace(/"/g, '""')}"`);
+        await client.query("commit");
+      } catch (error) {
+        // Never let a failing rollback mask the error that caused it.
+        await client.query("rollback").catch(() => undefined);
+        throw error;
+      }
+    } finally {
+      client.release();
     }
 
     console.log("[db:reset] done — the database is empty.");

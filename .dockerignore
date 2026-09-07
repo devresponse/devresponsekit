@@ -26,6 +26,7 @@ coverage-*.log
 # viewer serves only *.md and images, and the capture script (Playwright,
 # credentials from env) belongs in a source checkout, not the runtime image.
 help/capture.mjs
+help/capture-lib.mjs
 
 # Local-only and generated artifacts
 *.log

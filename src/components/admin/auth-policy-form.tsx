@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,7 +43,18 @@ export interface AuthPolicySettingsJson {
   autoApproveEmailDomains: string[] | null;
 }
 
-/** The fail-closed baseline, mirrored from `FAIL_CLOSED_AUTH_POLICY` (server-only). */
+/**
+ * The fail-closed baseline, mirrored from `FAIL_CLOSED_AUTH_POLICY`
+ * (server-only).
+ *
+ * This is a starting point for an EDITABLE form only. It must never be
+ * rendered as a read-only statement of the policy in effect: review #72
+ * stopped streaming the platform defaults to non-superadmins, so
+ * `platformDefaults` is now legitimately `null` ("withheld"), and
+ * substituting this baseline in the inherit summary told an org admin their
+ * org requires verification + admin approval when the real platform default
+ * may be the exact opposite. See {@link AuthPolicyForm}.
+ */
 const STRICT_DEFAULTS: AuthPolicySettingsJson = {
   requireEmailVerification: true,
   signupApprovalMode: "admin_approval",
@@ -81,6 +93,17 @@ function toFormValues(settings: AuthPolicySettingsJson | null): AuthPolicyFormIn
  * summary; Customize opens the form pre-filled from those defaults, and
  * Reset (DELETE) returns to inheritance. The platform scope always edits —
  * the baseline row cannot be deleted.
+ *
+ * `platformDefaults === null` means WITHHELD, not "strict". The RSC only
+ * loads the platform default for a superadmin or for an org that already
+ * inherits (review #72), so a non-superadmin editing an override never
+ * receives it. The inherit view therefore says "inherits the platform
+ * default" WITHOUT a summary in that case: rendering `STRICT_DEFAULTS`
+ * there stated a policy the platform may not have (the follow-up finding to
+ * #72 — it is reachable through Reset, which is the only path into the
+ * inherit view while the defaults are withheld). `router.refresh()` after a
+ * successful Reset re-runs the RSC, which — the override now gone — streams
+ * the real defaults back, so the summary appears on its own.
  */
 export function AuthPolicyForm({
   endpoint,
@@ -98,13 +121,21 @@ export function AuthPolicyForm({
   const t = useTranslations("administrator.orgs.authPolicy");
   const tErr = useTranslations("administrator.errors");
 
-  const inheritedView = platformDefaults ?? STRICT_DEFAULTS;
+  const router = useRouter();
+  // What the org inherits, when we are allowed to know it. `null` = withheld
+  // (see the component doc) — the summary must then say so rather than
+  // pretend the baseline is the answer.
+  const inheritedView = platformDefaults ?? null;
+  // Editing baseline only: a form the admin is about to fill in starts from
+  // the fail-closed policy when the real default is not disclosed. Nothing is
+  // saved until they press Save, so this states nothing about the platform.
+  const editBaseline = inheritedView ?? STRICT_DEFAULTS;
   const [hasRow, setHasRow] = useState(initialSettings !== null);
   const [editing, setEditing] = useState(scope === "platform" || initialSettings !== null);
   const [notice, setNotice] = useState<"saved" | "reset" | null>(null);
 
   const form = useZodForm<AuthPolicyFormInput>(authPolicyFormSchema, {
-    defaultValues: toFormValues(initialSettings ?? (scope === "platform" ? null : inheritedView)),
+    defaultValues: toFormValues(initialSettings ?? (scope === "platform" ? null : editBaseline)),
   });
 
   const onValid = async (values: AuthPolicyFormInput) => {
@@ -145,7 +176,11 @@ export function AuthPolicyForm({
         setHasRow(false);
         setEditing(false);
         setNotice("reset");
-        form.reset(toFormValues(inheritedView));
+        form.reset(toFormValues(editBaseline));
+        // Re-run the RSC: with the override gone the page is allowed to load
+        // the platform default again, so the inherit summary can show the
+        // REAL inherited policy instead of nothing.
+        router.refresh();
         return;
       }
       form.setError("root", { type: "server", message: t("errorToast") });
@@ -158,7 +193,11 @@ export function AuthPolicyForm({
     return (
       <div className="max-w-xl space-y-4">
         <p className="text-muted-foreground text-sm">{t("inheritBody")}</p>
-        <PolicySummary settings={inheritedView} />
+        {inheritedView ? (
+          <PolicySummary settings={inheritedView} />
+        ) : (
+          <p className="text-muted-foreground text-sm">{t("inheritUnknown")}</p>
+        )}
         {notice === "reset" ? (
           <p className="text-success text-sm" role="status">
             {t("resetDone")}
@@ -168,7 +207,7 @@ export function AuthPolicyForm({
           <Button
             type="button"
             onClick={() => {
-              form.reset(toFormValues(inheritedView));
+              form.reset(toFormValues(editBaseline));
               setNotice(null);
               setEditing(true);
             }}

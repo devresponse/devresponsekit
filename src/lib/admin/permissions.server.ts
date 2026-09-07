@@ -11,7 +11,7 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
-import { REQUEST_PATH_HEADER } from "@/lib/request-id";
+import { REQUEST_PATH_HEADER, normalizeRequestPath } from "@/lib/request-id";
 import {
   hasBearerCredential,
   resolveCaller,
@@ -207,12 +207,17 @@ export async function checkAdminPermissionServer(
  * vocabulary; `surface: "rsc"` and the pathname distinguish it from the route
  * row so an operator can tell a URL probe from an API probe.
  *
- * Deduped per request: a single navigation runs the layout guard and the page
- * guard (and any nested guard), and a denial that fails all of them must be
- * ONE row, not three. The key is the request's `Headers` object — the same
- * per-request carrier `getOrCreateRequestId` memoizes on — plus the required
- * keys and reason, so two genuinely different denials in one render still
- * both land.
+ * Deduped per request on `${reason}|${required}`, keyed by the request's
+ * `Headers` object — the same per-request carrier `getOrCreateRequestId`
+ * memoizes on. What that suppresses is a REPEAT of the same guard: the same
+ * required set failing the same way twice in one render (a layout re-run
+ * under the not-found boundary, a nested guard restating its parent's key).
+ * It does NOT collapse a layout+page navigation into one row, and must not:
+ * the administrator layout guards on `[...ANY_ADMIN_PERMISSION]` while the
+ * page guards on a single key, so a denied navigation legitimately records
+ * TWO rows — "no admin permission at all" and "not this page's permission"
+ * — which are different facts about the same probe. Two genuinely different
+ * denials in one render both land, by the same rule.
  */
 const rscDenialsSeen = new WeakMap<object, Set<string>>();
 
@@ -244,7 +249,13 @@ async function auditRscDenial(
       surface: "rsc",
       // `proxy.ts` stamps the resolved pathname on the forwarded request
       // headers; it is the only thing that says WHICH admin page was probed.
-      path: requestHeaders.get(REQUEST_PATH_HEADER),
+      // Normalized, never stored raw: on a path the proxy matcher does not
+      // cover the value is whatever the CLIENT sent, and this row goes into
+      // `app_audit_events` — append-only and trigger-protected, so an
+      // unbounded arbitrary string would be permanent. `normalizeRequestPath`
+      // caps the length and rejects anything that is not a single-line,
+      // origin-relative path (→ `null`).
+      path: normalizeRequestPath(requestHeaders.get(REQUEST_PATH_HEADER)),
     },
   });
 }

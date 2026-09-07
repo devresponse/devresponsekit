@@ -167,6 +167,13 @@ export function proxy(request: NextRequest) {
   // every branch below hands Better Auth the same derivation.
   const requestHeaders = new Headers(request.headers);
   applyClientIpHeader(requestHeaders);
+  // `x-drk-pathname` is OURS (review #74). Drop any inbound copy here, before
+  // any branch returns, so no request the proxy forwards — including the
+  // `/api/*` early return below, which stamps nothing — can carry a
+  // client-chosen value into `headers()`. The follow-up review to #74 found
+  // the original code set it on the localized branch only, which left every
+  // other forwarded request believing the browser.
+  requestHeaders.delete(REQUEST_PATH_HEADER);
 
   // Only `/api/auth/*` is matched (Better Auth needs the client-IP header);
   // other API routes are excluded by the matcher, but defend in depth.
@@ -196,8 +203,11 @@ export function proxy(request: NextRequest) {
   requestHeaders.set("Content-Security-Policy", csp);
   // Review #74: name the page for server-side guards. An RSC has no request
   // object, so an audited permission denial can only say WHICH page was probed
-  // if the pathname rides the request headers. Unconditionally overwritten
-  // here, so a browser-supplied value can never be believed.
+  // if the pathname rides the request headers. Any inbound copy was deleted
+  // above, so on a path the matcher covers this value is the proxy's own —
+  // but the matcher cannot cover every path (see `config` below), so
+  // consumers still normalize it (`normalizeRequestPath`) and treat it as a
+  // hint rather than evidence.
   requestHeaders.set(REQUEST_PATH_HEADER, pathname);
   const response = intlMiddleware(new NextRequest(request, { headers: requestHeaders }));
   response.headers.set("Content-Security-Policy", csp);
@@ -208,6 +218,16 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     "/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+    // The entry above skips ANY path containing a dot (the cheap "looks like
+    // a static asset" heuristic). Next still routes `/en/app/…/a.b` to the
+    // RSC, so before this entry existed such a URL reached the secure tree
+    // with NO proxy pass at all: no cookie pre-redirect, no CSP, and — the
+    // reason it was found — raw client headers, including a forged
+    // `x-drk-pathname` that the RSC denial audit then recorded verbatim.
+    // The localized secure tree is where every audited RSC guard lives and
+    // holds no static assets, so matching it unconditionally closes that gap
+    // (a dotted segment there is a user-supplied id, never a file).
+    "/:locale/app/:path*",
     // Better Auth's catch-all must pass through the proxy so the trusted
     // client-IP header is set before its rate limiter runs (review #35).
     "/api/auth/:path*",

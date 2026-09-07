@@ -878,6 +878,7 @@
         "platformTitle": "平台注册默认设置",
         "platformDescription": "所有未自行配置的组织都继承此注册策略。",
         "inheritBody": "此组织继承平台的注册默认设置。",
+        "inheritUnknown": "此处不显示平台默认设置——只有平台超级管理员才能查看。",
         "customize": "为此组织自定义",
         "cancel": "取消",
         "requireVerification": "要求电子邮件验证",

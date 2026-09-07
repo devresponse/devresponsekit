@@ -425,4 +425,65 @@ describe("checkAdminPermissionServer - denials are audited (review #74)", () => 
     expect(await checkAdminPermissionServer("admin.users.read")).not.toBe("denied");
     expect(auditMock).not.toHaveBeenCalled();
   });
+
+  /**
+   * The dedupe key is `${reason}|${required}`, so it suppresses a REPEAT of
+   * the SAME guard — not a layout+page navigation. The administrator layout
+   * guards on `[...ANY_ADMIN_PERMISSION]` while each page guards on a single
+   * key, so the two denials carry different required sets and legitimately
+   * write one row each. The docstring used to promise "ONE row, not three"
+   * for exactly this sequence, which is the only one that actually happens;
+   * this pins the real behaviour.
+   */
+  it("writes one row for the LAYOUT guard and one for the PAGE guard (different facts)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue({ ...ACTIVE_READER, permissions: [] });
+
+    const { checkAdminPermissionServer, ANY_ADMIN_PERMISSION } = await load();
+    // The real navigation: the layout guard first, then the page it wraps.
+    expect(await checkAdminPermissionServer([...ANY_ADMIN_PERMISSION])).toBe("denied");
+    expect(await checkAdminPermissionServer("admin.audit.read")).toBe("denied");
+
+    expect(auditMock).toHaveBeenCalledTimes(2);
+    expect(auditMock.mock.calls[0]?.[0]).toMatchObject({
+      metadata: expect.objectContaining({ required: [...ANY_ADMIN_PERMISSION] }),
+    });
+    expect(auditMock.mock.calls[1]?.[0]).toMatchObject({
+      metadata: expect.objectContaining({ required: ["admin.audit.read"] }),
+    });
+    // ...and the layout guard re-running under the not-found boundary — the
+    // case the dedupe DOES cover — adds nothing.
+    await checkAdminPermissionServer([...ANY_ADMIN_PERMISSION]);
+    expect(auditMock).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * `x-drk-pathname` is client-reachable on any path the proxy matcher does
+   * not cover, and this row lands in an append-only, trigger-protected table
+   * — so the value is shape-bounded before it is stored (the #74 follow-up
+   * finding: it used to be read raw and written verbatim).
+   */
+  it("records null for a forged pathname that is not a path", async () => {
+    ambient.headers = new Headers({ "x-drk-pathname": "not a path <script>alert(1)</script>" });
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACTIVE_READER);
+
+    const { checkAdminPermissionServer } = await load();
+    await checkAdminPermissionServer("admin.audit.read");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ path: null }) }),
+    );
+  });
+
+  it("records null rather than parking a kilobyte-long forged value in the audit row", async () => {
+    ambient.headers = new Headers({ "x-drk-pathname": "/" + "a".repeat(4096) });
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(ACTIVE_READER);
+
+    const { checkAdminPermissionServer } = await load();
+    await checkAdminPermissionServer("admin.audit.read");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ path: null }) }),
+    );
+  });
 });

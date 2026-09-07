@@ -878,6 +878,7 @@
         "platformTitle": "Valores de registro predeterminados de la plataforma",
         "platformDescription": "La política de registro que hereda cada organización sin configuración propia.",
         "inheritBody": "Esta organización hereda los valores de registro predeterminados de la plataforma.",
+        "inheritUnknown": "El valor predeterminado de la plataforma no se muestra aquí: solo un superadministrador de la plataforma puede verlo.",
         "customize": "Personalizar para esta organización",
         "cancel": "Cancelar",
         "requireVerification": "Exigir verificación de correo electrónico",

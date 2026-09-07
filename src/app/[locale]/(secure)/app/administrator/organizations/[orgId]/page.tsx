@@ -99,6 +99,14 @@ export default async function AdministratorOrganizationDetailPage({
   // these values as `effective` with `source: "platform_default"`. When the
   // org has its own override the default is withheld — the editor renders
   // without the "inherited" hint, which is the correct read of its authority.
+  //
+  // `null` therefore means WITHHELD, not "strict": `AuthPolicyForm` must say
+  // "not shown" rather than substitute its fail-closed baseline (the #72
+  // follow-up finding — Reset used to leave a non-superadmin looking at a
+  // summary claiming verification + admin approval, whatever the platform
+  // default actually is). The form calls `router.refresh()` after a
+  // successful Reset, which re-enters this branch with `authSettings === null`
+  // and streams the real defaults down.
   const authSettings = await getOrgAuthSettingsRow(org.id);
   const mayReadPlatformDefaults = isSuperadmin(guard.access) || authSettings === null;
   const platformAuthDefaults = mayReadPlatformDefaults ? await getOrgAuthSettingsRow(null) : null;

@@ -215,3 +215,49 @@ describe("onRequestError request_id tag (review #99)", () => {
     expect(sentry.tags).toContainEqual(["request_id", VALID]);
   });
 });
+
+/**
+ * `x-drk-pathname` normalization (the follow-up finding to review #74).
+ *
+ * The header was documented as unspoofable ("the proxy overwrites whatever
+ * arrived") and read RAW into `app_audit_events.metadata.path`. Both halves
+ * were wrong: the proxy stamped it on one branch only, and its matcher skips
+ * any path containing a dot, so `GET /en/app/…/a.b` with a hand-written
+ * header reached the RSC guard untouched — an attacker-chosen, unbounded
+ * string written into an append-only, trigger-protected compliance table.
+ * `proxy.ts` now deletes the inbound copy and covers the localized secure
+ * tree, and everything that reads the header bounds it here.
+ */
+describe("normalizeRequestPath (#74 follow-up)", () => {
+  it("keeps a real origin-relative path", () => {
+    expect(mod.normalizeRequestPath("/en/app/administrator/users")).toBe(
+      "/en/app/administrator/users",
+    );
+    expect(mod.normalizeRequestPath("/en/app/administrator/users/a.b?x=1")).toBe(
+      "/en/app/administrator/users/a.b?x=1",
+    );
+  });
+
+  it("rejects anything that is not a path, so no free-text lands in the audit row", () => {
+    expect(mod.normalizeRequestPath("not a path")).toBeNull();
+    expect(mod.normalizeRequestPath("https://evil.example/x")).toBeNull();
+    // Protocol-relative: `//host/x` is a URL, not an origin-relative path.
+    expect(mod.normalizeRequestPath("//evil.example/x")).toBeNull();
+    expect(mod.normalizeRequestPath("")).toBeNull();
+    expect(mod.normalizeRequestPath(undefined)).toBeNull();
+    expect(mod.normalizeRequestPath(null)).toBeNull();
+    expect(mod.normalizeRequestPath(42)).toBeNull();
+  });
+
+  it("rejects control characters, so a chosen value cannot forge a second log field", () => {
+    expect(mod.normalizeRequestPath("/en/app\r\nfake: line")).toBeNull();
+    expect(mod.normalizeRequestPath("/en/app\u0000")).toBeNull();
+    expect(mod.normalizeRequestPath("/en/app x")).toBeNull();
+    expect(mod.normalizeRequestPath("/en/app\u0085")).toBeNull();
+  });
+
+  it("caps the length: the header limit is kilobytes, the audit table is forever", () => {
+    expect(mod.normalizeRequestPath("/" + "a".repeat(511))).toBe("/" + "a".repeat(511));
+    expect(mod.normalizeRequestPath("/" + "a".repeat(512))).toBeNull();
+  });
+});

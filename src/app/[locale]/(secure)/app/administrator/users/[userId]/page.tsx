@@ -21,9 +21,12 @@ export const dynamic = "force-dynamic";
  *      gated the entire `/administrator/*` tree on any admin permission,
  *      so passing this read check means the caller is an admin reader).
  *   3. Renders the static metadata header + a client `UserDetailTabs`
- *      component that owns the interactive tabs (Overview, Roles, Groups,
- *      Memberships, Sessions, and — for callers holding `admin.audit.read`
- *      — Audit, the user's `app_user_id`-filtered audit trail).
+ *      component that owns the interactive tabs. Overview, Roles and
+ *      Memberships need only `admin.users.read`; every other tab is gated on
+ *      the permission ITS OWN API enforces (review #76) — Groups on
+ *      `admin.groups.read`, Sessions on `admin.users.sessions`, Audit on
+ *      `admin.audit.read` — so a permitted reader is never walked into a 403
+ *      by clicking a tab. The flags are derived below and passed down.
  */
 export default async function AdministratorUserDetailPage({
   params,

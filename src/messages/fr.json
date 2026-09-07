@@ -878,6 +878,7 @@
         "platformTitle": "Paramètres d'inscription par défaut de la plateforme",
         "platformDescription": "La politique d'inscription héritée par chaque organisation sans configuration propre.",
         "inheritBody": "Cette organisation hérite des paramètres d'inscription par défaut de la plateforme.",
+        "inheritUnknown": "La valeur par défaut de la plateforme n'est pas affichée ici — seul un superadministrateur de la plateforme peut la consulter.",
         "customize": "Personnaliser pour cette organisation",
         "cancel": "Annuler",
         "requireVerification": "Exiger la vérification de l'e-mail",

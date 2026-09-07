@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
  * It covers THREE surfaces, because the rule must hold everywhere it applies,
  * not just where it was first written (MAPI-1 / AUTHZ-RSC-1):
  *   1. `/api/administrator/**` route handlers   — resolveOrgScope / canAccess* / resolveTargetUser
- *   2. `/api/v1/**` route handlers              — same access-scope module, or requireAccountUser (self-scoped)
+ *   2. `/api/v1/**` route handlers              — same access-scope module, or requireApiAccount (self-scoped)
  *   3. administrator RSC *detail* pages          — canAccessOrg / canAccessUser → notFound()
  *
  * Each surface has its own tiny EXEMPT list (platform-global / public
@@ -48,8 +48,14 @@ const ADMIN_SCOPE_MARKERS = [
 ];
 
 // v1 routes scope tenant data via the SAME access-scope module; self-service
-// `/me/*` routes are confined to the caller's own account via requireAccountUser.
-const V1_SCOPE_MARKERS = ["@/lib/admin/access-scope.server", "requireAccountUser"];
+// `/me/*` routes are confined to the caller's own account via the account
+// guard — `requireApiAccount` on v1 (the problem+json rendering of the same
+// decision, review #45), `requireAccountUser` on the first-party surfaces.
+const V1_SCOPE_MARKERS = [
+  "@/lib/admin/access-scope.server",
+  "requireAccountUser",
+  "requireApiAccount",
+];
 
 // RSC detail pages enforce the boundary directly before rendering.
 const PAGE_SCOPE_MARKERS = ["canAccessOrg", "canAccessUser"];
@@ -85,6 +91,7 @@ const PREFERENCES_ROUTES_DIR = join(SRC_DIR, "app", "api", "preferences");
 const OTHER_SCOPE_MARKERS = [
   "@/lib/admin/access-scope.server",
   "requireAccountUser",
+  "requireApiAccount",
   "requireApiPermission",
   "resolveCaller",
   "getCurrentSession",
@@ -250,7 +257,10 @@ describe("review #184: every self-service guard call names an account scope lite
     ...walkFiles(V1_ME_ROUTES_DIR, "route.ts"),
     ...walkFiles(PREFERENCES_ROUTES_DIR, "route.ts"),
   ];
-  const GUARD_CALL = /requireAccountUser\s*\(([^)]*)\)/g;
+  // Both renderings of the one account decision (review #45): the first-party
+  // `requireAccountUser` and the v1 problem+json `requireApiAccount`. Matching
+  // only the former would silently stop scanning every `/api/v1/me/*` handler.
+  const GUARD_CALL = /require(?:AccountUser|ApiAccount)\s*\(([^)]*)\)/g;
   const SCOPED_CALL = /^\s*request\s*,\s*"account\.[a-z]+(?:\.[a-z]+)?"\s*$/;
   const SELF_SERVICE_EXEMPT: Record<string, string> = {
     // Browser redirect target after a scoped sign-in (GET, session-only, no
@@ -266,7 +276,7 @@ describe("review #184: every self-service guard call names an account scope lite
   });
 
   it.each(routeFiles.map((f) => [rel(f, "api/"), f] as const))(
-    "%s passes an account scope to every requireAccountUser call",
+    "%s passes an account scope to every account-guard call",
     (relPath, full) => {
       const reason = exemptReason(full, SELF_SERVICE_EXEMPT);
       if (reason !== undefined) {
@@ -275,11 +285,12 @@ describe("review #184: every self-service guard call names an account scope lite
       }
       const source = readFileSync(full, "utf8");
       const calls = [...source.matchAll(GUARD_CALL)].map((m) => m[1] ?? "");
-      expect(calls.length, `${relPath} has no requireAccountUser call`).toBeGreaterThan(0);
+      expect(calls.length, `${relPath} has no account-guard call`).toBeGreaterThan(0);
       for (const args of calls) {
         expect(
           SCOPED_CALL.test(args),
-          `${relPath}: requireAccountUser(${args.trim()}) must pass an "account.<x>" scope literal ` +
+          `${relPath}: the account guard was called as (${args.trim()}) but must pass an ` +
+            `"account.<x>" scope literal ` +
             `(e.g. "account.read" for reads, "account.profile.write" / ` +
             `"account.preferences.write" / "account.apikeys.manage" for mutations) so a ` +
             `read-only or zero-scope bearer key cannot reach the handler.`,

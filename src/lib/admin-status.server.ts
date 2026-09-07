@@ -1,6 +1,6 @@
 import "server-only";
 import type { NextRequest } from "next/server";
-import { sql } from "kysely";
+import { sql, type SqlBool } from "kysely";
 import { db } from "@/db/database";
 import { userHasMembershipOutsideOrg, type OrgScope } from "@/lib/admin/access-scope.server";
 import { auditEvent } from "@/lib/audit.server";
@@ -50,10 +50,30 @@ export interface AdminStatusChangeInput {
   eventType: string;
   /** Optional operator-supplied reason, stored and audited. */
   reason?: string;
+  /**
+   * Optimistic-concurrency version the caller read the row at (review #44).
+   *
+   * When present, the mutation becomes a COMPARE-AND-SWAP: the row is claimed
+   * with `updated_at` in the UPDATE's own WHERE, inside the transaction, so a
+   * writer whose read is stale by the time it writes loses (`precondition_
+   * failed`) instead of silently overwriting the winner. Omit for
+   * last-write-wins (no `If-Match` sent, or the bulk/console paths).
+   *
+   * The comparison is at MILLISECOND granularity because that is the
+   * granularity the ETag publishes: `updated_at` is a Postgres `timestamptz`
+   * (microseconds) but arrives as a JS `Date` (milliseconds), so an exact
+   * `updated_at = $1` predicate would never match a row whose stored value has
+   * a sub-millisecond component.
+   */
+  expectedUpdatedAt?: Date;
 }
 
 export type AdminStatusChangeResult =
-  { ok: true; status: AdminStatusChangeInput["newStatus"] } | { ok: false; error: "not_found" };
+  | { ok: true; status: AdminStatusChangeInput["newStatus"] }
+  | { ok: false; error: "not_found" | "precondition_failed" };
+
+/** Internal signal used to roll the transaction back on a lost CAS (#44). */
+class PreconditionFailedError extends Error {}
 
 export async function performAdminStatusChange(
   input: AdminStatusChangeInput,
@@ -76,43 +96,76 @@ export async function performAdminStatusChange(
       : false;
   const isGrant = input.newStatus === "active";
 
-  await db.transaction().execute(async (trx) => {
-    // Account-global status:
-    //  - SUPERADMIN, or a single-org user managed by their org admin → the
-    //    account status mirrors the action (unchanged behavior).
-    //  - Shared user + org admin → only LIFT a still-pending account to
-    //    active on a grant (so it becomes usable); never change it on a deny,
-    //    which would block the user in every other org too.
-    if (!orgScoped || !shared) {
-      await trx
-        .updateTable("app_users")
-        .set({
-          status: input.newStatus,
-          status_reason: input.reason ?? null,
-          updated_at: sql`now()`,
-        })
-        .where("id", "=", target.id)
-        .execute();
-    } else if (isGrant) {
-      await trx
-        .updateTable("app_users")
-        .set({ status: "active", updated_at: sql`now()` })
-        .where("id", "=", target.id)
-        .where("status", "=", "pending_approval")
-        .execute();
-    }
+  try {
+    await db.transaction().execute(async (trx) => {
+      // review #44: CLAIM the row before touching anything else. This UPDATE
+      // is the compare-and-swap — the expected version rides in its WHERE, so
+      // Postgres, not application code, decides the winner:
+      //
+      //   - it takes the row lock, so a concurrent claim blocks here;
+      //   - when the first transaction commits, the blocked one re-evaluates
+      //     this predicate against the NEW row version (READ COMMITTED
+      //     EvalPlanQual), finds `updated_at` moved, and updates ZERO rows.
+      //
+      // The previous shape read `updated_at` in the route, compared it there,
+      // and then wrote unconditionally — a check-then-act with a wide window
+      // in which BOTH writers passed the precondition and both wrote.
+      if (input.expectedUpdatedAt) {
+        const claim = await trx
+          .updateTable("app_users")
+          .set({ updated_at: sql`now()` })
+          .where("id", "=", target.id)
+          .where(sql<SqlBool>`date_trunc('milliseconds', updated_at) = ${input.expectedUpdatedAt}`)
+          .executeTakeFirst();
+        if (Number(claim.numUpdatedRows ?? 0) === 0) throw new PreconditionFailedError();
+      }
+      // Account-global status:
+      //  - SUPERADMIN, or a single-org user managed by their org admin → the
+      //    account status mirrors the action (unchanged behavior).
+      //  - Shared user + org admin → only LIFT a still-pending account to
+      //    active on a grant (so it becomes usable); never change it on a deny,
+      //    which would block the user in every other org too.
+      //  - SUPERADMIN, or a single-org user managed by their org admin → the
+      //    account status mirrors the action (unchanged behavior).
+      //  - Shared user + org admin → only LIFT a still-pending account to
+      //    active on a grant (so it becomes usable); never change it on a deny,
+      //    which would block the user in every other org too.
+      if (!orgScoped || !shared) {
+        await trx
+          .updateTable("app_users")
+          .set({
+            status: input.newStatus,
+            status_reason: input.reason ?? null,
+            updated_at: sql`now()`,
+          })
+          .where("id", "=", target.id)
+          .execute();
+      } else if (isGrant) {
+        await trx
+          .updateTable("app_users")
+          .set({ status: "active", updated_at: sql`now()` })
+          .where("id", "=", target.id)
+          .where("status", "=", "pending_approval")
+          .execute();
+      }
 
-    // Membership status: every org for a SUPERADMIN (account-global); only
-    // the actor's own org for an org admin (the AUTHZ-1 confinement).
-    let membership = trx
-      .updateTable("app_organization_memberships")
-      .set({ status: input.newMembershipStatus, updated_at: sql`now()` })
-      .where("app_user_id", "=", target.id);
-    if (input.scope.kind === "org") {
-      membership = membership.where("organization_id", "=", input.scope.organizationId);
-    }
-    await membership.execute();
-  });
+      // Membership status: every org for a SUPERADMIN (account-global); only
+      // the actor's own org for an org admin (the AUTHZ-1 confinement).
+      let membership = trx
+        .updateTable("app_organization_memberships")
+        .set({ status: input.newMembershipStatus, updated_at: sql`now()` })
+        .where("app_user_id", "=", target.id);
+      if (input.scope.kind === "org") {
+        membership = membership.where("organization_id", "=", input.scope.organizationId);
+      }
+      await membership.execute();
+    });
+  } catch (err) {
+    // A lost CAS is an expected outcome, not a fault: the transaction rolled
+    // back untouched and the caller answers 412 (review #44).
+    if (err instanceof PreconditionFailedError) return { ok: false, error: "precondition_failed" };
+    throw err;
+  }
 
   await auditEvent({
     eventType: input.eventType,

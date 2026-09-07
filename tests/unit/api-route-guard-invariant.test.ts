@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
  *
  *   - `requireAdminPermission`  (administrator surface: permission + origin),
  *   - `requireAccountUser`      (self-service surface: membership + origin + scope),
+ *   - `requireApiAccount`       (the same decision rendered as problem+json for
+ *                                the `/api/v1/me*` routes — review #45),
  *   - `requireApiPermission`    (v1 machine API: credential + scope),
  *   - `checkTrustedOrigin`      (a cookie mutation with its own authn, e.g. the
  *                                SSO confirm POST or invitation acceptance) —
@@ -27,6 +29,7 @@ const MUTATING_HANDLER = /export (?:async function|const) (?:POST|PATCH|PUT|DELE
 const GUARD_MARKERS = [
   "requireAdminPermission",
   "requireAccountUser",
+  "requireApiAccount",
   "requireApiPermission",
   "checkTrustedOrigin",
 ];

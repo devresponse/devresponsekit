@@ -483,6 +483,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           responses: {
             "200": { description: "OK", ...json(ref("Me")) },
             "401": errRef("Unauthorized"),
+            "403": errRef("Forbidden"),
           },
         },
       },
@@ -495,6 +496,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           responses: {
             "200": { description: "OK", ...json(ref("ApiKeyList")) },
             "401": errRef("Unauthorized"),
+            "403": errRef("Forbidden"),
           },
         },
         post: {
@@ -522,6 +524,8 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           responses: {
             "200": { description: "Revoked", ...json(ref("Revoked")) },
             "400": errRef("BadRequest"),
+            "401": errRef("Unauthorized"),
+            "403": errRef("Forbidden"),
             "404": errRef("NotFound"),
             "429": errRef("RateLimited"),
           },
@@ -537,6 +541,8 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           responses: {
             "201": { description: "Rotated", ...json(ref("ApiKeyCreated")) },
             "400": errRef("BadRequest"),
+            "401": errRef("Unauthorized"),
+            "403": errRef("Forbidden"),
             "404": errRef("NotFound"),
             "409": errRef("Conflict"),
             "429": errRef("RateLimited"),
@@ -664,6 +670,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           ],
           responses: {
             "200": { description: "OK", ...json(ref("ApiKeyAdminList")) },
+            // review #47: a non-UUID `appUserId` is now a 400 problem instead
+            // of a Postgres 22P02 surfacing as a 500.
+            "400": errRef("BadRequest"),
             "401": errRef("Unauthorized"),
             "403": errRef("Forbidden"),
           },

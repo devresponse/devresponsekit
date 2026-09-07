@@ -9,13 +9,15 @@ import type * as Route from "@/app/api/v1/me/api-keys/route";
  * itself (design §7). The real scope helpers run; the guard + repo are
  * mocked.
  */
-const requireAccountUser = vi.fn();
+const requireApiAccount = vi.fn();
 const listApiKeysForUser = vi.fn();
 const createApiKey = vi.fn();
 const auditEvent = vi.fn();
 
+// The v1 self-service routes gate on `requireApiAccount` — the problem+json
+// rendering of the same account decision (review #45).
 vi.mock("@/lib/account/guard.server", () => ({
-  requireAccountUser: (...a: unknown[]) => requireAccountUser(...a),
+  requireApiAccount: (...a: unknown[]) => requireApiAccount(...a),
 }));
 vi.mock("@/lib/api-auth/api-keys.server", () => ({
   listApiKeysForUser: (...a: unknown[]) => listApiKeysForUser(...a),
@@ -52,7 +54,7 @@ let GET: typeof Route.GET;
 let POST: typeof Route.POST;
 
 beforeEach(async () => {
-  for (const m of [requireAccountUser, listApiKeysForUser, createApiKey, auditEvent]) m.mockReset();
+  for (const m of [requireApiAccount, listApiKeysForUser, createApiKey, auditEvent]) m.mockReset();
   listApiKeysForUser.mockResolvedValue([{ id: "k1", name: "k", key_prefix: "drk_live_x" }]);
   createApiKey.mockResolvedValue({
     id: "k-new",
@@ -69,7 +71,7 @@ afterEach(() => vi.resetModules());
 describe("GET /api/v1/me/api-keys", () => {
   it("returns the guard's response when denied", async () => {
     const { NextResponse } = await import("next/server");
-    requireAccountUser.mockResolvedValue({
+    requireApiAccount.mockResolvedValue({
       ok: false,
       response: NextResponse.json({}, { status: 401 }),
     });
@@ -77,7 +79,7 @@ describe("GET /api/v1/me/api-keys", () => {
   });
 
   it("lists only the CALLER'S OWN keys (self-scoped by appUserId)", async () => {
-    requireAccountUser.mockResolvedValue(
+    requireApiAccount.mockResolvedValue(
       actor({ permissions: ["account.read"], grantedScopes: null }),
     );
     const res = await GET(req());
@@ -88,7 +90,7 @@ describe("GET /api/v1/me/api-keys", () => {
 
 describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
   it("400 on an invalid body (strict schema)", async () => {
-    requireAccountUser.mockResolvedValue(
+    requireApiAccount.mockResolvedValue(
       actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
     );
     const res = await POST(req({ method: "POST", body: { name: "", scopes: [] } }));
@@ -96,7 +98,7 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
   });
 
   it("403 invalid_scope when a cookie caller requests an admin scope it does NOT hold", async () => {
-    requireAccountUser.mockResolvedValue(
+    requireApiAccount.mockResolvedValue(
       actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
     );
     const res = await POST(
@@ -109,7 +111,7 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
   it("403 when a BEARER caller mints a key broader than its own granted scopes", async () => {
     // The calling credential only holds account.read; it cannot mint a key
     // that can manage api keys.
-    requireAccountUser.mockResolvedValue(
+    requireApiAccount.mockResolvedValue(
       actor({
         permissions: ["account.apikeys.manage", "account.read"],
         grantedScopes: ["account.read"],
@@ -123,7 +125,7 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
   });
 
   it("201 and returns the plaintext ONCE for a self-grantable account scope", async () => {
-    requireAccountUser.mockResolvedValue(
+    requireApiAccount.mockResolvedValue(
       actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
     );
     const res = await POST(req({ method: "POST", body: { name: "k", scopes: ["account.read"] } }));
@@ -139,7 +141,7 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
   it("429 rate-limits minting once the per-actor burst is exhausted", async () => {
     const rl = await import("@/lib/admin/rate-limit.server");
     rl.__resetRateLimitForTests();
-    requireAccountUser.mockResolvedValue(
+    requireApiAccount.mockResolvedValue(
       actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
     );
     let last: Response | undefined;

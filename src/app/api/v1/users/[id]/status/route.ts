@@ -11,7 +11,7 @@ import {
   TARGET_OUTRANKS_ACTOR_REASON,
   targetOutranksActor,
 } from "@/lib/admin/user-target.server";
-import { ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
+import { ifMatchPinsVersion, ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  * REST surface is a thin adapter, not a second implementation (design
  * §8.2). Requires `admin.users.manage`.
  *
- * Honors `If-Match` for optimistic concurrency: a stale tag → `412`.
+ * Honors `If-Match` for optimistic concurrency: a stale tag → `412`. The
+ * precondition is enforced as a compare-and-swap inside the mutation's own
+ * transaction (review #44), so of two writers racing on the same tag exactly
+ * one commits and the loser gets the `412` — not both.
  *
  * Target authorization mirrors the administrator route (review #7): after
  * ADR-0001 scoping (`canAccessUser` → 404), a non-superadmin principal may
@@ -113,14 +116,22 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   const scope = resolveOrgScope(grant.caller.access);
   if (!scope) return problemResponse("not_found", 404, request, { requestId: grant.requestId });
 
-  // Optimistic concurrency: reject a write made against a stale read.
+  // Optimistic concurrency (review #44). This early comparison is only a
+  // cheap fast path — it rejects a tag that was ALREADY stale at read time.
+  // The binding decision is made by the mutation itself: when the caller
+  // pinned a concrete version we hand `expectedUpdatedAt` down so the UPDATE
+  // carries it in its own WHERE (a real compare-and-swap under the row lock).
+  // Without that, two writers who both read the same tag both passed here and
+  // both wrote — the later one silently clobbering the earlier.
+  const currentUpdatedAt = current.updated_at as unknown as Date;
   const ifMatch = request.headers.get("if-match");
-  if (!ifMatchSatisfied(ifMatch, userEtag(current.updated_at as unknown as Date))) {
+  if (!ifMatchSatisfied(ifMatch, userEtag(currentUpdatedAt))) {
     return problemResponse("precondition_failed", 412, request, {
       detail: "The resource changed since you last read it.",
       requestId: grant.requestId,
     });
   }
+  const expectedUpdatedAt = ifMatchPinsVersion(ifMatch) ? currentUpdatedAt : undefined;
 
   let json: unknown;
   try {
@@ -141,9 +152,19 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     requestId: grant.requestId,
     targetAppUserId: id,
     reason: parsed.data.reason,
+    expectedUpdatedAt,
     ...mapping,
   });
-  if (!result.ok) return problemResponse("not_found", 404, request, { requestId: grant.requestId });
+  if (!result.ok) {
+    // The CAS lost: another writer committed between our read and our write.
+    if (result.error === "precondition_failed") {
+      return problemResponse("precondition_failed", 412, request, {
+        detail: "The resource changed since you last read it.",
+        requestId: grant.requestId,
+      });
+    }
+    return problemResponse("not_found", 404, request, { requestId: grant.requestId });
+  }
 
   return v1JsonResponse({ ok: true, status: result.status }, request, {
     requestId: grant.requestId,

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { requireAccountUser } from "@/lib/account/guard.server";
+import { requireApiAccount } from "@/lib/account/guard.server";
+import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import { v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -14,15 +15,18 @@ export const dynamic = "force-dynamic";
  * before attempting a scoped call.
  */
 export async function GET(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.read");
+  const guard = await requireApiAccount(request, "account.read");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 
   const permissions = actor.access.permissions;
-  const effectiveScopes =
-    actor.grantedScopes === null
-      ? permissions
-      : permissions.filter((p) => actor.grantedScopes!.includes(p));
+  // review #46: introspection MUST answer with the same rule the guards
+  // enforce. A literal `.includes` ignored the `prefix.*` wildcard sugar every
+  // guard honours via `scopesAuthorize`, so a caller holding `admin.users.*`
+  // was told it could do nothing while the API happily served it. Reuse the
+  // authorization predicate itself (never a second implementation) — it also
+  // folds in the `grantedScopes === null` (cookie = full authority) case.
+  const effectiveScopes = permissions.filter((p) => scopesAuthorize(actor.grantedScopes, p));
 
   return v1JsonResponse(
     {

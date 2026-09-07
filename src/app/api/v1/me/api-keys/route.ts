@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
-import { requireAccountUser } from "@/lib/account/guard.server";
+import { requireApiAccount } from "@/lib/account/guard.server";
 import {
   consumeToken,
   rateLimitKey,
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * credential principal. The secret and hash are never returned.
  */
 export async function GET(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.read");
+  const guard = await requireApiAccount(request, "account.read");
   if (!guard.ok) return guard.response;
 
   const items = await listApiKeysForUser(guard.actor.appUserId);
@@ -51,7 +51,7 @@ const createSchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.apikeys.manage");
+  const guard = await requireApiAccount(request, "account.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

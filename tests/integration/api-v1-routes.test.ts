@@ -26,7 +26,7 @@ const mintAccessToken = vi.fn();
 const getJwks = vi.fn();
 const requireApiPermission = vi.fn();
 const enforceApiRateLimit = vi.fn();
-const requireAccountUser = vi.fn();
+const requireApiAccount = vi.fn();
 const createBetterAuthUser = vi.fn();
 const auditUserAction = vi.fn();
 
@@ -101,8 +101,10 @@ vi.mock("@/lib/api-auth/v1-guard.server", () => ({
   requireApiPermission: (...a: unknown[]) => requireApiPermission(...a),
   enforceApiRateLimit: (...a: unknown[]) => enforceApiRateLimit(...a),
 }));
+// The v1 self-service routes gate on `requireApiAccount` — the problem+json
+// rendering of the same account decision (review #45).
 vi.mock("@/lib/account/guard.server", () => ({
-  requireAccountUser: (...a: unknown[]) => requireAccountUser(...a),
+  requireApiAccount: (...a: unknown[]) => requireApiAccount(...a),
 }));
 vi.mock("@/lib/admin/auth-admin.server", () => ({
   createBetterAuthUser: (...a: unknown[]) => createBetterAuthUser(...a),
@@ -147,7 +149,7 @@ beforeEach(() => {
     getJwks,
     requireApiPermission,
     enforceApiRateLimit,
-    requireAccountUser,
+    requireApiAccount,
     createBetterAuthUser,
     auditUserAction,
   ])
@@ -301,7 +303,7 @@ describe("POST /api/v1/auth/token", () => {
 describe("GET /api/v1/me", () => {
   it("403 (guard response) when the account guard denies", async () => {
     const { NextResponse } = await import("next/server");
-    requireAccountUser.mockResolvedValue({
+    requireApiAccount.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ e: 1 }, { status: 403 }),
     });
@@ -311,7 +313,7 @@ describe("GET /api/v1/me", () => {
   });
 
   it("returns identity + effectiveScopes (scopes ∩ permissions)", async () => {
-    requireAccountUser.mockResolvedValue({
+    requireApiAccount.mockResolvedValue({
       ok: true,
       actor: {
         betterAuthUserId: "ba1",
@@ -338,6 +340,59 @@ describe("GET /api/v1/me", () => {
     // intersection of grantedScopes with permissions
     expect(body.effectiveScopes).toEqual(["admin.users.read"]);
     expect(body.authentication.kind).toBe("api_key");
+  });
+
+  it("review #46: expands `prefix.*` wildcard grants the way the guards do", async () => {
+    // A credential granted `admin.users.*` IS authorized for every
+    // `admin.users.<x>` by `scopesAuthorize` — which is what every guard
+    // calls. Introspection used a literal `.includes`, so this caller was
+    // told it could do NOTHING while the API served its calls: the worst
+    // possible answer from an endpoint whose whole job is telling a client
+    // what it may attempt.
+    requireApiAccount.mockResolvedValue({
+      ok: true,
+      actor: {
+        betterAuthUserId: "ba1",
+        appUserId: "u1",
+        callerKind: "api_key",
+        credentialId: "k1",
+        grantedScopes: ["admin.users.*"],
+        access: {
+          primaryEmail: "a@x.com",
+          status: "active",
+          organizationId: "o1",
+          preferredLocale: "en",
+          permissions: ["admin.users.read", "admin.users.manage", "admin.orgs.read"],
+        },
+      },
+    });
+    const { GET } = await import("@/app/api/v1/me/route");
+    const res = await GET(req("/api/v1/me"));
+    const body = (await res.json()) as { effectiveScopes: string[] };
+    expect(body.effectiveScopes).toEqual(["admin.users.read", "admin.users.manage"]);
+  });
+
+  it("review #46: a cookie session (null scopes) reports its full permission set", async () => {
+    requireApiAccount.mockResolvedValue({
+      ok: true,
+      actor: {
+        betterAuthUserId: "ba1",
+        appUserId: "u1",
+        callerKind: "session",
+        credentialId: null,
+        grantedScopes: null,
+        access: {
+          primaryEmail: "a@x.com",
+          status: "active",
+          organizationId: "o1",
+          preferredLocale: "en",
+          permissions: ["admin.users.read", "shell.view"],
+        },
+      },
+    });
+    const { GET } = await import("@/app/api/v1/me/route");
+    const body = (await (await GET(req("/api/v1/me"))).json()) as { effectiveScopes: string[] };
+    expect(body.effectiveScopes).toEqual(["admin.users.read", "shell.view"]);
   });
 });
 

@@ -6,6 +6,7 @@ import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-gua
 import { createOauthClient, listOauthClients } from "@/lib/api-auth/oauth-clients.server";
 import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
 import { resolveOrgScope, userHasMembershipInOrg } from "@/lib/admin/access-scope.server";
+import { offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
@@ -19,8 +20,15 @@ export async function GET(request: NextRequest) {
   if (!guard.ok) return guard.response;
 
   const sp = request.nextUrl.searchParams;
-  const page = Math.max(1, Number(sp.get("page") ?? 1) || 1);
-  const pageSize = Math.min(200, Math.max(1, Number(sp.get("pageSize") ?? 25) || 25));
+  // review #47 (sibling of the api-keys listing): same shared list-query
+  // parser, so `page`/`pageSize` are integer-parsed and clamped instead of
+  // reaching the SQL LIMIT/OFFSET as a fraction or an overflowed float.
+  const query = parseListQuery(sp, {
+    allowedSortFields: [],
+    maxPageSize: 200,
+    defaultPageSize: 25,
+  });
+  const { page, pageSize } = query;
   const status = sp.get("status");
 
   // Org boundary (ADR-0001): org admin → their org only; superadmin → all.
@@ -29,7 +37,7 @@ export async function GET(request: NextRequest) {
 
   const { items, total } = await listOauthClients({
     limit: pageSize,
-    offset: (page - 1) * pageSize,
+    offset: offsetFor(query),
     status: status === "active" || status === "revoked" ? status : undefined,
     organizationId: scope.kind === "org" ? scope.organizationId : undefined,
   });

@@ -144,6 +144,35 @@ export function __resetRateLimitForTests(): void {
 }
 
 /**
+ * Test-only: the number of live buckets. The whole point of review #223 is
+ * that this number is HARD-BOUNDED by {@link MAX_BUCKETS} and that a single
+ * `consume` does a bounded amount of eviction work; neither property is
+ * observable through {@link consumeToken}'s token budgets alone, so the store
+ * has to be measurable for the eviction policy to be pinned by a test at all.
+ */
+export function __rateLimitBucketCountForTests(): number {
+  return buckets.size;
+}
+
+/**
+ * Test-only: the live bucket keys in least-recently-used-first order. Lets a
+ * test assert WHICH entries a flood evicted (the idle ones, from the front)
+ * and that no stored key exceeds the length bound — the memory half of
+ * review #223, which token budgets cannot show either.
+ */
+export function __rateLimitBucketKeysForTests(): string[] {
+  return [...buckets.keys()];
+}
+
+/** Test-only: the eviction constants the tests above assert against. */
+export const __RATE_LIMIT_EVICTION_CONSTANTS_FOR_TESTS = {
+  MAX_BUCKETS,
+  STALE_AFTER_MS,
+  MAX_EVICTIONS_PER_CONSUME,
+  MAX_KEY_LENGTH,
+} as const;
+
+/**
  * Refills `bucket` based on wall-clock time elapsed since the last
  * refill, then attempts to consume one token. Returns the structured
  * result; the caller is responsible for translating a deny into an

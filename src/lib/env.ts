@@ -257,7 +257,22 @@ const serverEnvSchema = z
       .transform((value) => value === "1" || value === "true"),
     /** Stamped into the key prefix: `drk_<tag>_…`. */
     API_KEY_ENV_TAG: z.enum(["live", "test"]).default("live"),
-    /** Default key lifetime in days; unset = no default expiry (UI warns). */
+    /**
+     * Default key lifetime in days; unset = no default expiry (UI warns).
+     *
+     * Review #202 asks for this to DEFAULT to e.g. 365 so keys expire out of
+     * the box. That is deliberately NOT done here: flipping it would silently
+     * give every already-deployed instance's next minted key an expiry its
+     * operator never chose, and the callers
+     * (`src/app/api/v1/me/api-keys/route.ts`,
+     * `src/app/api/administrator/api-keys/route.ts`) treat "omitted" as
+     * "non-expiring", so there is no way to opt back out without an API
+     * change too. The knob is the config-preserving half of the finding —
+     * #202 is recorded as knowingly deferred, and setting it is an operator
+     * step (see docs/api-security.md §3, "Set an expiry"). Revisit as a
+     * breaking change with
+     * an explicit `expiresInDays: null` opt-out.
+     */
     API_KEY_DEFAULT_TTL_DAYS: z.coerce.number().int().positive().optional(),
     /**
      * Minimum seconds between two `last_used_at` stamps for the SAME API key

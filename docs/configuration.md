@@ -273,7 +273,7 @@ Both paths resolve to the **same authority model**: a credential's effective acc
 | --- | --- |
 | `API_KEYS_ENABLED` | Enable API-key auth (`1`/`true`). |
 | `API_KEY_ENV_TAG` | `live` \| `test` — stamped into `drk_<tag>_…`. |
-| `API_KEY_DEFAULT_TTL_DAYS` | Default key expiry (empty = never expire; UI warns). |
+| `API_KEY_DEFAULT_TTL_DAYS` | Default key expiry (empty = never expire; UI warns). Set it if you issue keys to third parties — [api-security §3](./api-security.md#3-operator-playbook--granting-access-safely). |
 | `API_KEY_USAGE_TOUCH_INTERVAL_SECONDS` | Minimum seconds between two `last_used_at` stamps for the same key (default `60`, max `86400`). The stamp is coarse "is this key still in use?" telemetry — the audit trail is `app_audit_events` — so it is throttled rather than written on every request. Lower it for finer granularity at the cost of one write per key per interval; `0` writes on every request (the pre-throttle behaviour). |
 | `API_JWT_ENABLED` | Enable JWT access tokens (`1`/`true`). |
 | `API_JWT_ISSUER` | `iss` claim (defaults to `BETTER_AUTH_URL`). |

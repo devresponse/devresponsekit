@@ -18,11 +18,22 @@ import { authClient } from "@/lib/auth-client";
  * that, "Revoke" on the caller's own row destroyed the live session: the
  * follow-up `listSessions()` came back 401 and the panel showed a generic
  * "could not load sessions" error, with the rest of the app silently
- * signed out until the next navigation. That row is now labelled and its
- * Revoke button DISABLED rather than merely confirmed — the deliberate way
- * to end your own session is Sign out in the brand bar, which also clears
- * client state and lands on the logged-out page; a confirm dialog would
- * still leave the user staring at a broken panel afterwards.
+ * signed out until the next navigation. That row is now labelled "This
+ * device" and renders NO revoke control at all — not a disabled button, a
+ * short hint in its place. The deliberate way to end your own session is
+ * Sign out in the brand bar, which also clears client state and lands on
+ * the logged-out page; a confirm dialog would still leave the user staring
+ * at a broken panel afterwards.
+ *
+ * The marking is BEST-EFFORT and conditional on `getSession()` succeeding.
+ * When that lookup fails, `currentToken` stays null: no row is labelled,
+ * every row keeps its Revoke button, and the caller can still revoke their
+ * own session (pinned by "still lists sessions when the current-session
+ * lookup fails" in tests/component/account-sessions-panel.test.tsx). That
+ * is the deliberate trade: the fallback is the pre-#239 behaviour, which is
+ * recoverable by signing in again, whereas hiding every control on a
+ * transient lookup failure would strand a user who came here precisely to
+ * revoke a session they do not recognise.
  */
 interface ClientSession {
   id?: string;
@@ -85,8 +96,11 @@ export function AccountSessionsPanel() {
   }, [t, reloadToken]);
 
   const revokeOne = async (token: string | undefined) => {
-    // Guard in the handler too, not only on the disabled button: the
-    // current session must never be revoked from here (review #239).
+    // Guard in the handler too, not only by omitting the row's button: a
+    // list that changes under a queued click must never revoke the current
+    // session from here (review #239). When `currentToken` is null — the
+    // `getSession()` lookup failed — there is nothing to compare against
+    // and this guard, like the row marking, is inert.
     if (!token || token === currentToken) return;
     setBusy(true);
     setError(null);

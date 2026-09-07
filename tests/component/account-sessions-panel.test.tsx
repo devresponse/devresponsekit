@@ -16,7 +16,11 @@ import { renderWithIntl } from "../helpers/render-with-intl";
  *  - #239: the panel could not tell which row was the CALLER'S OWN
  *    session, so "Revoke" on it destroyed the live session — the reload
  *    came back 401 and the user was left looking at a generic load error.
- *    The current row must be marked and must not be revocable from here.
+ *    Whenever `getSession()` resolves, the current row must be marked and
+ *    must expose no revoke control. The last case pins the documented
+ *    best-effort fallback: when that lookup FAILS there is no token to
+ *    match on, so the list degrades to unmarked-and-fully-revocable rather
+ *    than to an unusable panel.
  */
 const listSessions = vi.fn();
 const getSession = vi.fn();

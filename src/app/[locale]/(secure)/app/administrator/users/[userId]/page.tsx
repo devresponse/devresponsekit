@@ -76,12 +76,9 @@ export default async function AdministratorUserDetailPage({
   // `user-actions.server.ts`), which is meaningless to a human reader
   // (review #212). Resolve it to a display name here — a single indexed
   // lookup, only when the field is set — and fall back to the raw id when
-  // the actor has no app_users row (a platform/seed actor, or a record
-  // deleted since). The lookup is deliberately NOT org-scoped: the caller
-  // is already authorized to read this record, and withholding the name of
-  // whoever deactivated it would leave the id on screen anyway.
+  // the actor is outside the caller's tenant or has no app_users row.
   const deactivatedByLabel = user.deactivated_by
-    ? await resolveActorLabel(user.deactivated_by)
+    ? await resolveActorLabel(guard.access, guard.betterAuthUserId, user.deactivated_by)
     : null;
 
   const canAssignRoles = guard.access.permissions.includes("admin.roles.assign");
@@ -141,17 +138,41 @@ export default async function AdministratorUserDetailPage({
 }
 
 /**
- * Best-effort display name for a Better Auth user id (review #212).
- * Returns the display name, else the primary email, else the id itself so
- * the UI never renders an empty "Deactivated by".
+ * Best-effort display name for the actor recorded in `deactivated_by`
+ * (review #212), resolved ONLY when that actor is inside the caller's own
+ * tenant boundary.
+ *
+ * The scope check is not redundant with the `canAccessUser` gate above.
+ * That gate authorizes the TARGET row; the actor is a DIFFERENT principal,
+ * and ADR-0001 is explicit that "a user may hold several memberships"
+ * (access-scope.server.ts) — so a target visible to an Org A admin can
+ * perfectly well have been deactivated by an Org B admin, or by a platform
+ * superadmin with no membership in Org A at all. Rendering that actor's
+ * display name or primary email would be a cross-tenant PII leak, so the
+ * label is only resolved when the actor IS the caller or passes the same
+ * `canAccessUser` predicate; otherwise the raw Better Auth id is returned,
+ * which is what the UI showed before #212 and leaks nothing new.
+ *
+ * Falls back to the raw id for a missing `app_users` row (a platform/seed
+ * actor, or a record deleted since) so "Deactivated by" is never empty.
  */
-async function resolveActorLabel(betterAuthUserId: string): Promise<string> {
+async function resolveActorLabel(
+  access: Parameters<typeof canAccessUser>[0],
+  callerBetterAuthUserId: string,
+  actorBetterAuthUserId: string,
+): Promise<string> {
   const actor = await db
     .selectFrom("app_users")
-    .select(["display_name", "primary_email"])
-    .where("better_auth_user_id", "=", betterAuthUserId)
+    .select(["id", "display_name", "primary_email"])
+    .where("better_auth_user_id", "=", actorBetterAuthUserId)
     .executeTakeFirst();
-  return actor?.display_name ?? actor?.primary_email ?? betterAuthUserId;
+  if (!actor) return actorBetterAuthUserId;
+
+  const inScope =
+    actorBetterAuthUserId === callerBetterAuthUserId || (await canAccessUser(access, actor.id));
+  if (!inScope) return actorBetterAuthUserId;
+
+  return actor.display_name ?? actor.primary_email ?? actorBetterAuthUserId;
 }
 
 function toIso(value: unknown): string | null {

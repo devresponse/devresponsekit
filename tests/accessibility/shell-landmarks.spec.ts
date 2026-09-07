@@ -60,18 +60,45 @@ async function expectShellLandmarksClean(page: Page, path: string): Promise<void
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
 
-/** Console errors React logs for a hydration mismatch. */
+/**
+ * Everything React emits for a hydration mismatch, on BOTH channels.
+ *
+ * React 19 reports a mismatch through the default `onRecoverableError`,
+ * which calls `reportError()` — Playwright surfaces that as a `pageerror`
+ * event, NOT as a console message. A collector subscribed only to
+ * `page.on("console")` therefore never observes a mismatch and the
+ * assertions below can never fail. Measured against the pre-#102
+ * `useIsMobile` (lazy `useState` initializer) on the Pixel 7 project: zero
+ * console entries of type `error`, and one `pageerror` reading "Hydration
+ * failed because the server rendered HTML didn't match the client." Both
+ * listeners stay attached — the Next dev overlay does also log to the
+ * console, and a production build reports the minified codes.
+ */
 function collectHydrationErrors(page: Page): string[] {
   const errors: string[] = [];
-  page.on("console", (msg) => {
-    if (msg.type() !== "error") return;
-    const text = msg.text();
-    // Dev builds log a prose message; production builds log error #418/#423/#425.
+  // Dev builds log a prose message; production builds log error #418/#423/#425.
+  const record = (text: string) => {
     if (/hydrat|did not match|Minified React error #(418|423|425)/i.test(text)) {
       errors.push(text);
     }
+  };
+  page.on("console", (msg) => {
+    if (msg.type() === "error") record(msg.text());
   });
+  page.on("pageerror", (err) => record(`${err.name}: ${err.message}`));
   return errors;
+}
+
+/**
+ * The hydration assertions only mean something once the SECURE SHELL has
+ * actually rendered: an empty error list is also what a redirect to
+ * `/sign-in`, a 404 or an error page produces. Without this, a base URL
+ * whose auth cookie does not stick keeps both hydration tests green while
+ * the nested-shell tests in this same file fail on `#main` count 0.
+ */
+async function expectSecureShellRendered(page: Page): Promise<void> {
+  expect(page.url(), `expected a secure-shell page, got ${page.url()}`).not.toContain("/sign-in");
+  await expect(page.locator("#main")).toHaveCount(1);
 }
 
 test.describe("public shell", () => {
@@ -116,6 +143,7 @@ test.describe("hydration", () => {
     await signInAsSeedAdmin(page);
     await page.goto("/en/app/dashboard");
     await page.waitForLoadState("networkidle");
+    await expectSecureShellRendered(page);
     expect(errors, errors.join("\n")).toEqual([]);
   });
 
@@ -126,6 +154,7 @@ test.describe("hydration", () => {
     await signInAsSeedAdmin(page);
     await page.goto("/en/app/account/preferences");
     await page.waitForLoadState("networkidle");
+    await expectSecureShellRendered(page);
     expect(errors, errors.join("\n")).toEqual([]);
   });
 });

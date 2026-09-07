@@ -13,7 +13,11 @@ import { ApplicationShell } from "@/components/app-shell/application-shell";
 export default function WorkspaceLayout({ children }: { children: ReactNode }) {
   const t = useTranslations("shell");
   return (
-    <ApplicationShell ariaLabel={t("regions.workspaceShell")} left={<WorkspaceSidebar />}>
+    <ApplicationShell
+      ariaLabel={t("regions.workspaceShell")}
+      leftAriaLabel={t("regions.workspaceNavigation")}
+      left={<WorkspaceSidebar />}
+    >
       {children}
     </ApplicationShell>
   );

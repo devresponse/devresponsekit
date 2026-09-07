@@ -24,7 +24,9 @@
       "confirm": "確認",
       "cancel": "キャンセル",
       "close": "閉じる"
-    }
+    },
+    "switchToLightTheme": "ライトテーマに切り替える",
+    "switchToDarkTheme": "ダークテーマに切り替える"
   },
   "auth": {
     "verifyEmailTitle": "メールアドレスを確認",
@@ -197,6 +199,14 @@
     "footer": {
       "githubLink": "GitHub",
       "rights": "MIT ライセンスのもとで無料かつオープンソース。"
+    },
+    "docs": {
+      "title": "ドキュメント",
+      "body": "製品ドキュメントの公開インデックスです。完全なガイドはサインイン後のドキュメント ワークスペースにあります。"
+    },
+    "about": {
+      "title": "概要",
+      "body": "{brand} はエンタープライズ向けのアプリケーション シェルです。製品の概要はホームページをご覧ください。"
     }
   },
   "shell": {
@@ -206,7 +216,20 @@
       "workspaceNavigation": "ワークスペース",
       "workspaceShell": "ワークスペースシェル",
       "skipLinks": "スキップリンク",
-      "toggleSidebar": "サイドバーを切り替え"
+      "toggleSidebar": "サイドバーを切り替え",
+      "publicSite": "公開サイト",
+      "sidebar": "サイドバー",
+      "sidebarDescription": "モバイル用サイドバーを表示します。",
+      "breadcrumb": "パンくずリスト",
+      "loadingNavigation": "ナビゲーションを読み込み中",
+      "accountShell": "アカウント ワークスペース",
+      "accountNavigation": "アカウント ナビゲーション",
+      "administratorShell": "管理者ワークスペース",
+      "administratorNavigation": "管理者ナビゲーション",
+      "documentationShell": "ドキュメント ワークスペース",
+      "documentationNavigation": "ドキュメント ナビゲーション",
+      "helpShell": "ヘルプ ワークスペース",
+      "helpNavigation": "ヘルプ ナビゲーション"
     },
     "applications": "アプリケーション",
     "dashboard": "ダッシュボード",
@@ -488,7 +511,8 @@
         "successToast": "{succeeded} 名のユーザーに「{action}」を適用しました。",
         "partialFailureToast": "{succeeded}/{attempted} 名のユーザーに「{action}」を適用しました。{failed} 件が失敗しました。",
         "errorToast": "一括操作に失敗しました。",
-        "rateLimitedToast": "一括リクエストが多すぎます。しばらくしてからもう一度お試しください。"
+        "rateLimitedToast": "一括リクエストが多すぎます。しばらくしてからもう一度お試しください。",
+        "tooManyToast": "一括操作では最大 {max} 人のユーザーを選択してください。"
       },
       "impersonation": {
         "confirmTitle": "{email} として代理ログインしますか？",
@@ -1375,7 +1399,10 @@
       "expiresAt": "{value} に期限切れ",
       "ipAddress": "IP",
       "userAgent": "デバイス",
-      "revoke": "取り消し"
+      "revoke": "取り消し",
+      "currentSession": "このデバイス",
+      "currentSessionHint": "このセッションを終了するにはサインアウトを使用してください。",
+      "revokeSession": "セッション {session} を取り消す"
     },
     "errors": {
       "nameRequired": "名前は必須です。",
@@ -1403,7 +1430,9 @@
       "expires": "{value} に期限切れ",
       "actions": {
         "rotate": "ローテーション",
-        "revoke": "取り消し"
+        "revoke": "取り消し",
+        "rotateNamed": "{name} をローテーション",
+        "revokeNamed": "{name} を取り消す"
       },
       "rotateError": "キーをローテーションできませんでした。",
       "revokeError": "キーを取り消せませんでした。",

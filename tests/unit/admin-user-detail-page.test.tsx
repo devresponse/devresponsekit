@@ -128,6 +128,113 @@ describe("administrator/users/[userId] page — tenant scope (ADR-0001, review #
     expect(canAccessUser).not.toHaveBeenCalled();
   });
 
+  /**
+   * Review #212 — `deactivated_by` stores the actor's BETTER AUTH id, which
+   * the Overview tab rendered verbatim ("Deactivated by ba-admin-7"). The
+   * RSC now resolves it to a display name, falling back to the raw id.
+   *
+   * The resolution is ORG-SCOPED: ADR-0001 allows a user to hold several
+   * memberships, so a target an Org A admin may read can have been
+   * deactivated by an Org B admin (or a platform superadmin). Resolving that
+   * actor's name/email unconditionally would be a cross-tenant PII leak, so
+   * the actor row goes through the same `canAccessUser` predicate as the
+   * target, with a self-exemption for the caller.
+   */
+  describe("deactivated_by resolution (review #212)", () => {
+    /** Depth-first search for the `user` prop handed to UserDetailTabs. */
+    function findUserProp(node: unknown): Record<string, unknown> | undefined {
+      if (!node || typeof node !== "object") return undefined;
+      const el = node as { props?: Record<string, unknown> };
+      const user = el.props?.user;
+      if (user && typeof user === "object") return user as Record<string, unknown>;
+      const children = el.props?.children;
+      for (const child of Array.isArray(children) ? children : [children]) {
+        const found = findUserProp(child);
+        if (found) return found;
+      }
+      return undefined;
+    }
+
+    beforeEach(() => canAccessUser.mockResolvedValue(true));
+
+    it("resolves the actor id to a display name", async () => {
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-admin-7" })
+        .mockResolvedValueOnce({
+          id: "actor-app-7",
+          display_name: "Grace Hopper",
+          primary_email: "grace@x.com",
+        });
+
+      const user = findUserProp(await Page(params(USER_ID)))!;
+      expect(user.deactivated_by).toBe("ba-admin-7");
+      expect(user.deactivated_by_label).toBe("Grace Hopper");
+    });
+
+    it("falls back to the actor's email, then to the raw id", async () => {
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-admin-7" })
+        .mockResolvedValueOnce({
+          id: "actor-app-7",
+          display_name: null,
+          primary_email: "grace@x.com",
+        });
+      expect(findUserProp(await Page(params(USER_ID)))!.deactivated_by_label).toBe("grace@x.com");
+
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-ghost" })
+        .mockResolvedValueOnce(undefined);
+      expect(findUserProp(await Page(params(USER_ID)))!.deactivated_by_label).toBe("ba-ghost");
+    });
+
+    it("keeps an out-of-scope actor's name off the page — raw id only (ADR-0001)", async () => {
+      // Target is visible to this org admin; the actor who deactivated them
+      // is NOT (another tenant's admin, or a platform superadmin).
+      canAccessUser.mockReset();
+      canAccessUser.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-org-b-admin" })
+        .mockResolvedValueOnce({
+          id: "actor-app-9",
+          display_name: "Org B Admin",
+          primary_email: "admin@org-b.example",
+        });
+
+      const user = findUserProp(await Page(params(USER_ID)))!;
+      expect(user.deactivated_by_label).toBe("ba-org-b-admin");
+      // No trace of the other tenant's PII anywhere in the client payload.
+      expect(JSON.stringify(user)).not.toMatch(/Org B Admin|admin@org-b\.example/);
+      // The actor row went through the SAME tenant predicate as the target.
+      expect(canAccessUser).toHaveBeenNthCalledWith(2, ACCESS, "actor-app-9");
+    });
+
+    it("resolves the caller's own name without a second scope query", async () => {
+      // Self-exemption: the actor IS the caller, so no membership lookup is
+      // needed. Only one `canAccessUser` answer is queued — a second call
+      // would resolve `undefined` and collapse the label to the raw id.
+      canAccessUser.mockReset();
+      canAccessUser.mockResolvedValueOnce(true);
+      executeTakeFirst
+        .mockResolvedValueOnce({ ...USER_ROW, deactivated_by: "ba-admin" })
+        .mockResolvedValueOnce({
+          id: "admin-app-1",
+          display_name: "Ada Admin",
+          primary_email: "admin@x.com",
+        });
+
+      expect(findUserProp(await Page(params(USER_ID)))!.deactivated_by_label).toBe("Ada Admin");
+      expect(canAccessUser).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not run the lookup when the user was never deactivated", async () => {
+      executeTakeFirst.mockReset();
+      executeTakeFirst.mockResolvedValue(USER_ROW); // deactivated_by is null
+      const user = findUserProp(await Page(params(USER_ID)))!;
+      expect(user.deactivated_by_label).toBeNull();
+      expect(executeTakeFirst).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it.each(["denied", "unauthenticated"] as const)(
     "calls notFound() when the permission guard returns %s, before any read",
     async (verdict) => {

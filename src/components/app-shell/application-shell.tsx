@@ -19,6 +19,12 @@ import type { ApplicationShellProps } from "./shell-types";
  * Why a Client Component? It reads the shell-depth context to compute
  * `depth + 1`. The context boundary is intentional so server pages can
  * still render this component synchronously inside a client tree.
+ *
+ * Landmarks (review #105): because `variant="nested"`, the content region
+ * renders as a labelled `<section>` (not a second `<main>`) and both the
+ * main and left regions get depth-suffixed ids, so the root shell keeps
+ * sole ownership of `#main` / `#navigation`. Always pass `ariaLabel` — a
+ * `<section>` without an accessible name is not a landmark.
  */
 export function ApplicationShell({
   layout,
@@ -34,6 +40,8 @@ export function ApplicationShell({
   mainClassName,
   ariaLabel,
   mainId,
+  leftId,
+  leftAriaLabel,
 }: ApplicationShellProps) {
   const parentDepth = useShellDepth();
 
@@ -53,6 +61,8 @@ export function ApplicationShell({
       mainClassName={mainClassName}
       ariaLabel={ariaLabel}
       mainId={mainId}
+      leftId={leftId}
+      leftAriaLabel={leftAriaLabel}
     >
       {children}
     </ShellGridContainer>

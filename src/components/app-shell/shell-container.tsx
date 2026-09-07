@@ -24,6 +24,8 @@ export function ShellContainer({
   mainClassName,
   ariaLabel,
   mainId,
+  leftId,
+  leftAriaLabel,
 }: ShellContainerProps) {
   return (
     <ShellDepthProvider depth={0}>
@@ -42,6 +44,8 @@ export function ShellContainer({
           mainClassName={mainClassName}
           ariaLabel={ariaLabel}
           mainId={mainId}
+          leftId={leftId}
+          leftAriaLabel={leftAriaLabel}
         >
           {children}
         </ShellGridContainer>

@@ -24,7 +24,9 @@
       "confirm": "Confirmar",
       "cancel": "Cancelar",
       "close": "Cerrar"
-    }
+    },
+    "switchToLightTheme": "Cambiar al tema claro",
+    "switchToDarkTheme": "Cambiar al tema oscuro"
   },
   "auth": {
     "verifyEmailTitle": "Verifica tu correo",
@@ -197,6 +199,14 @@
     "footer": {
       "githubLink": "GitHub",
       "rights": "Gratuito y de código abierto bajo la licencia MIT."
+    },
+    "docs": {
+      "title": "Documentación",
+      "body": "Un índice público de la documentación del producto. Las guías completas están en el espacio de trabajo de documentación una vez que inicias sesión."
+    },
+    "about": {
+      "title": "Acerca de",
+      "body": "{brand} es un shell de aplicación empresarial. Consulta la página de inicio para ver una descripción del producto."
     }
   },
   "shell": {
@@ -206,7 +216,20 @@
       "workspaceNavigation": "Espacio de trabajo",
       "workspaceShell": "Shell del espacio de trabajo",
       "skipLinks": "Enlaces para saltar",
-      "toggleSidebar": "Alternar barra lateral"
+      "toggleSidebar": "Alternar barra lateral",
+      "publicSite": "Sitio público",
+      "sidebar": "Barra lateral",
+      "sidebarDescription": "Muestra la barra lateral móvil.",
+      "breadcrumb": "Ruta de navegación",
+      "loadingNavigation": "Cargando la navegación",
+      "accountShell": "Espacio de trabajo de cuenta",
+      "accountNavigation": "Navegación de la cuenta",
+      "administratorShell": "Espacio de trabajo de administración",
+      "administratorNavigation": "Navegación de administración",
+      "documentationShell": "Espacio de trabajo de documentación",
+      "documentationNavigation": "Navegación de la documentación",
+      "helpShell": "Espacio de trabajo de ayuda",
+      "helpNavigation": "Navegación de la ayuda"
     },
     "applications": "Aplicaciones",
     "dashboard": "Panel",
@@ -548,7 +571,8 @@
         "successToast": "{action} aplicado a {succeeded} usuario(s).",
         "partialFailureToast": "{action} aplicado a {succeeded}/{attempted} usuario(s); {failed} fallaron.",
         "errorToast": "La acción masiva falló.",
-        "rateLimitedToast": "Demasiadas solicitudes masivas. Inténtelo de nuevo en breve."
+        "rateLimitedToast": "Demasiadas solicitudes masivas. Inténtelo de nuevo en breve.",
+        "tooManyToast": "Selecciona como máximo {max} usuarios para una acción masiva."
       },
       "impersonation": {
         "confirmTitle": "¿Suplantar a {email}?",
@@ -1375,7 +1399,10 @@
       "expiresAt": "Caduca el {value}",
       "ipAddress": "IP",
       "userAgent": "Dispositivo",
-      "revoke": "Revocar"
+      "revoke": "Revocar",
+      "currentSession": "Este dispositivo",
+      "currentSessionHint": "Usa Cerrar sesión para finalizar esta sesión.",
+      "revokeSession": "Revocar la sesión {session}"
     },
     "errors": {
       "nameRequired": "El nombre es obligatorio.",
@@ -1403,7 +1430,9 @@
       "expires": "Caduca el {value}",
       "actions": {
         "rotate": "Rotar",
-        "revoke": "Revocar"
+        "revoke": "Revocar",
+        "rotateNamed": "Rotar {name}",
+        "revokeNamed": "Revocar {name}"
       },
       "rotateError": "No se pudo rotar la clave.",
       "revokeError": "No se pudo revocar la clave.",

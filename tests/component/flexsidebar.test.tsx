@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   FlexSidebar,
@@ -11,6 +11,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/flexsidebar";
+import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
  * FlexSidebar is the container-friendly variant of the shadcn sidebar:
@@ -22,8 +23,10 @@ import {
  *   - the trigger flips data-state / data-collapsible so the icon
  *     collapse styling hooks engage.
  */
+// SidebarTrigger's default screen-reader label now comes from the message
+// catalog (review #106), so the tree needs the intl provider.
 function renderSidebar() {
-  return render(
+  return renderWithIntl(
     <SidebarProvider>
       <FlexSidebar collapsible="icon">
         <SidebarContent>
@@ -85,7 +88,7 @@ describe("FlexSidebar", () => {
   });
 
   it("persists state under a custom cookie name for nested providers", async () => {
-    render(
+    renderWithIntl(
       <SidebarProvider cookieName="administrator_sidebar_state">
         <FlexSidebar collapsible="icon">
           <SidebarContent />
@@ -98,7 +101,7 @@ describe("FlexSidebar", () => {
   });
 
   it("does not react to Ctrl+B when the keyboard shortcut is disabled", async () => {
-    const { container } = render(
+    const { container } = renderWithIntl(
       <SidebarProvider keyboardShortcut={null}>
         <FlexSidebar collapsible="icon">
           <SidebarContent />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -34,9 +34,30 @@ export function ProfileForm({ initial }: ProfileFormProps) {
   const router = useRouter();
 
   const [saved, setSaved] = useState(false);
+  // One object for both the initial values and the Cancel reset so the two
+  // can never drift (review #103).
+  const initialValues = useMemo<UpdateProfileInput>(
+    () => ({ name: initial.name, displayName: initial.displayName }),
+    [initial.name, initial.displayName],
+  );
   const form = useZodForm<UpdateProfileInput>(updateProfileSchema, {
-    defaultValues: { name: initial.name, displayName: initial.displayName },
+    defaultValues: initialValues,
   });
+
+  /**
+   * Cancel discards the edits. `router.refresh()` alone was a NO-OP
+   * (review #103): it re-renders the server tree but React Hook Form keeps
+   * its own client state, so the typed-in values, the validation errors and
+   * the sticky "saved" notice all survived. Reset the form to the
+   * server-supplied values explicitly, then refresh so a concurrent update
+   * from elsewhere still lands.
+   */
+  const onCancel = () => {
+    form.reset(initialValues);
+    form.clearErrors();
+    setSaved(false);
+    router.refresh();
+  };
 
   const onValid = async (values: UpdateProfileInput) => {
     form.clearErrors("root");
@@ -126,7 +147,7 @@ export function ProfileForm({ initial }: ProfileFormProps) {
             type="button"
             variant="outline"
             disabled={form.formState.isSubmitting}
-            onClick={() => router.refresh()}
+            onClick={onCancel}
           >
             {tCommon("cancel")}
           </Button>

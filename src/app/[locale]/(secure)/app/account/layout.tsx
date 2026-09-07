@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { getTranslations } from "next-intl/server";
 import type { ReactNode } from "react";
 import { ApplicationShell } from "@/components/app-shell/application-shell";
 import { SidebarProvider } from "@/components/ui/flexsidebar";
@@ -23,6 +24,11 @@ export const dynamic = "force-dynamic";
  * FlexSidebar provider (separate cookie, no keyboard shortcut so Ctrl/Cmd+B
  * keeps toggling the root sidebar). Mirrors the Administrator layout
  * structure so the two workspaces stay consistent.
+ *
+ * Landmarks (review #105/#106): the nested shell renders a labelled
+ * `<section>` with depth-suffixed region ids, so the root shell keeps sole
+ * ownership of `#main` / `#navigation` and the skip links stay unambiguous.
+ * Both landmark names are localized rather than hardcoded English.
  */
 const SIDEBAR_COOKIE = "account_sidebar_state";
 
@@ -39,6 +45,7 @@ export default async function AccountLayout({
 
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get(SIDEBAR_COOKIE)?.value !== "false";
+  const tRegions = await getTranslations({ locale, namespace: "shell.regions" });
 
   return (
     <SidebarProvider
@@ -50,7 +57,8 @@ export default async function AccountLayout({
       <ApplicationShell
         layout="sidebar-first"
         className="w-full"
-        ariaLabel="Account"
+        ariaLabel={tRegions("accountShell")}
+        leftAriaLabel={tRegions("accountNavigation")}
         header={<AccountTopHeader />}
         left={<AccountSidebar locale={locale} permissions={access.permissions} />}
       >

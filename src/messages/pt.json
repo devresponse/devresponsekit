@@ -24,7 +24,9 @@
       "confirm": "Confirmar",
       "cancel": "Cancelar",
       "close": "Fechar"
-    }
+    },
+    "switchToLightTheme": "Mudar para o tema claro",
+    "switchToDarkTheme": "Mudar para o tema escuro"
   },
   "auth": {
     "verifyEmailTitle": "Confirme o seu e-mail",
@@ -197,6 +199,14 @@
     "footer": {
       "githubLink": "GitHub",
       "rights": "Gratuito e de código aberto sob a licença MIT."
+    },
+    "docs": {
+      "title": "Documentação",
+      "body": "Um índice público da documentação do produto. Os guias completos ficam no espaço de trabalho de documentação depois que você entra."
+    },
+    "about": {
+      "title": "Sobre",
+      "body": "{brand} é um shell de aplicação corporativa. Veja a página inicial para uma visão geral do produto."
     }
   },
   "shell": {
@@ -206,7 +216,20 @@
       "workspaceNavigation": "Espaço de trabalho",
       "workspaceShell": "Shell do espaço de trabalho",
       "skipLinks": "Ligações de salto",
-      "toggleSidebar": "Alternar barra lateral"
+      "toggleSidebar": "Alternar barra lateral",
+      "publicSite": "Site público",
+      "sidebar": "Barra lateral",
+      "sidebarDescription": "Exibe a barra lateral móvel.",
+      "breadcrumb": "Trilha de navegação",
+      "loadingNavigation": "Carregando a navegação",
+      "accountShell": "Espaço de trabalho da conta",
+      "accountNavigation": "Navegação da conta",
+      "administratorShell": "Espaço de trabalho de administração",
+      "administratorNavigation": "Navegação de administração",
+      "documentationShell": "Espaço de trabalho de documentação",
+      "documentationNavigation": "Navegação da documentação",
+      "helpShell": "Espaço de trabalho de ajuda",
+      "helpNavigation": "Navegação da ajuda"
     },
     "applications": "Aplicações",
     "dashboard": "Painel",
@@ -488,7 +511,8 @@
         "successToast": "{action} aplicada a {succeeded} utilizador(es).",
         "partialFailureToast": "{action} aplicada a {succeeded}/{attempted} utilizador(es); {failed} falharam.",
         "errorToast": "A ação em massa falhou.",
-        "rateLimitedToast": "Demasiados pedidos em massa. Tente novamente dentro de momentos."
+        "rateLimitedToast": "Demasiados pedidos em massa. Tente novamente dentro de momentos.",
+        "tooManyToast": "Selecione no máximo {max} usuários para uma ação em massa."
       },
       "impersonation": {
         "confirmTitle": "Personificar {email}?",
@@ -1375,7 +1399,10 @@
       "expiresAt": "Expira {value}",
       "ipAddress": "IP",
       "userAgent": "Dispositivo",
-      "revoke": "Revogar"
+      "revoke": "Revogar",
+      "currentSession": "Este dispositivo",
+      "currentSessionHint": "Use Sair para encerrar esta sessão.",
+      "revokeSession": "Revogar a sessão {session}"
     },
     "errors": {
       "nameRequired": "O nome é obrigatório.",
@@ -1403,7 +1430,9 @@
       "expires": "Expira {value}",
       "actions": {
         "rotate": "Rodar",
-        "revoke": "Revogar"
+        "revoke": "Revogar",
+        "rotateNamed": "Rotacionar {name}",
+        "revokeNamed": "Revogar {name}"
       },
       "rotateError": "Não foi possível rodar a chave.",
       "revokeError": "Não foi possível revogar a chave.",

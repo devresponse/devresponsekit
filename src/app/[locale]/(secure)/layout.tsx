@@ -94,7 +94,14 @@ export default async function SecureLayout({
               </div>
             </TopShellBar>
           }
-          left={<SecureSidebar locale={safeLocale} permissions={access.permissions} />}
+          leftAriaLabel={tRegions("sidebar")}
+          // The sidebar only asks "does this caller have ANY permission?" before
+          // deciding whether to fetch the menu, so send the ANSWER, not the whole
+          // permission array — it kept the caller's full grant list in the RSC
+          // payload for no reader (review #213).
+          left={
+            <SecureSidebar locale={safeLocale} hasPermissions={access.permissions.length > 0} />
+          }
         >
           <ImpersonationBanner />
           <DialogManagerProvider>{children}</DialogManagerProvider>

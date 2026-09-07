@@ -47,8 +47,16 @@ export interface ShellGridContainerProps extends ShellControlledVisibilityProps 
   leftMode?: ShellSidebarMode;
   rightMode?: ShellSidebarMode;
   footerMode?: ShellFooterMode;
+  /** Accessible name for the main region landmark. */
   ariaLabel?: string;
+  /** Landmark id for the main region. Defaults to `main` at root depth and
+   *  `main-<depth>` for a nested shell so the two never collide (#105). */
   mainId?: string;
+  /** Landmark id for the left region. Defaults to `navigation` at root depth
+   *  and `navigation-<depth>` for a nested shell (#105). */
+  leftId?: string;
+  /** Localized accessible name for the left region landmark (#106). */
+  leftAriaLabel?: string;
 }
 
 export interface ShellContainerProps extends ShellControlledVisibilityProps {
@@ -60,8 +68,16 @@ export interface ShellContainerProps extends ShellControlledVisibilityProps {
   children: ReactNode;
   className?: string;
   mainClassName?: string;
+  /** Accessible name for the main region landmark. */
   ariaLabel?: string;
+  /** Landmark id for the main region. Defaults to `main` at root depth and
+   *  `main-<depth>` for a nested shell so the two never collide (#105). */
   mainId?: string;
+  /** Landmark id for the left region. Defaults to `navigation` at root depth
+   *  and `navigation-<depth>` for a nested shell (#105). */
+  leftId?: string;
+  /** Localized accessible name for the left region landmark (#106). */
+  leftAriaLabel?: string;
 }
 
 export interface ApplicationShellProps extends ShellControlledVisibilityProps {
@@ -73,8 +89,16 @@ export interface ApplicationShellProps extends ShellControlledVisibilityProps {
   children: ReactNode;
   className?: string;
   mainClassName?: string;
+  /** Accessible name for the main region landmark. */
   ariaLabel?: string;
+  /** Landmark id for the main region. Defaults to `main` at root depth and
+   *  `main-<depth>` for a nested shell so the two never collide (#105). */
   mainId?: string;
+  /** Landmark id for the left region. Defaults to `navigation` at root depth
+   *  and `navigation-<depth>` for a nested shell (#105). */
+  leftId?: string;
+  /** Localized accessible name for the left region landmark (#106). */
+  leftAriaLabel?: string;
 }
 
 export type {

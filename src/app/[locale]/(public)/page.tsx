@@ -91,8 +91,10 @@ function Landing({ locale }: { locale: SupportedLocale }) {
   const heroLocale = HERO_SCREENSHOT_LOCALES.has(locale) ? locale : "en";
   const heroScreenshot = `/front1-${heroLocale}.avif`;
 
+  // The (public) layout owns the single <main> landmark, so this page root
+  // is a plain div (review #104).
   return (
-    <main className="flex flex-col">
+    <div className="flex flex-col">
       {/* ---------------------------------------------------------------- Hero */}
       <section
         aria-labelledby="hero-heading"
@@ -307,6 +309,6 @@ function Landing({ locale }: { locale: SupportedLocale }) {
           </a>
         </div>
       </footer>
-    </main>
+    </div>
   );
 }

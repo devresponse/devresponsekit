@@ -24,7 +24,9 @@
       "confirm": "पुष्टि करें",
       "cancel": "रद्द करें",
       "close": "बंद करें"
-    }
+    },
+    "switchToLightTheme": "लाइट थीम पर स्विच करें",
+    "switchToDarkTheme": "डार्क थीम पर स्विच करें"
   },
   "auth": {
     "verifyEmailTitle": "अपना ईमेल सत्यापित करें",
@@ -197,6 +199,14 @@
     "footer": {
       "githubLink": "GitHub",
       "rights": "MIT लाइसेंस के अंतर्गत निःशुल्क और ओपन सोर्स।"
+    },
+    "docs": {
+      "title": "दस्तावेज़ीकरण",
+      "body": "उत्पाद दस्तावेज़ीकरण का एक सार्वजनिक सूचकांक। साइन इन करने के बाद पूरी गाइड दस्तावेज़ कार्यक्षेत्र में मिलती हैं।"
+    },
+    "about": {
+      "title": "परिचय",
+      "body": "{brand} एक एंटरप्राइज़ एप्लिकेशन शेल है। उत्पाद अवलोकन के लिए होम पेज देखें।"
     }
   },
   "shell": {
@@ -206,7 +216,20 @@
       "workspaceNavigation": "कार्यस्थान",
       "workspaceShell": "कार्यस्थान शेल",
       "skipLinks": "स्किप लिंक",
-      "toggleSidebar": "साइडबार टॉगल करें"
+      "toggleSidebar": "साइडबार टॉगल करें",
+      "publicSite": "सार्वजनिक साइट",
+      "sidebar": "साइडबार",
+      "sidebarDescription": "मोबाइल साइडबार दिखाता है।",
+      "breadcrumb": "ब्रेडक्रंब",
+      "loadingNavigation": "नेविगेशन लोड हो रहा है",
+      "accountShell": "खाता कार्यक्षेत्र",
+      "accountNavigation": "खाता नेविगेशन",
+      "administratorShell": "प्रशासक कार्यक्षेत्र",
+      "administratorNavigation": "प्रशासक नेविगेशन",
+      "documentationShell": "दस्तावेज़ कार्यक्षेत्र",
+      "documentationNavigation": "दस्तावेज़ नेविगेशन",
+      "helpShell": "सहायता कार्यक्षेत्र",
+      "helpNavigation": "सहायता नेविगेशन"
     },
     "applications": "एप्लिकेशन",
     "dashboard": "डैशबोर्ड",
@@ -488,7 +511,8 @@
         "successToast": "{action} {succeeded} उपयोगकर्ता(ओं) पर लागू किया गया।",
         "partialFailureToast": "{action} {succeeded}/{attempted} उपयोगकर्ता(ओं) पर लागू किया गया; {failed} विफल रहे।",
         "errorToast": "बल्क क्रिया विफल रही।",
-        "rateLimitedToast": "बहुत अधिक बल्क अनुरोध। शीघ्र ही पुनः प्रयास करें।"
+        "rateLimitedToast": "बहुत अधिक बल्क अनुरोध। शीघ्र ही पुनः प्रयास करें।",
+        "tooManyToast": "बल्क कार्रवाई के लिए अधिकतम {max} उपयोगकर्ता चुनें।"
       },
       "impersonation": {
         "confirmTitle": "{email} का प्रतिरूपण करें?",
@@ -1375,7 +1399,10 @@
       "expiresAt": "समय-सीमा समाप्त होती है {value}",
       "ipAddress": "IP",
       "userAgent": "डिवाइस",
-      "revoke": "निरस्त करें"
+      "revoke": "निरस्त करें",
+      "currentSession": "यह डिवाइस",
+      "currentSessionHint": "इस सत्र को समाप्त करने के लिए साइन आउट का उपयोग करें।",
+      "revokeSession": "सत्र {session} रद्द करें"
     },
     "errors": {
       "nameRequired": "नाम आवश्यक है।",
@@ -1403,7 +1430,9 @@
       "expires": "समय-सीमा समाप्त होती है {value}",
       "actions": {
         "rotate": "घुमाएँ",
-        "revoke": "निरस्त करें"
+        "revoke": "निरस्त करें",
+        "rotateNamed": "{name} को घुमाएँ",
+        "revokeNamed": "{name} को रद्द करें"
       },
       "rotateError": "कुंजी घुमाई नहीं जा सकी।",
       "revokeError": "कुंजी निरस्त नहीं की जा सकी।",

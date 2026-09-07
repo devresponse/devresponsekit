@@ -24,7 +24,9 @@
       "confirm": "Confirm",
       "cancel": "Cancel",
       "close": "Close"
-    }
+    },
+    "switchToLightTheme": "Switch to light theme",
+    "switchToDarkTheme": "Switch to dark theme"
   },
   "auth": {
     "verifyEmailTitle": "Verify your email",
@@ -197,6 +199,14 @@
     "footer": {
       "githubLink": "GitHub",
       "rights": "Free and open source under the MIT license."
+    },
+    "docs": {
+      "title": "Documentation",
+      "body": "A public index of the product documentation. The full guides live in the Documentation workspace once you are signed in."
+    },
+    "about": {
+      "title": "About",
+      "body": "{brand} is an enterprise application shell. See the home page for a product overview."
     }
   },
   "shell": {
@@ -206,7 +216,20 @@
       "workspaceNavigation": "Workspace",
       "workspaceShell": "Workspace shell",
       "skipLinks": "Skip links",
-      "toggleSidebar": "Toggle sidebar"
+      "toggleSidebar": "Toggle sidebar",
+      "publicSite": "Public site",
+      "sidebar": "Sidebar",
+      "sidebarDescription": "Displays the mobile sidebar.",
+      "breadcrumb": "Breadcrumb",
+      "loadingNavigation": "Loading navigation",
+      "accountShell": "Account workspace",
+      "accountNavigation": "Account navigation",
+      "administratorShell": "Administrator workspace",
+      "administratorNavigation": "Administrator navigation",
+      "documentationShell": "Documentation workspace",
+      "documentationNavigation": "Documentation navigation",
+      "helpShell": "Help workspace",
+      "helpNavigation": "Help navigation"
     },
     "applications": "Applications",
     "dashboard": "Dashboard",
@@ -488,7 +511,8 @@
         "successToast": "{action} applied to {succeeded} user(s).",
         "partialFailureToast": "{action} applied to {succeeded}/{attempted} user(s); {failed} failed.",
         "errorToast": "Bulk action failed.",
-        "rateLimitedToast": "Too many bulk requests. Try again shortly."
+        "rateLimitedToast": "Too many bulk requests. Try again shortly.",
+        "tooManyToast": "Select at most {max} users for a bulk action."
       },
       "impersonation": {
         "confirmTitle": "Impersonate {email}?",
@@ -1375,7 +1399,10 @@
       "expiresAt": "Expires {value}",
       "ipAddress": "IP",
       "userAgent": "Device",
-      "revoke": "Revoke"
+      "revoke": "Revoke",
+      "currentSession": "This device",
+      "currentSessionHint": "Use Sign out to end this session.",
+      "revokeSession": "Revoke session {session}"
     },
     "errors": {
       "nameRequired": "Name is required.",
@@ -1403,7 +1430,9 @@
       "expires": "Expires {value}",
       "actions": {
         "rotate": "Rotate",
-        "revoke": "Revoke"
+        "revoke": "Revoke",
+        "rotateNamed": "Rotate {name}",
+        "revokeNamed": "Revoke {name}"
       },
       "rotateError": "Could not rotate the key.",
       "revokeError": "Could not revoke the key.",

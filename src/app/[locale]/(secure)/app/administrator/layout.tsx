@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { ApplicationShell } from "@/components/app-shell/application-shell";
@@ -52,6 +53,8 @@ export default async function AdministratorLayout({
 
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get(SIDEBAR_COOKIE)?.value !== "false";
+  // Localized landmark names (review #106) for the nested shell regions.
+  const tRegions = await getTranslations({ locale, namespace: "shell.regions" });
 
   return (
     <SidebarProvider
@@ -63,7 +66,8 @@ export default async function AdministratorLayout({
       <ApplicationShell
         layout="sidebar-first"
         className="w-full"
-        ariaLabel="Administrator"
+        ariaLabel={tRegions("administratorShell")}
+        leftAriaLabel={tRegions("administratorNavigation")}
         header={<AdministratorTopHeader locale={locale} permissions={guard.access.permissions} />}
         left={<AdministratorSidebar locale={locale} permissions={guard.access.permissions} />}
       >

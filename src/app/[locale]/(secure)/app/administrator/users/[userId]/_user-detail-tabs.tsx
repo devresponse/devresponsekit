@@ -31,6 +31,9 @@ export interface UserDetailJson {
   updated_at: string | null;
   deactivated_at: string | null;
   deactivated_by: string | null;
+  /** Display name / email resolved from {@link deactivated_by} by the RSC;
+   *  falls back to the raw id when the actor cannot be resolved (#212). */
+  deactivated_by_label: string | null;
   deactivated_reason: string | null;
 }
 
@@ -99,7 +102,13 @@ export function UserDetailTabs({
           <div className="border-warning/40 bg-warning/10 text-warning-foreground rounded-md border p-3 text-xs">
             <p>{t("detail.deactivated", { value: formatDate(user.deactivated_at) })}</p>
             {user.deactivated_by ? (
-              <p>{t("detail.deactivatedBy", { actor: user.deactivated_by })}</p>
+              // Prefer the resolved name; the raw Better Auth id is the
+              // last-resort fallback (review #212).
+              <p>
+                {t("detail.deactivatedBy", {
+                  actor: user.deactivated_by_label ?? user.deactivated_by,
+                })}
+              </p>
             ) : null}
             {user.deactivated_reason ? (
               <p>{t("detail.deactivatedReason", { reason: user.deactivated_reason })}</p>

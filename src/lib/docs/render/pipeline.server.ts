@@ -90,7 +90,21 @@ function rehypeCollectHeadings(sink: DocHeading[]) {
   };
 }
 
-const EXTERNAL = /^https?:\/\//i;
+/**
+ * Matches a remote URL, including the **protocol-relative** form (review #215).
+ *
+ * `//host/path` is remote: the browser inherits the page's scheme, so on an
+ * https page it resolves to `https://host/path`. A scheme-only pattern
+ * (`/^https?:\/\//`) missed it, and because `"//host/x.png".startsWith("/")`
+ * is also true, such an image fell through BOTH arms of the branch below and
+ * was emitted untouched — exactly the CSP-blocked broken-image box this
+ * fallback exists to prevent. `hast-util-sanitize` does not catch it either:
+ * its protocol check only applies when a `:` precedes the first `/`, so
+ * `protocols.src: ["https"]` reads `//host/...` as a relative URL. The same
+ * blind spot skipped the `target=_blank` + `rel="noopener noreferrer"`
+ * treatment for `[x](//host)` anchors.
+ */
+const EXTERNAL = /^(?:https?:)?\/\//i;
 const DOC_LINK = /\.mdx?(?=$|[#?])/i;
 
 /**
@@ -129,7 +143,8 @@ function toExternalImageFallback(node: HastNode, src: string): void {
  * Rewrites links and images on the sanitized tree:
  *   - relative `*.md`/`*.mdx` links → `/{locale}/app/{space}/{slug}` routes
  *   - relative image `src` → the space's path-safe asset route
- *   - remote image `src` → a visible external-link fallback (review #215)
+ *   - remote image `src` (`https://…` **or** `//host/…`) → a visible
+ *     external-link fallback (review #215)
  *   - external links get `target="_blank"` + `rel="noopener noreferrer"`
  *
  * Hash links and already-absolute in-app links are left untouched. Author
@@ -154,6 +169,9 @@ function rehypeRewriteLinks(locale: string, space: DocSpace) {
 
       if (node.tagName === "img" && typeof props.src === "string") {
         const src = props.src;
+        // Order matters (review #215): `//host/x.png` satisfies
+        // `startsWith("/")`, so the remote test has to run first or a
+        // protocol-relative image is mistaken for a root-relative one.
         if (EXTERNAL.test(src)) {
           toExternalImageFallback(node, src);
         } else if (!src.startsWith("/")) {

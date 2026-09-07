@@ -130,6 +130,29 @@ describe("renderDocument", () => {
     expect(html).toContain(">https://cdn.example.com/x.png</a>");
   });
 
+  it("treats a protocol-relative image as remote, not root-relative (review #215)", async () => {
+    // `//cdn.example.com/x.png` inherits the page scheme, so on an https page
+    // the browser fetches https://cdn.example.com/x.png — which `img-src
+    // 'self' data: blob:` blocks. It used to slip past BOTH arms of the image
+    // branch (the scheme-only remote test missed it, and `startsWith("/")`
+    // claimed it as root-relative) and ship as a bare <img>.
+    const { html } = await renderDocument("![Diagram](//cdn.example.com/x.png)", { locale: "en" });
+
+    expect(html).not.toContain("<img");
+    expect(html).toContain('href="//cdn.example.com/x.png"');
+    expect(html).toContain('data-external-image="//cdn.example.com/x.png"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain("Diagram (//cdn.example.com/x.png)");
+    // It must NOT have been rewritten into the local asset route.
+    expect(html).not.toContain("/api/docs/asset/");
+  });
+
+  it("gives a protocol-relative link the external-anchor treatment (review #215)", async () => {
+    const { html } = await renderDocument("[x](//evil.example.com)", { locale: "en" });
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+  });
+
   it("drops a plain-http image src (protocols.src is https-only, review #215)", async () => {
     const { html } = await renderDocument("![a](http://cdn.example.com/x.png)", { locale: "en" });
     // Sanitize removed the attribute, so there is no URL left to link to and

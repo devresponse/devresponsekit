@@ -27,7 +27,10 @@ import { defaultSchema } from "rehype-sanitize";
  * upgraded/blocked in production anyway (`upgrade-insecure-requests`), so we
  * drop it (review #215). Remote images are additionally replaced by a visible
  * fallback in the pipeline — the app's `img-src 'self' data: blob:` CSP would
- * otherwise break them silently.
+ * otherwise break them silently. That pipeline step, not this schema, is what
+ * covers the protocol-relative form (`//host/x.png`): hast-util-sanitize only
+ * applies `protocols` when a `:` precedes the first `/ ? #`, so it reads such
+ * a URL as relative and lets it through.
  *
  * Crucially, sanitize runs BEFORE slug/anchor/mermaid/highlight in the
  * pipeline, so this schema only has to cover what authored Markdown produces.

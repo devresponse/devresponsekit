@@ -121,8 +121,10 @@ export function normalizeBucketKey(key: string): string {
   // key before the credential verifies", and no secret is stored, compared or
   // re-derived from this digest: it is only a fixed-size map key, so a
   // deliberately slow KDF would buy nothing and would put a work factor on
-  // the hot abuse path. Fenced to this one line.
-  // codeql[js/insufficient-password-hash]
+  // the hot abuse path. Code scanning does not honour `// codeql[...]`
+  // suppression comments, so alert #50 is dismissed as a false positive in
+  // the Security tab with this rationale; if this function ever starts
+  // digesting real secret material, REOPEN it rather than editing this note.
   return `${key.slice(0, 32)}#${createHash("sha256").update(key).digest("hex")}`;
 }
 

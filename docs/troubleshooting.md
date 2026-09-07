@@ -104,6 +104,14 @@ warrant a comms channel and an owner before deep debugging.
   enabled, sent to Sentry — both stamped with the `x-request-id`. Pull a few and
   find the common stack.
 - If it started at a deploy, **roll back first, debug second** (§5).
+- **Every** route 5xx-ing at once, with `Invalid server environment variables:
+  API_JWT_ISSUER` in the log, is the MCP discovery gate (review #57):
+  `MCP_ENABLED` is on and `API_JWT_ISSUER` is not the same identifier as
+  `BETTER_AUTH_URL`, so `getServerEnv()` throws for every request. Unset
+  `API_JWT_ISSUER` (or set it equal to `BETTER_AUTH_URL`), or clear
+  `MCP_ENABLED` if the gateway is not in use, then redeploy. See
+  [Deployment §3](./deployment.md#3-vercel-project--environment) for the
+  pre-deploy check that prevents it.
 
 ### Sign-in failing for many
 - Credential **failures** are not written to `app_audit_events` (only successful

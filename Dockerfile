@@ -58,6 +58,17 @@ ENV NODE_ENV="production" \
     HOSTNAME="0.0.0.0"
 WORKDIR /app
 
+# Debian shipped libpcre2-8-0 10.42-1+deb12u1 for CVE-2026-86145 (out-of-bounds
+# write -> arbitrary code execution via a crafted regex) and CVE-2026-89161
+# (memory corruption in pcre2_jit_match), but the upstream node:24-bookworm-slim
+# rebuild still carries 10.42-1, so no digest bump clears them. Pull the patched
+# package directly rather than muting the finding: this project's stance is that
+# a mute outlives the problem it describes (see the CLI-stripping note below and
+# the header of `.trivyignore`). Remove this step once the base image catches up.
+RUN apt-get update \
+ && apt-get install --no-install-recommends -y libpcre2-8-0 \
+ && rm -rf /var/lib/apt/lists/*
+
 # Non-root runtime user.
 RUN groupadd --system --gid 1001 nodejs \
  && useradd --system --uid 1001 --gid nodejs nextjs

@@ -11,3 +11,6 @@ docs/openapi-admin.json
 sdk
 pnpm-lock.yaml
 *.md
+
+# Standalone deploy CLI (own package, formats itself)
+vercel-cli

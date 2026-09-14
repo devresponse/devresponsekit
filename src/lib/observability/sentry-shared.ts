@@ -119,7 +119,17 @@ function isSensitiveHeaderName(name: string): boolean {
 export const SENTRY_DATA_COLLECTION: DataCollection = {
   userInfo: false,
   cookies: false,
+  // Sentry 10.74 renamed `queryParams` to `urlQueryParams` and DEFAULTS THE NEW
+  // ONE TO `true`, dropping the old key from the resolved policy entirely
+  // (`ResolvedDataCollection` is `Omit<DataCollection, 'queryParams'>`). Setting
+  // only the deprecated name would therefore have silently started shipping
+  // query strings — which on this app carry one-time reset and invite tokens.
+  // Both are set: the new name is what the SDK reads, the old one keeps the
+  // policy correct if a dependency pins an older SDK. `tests/unit/
+  // sentry-scrub.test.ts` pins this against the real SDK so the next rename
+  // fails the build instead of leaking.
   queryParams: false,
+  urlQueryParams: false,
   httpBodies: [],
   httpHeaders: {
     request: { deny: HEADER_DENY_LIST },

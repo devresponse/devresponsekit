@@ -79,7 +79,7 @@ export function getClientIp(headers: Headers): string | null {
 /**
  * The request header that carries the trusted client IP to Better Auth.
  *
- * Better Auth's own resolver (`getIp` in `@better-auth/core/utils/ip`) trusts
+ * Better Auth's own resolver (`getIP` in `@better-auth/core/utils/ip`) trusts
  * a forwarded header only when it holds exactly ONE value, so behind a
  * multi-hop chain every request collapsed into its shared `no-trusted-ip`
  * bucket (3 sign-ins / 10 s for the whole deployment), and where the edge

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ConsumeRouteModule from "@/app/api/sso/consume/route";
 import type { NextRequest } from "next/server";
 import type { BetterAuthOptions } from "better-auth";
-import { getIp } from "better-auth/api";
+import { getIP } from "better-auth/api";
 import { CLIENT_IP_HEADER, getClientIp } from "@/lib/client-ip";
 
 /**
@@ -325,7 +325,7 @@ describe("application-id binding — token minted for another app (review #15)",
 describe("trusted client IP on session creation (review #35 / #190)", () => {
   /** What Better Auth's own resolver will record, given the headers the route passes. */
   function betterAuthIp(headers: Headers): string | null {
-    return getIp(headers, {
+    return getIP(headers, {
       advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
     } as BetterAuthOptions);
   }

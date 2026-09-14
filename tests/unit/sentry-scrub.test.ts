@@ -490,14 +490,20 @@ describe("SDK parity: real @sentry/core writer + SENTRY_DATA_COLLECTION", () => 
   }
 
   it("resolves with every channel closed and the bridge's frameContextLines", () => {
+    // `queryParams` is deliberately absent here: the SDK resolves it away
+    // (`ResolvedDataCollection = Required<Omit<DataCollection, 'queryParams'>>`)
+    // in favour of `urlQueryParams`. Asserting the RESOLVED shape is the point
+    // of this test — it is what proves the rename did not quietly re-open query
+    // collection, whose default is `true`.
     expect(resolvedPolicy()).toMatchObject({
       userInfo: false,
       cookies: false,
-      queryParams: false,
+      urlQueryParams: false,
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
       frameContextLines: 7,
     });
+    expect(resolvedPolicy()).not.toHaveProperty("queryParams");
   });
 
   it("denies at least every header the old sendDefaultPii:false bridge denied", () => {
@@ -573,6 +579,7 @@ describe("SENTRY_DATA_COLLECTION", () => {
       userInfo: false,
       cookies: false,
       queryParams: false,
+      urlQueryParams: false,
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
       frameContextLines: 7,

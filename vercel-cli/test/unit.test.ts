@@ -134,9 +134,18 @@ test("the fingerprint is stable, short and not the value", () => {
 
 test("redactUrl keeps the host but drops the password", () => {
   const redacted = redactUrl("postgresql://appuser:hunter2@db.example.com:5432/appdb");
-  assert.ok(!redacted.includes("hunter2"));
-  assert.ok(redacted.includes("db.example.com"));
-  assert.ok(redacted.includes("appuser"), "the user is useful context and is not the secret");
+  assert.ok(!redacted.includes("hunter2"), "the password must not survive");
+
+  // Parse and compare the components exactly. A substring check would pass for
+  // `evil.com/db.example.com` just as happily, which is the whole reason
+  // `includes()` is the wrong tool for asserting anything about a URL.
+  const parsed = new URL(redacted);
+  assert.equal(parsed.hostname, "db.example.com");
+  assert.equal(parsed.port, "5432");
+  assert.equal(parsed.pathname, "/appdb");
+  assert.equal(parsed.username, "appuser", "the user is useful context and is not the secret");
+  assert.equal(parsed.password, "***", "the password is replaced by a marker, not passed through");
+
   assert.equal(redactUrl("not a url"), "(unparseable connection string)");
 });
 

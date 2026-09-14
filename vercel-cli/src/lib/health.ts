@@ -19,9 +19,39 @@ export interface HealthReport {
   signIn: number;
 }
 
-async function statusOf(url: string, init?: RequestInit): Promise<{ code: number; body: string }> {
+/**
+ * The origin to probe, validated before anything is requested.
+ *
+ * It arrives from `.drk-deploy.json`, so it is file-sourced data driving an
+ * outbound request — the flow CodeQL's `js/file-access-to-http` rule is about.
+ * Probing an operator-configured origin IS this command's purpose, so the
+ * answer is not to avoid the flow but to constrain it: parse the value,
+ * require http(s), and use only the parsed `origin`, discarding any path,
+ * query, credentials or fragment someone put in the config. A malformed entry
+ * then fails here with a clear message instead of as a puzzling fetch error.
+ */
+function probeOrigin(origin: string): string {
+  let url: URL;
   try {
-    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(30_000) });
+    url = new URL(origin);
+  } catch {
+    throw new Error(`Not a valid origin: ${origin}`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`Origin must be http(s), got ${url.protocol}`);
+  }
+  return url.origin;
+}
+
+/** Requests one path under an already-validated origin. Never throws. */
+async function statusOf(
+  base: string,
+  path: string,
+  init?: RequestInit,
+): Promise<{ code: number; body: string }> {
+  const target = new URL(path, base);
+  try {
+    const response = await fetch(target, { ...init, signal: AbortSignal.timeout(30_000) });
     return { code: response.status, body: await response.text().catch(() => "") };
   } catch {
     return { code: 0, body: "" };
@@ -35,11 +65,11 @@ async function statusOf(url: string, init?: RequestInit): Promise<{ code: number
  * alive; 500 means the build is up but broken.
  */
 export async function probe(origin: string): Promise<HealthReport> {
-  const base = origin.replace(/\/$/, "");
+  const base = probeOrigin(origin);
 
-  const health = await statusOf(`${base}/api/health`);
-  const ready = await statusOf(`${base}/api/health/ready`);
-  const signIn = await statusOf(`${base}/api/auth/sign-in/email`, {
+  const health = await statusOf(base, "/api/health");
+  const ready = await statusOf(base, "/api/health/ready");
+  const signIn = await statusOf(base, "/api/auth/sign-in/email", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: base },
     body: JSON.stringify({
@@ -58,7 +88,7 @@ export async function probe(origin: string): Promise<HealthReport> {
 
 /** The SSO issuer's published keys — empty means handoffs cannot be verified. */
 export async function jwksKeyCount(origin: string): Promise<number | null> {
-  const { code, body } = await statusOf(`${origin.replace(/\/$/, "")}/api/sso/jwks.json`);
+  const { code, body } = await statusOf(probeOrigin(origin), "/api/sso/jwks.json");
   if (code !== 200) return null;
   try {
     const parsed = JSON.parse(body) as { keys?: unknown[] };

@@ -64,6 +64,7 @@ describe.each(CONFIGS)("Sentry %s config", (_name, load) => {
       userInfo: false,
       cookies: false,
       queryParams: false,
+      urlQueryParams: false,
       httpBodies: [],
     });
     // The deprecated flag is superseded by `dataCollection` (the SDK ignores

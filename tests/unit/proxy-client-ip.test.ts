@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { BetterAuthOptions } from "better-auth";
-import { getIp } from "better-auth/api";
+import { getIP } from "better-auth/api";
 import type * as ProxyModule from "@/proxy";
 import { CLIENT_IP_HEADER, applyClientIpHeader, getClientIp } from "@/lib/client-ip";
 
@@ -177,7 +177,7 @@ describe("Better Auth's resolver agrees with getClientIp for the same inputs", (
       // block, to the same client the app's limiter keys on. (IPv4-mapped
       // IPv6 is the one shape Better Auth canonicalizes; the bucket is still
       // that client's.)
-      const resolved = getIp(headers, betterAuthIpOptions);
+      const resolved = getIP(headers, betterAuthIpOptions);
       expect(resolved).toBe(expected === "::ffff:203.0.113.9" ? "203.0.113.9" : expected);
     });
   }
@@ -189,7 +189,7 @@ describe("Better Auth's resolver agrees with getClientIp for the same inputs", (
     // is not the client the app's own limiter would key on.
     const headers = new Headers({ "x-forwarded-for": "198.51.100.77, 203.0.113.9" });
     expect(getClientIp(headers)).toBe("203.0.113.9");
-    expect(getIp(headers, {} as BetterAuthOptions)).not.toBe("203.0.113.9");
+    expect(getIP(headers, {} as BetterAuthOptions)).not.toBe("203.0.113.9");
   });
 
   it("a client cannot pick its bucket: only the proxy-stamped header is read", () => {
@@ -201,11 +201,11 @@ describe("Better Auth's resolver agrees with getClientIp for the same inputs", (
       "x-forwarded-for": "198.51.100.77, 203.0.113.9",
     });
     applyClientIpHeader(spoofed);
-    expect(getIp(spoofed, betterAuthIpOptions)).toBe("203.0.113.9");
+    expect(getIP(spoofed, betterAuthIpOptions)).toBe("203.0.113.9");
 
     const bare = new Headers({ [CLIENT_IP_HEADER]: "198.51.100.77" });
     applyClientIpHeader(bare);
     expect(bare.get(CLIENT_IP_HEADER)).toBeNull();
-    expect(getIp(bare, betterAuthIpOptions)).not.toBe("198.51.100.77");
+    expect(getIP(bare, betterAuthIpOptions)).not.toBe("198.51.100.77");
   });
 });

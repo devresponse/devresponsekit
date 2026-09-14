@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BetterAuthOptions } from "better-auth";
-import { getIp } from "better-auth/api";
+import { getIP } from "better-auth/api";
 import type * as RouteModule from "@/app/api/auth/[...all]/route";
 import { CLIENT_IP_HEADER, getClientIp } from "@/lib/client-ip";
 
@@ -57,7 +57,7 @@ describe("api/auth/[...all] — trusted client-IP header re-derived in the handl
     const req = received();
     expect(req.method).toBe("POST");
     expect(req.headers.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
-    expect(getIp(req.headers, betterAuthIpOptions)).toBe("203.0.113.9");
+    expect(getIP(req.headers, betterAuthIpOptions)).toBe("203.0.113.9");
     // Everything Better Auth needs survives the re-wrap.
     expect(req.headers.get("cookie")).toBe("ba.session=x");
     expect(req.headers.get("content-type")).toBe("application/json");
@@ -83,7 +83,7 @@ describe("api/auth/[...all] — trusted client-IP header re-derived in the handl
     );
     const req = received();
     expect(req.headers.has(CLIENT_IP_HEADER)).toBe(false);
-    expect(getIp(req.headers, betterAuthIpOptions)).not.toBe("6.6.6.6");
+    expect(getIP(req.headers, betterAuthIpOptions)).not.toBe("6.6.6.6");
   });
 
   it("honors TRUSTED_PROXY_COUNT — the same hop the app's own limiter and audit rows use", async () => {

@@ -61,7 +61,14 @@ async function seedLocalUser(
   emailVerified: boolean,
 ) {
   const ctx = await auth.$context;
-  await ctx.internalAdapter.createUser({ email, name: "Local User", emailVerified });
+  // better-auth 1.7 made the creation SOURCE a required second argument (it is
+  // forwarded to the database hooks). This helper stands in for a local
+  // email/password sign-up, which is the case these tests are about: a local
+  // account a provider might later try to link itself to.
+  await ctx.internalAdapter.createUser(
+    { email, name: "Local User", emailVerified },
+    { method: "email-password" },
+  );
 }
 
 describe("account linking behavior (better-auth implicit linking)", () => {

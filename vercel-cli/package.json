@@ -1,0 +1,32 @@
+{
+  "name": "drk-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CLI that deploys devresponsekit to Vercel: project, environment, Postgres, migrations and promotion in the one order that is safe.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "drk-deploy": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && node --test --experimental-strip-types test/*.test.ts",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" README.md package.json",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" README.md package.json"
+  },
+  "dependencies": {
+    "@vercel/sdk": "1.28.30",
+    "commander": "15.0.0",
+    "vercel": "59.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3"
+  }
+}

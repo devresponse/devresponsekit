@@ -15,6 +15,8 @@ export default tseslint.config(
       "dist/**",
       "src/db/schema/generated.ts",
       "sdk/**",
+      // Standalone deploy CLI: its own package, tsconfig and lint setup.
+      "vercel-cli/**",
       "coverage/**",
       "playwright-report/**",
       "test-results/**",

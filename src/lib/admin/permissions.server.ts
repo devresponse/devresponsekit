@@ -132,6 +132,15 @@ export async function requireAdminPermission(
   // org (the superuser marker is global — see getUserAccessContext). Bearer
   // credentials are still bounded by their scopes: a key can never out-scope
   // its owner, even a superuser owner (design §7).
+  //
+  // MACHINE-2 audit: this stays on `isSuperadmin`, NOT `hasCrossOrgReach`. It
+  // answers a CAPABILITY question — "does this principal hold the permission
+  // at all" — and an org-bound superuser genuinely does hold it inside its
+  // bound tenant (`getUserAccessContext` expands the marker on that path too).
+  // Narrowing it here would deny the request outright rather than scope it, and
+  // would be redundant anyway since the expansion already puts every `admin.*`
+  // key in `permissions`. WHICH ROWS the request may then touch is the tenant
+  // boundary's job, and that is capped in `access-scope.server`.
   const granted = required.some(
     (perm) =>
       (isSuperadmin(caller.access) || caller.access.permissions.includes(perm)) &&

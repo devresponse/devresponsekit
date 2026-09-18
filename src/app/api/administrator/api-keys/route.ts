@@ -16,7 +16,12 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  canAccessOrg,
+  isSuperadmin,
+  ownerOutranksActor,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { createApiKey } from "@/lib/api-auth/api-keys.server";
 import {
   normalizeScopes,
@@ -160,6 +165,9 @@ export async function GET(request: NextRequest) {
  *       their own authority by pocketing the plaintext. Mirrors the actor
  *       bound already enforced on /api/v1/admin/oauth-clients and
  *       /api/v1/me/api-keys.
+ *     - AND the owner's org REACH ({@link ownerOutranksActor}, MACHINE-2): a
+ *       non-superadmin may not mint on behalf of a SUPERUSER owner at all,
+ *       whatever the scopes. Scope names alone never bounded reach.
  *   - Unknown scopes are rejected.
  */
 
@@ -242,6 +250,36 @@ export async function POST(request: NextRequest) {
       requestId: guard.requestId,
       extra: { ungrantableScopes: actorUngrantable },
     });
+  }
+
+  // Bound 3 — the owner's org REACH (MACHINE-2, layer 2). Bounds 1 and 2
+  // constrain only WHICH SCOPE NAMES may ride along; neither says anything
+  // about how far the resulting credential can see. A global superuser's reach
+  // is every tenant, so an org admin holding `admin.apikeys.manage` who shares
+  // an org with any superuser — support staff parked in a customer tenant, or
+  // the seeded default admin — could mint a key on that superuser's behalf
+  // using only scopes they themselves hold (passing both bounds), pocket the
+  // one-time plaintext, and administer the whole platform with it.
+  //
+  // Layer 1 already confines such a key to its bound org at USE time, so this
+  // is defence in depth — but it is also the difference between a 403 the
+  // caller can act on and a credential that silently does less than they asked
+  // for. A superadmin actor is exempt: they already hold every power, so they
+  // are conferring nothing they lack (and that includes an org-bound superuser
+  // actor, whose minted key is capped to the very tenant the actor is capped to).
+  if (ownerOutranksActor(isSuperadmin(ownerAccess), guard.access)) {
+    await auditEvent({
+      eventType: "admin.api_key.create_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: owner.id,
+      organizationId: ownerAccess.organizationId,
+      reason: "owner_outranks_actor",
+      request,
+      requestId: guard.requestId,
+      metadata: { ownerAppUserId: owner.id, scopes },
+    });
+    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
   }
 
   const env = getServerEnv();

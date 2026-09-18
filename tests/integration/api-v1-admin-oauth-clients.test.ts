@@ -9,9 +9,13 @@ import type * as Route from "@/app/api/v1/admin/oauth-clients/route";
  *     scope sees/creates nothing; the client-supplied organizationId is
  *     ignored for org admins,
  *   - the service principal must belong to the actor's org,
- *   - the creator may not grant scopes it does not itself hold.
- * resolveOrgScope / userHasMembershipInOrg / ungrantableScopesForCaller run
- * for real; the guard + repo + DB are mocked.
+ *   - the creator may not grant scopes it does not itself hold,
+ *   - the creator may not register a client for a service principal that
+ *     OUTRANKS them (MACHINE-2 layer 2): the client BORROWS that principal's
+ *     identity, and a global superuser's identity reaches every tenant, so a
+ *     non-superadmin actor is refused whatever the scopes.
+ * resolveOrgScope / userHasMembershipInOrg / userIsGlobalSuperuser /
+ * ungrantableScopesForCaller run for real; the guard + repo + DB are mocked.
  */
 const requireApiPermission = vi.fn();
 const enforceApiRateLimit = vi.fn();
@@ -22,9 +26,12 @@ const auditEvent = vi.fn();
 const state: {
   serviceUser: { id: string; status: string } | undefined;
   membership: { id: string } | undefined;
+  /** Drives the REAL `userIsGlobalSuperuser` (an `app_user_roles` join). */
+  serviceIsSuperuser: boolean;
 } = {
   serviceUser: undefined,
   membership: undefined,
+  serviceIsSuperuser: false,
 };
 
 vi.mock("@/lib/api-auth/v1-guard.server", () => ({
@@ -51,7 +58,11 @@ vi.mock("@/db/database", () => {
                 ? state.serviceUser
                 : table === "app_organization_memberships"
                   ? state.membership
-                  : undefined;
+                  : table === "app_user_roles"
+                    ? state.serviceIsSuperuser
+                      ? { id: "perm-superuser" }
+                      : undefined
+                    : undefined;
           if (prop === "execute") return async () => [];
           return () => chain(table);
         },
@@ -131,6 +142,7 @@ beforeEach(async () => {
   });
   state.serviceUser = { id: SVC, status: "active" };
   state.membership = { id: "m1" };
+  state.serviceIsSuperuser = false;
   ({ GET, POST } = await import("@/app/api/v1/admin/oauth-clients/route"));
 });
 afterEach(() => vi.resetModules());
@@ -210,5 +222,32 @@ describe("POST /api/v1/admin/oauth-clients", () => {
   it("403 forbidden for a null-scope admin", async () => {
     requireApiPermission.mockResolvedValue(nullScope());
     expect((await POST(req({ method: "POST", body: body() }))).status).toBe(403);
+  });
+
+  /**
+   * MACHINE-2 layer 2. These fail without the fix: the scopes requested are
+   * `[]`, so `ungrantableScopesForCaller` is satisfied and the registration
+   * used to return 201 with a one-time `clientSecret` for a superuser identity.
+   */
+  it("403 when the service principal is a GLOBAL SUPERUSER and the actor is not", async () => {
+    state.serviceIsSuperuser = true;
+    requireApiPermission.mockResolvedValue(orgAdmin());
+    const res = await POST(req({ method: "POST", body: body() }));
+    expect(res.status).toBe(403);
+    expect(createOauthClient).not.toHaveBeenCalled();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "denied",
+        reason: "service_principal_outranks_actor",
+      }),
+    );
+  });
+
+  it("SUPERADMIN may still register a client for a superuser service principal", async () => {
+    state.serviceIsSuperuser = true;
+    requireApiPermission.mockResolvedValue(superadmin());
+    const res = await POST(req({ method: "POST", body: body() }));
+    expect(res.status).toBe(201);
+    expect(createOauthClient).toHaveBeenCalledTimes(1);
   });
 });

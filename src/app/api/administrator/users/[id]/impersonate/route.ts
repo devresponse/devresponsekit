@@ -9,7 +9,7 @@ import {
   stopBetterAuthImpersonating,
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getUserAccessContext } from "@/lib/auth-status";
@@ -77,7 +77,15 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // member locally but an admin in another tenant could be impersonated and
   // then switched into that tenant (P0-1) — do not relax the pin without also
   // widening this guard to the union of the target's memberships.
-  if (!isSuperadmin(guard.access)) {
+  //
+  // MACHINE-2: the skip is `hasCrossOrgReach`, not `isSuperadmin`. A successful
+  // impersonation hands back a COOKIE session for the target, and a cookie
+  // session is by definition not org-bound — so an ORG-BOUND bearer credential
+  // that skipped this check could launder itself into unbounded reach by
+  // assuming a more-privileged identity. A bound credential therefore runs the
+  // subset check like any org admin: it may only borrow a session whose
+  // permissions it already holds.
+  if (!hasCrossOrgReach(guard.access)) {
     const targetAccess = await getUserAccessContext(target.betterAuthUserId);
     const actorPermissions = new Set(guard.access.permissions);
     const escalates = targetAccess.permissions.some((perm) => !actorPermissions.has(perm));

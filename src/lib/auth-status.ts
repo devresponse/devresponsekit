@@ -24,6 +24,24 @@ export interface UserAccessContext {
   membershipStatus: MembershipStatus | null;
   preferredLocale: string;
   permissions: string[];
+  /**
+   * True when this context was resolved against a BEARER CREDENTIAL'S BOUND
+   * ORG (MACHINE-2) rather than the browser's `active_org` cookie — i.e. the
+   * caller is a machine credential pinned to one tenant.
+   *
+   * `getUserAccessContext` ALWAYS sets it explicitly (`true` whenever a
+   * `boundOrg` argument was supplied, `false` on the cookie/session path), so
+   * no real code path is ever ambiguous. It is declared OPTIONAL only so the
+   * many hand-built `UserAccessContext` literals in the test suite — and any
+   * other caller that constructs a context by hand — keep compiling; an
+   * absent marker means "not org-bound", the pre-existing behaviour.
+   *
+   * Consumers must not read this directly to make an authorization decision:
+   * the cap lives in `@/lib/admin/access-scope.server`
+   * (`resolveOrgScope` / `canAccessOrg` / `canAccessUser` / `hasCrossOrgReach`)
+   * so the rule has exactly one home.
+   */
+  orgBound?: boolean;
 }
 
 /** Status values that block access to all secure routes. */
@@ -118,6 +136,10 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
       membershipStatus: null,
       preferredLocale: "en",
       permissions: [],
+      // Set even on the unprovisioned short-circuit: the marker describes HOW
+      // the caller presented itself, not what was found, so every context this
+      // function returns carries it explicitly (MACHINE-2).
+      orgBound: boundOrg !== undefined,
     };
   }
 
@@ -218,7 +240,19 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
 
   // Global superuser: holding the `superuser` permission via a role in ANY
   // org the user is an active member of makes them a SUPERADMIN everywhere —
-  // the active org must never downgrade it. Expand the marker to the FULL
+  // the active org must never downgrade it.
+  //
+  // MACHINE-2: "everywhere" is about the PRINCIPAL, not about a credential the
+  // principal owns. The expansion below therefore still runs on the bound-org
+  // path (an org-bound superuser genuinely holds every capability INSIDE its
+  // bound tenant, and downgrading the permission set here would silently break
+  // every `permissions.includes("admin.*")` gate). What must NOT follow from it
+  // is cross-tenant REACH: `orgBound` is returned alongside the permissions so
+  // `resolveOrgScope` / `canAccessOrg` / `canAccessUser` can cap a bound
+  // credential to its own org. Do not "fix" this by dropping the expansion —
+  // that would turn a scoping bug into an authentication bug.
+  //
+  // Expand the marker to the FULL
   // superuser permission set so every consumer of `permissions` — the admin
   // gates, the server-filtered nav menu, and the per-feature `canX` toggles
   // on the RSC pages — recognizes them uniformly, EVEN when their role
@@ -242,5 +276,9 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     membershipStatus: memberStatus,
     preferredLocale: user.preferred_locale,
     permissions,
+    // MACHINE-2 — always explicit: a `boundOrg` argument means this context
+    // belongs to a bearer credential pinned to one tenant, and the scope
+    // helpers cap it there even for a global superuser principal.
+    orgBound: boundOrg !== undefined,
   };
 });

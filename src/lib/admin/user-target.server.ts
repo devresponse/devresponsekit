@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
-import { canAccessUser, isSuperadmin } from "@/lib/admin/access-scope.server";
-import { getUserAccessContext, type UserAccessContext } from "@/lib/auth-status";
+import { canAccessUser, isSuperadmin, type AccessLike } from "@/lib/admin/access-scope.server";
+import { getUserAccessContext } from "@/lib/auth-status";
 
 /**
  * Shared helpers for the `/api/administrator/users/[id]/*` routes.
@@ -48,7 +48,7 @@ export function isUuid(value: string): boolean {
  */
 export async function resolveTargetUser(
   id: string,
-  access: Pick<UserAccessContext, "permissions" | "organizationId">,
+  access: AccessLike,
   request?: { headers: Headers },
 ): Promise<ResolvedTargetUser | NextResponse> {
   if (!isUuid(id)) {
@@ -62,6 +62,9 @@ export async function resolveTargetUser(
   // ADR-0001: an org admin may only target users in their own org. A 404
   // (not 403) on an out-of-scope user avoids leaking its existence — the
   // `access` argument is REQUIRED so no caller can forget to scope.
+  // MACHINE-2: `canAccessUser` also caps an ORG-BOUND credential to its bound
+  // org, so a superuser-owned key cannot pivot to another tenant's users via
+  // any `/administrator/users/[id]/*` action.
   if (!row || !(await canAccessUser(access, row.id))) {
     return adminErrorResponse("not_found", 404, request);
   }
@@ -80,7 +83,7 @@ export function isResolvedUserResponse(
   return value instanceof NextResponse;
 }
 
-type ActorAccess = Pick<UserAccessContext, "permissions" | "organizationId">;
+type ActorAccess = AccessLike;
 
 /**
  * Privilege-ordering guard for account-level actions on ANOTHER user
@@ -106,6 +109,19 @@ type ActorAccess = Pick<UserAccessContext, "permissions" | "organizationId">;
  * `active_org` cookie. A non-superadmin actor with no resolvable org fails
  * closed (`true`) — `resolveTargetUser` has already 404'd that case, so this
  * is defensive only.
+ *
+ * MACHINE-2 audit — the `isSuperadmin` exemption on the first line is
+ * DELIBERATELY not narrowed to {@link hasCrossOrgReach}. It grants no
+ * cross-org reach: the target set this runs against was already produced by
+ * `resolveTargetUser` → `canAccessUser`, which caps an org-bound credential to
+ * its bound org, so the comparison is always between two principals inside one
+ * tenant — and inside its bound tenant an org-bound superuser genuinely IS a
+ * superadmin. Narrowing it would also change nothing in practice (the actor's
+ * expanded permission set is the whole catalog, a superset of any target's)
+ * while adding a DB round-trip and a false-403 risk for legitimate
+ * superuser-owned automation. The escalation this exemption could otherwise
+ * enable — minting a superuser-owned credential in the first place — is closed
+ * at mint time by `ownerOutranksActor` (layer 2).
  *
  * Self-service surfaces (`/api/account/*`) never call this: it is for the
  * administrator routes acting on a *different* user.

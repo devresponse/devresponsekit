@@ -265,9 +265,29 @@ export async function POST(request: NextRequest) {
   // is defence in depth — but it is also the difference between a 403 the
   // caller can act on and a credential that silently does less than they asked
   // for. A superadmin actor is exempt: they already hold every power, so they
-  // are conferring nothing they lack (and that includes an org-bound superuser
-  // actor, whose minted key is capped to the very tenant the actor is capped to).
-  if (ownerOutranksActor(isSuperadmin(ownerAccess), guard.access)) {
+  // are conferring nothing they lack — but only a COOKIE superadmin, per the
+  // P1-1 rule inside `ownerOutranksActor`: a superuser-OWNED key is not itself
+  // superuser authority.
+  //
+  // The owner's rank is `isSuperadmin(ownerAccess)` here, where the `[id]/rotate`
+  // twin uses `userIsGlobalSuperuser(app_user_id)`. That asymmetry is
+  // deliberate, and this is the BROADER of the two: `userIsGlobalSuperuser`
+  // joins `app_user_roles` only, so it does not see a `superuser` marker
+  // conferred through a GROUP (ADR-0002: app_group_memberships → app_group_roles),
+  // whereas `ownerAccess.permissions` is the UNION of direct and group-conferred
+  // roles and then folds in `userIsGlobalSuperuser` anyway (auth-status.ts).
+  // So `isSuperadmin(ownerAccess)` ⊇ `userIsGlobalSuperuser(owner)` — do NOT
+  // "harmonize" this to the rotate twin's primitive; that would WEAKEN the very
+  // bound that closes the reported exploit. The rotate paths hold only an
+  // `app_user_id` and no resolved context, which is why they use the narrower
+  // one; the residual gap there is a group-conferred marker.
+  //
+  // `ownerAccess` resolves via the cookie path, so WHICH org the owner resolves
+  // in follows the actor's `active_org`. That is sound only because the
+  // `owner_inactive` 409 above guarantees an active membership resolved at all
+  // (an empty context would make `isSuperadmin` vacuously false) — keep that
+  // check before this one.
+  if (ownerOutranksActor(isSuperadmin(ownerAccess), guard.access, guard.grantedScopes)) {
     await auditEvent({
       eventType: "admin.api_key.create_denied",
       outcome: "denied",

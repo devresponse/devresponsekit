@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as Route from "@/app/api/v1/admin/oauth-clients/route";
+import type * as RotateSecretRoute from "@/app/api/v1/admin/oauth-clients/[id]/rotate-secret/route";
 
 /**
  * /api/v1/admin/oauth-clients — machine-identity registration (was 0%).
@@ -14,13 +15,21 @@ import type * as Route from "@/app/api/v1/admin/oauth-clients/route";
  *     OUTRANKS them (MACHINE-2 layer 2): the client BORROWS that principal's
  *     identity, and a global superuser's identity reaches every tenant, so a
  *     non-superadmin actor is refused whatever the scopes.
- * resolveOrgScope / userHasMembershipInOrg / userIsGlobalSuperuser /
- * ungrantableScopesForCaller run for real; the guard + repo + DB are mocked.
+ *   - the SAME bound applies to `[id]/rotate-secret`, which is an on-behalf
+ *     reissue: it hands the actor a fresh one-time secret for a credential
+ *     that authenticates as the service principal, carrying the client's
+ *     existing scopes forward verbatim (it never runs
+ *     `ungrantableScopesForCaller` at all).
+ * resolveOrgScope / canAccessOrg / userHasMembershipInOrg /
+ * userIsGlobalSuperuser / ungrantableScopesForCaller / ownerOutranksActor run
+ * for real; the guard + repo + DB are mocked.
  */
 const requireApiPermission = vi.fn();
 const enforceApiRateLimit = vi.fn();
 const listOauthClients = vi.fn();
 const createOauthClient = vi.fn();
+const getOauthClientById = vi.fn();
+const rotateOauthClientSecret = vi.fn();
 const auditEvent = vi.fn();
 
 const state: {
@@ -41,6 +50,8 @@ vi.mock("@/lib/api-auth/v1-guard.server", () => ({
 vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
   listOauthClients: (...a: unknown[]) => listOauthClients(...a),
   createOauthClient: (...a: unknown[]) => createOauthClient(...a),
+  getOauthClientById: (...a: unknown[]) => getOauthClientById(...a),
+  rotateOauthClientSecret: (...a: unknown[]) => rotateOauthClientSecret(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
 vi.mock("@/db/database", () => {
@@ -73,6 +84,7 @@ vi.mock("@/db/database", () => {
 });
 
 const SVC = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const CLIENT_ROW_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 function req(init?: { method?: string; body?: unknown; query?: string }): NextRequest {
   const url = `http://test.local/api/v1/admin/oauth-clients${init?.query ?? ""}`;
@@ -121,6 +133,7 @@ const nullScope = () =>
 
 let GET: typeof Route.GET;
 let POST: typeof Route.POST;
+let ROTATE_SECRET: typeof RotateSecretRoute.POST;
 
 beforeEach(async () => {
   for (const m of [
@@ -128,10 +141,20 @@ beforeEach(async () => {
     enforceApiRateLimit,
     listOauthClients,
     createOauthClient,
+    getOauthClientById,
+    rotateOauthClientSecret,
     auditEvent,
   ])
     m.mockReset();
   enforceApiRateLimit.mockReturnValue(null);
+  getOauthClientById.mockResolvedValue({
+    id: CLIENT_ROW_ID,
+    client_id: "drkc_x",
+    app_user_id: SVC,
+    organization_id: "o1",
+    status: "active",
+  });
+  rotateOauthClientSecret.mockResolvedValue("drkcsec_ROTATED");
   listOauthClients.mockResolvedValue({ items: [{ id: "c1" }], total: 1 });
   createOauthClient.mockResolvedValue({
     id: "c-new",
@@ -144,6 +167,8 @@ beforeEach(async () => {
   state.membership = { id: "m1" };
   state.serviceIsSuperuser = false;
   ({ GET, POST } = await import("@/app/api/v1/admin/oauth-clients/route"));
+  ({ POST: ROTATE_SECRET } =
+    await import("@/app/api/v1/admin/oauth-clients/[id]/rotate-secret/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -249,5 +274,74 @@ describe("POST /api/v1/admin/oauth-clients", () => {
     const res = await POST(req({ method: "POST", body: body() }));
     expect(res.status).toBe(201);
     expect(createOauthClient).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/v1/admin/oauth-clients/[id]/rotate-secret — service-principal reach bound", () => {
+  const ctx = { params: Promise.resolve({ id: CLIENT_ROW_ID }) };
+  const rotateReq = () => req({ method: "POST" });
+
+  /**
+   * The rotate twin was the one on-behalf reissue path layer 2 originally
+   * missed. It has NO scope bound of its own — the reissued secret carries the
+   * client's existing scopes forward verbatim — so before this bound an org
+   * admin holding only `admin.clients.manage` could rotate any superuser-owned
+   * client in their own org, pocket the new secret, exchange it at
+   * `/api/v1/auth/token`, and wield that superuser's authority in the tenant.
+   */
+  it("403 when the service principal is a GLOBAL SUPERUSER and the actor is not", async () => {
+    state.serviceIsSuperuser = true;
+    requireApiPermission.mockResolvedValue(orgAdmin());
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "denied",
+        reason: "service_principal_outranks_actor",
+      }),
+    );
+  });
+
+  it("SUPERADMIN may still rotate a superuser-owned client's secret", async () => {
+    state.serviceIsSuperuser = true;
+    requireApiPermission.mockResolvedValue(superadmin());
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(rotateOauthClientSecret).toHaveBeenCalledTimes(1);
+  });
+
+  it("ORG ADMIN may still rotate an ORDINARY principal's client (unchanged behaviour)", async () => {
+    state.serviceIsSuperuser = false;
+    requireApiPermission.mockResolvedValue(orgAdmin());
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(rotateOauthClientSecret).toHaveBeenCalledTimes(1);
+  });
+
+  it("P1-1: a superuser-OWNED bearer credential is NOT exempt from the bound", async () => {
+    // `access.permissions` is the credential OWNER's held set, not the
+    // credential's authority — a superuser-owned key scoped to
+    // `admin.clients.manage` must not be able to reissue a superuser-owned
+    // client's secret and escalate from one scope to that client's whole set.
+    state.serviceIsSuperuser = true;
+    requireApiPermission.mockResolvedValue(
+      grant({
+        permissions: ["admin.clients.read", "admin.clients.manage", "superuser"],
+        organizationId: "o1",
+        grantedScopes: ["admin.clients.manage"],
+      }),
+    );
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as UserTargetModule from "@/lib/admin/user-target.server";
+import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 
 /**
  * Unit tests for `targetOutranksActor` / `refuseOutrankingTarget`
@@ -13,10 +14,17 @@ import type * as UserTargetModule from "@/lib/admin/user-target.server";
  */
 const accessGetter = vi.fn();
 const auditMock = vi.fn();
+const globalSuperuserMock = vi.fn();
 
 vi.mock("@/lib/auth-status", () => ({
   getUserAccessContext: (...a: unknown[]) => accessGetter(...a),
 }));
+// `isOrgBound` / `isSuperadmin` run for REAL — they are the rule under test.
+// Only the DB-backed rank lookup is stubbed.
+vi.mock("@/lib/admin/access-scope.server", async () => {
+  const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
+  return { ...actual, userIsGlobalSuperuser: (...a: unknown[]) => globalSuperuserMock(...a) };
+});
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...a: unknown[]) => auditMock(...a),
 }));
@@ -49,6 +57,8 @@ const target = {
 beforeEach(async () => {
   accessGetter.mockReset();
   auditMock.mockReset();
+  globalSuperuserMock.mockReset();
+  globalSuperuserMock.mockResolvedValue(false);
   ({ targetOutranksActor, refuseOutrankingTarget } =
     await import("@/lib/admin/user-target.server"));
 });
@@ -107,6 +117,49 @@ describe("targetOutranksActor", () => {
     accessGetter.mockResolvedValue(targetCtx(["shell.view"]));
     const actor = { permissions: ["shell.view", "admin.users.ban"], organizationId: ORG };
     await expect(targetOutranksActor(actor, target)).resolves.toBe(false);
+  });
+
+  /**
+   * MACHINE-2. The subset test cannot express this case. A bound SUPERUSER
+   * credential's `permissions` is the whole `ADMIN_PERMISSION_CATALOG`
+   * (getUserAccessContext expands the marker on the bound path too), so the
+   * `isSuperadmin` exemption fires first and, even without it, the actor's set
+   * is a superset of every target's. Without an explicit RANK rule, an
+   * org-bound credential could set the password of — and thereby become — a
+   * platform superuser who happens to be a member of its bound org.
+   */
+  it("an ORG-BOUND actor may NOT act on a GLOBAL SUPERUSER target, whatever its own set", async () => {
+    globalSuperuserMock.mockResolvedValue(true);
+    const actor = {
+      permissions: ["superuser", "admin.users.setPassword", "admin.users.ban"],
+      organizationId: ORG,
+      orgBound: true,
+    };
+    await expect(targetOutranksActor(actor, target)).resolves.toBe(true);
+    expect(globalSuperuserMock).toHaveBeenCalledWith("u-target");
+    // Short-circuits before the subset comparison — the target context is
+    // never even resolved.
+    expect(accessGetter).not.toHaveBeenCalled();
+  });
+
+  it("an ORG-BOUND actor still falls through to the subset test for an ORDINARY target", async () => {
+    // Additive only: the rank rule adds a refusal, it never replaces the
+    // stricter subset comparison for a bound NON-superuser actor.
+    globalSuperuserMock.mockResolvedValue(false);
+    accessGetter.mockResolvedValue(targetCtx(["shell.view", "admin.roles.update"]));
+    const actor = {
+      permissions: ["shell.view", "admin.users.ban"],
+      organizationId: ORG,
+      orgBound: true,
+    };
+    await expect(targetOutranksActor(actor, target)).resolves.toBe(true);
+    expect(accessGetter).toHaveBeenCalledWith("ba-target", { organizationId: ORG });
+  });
+
+  it("an UNBOUND superadmin pays no rank round-trip (cookie sessions unchanged)", async () => {
+    const actor = { permissions: ["superuser"], organizationId: ORG };
+    await expect(targetOutranksActor(actor, target)).resolves.toBe(false);
+    expect(globalSuperuserMock).not.toHaveBeenCalled();
   });
 });
 

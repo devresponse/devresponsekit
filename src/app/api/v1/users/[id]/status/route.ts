@@ -91,6 +91,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // co-org superadmin — account-globally for a single-org target.
   if (
     await targetOutranksActor(grant.caller.access, {
+      appUserId: current.id,
       betterAuthUserId: current.better_auth_user_id,
     })
   ) {

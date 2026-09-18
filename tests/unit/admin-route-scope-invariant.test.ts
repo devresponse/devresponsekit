@@ -305,6 +305,87 @@ describe("review #184: every self-service guard call names an account scope lite
   );
 });
 
+describe("MACHINE-2: no route uses isSuperadmin as a tenant boundary", () => {
+  /**
+   * The sibling of the scans above, for the predicate rather than the module.
+   * `ADMIN_SCOPE_MARKERS` matches on the IMPORT PATH, so a route that imports
+   * `isSuperadmin` from `@/lib/admin/access-scope.server` and uses it to decide
+   * "may this caller reach every org" passes every scan above unchanged — and
+   * silently reintroduces MACHINE-2 (a bearer credential minted in one tenant
+   * reaching the whole platform, because `getUserAccessContext` expands a
+   * superuser principal to the full permission set on the bound path too).
+   *
+   * That mistake existed in 18 branches across 16 files and had to be corrected
+   * by hand; `main` auto-deploys, so the regression cost is an outage-grade
+   * cross-tenant leak. A point-in-time fix does not stop the next one — this
+   * does. Reverting any of those `hasCrossOrgReach` gates back to `isSuperadmin`
+   * now fails here.
+   *
+   * TWO uses are legitimate in a route and are recognized by shape or by name:
+   *   - the P1-1 conferral idiom `isSuperadmin(x) && <g>.grantedScopes === null`
+   *     — a CAPABILITY question about a cookie session, not a tenant boundary;
+   *   - a listed exemption, which must say WHY in its value.
+   * Anything else must use `hasCrossOrgReach`.
+   */
+  const SUPERADMIN_CALL = /isSuperadmin\s*\(/g;
+  // `isSuperadmin(<args>) && <something>grantedScopes === null` — the exact
+  // form the role/group/permission conferral routes use (AUTHZ-3 / P1-1).
+  const P1_1_IDIOM = /^\s*\([^()]*\)\s*&&\s*[\w.]*grantedScopes\s*===\s*null/;
+  const SUPERADMIN_EXEMPT: Record<string, string> = {
+    // Bound 3 of the on-behalf mint asks the rank of the OWNER (a context
+    // resolved for someone else entirely), not the reach of the caller — the
+    // caller's own bound is the `grantedScopes` argument of
+    // `ownerOutranksActor`, which applies the P1-1 rule internally.
+    "api/administrator/api-keys/route.ts":
+      "asks the OWNER's rank for the layer-2 mint bound, not the caller's tenant reach; the caller bound lives inside ownerOutranksActor",
+  };
+
+  const routeFiles = [
+    ...walkFiles(ADMIN_ROUTES_DIR, "route.ts"),
+    ...walkFiles(V1_ROUTES_DIR, "route.ts"),
+  ];
+
+  // Comments discuss `isSuperadmin(...)` at length in exactly the files that
+  // correctly avoid it, so strip them before scanning — otherwise the guard
+  // would punish the documentation it is meant to encourage.
+  const stripComments = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+  it("names only real route files in the exemption map", () => {
+    for (const key of Object.keys(SUPERADMIN_EXEMPT)) {
+      expect(
+        routeFiles.some((f) => f.replace(/\\/g, "/").endsWith(key)),
+        `SUPERADMIN_EXEMPT names ${key}, which no longer exists — drop the stale entry`,
+      ).toBe(true);
+    }
+  });
+
+  it.each(routeFiles.map((f) => [rel(f, "api/"), f] as const))(
+    "%s decides cross-tenant reach with hasCrossOrgReach, not isSuperadmin",
+    (relPath, full) => {
+      const reason = exemptReason(full, SUPERADMIN_EXEMPT);
+      if (reason !== undefined) {
+        expect(reason.length).toBeGreaterThan(0);
+        return;
+      }
+      const source = stripComments(readFileSync(full, "utf8"));
+      for (const match of source.matchAll(SUPERADMIN_CALL)) {
+        const tail = source.slice((match.index ?? 0) + "isSuperadmin".length);
+        expect(
+          P1_1_IDIOM.test(tail),
+          `${relPath} calls isSuperadmin(...) outside the P1-1 conferral idiom. ` +
+            `isSuperadmin answers "is this principal a superadmin", NOT "may this ` +
+            `request reach every org" — an ORG-BOUND bearer credential owned by a ` +
+            `global superuser satisfies it and would escape its tenant (MACHINE-2). ` +
+            `Use hasCrossOrgReach for the tenant boundary, write the conferral guard ` +
+            `as \`isSuperadmin(access) && guard.grantedScopes === null\`, or add a ` +
+            `justified entry to SUPERADMIN_EXEMPT.`,
+        ).toBe(true);
+      }
+    },
+  );
+});
+
 describe("AUTHZ-RSC: every administrator RSC detail page is org-scoped", () => {
   // Detail pages (a dynamic [segment] below /administrator) load a record by
   // id and MUST gate it with canAccessOrg/canAccessUser → notFound(). List and

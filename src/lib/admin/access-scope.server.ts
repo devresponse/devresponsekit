@@ -45,7 +45,9 @@ import type { UserAccessContext } from "@/lib/auth-status";
  * So the bypass is now qualified by {@link hasCrossOrgReach}: an ORG-BOUND
  * context (`access.orgBound === true`, set by `getUserAccessContext` whenever
  * a `boundOrg` argument was supplied) is confined to `access.organizationId`
- * exactly like an org admin, and to NOTHING when it has no resolvable org.
+ * exactly like an org admin, and to NOTHING when it has no resolvable org (see
+ * {@link resolveOrgScope} for what an ORG-LESS credential — one minted with a
+ * null `organization_id` — resolves to; it is pinned, not denied).
  * Cookie sessions are untouched — a superadmin at a browser still manages
  * every tenant. Note that this is a scoping rule, not an identity rule:
  * {@link isSuperadmin} keeps answering "is this principal a superadmin?"
@@ -114,9 +116,10 @@ export function hasCrossOrgReach(
  * Mint-time reach bound for an ON-BEHALF credential issuance (MACHINE-2,
  * layer 2 — sibling of `targetOutranksActor` in `user-target.server.ts`).
  *
- * `POST /api/administrator/api-keys`, its `[id]/rotate` twin, and
- * `POST /api/v1/admin/oauth-clients` all hand the ACTOR a one-time secret for
- * a credential that authenticates as SOMEONE ELSE. Their existing bounds
+ * All FOUR on-behalf issuance paths — `POST /api/administrator/api-keys`, its
+ * `[id]/rotate` twin, `POST /api/v1/admin/oauth-clients` and ITS
+ * `[id]/rotate-secret` twin — hand the ACTOR a one-time secret for a
+ * credential that authenticates as SOMEONE ELSE. Their existing bounds
  * constrain which SCOPE NAMES may ride along (the owner's held set ∩ the
  * actor's grantable set) but say nothing about the owner's org REACH — so an
  * org admin could mint a credential owned by a superuser co-member using only
@@ -125,16 +128,27 @@ export function hasCrossOrgReach(
  * caller gets an explicit 403 instead of a silently narrowed credential.
  *
  * Returns true when the OWNER outranks the ACTOR: the owner resolves as a
- * superadmin and the actor does not. A superadmin actor may still mint for a
- * superadmin owner (they already hold every power), and an org-bound superuser
- * actor may too — the credential it mints is capped to the same single tenant
- * it is itself capped to, so nothing is gained.
+ * superadmin and the actor does not. A superadmin actor is exempt — they
+ * already hold every power, so they confer nothing they lack.
+ *
+ * P1-1 — the actor exemption requires `actorGrantedScopes === null` (a COOKIE
+ * session), the same form this codebase writes everywhere else on a
+ * bearer-reachable path (see `grantable-permissions.server.ts`, and the seven
+ * `isSuperadmin(guard.access) && guard.grantedScopes === null` gates on the
+ * role/group routes). `actorAccess.permissions` is the OWNER OF THE
+ * CREDENTIAL's full held set, not the credential's authority — a
+ * superuser-owned key scoped to only `admin.apikeys.manage` would otherwise be
+ * exempt from this bound and could reissue a broadly-scoped superuser-owned
+ * key in its bound org, escalating from one scope to whatever that key holds.
+ * A bearer credential therefore never mints or rotates on behalf of a superuser
+ * principal, whoever owns it; only a human superadmin at a browser may.
  */
 export function ownerOutranksActor(
   ownerIsSuperadmin: boolean,
   actorAccess: Pick<UserAccessContext, "permissions">,
+  actorGrantedScopes: string[] | null,
 ): boolean {
-  return ownerIsSuperadmin && !isSuperadmin(actorAccess);
+  return ownerIsSuperadmin && !(isSuperadmin(actorAccess) && actorGrantedScopes === null);
 }
 
 /**
@@ -147,6 +161,20 @@ export function ownerOutranksActor(
  *   - `null` when an org admin — or an org-bound credential — has no
  *     resolvable org. Callers MUST treat null as "deny / empty result", never
  *     as "all".
+ *
+ * ORG-LESS CREDENTIALS. "No resolvable org" means `access.organizationId` is
+ * null, which is NOT the same as "the credential named no tenant". A
+ * credential minted with `organization_id = null` (only an unbound superadmin
+ * can create one — `POST /api/v1/admin/oauth-clients` honours a caller-supplied
+ * `organizationId` exclusively on the `kind: "all"` branch) still resolves
+ * through the bound path, where `getUserAccessContext` falls back to the
+ * principal's EARLIEST membership (MACHINE-1, unchanged). It is therefore
+ * org-bound to that one membership and scoped to it here. For a NON-superuser
+ * owner that is exactly the pre-MACHINE-2 behaviour; for a SUPERUSER owner it
+ * is a deliberate narrowing — an org-less credential is not a platform master
+ * key either, and pinning it to a membership rather than denying it keeps the
+ * two owner kinds on one rule. Operators who need platform-wide machine reach
+ * do not have it: use a human superadmin session, or one credential per tenant.
  */
 export type OrgScope = { kind: "all" } | { kind: "org"; organizationId: string };
 

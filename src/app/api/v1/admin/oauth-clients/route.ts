@@ -156,6 +156,7 @@ export async function POST(request: NextRequest) {
     ownerOutranksActor(
       await userIsGlobalSuperuser(parsed.data.serviceAppUserId),
       grant.caller.access,
+      grant.caller.grantedScopes,
     )
   ) {
     await auditEvent({

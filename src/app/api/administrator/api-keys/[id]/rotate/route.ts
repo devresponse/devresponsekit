@@ -82,7 +82,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // all we hold here is the owner's `app_user_id`, and it is the canonical
   // "is this principal a superadmin in ANY org" determination — the rank check
   // must not depend on which org happens to resolve for them.
-  if (ownerOutranksActor(await userIsGlobalSuperuser(existing.app_user_id), guard.access)) {
+  if (
+    ownerOutranksActor(
+      await userIsGlobalSuperuser(existing.app_user_id),
+      guard.access,
+      guard.grantedScopes,
+    )
+  ) {
     await auditEvent({
       eventType: "admin.api_key.rotate_denied",
       outcome: "denied",

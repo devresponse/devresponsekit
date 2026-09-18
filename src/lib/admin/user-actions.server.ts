@@ -1,12 +1,15 @@
 import "server-only";
 import { sql } from "kysely";
 import { db } from "@/db/database";
-import { requiresSuperadminForSharedTarget, type OrgScope } from "@/lib/admin/access-scope.server";
+import {
+  requiresSuperadminForSharedTarget,
+  type AccessLike,
+  type OrgScope,
+} from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { targetOutranksActor } from "@/lib/admin/user-target.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
-import type { UserAccessContext } from "@/lib/auth-status";
 
 /**
  * Shared per-user mutation helpers used by both the per-id endpoints
@@ -32,11 +35,17 @@ export interface BulkUserActor {
    */
   scope: OrgScope;
   /**
-   * The actor's access context (permissions + org), used by the per-row
-   * privilege-ordering guard (review #7): a non-SUPERADMIN may not act on a
-   * target who outranks them. Pass `guard.access`.
+   * The actor's access context (permissions + org + the MACHINE-2 `orgBound`
+   * marker), used by the per-row privilege-ordering guard (review #7): a
+   * non-SUPERADMIN may not act on a target who outranks them, and an org-bound
+   * credential may not act on a global superuser at all. Pass `guard.access`.
+   *
+   * Declared as the shared `AccessLike` slice rather than a local `Pick` so a
+   * future refactor cannot type `orgBound` away on the way in — `orgBound` is
+   * optional, so a narrower Pick would still compile while silently stripping
+   * the marker this guard now reads.
    */
-  access: Pick<UserAccessContext, "permissions" | "organizationId">;
+  access: AccessLike;
   /**
    * Correlation id of the batch request (`guard.requestId`), stamped on the
    * per-row refusal audit rows so a denied row can be joined to the

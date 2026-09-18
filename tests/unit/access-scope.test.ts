@@ -107,17 +107,26 @@ describe("isOrgBound / hasCrossOrgReach (MACHINE-2)", () => {
 
 describe("ownerOutranksActor (MACHINE-2 layer 2 — mint-time bound)", () => {
   it("refuses a superuser owner to a non-superadmin actor", () => {
-    expect(ownerOutranksActor(true, orgAdmin)).toBe(true);
+    expect(ownerOutranksActor(true, orgAdmin, null)).toBe(true);
   });
-  it("allows a superadmin actor to mint for a superuser owner", () => {
-    expect(ownerOutranksActor(true, superadmin)).toBe(false);
-    // Including an org-bound superuser actor: the credential it mints is
-    // capped to the same single tenant the actor is itself capped to.
-    expect(ownerOutranksActor(true, boundSuperadmin)).toBe(false);
+  it("allows a COOKIE superadmin actor to mint for a superuser owner", () => {
+    expect(ownerOutranksActor(true, superadmin, null)).toBe(false);
+  });
+  it("refuses a superuser-OWNED BEARER credential, whatever its scopes (P1-1)", () => {
+    // `access.permissions` is the OWNER's held set, not the credential's
+    // authority. A superuser-owned key scoped to only `admin.apikeys.manage`
+    // must not inherit the actor exemption and reissue a broadly-scoped
+    // superuser-owned credential in its bound org.
+    expect(ownerOutranksActor(true, superadmin, ["admin.apikeys.manage"])).toBe(true);
+    expect(ownerOutranksActor(true, boundSuperadmin, ["admin.apikeys.manage"])).toBe(true);
+    // Even a full-scope bearer credential: only a cookie session carries the
+    // human's own authority.
+    expect(ownerOutranksActor(true, boundSuperadmin, ["admin.*"])).toBe(true);
   });
   it("is irrelevant for an ordinary owner", () => {
-    expect(ownerOutranksActor(false, orgAdmin)).toBe(false);
-    expect(ownerOutranksActor(false, superadmin)).toBe(false);
+    expect(ownerOutranksActor(false, orgAdmin, null)).toBe(false);
+    expect(ownerOutranksActor(false, superadmin, null)).toBe(false);
+    expect(ownerOutranksActor(false, orgAdmin, ["admin.apikeys.manage"])).toBe(false);
   });
 });
 

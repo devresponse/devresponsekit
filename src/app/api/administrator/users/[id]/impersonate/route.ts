@@ -9,7 +9,7 @@ import {
   stopBetterAuthImpersonating,
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach, isOrgBound } from "@/lib/admin/access-scope.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getUserAccessContext } from "@/lib/auth-status";
@@ -34,6 +34,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  *   - Caller MUST hold `admin.users.impersonate`.
  *   - Caller MUST NOT impersonate themselves; we reject with 400 to
  *     avoid an audit trail of meaningless self-impersonation events.
+ *   - Caller MUST NOT be an ORG-BOUND bearer credential (MACHINE-2): the
+ *     returned session is a cookie session and therefore unbound, so this is
+ *     the one action that could convert a tenant-confined credential into an
+ *     unconfined one. Refused with 403.
  *   - The UI MUST present a double-confirm before calling this
  *     endpoint. The server cannot enforce that, but it does cap the
  *     call rate via the shared in-memory token bucket so a missing
@@ -77,7 +81,50 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // member locally but an admin in another tenant could be impersonated and
   // then switched into that tenant (P0-1) — do not relax the pin without also
   // widening this guard to the union of the target's memberships.
-  if (!isSuperadmin(guard.access)) {
+  //
+  // MACHINE-2: an ORG-BOUND bearer credential may not impersonate AT ALL.
+  //
+  // Impersonation is the one admin action that converts the caller's authority
+  // into a different KIND of credential: it hands back a COOKIE session for the
+  // target, and a cookie session is by definition not org-bound
+  // (`orgBound: false`, `hasCrossOrgReach` true for a superuser target). A
+  // credential confined to one tenant that could exchange itself for such a
+  // session would launder itself into exactly the unbounded reach MACHINE-2
+  // exists to deny.
+  //
+  // This is an outright refusal rather than the subset check below, because for
+  // the case that matters the subset check is vacuous: `getUserAccessContext`
+  // expands a bound SUPERUSER credential to the whole `ADMIN_PERMISSION_CATALOG`
+  // (auth-status.ts — correctly; see the comment there), so
+  // `targetAccess.permissions.some(p => !actorPermissions.has(p))` is
+  // structurally unsatisfiable and every target would pass. Today the exchange
+  // is also blocked incidentally — Better Auth's `impersonateUser` resolves the
+  // actor from the request's own session cookie, and a pure-bearer request has
+  // none — but that is an accident of another package's implementation, and it
+  // evaporates the moment a caller presents BOTH a bound credential (which
+  // `resolveCaller` prefers) and their own cookie. Do not demote this to the
+  // subset check on the strength of that incidental defence.
+  //
+  // Impersonation is a HUMAN-session capability, like the superadmin bypass in
+  // access-scope.server.ts. A machine credential that needs to act as a user
+  // should be minted for that user.
+  if (isOrgBound(guard.access)) {
+    await auditUserAction("admin.user.impersonation_failed", "failure", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      reason: "org_bound_credential",
+      metadata: { targetBetterAuthUserId: target.betterAuthUserId },
+    });
+    return adminErrorResponse("forbidden", 403, request);
+  }
+
+  // The `hasCrossOrgReach` skip below is equivalent to `isSuperadmin` now that
+  // every org-bound caller has been refused outright — it is kept in that form
+  // so the tenant-boundary predicate stays the one used for every such decision
+  // (and so re-introducing a bound caller here cannot silently skip the check).
+  if (!hasCrossOrgReach(guard.access)) {
     const targetAccess = await getUserAccessContext(target.betterAuthUserId);
     const actorPermissions = new Set(guard.access.permissions);
     const escalates = targetAccess.permissions.some((perm) => !actorPermissions.has(perm));

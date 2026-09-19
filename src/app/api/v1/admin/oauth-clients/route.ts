@@ -5,7 +5,12 @@ import { auditEvent } from "@/lib/audit.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import { createOauthClient, listOauthClients } from "@/lib/api-auth/oauth-clients.server";
 import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
-import { resolveOrgScope, userHasMembershipInOrg } from "@/lib/admin/access-scope.server";
+import {
+  ownerOutranksActor,
+  resolveOrgScope,
+  userHasMembershipInOrg,
+  userIsGlobalSuperuser,
+} from "@/lib/admin/access-scope.server";
 import { offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
@@ -52,7 +57,9 @@ export async function GET(request: NextRequest) {
  * The client borrows `serviceAppUserId`'s authority intersected with
  * `scopes`; that service user must already exist (provision it via
  * `/api/v1/users` first). The admin may only grant scopes they themselves
- * hold (design §7).
+ * hold (design §7), and may not register a client for a service principal that
+ * OUTRANKS them — a superuser principal is refused to a non-superadmin actor
+ * (MACHINE-2).
  */
 const createSchema = z
   .object({
@@ -129,6 +136,42 @@ export async function POST(request: NextRequest) {
     return problemResponse("invalid_scope", 403, request, {
       detail: "You cannot grant scopes you do not hold.",
       extra: { ungrantableScopes: ungrantable },
+      requestId: grant.requestId,
+    });
+  }
+
+  // Service-principal REACH bound (MACHINE-2, layer 2) — the twin of the bound
+  // on `POST /api/administrator/api-keys`. The registration above constrains
+  // which SCOPE NAMES the client may carry, but the client BORROWS
+  // `serviceAppUserId`'s identity, and a global superuser's identity reaches
+  // every tenant. Without this, an org admin holding `admin.clients.manage`
+  // could register a client against a superuser co-member using only scopes
+  // they themselves hold, take the one-time `clientSecret`, exchange it at
+  // `/api/v1/auth/token`, and administer the platform.
+  //
+  // Refused rather than silently narrowed: layer 1 caps the resulting tokens to
+  // the client's bound org, so a caller who got a 201 here would receive a
+  // credential that quietly does less than they asked for.
+  if (
+    ownerOutranksActor(
+      await userIsGlobalSuperuser(parsed.data.serviceAppUserId),
+      grant.caller.access,
+      grant.caller.grantedScopes,
+    )
+  ) {
+    await auditEvent({
+      eventType: "oauth_client.create_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: parsed.data.serviceAppUserId,
+      organizationId,
+      reason: "service_principal_outranks_actor",
+      request,
+      requestId: grant.requestId,
+      metadata: { scopes },
+    });
+    return problemResponse("forbidden", 403, request, {
+      detail: "You cannot register a client for a service principal that outranks you.",
       requestId: grant.requestId,
     });
   }

@@ -111,4 +111,48 @@ describe("selectDashboardMetrics", () => {
     expect(result.registrationsDaily).toBeUndefined();
     expect(dailyRegistrations).not.toHaveBeenCalled();
   });
+
+  /**
+   * MACHINE-2. An ORG-BOUND bearer credential owned by a global superuser
+   * carries the FULL superuser permission set (`getUserAccessContext` expands
+   * the marker on the bound path too), so the only thing separating it from a
+   * platform-wide report is the `hasCrossOrgReach` gate on the system branch.
+   * Reverting that gate to `isSuperadmin` must fail here — otherwise a key
+   * minted in one tenant reports every tenant's signups, registrations, logins
+   * and audit volume through `GET /api/administrator/metrics`.
+   */
+  it("MACHINE-2: an ORG-BOUND superuser credential gets its OWN org, not the platform", async () => {
+    const result = await selectDashboardMetrics({
+      permissions: ["superuser", "admin.users.read", "admin.audit.read"],
+      organizationId: "org-bound",
+      orgBound: true,
+    });
+
+    expect(result.scope).toBe("organization");
+    expect(result.organizationId).toBe("org-bound");
+    expect(result.mostActiveOrgs).toBeUndefined();
+    expect(signupsPerOrg).not.toHaveBeenCalled();
+    // The per-series CAPABILITY questions still resolve via the marker, so the
+    // credential does see its own tenant's numbers — scoped, never system-wide.
+    expect(dailyRegistrations).toHaveBeenCalledWith("org-bound");
+    expect(dailyLogins).toHaveBeenCalledWith("org-bound");
+    // Total audit volume has no org-scoped variant: a bound credential, like an
+    // org admin, never receives it.
+    expect(result.auditEventsDaily).toBeUndefined();
+    expect(dailyAuditEvents).not.toHaveBeenCalled();
+  });
+
+  it("MACHINE-2: an ORG-BOUND superuser credential with no resolvable org gets NOTHING", async () => {
+    const result = await selectDashboardMetrics({
+      permissions: ["superuser"],
+      organizationId: null,
+      orgBound: true,
+    });
+
+    expect(result.scope).toBe("organization");
+    expect(result.organizationId).toBeNull();
+    expect(signupsPerOrg).not.toHaveBeenCalled();
+    expect(dailyRegistrations).not.toHaveBeenCalled();
+    expect(dailyLogins).not.toHaveBeenCalled();
+  });
 });

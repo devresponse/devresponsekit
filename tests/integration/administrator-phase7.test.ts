@@ -253,6 +253,68 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     );
   });
 
+  /**
+   * MACHINE-2. Impersonation is the one admin action that converts the caller's
+   * authority into a different KIND of credential: it returns a COOKIE session
+   * for the target, and a cookie session is not org-bound. An ORG-BOUND bearer
+   * credential that could perform it would launder itself into exactly the
+   * unbounded reach MACHINE-2 denies.
+   *
+   * The subset check below cannot catch the case that matters: a bound
+   * SUPERUSER credential's `permissions` is the whole ADMIN_PERMISSION_CATALOG
+   * (getUserAccessContext expands the marker on the bound path too), so
+   * `targetAccess.permissions.some(p => !actorPermissions.has(p))` is
+   * structurally unsatisfiable and every target passes. Hence the outright
+   * refusal, pinned here for both actor shapes.
+   */
+  it("MACHINE-2: refuses an ORG-BOUND credential outright (403 + audit)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_ID
+        ? { ...grantedAccess("admin.users.impersonate"), orgBound: true }
+        : { ...grantedAccess("admin.users.read"), permissions: ["admin.users.read"] },
+    );
+    dbMock.mockResolvedValue(targetRow);
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+    expect(res.status).toBe(403);
+    expect(authImpersonate).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_failed",
+        outcome: "failure",
+        reason: "org_bound_credential",
+      }),
+    );
+  });
+
+  it("MACHINE-2: refuses an ORG-BOUND SUPERUSER credential, which the subset check cannot", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_ID
+        ? {
+            ...grantedAccess("admin.users.impersonate"),
+            // The expanded set a bound superuser credential really carries: a
+            // superset of any target's, so `escalates` would be false.
+            permissions: ["admin.users.impersonate", "admin.users.read", "superuser"],
+            orgBound: true,
+          }
+        : {
+            ...grantedAccess("admin.users.read"),
+            permissions: ["admin.users.read", "superuser"],
+          },
+    );
+    dbMock.mockResolvedValue(targetRow);
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+    expect(res.status).toBe(403);
+    expect(authImpersonate).not.toHaveBeenCalled();
+  });
+
   // Inverse: a non-superadmin actor whose permissions are a strict superset
   // of the target's is NOT escalating, so impersonation proceeds.
   it("allows a non-superadmin to impersonate a less-privileged (subset) target", async () => {

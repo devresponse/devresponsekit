@@ -1,5 +1,10 @@
 import "server-only";
-import { isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  hasCrossOrgReach,
+  isSuperadmin,
+  resolveOrgScope,
+  type AccessLike,
+} from "@/lib/admin/access-scope.server";
 import {
   DEFAULT_WINDOW_DAYS,
   dailyAuditEvents,
@@ -9,7 +14,6 @@ import {
   type DailyCount,
   type OrgSignupCount,
 } from "@/lib/admin/metrics.server";
-import type { UserAccessContext } from "@/lib/auth-status";
 
 /**
  * RBAC-scoped dashboard metric selection — the SINGLE place that decides
@@ -21,6 +25,10 @@ import type { UserAccessContext } from "@/lib/auth-status";
  *     volume (the last is SUPERADMIN-only — no org-scoped variant).
  *   - ORG ADMIN  → daily registrations + logins for THEIR active org only;
  *     never system-wide data and never another org's.
+ *   - ORG-BOUND CREDENTIAL (MACHINE-2) → the ORG ADMIN payload for its bound
+ *     org, even when its owner is a global superuser. A minted credential is
+ *     confined to the tenant it was minted in, so it never reports
+ *     platform-wide activity.
  *
  * Per-series visibility still follows the permission catalog: registrations
  * need `admin.users.read`, and logins + total audit volume need
@@ -48,16 +56,24 @@ export interface DashboardMetrics {
   auditEventsDaily?: DailyCount[];
 }
 
-type AccessLike = Pick<UserAccessContext, "permissions" | "organizationId">;
-
 export async function selectDashboardMetrics(access: AccessLike): Promise<DashboardMetrics> {
   // A SUPERADMIN holds every capability via the marker, so the literal
-  // permission keys are implied; an org admin needs them explicitly.
+  // permission keys are implied; an org admin needs them explicitly. These two
+  // are CAPABILITY questions ("may this principal see logins at all?"), not
+  // tenant-boundary questions, so they stay on `isSuperadmin` — an org-bound
+  // superuser credential really does hold `admin.audit.read` in its own org.
   const canSeeRegistrations =
     isSuperadmin(access) || access.permissions.includes("admin.users.read");
   const canSeeLogins = isSuperadmin(access) || access.permissions.includes("admin.audit.read");
 
-  if (isSuperadmin(access)) {
+  // MACHINE-2: the SYSTEM branch below is cross-tenant by construction —
+  // `signupsPerOrg()` / the un-scoped `dailyRegistrations()` / `dailyLogins()` /
+  // `dailyAuditEvents()` read EVERY org. An org-bound credential must not enter
+  // it, or a superuser-owned key minted in org A would report the whole
+  // platform's activity through `GET /api/administrator/metrics`. A bound
+  // superuser falls through to the org branch and gets its own tenant's
+  // numbers, exactly like an org admin.
+  if (hasCrossOrgReach(access)) {
     const [mostActiveOrgs, registrationsDaily, loginsDaily, auditEventsDaily] = await Promise.all([
       signupsPerOrg(),
       canSeeRegistrations ? dailyRegistrations() : Promise.resolve(undefined),

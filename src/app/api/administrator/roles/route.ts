@@ -15,7 +15,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -214,7 +214,10 @@ export async function POST(request: NextRequest) {
 
   // ADR-0001: an org admin may create roles ONLY within their own org —
   // never a global role and never another org's. SUPERADMIN bypasses.
-  if (!isSuperadmin(guard.access) && (orgId === null || !canAccessOrg(guard.access, orgId))) {
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (!hasCrossOrgReach(guard.access) && (orgId === null || !canAccessOrg(guard.access, orgId))) {
     return adminErrorResponse("forbidden", 403, request);
   }
 

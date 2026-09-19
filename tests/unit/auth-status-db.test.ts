@@ -92,6 +92,9 @@ describe("getUserAccessContext (DB-backed)", () => {
       membershipStatus: null,
       preferredLocale: "en",
       permissions: [],
+      // MACHINE-2: set explicitly even on this short-circuit — the marker
+      // records HOW the caller presented itself (no `boundOrg` → a session).
+      orgBound: false,
     });
     expect(membershipTakeFirst).not.toHaveBeenCalled();
   });
@@ -211,6 +214,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1");
     expect(ctx.organizationId).toBe("o-cookie");
+    // MACHINE-2: the cookie/session path is NOT bound — a human superadmin at a
+    // browser keeps cross-org reach.
+    expect(ctx.orgBound).toBe(false);
     // An active member always carries the baseline `shell.view` (implied by
     // membership), in addition to whatever their roles grant.
     expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
@@ -250,6 +256,7 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1");
     // Recognized as a superadmin everywhere, with the full admin authority.
+    expect(ctx.orgBound).toBe(false);
     expect(ctx.permissions).toContain("superuser");
     expect(ctx.permissions).toContain("admin.users.read");
     expect(ctx.permissions).toContain("admin.audit.read");
@@ -269,6 +276,8 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1", { organizationId: "o-bound" });
     expect(ctx.organizationId).toBe("o-bound");
+    // MACHINE-2: the marker that lets the scope helpers cap this context.
+    expect(ctx.orgBound).toBe(true);
     // An active member always carries the baseline `shell.view` (implied by
     // membership), in addition to whatever their roles grant.
     expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
@@ -287,6 +296,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1", { organizationId: "o-foreign" });
     expect(ctx.organizationId).toBeNull();
+    // MACHINE-2: still bound — `resolveOrgScope` must answer null (deny), not
+    // "all", for a bound credential that resolved to no membership.
+    expect(ctx.orgBound).toBe(true);
     expect(ctx.membershipStatus).toBeNull();
     expect(ctx.permissions).toEqual([]);
     expect(rolesExecute).not.toHaveBeenCalled();
@@ -306,6 +318,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1", { organizationId: null });
     expect(ctx.organizationId).toBe("o-earliest");
+    // MACHINE-2: an ORG-LESS credential is still a credential — it is bound to
+    // whatever single membership resolved, never to "every org".
+    expect(ctx.orgBound).toBe(true);
     expect(membershipByOrgTakeFirst).not.toHaveBeenCalled();
     expect(readActiveOrgId).not.toHaveBeenCalled();
   });
@@ -332,5 +347,41 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(ctx.permissions).toContain("admin.orgs.update");
     // The marker is already present, so the redundant lookup is skipped.
     expect(userIsGlobalSuperuser).not.toHaveBeenCalled();
+  });
+
+  it("MACHINE-2: a GLOBAL superuser on the bound-org path keeps the full permission set AND is marked org-bound", async () => {
+    // This is the exact shape of the vulnerability: a credential minted in
+    // org-a whose owner is a global superuser. The permission EXPANSION must
+    // still happen (dropping it would turn a scoping bug into an
+    // authentication bug — every `permissions.includes("admin.*")` gate would
+    // start failing for a legitimate bound superuser), so the ONLY thing that
+    // stops the credential reaching org-b is the `orgBound` marker travelling
+    // with it to `resolveOrgScope` / `canAccessOrg` / `canAccessUser`.
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "su@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "shell.view" }]);
+    userIsGlobalSuperuser.mockResolvedValue(true);
+
+    const ctx = await getUserAccessContext("ba-1", { organizationId: "o-a" });
+    expect(ctx.orgBound).toBe(true);
+    expect(ctx.organizationId).toBe("o-a");
+    expect(ctx.permissions).toContain("superuser");
+    expect(ctx.permissions).toContain("admin.users.read");
+  });
+
+  it("MACHINE-2: an UNPROVISIONED user still reports how it presented itself", async () => {
+    // The synthetic pending_approval short-circuit returns before any
+    // membership lookup; the marker describes the CALLER, not what was found,
+    // so it must be set on that path too rather than defaulting to undefined.
+    userTakeFirst.mockResolvedValue(undefined);
+    expect((await getUserAccessContext("ba-missing")).orgBound).toBe(false);
+    expect((await getUserAccessContext("ba-missing", { organizationId: "o-a" })).orgBound).toBe(
+      true,
+    );
   });
 });

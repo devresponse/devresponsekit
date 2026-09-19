@@ -12,7 +12,7 @@ import {
 } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -77,8 +77,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (limited) return limited;
 
   // ADR-0001: mutating the org entity (rename/status/default) is a
-  // platform-level, SUPERADMIN-only action.
-  if (!isSuperadmin(guard.access)) {
+  // platform-level, SUPERADMIN-only action. Note this gate is reached for ANY
+  // org id — there is no `canAccessOrg` narrowing below it — so before
+  // MACHINE-2 a superuser-owned key minted in org A could rename or re-home
+  // org B.
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
   }
 
@@ -165,8 +171,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   );
   if (limited) return limited;
 
-  // ADR-0001: deleting a tenant is a SUPERADMIN-only action.
-  if (!isSuperadmin(guard.access)) {
+  // ADR-0001: deleting a tenant is a SUPERADMIN-only action, on ANY org id.
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
   }
 

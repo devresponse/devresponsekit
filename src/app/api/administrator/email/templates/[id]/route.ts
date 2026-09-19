@@ -7,7 +7,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { updateEmailTemplateSchema } from "@/lib/validation/email-templates";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 
 export const dynamic = "force-dynamic";
@@ -70,8 +70,12 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 export async function PUT(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
-  // ADR-0001: editing a platform-global template is SUPERADMIN-only.
-  if (!isSuperadmin(guard.access)) {
+  // ADR-0001: editing a platform-global template is SUPERADMIN-only — it is
+  // the template EVERY tenant sends against.
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);
   }
 

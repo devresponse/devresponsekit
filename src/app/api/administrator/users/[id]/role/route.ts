@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { setBetterAuthUserRole } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -43,7 +43,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // `admin.users.setRole` alone must therefore NOT let an org admin mint a
   // platform admin (cross-tenant privilege escalation).
   // Org-level role management goes through `app_user_roles` / app-roles.
-  if (!isSuperadmin(guard.access)) {
+  //
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin`. The Better Auth platform
+  // role is account-global — it has no tenant at all — so an ORG-BOUND bearer
+  // credential must not be able to mint one, or a key minted in org A would
+  // hand its holder the admin console over every tenant.
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);
   }
 

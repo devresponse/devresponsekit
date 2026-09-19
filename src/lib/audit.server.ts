@@ -51,6 +51,24 @@ export interface AuditEventInput {
    * satisfies the FK and makes the audit atomic with the outcome it describes:
    * nothing is removed without its audit row, and a delete that rolls back
    * leaves no row claiming it happened.
+   *
+   * DB-4 — the inverse hazard, stated here because this is a public knob on a
+   * primitive every route reaches: a row written through a transaction handle
+   * is DISCARDED, silently and with no error raised anywhere, when that
+   * transaction rolls back. For the DB-3 `success` row that is the point — it
+   * must not outlive the outcome it claims. For a `denied` or an `error` row it
+   * is exactly backwards: those are the rows the contract below refuses to
+   * suppress, because a lost denial is an unrecorded attack, and the
+   * OBSERVABILITY-2 stdout mirror is no safety net either (it fires for
+   * `error`/`failure`, never for `denied`). So a caller that wraps a mutation in
+   * a transaction MUST NOT thread the same handle into its failure audit out of
+   * symmetry.
+   *
+   * The rule, in one line: pass `executor` ONLY for an audit that names a row
+   * this very transaction is deleting, and therefore SHOULD vanish with it.
+   * Every other audit — including every denial and failure raised inside a
+   * transaction — belongs on the pool, written after the rollback, the way the
+   * tenant DELETE writes its `admin.organization.delete_blocked` row.
    */
   executor?: Kysely<AppDatabase>;
 }
@@ -65,8 +83,12 @@ export interface AuditEventInput {
  *     the caller — log them but never include secrets in the metadata.
  *   - `metadata` is serialized as JSON. Callers MUST NOT pass tokens,
  *     refresh tokens, or raw passwords.
- *   - `input.executor` (DB-3) writes the row inside the caller's transaction;
- *     see its doc above for when that is mandatory rather than optional.
+ *   - `input.executor` (DB-3) writes the row inside the caller's transaction,
+ *     which also means a ROLLBACK discards it without raising anything — the
+ *     one suppression path this function has. DB-4: that is mandatory for an
+ *     audit naming a row the same transaction deletes, and FORBIDDEN for a
+ *     `denied`/`error` audit, which must outlive the rollback for the reason
+ *     in the bullet above. See the field's doc for the full rule.
  */
 export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;

@@ -371,4 +371,30 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     // DB-3 is asserted against real Postgres in
     // tests/db/organizations-delete-route.db.test.ts.
   });
+
+  it("answers 404, not 500, when the tenant vanishes before the transaction (DB-5)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
+    // The existence read still sees the org...
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
+    // ...but a second superadmin commits its own delete before this request
+    // opens its transaction, so the success audit — the FIRST statement in it
+    // (DB-3) — is what finds the parent gone. This is the exact error node-pg
+    // raises for that FK.
+    auditMock.mockRejectedValueOnce(
+      new Error(
+        'insert or update on table "app_audit_events" violates foreign key constraint "app_audit_events_organization_id_fkey"',
+      ),
+    );
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "organization_not_found" });
+    // The delete statement is never reached, and nothing is audited: the 409
+    // branch must not claim `organization_in_use` for a tenant that is simply
+    // gone, and the rolled-back success row is already discarded.
+    expect(itemsExecute).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledTimes(1);
+  });
 });

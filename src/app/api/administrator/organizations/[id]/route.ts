@@ -230,15 +230,40 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   // that rolls back (the FK 409 below, or any later failure) takes the success
   // row with it, and a tenant can no longer be removed without one.
   let blockedByForeignKey = false;
+  let vanishedMidRequest = false;
   try {
     await db.transaction().execute(async (trx) => {
-      await auditOrgAction("admin.organization.deleted", "success", {
-        request,
-        actorBetterAuthUserId: guard.betterAuthUserId,
-        organizationId: id,
-        metadata: { organizationId: id, slug: existing.slug },
-        executor: trx,
-      });
+      try {
+        await auditOrgAction("admin.organization.deleted", "success", {
+          request,
+          actorBetterAuthUserId: guard.betterAuthUserId,
+          organizationId: id,
+          metadata: { organizationId: id, slug: existing.slug },
+          executor: trx,
+        });
+      } catch (err) {
+        // DB-5: the existence check above ran on the pool, so a second
+        // superadmin can commit its own delete of this tenant between that
+        // read and this INSERT. Making the audit the FIRST statement in the
+        // transaction (DB-3) also makes it the statement that DISCOVERS the
+        // race: its `organization_id` has no parent left and the FK rejects it.
+        // Unhandled, that reaches the generic rethrow below and the caller gets
+        // a 500 — for a tenant this same handler answers 404 for whenever the
+        // row happens to be missing a moment sooner. Flag it so the outer catch
+        // gives that documented answer instead.
+        //
+        // Matched on the CONSTRAINT NAME rather than the sibling branch's
+        // generic /foreign key/i: `app_audit_events_organization_id_fkey` is
+        // pinned by migration 0001 (it drops whatever constraint is present and
+        // re-adds it under exactly this name), and it is the only FK on this
+        // INSERT that a missing org can break. The looser pattern would also
+        // catch the row's `app_user_id` FK and report an unrelated fault as a
+        // missing tenant. If the name ever stops matching, this falls through
+        // to the rethrow — the pre-DB-5 behaviour, never a wrong answer.
+        const message = err instanceof Error ? err.message : "unknown";
+        if (/app_audit_events_organization_id_fkey/i.test(message)) vanishedMidRequest = true;
+        throw err;
+      }
 
       try {
         await trx.deleteFrom("app_organizations").where("id", "=", id).execute();
@@ -258,6 +283,12 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       }
     });
   } catch (err) {
+    // DB-5: the tenant was already gone before this request could touch it, so
+    // answer exactly as the existence check above answers for an id that was
+    // never there. No audit row, for the same two reasons that branch writes
+    // none: there is no tenant left to name, and the rollback has already taken
+    // back the success row this request wrote a moment ago.
+    if (vanishedMidRequest) return adminErrorResponse("organization_not_found", 404, request);
     if (!blockedByForeignKey) throw err;
     await auditOrgAction("admin.organization.delete_blocked", "denied", {
       request,

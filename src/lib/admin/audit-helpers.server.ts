@@ -88,8 +88,13 @@ export interface OrgAuditContext {
    * `admin.organization.deleted` row names an org the same request is removing,
    * so it MUST be inserted before the delete, while its `organization_id` FK
    * still has a parent to point at. Every other org audit runs after its
-   * mutation on the shared pool, which is the default. See
-   * {@link AuditEventInput.executor}.
+   * mutation on the shared pool, which is the default.
+   *
+   * DB-4: passing a handle also means a ROLLBACK discards the row in silence,
+   * which is correct only for a `success` row whose subject the same
+   * transaction is deleting. Never pass one for a `denied` or `error` org audit
+   * — that record has to survive the rollback. See
+   * {@link AuditEventInput.executor} for the full rule.
    */
   executor?: Kysely<AppDatabase>;
 }

@@ -1,5 +1,7 @@
 import "server-only";
+import type { Kysely } from "kysely";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
 import type { UserAccessContext } from "@/lib/auth-status";
 
@@ -386,4 +388,317 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
     .limit(1)
     .executeTakeFirst();
   return row !== undefined;
+}
+
+/**
+ * REVOKE-2 — the LAST-SUPERADMIN invariant.
+ *
+ * {@link userIsGlobalSuperuser} makes global superuser authority a function of
+ * three ordinary, individually-revocable rows: an `app_user_roles` assignment,
+ * an `app_role_permissions` link carrying {@link SUPERADMIN_PERMISSION}, and an
+ * ACTIVE `app_organization_memberships` row pairing the two. The seeded
+ * `superuser` role is ORG-SCOPED to the default organization, so every one of
+ * those rows is reachable by a delegated admin OF THAT ORG — someone holding
+ * `admin.roles.assign`, `admin.roles.update`, `admin.users.update` or
+ * `admin.orgs.update` there. Revoking the assignment, stripping the marker off
+ * the role, or blocking/deleting the membership each destroy the authority
+ * PLATFORM-WIDE, and no org admin can confer it back (AUTHZ-3 forbids
+ * conferring a permission you do not hold). The platform could therefore be
+ * left with NO superadmin and no in-app way to recover.
+ *
+ * The invariant this file now enforces: **at least one `app_user` must retain
+ * an ACTIVE membership plus an assignment of a role carrying the `superuser`
+ * permission.** An operation that would empty that set is refused (409
+ * `last_superadmin`); an operation that leaves even one route intact is not.
+ *
+ * Deliberately NOT a "you may not touch a superadmin" rule — a superadmin must
+ * still be able to demote a co-superadmin, and an org admin must still manage
+ * ordinary members exactly as before. The predicate fires ONLY on the final
+ * one, and only when there is something to protect: with zero grants today
+ * (a platform that never seeded one, or one whose superuser is conferred
+ * through a GROUP — see the note on {@link SuperuserGrant}) it returns false
+ * and every revocation proceeds, rather than dead-locking every role edit.
+ *
+ * ENFORCED ON (keep this list and docs/admin-manager.md §8.1 in step —
+ * an invariant that lives in route bodies is an invariant the next route
+ * forgets, which is why the last two sit in shared cores, not in routes):
+ *
+ *   1. `DELETE /users/[id]/app-roles`        — assignment revoke
+ *   2. `DELETE /roles/[id]/permissions`      — `superuser` stripped off a role
+ *   3. `PATCH|DELETE /users/[id]/memberships`
+ *   4. `PATCH|DELETE /organizations/[id]/members`
+ *   5. `performAdminStatusChange` (review #444) — the shared status core behind
+ *      `POST /users/[id]/status`, `POST /api/v1/users/[id]/status` and the
+ *      `block`/`suspend` bulk actions. These are rank-guarded, but
+ *      `targetOutranksActor` exempts a SUPERADMIN actor outright, so without
+ *      this the last superadmin could block themselves in one request.
+ *   6. The soft-delete cascade (review #444) — `DELETE /users/[id]` and the
+ *      `soft_delete` bulk action, both of which blanket-block every membership
+ *      the target holds.
+ *
+ * NOT enforced on, stated so the wording above is not read as wider than it
+ * is: `ban` / `unban` (see the note on `performBan` — they change no row this
+ * invariant counts), and any authority conferred through a GROUP (see
+ * {@link SuperuserGrant}).
+ */
+
+/**
+ * One surviving route by which a principal is a global superuser: the
+ * (user, org, role) triple {@link userIsGlobalSuperuser} tests for.
+ *
+ * Group-conferred roles (`app_group_roles`, ADR-0002) are deliberately NOT
+ * counted, because {@link userIsGlobalSuperuser} does not count them either:
+ * this predicate protects exactly the authority that predicate reports, and
+ * the two must stay identical — counting a route the platform's own superuser
+ * determination ignores would let the invariant "pass" while the real
+ * superadmin set went empty, and vice versa.
+ *
+ * KNOWN LIMIT, stated so nobody reads more protection into REVOKE-2 than it
+ * gives (review #444): `getUserAccessContext` DOES union group-conferred roles
+ * into the permission set and then expands a bare `superuser` marker to the
+ * full `SUPERUSER_PERMISSIONS` set, so within the group's org a
+ * group-conferred superuser really does act as a platform superadmin.
+ * {@link userIsGlobalSuperuser} nevertheless reads only direct
+ * `app_user_roles`, so such a principal is NOT a "global superuser" anywhere
+ * this module decides rank, machine-credential reach (MACHINE-2) or this
+ * invariant. Conferring `superuser` THROUGH A GROUP is therefore unsupported:
+ * it is not counted here, and a platform whose only superadmin is
+ * group-conferred has zero grants, which the escape hatch in
+ * {@link stripsLastGlobalSuperuser} turns into "nothing to protect". Confer
+ * `superuser` by DIRECT role assignment. What IS protected on the group paths
+ * is the conferral symmetry (REVOKE-1): the three group revocation routes run
+ * the AUTHZ-3 subset test against the removed set, so a delegated admin who
+ * does not hold `superuser` can neither build nor dismantle such a group.
+ * Closing the gap properly means teaching BOTH predicates about
+ * `app_group_roles` in one change; see docs/admin-manager.md §8.6.
+ */
+export interface SuperuserGrant {
+  appUserId: string;
+  organizationId: string;
+  roleId: string;
+}
+
+/**
+ * The rows a pending revocation is about to destroy, expressed in terms of the
+ * three ways a {@link SuperuserGrant} can die. Every field is optional; a call
+ * site fills in only the shape its own mutation has.
+ */
+export interface SuperuserGrantRemoval {
+  /** `app_user_roles` rows being deleted (the role-assignment revoke path). */
+  assignments?: ReadonlyArray<SuperuserGrant>;
+  /**
+   * Roles that will no longer carry `superuser` (the role-permission strip
+   * path). Every grant conferred through one of these roles dies.
+   */
+  roleIds?: ReadonlyArray<string>;
+  /**
+   * Memberships that will stop being ACTIVE — a status change away from
+   * `active`, or an outright delete. Every grant held in that (user, org) dies,
+   * because the active-membership join in {@link userIsGlobalSuperuser} is what
+   * makes the assignment count.
+   *
+   * Note the model this implies: for this shape the grant is SUSPENDED, not
+   * destroyed. `app_user_roles` references `app_users` and `app_organizations`
+   * but NOT `app_organization_memberships` (migration 0001), and there is no
+   * cascade, so deleting a membership leaves the role assignment behind
+   * invisibly — re-adding that user to the org silently restores whatever the
+   * assignment confers, including `superuser`. Pre-existing and not something
+   * this predicate can fix (the cascade would need a schema change, which is an
+   * operator gate here), but REVOKE-2 is defined on exactly that join, so it is
+   * worth being explicit that "the grant is gone" means "the grant no longer
+   * counts", not "the row is gone". See docs/admin-manager.md §8.3.
+   */
+  memberships?: ReadonlyArray<{ appUserId: string; organizationId: string }>;
+}
+
+/** Pure: would `removal` destroy this particular grant? */
+function grantIsRemoved(grant: SuperuserGrant, removal: SuperuserGrantRemoval): boolean {
+  if (removal.roleIds?.includes(grant.roleId)) return true;
+  if (
+    removal.assignments?.some(
+      (a) =>
+        a.appUserId === grant.appUserId &&
+        a.organizationId === grant.organizationId &&
+        a.roleId === grant.roleId,
+    )
+  ) {
+    return true;
+  }
+  return (
+    removal.memberships?.some(
+      (m) => m.appUserId === grant.appUserId && m.organizationId === grant.organizationId,
+    ) ?? false
+  );
+}
+
+/**
+ * Pure (REVOKE-2): true when `removal` destroys EVERY grant in `grants` — i.e.
+ * the platform would be left with no global superuser at all.
+ *
+ * `grants.length === 0` returns false on purpose: there is nothing to protect,
+ * and refusing there would block legitimate administration forever on any
+ * platform that has no direct-assignment superadmin (see {@link SuperuserGrant}).
+ *
+ * Exported separately from the DB read so the rule itself is unit-testable
+ * without a database — the same split as `unheldPermissionKeys` (AUTHZ-3).
+ */
+export function stripsLastGlobalSuperuser(
+  grants: ReadonlyArray<SuperuserGrant>,
+  removal: SuperuserGrantRemoval,
+): boolean {
+  if (grants.length === 0) return false;
+  return grants.every((grant) => grantIsRemoved(grant, removal));
+}
+
+/**
+ * Every (user, org, role) triple that currently confers global superuser
+ * authority — the set {@link stripsLastGlobalSuperuser} is measured against.
+ *
+ * The `FOR UPDATE OF` list is load-bearing, not decoration (REVOKE-2), and it
+ * must name EVERY MUTABLE RELATION THE JOIN DEPENDS ON — not just the
+ * assignment table. Without a lock the check and the write race: two
+ * concurrent revocations, each aimed at a DIFFERENT superadmin, would each
+ * read two grants, each conclude "one survives", and together empty the set.
+ * READ COMMITTED does not prevent that — a snapshot is not a lock.
+ *
+ * Why the list and not `OF app_user_roles` alone (review #444): under READ
+ * COMMITTED a blocked `SELECT … FOR UPDATE` re-evaluates its predicate against
+ * the new row version (EvalPlanQual) only for rows of a LOCKED relation that
+ * the committing transaction actually updated or deleted; it does NOT see that
+ * transaction's effects on any other table. Only ONE of the guarded paths
+ * writes `app_user_roles` (the role-assignment revoke). The membership paths
+ * write `app_organization_memberships`, the role-permission strip writes
+ * `app_role_permissions`, and the account-lifecycle cascades (soft-delete,
+ * status change) write `app_organization_memberships` too. With the lock on
+ * the assignment rows alone, the second caller would block on the first,
+ * acquire the lock on an UNMODIFIED assignment tuple, skip the recheck, and
+ * still evaluate the membership/permission joins against its own pre-commit
+ * statement snapshot — in which the other superadmin's membership is still
+ * `active`. Locking all three relations means a concurrent membership update /
+ * delete or permission detach hits EPQ on a locked relation, the recheck drops
+ * the row, and the second caller is correctly refused. `app_permissions` is a
+ * static catalog and is deliberately left out.
+ *
+ * Pass the enclosing transaction as `executor`; calling this on the shared
+ * pool takes and releases the lock immediately and protects nothing.
+ *
+ * The result set is bounded by the number of superuser assignments on the
+ * platform (a handful), so reading the rows and filtering in TypeScript is
+ * cheaper and far clearer than encoding each removal shape as SQL.
+ */
+export async function activeGlobalSuperuserGrants(
+  executor: Kysely<AppDatabase> = db,
+): Promise<SuperuserGrant[]> {
+  const rows = await executor
+    .selectFrom("app_user_roles")
+    .innerJoin("app_organization_memberships", (join) =>
+      join
+        .onRef("app_organization_memberships.app_user_id", "=", "app_user_roles.app_user_id")
+        .onRef(
+          "app_organization_memberships.organization_id",
+          "=",
+          "app_user_roles.organization_id",
+        )
+        .on("app_organization_memberships.status", "=", "active"),
+    )
+    .innerJoin("app_role_permissions", "app_role_permissions.role_id", "app_user_roles.role_id")
+    .innerJoin("app_permissions", "app_permissions.id", "app_role_permissions.permission_id")
+    .where("app_permissions.key", "=", SUPERADMIN_PERMISSION)
+    .select([
+      "app_user_roles.app_user_id as app_user_id",
+      "app_user_roles.organization_id as organization_id",
+      "app_user_roles.role_id as role_id",
+    ])
+    .forUpdate(["app_user_roles", "app_organization_memberships", "app_role_permissions"])
+    .execute();
+  return rows.map((row) => ({
+    appUserId: row.app_user_id,
+    organizationId: row.organization_id,
+    roleId: row.role_id,
+  }));
+}
+
+/**
+ * REVOKE-2 route guard: would this removal leave the platform with no global
+ * superuser? Call it INSIDE the same transaction as the write it guards (see
+ * {@link activeGlobalSuperuserGrants} for why the lock matters), and refuse
+ * with {@link LAST_SUPERADMIN_ERROR} / 409 when it returns true.
+ */
+export async function wouldStripLastGlobalSuperuser(
+  removal: SuperuserGrantRemoval,
+  executor: Kysely<AppDatabase> = db,
+): Promise<boolean> {
+  return stripsLastGlobalSuperuser(await activeGlobalSuperuserGrants(executor), removal);
+}
+
+/**
+ * REVOKE-2 for the ACCOUNT-LIFECYCLE cascades (review #444).
+ *
+ * The four revocation routes name the rows they are about to remove, so they
+ * build a {@link SuperuserGrantRemoval} literal. The lifecycle cascades do not:
+ * soft-delete (`DELETE /users/[id]` and its bulk twin) blanket-blocks EVERY
+ * membership of the target, and `performAdminStatusChange` moves every
+ * membership in the actor's scope away from `active`. Both are still exactly
+ * the `memberships` removal shape, so they take the SAME predicate instead of a
+ * second mechanism that could drift from it — they just have to resolve the
+ * affected (user, org) pairs first.
+ *
+ * Reads those pairs through the CALLER'S transaction so the grant read below
+ * takes its row locks there too; calling this on the shared pool protects
+ * nothing (see {@link activeGlobalSuperuserGrants}).
+ *
+ * `organizationId` confines the read to one tenant for a caller whose write is
+ * org-confined (AUTHZ-1); omit it when the cascade is account-global, so the
+ * predicate measures every membership the write will touch and no more.
+ */
+export async function membershipCascadeStripsLastGlobalSuperuser(
+  appUserId: string,
+  executor: Kysely<AppDatabase>,
+  organizationId?: string,
+): Promise<boolean> {
+  let query = executor
+    .selectFrom("app_organization_memberships")
+    .select("organization_id")
+    .where("app_user_id", "=", appUserId);
+  if (organizationId !== undefined) {
+    query = query.where("organization_id", "=", organizationId);
+  }
+  const rows = await query.execute();
+  return wouldStripLastGlobalSuperuser(
+    {
+      memberships: rows.map((row) => ({ appUserId, organizationId: row.organization_id })),
+    },
+    executor,
+  );
+}
+
+/**
+ * Wire + audit vocabulary for a REVOKE-2 refusal, shared by all four
+ * revocation paths so the audit explorer can list every attempt to remove the
+ * last superadmin with a single filter — exactly as
+ * `TARGET_OUTRANKS_ACTOR_EVENT` does for the rank guard.
+ *
+ * 409 (not 403): the caller is not forbidden from revoking superuser roles in
+ * general — the platform's CURRENT state is what conflicts with this one.
+ */
+export const LAST_SUPERADMIN_ERROR = "last_superadmin";
+export const LAST_SUPERADMIN_STATUS = 409;
+export const LAST_SUPERADMIN_EVENT = "admin.superuser.revocation_denied";
+export const LAST_SUPERADMIN_REASON = "last_global_superuser";
+
+/**
+ * Control-flow signal for a REVOKE-2 refusal raised INSIDE a transaction that
+ * has already done work the caller must undo — the soft-delete saga, which
+ * applies the Better Auth ban before its DB cascade (#B6) and therefore has to
+ * roll the transaction back AND compensate the ban.
+ *
+ * Shared rather than re-declared per call site so `instanceof` still matches
+ * when the throw and the catch live in different modules, and so a future
+ * cascade cannot invent a second, subtly different signal.
+ */
+export class LastSuperadminCascadeError extends Error {
+  constructor() {
+    super(LAST_SUPERADMIN_REASON);
+    this.name = "LastSuperadminCascadeError";
+  }
 }

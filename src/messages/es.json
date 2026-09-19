@@ -671,7 +671,8 @@
       "exportTruncated": "La exportación alcanzó el límite máximo de filas. Refine los filtros y vuelva a exportar para obtener el resto.",
       "originNotAllowed": "El host de origen no está en la lista permitida para redirecciones SSO.",
       "memberExists": "Esta dirección ya pertenece a un miembro activo.",
-      "invitationExists": "Ya existe una invitación pendiente para esta dirección."
+      "invitationExists": "Ya existe una invitación pendiente para esta dirección.",
+      "lastSuperadmin": "Es el último superadministrador de la plataforma; el cambio dejaría la plataforma sin nadie que pueda administrarla."
     },
     "roles": {
       "title": "Roles",
@@ -1311,7 +1312,8 @@
     "auth_settings_not_found": "No hay configuración de registro que eliminar.",
     "not_provisioned": "Tu cuenta aún no está completamente configurada. Contacta a un administrador.",
     "insufficient_scope": "Esta credencial no está autorizada para esa acción.",
-    "forbidden_while_impersonating": "Esta acción no está disponible mientras suplantas a otro usuario."
+    "forbidden_while_impersonating": "Esta acción no está disponible mientras suplantas a otro usuario.",
+    "last_superadmin": "Es el último superadministrador de la plataforma; el cambio dejaría la plataforma sin nadie que pueda administrarla."
   },
   "account": {
     "appTitle": "Cuenta",

@@ -38,6 +38,9 @@ const TITLES: Record<string, string> = {
   not_found: "Resource not found",
   invalid_request: "Invalid request",
   conflict: "Conflict",
+  // REVOKE-2: the request is well-formed and the caller is entitled — the
+  // platform's CURRENT state is what conflicts, so 409 rather than 403.
+  last_superadmin: "Last global superadmin",
   rate_limited: "Too many requests",
   precondition_failed: "Precondition failed",
   unsupported_grant_type: "Unsupported grant type",

@@ -45,6 +45,7 @@ export function UserRolesPanel({
   canAssign?: boolean;
 }) {
   const t = useTranslations("administrator.users.roles");
+  const tErr = useTranslations("administrator.errors");
   const locale = useLocale();
   const dialogs = useDialogs();
 
@@ -76,13 +77,24 @@ export function UserRolesPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ roleId, organizationId }),
       });
+      // REVOKE-2: the 409 `last_superadmin` refusal is the most consequential
+      // one in the console — the platform declining to let itself be left with
+      // no administrator. A generic "couldn't remove" here invites the operator
+      // to go looking for another route, so name the cause, using the same
+      // read-the-envelope-code pattern the organizations and enterprise-apps
+      // grids use for their own 409s.
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRowError(body?.error === "last_superadmin" ? tErr("lastSuperadmin") : t("removeError"));
+        return;
+      }
       if (!res.ok) {
         setRowError(t("removeError"));
         return;
       }
       setReloadKey((k) => k + 1);
     },
-    [t, userId, dialogs],
+    [t, tErr, userId, dialogs],
   );
 
   const onAssign = useCallback(async () => {

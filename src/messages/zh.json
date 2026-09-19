@@ -671,7 +671,8 @@
       "exportTruncated": "导出已达到最大行数上限。请细化筛选条件并重新导出以获取其余内容。",
       "originNotAllowed": "源主机不在 SSO 重定向的允许列表中。",
       "memberExists": "该地址已属于一名活跃成员。",
-      "invitationExists": "该地址已有待处理的邀请。"
+      "invitationExists": "该地址已有待处理的邀请。",
+      "lastSuperadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。"
     },
     "roles": {
       "title": "角色",
@@ -1311,7 +1312,8 @@
     "auth_settings_not_found": "没有可移除的注册策略覆盖。",
     "not_provisioned": "您的账户尚未完成设置。请联系管理员。",
     "insufficient_scope": "此凭证无权执行该操作。",
-    "forbidden_while_impersonating": "在模拟其他用户期间无法执行此操作。"
+    "forbidden_while_impersonating": "在模拟其他用户期间无法执行此操作。",
+    "last_superadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。"
   },
   "account": {
     "appTitle": "账户",

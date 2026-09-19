@@ -3,7 +3,12 @@ import { z } from "zod";
 import { db } from "@/db/database";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
-import { canAccessUser, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  canAccessUser,
+  resolveOrgScope,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_STATUS,
+} from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
   isUuid,
@@ -161,6 +166,18 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     if (result.error === "precondition_failed") {
       return problemResponse("precondition_failed", 412, request, {
         detail: "The resource changed since you last read it.",
+        requestId: grant.requestId,
+      });
+    }
+    // REVOKE-2 (review #444): the machine surface is a thin adapter over the
+    // same status core, so it carries the same refusal — a `block`/`suspend`
+    // that would strip the platform's last global superuser is a 409, not a
+    // silent 404. Without the mapping this route would answer "not found" for a
+    // user it had just resolved. The core audits the denial.
+    if (result.error === "last_superadmin") {
+      return problemResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+        detail:
+          "This is the last global superadmin; the change would leave the platform without one.",
         requestId: grant.requestId,
       });
     }

@@ -23,7 +23,13 @@ const state: {
   org: { id: string } | undefined;
   /** Permission keys the assigned role confers (AUTHZ-3 subset check). */
   conferredPermKeys: { key: string }[];
-} = { role: undefined, org: undefined, conferredPermKeys: [] };
+  /**
+   * Rows `activeGlobalSuperuserGrants` sees — every (user, org, role) triple
+   * that currently confers global superuser authority (REVOKE-2). Empty by
+   * default: a platform with nothing to protect must behave exactly as before.
+   */
+  superuserGrants: { app_user_id: string; organization_id: string; role_id: string }[];
+} = { role: undefined, org: undefined, conferredPermKeys: [], superuserGrants: [] };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -57,6 +63,8 @@ function firstFor(table: string) {
 function execFor(table: string): unknown[] {
   // permissionKeysForRoles(...) selects the role's conferred permission keys.
   if (table === "app_role_permissions") return state.conferredPermKeys;
+  // activeGlobalSuperuserGrants(...) reads the surviving superuser grants.
+  if (table === "app_user_roles") return state.superuserGrants;
   return [];
 }
 function makeChain(table: string): unknown {
@@ -89,6 +97,9 @@ vi.mock("@/db/database", () => ({
         cb({
           insertInto: () => makeChain("trx"),
           deleteFrom: () => makeChain("trx"),
+          // REVOKE-2 runs its check on the ENCLOSING transaction, so the trx
+          // stub must be able to read as well as write.
+          selectFrom: (t: unknown) => makeChain(tableKey(t)),
         }),
     }),
   },
@@ -134,6 +145,7 @@ beforeEach(async () => {
   state.role = { id: ROLE, key: "editor", organization_id: ORG_A };
   state.org = { id: ORG_A };
   state.conferredPermKeys = [];
+  state.superuserGrants = [];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ GET, POST, DELETE } = await import("@/app/api/administrator/users/[id]/app-roles/route"));
 });
@@ -273,5 +285,97 @@ describe("DELETE /users/[id]/app-roles — revocation scoping", () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
     const res = await DELETE(jsonReq(body(ORG_A)), ctx);
     expect(res.status).toBe(404);
+  });
+});
+
+/**
+ * REVOKE-1 — the AUTHZ-3 conferral guard, applied to the REVOKE.
+ *
+ * The mirror image of the POST suite above: the same subset test, the same
+ * 403, the same SUPERADMIN exemption — measured against the permissions the
+ * revoked role confers.
+ */
+describe("DELETE /users/[id]/app-roles — conferral symmetry (REVOKE-1)", () => {
+  it("403 when an ORG ADMIN revokes the org-scoped `superuser` role", async () => {
+    // The exact lockout the finding describes: a delegated admin of the
+    // DEFAULT org cannot grant `superuser`, so they must not be able to take
+    // it away either — nobody below a superadmin could put it back.
+    state.role = { id: ROLE, key: "superuser", organization_id: ORG_A };
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
+    const res = await DELETE(jsonReq(body(ORG_A)), ctx);
+    expect(res.status).toBe(403);
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.user.role_revoked",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("403 when an ORG ADMIN revokes a role conferring a permission they lack", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
+    expect((await DELETE(jsonReq(body(ORG_A)), ctx)).status).toBe(403);
+  });
+
+  it("200 when the revoked role's permissions are a subset the actor holds", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign", "admin.users.read"]));
+    expect((await DELETE(jsonReq(body(ORG_A)), ctx)).status).toBe(200);
+  });
+
+  it("SUPERADMIN MAY revoke a `superuser` role while another superadmin remains (200)", async () => {
+    state.role = { id: ROLE, key: "superuser", organization_id: ORG_A };
+    state.conferredPermKeys = [{ key: "superuser" }];
+    state.superuserGrants = [
+      { app_user_id: "u-target", organization_id: ORG_A, role_id: ROLE },
+      { app_user_id: "u-other", organization_id: ORG_A, role_id: ROLE },
+    ];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.assign"]));
+    expect((await DELETE(jsonReq(body(ORG_A)), ctx)).status).toBe(200);
+  });
+});
+
+/** REVOKE-2 — the last global superadmin cannot be revoked away. */
+describe("DELETE /users/[id]/app-roles — last-superadmin invariant (REVOKE-2)", () => {
+  it("409 `last_superadmin` when the assignment is the only remaining grant", async () => {
+    state.role = { id: ROLE, key: "superuser", organization_id: ORG_A };
+    state.conferredPermKeys = [{ key: "superuser" }];
+    state.superuserGrants = [{ app_user_id: "u-target", organization_id: ORG_A, role_id: ROLE }];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.assign"]));
+    const res = await DELETE(jsonReq(body(ORG_A)), ctx);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "last_superadmin",
+      message: "errors.last_superadmin",
+    });
+    // Denial is audited under its own event type, and the success row is not.
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.superuser.revocation_denied",
+      "denied",
+      expect.objectContaining({ reason: "last_global_superuser" }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.user.role_revoked",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("200 when the grants are empty — nothing to protect, ordinary revocation", async () => {
+    // A platform with no direct-assignment superadmin must not have every
+    // revocation refused; the invariant only guards the FINAL one.
+    state.superuserGrants = [];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.assign"]));
+    expect((await DELETE(jsonReq(body(ORG_A)), ctx)).status).toBe(200);
+  });
+
+  it("200 when the revoked assignment is not a superuser grant at all", async () => {
+    state.superuserGrants = [
+      { app_user_id: "u-other", organization_id: ORG_B, role_id: "r-super" },
+    ];
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign", "admin.users.read"]));
+    expect((await DELETE(jsonReq(body(ORG_A)), ctx)).status).toBe(200);
   });
 });

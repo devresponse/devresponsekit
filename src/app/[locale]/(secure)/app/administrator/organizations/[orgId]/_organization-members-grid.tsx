@@ -34,6 +34,7 @@ export function OrganizationMembersGrid({
   canUpdate: boolean;
 }) {
   const t = useTranslations("administrator.orgs.members");
+  const tErr = useTranslations("administrator.errors");
   const locale = useLocale();
   const dialogs = useDialogs();
 
@@ -60,13 +61,20 @@ export function OrganizationMembersGrid({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ membershipIds: [membershipId] }),
       });
+      // REVOKE-2: name the last-superadmin refusal rather than showing the
+      // generic remove error — see the note in the user roles panel.
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRowError(body?.error === "last_superadmin" ? tErr("lastSuperadmin") : t("removeError"));
+        return;
+      }
       if (!res.ok) {
         setRowError(t("removeError"));
         return;
       }
       setReloadKey((k) => k + 1);
     },
-    [t, orgId, dialogs],
+    [t, tErr, orgId, dialogs],
   );
 
   const columns = useMemo<ColumnDef<MemberRow, unknown>[]>(

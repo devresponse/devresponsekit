@@ -137,11 +137,17 @@ describe("listActiveOrganizationIdsForBetterAuthUser (IMP-1 confinement source)"
     const q = recorded[0]!;
     expect(q.table).toBe("app_organization_memberships as m");
     expect(q.joins).toEqual([["app_users as u", "u.id", "m.app_user_id"]]);
-    // `status = 'active'` is the whole point: a suspended membership does not
+    // TWO different statuses, both load-bearing, and neither substitutes for
+    // the other. `m.status` is the MEMBERSHIP: a suspended membership does not
     // let the ADMIN act in that tenant, so it must not widen what a session
-    // they borrow can reach either.
+    // they borrow can reach either. `u.status` is the ACCOUNT (IMP-2):
+    // suspending or blocking a user writes `app_users.status` and leaves the
+    // membership rows alone, so without it a just-suspended admin kept the full
+    // intersection and the session they had borrowed kept its full reach —
+    // the exact opposite of what the confinement's fail-closed branch claims.
     expect(q.wheres).toEqual([
       ["u.better_auth_user_id", "=", "ba-admin"],
+      ["u.status", "=", "active"],
       ["m.status", "=", "active"],
     ]);
   });

@@ -33,6 +33,15 @@ const authUnban = vi.fn();
  * tests/unit/grantable-permissions-any-org.test.ts.
  */
 const heldAnyOrg = vi.fn();
+/**
+ * IMP-2: the union above is compared against the actor's authority in ONE org,
+ * so it never notices a target who out-ranks the actor in a tenant the two
+ * SHARE. The guard now also compares tenant by tenant, reading both parties'
+ * authority from `permissionKeysByActiveOrg`. Mocked here so a test can state
+ * each side's per-tenant authority directly; the query's own predicates are
+ * pinned in tests/unit/grantable-permissions-by-active-org.test.ts.
+ */
+const heldByOrg = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -53,7 +62,11 @@ vi.mock("@/lib/admin/grantable-permissions.server", async () => {
   const actual = await vi.importActual<typeof GrantableModule>(
     "@/lib/admin/grantable-permissions.server",
   );
-  return { ...actual, permissionKeysHeldInAnyOrg: (...a: unknown[]) => heldAnyOrg(...a) };
+  return {
+    ...actual,
+    permissionKeysHeldInAnyOrg: (...a: unknown[]) => heldAnyOrg(...a),
+    permissionKeysByActiveOrg: (...a: unknown[]) => heldByOrg(...a),
+  };
 });
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
@@ -151,6 +164,10 @@ beforeEach(async () => {
   // Default: the target holds nothing anywhere, so the union guard never
   // refuses unless a test says the target holds something.
   heldAnyOrg.mockResolvedValue([]);
+  heldByOrg.mockReset();
+  // Default: neither party holds anything in any tenant, so the per-tenant
+  // bound never refuses unless a test builds the shape.
+  heldByOrg.mockResolvedValue(new Map<string, Set<string>>());
   dbExecuteResult = [];
   const rl = await import("@/lib/admin/rate-limit.server");
   rl.__resetRateLimitForTests();
@@ -386,6 +403,135 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     );
   });
 
+  /**
+   * IMP-2. The union above and the tenant confinement in `getUserAccessContext`
+   * were believed to cover each other; they measure different axes and so never
+   * intersect. The confinement caps WHICH tenants a borrowed session may
+   * resolve (the impersonator's own) and says nothing about rank inside them,
+   * while the union compares the target's cross-org total against the actor's
+   * authority in ONE org — their active one. The seam between them:
+   *
+   *   actor  — admin of ORG_A, ordinary ROLE-LESS member of ORG_B
+   *   target — plain member of ORG_A, ADMIN of ORG_B
+   *
+   * The union passes (the actor's org-A set is a superset of the target's
+   * total), the confinement ADMITS org B (the actor really is a member), and
+   * rewriting the unsigned `active_org` cookie lands a session holding
+   * `admin.roles.update` in a tenant the actor has no authority in.
+   *
+   * These two drive the shape through the real handler with only the two
+   * authority lookups stubbed.
+   */
+  const ORG_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const ORG_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  /** Per-tenant authority for the target and the actor, by app-user id. */
+  function byOrgFixture(target: Record<string, string[]>, actor: Record<string, string[]>) {
+    const toMap = (spec: Record<string, string[]>) =>
+      new Map(Object.entries(spec).map(([org, keys]) => [org, new Set(keys)]));
+    heldByOrg.mockImplementation(async (appUserId: string) =>
+      toMap(appUserId === TARGET_ID ? target : actor),
+    );
+  }
+
+  it("IMP-2: refuses a target who out-ranks the actor in a tenant they SHARE", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue({
+      ...grantedAccess("admin.users.impersonate"),
+      // The actor's authority in their ACTIVE org — a superset of the target's
+      // cross-org union, which is exactly why the union guard waves this
+      // through and something else has to refuse it.
+      permissions: ["admin.users.impersonate", "admin.users.read", "admin.roles.update"],
+    });
+    heldAnyOrg.mockResolvedValue(["admin.users.read", "admin.roles.update"]);
+    byOrgFixture(
+      // Target: nothing in A, an admin in B.
+      { [ORG_A]: [], [ORG_B]: ["admin.users.read", "admin.roles.update"] },
+      // Actor: an admin in A, an active member of B holding NOTHING there.
+      {
+        [ORG_A]: ["admin.users.impersonate", "admin.users.read", "admin.roles.update"],
+        [ORG_B]: [],
+      },
+    );
+    dbMock.mockResolvedValue(targetRow);
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(authImpersonate).not.toHaveBeenCalled();
+    // Both parties are measured, and by APP USER id.
+    expect(heldByOrg).toHaveBeenCalledWith(TARGET_ID);
+    expect(heldByOrg).toHaveBeenCalledWith("u-self");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_failed",
+        outcome: "failure",
+        // A reason of its own: the union guard's `privilege_escalation` would
+        // hide which of the two bounds fired.
+        reason: "privilege_escalation_in_shared_org",
+        metadata: expect.objectContaining({ organizationIds: [ORG_B] }),
+      }),
+    );
+  });
+
+  it("IMP-2: allows it when the actor holds the same authority in that shared tenant", async () => {
+    // The control. Same fixture except the actor is an admin of org B too, so
+    // the borrowed session can reach nothing they could not reach themselves —
+    // which is the whole invariant, and must not be broken by refusing
+    // everyone.
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue({
+      ...grantedAccess("admin.users.impersonate"),
+      permissions: ["admin.users.impersonate", "admin.users.read", "admin.roles.update"],
+    });
+    heldAnyOrg.mockResolvedValue(["admin.users.read", "admin.roles.update"]);
+    byOrgFixture(
+      { [ORG_A]: [], [ORG_B]: ["admin.users.read", "admin.roles.update"] },
+      {
+        [ORG_A]: ["admin.users.impersonate"],
+        [ORG_B]: ["admin.users.read", "admin.roles.update"],
+      },
+    );
+    dbMock.mockResolvedValue(targetRow);
+    authImpersonate.mockResolvedValue({ user: { id: "ba-target" } });
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(authImpersonate).toHaveBeenCalledWith("ba-target", expect.anything());
+  });
+
+  it("IMP-2: a tenant the ACTOR does not belong to is not judged here", async () => {
+    // The per-tenant bound deliberately says nothing about an org the actor is
+    // not an active member of: the confinement already makes it unreachable,
+    // and judging it would re-impose the union's blanket refusal twice over.
+    // (The one target that would escape both — a GLOBAL SUPERUSER, whose
+    // marker expands for the principal wherever the session lands — is refused
+    // by the union, which is why that check stays.)
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue({
+      ...grantedAccess("admin.users.impersonate"),
+      permissions: ["admin.users.impersonate", "admin.reports.read"],
+    });
+    heldAnyOrg.mockResolvedValue(["admin.reports.read"]);
+    byOrgFixture(
+      { [ORG_A]: [], [ORG_B]: ["admin.reports.read"] },
+      { [ORG_A]: ["admin.users.impersonate", "admin.reports.read"] }, // no ORG_B membership
+    );
+    dbMock.mockResolvedValue(targetRow);
+    authImpersonate.mockResolvedValue({ user: { id: "ba-target" } });
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
   it("IMP-1: a SUPERADMIN actor still skips the union check entirely", async () => {
     // The union is strictly more refusing than the old single-org check, so the
     // superadmin exemption has to keep working or support loses the escape
@@ -405,6 +551,9 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
 
     expect(res.status).toBe(200);
     expect(heldAnyOrg).not.toHaveBeenCalled();
+    // …and the per-tenant bound with it: a superadmin holds every permission
+    // in every org, so there is no rank to escalate to (IMP-2).
+    expect(heldByOrg).not.toHaveBeenCalled();
   });
 });
 

@@ -135,6 +135,23 @@ export async function permissionKeysHeldInOrg(
  * As with {@link permissionKeysHeldInOrg}, the bare `superuser` MARKER is
  * returned unexpanded: an actor who is not a superadmin does not hold the
  * marker either, so its mere presence already trips the subset test.
+ *
+ * IMP-2 — NOT SUFFICIENT ON ITS OWN, and NOT redundant either. It is not
+ * sufficient because the union is compared against the actor's authority in
+ * ONE org (their active one), so an actor who is an admin in A and a
+ * role-less member of B passes it against a target who is an admin in B —
+ * two different axes that never intersect. {@link permissionKeysByActiveOrg}
+ * adds the per-tenant comparison that closes that.
+ *
+ * It is not redundant because the per-tenant rule deliberately says nothing
+ * about a tenant the actor does not belong to, and one such target is
+ * catastrophic: `getUserAccessContext` expands the `superuser` marker for the
+ * PRINCIPAL (`userIsGlobalSuperuser` spans every org), so borrowing a session
+ * from a global superuser yields `hasCrossOrgReach` and `{ kind: "all" }`
+ * scope NO MATTER which single tenant the confinement pinned the session to.
+ * This union is what refuses that impersonation up front, because the bare
+ * marker appears in it wherever the target holds it. Do not replace it with
+ * the per-org rule.
  */
 export async function permissionKeysHeldInAnyOrg(appUserId: string): Promise<string[]> {
   // Both halves require an ACTIVE membership in the org that confers the role,
@@ -168,6 +185,81 @@ export async function permissionKeysHeldInAnyOrg(appUserId: string): Promise<str
     .where("gm.app_user_id", "=", appUserId);
   const rows = await directPerms.union(groupPerms).execute();
   return [...new Set(rows.map((r) => r.key))];
+}
+
+/**
+ * The permission keys a user holds IN EACH organization they are an ACTIVE
+ * member of, keyed by organization id.
+ *
+ * IMP-2. {@link permissionKeysHeldInAnyOrg} flattens authority across tenants,
+ * which answers "does the target hold anything the actor lacks ANYWHERE" but
+ * cannot answer "does the target OUTRANK the actor IN THIS TENANT" — and that
+ * second question is the one the impersonation tenant confinement leaves open.
+ * The confinement caps which orgs a borrowed session may resolve (the ones the
+ * impersonator belongs to); it says nothing about RANK inside them. So an
+ * actor who is an admin in org A and an ordinary member of org B could borrow
+ * a session from a target who is a plain member of A and an ADMIN of B: the
+ * union test passes (the actor's org-A permissions are a superset of the
+ * target's total), the confinement admits B (the actor IS a member), and the
+ * borrowed session wields admin authority in B that the actor does not hold
+ * there as themselves. Comparing tenant by tenant is what closes that.
+ *
+ * AN ORG WITH NO ROLES MAPS TO AN EMPTY SET, NOT TO A MISSING KEY. That
+ * distinction is the whole point: "an active member holding no authority" and
+ * "not a member at all" must lead to OPPOSITE answers in the rank comparison —
+ * the first is a shared tenant where the target may hold nothing the actor
+ * lacks, the second is a tenant the confinement already makes unreachable and
+ * which must therefore not be judged here. Seeding the map from the membership
+ * rows is what keeps them apart; deriving the keys from the role rows alone
+ * would silently drop every no-role membership and re-open the pivot above.
+ *
+ * The membership seed carries the `status = 'active'` filter (mirroring
+ * {@link permissionKeysHeldInOrg}), so the permission statements below need no
+ * membership join of their own: a role left attached in a tenant the user is
+ * suspended from lands on an org that is not in the map and is dropped.
+ *
+ * Does NOT expand the `superuser` marker into the full catalog — same contract
+ * as its two siblings, and for the same reason: callers short-circuit on
+ * `hasCrossOrgReach` / `userIsGlobalSuperuser` before comparing ranks, and an
+ * actor who is not a superadmin does not hold the bare marker either, so its
+ * mere presence on the target's side already trips the subset test.
+ */
+export async function permissionKeysByActiveOrg(
+  appUserId: string,
+): Promise<Map<string, Set<string>>> {
+  const memberships = await db
+    .selectFrom("app_organization_memberships")
+    .select("organization_id")
+    .where("app_user_id", "=", appUserId)
+    .where("status", "=", "active")
+    .execute();
+
+  const byOrg = new Map<string, Set<string>>();
+  for (const row of memberships) byOrg.set(row.organization_id, new Set());
+  // No active membership anywhere → no tenant to compare in, and an empty
+  // `in ()` never reaches SQL.
+  if (byOrg.size === 0) return byOrg;
+
+  const directPerms = db
+    .selectFrom("app_user_roles as ur")
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select(["ur.organization_id as organization_id", "p.key as key"])
+    .where("ur.app_user_id", "=", appUserId);
+  const groupPerms = db
+    .selectFrom("app_group_memberships as gm")
+    .innerJoin("app_groups as g", "g.id", "gm.group_id")
+    .innerJoin("app_group_roles as gr", "gr.group_id", "g.id")
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "gr.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select(["g.organization_id as organization_id", "p.key as key"])
+    .where("gm.app_user_id", "=", appUserId);
+  const rows = await directPerms.union(groupPerms).execute();
+  // `?.add` rather than an upsert: a key whose org is absent from the seed is
+  // a role in a tenant this user is not an ACTIVE member of, which grants
+  // nothing there and must not create an entry.
+  for (const row of rows) byOrg.get(row.organization_id)?.add(row.key);
+  return byOrg;
 }
 
 /**

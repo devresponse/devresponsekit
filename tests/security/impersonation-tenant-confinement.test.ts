@@ -56,6 +56,13 @@ interface MembershipRow extends Record<string, unknown> {
 
 let memberships: MembershipRow[] = [];
 
+/**
+ * Better Auth ids that resolve as GLOBAL SUPERUSERS (IMP-2). Their reach is
+ * conferred by permission rather than by membership, so the confinement must
+ * skip them entirely — see the superadmin case below.
+ */
+let superusers = new Set<string>();
+
 /** Permissions the target's roles confer, per organization. */
 const PERMISSIONS_BY_ORG: Record<string, string[]> = {
   [ORG_A]: [],
@@ -125,9 +132,20 @@ function builderFor(table: string): unknown {
         }
         if (prop === "executeTakeFirst") {
           return async () => {
-            // `userIsGlobalSuperuser` probes `app_user_roles as ur` with a
-            // terminal takeFirst — nobody here is a global superuser.
-            if (table === "app_user_roles as ur") return undefined;
+            if (table === "app_user_roles as ur") {
+              // TWO superuser probes land on this table with a terminal
+              // takeFirst. `userIsGlobalSuperuser` keys on the app_users id
+              // (the TARGET — never a superuser in these fixtures);
+              // `betterAuthUserIsGlobalSuperuser` keys on the Better Auth id
+              // (the IMPERSONATOR, IMP-2). Only the second is answerable here,
+              // and only for an id the test opted in.
+              const betterAuthId = wheres.find(([col]) =>
+                String(col).endsWith("better_auth_user_id"),
+              )?.[2];
+              return typeof betterAuthId === "string" && superusers.has(betterAuthId)
+                ? { id: "p-superuser" }
+                : undefined;
+            }
             // `rows()` already returns memberships in `seq` order, which stands
             // in for `created_at asc`, so the first row is what both the
             // cookie lookup and the earliest-membership fallback would get.
@@ -209,6 +227,7 @@ function seedMemberships(adminOrgs: string[]): void {
 beforeEach(() => {
   getCurrentSession.mockReset();
   cookieValue.mockReset();
+  superusers = new Set();
   seedMemberships([ORG_A]);
 });
 afterEach(() => vi.resetModules());
@@ -263,7 +282,7 @@ describe("IMP-1 controls: the cookie still works for everyone it should", () => 
     expect(me.permissions).toContain("admin.roles.update");
   });
 
-  it("an impersonator who IS a member of org B may reach org B", async () => {
+  it("an impersonator who IS a member of org B may reach org B — RANK IS CAPPED ELSEWHERE", async () => {
     seedMemberships([ORG_A, ORG_B]);
     const me = await resolveMe(impersonatedSession, ORG_B);
 
@@ -271,6 +290,57 @@ describe("IMP-1 controls: the cookie still works for everyone it should", () => 
     // Assuming the target's authority INSIDE the admin's own tenancy is the
     // point of impersonation, so it must survive.
     expect(me.permissions).toContain("admin.roles.update");
+
+    // READ THIS BEFORE TREATING THE LINE ABOVE AS A STATEMENT OF INTENT.
+    //
+    // This resolver enforces TENANCY, not RANK, and on its own that is not
+    // enough (IMP-2). Shared membership does not imply shared authority: an
+    // admin of org A who is an ordinary ROLE-LESS member of org B would land
+    // here too, holding the target's `admin.roles.update` in a tenant where
+    // they have none themselves — the original escalation, merely narrowed
+    // from "any tenant the target belongs to" to "any tenant they SHARE".
+    //
+    // What makes reaching org B legitimate is that
+    // `POST /api/administrator/users/[id]/impersonate` has already refused
+    // every actor who does NOT hold, in org B itself, everything the target
+    // holds there. That per-tenant bound is pinned in
+    // tests/integration/administrator-phase7.test.ts ("refuses a target who
+    // out-ranks the actor in a tenant they SHARE"); the data source it reads
+    // is pinned in tests/unit/grantable-permissions-by-active-org.test.ts.
+    // Do not relax either one on the strength of this assertion.
+  });
+
+  it("IMP-2: a SUPERADMIN impersonator reaches a tenant they are not a member of", async () => {
+    // The platform operator's primary support path, which the IMP-1 membership
+    // intersection turned into a dead session: a superadmin reaches every
+    // tenant AS THEMSELVES (that is what `hasCrossOrgReach` and `canAccessUser`
+    // answer, and `POST /api/administrator/organizations` never enrols the
+    // creator), so measuring their reach by membership rows resolved nothing at
+    // all — 403 everywhere, and a redirect to a page outside the secure layout
+    // that renders neither the Stop control nor a sign-out button.
+    //
+    // This cannot reopen the pivot: the attack needs a NON-superadmin actor,
+    // because a superadmin already holds every permission in every org and has
+    // nothing to escalate to.
+    seedMemberships([]); // not a member of ORG_A or ORG_B — or of anything
+    superusers.add("ba-admin");
+
+    const me = await resolveMe(impersonatedSession, ORG_B);
+
+    expect(me.organizationId).toBe(ORG_B);
+    expect(me.permissions).toContain("admin.roles.update");
+  });
+
+  it("IMP-2: a NON-superadmin in exactly that position still resolves nothing", async () => {
+    // The control that keeps the exemption from being a hole: identical
+    // fixture, an ordinary admin behind the session, and the account guard
+    // refuses outright.
+    seedMemberships([]);
+    getCurrentSession.mockResolvedValue(impersonatedSession);
+    cookieValue.mockImplementation((name: string) => (name === "active_org" ? ORG_B : undefined));
+    const { GET } = await import("@/app/api/v1/me/route");
+
+    expect((await GET(meRequest())).status).toBe(403);
   });
 
   it("ordinary same-tenant impersonation is unaffected", async () => {

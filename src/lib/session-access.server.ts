@@ -1,5 +1,10 @@
 import "server-only";
-import { getUserAccessContext, type UserAccessContext } from "@/lib/auth-status";
+import { cache } from "react";
+import {
+  getUserAccessContext,
+  type ImpersonatedBy,
+  type UserAccessContext,
+} from "@/lib/auth-status";
 import { readImpersonatorId } from "@/lib/impersonation";
 
 /**
@@ -38,11 +43,33 @@ export interface SessionLike {
   session?: unknown;
 }
 
+/**
+ * ONE {@link ImpersonatedBy} object per impersonator per request.
+ *
+ * `getUserAccessContext` is wrapped in React `cache()`, whose memo key is the
+ * ARGUMENT LIST compared with `Object.is`. A fresh `{ betterAuthUserId }`
+ * literal per call is never `Object.is`-equal to the previous one, so every
+ * impersonated resolution missed the cache and re-ran the user lookup, the
+ * reach query, the membership lookups, the permission UNION and the superuser
+ * probe — two or three times per RSC render (the secure layout's
+ * `requireSecureSession`, then `checkAdminPermissionServer`, then any nested
+ * guard), silently breaking the "a single set of DB round-trips" contract that
+ * function's own doc promises, on exactly the path IMP-1 made more expensive.
+ * `cache()` keyed on the impersonator's id — a string, compared by value —
+ * makes the marker stable, so the memo hits. Ordinary sessions were never
+ * affected: they pass `undefined`, which is stable already.
+ */
+const impersonationMarker = cache(function impersonationMarker(
+  betterAuthUserId: string,
+): ImpersonatedBy {
+  return { betterAuthUserId };
+});
+
 export function getSessionAccessContext(session: SessionLike): Promise<UserAccessContext> {
   const impersonatorId = readImpersonatorId(session);
   return getUserAccessContext(
     session.user.id,
     undefined,
-    impersonatorId ? { betterAuthUserId: impersonatorId } : undefined,
+    impersonatorId ? impersonationMarker(impersonatorId) : undefined,
   );
 }

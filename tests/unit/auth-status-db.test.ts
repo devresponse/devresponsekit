@@ -18,6 +18,12 @@ const rolesExecute = vi.fn();
 const readActiveOrgId = vi.fn();
 const userIsGlobalSuperuser = vi.fn();
 const listActiveOrganizationIdsForBetterAuthUser = vi.fn();
+/**
+ * IMP-2: the confinement asks whether the IMPERSONATOR is an unbound global
+ * superuser before it measures their tenancy by membership — a superadmin's
+ * reach is conferred by permission, not by membership rows.
+ */
+const betterAuthUserIsGlobalSuperuser = vi.fn();
 /** Every `.where(...)` argument list the membership builder received. */
 const membershipWheres: unknown[][] = [];
 
@@ -28,6 +34,7 @@ vi.mock("@/lib/active-org.server", () => ({
 }));
 vi.mock("@/lib/admin/access-scope.server", () => ({
   userIsGlobalSuperuser: () => userIsGlobalSuperuser(),
+  betterAuthUserIsGlobalSuperuser: (...a: unknown[]) => betterAuthUserIsGlobalSuperuser(...a),
 }));
 
 vi.mock("@/db/database", () => ({
@@ -103,6 +110,8 @@ beforeEach(async () => {
   userIsGlobalSuperuser.mockReset();
   userIsGlobalSuperuser.mockResolvedValue(false); // not a global superuser by default
   listActiveOrganizationIdsForBetterAuthUser.mockReset();
+  betterAuthUserIsGlobalSuperuser.mockReset();
+  betterAuthUserIsGlobalSuperuser.mockResolvedValue(false); // an ordinary admin by default
   membershipWheres.length = 0;
   ({ getUserAccessContext } = await import("@/lib/auth-status"));
 });
@@ -488,6 +497,50 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(rolesExecute).not.toHaveBeenCalled();
   });
 
+  it("IMP-2: a SUPERADMIN impersonator is UNCONFINED — the target's own tenant resolves", async () => {
+    // The platform-support flow the membership intersection broke. A superadmin
+    // reaches every tenant AS THEMSELVES (`hasCrossOrgReach` / `canAccessUser`
+    // short-circuit on the marker, and creating an organization never enrols
+    // the creator), so measuring their reach by membership rows resolved NO
+    // org at all: the borrowed session landed on `pending_approval`, every
+    // route answered 403, and the admin was stranded on a page outside the
+    // secure layout that renders neither the Stop control nor a sign-out.
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-customer");
+    betterAuthUserIsGlobalSuperuser.mockResolvedValue(true);
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-customer", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
+
+    const ctx = await getUserAccessContext("ba-target", undefined, {
+      betterAuthUserId: "ba-superadmin",
+    });
+
+    expect(betterAuthUserIsGlobalSuperuser).toHaveBeenCalledWith("ba-superadmin");
+    // Unconfined means the membership query carries NO `in` predicate at all,
+    // and the membership list is never even fetched.
+    expect(listActiveOrganizationIdsForBetterAuthUser).not.toHaveBeenCalled();
+    expect(membershipWheres.some((w) => w[1] === "in")).toBe(false);
+    expect(ctx.organizationId).toBe("o-customer");
+    expect(ctx.permissions).toContain("admin.users.read");
+  });
+
+  it("IMP-2: a NON-superadmin in the same position still fails closed", async () => {
+    // The control that keeps the exemption honest: same target, same tenant,
+    // an ordinary org admin behind the session — and nothing resolves.
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-customer");
+    betterAuthUserIsGlobalSuperuser.mockResolvedValue(false);
+    listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue([]); // no shared tenant
+
+    const ctx = await getUserAccessContext("ba-target", undefined, {
+      betterAuthUserId: "ba-admin",
+    });
+
+    expect(ctx.organizationId).toBeNull();
+    expect(ctx.permissions).toEqual([]);
+    expect(membershipWheres).toEqual([]);
+  });
+
   it("IMP-1: a NON-impersonated session is untouched — no confinement lookup, no predicate", async () => {
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-b");
@@ -497,6 +550,9 @@ describe("getUserAccessContext (DB-backed)", () => {
     const ctx = await getUserAccessContext("ba-target");
 
     expect(listActiveOrganizationIdsForBetterAuthUser).not.toHaveBeenCalled();
+    // …and the superuser probe on the IMPERSONATOR is not run either: there is
+    // no impersonator to probe (IMP-2).
+    expect(betterAuthUserIsGlobalSuperuser).not.toHaveBeenCalled();
     expect(membershipWheres.some((w) => w[1] === "in")).toBe(false);
     expect(ctx.organizationId).toBe("o-b");
   });

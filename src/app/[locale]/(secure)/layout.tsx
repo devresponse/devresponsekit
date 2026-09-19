@@ -16,10 +16,8 @@ import { OrganizationSwitcher } from "@/components/app-shell/organization-switch
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { getImpersonatorId, requireSecureSession } from "@/lib/auth-guard";
-import {
-  listActiveOrganizationIdsForBetterAuthUser,
-  listUserActiveOrganizations,
-} from "@/lib/active-org.server";
+import { listUserActiveOrganizations } from "@/lib/active-org.server";
+import { listImpersonationReachableOrgIds } from "@/lib/impersonation-reach.server";
 import { SecureSidebar } from "./_components/secure-sidebar";
 import type { ReactNode } from "react";
 
@@ -73,12 +71,20 @@ export default async function SecureLayout({
   // admin's — so unfiltered it names organizations the admin has no business
   // knowing about, and offers switch controls that the P0-1 refusal would
   // reject anyway. Show only what the borrowed session can actually resolve:
-  // the same intersection `getUserAccessContext` applies. This is presentation
-  // hardening, not the boundary — the boundary is the confinement itself.
+  // the same confinement `getUserAccessContext` applies, resolved through the
+  // SAME helper (IMP-2) so the switcher cannot drift from the boundary — a
+  // `null` reach means unconfined (a superadmin), and filtering that to the
+  // superadmin's own memberships would hide the very tenant they are
+  // supporting in. This is presentation hardening, not the boundary — the
+  // boundary is the confinement itself. Memoized per request, so this shares
+  // its round trips with the resolver's.
   const impersonatorId = getImpersonatorId(session);
   if (impersonatorId) {
-    const reachable = new Set(await listActiveOrganizationIdsForBetterAuthUser(impersonatorId));
-    organizations = organizations.filter((org) => reachable.has(org.id));
+    const reachableIds = await listImpersonationReachableOrgIds(impersonatorId);
+    if (reachableIds !== null) {
+      const reachable = new Set(reachableIds);
+      organizations = organizations.filter((org) => reachable.has(org.id));
+    }
   }
 
   // Localized landmark labels (P2-15). This layout is a Server Component, so it

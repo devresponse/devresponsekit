@@ -1,11 +1,9 @@
 import "server-only";
 import { cache } from "react";
 import { db } from "@/db/database";
-import {
-  listActiveOrganizationIdsForBetterAuthUser,
-  readActiveOrgId,
-} from "@/lib/active-org.server";
+import { readActiveOrgId } from "@/lib/active-org.server";
 import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
+import { listImpersonationReachableOrgIds } from "@/lib/impersonation-reach.server";
 import {
   SHELL_BASELINE_PERMISSION,
   SUPERADMIN_PERMISSION,
@@ -112,8 +110,11 @@ export interface BoundOrg {
  * for the other credential kind (IMP-1).
  *
  * Passing this to {@link getUserAccessContext} confines the resolved
- * organization to one the IMPERSONATOR also holds an active membership in, so
- * a borrowed session can never leave the borrower's own tenancy.
+ * organization to one the IMPERSONATOR could already reach as themselves, so
+ * a borrowed session can never leave the borrower's own tenancy. "Could reach"
+ * is membership for every principal except an unbound global superuser, whose
+ * reach is conferred by permission — `src/lib/impersonation-reach.server.ts`
+ * owns that distinction (IMP-2).
  *
  * WHY THIS EXISTS. The impersonate route's escalation guard evaluates the
  * target's permissions in ONE organization, and the only thing that used to
@@ -229,23 +230,28 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     // target belongs to, including ones the impersonate route's escalation
     // guard never evaluated. So when the session is an impersonation, both the
     // cookie lookup AND the earliest-membership fallback are additionally
-    // confined to organizations the IMPERSONATOR is an active member of: the
-    // borrowed session can reach exactly what its borrower could already reach
-    // as themselves, and nothing more. See {@link ImpersonatedBy}.
+    // confined to the organizations the IMPERSONATOR could reach AS THEMSELVES:
+    // the borrowed session reaches exactly that much, and nothing more. See
+    // {@link ImpersonatedBy}.
+    //
+    // IMP-2 — "could reach as themselves" is `listImpersonationReachableOrgIds`,
+    // NOT a raw membership query: for an unbound global superuser reach is
+    // conferred by permission rather than by membership, and measuring them by
+    // membership stranded the platform operator's own support flow in a dead
+    // session. That module owns the distinction and the argument for why
+    // exempting a superadmin cannot reopen the pivot.
     let confinedOrgIds: string[] | null = null;
     if (impersonatedBy) {
-      confinedOrgIds = await listActiveOrganizationIdsForBetterAuthUser(
-        impersonatedBy.betterAuthUserId,
-      );
+      confinedOrgIds = await listImpersonationReachableOrgIds(impersonatedBy.betterAuthUserId);
     }
 
     if (confinedOrgIds !== null && confinedOrgIds.length === 0) {
-      // FAIL CLOSED. An impersonator with no active membership anywhere (their
-      // own account was suspended mid-session, say) shares no tenant with the
-      // target, so the intersection is empty and the borrowed session resolves
-      // to NO membership — no org, no permissions, and `decideSecureAccess`
-      // blocks every secure surface. Skipping the queries here also keeps an
-      // empty `in ()` out of the SQL.
+      // FAIL CLOSED. An impersonator who could reach no tenant as themselves —
+      // their account was suspended or their last membership revoked
+      // mid-session — shares no tenant with the target, so the intersection is
+      // empty and the borrowed session resolves to NO membership: no org, no
+      // permissions, and `decideSecureAccess` blocks every secure surface.
+      // Skipping the queries here also keeps an empty `in ()` out of the SQL.
       membership = undefined;
     } else {
       // One builder shape for both lookups so the confinement can never be

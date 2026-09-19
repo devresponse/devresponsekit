@@ -15,8 +15,11 @@ import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { OrganizationSwitcher } from "@/components/app-shell/organization-switcher";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
-import { requireSecureSession } from "@/lib/auth-guard";
-import { listUserActiveOrganizations } from "@/lib/active-org.server";
+import { getImpersonatorId, requireSecureSession } from "@/lib/auth-guard";
+import {
+  listActiveOrganizationIdsForBetterAuthUser,
+  listUserActiveOrganizations,
+} from "@/lib/active-org.server";
 import { SecureSidebar } from "./_components/secure-sidebar";
 import type { ReactNode } from "react";
 
@@ -53,7 +56,10 @@ export default async function SecureLayout({
 }) {
   const { locale: rawLocale } = await params;
   const safeLocale: SupportedLocale = isSupportedLocale(rawLocale) ? rawLocale : "en";
-  const { access } = await requireSecureSession(safeLocale, `/${safeLocale}/app/dashboard`);
+  const { session, access } = await requireSecureSession(
+    safeLocale,
+    `/${safeLocale}/app/dashboard`,
+  );
 
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";
@@ -61,7 +67,19 @@ export default async function SecureLayout({
   // Multi-org accounts get an organization switcher in the brand bar; the
   // active org itself is resolved from the `active_org` cookie inside
   // `getUserAccessContext`, so `access.organizationId` is already the active one.
-  const organizations = access.appUserId ? await listUserActiveOrganizations(access.appUserId) : [];
+  let organizations = access.appUserId ? await listUserActiveOrganizations(access.appUserId) : [];
+
+  // IMP-1: while impersonating, this list is the TARGET's tenancy, not the
+  // admin's — so unfiltered it names organizations the admin has no business
+  // knowing about, and offers switch controls that the P0-1 refusal would
+  // reject anyway. Show only what the borrowed session can actually resolve:
+  // the same intersection `getUserAccessContext` applies. This is presentation
+  // hardening, not the boundary — the boundary is the confinement itself.
+  const impersonatorId = getImpersonatorId(session);
+  if (impersonatorId) {
+    const reachable = new Set(await listActiveOrganizationIdsForBetterAuthUser(impersonatorId));
+    organizations = organizations.filter((org) => reachable.has(org.id));
+  }
 
   // Localized landmark labels (P2-15). This layout is a Server Component, so it
   // resolves the strings and passes them to the (Server) shell components,

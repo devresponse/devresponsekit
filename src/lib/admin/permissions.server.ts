@@ -3,11 +3,8 @@ import { headers } from "next/headers";
 import type { NextRequest, NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
-import {
-  decideSecureAccess,
-  getUserAccessContext,
-  type UserAccessContext,
-} from "@/lib/auth-status";
+import { decideSecureAccess, type UserAccessContext } from "@/lib/auth-status";
+import { getSessionAccessContext } from "@/lib/session-access.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
@@ -186,7 +183,9 @@ export async function checkAdminPermissionServer(
   const session = await getCurrentSession();
   if (!session) return "unauthenticated";
 
-  const access = await getUserAccessContext(session.user.id);
+  // IMP-1: the RSC admin gate resolves the context THROUGH the session, so an
+  // impersonated browser is confined to the impersonator's own tenancy.
+  const access = await getSessionAccessContext(session);
   const decision = decideSecureAccess(access.status, access.membershipStatus);
   if (decision !== "allow") {
     await auditRscDenial(required, session.user.id, decision);

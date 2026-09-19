@@ -1,7 +1,10 @@
 import "server-only";
 import { cache } from "react";
 import { db } from "@/db/database";
-import { readActiveOrgId } from "@/lib/active-org.server";
+import {
+  listActiveOrganizationIdsForBetterAuthUser,
+  readActiveOrgId,
+} from "@/lib/active-org.server";
 import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
 import {
   SHELL_BASELINE_PERMISSION,
@@ -104,6 +107,45 @@ export interface BoundOrg {
 }
 
 /**
+ * Marks a COOKIE SESSION as an IMPERSONATION and names the admin behind it
+ * (Better Auth's `session.impersonatedBy`) — the sibling of {@link BoundOrg}
+ * for the other credential kind (IMP-1).
+ *
+ * Passing this to {@link getUserAccessContext} confines the resolved
+ * organization to one the IMPERSONATOR also holds an active membership in, so
+ * a borrowed session can never leave the borrower's own tenancy.
+ *
+ * WHY THIS EXISTS. The impersonate route's escalation guard evaluates the
+ * target's permissions in ONE organization, and the only thing that used to
+ * make that sound was the pair of refusals on
+ * `/api/preferences/active-org(/apply)`. But `active_org` is a plain UNSIGNED
+ * cookie that `getUserAccessContext` reads for whichever user the session
+ * names — during an impersonation, the TARGET. `httpOnly` stops other sites
+ * reading it; it does not stop the browser's own owner rewriting it in
+ * devtools or replaying the request with curl. So an org-A admin could
+ * impersonate a user who is a plain member in A but an ADMIN in org B (the
+ * escalation guard passes, because the target holds nothing in A), then set
+ * `active_org` to B and wield the target's admin authority in a tenant the
+ * guard never evaluated. Enumeration was the only obstacle, and the
+ * impersonated shell renders the target's org ids itself.
+ *
+ * WHY THE INTERSECTION RATHER THAN REFUSING ADMIN POWERS OUTRIGHT. Assuming
+ * an org admin's session inside the admin's OWN tenant is the point of
+ * impersonation ("reproduce what this user sees"); blanket-refusing `admin.*`
+ * while impersonating would break that legitimate support flow and would be a
+ * permission rule bolted onto a tenancy problem. The intersection fixes the
+ * tenancy problem where it actually is: whatever the borrowed session can
+ * reach, the borrower could already reach as themselves.
+ *
+ * NOT A SCHEMA CHANGE. Better Auth already persists `impersonatedBy` on the
+ * session row; this only threads the value that is already there.
+ */
+export interface ImpersonatedBy {
+  /** The ORIGINAL admin's Better Auth user id. */
+  betterAuthUserId: string;
+}
+
+/**
  * Loads application-level access context for a Better Auth user id.
  *
  * Returns a synthetic `pending_approval` context when the user has not yet
@@ -116,10 +158,20 @@ export interface BoundOrg {
  * single set of DB round-trips. The memoization is per-request (and a
  * no-op outside React rendering), so it never serves stale permissions
  * across requests.
+ *
+ * IMP-1: a COOKIE-SESSION caller must not call this directly — it cannot see
+ * the session and therefore cannot know whether the session is an
+ * impersonation. Use `getSessionAccessContext` (src/lib/session-access.server.ts),
+ * which derives {@link ImpersonatedBy} from the session itself. That rule is
+ * enforced by the source scan in
+ * tests/unit/session-access-context-invariant.test.ts, which allow-lists the
+ * few modules that legitimately resolve a NON-session principal (a
+ * credential's bound org, a target user, a credential owner).
  */
 export const getUserAccessContext = cache(async function getUserAccessContext(
   betterAuthUserId: string,
   boundOrg?: BoundOrg,
+  impersonatedBy?: ImpersonatedBy,
 ): Promise<UserAccessContext> {
   const user = await db
     .selectFrom("app_users")
@@ -170,22 +222,51 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     // membership (the historical single-org behavior). The `app_user_id`
     // filter makes a forged cookie harmless — it can only ever select among
     // the user's own memberships.
-    const activeOrgId = await readActiveOrgId();
-    membership = activeOrgId
-      ? await db
+    //
+    // IMP-1 — …and during an IMPERSONATION "the user" is the TARGET, so that
+    // filter alone lets the admin holding the browser rewrite the unsigned
+    // `active_org` cookie and steer the borrowed session into any tenant the
+    // target belongs to, including ones the impersonate route's escalation
+    // guard never evaluated. So when the session is an impersonation, both the
+    // cookie lookup AND the earliest-membership fallback are additionally
+    // confined to organizations the IMPERSONATOR is an active member of: the
+    // borrowed session can reach exactly what its borrower could already reach
+    // as themselves, and nothing more. See {@link ImpersonatedBy}.
+    let confinedOrgIds: string[] | null = null;
+    if (impersonatedBy) {
+      confinedOrgIds = await listActiveOrganizationIdsForBetterAuthUser(
+        impersonatedBy.betterAuthUserId,
+      );
+    }
+
+    if (confinedOrgIds !== null && confinedOrgIds.length === 0) {
+      // FAIL CLOSED. An impersonator with no active membership anywhere (their
+      // own account was suspended mid-session, say) shares no tenant with the
+      // target, so the intersection is empty and the borrowed session resolves
+      // to NO membership — no org, no permissions, and `decideSecureAccess`
+      // blocks every secure surface. Skipping the queries here also keeps an
+      // empty `in ()` out of the SQL.
+      membership = undefined;
+    } else {
+      // One builder shape for both lookups so the confinement can never be
+      // applied to the cookie hit but forgotten on the fallback — which would
+      // reopen the pivot for any target whose EARLIEST membership is outside
+      // the impersonator's tenancy.
+      const scopedMemberships = () => {
+        const base = db
           .selectFrom("app_organization_memberships")
           .select(["organization_id", "status"])
-          .where("app_user_id", "=", user.id)
-          .where("organization_id", "=", activeOrgId)
-          .executeTakeFirst()
-      : undefined;
-    if (!membership) {
-      membership = await db
-        .selectFrom("app_organization_memberships")
-        .select(["organization_id", "status"])
-        .where("app_user_id", "=", user.id)
-        .orderBy("created_at", "asc")
-        .executeTakeFirst();
+          .where("app_user_id", "=", user.id);
+        return confinedOrgIds === null ? base : base.where("organization_id", "in", confinedOrgIds);
+      };
+
+      const activeOrgId = await readActiveOrgId();
+      membership = activeOrgId
+        ? await scopedMemberships().where("organization_id", "=", activeOrgId).executeTakeFirst()
+        : undefined;
+      if (!membership) {
+        membership = await scopedMemberships().orderBy("created_at", "asc").executeTakeFirst();
+      }
     }
   }
 

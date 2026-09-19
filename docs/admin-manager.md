@@ -803,13 +803,42 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
 
 - Caller MUST hold `admin.users.impersonate`. Self-impersonation is rejected
   (400 `cannot_impersonate_self`).
-- **Privilege-escalation guard.** Impersonation grants the actor the target's
-  session. A **non-superadmin** actor may not assume a session carrying any
-  permission they do not already hold (an org admin cannot impersonate a
+- **Privilege-escalation guard (IMP-1).** Impersonation grants the actor the
+  target's session. A **non-superadmin** actor may not assume a session carrying
+  any permission they do not already hold (an org admin cannot impersonate a
   superadmin or a more-privileged peer); a mismatch audits
   `admin.user.impersonation_failed` and returns 403. A superadmin already holds
   every power, so the check is skipped for them. The same subset test guards
   the other account-level actions via `targetOutranksActor` (§6, §8.1).
+
+  The comparison is against the target's authority in **every organization they
+  are an active member of** (`permissionKeysHeldInAnyOrg`), not just the actor's
+  current one. It used to be single-org, which was sound only if an impersonated
+  session were genuinely tenant-confined — and it was not: `active_org` is an
+  unsigned cookie that `getUserAccessContext` reads for whichever user the
+  session names, i.e. the **target**, so the admin holding the browser could
+  rewrite it and land in a tenant this guard never evaluated. The union is
+  deliberately conservative: a non-superadmin cannot impersonate someone who
+  administers an unrelated tenant. A superadmin can.
+- **Tenant confinement (IMP-1).** An impersonated session may only resolve an
+  organization the **impersonator** is also an active member of — the
+  intersection is applied in `getUserAccessContext`, to both the `active_org`
+  cookie lookup and the earliest-membership fallback, so the borrowed session
+  can reach exactly what its borrower could already reach as themselves, and
+  nothing more. An empty intersection resolves no membership at all (fail
+  closed). Every cookie caller therefore resolves its context through
+  `getSessionAccessContext`, which is enforced by a source scan
+  (`tests/unit/session-access-context-invariant.test.ts`).
+- **The self-service surface is closed while impersonating (IMP-1).** The
+  account guard refuses an impersonated session by default, so
+  `POST /api/v1/me/api-keys`, `DELETE …/[id]` and `POST …/[id]/rotate` answer
+  403 and audit `account.impersonated_access.denied` against the **original
+  admin**. Rotation was the sharp edge: ownership passes (the session *is* the
+  target), and the re-mint keeps the existing organization and scopes, so an
+  admin would have walked away with a standalone bearer credential carrying the
+  borrowed user's authority. Routes that neither issue nor destroy credentials
+  opt back in explicitly with `{ allowImpersonation: true }`; the key **listing**
+  stays available but is confined to the impersonated session's organization.
 - This route is the **only** path to Better Auth's `impersonateUser` — the raw
   `POST /api/auth/admin/impersonate-user` endpoint is closed (404; see §8.1).
   The plugin is configured with `allowImpersonatingAdmins: true` on purpose:

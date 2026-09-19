@@ -37,7 +37,14 @@ const bodySchema = z.object({ organizationId: z.string().uuid() });
  *   - An impersonated session is refused (P0-1, below).
  */
 export async function POST(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.preferences.write");
+  // IMP-1: opted in at the GUARD so this route keeps applying its OWN,
+  // older refusal below (P0-1) — same 403, but a distinct
+  // `forbidden_while_impersonating` body that clients and the e2e suite pin.
+  // Letting the shared guard answer first would change that wire contract for
+  // no security gain: both paths refuse the identical set of callers.
+  const guard = await requireAccountUser(request, "account.preferences.write", {
+    allowImpersonation: true,
+  });
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

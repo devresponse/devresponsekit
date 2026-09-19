@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as GrantableModule from "@/lib/admin/grantable-permissions.server";
 
 /**
  * Integration tests for the Phase 7 endpoints
@@ -23,6 +24,15 @@ const authImpersonate = vi.fn();
 const authStopImpersonate = vi.fn();
 const authBan = vi.fn();
 const authUnban = vi.fn();
+/**
+ * IMP-1: the impersonation escalation guard no longer reads the target's
+ * context in ONE org (which depended on the actor's `active_org` cookie) — it
+ * compares against the UNION of the target's authority across every org they
+ * are an active member of. Mocked here so a test can state that union
+ * directly; the query's own predicates are pinned in
+ * tests/unit/grantable-permissions-any-org.test.ts.
+ */
+const heldAnyOrg = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -38,6 +48,12 @@ vi.mock("@/lib/auth-status", async () => {
     ...actual,
     getUserAccessContext: (id: string) => accessGetter(id),
   };
+});
+vi.mock("@/lib/admin/grantable-permissions.server", async () => {
+  const actual = await vi.importActual<typeof GrantableModule>(
+    "@/lib/admin/grantable-permissions.server",
+  );
+  return { ...actual, permissionKeysHeldInAnyOrg: (...a: unknown[]) => heldAnyOrg(...a) };
 });
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
@@ -131,6 +147,10 @@ beforeEach(async () => {
   authStopImpersonate.mockReset();
   authBan.mockReset();
   authUnban.mockReset();
+  heldAnyOrg.mockReset();
+  // Default: the target holds nothing anywhere, so the union guard never
+  // refuses unless a test says the target holds something.
+  heldAnyOrg.mockResolvedValue([]);
   dbExecuteResult = [];
   const rl = await import("@/lib/admin/rate-limit.server");
   rl.__resetRateLimitForTests();
@@ -228,15 +248,9 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
   it("blocks a non-superadmin from impersonating a more-privileged target (403 + audit)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
     // Actor (ACTOR_ID) holds impersonate but NOT superuser; the target
-    // (ba-target) additionally holds superuser — a permission the actor lacks.
-    accessGetter.mockImplementation((id: string) =>
-      id === ACTOR_ID
-        ? grantedAccess("admin.users.impersonate")
-        : {
-            ...grantedAccess("admin.users.impersonate"),
-            permissions: ["admin.users.impersonate", "superuser"],
-          },
-    );
+    // additionally holds superuser — a permission the actor lacks.
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+    heldAnyOrg.mockResolvedValue(["admin.users.impersonate", "superuser"]);
     dbMock.mockResolvedValue(targetRow);
     const { POST } = await importRoute();
     const res = await POST(makeRequest(url, { method: "POST" }), {
@@ -263,7 +277,7 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
    * The subset check below cannot catch the case that matters: a bound
    * SUPERUSER credential's `permissions` is the whole ADMIN_PERMISSION_CATALOG
    * (getUserAccessContext expands the marker on the bound path too), so
-   * `targetAccess.permissions.some(p => !actorPermissions.has(p))` is
+   * `targetPermissions.some(p => !actorPermissions.has(p))` is
    * structurally unsatisfiable and every target passes. Hence the outright
    * refusal, pinned here for both actor shapes.
    */
@@ -319,14 +333,11 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
   // of the target's is NOT escalating, so impersonation proceeds.
   it("allows a non-superadmin to impersonate a less-privileged (subset) target", async () => {
     sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
-    accessGetter.mockImplementation((id: string) =>
-      id === ACTOR_ID
-        ? {
-            ...grantedAccess("admin.users.impersonate"),
-            permissions: ["admin.users.impersonate", "admin.users.read"],
-          }
-        : { ...grantedAccess("admin.users.read"), permissions: ["admin.users.read"] },
-    );
+    accessGetter.mockResolvedValue({
+      ...grantedAccess("admin.users.impersonate"),
+      permissions: ["admin.users.impersonate", "admin.users.read"],
+    });
+    heldAnyOrg.mockResolvedValue(["admin.users.read"]);
     dbMock.mockResolvedValue(targetRow);
     const cookieHeaders = new Headers();
     cookieHeaders.append("set-cookie", "ba.session=imp; Path=/; HttpOnly");
@@ -337,6 +348,63 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     });
     expect(res.status).toBe(200);
     expect(authImpersonate).toHaveBeenCalledWith("ba-target", expect.anything());
+  });
+
+  /**
+   * IMP-1. The exact shape the old single-org check missed: the target holds
+   * NOTHING in the actor's org (so the pre-fix guard, which read the target's
+   * context in the actor's `active_org`, saw an empty permission set and let
+   * the impersonation start) but is an ADMIN of a tenant the actor knows
+   * nothing about. The session handed back would have been pivotable into that
+   * tenant by rewriting the unsigned `active_org` cookie.
+   *
+   * The guard now asks for the target's authority across EVERY org they are an
+   * active member of, and refuses on the first permission the actor lacks.
+   */
+  it("IMP-1: refuses when the target holds a permission the actor lacks in ANY org", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+    // Nothing in the actor's org; `admin.roles.update` in another tenant.
+    heldAnyOrg.mockResolvedValue(["shell.view", "admin.roles.update"]);
+    dbMock.mockResolvedValue(targetRow);
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(authImpersonate).not.toHaveBeenCalled();
+    // The union is asked for by APP USER id (the `[id]` segment), not the
+    // Better Auth id, and never carries an org — that is the whole point.
+    expect(heldAnyOrg).toHaveBeenCalledWith(TARGET_ID);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_failed",
+        outcome: "failure",
+        reason: "privilege_escalation",
+      }),
+    );
+  });
+
+  it("IMP-1: a SUPERADMIN actor still skips the union check entirely", async () => {
+    // The union is strictly more refusing than the old single-org check, so the
+    // superadmin exemption has to keep working or support loses the escape
+    // hatch for every rank refusal.
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue({
+      ...grantedAccess("admin.users.impersonate"),
+      permissions: ["admin.users.impersonate", "superuser"],
+    });
+    heldAnyOrg.mockResolvedValue(["superuser", "admin.roles.update"]);
+    dbMock.mockResolvedValue(targetRow);
+    authImpersonate.mockResolvedValue({ user: { id: "ba-target" } });
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(heldAnyOrg).not.toHaveBeenCalled();
   });
 });
 

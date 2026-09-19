@@ -108,6 +108,69 @@ export async function permissionKeysHeldInOrg(
 }
 
 /**
+ * Distinct permission keys a user currently HOLDS in ANY organization they are
+ * an ACTIVE member of — the UNION of {@link permissionKeysHeldInOrg} over every
+ * such org, in one pair of statements instead of N.
+ *
+ * IMP-1. The impersonate route's escalation guard used to evaluate the target
+ * in a SINGLE org — the actor's active one — which was sound only while an
+ * impersonated session was believed to be tenant-confined. It was not (the
+ * `active_org` cookie is unsigned and the session names the TARGET), so a
+ * target who holds nothing in the actor's org but is an admin elsewhere passed
+ * the guard and the borrowed session could then be pivoted into that tenant.
+ * The guard now compares against this union, so impersonation is refused up
+ * front whenever the target holds ANYTHING the actor lacks ANYWHERE. Together
+ * with the tenancy confinement in `getUserAccessContext` that is belt and
+ * braces: the union stops the impersonation starting, the confinement stops a
+ * pivot afterwards.
+ *
+ * The union is deliberately the STRICTER of the two rules — it refuses even
+ * when the target's extra authority sits in a tenant the confinement would
+ * already have made unreachable. That is the route's own documented intent,
+ * and it fails in the safe direction: the cost is that a non-superadmin org
+ * admin cannot impersonate someone who administers an unrelated tenant, and
+ * the remedy (a superadmin does it) is already the escape hatch for every
+ * other rank refusal here.
+ *
+ * As with {@link permissionKeysHeldInOrg}, the bare `superuser` MARKER is
+ * returned unexpanded: an actor who is not a superadmin does not hold the
+ * marker either, so its mere presence already trips the subset test.
+ */
+export async function permissionKeysHeldInAnyOrg(appUserId: string): Promise<string[]> {
+  // Both halves require an ACTIVE membership in the org that confers the role,
+  // mirroring `permissionKeysHeldInOrg`: a role left attached in a tenant the
+  // user is suspended from grants nothing there and must not count here.
+  const directPerms = db
+    .selectFrom("app_user_roles as ur")
+    .innerJoin("app_organization_memberships as m", (join) =>
+      join
+        .onRef("m.app_user_id", "=", "ur.app_user_id")
+        .onRef("m.organization_id", "=", "ur.organization_id")
+        .on("m.status", "=", "active"),
+    )
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.key as key")
+    .where("ur.app_user_id", "=", appUserId);
+  const groupPerms = db
+    .selectFrom("app_group_memberships as gm")
+    .innerJoin("app_groups as g", "g.id", "gm.group_id")
+    .innerJoin("app_organization_memberships as m", (join) =>
+      join
+        .onRef("m.app_user_id", "=", "gm.app_user_id")
+        .onRef("m.organization_id", "=", "g.organization_id")
+        .on("m.status", "=", "active"),
+    )
+    .innerJoin("app_group_roles as gr", "gr.group_id", "g.id")
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "gr.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.key as key")
+    .where("gm.app_user_id", "=", appUserId);
+  const rows = await directPerms.union(groupPerms).execute();
+  return [...new Set(rows.map((r) => r.key))];
+}
+
+/**
  * Pure: the requested permission keys the actor may NOT confer — those not in
  * the actor's own held set. Returns `[]` when every requested key is held
  * (i.e. the grant is allowed). Permission keys are concrete catalog keys (no

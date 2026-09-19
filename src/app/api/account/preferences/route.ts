@@ -37,7 +37,14 @@ export const dynamic = "force-dynamic";
  */
 
 export async function PUT(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.preferences.write");
+  // IMP-1: opted in. Locale / time-zone / number-format preferences issue no
+  // credential and destroy nothing; an admin reproducing a user's formatting
+  // problem needs to be able to change them, and every write is already
+  // rate-limited and audited. Reverting this to the default (deny) would be
+  // safe but would break that support flow.
+  const guard = await requireAccountUser(request, "account.preferences.write", {
+    allowImpersonation: true,
+  });
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

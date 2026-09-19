@@ -266,7 +266,14 @@ describe("review #184: every self-service guard call names an account scope lite
   // `requireAccountUser` and the v1 problem+json `requireApiAccount`. Matching
   // only the former would silently stop scanning every `/api/v1/me/*` handler.
   const GUARD_CALL = /require(?:AccountUser|ApiAccount)\s*\(([^)]*)\)/g;
-  const SCOPED_CALL = /^\s*request\s*,\s*"account\.[a-z]+(?:\.[a-z]+)?"\s*$/;
+  // `(request, "account.<x>"[, { …options }])`. The optional third argument is
+  // the per-route options bag (IMP-1's `allowImpersonation`); it only ever
+  // relaxes the impersonation default, never the scope requirement, so it is
+  // tolerated here — the scope literal in position 2 is still mandatory. Which
+  // routes may set `allowImpersonation` is policed separately, by
+  // tests/unit/session-access-context-invariant.test.ts.
+  const SCOPED_CALL =
+    /^\s*request\s*,\s*"account\.[a-z]+(?:\.[a-z]+)?"\s*(?:,\s*\{[\s\S]*\}\s*,?\s*)?$/;
   const SELF_SERVICE_EXEMPT: Record<string, string> = {
     // Browser redirect target after a scoped sign-in (GET, session-only, no
     // bearer path): it degrades to a plain redirect on every failure, so there

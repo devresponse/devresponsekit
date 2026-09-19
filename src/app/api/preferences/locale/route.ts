@@ -38,7 +38,12 @@ const bodySchema = z.object({
  * cookie mutation).
  */
 export async function POST(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.preferences.write");
+  // IMP-1: opted in. The secure shell's locale switcher posts here on every
+  // change, including inside an impersonated session; refusing would break the
+  // shell for a write that issues no credential.
+  const guard = await requireAccountUser(request, "account.preferences.write", {
+    allowImpersonation: true,
+  });
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

@@ -291,3 +291,31 @@ describe("POST /api/v1/users/[id]/status", () => {
     expect((await POST(req(USER), ctx(USER))).status).toBe(404);
   });
 });
+
+/**
+ * REVOKE-2 (review #444). The machine surface is a thin adapter over the same
+ * status core, so it must carry the same refusal — otherwise `/api/v1` is the
+ * way around the console's 409 and reports "not found" for a user it had just
+ * resolved.
+ */
+describe("POST /api/v1/users/[id]/status — last superadmin (REVOKE-2)", () => {
+  it("maps the core's refusal to a 409 problem document, not a 404", async () => {
+    requireApiPermission.mockResolvedValue(superadmin());
+    performAdminStatusChange.mockResolvedValue({ ok: false, error: "last_superadmin" });
+    const res = await POST(req(USER), ctx(USER));
+    expect(res.status).toBe(409);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    const body = (await res.json()) as { code?: string; type?: string; title?: string };
+    expect(body.code).toBe("last_superadmin");
+    expect(body.type).toBe("https://devresponse.com/problems/last_superadmin");
+    // A code with no TITLES entry falls back to the generic "Error"; the
+    // problem document must name this one.
+    expect(body.title).toBe("Last global superadmin");
+  });
+
+  it("still 404s a genuinely missing target", async () => {
+    requireApiPermission.mockResolvedValue(superadmin());
+    performAdminStatusChange.mockResolvedValue({ ok: false, error: "not_found" });
+    expect((await POST(req(USER), ctx(USER))).status).toBe(404);
+  });
+});

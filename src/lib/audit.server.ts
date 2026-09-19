@@ -1,6 +1,8 @@
 import "server-only";
+import type { Kysely } from "kysely";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
 import { logServerError } from "@/lib/observability/logger.server";
@@ -34,6 +36,23 @@ export interface AuditEventInput {
    */
   requestId?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * Write the row through THIS handle instead of the shared pool — i.e. inside
+   * the caller's transaction. Per-call context like `request` / `requestId`
+   * above, not part of the event itself. Defaults to the pool, which is what
+   * every call site that audits AFTER its mutation wants.
+   *
+   * DB-3: the call sites that MUST pass one are the audits naming a row the
+   * same request is about to delete. `organization_id` carries a real FK to
+   * `app_organizations`; `ON DELETE SET NULL` rescues rows that ALREADY EXIST
+   * when the parent goes away, but it says nothing about a NEW insert naming an
+   * id that is already gone — that insert is a plain foreign-key violation.
+   * Writing the row inside the deleting transaction, ahead of the delete, both
+   * satisfies the FK and makes the audit atomic with the outcome it describes:
+   * nothing is removed without its audit row, and a delete that rolls back
+   * leaves no row claiming it happened.
+   */
+  executor?: Kysely<AppDatabase>;
 }
 
 /**
@@ -46,6 +65,8 @@ export interface AuditEventInput {
  *     the caller — log them but never include secrets in the metadata.
  *   - `metadata` is serialized as JSON. Callers MUST NOT pass tokens,
  *     refresh tokens, or raw passwords.
+ *   - `input.executor` (DB-3) writes the row inside the caller's transaction;
+ *     see its doc above for when that is mandatory rather than optional.
  */
 export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;
@@ -74,7 +95,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
     });
   }
 
-  await db
+  await (input.executor ?? db)
     .insertInto("app_audit_events")
     .values({
       event_type: input.eventType,

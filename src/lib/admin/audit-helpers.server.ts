@@ -1,5 +1,7 @@
 import "server-only";
+import type { Kysely } from "kysely";
 import type { NextRequest } from "next/server";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { auditEvent, type AuditEventInput } from "@/lib/audit.server";
 
 /**
@@ -80,6 +82,16 @@ export interface OrgAuditContext {
   reason?: string | null;
   requestId?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * DB-3: transaction handle for an org audit that must be written inside the
+   * caller's transaction. Only the tenant DELETE needs it — an
+   * `admin.organization.deleted` row names an org the same request is removing,
+   * so it MUST be inserted before the delete, while its `organization_id` FK
+   * still has a parent to point at. Every other org audit runs after its
+   * mutation on the shared pool, which is the default. See
+   * {@link AuditEventInput.executor}.
+   */
+  executor?: Kysely<AppDatabase>;
 }
 
 export async function auditOrgAction(
@@ -97,5 +109,6 @@ export async function auditOrgAction(
     request: ctx.request,
     requestId: ctx.requestId ?? null,
     metadata: ctx.metadata,
+    executor: ctx.executor,
   });
 }

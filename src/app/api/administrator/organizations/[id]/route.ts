@@ -209,33 +209,64 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     throw err;
   }
 
+  // DB-3: the success audit is written INSIDE the deleting transaction and
+  // BEFORE the delete statement. Written afterwards (as it was), the INSERT
+  // named an `organization_id` whose parent row was already gone: DB-1's
+  // `ON DELETE SET NULL` detaches audit rows that ALREADY EXIST when the org
+  // is removed, but it says nothing about a NEW insert naming a missing id, so
+  // that insert was a plain foreign-key violation. It landed outside the FK
+  // handler below, so EVERY successful tenant delete ended in an unhandled 500
+  // — after the row was already committed as deleted — and
+  // `admin.organization.deleted` was never recorded at all.
+  //
+  // Inside the transaction the parent still exists, so the FK resolves; the
+  // delete then cascades the same SET NULL tombstone over this row as over the
+  // org's older audit history. The surviving row therefore has a NULL
+  // `organization_id` by design — `metadata.organizationId` / `metadata.slug`
+  // are what tell an operator WHICH tenant was removed, alongside the actor and
+  // `created_at` for who and when.
+  //
+  // Ordering also makes the audit atomic with the outcome it claims: a delete
+  // that rolls back (the FK 409 below, or any later failure) takes the success
+  // row with it, and a tenant can no longer be removed without one.
+  let blockedByForeignKey = false;
   try {
-    await db.deleteFrom("app_organizations").where("id", "=", id).execute();
-  } catch (err) {
-    // The emptiness guard only covers memberships. An org can still own roles,
-    // provider bindings, enterprise apps, or API/OAuth credentials whose FKs
-    // block the delete. Translate that FK violation into the documented 409
-    // (DB-1) instead of letting it surface as a raw 500. Audit rows do NOT
-    // reach here — their FK is ON DELETE SET NULL.
-    const message = err instanceof Error ? err.message : "unknown";
-    if (/foreign key/i.test(message)) {
-      await auditOrgAction("admin.organization.delete_blocked", "denied", {
+    await db.transaction().execute(async (trx) => {
+      await auditOrgAction("admin.organization.deleted", "success", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         organizationId: id,
-        metadata: { organizationId: id, slug: existing.slug, reason: "organization_in_use" },
+        metadata: { organizationId: id, slug: existing.slug },
+        executor: trx,
       });
-      return adminErrorResponse("organization_in_use", 409, request);
-    }
-    throw err;
-  }
 
-  await auditOrgAction("admin.organization.deleted", "success", {
-    request,
-    actorBetterAuthUserId: guard.betterAuthUserId,
-    organizationId: id,
-    metadata: { organizationId: id, slug: existing.slug },
-  });
+      try {
+        await trx.deleteFrom("app_organizations").where("id", "=", id).execute();
+      } catch (err) {
+        // The emptiness guard only covers memberships. An org can still own
+        // roles, provider bindings, enterprise apps, or API/OAuth credentials
+        // whose FKs block the delete. Translate that FK violation into the
+        // documented 409 (DB-1) instead of letting it surface as a raw 500.
+        // The flag is set HERE, on the delete statement alone, so an FK error
+        // from any other statement in the transaction still surfaces as itself
+        // rather than being mislabelled `organization_in_use`.
+        const message = err instanceof Error ? err.message : "unknown";
+        if (/foreign key/i.test(message)) blockedByForeignKey = true;
+        // Rethrow regardless: the failed statement has already aborted the
+        // transaction, and rolling back is what discards the success audit.
+        throw err;
+      }
+    });
+  } catch (err) {
+    if (!blockedByForeignKey) throw err;
+    await auditOrgAction("admin.organization.delete_blocked", "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: id,
+      metadata: { organizationId: id, slug: existing.slug, reason: "organization_in_use" },
+    });
+    return adminErrorResponse("organization_in_use", 409, request);
+  }
 
   return NextResponse.json({ ok: true });
 }

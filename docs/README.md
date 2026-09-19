@@ -43,7 +43,7 @@ This folder is the canonical documentation set, organized by **audience**.
 | Document | What's inside |
 | --- | --- |
 | [Configuration](./configuration.md) | Every environment variable, config files, secrets, local vs production |
-| [Deployment](./deployment.md) | The migrate-first **Vercel + Neon** pipeline, one-time database provisioning, CI/CD, environment, and post-deploy verification |
+| [Deployment](./deployment.md) | How production actually ships (**Vercel + Neon**, git-integration deploys with hand-applied migrations), the optional migrate-first pipelines, one-time database provisioning, environment, and post-deploy verification |
 | [Docker](./docker.md) | The container image and Compose setup for self-hosting — build, local stack, healthcheck, production notes |
 | [Observability](./observability.md) | Structured logging, Sentry error/performance monitoring, and the opt-in Prometheus metrics endpoint |
 | [Troubleshooting](./troubleshooting.md) | The incident-response runbook **and** common setup, build, runtime, and deployment failures and their fixes |

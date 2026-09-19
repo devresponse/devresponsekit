@@ -56,6 +56,23 @@ build, and deploying a fully functional instance — see the canonical docs in
 [docs/](docs/README.md) (start with [Configuration](docs/configuration.md) and
 [Deployment](docs/deployment.md)).
 
+## Deployment
+
+Production ships through **Vercel's Git integration**: every push to `main` is
+built and promoted automatically. Vercel does not run migrations, so the
+ordering is a standing **operator gate** — a pull request that adds a database
+migration is applied to production **first** (`pnpm db:app:migrate` against the
+production direct/unpooled `DATABASE_URL`), and merged **second**. Merging first
+promotes a build that expects a schema the database does not have; the tell is
+`GET /api/health/ready` answering **503 `schema_behind`**.
+
+Two tools automate that order instead. [`vercel-cli/`](vercel-cli/README.md)
+(`drk-deploy`) does migrate → build → promote → verify from your machine and
+works today; `.github/workflows/deploy.yml` does the same in CI but has none of
+its four credentials configured, so it skips itself and says so (DEPLOY-1).
+Full detail, and what adopting either would take, is in
+[docs/deployment.md §1](docs/deployment.md#1-how-this-repo-deploys).
+
 ## Scripts
 
 | Command           | Purpose                                           |

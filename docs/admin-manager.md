@@ -378,6 +378,37 @@ Grids support per-row actions and two selection modes (the client state lives in
 Bulk actions and CSV export are surfaced by the grid toolbar
 (`_components/grid/data-grid-toolbar.tsx`) and detailed in §13 and §19.
 
+### 7.2 Sortable header accessibility (A11Y-4)
+
+A column is sortable when it declares an `accessorKey` and does not set
+`enableSorting: false`; `DataGrid` then wraps its header in the
+`DataGridColumnHeader` button. Two rules hold for that button:
+
+- **The accessible name is the column name, and nothing else.** It is computed
+  from the rendered header (name-from-content) — the button carries no
+  `aria-label`. An `aria-label` overrides the visible text, and the one this
+  component used to build collapsed to `"— Not sorted"` for every column,
+  because `header` is a function for all of them and the label was only
+  composed when `children` was a string. Deriving the name from what is on
+  screen cannot drift that way again, and it satisfies WCAG 2.5.3 (Label in
+  Name) by construction, so voice control can target the control by the name a
+  user can see.
+- **The sort state is a separate channel.** `aria-sort` on the wrapping `<th>`
+  is the ARIA-designated mechanism (it is not valid on `role=button`), and the
+  button additionally points `aria-describedby` at a visually-hidden span for
+  assistive technology that under-reports `aria-sort` while focus is on the
+  button. That span is `aria-hidden` so it stays out of name-from-content —
+  otherwise it would leak the sort state into the `<th>`'s name, which screen
+  readers prefix onto every data cell in the column.
+
+Consequently a sortable column **must** render text. Row-action columns have no
+`accessorKey`, render their header raw and no button, and may keep
+`header: () => ""`. The rule is enforced two ways:
+`tests/component/administrator-data-grid.test.tsx` pins the rendering contract
+(name, description and `aria-sort` per state) and
+`tests/unit/admin-grid-column-label-invariant.test.ts` statically checks every
+sortable column definition in every Administrator grid.
+
 ---
 
 ## 8. Administrator areas

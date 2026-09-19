@@ -126,4 +126,35 @@ describe("auditEvent", () => {
     insertExecute.mockRejectedValueOnce(new Error("db down"));
     await expect(auditEvent({ eventType: "x", outcome: "success" })).rejects.toThrow(/db down/);
   });
+
+  it("writes through input.executor instead of the pool when one is given (DB-3, DB-4)", async () => {
+    const trxValues = vi.fn();
+    const trxExecute = vi.fn().mockResolvedValue(undefined);
+    const trx = {
+      insertInto: () => ({
+        values: (v: unknown) => {
+          trxValues(v);
+          return { execute: trxExecute };
+        },
+      }),
+    } as unknown as AuditServerModule.AuditEventInput["executor"];
+
+    await auditEvent({
+      eventType: "admin.organization.deleted",
+      outcome: "success",
+      organizationId: "o-1",
+      executor: trx,
+    });
+
+    expect(trxExecute).toHaveBeenCalledTimes(1);
+    expect(trxValues.mock.calls[0]![0]).toMatchObject({
+      event_type: "admin.organization.deleted",
+      organization_id: "o-1",
+    });
+    // DB-4: nothing reached the pool, which is precisely why this row is
+    // discarded if the caller's transaction rolls back. That is the intended
+    // semantics for an audit naming a row the same transaction deletes, and the
+    // reason a `denied`/`error` audit must never be handed a transaction.
+    expect(insertExecute).not.toHaveBeenCalled();
+  });
 });

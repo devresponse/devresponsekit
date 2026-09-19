@@ -60,19 +60,20 @@ export async function createOrganization(api: APIRequestContext, slug: string): 
 /**
  * Deleting a tenant requires it to be empty — remove memberships + roles first.
  *
- * KNOWN BUG (surfaced by the review #29 e2e work, tracked separately): the
- * route deletes the row and THEN inserts the `admin.organization.deleted`
- * audit event with the now-dangling `organization_id`, so the audit insert
- * violates its FK and the response is a 500 even though the tenant is gone.
- * Cleanup therefore verifies the OUTCOME (the org no longer resolves) and
- * tolerates only that specific status; anything else (403, 409
- * `organization_not_empty`, …) still fails the test.
+ * This asserts `res.ok()`, NOT "ok or 500". The 500 tolerance was added for the
+ * DB-1-era bug where the route deleted the row and THEN inserted the
+ * `admin.organization.deleted` audit event naming the now-dangling
+ * `organization_id`, so the audit INSERT violated its FK and a SUCCESSFUL
+ * delete answered 500. DB-3 moved that insert inside the deleting transaction,
+ * ahead of the delete, so the only correct answer is a 2xx — and a widened
+ * assertion in a shared fixture is how that bug stayed green everywhere for as
+ * long as it did. Keep this strict.
  */
 export async function deleteOrganization(api: APIRequestContext, orgId: string): Promise<void> {
   const res = await api.delete(`/api/administrator/organizations/${orgId}`, {
     headers: ADMIN_API_HEADERS,
   });
-  expect(res.ok() || res.status() === 500, await res.text()).toBe(true);
+  expect(res.ok(), await res.text()).toBe(true);
   const check = await api.get(`/api/administrator/organizations/${orgId}`);
   expect(check.status(), `organization ${orgId} should be gone after delete`).toBe(404);
 }

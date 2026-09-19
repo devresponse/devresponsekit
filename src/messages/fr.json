@@ -671,7 +671,8 @@
       "exportTruncated": "L’export a atteint la limite maximale de lignes. Affinez les filtres et relancez l’export pour obtenir le reste.",
       "originNotAllowed": "L’hôte d’origine ne figure pas dans la liste autorisée pour les redirections SSO.",
       "memberExists": "Cette adresse appartient déjà à un membre actif.",
-      "invitationExists": "Une invitation en attente existe déjà pour cette adresse."
+      "invitationExists": "Une invitation en attente existe déjà pour cette adresse.",
+      "lastSuperadmin": "Il s'agit du dernier super-administrateur de la plateforme ; cette modification ne laisserait personne pour l'administrer."
     },
     "roles": {
       "title": "Rôles",
@@ -1310,7 +1311,8 @@
     "invitation_email_mismatch": "Cette invitation a été émise pour une autre adresse e-mail.",
     "auth_settings_not_found": "Aucune configuration d'inscription à supprimer.",
     "not_provisioned": "Votre compte n'est pas encore entièrement configuré. Contactez un administrateur.",
-    "insufficient_scope": "Cette autorisation ne couvre pas cette action."
+    "insufficient_scope": "Cette autorisation ne couvre pas cette action.",
+    "last_superadmin": "Il s'agit du dernier super-administrateur de la plateforme ; cette modification ne laisserait personne pour l'administrer."
   },
   "account": {
     "appTitle": "Compte",

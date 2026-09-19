@@ -29,9 +29,20 @@ const state: {
       }
     | undefined;
   whereCols: string[];
+  /** Permission keys the DELETE body resolves to in the catalog. */
+  catalogPerms: { id: string; key: string }[];
+  /**
+   * Rows `activeGlobalSuperuserGrants` sees (REVOKE-2). Empty by default so a
+   * platform with nothing to protect behaves exactly as before — and so the
+   * `roles/[id]/members` feed, which reads the same table in this stub, keeps
+   * returning an empty item list.
+   */
+  superuserGrants: { app_user_id: string; organization_id: string; role_id: string }[];
 } = {
   role: undefined,
   whereCols: [],
+  catalogPerms: [{ id: "p1", key: "admin.users.read" }],
+  superuserGrants: [],
 };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
@@ -55,8 +66,9 @@ function firstFor(table: string) {
 }
 function execFor(table: string): unknown[] {
   if (table === "app_role_permissions") return [{ key: "admin.users.read" }];
-  if (table === "app_permissions") return [{ id: "p1", key: "admin.users.read" }];
-  return []; // app_user_roles items, app_roles duplicate-candidates
+  if (table === "app_permissions") return state.catalogPerms;
+  if (table === "app_user_roles") return state.superuserGrants;
+  return []; // app_roles duplicate-candidates
 }
 function makeChain(table: string): unknown {
   return new Proxy(
@@ -87,7 +99,12 @@ vi.mock("@/db/database", () => ({
     selectFrom: (t: unknown) => makeChain(tableKey(t)),
     transaction: () => ({
       execute: async (cb: (trx: unknown) => Promise<unknown>) =>
-        cb({ insertInto: () => makeChain("trx"), deleteFrom: () => makeChain("trx") }),
+        cb({
+          insertInto: () => makeChain("trx"),
+          deleteFrom: () => makeChain("trx"),
+          // REVOKE-2 reads the surviving grants on the ENCLOSING transaction.
+          selectFrom: (t: unknown) => makeChain(tableKey(t)),
+        }),
     }),
   },
 }));
@@ -131,6 +148,8 @@ let duplicatePOST: typeof DuplicateRoute.POST;
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
   state.whereCols = [];
+  state.catalogPerms = [{ id: "p1", key: "admin.users.read" }];
+  state.superuserGrants = [];
   state.role = {
     id: ROLE,
     organization_id: ORG_A,
@@ -227,7 +246,12 @@ describe("roles/[id]/permissions — org scoping + superuser guard", () => {
   });
 
   it("DELETE 200 in own org; 404 for a foreign-org role", async () => {
-    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+    // REVOKE-1: detaching is now bounded by the same subset test as attaching,
+    // so the actor must HOLD `admin.users.read` to remove it. The assertion
+    // under test is unchanged — this suite pins SCOPING (200 own / 404
+    // foreign), and the held permission just keeps the conferral guard out of
+    // the way. The guard itself is pinned in the REVOKE-1 suite below.
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update", "admin.users.read"]));
     expect(
       (
         await permsDELETE(
@@ -245,6 +269,67 @@ describe("roles/[id]/permissions — org scoping + superuser guard", () => {
         )
       ).status,
     ).toBe(404);
+  });
+});
+
+/**
+ * REVOKE-1 / REVOKE-2 on `DELETE roles/[id]/permissions` — the mirror image of
+ * the POST guards above. Detaching a permission is a mutation of authority, so
+ * it takes the same AUTHZ-3 subset test; and stripping `superuser` off the
+ * last role that carries it would leave the platform unadministrable.
+ */
+describe("DELETE roles/[id]/permissions — revocation guards", () => {
+  const del = (ids: string[]) =>
+    permsDELETE(req("permissions", { method: "DELETE", body: { ids } }), ctx);
+
+  it("403 when a non-superadmin detaches a permission they do NOT hold (REVOKE-1)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+    expect((await del(["admin.users.delete"])).status).toBe(403);
+  });
+
+  it("403 when a non-superadmin detaches `superuser`", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.update"]));
+    expect((await del(["superuser"])).status).toBe(403);
+  });
+
+  it("200 — a SUPERADMIN may detach `superuser` while another grant survives", async () => {
+    state.catalogPerms = [{ id: "p-super", key: "superuser" }];
+    state.superuserGrants = [{ app_user_id: "u-1", organization_id: ORG_A, role_id: "other-role" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    expect((await del(["superuser"])).status).toBe(200);
+  });
+
+  it("409 `last_superadmin` when every surviving grant runs through this role (REVOKE-2)", async () => {
+    state.catalogPerms = [{ id: "p-super", key: "superuser" }];
+    state.superuserGrants = [
+      { app_user_id: "u-1", organization_id: ORG_A, role_id: ROLE },
+      { app_user_id: "u-2", organization_id: ORG_A, role_id: ROLE },
+    ];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    const res = await del(["superuser"]);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "last_superadmin",
+      message: "errors.last_superadmin",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.superuser.revocation_denied",
+      "denied",
+      expect.objectContaining({ reason: "last_global_superuser" }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.role.permissions_changed",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("200 detaching an ordinary permission even while superuser grants exist", async () => {
+    // The invariant must not turn into "a role carrying superuser is frozen":
+    // only a removal that actually strips the marker is gated.
+    state.superuserGrants = [{ app_user_id: "u-1", organization_id: ORG_A, role_id: ROLE }];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    expect((await del(["admin.users.read"])).status).toBe(200);
   });
 });
 

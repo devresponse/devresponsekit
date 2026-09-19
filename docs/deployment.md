@@ -9,29 +9,65 @@ order: 60
 
 _Audience: DevOps and release engineers. How this repo ships to production, the one-time database bootstrap, and how to verify a release._
 
-This repo deploys to **Vercel** with a **Neon** serverless Postgres database via a **GitHub Actions** pipeline. For the full environment-variable catalog see [Configuration](./configuration.md); for the self-host/container path see [Docker](./docker.md).
+This repo deploys to **Vercel** with a **Neon** serverless Postgres database. For the full environment-variable catalog see [Configuration](./configuration.md); for the self-host/container path see [Docker](./docker.md).
 
 ---
 
 ## 1. How this repo deploys
 
-The pipeline is **GitHub-Actions-driven, CI-gated, and migrate-first** — it does **not** use Vercel's native "build on git push" integration. [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs when the **CI workflow completes successfully for `main`** (`workflow_run` trigger — a failed CI run never deploys), or on manual `workflow_dispatch`, gated behind a `production` GitHub Environment, and does, in order:
+**Production ships through Vercel's own Git integration: every push to `main` is built and promoted by Vercel, and database migrations are applied by hand beforehand.** That is the whole of the live path today — read §1.1 before merging anything that adds a migration.
+
+The repo also carries two pieces of tooling that automate the safe ordering: a GitHub Actions pipeline ([`deploy.yml`](../.github/workflows/deploy.yml), §1.2) and a local command-line client (`drk-deploy`, §1.3). The Actions pipeline is **written but not configured**, and skips itself; the CLI works today.
+
+### 1.1 The live path: Vercel Git integration + hand-applied migrations
+
+| | What happens today |
+| --- | --- |
+| **Trigger** | every push to `main` — a merge **is** a production deploy |
+| **Deployer** | Vercel's Git integration (deployments appear under the repo's `Production` environment, created by `vercel[bot]`) |
+| **Migrations** | **none** — Vercel builds and promotes; it knows nothing about the database |
+| **Env read at build + runtime** | Vercel → Project → Settings → Environment Variables → **Production** |
+
+Because that path cannot migrate, the ordering contract is enforced by a person. It is a **standing operator gate**, not a suggestion:
+
+> **A pull request that adds or changes a migration is applied to production FIRST and merged SECOND.**
+>
+> While the PR is still open, run `pnpm db:app:migrate` against the production `DATABASE_URL` (the **direct/unpooled** endpoint — §5), confirm it succeeded, and only then merge. Migrations are additive, idempotent and ledgered, so the live build keeps serving happily against the migrated schema; merging first promotes a build that expects a schema the database does not have.
+
+Getting that order wrong is **verifiable without credentials**: `GET https://<domain>/api/health/ready` returns **503 `schema_behind`** while a live build is ahead of one of its migrations, and **200 `ready`** once the ledger is complete (§4). Before anyone looks at the probe the symptom is 500s confined to the routes that touch the new column or table. Migration `0004-oauth-client-secret-rotated-at.sql` documents the worked case (review #43); the runbook entry is in [Troubleshooting](./troubleshooting.md).
+
+### 1.2 The Actions pipeline: optional, and not configured (DEPLOY-1)
+
+[`deploy.yml`](../.github/workflows/deploy.yml) encodes the **migrate-first contract** as CI. It runs when the **CI workflow completes successfully for `main`** (`workflow_run` trigger — a failed CI run never deploys) or on manual `workflow_dispatch`, and does, in order:
 
 1. `pnpm db:app:migrate` against the **direct (non-pooled)** Neon endpoint (`PRODUCTION_DIRECT_DATABASE_URL`).
-2. `vercel pull` → `vercel build --prod` → `vercel deploy --prebuilt --prod` — builds locally in CI and promotes the prebuilt output.
+2. `vercel pull` → `vercel build --prod` → `vercel deploy --prebuilt --prod` — builds in CI and promotes the prebuilt output.
 
-The point of this shape is the **migrate-first contract**: the new build goes live only **after** migrations succeed, so the currently-live build always sees a schema it understands. If step 1 fails, nothing is promoted and production keeps running the previous deployment. This relies on migrations being additive/idempotent (see §5).
+The new build goes live only **after** migrations succeed; if step 1 fails, nothing is promoted and production keeps running the previous deployment.
 
-**Two environment stores.** They are separate and serve different phases:
+**None of that is in force.** This repository holds no value for any of the workflow's four credentials, so its `preflight` job reports "not configured", the deploy job is **skipped**, and the run finishes green with the reason in its job summary (**DEPLOY-1**). Before that guard existed the job ran anyway and failed at the migrate step on every push from 2026-09-07 onward — a permanently red run on `main` that everyone had learned to ignore.
+
+Turning the pipeline on is an operator decision with **two** halves, and doing one without the other is worse than doing neither:
+
+1. Add `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `PRODUCTION_DIRECT_DATABASE_URL` (§3).
+2. **Turn Vercel's automatic production Git deploys OFF** — Vercel → Project → Settings → Git: disable production-branch auto-deploy, or set an "Ignored Build Step". With both paths live, the Vercel half still promotes a build ahead of the migration, which is the exact race the pipeline exists to prevent. Nothing in [`vercel.json`](../vercel.json) enforces this; it is a dashboard setting.
+
+The `output: "standalone"` setting in [`next.config.mjs`](../next.config.mjs) is for the Docker image only — Vercel ignores it; no action needed.
+
+### 1.3 `drk-deploy`: the safe order, on demand
+
+[`vercel-cli/README.md`](../vercel-cli/README.md) documents **`drk-deploy`**, a local client that encodes the same order — **migrate → build → promote → verify** — and needs no repository secrets. `drk-deploy deploy` applies migrations first and promotes only if they succeed; `drk-deploy up` syncs the environment first. It refuses a pooled connection string for migrations, never prints a secret value, and probes `/api/health`, `/api/health/ready` and a deliberately-wrong sign-in after promoting. **If you want a deploy that is ordered end to end today, this is the path that gives it.**
+
+One caveat that keeps §1.1 binding: running `drk-deploy` does not stop Vercel's Git integration from deploying the same push. While auto-deploy is on, a merge can still promote a build ahead of its migration no matter what you do afterwards — so the hand-migration gate stands until half two of §1.2 is done.
+
+### 1.4 Two environment stores
+
+They are separate and serve different phases:
 
 | Store | Holds | Read by |
 | --- | --- | --- |
-| **GitHub Actions secrets** (the `production` environment) | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `PRODUCTION_DIRECT_DATABASE_URL` (optional var `DB_SCHEMA`) | the deploy pipeline |
-| **Vercel env** (Project → Settings → Environment Variables → Production) | runtime + build vars (`DATABASE_URL`, auth secrets, feature flags, `NEXT_PUBLIC_*`, …) | `vercel build` and the deployed functions at runtime |
-
-> **Current state (2026-09).** The `production` GitHub Environment secrets are **not configured**, so `deploy.yml` fails at its migrate step and the live site (`demo.devresponse.ca`) is deployed by **Vercel's git integration on every push to `main`** — i.e. the migrate-first contract above is **not** in force today. Until the Actions path is configured, every core migration must be applied **by hand, before its branch merges** (`pnpm db:app:migrate` against the production `DATABASE_URL`), and the state is verifiable without credentials: `GET https://<domain>/api/health/ready` returns **503 `schema_behind`** while a build is live ahead of one of its migrations and **200 `ready`** once the ledger is complete (see §4). Migration `0004-oauth-client-secret-rotated-at.sql` documents the worked case (review #43).
->
-> **Do NOT also enable Vercel's native Git auto-deploy.** Connecting the repo for Vercel to build on push would **double-deploy and skip the migration step**. Leave the project unconnected to Git, or disable production auto-builds (Vercel → Project → Settings → Git) so this workflow is the sole path to production. The `output: "standalone"` setting in [`next.config.mjs`](../next.config.mjs) is for the Docker image only — Vercel ignores it; no action needed.
+| **Vercel env** (Project → Settings → Environment Variables → Production) | runtime + build vars (`DATABASE_URL`, auth secrets, feature flags, `NEXT_PUBLIC_*`, …) | `vercel build` and the deployed functions at runtime — **this is the live path** |
+| **GitHub Actions secrets** (the `production` GitHub Environment, or repository secrets) | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `PRODUCTION_DIRECT_DATABASE_URL` (optional variable `DB_SCHEMA`) | the Actions pipeline only — **unset today** (§1.2) |
 
 ---
 
@@ -72,9 +108,11 @@ Notes:
 
 ## 3. Vercel project + environment
 
-1. From the repo root: `vercel link` (or import the repo in the dashboard). Framework preset: **Next.js**.
-2. Capture the identifiers from `.vercel/project.json` → GitHub secrets: `orgId` → `VERCEL_ORG_ID`, `projectId` → `VERCEL_PROJECT_ID`. Create a deploy token (Vercel Account Settings → Tokens) → `VERCEL_TOKEN`.
-3. In the repo, create the `production` GitHub Environment (Settings → Environments) and add the secrets above plus `PRODUCTION_DIRECT_DATABASE_URL` (Neon **direct/unpooled** URL). Optionally add required reviewers so each deploy needs approval.
+Step 1 is the live path. Steps 2 and 3 are needed **only** if you are adopting the optional Actions pipeline (§1.2).
+
+1. From the repo root: `vercel link` (or import the repo in the dashboard). Framework preset: **Next.js**. Importing the repo is also what enables the Git integration that deploys production today (§1.1).
+2. _(Actions pipeline only.)_ Capture the identifiers from `.vercel/project.json` → GitHub secrets: `orgId` → `VERCEL_ORG_ID`, `projectId` → `VERCEL_PROJECT_ID`. Create a deploy token (Vercel Account Settings → Tokens) → `VERCEL_TOKEN`.
+3. _(Actions pipeline only.)_ In the repo, create the `production` GitHub Environment (Settings → Environments) and add the secrets above plus `PRODUCTION_DIRECT_DATABASE_URL` (Neon **direct/unpooled** URL); repository secrets work too, but the environment scopes them to this one workflow. Optionally add required reviewers so each deploy needs approval — note that both the `preflight` and the `deploy` job name the environment, so each run then asks for approval twice (the DEPLOY-1 comment in `deploy.yml` explains why `preflight` must name it). And do not stop here: half two of §1.2 — turning Vercel's production auto-deploy off — belongs in the same sitting, or you now have two paths to production.
 
 **Set runtime env in Vercel (Production).** [Configuration](./configuration.md) is the **authoritative** list of every variable (≈60); set it there. Validation is at **runtime, not build time** — a missing required var will not fail `next build`, it throws a 500 on the first request that needs it, so set everything before sending real traffic. The deployment-critical must-set production secrets:
 
@@ -93,7 +131,7 @@ Notes:
 
 ## 4. Deploy + post-deploy verification
 
-Push to `main` (or run the workflow from the Actions tab). After it completes, verify:
+Apply any new migration to production first (§1.1), then push to `main` and let Vercel build and promote it — or, on the tooling paths, run `drk-deploy deploy` (§1.3) or the workflow from the Actions tab (§1.2). Once the deployment is live, verify:
 
 - [ ] `GET https://<domain>/` → the landing page returns **200**.
 - [ ] `GET https://<domain>/api/health/ready` → **200 `{"status":"ready"}`**. This proves the database is reachable **and** the ledger holds every core migration the live build depends on (`REQUIRED_CORE_MIGRATIONS` in `src/db/migrations/migration-plan.ts`). A **503 `{"status":"unavailable","reason":"schema_behind"}`** means the build went live ahead of one of its migrations — run `pnpm db:app:migrate` against production now; the missing ids are in the server log (`kind: "schema-behind"`), never in the response.
@@ -132,9 +170,9 @@ Migrations still use the direct endpoint. Keep `PGPOOL_MAX` small on serverless 
 - **Core** — `0001-initial-schema.sql` is the frozen baseline; further schema changes are added as new **numbered `NNNN-*.sql`** files, applied in lexical order after it and recorded once each in the ledger.
 - **Email templates** — one file per locale — go in `src/db/migrations/locales/`. The English base `locales/0000-email-templates-en.sql` is ALWAYS applied (the fallback every locale resolves to); the localized files (`locales/0001-…`+) apply unless `DB_MIGRATE_LOCALES=0`. Ledger ids are path-prefixed (`locales/<file>`) so they can never collide with a core filename.
 
-CI applies them migrate-first on the next deploy.
+On the live path **you** apply them, against production, **before** the PR merges (§1.1). The tooling paths apply them migrate-first on the next deploy (§1.2, §1.3).
 
-**Rollback.** Roll the app back by **promoting a previous deployment** in Vercel (dashboard → previous deployment → "Promote to Production", or `vercel rollback`). Migrations are **forward-only** — additive, with **no down-migrations** — so the older build runs safely against the newer schema (forward-compatible by design). The deploy pipeline migrates *before* promoting, so a rollback needs no DB change. A migration that genuinely must be reverted is authored as a **new forward migration**. To recover lost *data* (not a bad deploy), use your provider's PITR/snapshot, not a schema revert.
+**Rollback.** Roll the app back by **promoting a previous deployment** in Vercel (dashboard → previous deployment → "Promote to Production", or `vercel rollback`). Migrations are **forward-only** — additive, with **no down-migrations** — so the older build runs safely against the newer schema (forward-compatible by design). Migrations always land *before* the build that needs them — by hand on the live path (§1.1), by the pipeline on the tooling paths — so a rollback needs no DB change. A migration that genuinely must be reverted is authored as a **new forward migration**. To recover lost *data* (not a bad deploy), use your provider's PITR/snapshot, not a schema revert.
 
 See [Troubleshooting](./troubleshooting.md) for operational issues.
 
@@ -148,7 +186,7 @@ A production-ready multi-stage `Dockerfile` (built from the Next.js standalone o
 
 ## 7. CI
 
-CI is **[`.github/workflows/`](../.github/workflows/)** (source of truth). [`ci.yml`](../.github/workflows/ci.yml) runs on push + pull_request and validates quality and behavior — typecheck, lint, format, build, tests + coverage gate, DB-backed integration tests, Playwright e2e + accessibility, a `pnpm audit` hard gate, SDK/schema/doc-link drift checks — but does **not** itself deploy: [`deploy.yml`](../.github/workflows/deploy.yml) fires only after this workflow **succeeds** on `main` (§1). Separate workflows run Trivy, CodeQL, gitleaks, and an advisory Stryker mutation-testing pass on the security core (`mutation.yml`). See [Testing](./testing.md).
+CI is **[`.github/workflows/`](../.github/workflows/)** (source of truth). [`ci.yml`](../.github/workflows/ci.yml) runs on push + pull_request and validates quality and behavior — typecheck, lint, format, build, tests + coverage gate, DB-backed integration tests, Playwright e2e + accessibility, a `pnpm audit` hard gate, SDK/schema/doc-link drift checks — but does **not** itself deploy: [`deploy.yml`](../.github/workflows/deploy.yml) fires only after this workflow **succeeds** on `main`, and then skips itself because its credentials are unset (§1.2). Nothing in CI deploys production today — Vercel's Git integration does, independently of CI's result (§1.1). Separate workflows run Trivy, CodeQL, gitleaks, and an advisory Stryker mutation-testing pass on the security core (`mutation.yml`). See [Testing](./testing.md).
 
 ---
 

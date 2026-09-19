@@ -95,9 +95,10 @@ warrant a comms channel and an owner before deep debugging.
   `DATABASE_URL` (migrations are additive and idempotent), then re-curl
   `/api/health/ready` for `200`. Rolling the app back also works (the older
   build does not read the column) but leaves the gap for the next deploy.
-- Root cause is the deploy path: see [deployment.md §1](./deployment.md#1-how-this-repo-deploys)
-  ("current state") — until the migrate-first Actions pipeline is configured,
-  migrations must be applied by hand **before** their branch merges.
+- Root cause is the deploy path: see [deployment.md §1.1](./deployment.md#1-how-this-repo-deploys)
+  — Vercel's git integration promotes every push to `main` and cannot migrate,
+  so a migration must be applied to production **before** its branch merges.
+  That is the operator gate, and skipping it is how this 503 happens.
 
 ### Elevated 5xx
 - Every uncaught 5xx is logged (`onRequestError` → `logServerError`) and, if

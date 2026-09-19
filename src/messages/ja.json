@@ -1310,7 +1310,8 @@
     "invitation_email_mismatch": "この招待は別のメールアドレス宛てに発行されています。",
     "auth_settings_not_found": "削除するサインアップポリシーの上書きがありません。",
     "not_provisioned": "アカウントのセットアップがまだ完了していません。管理者にお問い合わせください。",
-    "insufficient_scope": "この資格情報はその操作を許可されていません。"
+    "insufficient_scope": "この資格情報はその操作を許可されていません。",
+    "last_superadmin": "これはプラットフォーム最後のスーパー管理者です。この変更ではプラットフォームを管理できる人がいなくなります。"
   },
   "account": {
     "appTitle": "アカウント",

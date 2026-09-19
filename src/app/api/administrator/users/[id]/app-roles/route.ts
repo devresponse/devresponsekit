@@ -6,7 +6,16 @@ import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  canAccessOrg,
+  isSuperadmin,
+  resolveOrgScope,
+  wouldStripLastGlobalSuperuser,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
+  LAST_SUPERADMIN_STATUS,
+} from "@/lib/admin/access-scope.server";
 import {
   permissionKeysForRoles,
   conferrablePermissions,
@@ -245,14 +254,73 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("role_not_found", 404, request);
   }
 
-  await db.transaction().execute(async (trx) => {
+  // REVOKE-1 (symmetry): the AUTHZ-3 conferral guard now bounds the REVOKE as
+  // well as the grant. It was only ever applied to POST, which left the mirror
+  // image wide open: an org admin holding `admin.roles.assign` could not GRANT
+  // the seeded org-scoped `superuser` role, but could freely REVOKE it — and
+  // could not confer it back afterwards, since AUTHZ-3 forbids conferring what
+  // you do not hold. Revocation is a mutation of authority the actor does not
+  // possess, so it takes the same test against the REMOVED set: a
+  // non-SUPERADMIN may only revoke a role whose conferred permissions are a
+  // subset of what they could themselves confer. A bearer credential is bounded
+  // by its scopes and never takes the SUPERADMIN fast-path (P1-1), identically
+  // to POST above. A role that no longer exists confers nothing and the delete
+  // below is a no-op, so the guard has nothing to measure.
+  if (role && !(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+    const conferred = await permissionKeysForRoles([role.id]);
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheld = unheldPermissionKeys(conferrable, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+  }
+
+  // REVOKE-2: a SUPERADMIN passes the guard above by construction, so this is
+  // the only thing standing between "demote a co-superadmin" and "leave the
+  // platform with none". The check runs INSIDE the deleting transaction and
+  // takes a row lock on the superuser assignments (see
+  // `activeGlobalSuperuserGrants`), so two concurrent revocations aimed at two
+  // different superadmins cannot each believe the other survives.
+  const outcome = await db.transaction().execute(async (trx) => {
+    const stripsLast = await wouldStripLastGlobalSuperuser(
+      {
+        assignments: [
+          {
+            appUserId: target.appUserId,
+            organizationId: parsed.data.organizationId,
+            roleId: parsed.data.roleId,
+          },
+        ],
+      },
+      trx,
+    );
+    if (stripsLast) return "last_superadmin" as const;
     await trx
       .deleteFrom("app_user_roles")
       .where("app_user_id", "=", target.appUserId)
       .where("organization_id", "=", parsed.data.organizationId)
       .where("role_id", "=", parsed.data.roleId)
       .execute();
+    return "revoked" as const;
   });
+
+  if (outcome === "last_superadmin") {
+    await auditUserAction(LAST_SUPERADMIN_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      requestId: guard.requestId,
+      reason: LAST_SUPERADMIN_REASON,
+      metadata: {
+        action: "role_revoke",
+        roleId: parsed.data.roleId,
+        roleKey: role?.key ?? null,
+        organizationId: parsed.data.organizationId,
+      },
+    });
+    return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   await auditUserAction("admin.user.role_revoked", "success", {
     request,

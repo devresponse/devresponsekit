@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 // decision functions never touch it; the membership helpers run a single
 // `.select().where().where().limit().executeTakeFirst()` we route to a fn.
 const membershipTakeFirst = vi.fn();
+// `activeGlobalSuperuserGrants` (REVOKE-2) is the one helper here that reads a
+// LIST rather than a single row, so the stub routes `.execute()` separately.
+const grantsExecute = vi.fn();
 vi.mock("@/db/database", () => ({
   db: {
     selectFrom: () => {
@@ -12,6 +15,7 @@ vi.mock("@/db/database", () => ({
         {
           get(_t, prop) {
             if (prop === "executeTakeFirst") return membershipTakeFirst;
+            if (prop === "execute") return grantsExecute;
             return () => chain;
           },
         },
@@ -22,6 +26,7 @@ vi.mock("@/db/database", () => ({
 }));
 
 import {
+  activeGlobalSuperuserGrants,
   canAccessUser,
   hasCrossOrgReach,
   isOrgBound,
@@ -30,12 +35,19 @@ import {
   resolveOrgScope,
   canAccessOrg,
   requiresSuperadminForSharedTarget,
+  stripsLastGlobalSuperuser,
   userHasMembershipOutsideOrg,
+  wouldStripLastGlobalSuperuser,
   SUPERADMIN_PERMISSION,
   type OrgScope,
+  type SuperuserGrant,
 } from "@/lib/admin/access-scope.server";
 
-beforeEach(() => membershipTakeFirst.mockReset());
+beforeEach(() => {
+  membershipTakeFirst.mockReset();
+  grantsExecute.mockReset();
+  grantsExecute.mockResolvedValue([]);
+});
 afterEach(() => vi.restoreAllMocks());
 
 /**
@@ -241,5 +253,88 @@ describe("requiresSuperadminForSharedTarget (AUTHZ-2)", () => {
   it("is false for an org admin acting on a single-org target", async () => {
     membershipTakeFirst.mockResolvedValue(undefined);
     expect(await requiresSuperadminForSharedTarget(orgScope, "u1")).toBe(false);
+  });
+});
+
+/**
+ * REVOKE-2 — the last-superadmin invariant, tested as the pure rule it is.
+ *
+ * `stripsLastGlobalSuperuser` is the single predicate all four revocation
+ * paths consult (role-assignment delete, role-permission strip, membership
+ * PATCH away from active, membership DELETE), so the rule itself is pinned
+ * here once rather than re-derived per route.
+ */
+describe("stripsLastGlobalSuperuser (REVOKE-2)", () => {
+  const g1: SuperuserGrant = { appUserId: "u1", organizationId: "org-a", roleId: "r-super" };
+  const g2: SuperuserGrant = { appUserId: "u2", organizationId: "org-b", roleId: "r-other" };
+
+  it("is false when there are NO grants — nothing to protect, never a dead-lock", () => {
+    // The load-bearing escape hatch: a platform whose superuser is conferred
+    // through a GROUP (which `userIsGlobalSuperuser` does not count) must not
+    // have every role edit and every membership change refused forever.
+    expect(stripsLastGlobalSuperuser([], { roleIds: ["r-super"] })).toBe(false);
+  });
+
+  it("is false while one grant survives the removal", () => {
+    expect(stripsLastGlobalSuperuser([g1, g2], { assignments: [g1] })).toBe(false);
+  });
+
+  it("is true when the removal destroys the only grant", () => {
+    expect(stripsLastGlobalSuperuser([g1], { assignments: [g1] })).toBe(true);
+  });
+
+  it("is false when the removed assignment differs in ANY of the three keys", () => {
+    expect(stripsLastGlobalSuperuser([g1], { assignments: [{ ...g1, roleId: "other" }] })).toBe(
+      false,
+    );
+    expect(stripsLastGlobalSuperuser([g1], { assignments: [{ ...g1, appUserId: "u9" }] })).toBe(
+      false,
+    );
+    expect(
+      stripsLastGlobalSuperuser([g1], { assignments: [{ ...g1, organizationId: "org-z" }] }),
+    ).toBe(false);
+  });
+
+  it("a role strip kills EVERY grant conferred through that role", () => {
+    const sameRole: SuperuserGrant = { ...g2, roleId: "r-super" };
+    expect(stripsLastGlobalSuperuser([g1, sameRole], { roleIds: ["r-super"] })).toBe(true);
+    expect(stripsLastGlobalSuperuser([g1, g2], { roleIds: ["r-other"] })).toBe(false);
+  });
+
+  it("a membership removal kills every grant held in that (user, org)", () => {
+    expect(
+      stripsLastGlobalSuperuser([g1], {
+        memberships: [{ appUserId: "u1", organizationId: "org-a" }],
+      }),
+    ).toBe(true);
+    // Same user, DIFFERENT org: the grant in org-a is untouched.
+    expect(
+      stripsLastGlobalSuperuser([g1], {
+        memberships: [{ appUserId: "u1", organizationId: "org-b" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("an empty removal never strips anything", () => {
+    expect(stripsLastGlobalSuperuser([g1], {})).toBe(false);
+  });
+});
+
+describe("activeGlobalSuperuserGrants / wouldStripLastGlobalSuperuser (REVOKE-2)", () => {
+  it("maps the DB rows onto the grant shape", async () => {
+    grantsExecute.mockResolvedValue([
+      { app_user_id: "u1", organization_id: "org-a", role_id: "r-super" },
+    ]);
+    await expect(activeGlobalSuperuserGrants()).resolves.toEqual([
+      { appUserId: "u1", organizationId: "org-a", roleId: "r-super" },
+    ]);
+  });
+
+  it("feeds those grants to the pure rule", async () => {
+    grantsExecute.mockResolvedValue([
+      { app_user_id: "u1", organization_id: "org-a", role_id: "r-super" },
+    ]);
+    await expect(wouldStripLastGlobalSuperuser({ roleIds: ["r-super"] })).resolves.toBe(true);
+    await expect(wouldStripLastGlobalSuperuser({ roleIds: ["r-other"] })).resolves.toBe(false);
   });
 });

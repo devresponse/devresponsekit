@@ -15,6 +15,17 @@ const itemsExecute = vi.fn();
 const selectFirst = vi.fn();
 const insertExecute = vi.fn();
 
+/**
+ * Rows `activeGlobalSuperuserGrants` sees (REVOKE-2). Kept apart from
+ * `itemsExecute` because PATCH/DELETE now read TWO different tables:
+ * the memberships they are about to mutate, and the surviving superuser
+ * grants. Empty by default, so a platform with nothing to protect behaves
+ * exactly as before.
+ */
+const superuserGrants: {
+  rows: Array<{ app_user_id: string; organization_id: string; role_id: string }>;
+} = { rows: [] };
+
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
 }));
@@ -30,12 +41,14 @@ vi.mock("@/lib/audit.server", () => ({
 }));
 
 vi.mock("@/db/database", () => {
-  function makeChain() {
+  function makeChain(table: string) {
     const proxy: unknown = new Proxy(
       {},
       {
         get(_, prop) {
-          if (prop === "execute") return itemsExecute;
+          if (prop === "execute") {
+            return table === "app_user_roles" ? async () => superuserGrants.rows : itemsExecute;
+          }
           if (prop === "executeTakeFirst") return selectFirst;
           if (prop === "executeTakeFirstOrThrow") {
             return async () => {
@@ -65,9 +78,27 @@ vi.mock("@/db/database", () => {
     );
     return proxy;
   }
+  const tableKey = (t: unknown) => String(t).split(" ")[0] ?? "";
+  const updateChain = () => ({
+    set: () => ({
+      where: () => ({
+        execute: itemsExecute,
+        where: () => ({ execute: itemsExecute }),
+      }),
+    }),
+  });
+  const deleteChain = () => ({
+    where: () => ({
+      execute: itemsExecute,
+      where: () => ({
+        execute: itemsExecute,
+        where: () => ({ execute: itemsExecute }),
+      }),
+    }),
+  });
   return {
     db: {
-      selectFrom: () => makeChain(),
+      selectFrom: (t: unknown) => makeChain(tableKey(t)),
       insertInto: () => ({
         values: () => ({
           returning: () => ({
@@ -80,22 +111,17 @@ vi.mock("@/db/database", () => {
           }),
         }),
       }),
-      updateTable: () => ({
-        set: () => ({
-          where: () => ({
-            execute: itemsExecute,
-            where: () => ({ execute: itemsExecute }),
+      updateTable: updateChain,
+      deleteFrom: deleteChain,
+      // PATCH/DELETE now check REVOKE-2 and write in ONE transaction, so the
+      // trx stub has to read as well as write.
+      transaction: () => ({
+        execute: async (cb: (trx: unknown) => Promise<unknown>) =>
+          cb({
+            selectFrom: (t: unknown) => makeChain(tableKey(t)),
+            updateTable: updateChain,
+            deleteFrom: deleteChain,
           }),
-        }),
-      }),
-      deleteFrom: () => ({
-        where: () => ({
-          execute: itemsExecute,
-          where: () => ({
-            execute: itemsExecute,
-            where: () => ({ execute: itemsExecute }),
-          }),
-        }),
       }),
     },
   };
@@ -159,6 +185,7 @@ beforeEach(async () => {
     insertExecute,
   ])
     m.mockReset();
+  superuserGrants.rows = [];
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({
     id: ORG_ID,
@@ -271,5 +298,129 @@ describe("DELETE /api/administrator/organizations/:id/members", () => {
       params: Promise.resolve({ id: ORG_ID }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+/**
+ * REVOKE-1 / REVOKE-2 on the ORG-CENTRIC member routes.
+ *
+ * This route never calls `resolveTargetUser`, which is exactly why the review
+ * #7 rank guard and the last-superadmin invariant were both missing here: an
+ * org admin holding only `admin.orgs.update` could block, suspend or delete a
+ * SUPERADMIN co-member's membership — the same lockout the user-centric twin
+ * refuses. The real `refuseOutrankingTarget` runs in this suite (nothing mocks
+ * `user-target.server` here).
+ */
+const MEMBERSHIP_ID = "b2c3d4e5-f6a7-4890-bcde-f12345678901";
+/** One membership row as the route's `loadScopedMembers` join returns it. */
+const memberRow = {
+  id: MEMBERSHIP_ID,
+  app_user_id: "u-member",
+  better_auth_user_id: "ba-member",
+  primary_email: "member@example.com",
+  display_name: "Member",
+  status: "active",
+};
+const memberBody = { membershipIds: [MEMBERSHIP_ID] };
+
+describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () => {
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    itemsExecute.mockResolvedValue([memberRow]);
+  });
+
+  /**
+   * Actor is a non-superadmin admin OF THIS ORG (so `canAccessOrg` passes and
+   * the rank guard is what decides); the MEMBER resolves to `memberPerms`.
+   */
+  function ranks(perms: string[], memberPerms: string[]) {
+    const inThisOrg = { ...ORG_ADMIN(perms), organizationId: ORG_ID };
+    accessGetter.mockImplementation((id: string) =>
+      id === "ba-1" ? inThisOrg : { ...inThisOrg, appUserId: "u-member", permissions: memberPerms },
+    );
+  }
+
+  it("PATCH 403 + denied audit when the member is a SUPERADMIN and the actor is not", async () => {
+    ranks(["admin.orgs.update"], ["admin.orgs.update", "superuser"]);
+    const res = await PATCH(jsonReq({ ...memberBody, status: "blocked" }), {
+      params: Promise.resolve({ id: ORG_ID }),
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "forbidden" });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.action_denied",
+        outcome: "denied",
+        reason: "target_outranks_actor",
+      }),
+    );
+  });
+
+  it("DELETE 403 when the member is a SUPERADMIN and the actor is not", async () => {
+    ranks(["admin.orgs.update"], ["admin.orgs.update", "superuser"]);
+    const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
+    expect(res.status).toBe(403);
+  });
+
+  it("DELETE 200 for a plain member — ordinary org administration is unchanged", async () => {
+    ranks(["admin.orgs.update", "shell.view"], ["shell.view"]);
+    const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
+    expect(res.status).toBe(200);
+  });
+
+  it("DELETE 200 for a SUPERADMIN actor against a superadmin member", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("PATCH/DELETE organizations/:id/members — last-superadmin invariant (REVOKE-2)", () => {
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    itemsExecute.mockResolvedValue([memberRow]);
+    superuserGrants.rows = [
+      { app_user_id: "u-member", organization_id: ORG_ID, role_id: "r-super" },
+    ];
+  });
+
+  it("PATCH 409 `last_superadmin` when blocking the only remaining superadmin", async () => {
+    const res = await PATCH(jsonReq({ ...memberBody, status: "blocked" }), {
+      params: Promise.resolve({ id: ORG_ID }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "last_superadmin",
+      message: "errors.last_superadmin",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.superuser.revocation_denied",
+        outcome: "denied",
+        reason: "last_global_superuser",
+      }),
+    );
+  });
+
+  it("PATCH 200 REACTIVATING that member — a move TO active can only add a grant", async () => {
+    const res = await PATCH(jsonReq({ ...memberBody, status: "active" }), {
+      params: Promise.resolve({ id: ORG_ID }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("DELETE 409 when removing the only remaining superadmin's membership", async () => {
+    const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
+    expect(res.status).toBe(409);
+  });
+
+  it("DELETE 200 while another superadmin survives in a different org", async () => {
+    superuserGrants.rows = [
+      ...superuserGrants.rows,
+      { app_user_id: "u-other", organization_id: "other-org", role_id: "r-super" },
+    ];
+    const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
+    expect(res.status).toBe(200);
   });
 });

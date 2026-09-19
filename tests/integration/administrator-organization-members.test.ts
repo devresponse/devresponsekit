@@ -299,6 +299,46 @@ describe("DELETE /api/administrator/organizations/:id/members", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  /** 501 ids — one past the product-wide batch ceiling. */
+  const overCapIds = () => Array.from({ length: 501 }, () => MEMBERSHIP_ID);
+
+  /**
+   * The REVOKE-1 rank guard costs a `getUserAccessContext` per DISTINCT member
+   * and runs them one at a time (it must: it stops at the first refusal so a
+   * mixed batch writes ONE denial audit row). With no ceiling on the array a
+   * single rate-limited request could become thousands of sequential
+   * round-trips holding a pool connection, so both schemas cap at the
+   * product-wide `MAX_BULK_IDS`.
+   */
+  it("DELETE rejects a batch above MAX_BULK_IDS with 400", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    const res = await DELETE(jsonReq({ membershipIds: overCapIds() }), {
+      params: Promise.resolve({ id: ORG_ID }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH rejects a batch above MAX_BULK_IDS with 400", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    const res = await PATCH(jsonReq({ membershipIds: overCapIds(), status: "blocked" }), {
+      params: Promise.resolve({ id: ORG_ID }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH still accepts a batch AT the cap (the ceiling is not off by one)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    itemsExecute.mockResolvedValue([]); // no rows resolve → 404, i.e. PAST validation
+    const atCap = Array.from({ length: 500 }, () => MEMBERSHIP_ID);
+    const res = await PATCH(jsonReq({ membershipIds: atCap, status: "blocked" }), {
+      params: Promise.resolve({ id: ORG_ID }),
+    });
+    expect(res.status).not.toBe(400);
+  });
 });
 
 /**

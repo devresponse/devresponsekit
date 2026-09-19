@@ -2,7 +2,13 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { sql, type SqlBool } from "kysely";
 import { db } from "@/db/database";
-import { userHasMembershipOutsideOrg, type OrgScope } from "@/lib/admin/access-scope.server";
+import {
+  userHasMembershipOutsideOrg,
+  membershipCascadeStripsLastGlobalSuperuser,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
+  type OrgScope,
+} from "@/lib/admin/access-scope.server";
 import { auditEvent } from "@/lib/audit.server";
 
 /**
@@ -23,6 +29,19 @@ import { auditEvent } from "@/lib/audit.server";
  *     org membership and never changes the account-global status (except a
  *     grant may lift a still-pending account so it becomes usable). A
  *     SUPERADMIN (`scope.kind === "all"`) retains account-global authority.
+ *   - It DOES enforce REVOKE-2 (the last-superadmin invariant). Every action
+ *     except `approve`/`reactivate` moves the target's memberships AWAY from
+ *     `active`, which is precisely what breaks the active-membership join that
+ *     makes a `superuser` assignment count — the same transition the four
+ *     revocation routes refuse with 409 `last_superadmin`. The check lives
+ *     HERE, in the shared core, rather than in the three routes above it
+ *     (`POST /api/administrator/users/[id]/status`,
+ *     `POST /api/v1/users/[id]/status`, `POST /users/bulk`), so a fourth
+ *     caller cannot forget it (review #444). The rank guard those routes carry
+ *     already keeps an org admin off a superadmin target; this is what stops a
+ *     SUPERADMIN — whom `targetOutranksActor` exempts outright — from blocking
+ *     or suspending the platform's last superadmin, including themselves, and
+ *     leaving nobody able to administer it.
  *   - The `reason` field is optional and surfaces in audit metadata so
  *     ops teams can answer "who blocked this user and why". Callers
  *     validate its length (max 500) at the route schema.
@@ -70,10 +89,17 @@ export interface AdminStatusChangeInput {
 
 export type AdminStatusChangeResult =
   | { ok: true; status: AdminStatusChangeInput["newStatus"] }
-  | { ok: false; error: "not_found" | "precondition_failed" };
+  | { ok: false; error: "not_found" | "precondition_failed" | "last_superadmin" };
 
 /** Internal signal used to roll the transaction back on a lost CAS (#44). */
 class PreconditionFailedError extends Error {}
+
+/**
+ * Internal signal used to roll the transaction back on a REVOKE-2 refusal
+ * (review #444). Same shape as the CAS signal above: an expected outcome, not
+ * a fault — the transaction rolls back untouched and the caller answers 409.
+ */
+class LastSuperadminError extends Error {}
 
 export async function performAdminStatusChange(
   input: AdminStatusChangeInput,
@@ -119,6 +145,30 @@ export async function performAdminStatusChange(
           .executeTakeFirst();
         if (Number(claim.numUpdatedRows ?? 0) === 0) throw new PreconditionFailedError();
       }
+
+      // REVOKE-2 (review #444): refuse before writing anything when this
+      // transition would leave the platform with no global superuser at all.
+      // Only a move AWAY from `active` can destroy a grant — `approve` /
+      // `reactivate` can only ever ADD one, so they are never gated, exactly as
+      // the membership PATCH route treats a status of `active`.
+      //
+      // The affected (user, org) pairs are read INSIDE the transaction and with
+      // the SAME org confinement the membership UPDATE below applies, so the
+      // predicate measures precisely the rows that are about to move: every org
+      // for an account-global actor, only the actor's own org for an org admin
+      // (AUTHZ-1). `wouldStripLastGlobalSuperuser` then takes its row locks on
+      // the grant relations here, inside this transaction, so a status change
+      // racing one of the four revocation routes cannot have both sides
+      // conclude that the other's superadmin survives.
+      if (input.newMembershipStatus !== "active") {
+        const stripsLast = await membershipCascadeStripsLastGlobalSuperuser(
+          target.id,
+          trx,
+          input.scope.kind === "org" ? input.scope.organizationId : undefined,
+        );
+        if (stripsLast) throw new LastSuperadminError();
+      }
+
       // Account-global status:
       //  - SUPERADMIN, or a single-org user managed by their org admin → the
       //    account status mirrors the action (unchanged behavior).
@@ -164,6 +214,30 @@ export async function performAdminStatusChange(
     // A lost CAS is an expected outcome, not a fault: the transaction rolled
     // back untouched and the caller answers 412 (review #44).
     if (err instanceof PreconditionFailedError) return { ok: false, error: "precondition_failed" };
+    // REVOKE-2: likewise an expected refusal. The audit row is written HERE so
+    // every caller of this core — both status routes and the bulk helper —
+    // records the denial with the same event/reason the four revocation routes
+    // use, and the audit explorer can list every attempt with one filter.
+    if (err instanceof LastSuperadminError) {
+      await auditEvent({
+        eventType: LAST_SUPERADMIN_EVENT,
+        outcome: "denied",
+        actorBetterAuthUserId: input.actorBetterAuthUserId,
+        appUserId: target.id,
+        email: target.primary_email,
+        reason: LAST_SUPERADMIN_REASON,
+        request: input.request,
+        requestId: input.requestId,
+        metadata: {
+          action: "status_change",
+          statusEvent: input.eventType,
+          newStatus: input.newStatus,
+          newMembershipStatus: input.newMembershipStatus,
+          scope: input.scope.kind,
+        },
+      });
+      return { ok: false, error: "last_superadmin" };
+    }
     throw err;
   }
 

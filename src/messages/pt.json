@@ -671,7 +671,8 @@
       "exportTruncated": "A exportação atingiu o limite máximo de linhas. Refine os filtros e exporte novamente para obter o restante.",
       "originNotAllowed": "O anfitrião de origem não está na lista permitida para redirecionamentos de SSO.",
       "memberExists": "Este endereço já pertence a um membro ativo.",
-      "invitationExists": "Já existe um convite pendente para este endereço."
+      "invitationExists": "Já existe um convite pendente para este endereço.",
+      "lastSuperadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la."
     },
     "roles": {
       "title": "Funções",

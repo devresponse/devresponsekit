@@ -7,15 +7,22 @@ const membershipTakeFirst = vi.fn();
 // `activeGlobalSuperuserGrants` (REVOKE-2) is the one helper here that reads a
 // LIST rather than a single row, so the stub routes `.execute()` separately.
 const grantsExecute = vi.fn();
+// `membershipCascadeStripsLastGlobalSuperuser` (REVOKE-2) reads a SECOND list —
+// the target's affected memberships — before the grant read, so `.execute()`
+// has to be routed by table or the two would share one stub.
+const membershipRowsExecute = vi.fn();
 vi.mock("@/db/database", () => ({
   db: {
-    selectFrom: () => {
+    selectFrom: (table: unknown) => {
+      const rows = String(table).startsWith("app_user_roles")
+        ? grantsExecute
+        : membershipRowsExecute;
       const chain: unknown = new Proxy(
         {},
         {
           get(_t, prop) {
             if (prop === "executeTakeFirst") return membershipTakeFirst;
-            if (prop === "execute") return grantsExecute;
+            if (prop === "execute") return rows;
             return () => chain;
           },
         },
@@ -35,6 +42,7 @@ import {
   resolveOrgScope,
   canAccessOrg,
   requiresSuperadminForSharedTarget,
+  membershipCascadeStripsLastGlobalSuperuser,
   stripsLastGlobalSuperuser,
   userHasMembershipOutsideOrg,
   wouldStripLastGlobalSuperuser,
@@ -42,11 +50,14 @@ import {
   type OrgScope,
   type SuperuserGrant,
 } from "@/lib/admin/access-scope.server";
+import { db as mockedDb } from "@/db/database";
 
 beforeEach(() => {
   membershipTakeFirst.mockReset();
   grantsExecute.mockReset();
   grantsExecute.mockResolvedValue([]);
+  membershipRowsExecute.mockReset();
+  membershipRowsExecute.mockResolvedValue([]);
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -336,5 +347,55 @@ describe("activeGlobalSuperuserGrants / wouldStripLastGlobalSuperuser (REVOKE-2)
     ]);
     await expect(wouldStripLastGlobalSuperuser({ roleIds: ["r-super"] })).resolves.toBe(true);
     await expect(wouldStripLastGlobalSuperuser({ roleIds: ["r-other"] })).resolves.toBe(false);
+  });
+});
+
+/**
+ * REVOKE-2 for the ACCOUNT-LIFECYCLE cascades (review #444). Soft-delete and
+ * `performAdminStatusChange` do not name the rows they remove — they blanket a
+ * user's memberships — so they resolve the affected (user, org) pairs and feed
+ * the SAME predicate rather than growing a second, drift-prone mechanism.
+ */
+describe("membershipCascadeStripsLastGlobalSuperuser (REVOKE-2)", () => {
+  // The helper takes NO default executor on purpose — it must run inside the
+  // caller's transaction or the row lock protects nothing — so stand the mocked
+  // `db` in for one.
+  const trx = mockedDb as unknown as Parameters<
+    typeof membershipCascadeStripsLastGlobalSuperuser
+  >[1];
+
+  it("refuses when the cascade covers the only remaining grant", async () => {
+    membershipRowsExecute.mockResolvedValue([{ organization_id: "org-a" }]);
+    grantsExecute.mockResolvedValue([
+      { app_user_id: "u1", organization_id: "org-a", role_id: "r-super" },
+    ]);
+    await expect(membershipCascadeStripsLastGlobalSuperuser("u1", trx)).resolves.toBe(true);
+  });
+
+  it("allows it when another user keeps a grant", async () => {
+    membershipRowsExecute.mockResolvedValue([{ organization_id: "org-a" }]);
+    grantsExecute.mockResolvedValue([
+      { app_user_id: "u1", organization_id: "org-a", role_id: "r-super" },
+      { app_user_id: "u2", organization_id: "org-a", role_id: "r-super" },
+    ]);
+    await expect(membershipCascadeStripsLastGlobalSuperuser("u1", trx)).resolves.toBe(false);
+  });
+
+  it("allows it when the surviving grant is in an org the cascade does not reach", async () => {
+    // The AUTHZ-1 confinement: an org admin's status change only moves their
+    // own org's membership, so a grant held in another org is untouched.
+    membershipRowsExecute.mockResolvedValue([{ organization_id: "org-a" }]);
+    grantsExecute.mockResolvedValue([
+      { app_user_id: "u1", organization_id: "org-b", role_id: "r-super" },
+    ]);
+    await expect(membershipCascadeStripsLastGlobalSuperuser("u1", trx, "org-a")).resolves.toBe(
+      false,
+    );
+  });
+
+  it("is a no-op on a platform with no direct-assignment superuser", async () => {
+    membershipRowsExecute.mockResolvedValue([{ organization_id: "org-a" }]);
+    grantsExecute.mockResolvedValue([]);
+    await expect(membershipCascadeStripsLastGlobalSuperuser("u1", trx)).resolves.toBe(false);
   });
 });

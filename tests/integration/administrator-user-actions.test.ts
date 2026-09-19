@@ -33,6 +33,9 @@ const requiresSuperadminMock = vi.fn();
 // .test.ts); configurable so the review #7 guard tests can assert it is NOT
 // reached for an out-ranking target.
 const statusChangeMock = vi.fn();
+// REVOKE-2 last-superadmin predicate for the soft-delete cascade (review #444).
+// Default false = the platform has other superadmins.
+const cascadeStripsLastMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -42,6 +45,7 @@ vi.mock("@/lib/admin/access-scope.server", async () => {
   return {
     ...actual,
     requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
+    membershipCascadeStripsLastGlobalSuperuser: (...a: unknown[]) => cascadeStripsLastMock(...a),
   };
 });
 vi.mock("@/lib/auth-status", async () => {
@@ -101,6 +105,9 @@ vi.mock("@/db/database", () => ({
     transaction: () => ({
       execute: async (cb: (trx: unknown) => Promise<unknown>) =>
         cb({
+          // REVOKE-2 reads the target's memberships + the surviving grants
+          // inside the soft-delete transaction (review #444).
+          selectFrom: () => makeChain(),
           updateTable: () => makeChain(),
           insertInto: () => makeChain(),
         }),
@@ -163,6 +170,8 @@ beforeEach(() => {
   requiresSuperadminMock.mockResolvedValue(false); // target not shared by default
   statusChangeMock.mockReset();
   statusChangeMock.mockResolvedValue({ ok: true, status: "active" });
+  cascadeStripsLastMock.mockReset();
+  cascadeStripsLastMock.mockResolvedValue(false);
 });
 afterEach(() => vi.resetModules());
 
@@ -457,6 +466,45 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
         outcome: "success",
         reason: "spam-account",
       }),
+    );
+  });
+
+  /**
+   * REVOKE-2 (review #444). The soft-delete cascade blocks EVERY membership the
+   * target holds — the same transition `PATCH/DELETE …/memberships` refuses
+   * with 409 — and `targetOutranksActor` exempts a superadmin actor outright,
+   * so this is what stops the platform's last superadmin from soft-deleting
+   * themselves and leaving nobody able to administer it.
+   */
+  it("returns 409 last_superadmin when the cascade would strip the last global superuser", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
+    dbMock.mockResolvedValue(targetRow);
+    authBan.mockResolvedValue({ ok: true });
+    cascadeStripsLastMock.mockResolvedValue(true);
+    const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
+    const res = await DELETE(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+        method: "DELETE",
+        body: JSON.stringify({}),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "last_superadmin" }));
+    // The ban was already applied when the refusal fired, so the saga must have
+    // compensated it — the account has to be left exactly as it was.
+    expect(authUnban).toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.superuser.revocation_denied",
+        outcome: "denied",
+        reason: "last_global_superuser",
+      }),
+    );
+    // NOT the generic 500-class cascade failure.
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.soft_delete_failed" }),
     );
   });
 
@@ -893,5 +941,48 @@ describe("POST /users/[id]/password — rank guard precedes body parsing", () =>
     expect(jsonSpy).not.toHaveBeenCalled();
     expect(authForget).not.toHaveBeenCalled();
     expect(authSetPassword).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * REVOKE-2 (review #444) — `POST /users/[id]/status` maps the shared core's
+ * `last_superadmin` refusal onto 409, not the catch-all 404.
+ *
+ * The rank guard on this route keeps an org admin off a superadmin target, but
+ * it exempts a SUPERADMIN actor outright, so `block` / `suspend` was the one
+ * request that could still empty the platform's superadmin set — the same
+ * unrecoverable state the four revocation routes refuse. The refusal itself and
+ * its audit row live in `performAdminStatusChange` (admin-status-action.test.ts
+ * covers them); what is pinned here is that the route does not swallow it.
+ */
+describe("POST /api/administrator/users/[id]/status — last superadmin (REVOKE-2)", () => {
+  async function postStatus() {
+    const { POST } = await import("@/app/api/administrator/users/[id]/status/route");
+    return POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/status`, {
+        method: "POST",
+        body: JSON.stringify({ action: "block" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+  }
+
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.manage"));
+    dbMock.mockResolvedValue(targetRow);
+  });
+
+  it("returns 409 last_superadmin when the core refuses", async () => {
+    statusChangeMock.mockResolvedValue({ ok: false, error: "last_superadmin" });
+    const res = await postStatus();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "last_superadmin" }));
+  });
+
+  it("still returns 404 for a genuinely missing target", async () => {
+    statusChangeMock.mockResolvedValue({ ok: false, error: "not_found" });
+    const res = await postStatus();
+    expect(res.status).toBe(404);
   });
 });

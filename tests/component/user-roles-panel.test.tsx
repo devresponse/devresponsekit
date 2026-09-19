@@ -158,4 +158,48 @@ describe("UserRolesPanel", () => {
     expect(callOf("DELETE")![0]).toContain(`/users/${USER_ID}/app-roles`);
     expect(bodyOf(callOf("DELETE")!)).toEqual({ roleId: ROLE, organizationId: ORG });
   });
+
+  /**
+   * REVOKE-2 (review #444). The 409 is the single most consequential refusal in
+   * the console — the platform declining to let itself be left with no
+   * administrator. Showing the generic "couldn't remove" for it tells the
+   * operator nothing and invites them to try another route, so the panel reads
+   * the envelope's `error` code, the way the organizations and enterprise-apps
+   * grids already do for their own 409s.
+   */
+  it("names the last-superadmin refusal instead of the generic remove error", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation((url: string, init?: { method?: string }) => {
+      if (init?.method === "DELETE") {
+        return Promise.resolve(
+          jsonOk({ error: "last_superadmin", message: "errors.last_superadmin" }, 409),
+        );
+      }
+      if (String(url).includes(`/users/${USER_ID}/roles`))
+        return Promise.resolve(jsonOk(ROLE_ROWS));
+      return Promise.resolve(jsonOk({ items: [], total: 0 }));
+    });
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign />);
+
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
+
+    expect(await screen.findByText(/last platform superadmin/i)).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't remove the role.")).not.toBeInTheDocument();
+  });
+
+  it("still shows the generic error for any OTHER failure", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation((url: string, init?: { method?: string }) => {
+      if (init?.method === "DELETE") return Promise.resolve(jsonOk({ error: "forbidden" }, 403));
+      if (String(url).includes(`/users/${USER_ID}/roles`))
+        return Promise.resolve(jsonOk(ROLE_ROWS));
+      return Promise.resolve(jsonOk({ items: [], total: 0 }));
+    });
+    renderWithIntl(<UserRolesPanel userId={USER_ID} canAssign />);
+
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
+
+    expect(await screen.findByText("Couldn't remove the role.")).toBeInTheDocument();
+    expect(screen.queryByText(/last platform superadmin/i)).not.toBeInTheDocument();
+  });
 });

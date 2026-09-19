@@ -13,6 +13,7 @@ import {
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
+import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import {
@@ -84,6 +85,10 @@ async function loadScopedMembers(
  * `refuseOutrankingTarget` costs a `getUserAccessContext` round-trip per
  * DISTINCT member, and a SUPERADMIN cookie actor short-circuits before any of
  * them — so the cost is paid only by the delegated admins this guard exists for.
+ * The loop is SEQUENTIAL on purpose: it stops at the first refusal, so a mixed
+ * batch writes ONE `admin.user.action_denied` audit row rather than one per
+ * member. Both body schemas therefore cap `membershipIds` at `MAX_BULK_IDS` —
+ * see the note there — so the fan-out is bounded.
  */
 async function refuseOutrankedMembers(
   guard: { access: AccessLike; betterAuthUserId: string; requestId?: string },
@@ -326,9 +331,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
  *
  * Caller MUST hold `admin.orgs.update`.
  */
+/**
+ * `membershipIds` is capped at {@link MAX_BULK_IDS} — the same ceiling
+ * `POST /users/bulk` and the group sub-resources use — because REVOKE-1's
+ * `refuseOutrankedMembers` costs a `getUserAccessContext` per DISTINCT member
+ * and runs them one at a time. Uncapped, a single rate-limited request from a
+ * delegated admin could turn into thousands of sequential round-trips holding
+ * one pool connection for the whole batch. (The console only ever sends one id.)
+ */
 const patchMembersSchema = z
   .object({
-    membershipIds: z.array(z.string().uuid()).min(1),
+    membershipIds: z.array(z.string().uuid()).min(1).max(MAX_BULK_IDS),
     status: z.enum(["active", "pending_approval", "blocked", "suspended"]),
   })
   .strict();
@@ -466,9 +479,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
  *
  * Caller MUST hold `admin.orgs.update`.
  */
+/** Same cap as {@link patchMembersSchema}, for the same reason. */
 const deleteMembersSchema = z
   .object({
-    membershipIds: z.array(z.string().uuid()).min(1),
+    membershipIds: z.array(z.string().uuid()).min(1).max(MAX_BULK_IDS),
   })
   .strict();
 

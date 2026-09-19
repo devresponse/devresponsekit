@@ -671,7 +671,8 @@
       "exportTruncated": "Export hit the maximum row cap. Refine the filters and re-export to get the rest.",
       "originNotAllowed": "Origin host is not in the allowed list for SSO redirects.",
       "memberExists": "This address already belongs to an active member.",
-      "invitationExists": "A pending invitation for this address already exists."
+      "invitationExists": "A pending invitation for this address already exists.",
+      "lastSuperadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform."
     },
     "roles": {
       "title": "Roles",

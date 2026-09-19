@@ -425,8 +425,8 @@ Manages the application user lifecycle and per-user administration.
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
 | `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`; `admin.user.created` |
-| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore |
-| `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated` |
+| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
+| `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email; `admin.user.password_set` / `.password_reset_email_sent` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`) |
@@ -487,16 +487,52 @@ three revocable rows — an `app_user_roles` assignment, an
 `app_role_permissions` link carrying `superuser`, and an **active** membership
 pairing them (`userIsGlobalSuperuser`) — and no org admin can confer it back.
 `stripsLastGlobalSuperuser` / `wouldStripLastGlobalSuperuser`
-(`src/lib/admin/access-scope.server.ts`) is the single predicate guarding all
-four paths: a revocation that would destroy **every** remaining grant is refused
-with **409** `last_superadmin` and an `admin.superuser.revocation_denied`
-(`denied`, reason `last_global_superuser`, `metadata.action`) audit row. It is
-not a "superadmins are untouchable" rule — a superadmin may still demote a
-co-superadmin, a membership PATCH **to** `active` is never gated (it can only
-add a grant), and a platform with no such grant today has nothing to protect, so
-nothing is refused. The check shares the writing transaction and takes
-`for update of app_user_roles`, so two concurrent revocations aimed at two
-different superadmins cannot each conclude that the other survives.
+(`src/lib/admin/access-scope.server.ts`) is the single predicate: a revocation
+that would destroy **every** remaining grant is refused with **409**
+`last_superadmin` and an `admin.superuser.revocation_denied` (`denied`, reason
+`last_global_superuser`, `metadata.action`) audit row. It is not a "superadmins
+are untouchable" rule — a superadmin may still demote a co-superadmin, a
+membership PATCH **to** `active` is never gated (it can only add a grant), and a
+platform with no such grant today has nothing to protect, so nothing is refused.
+
+It binds the four revocation paths above **and** the account-lifecycle cascades
+that move memberships away from `active` by another name. Those cascades are
+rank-guarded, but `targetOutranksActor` exempts a superadmin actor outright, so
+without the invariant a superadmin could reach the identical unrecoverable state
+in one request — including on themselves:
+
+| Path | Where the check lives |
+| --- | --- |
+| `DELETE /users/[id]/app-roles`, `DELETE /roles/[id]/permissions`, `PATCH\|DELETE /users/[id]/memberships`, `PATCH\|DELETE /organizations/[id]/members` | the route handler |
+| `POST /users/[id]/status`, `POST /api/v1/users/[id]/status`, `block`/`suspend` via `POST /users/bulk` | `performAdminStatusChange` (`src/lib/admin-status.server.ts`) — the shared core, so a fourth caller cannot forget it |
+| `DELETE /users/[id]`, `soft_delete` via `POST /users/bulk` | inside the soft-delete transaction; the saga's compensating unban runs first, so a refusal leaves the account untouched |
+
+The bulk endpoint reports it as a per-row `last_superadmin` outcome rather than a
+status code; `/api/v1` returns the RFC 7807 twin.
+
+**Not covered**, stated so the wording above is not read as wider than it is:
+
+- **`ban` / `unban`.** The invariant is defined on rows, and a ban changes none
+  of them — the grant survives and `unban` restores access without re-conferring
+  anything. Banning the last superadmin still locks them out of the UI; gating
+  that needs a different predicate ("at least one superadmin can still sign in",
+  which must also read `app_users.status` and the Better Auth ban flags). Open
+  follow-up.
+- **Authority conferred through a GROUP.** See §8.3.
+
+**Concurrency.** The check shares the writing transaction, and the grant read
+takes `for update of app_user_roles, app_organization_memberships,
+app_role_permissions`. The relation list matters: under READ COMMITTED a blocked
+`SELECT … FOR UPDATE` re-evaluates its predicate (EvalPlanQual) only for rows of
+a **locked** relation that the committing transaction actually changed. Only the
+role-assignment revoke writes `app_user_roles`; the membership paths and the
+lifecycle cascades write `app_organization_memberships`, and the permission strip
+writes `app_role_permissions`. Locking only the assignments would let a second
+caller acquire the released lock on an unmodified tuple, skip the recheck, and
+still see the other superadmin's membership as `active` in its own pre-commit
+snapshot — so two concurrent revocations aimed at two different superadmins could
+each conclude that the other survives. With all three relations locked, the
+recheck drops the row and the second caller is correctly refused.
 
 **The Better Auth admin plugin's raw HTTP surface is closed.** Every plugin
 endpoint (`/api/auth/admin/list-users`, `/set-user-password`,
@@ -548,6 +584,19 @@ search of `app_organization_memberships` joined to users and organizations,
 scoped to the actor's org. Membership **mutations** happen through the
 organization-members and user-memberships sub-routes (§8.2).
 
+**A membership delete does not delete the role assignments that hung off it.**
+`app_user_roles` references `app_users` and `app_organizations` but **not**
+`app_organization_memberships` (migration `0001-initial-schema.sql`), and there
+is no cascade. Removing a membership therefore leaves the user's assignments in
+place, invisibly: re-adding that user to the org silently restores everything
+those roles confer — including `superuser`, a grant nobody consciously
+re-conferred and one AUTHZ-3 would forbid an org admin from conferring directly.
+This is long-standing behaviour, not new, but REVOKE-2 is defined on exactly the
+membership→assignment join, so read its guarantee precisely: a revocation makes
+the grant stop **counting**, it does not delete the row. Removing a member's
+roles is a separate step (§8.1, the Roles tab). Closing it properly means a
+schema change and is tracked as an operator-gated follow-up.
+
 ### 8.4 Roles
 
 Application RBAC roles (`app_roles`). A role is org-scoped (`organization_id`
@@ -585,8 +634,33 @@ permissions directly, so they add zero new authority primitives.
 | `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped) |
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
 | `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted` |
-| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed`. A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only |
-| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed` |
+| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed`. A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
+| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
+
+**Group revocation is bounded by the same guard as the grant (REVOKE-1).** The
+three routes that take a group-conferred role away —
+`DELETE /groups/[id]/roles`, `DELETE /groups/[id]/members` and
+`DELETE /users/[id]/groups` — run the same `conferrablePermissions` +
+`unheldPermissionKeys` subset test their POST twin does, measured against the
+permissions the removal destroys (403 `forbidden`; a bearer credential is
+bounded by its scopes and never takes the superadmin fast-path, P1-1). Without
+it the guard was one-directional: an admin holding only `admin.groups.assign`
+could not *build* a high-authority group but could dismantle one with a single
+DELETE, and AUTHZ-3 then forbade them from putting it back.
+
+**Conferring `superuser` through a group is not supported.**
+`getUserAccessContext` does union group-conferred roles into the permission set
+and expands a bare `superuser` marker to the full superuser set, so inside the
+group's org such a principal really does act as a platform superadmin — but
+`userIsGlobalSuperuser` reads only direct `app_user_roles`, so they are **not**
+a global superuser anywhere rank, machine-credential reach (MACHINE-2) or the
+REVOKE-2 last-superadmin invariant is decided. On a platform whose only
+superadmin is group-conferred, REVOKE-2 sees zero grants and refuses nothing.
+**Confer `superuser` by direct role assignment.** Changing this means teaching
+`userIsGlobalSuperuser` and `activeGlobalSuperuserGrants` about
+`app_group_roles` in one change, so the two predicates stay identical; until
+then the REVOKE-1 guard above is what keeps a delegated admin from building or
+dismantling such a group.
 
 ### 8.7 Enterprise applications
 

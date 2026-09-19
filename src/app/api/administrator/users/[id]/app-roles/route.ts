@@ -266,6 +266,16 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   // by its scopes and never takes the SUPERADMIN fast-path (P1-1), identically
   // to POST above. A role that no longer exists confers nothing and the delete
   // below is a no-op, so the guard has nothing to measure.
+  //
+  // Accepted blast radius (review #444): the test measures the FULL set the
+  // revoked role confers, so an org admin holding `admin.roles.assign` can no
+  // longer revoke a role granting anything they lack — including a role a
+  // SUPERADMIN assigned inside their tenant, which they could never have
+  // granted and therefore cannot clean up. That is deliberate and is the whole
+  // point of the symmetry: a revoke is a mutation of authority, and "I may
+  // remove power I was never trusted to hand out" is exactly the asymmetry that
+  // let a delegated admin dismantle the platform's superuser. Operators who hit
+  // it should escalate to a superadmin; see docs/admin-manager.md §8.1.
   if (role && !(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForRoles([role.id]);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);

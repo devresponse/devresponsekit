@@ -240,6 +240,16 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   // platform authority they were never trusted with, with no way to put it
   // back (AUTHZ-3 forbids re-conferring it). Measured against the raw requested
   // keys, exactly as POST does, so the two directions cannot drift.
+  //
+  // Consequence worth stating (review #444): a key that is NOT in
+  // `app_permissions` is in nobody's held set, so `unheldPermissionKeys` always
+  // reports it and a non-superadmin now gets a 403 where the same request used
+  // to be a silent 200 no-op (the key resolved to nothing and nothing was
+  // deleted). That is precisely the failure POST has always had for an unknown
+  // key; measuring against the catalog-resolved set instead would restore the
+  // no-op but break the symmetry this guard exists to hold, so it stays
+  // fail-closed. A client replaying a permission key retired from the catalog
+  // must drop it from the request.
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, parsed.data.ids);

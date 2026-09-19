@@ -58,7 +58,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # DEPLOY-1 — an unconfigured pipeline must SKIP, not fail red.
+  # DEPLOY-1 — an UNCONFIGURED pipeline must SKIP quietly; a HALF-configured
+  # one must FAIL loudly.
   #
   # Before this job existed, `deploy` ran on every successful CI run on `main`,
   # reached "Apply database migrations (production)" with an empty
@@ -67,6 +68,20 @@ jobs:
   # everyone to ignore the one signal that would report a genuinely failed
   # production deploy. This job decides, honestly and cheaply, whether the
   # pipeline can run, and reports the answer in the run summary.
+  #
+  # Three outcomes, deliberately not two. "No credentials" and "some
+  # credentials" look identical to a presence check and mean opposite things:
+  # nobody has adopted this path, versus somebody believes production is
+  # deployed here and mistyped a secret name or set three of four. So ZERO of
+  # four present SKIPS green — there is no intent to deploy to betray — while
+  # one to three present FAILS the job red, because a repository holding some
+  # of these secrets is a repository whose operator expects deploys to happen
+  # here. Collapsing the partial state into the quiet skip would reintroduce
+  # the very defect this job removes, merely inverted: a signal that does not
+  # mean what it appears to mean — before, red and ignorable; after, green and
+  # hollow. It matters most at exactly the moment it is most likely: half two
+  # of adoption (turning Vercel's auto-deploy off — see the header) makes the
+  # gap total, `main` auto-merges on green, and nobody is at a keyboard.
   #
   # Why a separate job rather than a job-level `if:` on the secrets: the
   # `secrets` context is NOT available in `jobs.<id>.if` — GitHub allows only
@@ -103,9 +118,11 @@ jobs:
     # out the fork's commit and run `pnpm install` + migrations with production
     # secrets. Require the run to be a PUSH from THIS repository.
     #
-    # DEPLOY-1: this guard is stated once, here at the head of the chain, and
-    # reaches `deploy` through `needs:` — GitHub skips the dependents of a
-    # skipped job. Do not remove `needs: preflight` from `deploy`.
+    # DEPLOY-1: this guard is stated TWICE on purpose — here, so a fork never
+    # reaches the `production` environment at all, and again on `deploy`, the
+    # job that actually holds the credentials. Keep both; neither is redundant
+    # while the other can be edited away. `needs: preflight` is separately
+    # load-bearing for the credential check and must not be removed either.
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
@@ -129,19 +146,49 @@ jobs:
           PRODUCTION_DIRECT_DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
         run: |
           missing=""
+          missing_count=0
+          present_count=0
           for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID PRODUCTION_DIRECT_DATABASE_URL; do
             if [ -z "${!name}" ]; then
               missing="${missing}${name} "
+              missing_count=$((missing_count + 1))
+            else
+              present_count=$((present_count + 1))
             fi
           done
 
           echo "## Production deploy (GitHub Actions pipeline)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          if [ -z "$missing" ]; then
+          if [ "$missing_count" -eq 0 ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
             echo "All four credentials are present — running migrate-then-promote." >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+
+          # Half-configured — fail RED. See the DEPLOY-1 note above this job:
+          # a partial set is unambiguous evidence that somebody intends to
+          # deploy through this pipeline, so a green skip would hide a
+          # production outage. No `configured` output is written on this path,
+          # so `deploy` is fenced twice: by the failure and by the empty value.
+          if [ "$present_count" -gt 0 ]; then
+            {
+              echo "**Failed — this repository is HALF configured for the Actions deploy path.**"
+              echo ""
+              echo "Credentials set: $present_count of 4. No value is set for:"
+              echo ""
+              for name in $missing; do
+                echo "- \`$name\`"
+              done
+              echo ""
+              echo "Nothing was migrated and nothing was promoted by this run. Set the missing"
+              echo "values, or clear all four so the pipeline goes back to skipping quietly —"
+              echo "a partial set is read as an intent to deploy that this repository cannot"
+              echo "honour. See \`docs/deployment.md\` §1.2 and \`.github/workflows/deploy.yml\` (DEPLOY-1)."
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            echo "::error title=Production deploy misconfigured::Deploy credentials set: $present_count of 4, $missing_count missing. A partial set means somebody expects production to deploy from here, so this run fails rather than skipping green. Nothing was migrated or promoted. See the job summary and docs/deployment.md §1.2."
+            exit 1
           fi
 
           echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -168,11 +215,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: preflight
-    # DEPLOY-1: run only when `preflight` found all four credentials. The
-    # trigger/fork guard is NOT restated here — it lives on `preflight` and
-    # reaches this job through `needs:`, because GitHub skips the dependents of
-    # a skipped job. `needs: preflight` is therefore load-bearing twice over.
-    if: needs.preflight.outputs.configured == 'true'
+    # DEPLOY-1: run only when `preflight` found all FOUR credentials — it fails
+    # the run outright on a partial set, so this output is `true` or nothing.
+    #
+    # The trigger/fork guard (review 2026-09-04 #10) is RESTATED here, not
+    # inherited. It does also reach this job through `needs:` — GitHub skips
+    # the dependents of a skipped job — but this is the job that checks out
+    # `workflow_run.head_sha`, runs `pnpm install --frozen-lockfile` over that
+    # tree, and hands it PRODUCTION_DIRECT_DATABASE_URL (owner-role DDL) and
+    # VERCEL_TOKEN. Every other security-critical guard in this repo is
+    # enforced where the side effect happens rather than one hop away, and the
+    # two most ordinary edits to a gated job — dropping `needs: preflight`, or
+    # adding `always()` / `!cancelled()` so it reports instead of skipping —
+    # would each silently put fork code in reach of production credentials with
+    # every check still green. Restated, the fork gate survives both.
+    # `tests/unit/deploy-workflow-guards.test.ts` pins this shape, and the
+    # three-state credential verdict above, so neither can quietly regress.
+    if: >-
+      ${{
+        needs.preflight.outputs.configured == 'true' &&
+        (
+          github.event_name == 'workflow_dispatch' ||
+          (
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.event == 'push' &&
+            github.event.workflow_run.head_repository.full_name == github.repository
+          )
+        )
+      }}
     # Gate behind a GitHub Environment for required reviewers + scoped secrets
     # (docs/deployment.md §3). Remove `environment:` for unattended deploys —
     # but leave it on `preflight`, which needs it to see environment secrets.

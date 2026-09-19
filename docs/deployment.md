@@ -47,6 +47,16 @@ The new build goes live only **after** migrations succeed; if step 1 fails, noth
 
 **None of that is in force.** This repository holds no value for any of the workflow's four credentials, so its `preflight` job reports "not configured", the deploy job is **skipped**, and the run finishes green with the reason in its job summary (**DEPLOY-1**). Before that guard existed the job ran anyway and failed at the migrate step on every push from 2026-09-07 onward — a permanently red run on `main` that everyone had learned to ignore.
 
+`preflight` reports **three** states, not two, and the middle one is the one to remember while you are adopting this path:
+
+| Credentials present | `preflight` | `deploy` | The run |
+| --- | --- | --- | --- |
+| **0 of 4** | reports "not configured" | skipped | **green** — nobody has adopted this path, so there is nothing to warn about |
+| **1–3 of 4** | **fails**, naming the missing ones | skipped | **red** — a partial set is evidence somebody expects deploys here, and a green run would hide that production is no longer being deployed |
+| **4 of 4** | reports "configured" | runs | green if migrate-then-promote succeeded |
+
+A typo'd secret name, a rotated-to-empty value, or a secret added to an environment this job cannot see all land in the middle row. That is deliberate: once half two below is done, a silently-skipping pipeline means production stops receiving deploys with every check still green, and `main` auto-merges on green.
+
 Turning the pipeline on is an operator decision with **two** halves, and doing one without the other is worse than doing neither:
 
 1. Add `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `PRODUCTION_DIRECT_DATABASE_URL` (§3).
@@ -112,7 +122,7 @@ Step 1 is the live path. Steps 2 and 3 are needed **only** if you are adopting t
 
 1. From the repo root: `vercel link` (or import the repo in the dashboard). Framework preset: **Next.js**. Importing the repo is also what enables the Git integration that deploys production today (§1.1).
 2. _(Actions pipeline only.)_ Capture the identifiers from `.vercel/project.json` → GitHub secrets: `orgId` → `VERCEL_ORG_ID`, `projectId` → `VERCEL_PROJECT_ID`. Create a deploy token (Vercel Account Settings → Tokens) → `VERCEL_TOKEN`.
-3. _(Actions pipeline only.)_ In the repo, create the `production` GitHub Environment (Settings → Environments) and add the secrets above plus `PRODUCTION_DIRECT_DATABASE_URL` (Neon **direct/unpooled** URL); repository secrets work too, but the environment scopes them to this one workflow. Optionally add required reviewers so each deploy needs approval — note that both the `preflight` and the `deploy` job name the environment, so each run then asks for approval twice (the DEPLOY-1 comment in `deploy.yml` explains why `preflight` must name it). And do not stop here: half two of §1.2 — turning Vercel's production auto-deploy off — belongs in the same sitting, or you now have two paths to production.
+3. _(Actions pipeline only.)_ In the repo, create the `production` GitHub Environment (Settings → Environments) and add the secrets above plus `PRODUCTION_DIRECT_DATABASE_URL` (Neon **direct/unpooled** URL). Repository secrets work too; what the environment buys is a narrower audience — an environment secret is readable only by a job that declares `environment: production`, but by **any** such job, in **any** workflow in this repository. It is scoped to the environment, not to this workflow: it fences the jobs that exist today (only `deploy.yml` names the environment) and not a workflow somebody adds tomorrow. Optionally add **required reviewers** so each deploy needs approval — with two consequences worth knowing before you turn it on. Both `preflight` and `deploy` name the environment (the DEPLOY-1 comment in `deploy.yml` explains why `preflight` must), so a real deploy is approved **twice**; and `preflight` asks on **every** successful CI run on `main`, including while the pipeline is unconfigured and the deploy would skip anyway. Doing this step before you have the credentials therefore buys an approval prompt per merge for a job that deploys nothing. And do not stop here: half two of §1.2 — turning Vercel's production auto-deploy off — belongs in the same sitting, or you now have two paths to production.
 
 **Set runtime env in Vercel (Production).** [Configuration](./configuration.md) is the **authoritative** list of every variable (≈60); set it there. Validation is at **runtime, not build time** — a missing required var will not fail `next build`, it throws a 500 on the first request that needs it, so set everything before sending real traffic. The deployment-critical must-set production secrets:
 

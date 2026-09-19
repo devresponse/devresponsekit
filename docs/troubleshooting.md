@@ -95,7 +95,7 @@ warrant a comms channel and an owner before deep debugging.
   `DATABASE_URL` (migrations are additive and idempotent), then re-curl
   `/api/health/ready` for `200`. Rolling the app back also works (the older
   build does not read the column) but leaves the gap for the next deploy.
-- Root cause is the deploy path: see [deployment.md §1.1](./deployment.md#1-how-this-repo-deploys)
+- Root cause is the deploy path: see [deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)
   — Vercel's git integration promotes every push to `main` and cannot migrate,
   so a migration must be applied to production **before** its branch merges.
   That is the operator gate, and skipping it is how this 503 happens.
@@ -195,9 +195,11 @@ build** and leave the additive migrations ahead — **never auto-down-migrate**
 (there are no down-migrations, and reverting schema risks data loss).
 
 - **Vercel:** promote the last-known-good deployment (dashboard → previous
-  deployment → "Promote to Production", or `vercel rollback`). The deploy
-  pipeline ([deployment.md §7](./deployment.md#7-ci)) runs migrations
-  *before* promotion, so a rollback needs no DB change.
+  deployment → "Promote to Production", or `vercel rollback`). Migrations
+  always land *before* the build that needs them — by hand on the live path
+  ([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)),
+  by the tooling on the optional paths (deployment.md §1.2, §1.3) — so a
+  rollback needs no DB change.
 - **Container:** redeploy the previous (digest-pinned) image tag; keep the prior
   tag available.
 - A migration that must be reverted is a separate **forward** migration — never
@@ -373,9 +375,11 @@ serverless concurrency.
 db:app:migrate` against the target **before** routing traffic. The migrate step
 **creates the `auth` schema** (or whatever `DB_SCHEMA` is) automatically and
 provisions every table — you don't create the schema by hand. Migrations are
-idempotent (ledgered in `app_schema_migrations`) and safe to re-run; the deploy
-pipeline applies them against the **direct** (non-pooled) endpoint before
-promotion.
+idempotent (ledgered in `app_schema_migrations`) and safe to re-run. Always use
+the **direct** (non-pooled) endpoint — by hand before the merge on the live path
+([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)),
+or via the tooling paths, which apply them before promoting (deployment.md
+§1.2, §1.3).
 
 **`[migrate] checksum mismatch for applied migration "…"`.** The runner hashes
 every applied file — comments stripped and whitespace collapsed, so a re-flowed

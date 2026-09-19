@@ -14,10 +14,18 @@ import { renderWithIntl } from "../helpers/render-with-intl";
  */
 const replaceMock = vi.fn();
 
+/**
+ * The current URL query string, read by the mocked `useSearchParams` at
+ * render time. The grid takes page / sort / filter state from the URL
+ * (docs/admin-manager.md §10), so a test that needs a column to be sorted
+ * sets this rather than clicking through the UI.
+ */
+let currentSearch = "";
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock, push: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/en/app/administrator/users",
-  useSearchParams: () => new URLSearchParams(""),
+  useSearchParams: () => new URLSearchParams(currentSearch),
 }));
 
 interface Row {
@@ -34,6 +42,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   replaceMock.mockReset();
   fetchMock.mockReset();
+  currentSearch = "";
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -106,6 +115,129 @@ describe("DataGrid", () => {
     await screen.findByText("Ada");
     const prev = screen.getByRole("button", { name: "Previous page" });
     expect(prev).toBeDisabled();
+  });
+});
+
+/**
+ * A11Y-4 — the sortable column-header button must be NAMED AFTER ITS COLUMN.
+ *
+ * The regression this pins: `DataGridColumnHeader` built an `aria-label` from
+ * `children` but only `if (typeof children === "string")`. `DataGrid` passes
+ * `flexRender(columnDef.header, ctx)`, and flexRender wraps a FUNCTION header in
+ * `React.createElement` — and every one of the ~100 admin columns declares
+ * `header: () => t("…")`. So the string branch was never taken, every sort button
+ * on every Administrator grid was labelled "— Not sorted", and because aria-label
+ * overrides name-from-content the column name was gone from the accessible name
+ * entirely. axe stayed green: the name was non-empty, just identical and useless.
+ *
+ * The fix makes the name come from the VISIBLE label, so these cases deliberately
+ * cover all three header shapes TanStack allows — function-returning-string (what
+ * every real grid uses), plain string, and an element with a decorative icon —
+ * because the old bug was precisely that only one shape worked.
+ */
+describe("DataGrid sortable column headers (A11Y-4)", () => {
+  interface A11yRow {
+    id: string;
+    email: string;
+    name: string;
+    status: string;
+  }
+
+  const A11Y_COLUMNS: ColumnDef<A11yRow, unknown>[] = [
+    // The shape EVERY production admin column uses.
+    { id: "email", accessorKey: "email", header: () => "Email" },
+    // TanStack also allows a bare string header.
+    { id: "name", accessorKey: "name", header: "Name" },
+    // …and an arbitrary element. The icon is decorative; the text is the name.
+    {
+      id: "status",
+      accessorKey: "status",
+      header: () => (
+        <span>
+          <span aria-hidden>★</span>
+          Status
+        </span>
+      ),
+    },
+    // Not sortable (no accessorKey): rendered raw, contributes no button.
+    { id: "__actions", header: () => "", enableSorting: false, cell: () => null },
+  ];
+
+  const ROW: A11yRow = { id: "u1", email: "ada@example.com", name: "Ada", status: "active" };
+
+  async function renderGrid(search = ""): Promise<void> {
+    currentSearch = search;
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: [ROW], total: 1 }) });
+    renderWithIntl(<DataGrid<A11yRow> name="t" endpoint="/api/test" columns={A11Y_COLUMNS} />);
+    await screen.findByText("Ada");
+  }
+
+  it("names each sort button after its column, for every header shape", async () => {
+    await renderGrid();
+    // Exact names — a substring match would still pass if the sort state leaked
+    // back into the name, which is the whole defect being pinned here.
+    expect(screen.getByRole("button", { name: "Email" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Name" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Status" })).toBeInTheDocument();
+  });
+
+  it("does not render a sort button for a non-sortable column", async () => {
+    await renderGrid();
+    const headers = screen.getAllByRole("columnheader");
+    const actions = headers.at(-1);
+    expect(actions).toBeDefined();
+    expect(within(actions!).queryByRole("button")).toBeNull();
+  });
+
+  it.each([
+    ["", "Not sorted", "none"],
+    ["sort=email.asc", "Sorted ascending", "ascending"],
+    ["sort=email.desc", "Sorted descending", "descending"],
+  ])(
+    "with %s the Email header keeps its name and describes the sort state",
+    async (search, description, ariaSort) => {
+      await renderGrid(search);
+
+      // The NAME never changes with the sort state — that is what lets a voice
+      // control user say "click Email" in any state (WCAG 2.5.3).
+      const button = screen.getByRole("button", { name: "Email" });
+      // …and the state rides the description instead.
+      expect(button).toHaveAccessibleDescription(description);
+
+      // Channel 2: `aria-sort` on the wrapping columnheader (the ARIA-designated
+      // mechanism; the attribute is not valid on role=button).
+      const header = screen.getByRole("columnheader", { name: "Email" });
+      expect(header).toHaveAttribute("aria-sort", ariaSort);
+    },
+  );
+
+  it("keeps the sort state out of the column header cell's name", async () => {
+    // Screen readers prefix the columnheader's name onto every data cell in the
+    // column, so leaking "Not sorted" into it would make each of the N rows
+    // announce it. The sr-only state span is `aria-hidden` precisely to stop that
+    // while `aria-describedby` still picks it up for the button.
+    await renderGrid("sort=email.asc");
+    expect(screen.getByRole("columnheader", { name: "Email" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /Sorted ascending/ })).toBeNull();
+  });
+
+  it("gives every rendered header button a resolvable accessible name", async () => {
+    // The completeness guard for THIS grid: whatever columns a caller passes, no
+    // header button may end up nameless. The cross-grid counterpart — every
+    // sortable column definition in every Administrator grid declaring a header
+    // that resolves to a label — is enforced statically in
+    // tests/unit/admin-grid-column-label-invariant.test.ts.
+    await renderGrid();
+    const buttons = screen
+      .getAllByRole("columnheader")
+      .flatMap((header) => within(header).queryAllByRole("button"));
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(
+        button,
+        `header button ${button.outerHTML} has no accessible name`,
+      ).toHaveAccessibleName();
+    }
   });
 });
 

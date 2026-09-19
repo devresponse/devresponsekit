@@ -1312,6 +1312,7 @@
     "auth_settings_not_found": "Nenhuma configuração de cadastro para remover.",
     "not_provisioned": "Sua conta ainda não está totalmente configurada. Contate um administrador.",
     "insufficient_scope": "Esta credencial não está autorizada para essa ação.",
+    "forbidden_while_impersonating": "Esta ação não está disponível enquanto você personifica outro usuário.",
     "last_superadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la."
   },
   "account": {

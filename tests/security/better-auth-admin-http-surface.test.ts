@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { betterAuth } from "better-auth";
@@ -6,8 +6,10 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin } from "better-auth/plugins";
 import {
   ADMIN_PLUGIN_OPTIONS,
+  IMPERSONATION_CLOSED_PATHS,
   isAdminPluginPath,
-  rejectAdminPluginOverHttp,
+  isImpersonationClosedPath,
+  rejectClosedAuthEndpoints,
 } from "@/lib/auth-admin-surface";
 
 /**
@@ -38,6 +40,16 @@ import {
  * options, so the live config cannot drift from what is exercised here.
  */
 
+/**
+ * The IMP-3 refusal writes an audit row before it throws. Stubbed so the real
+ * module — and the database handle it imports — stays out of this suite, and
+ * so the row itself can be asserted.
+ */
+const auditMock = vi.fn();
+vi.mock("@/lib/audit.server", () => ({
+  auditEvent: (...args: unknown[]) => auditMock(...args),
+}));
+
 const BASE_URL = "http://localhost:3000";
 const PASSWORD = "ci-only-admin-surface-password-not-for-production";
 
@@ -48,7 +60,7 @@ function makeAuth(opts: { guarded: boolean; allowImpersonatingAdmins?: boolean }
     secret: "test-secret-test-secret-test-secret",
     baseURL: BASE_URL,
     emailAndPassword: { enabled: true },
-    ...(opts.guarded ? { hooks: { before: rejectAdminPluginOverHttp } } : {}),
+    ...(opts.guarded ? { hooks: { before: rejectClosedAuthEndpoints } } : {}),
     plugins: [
       admin({
         ...ADMIN_PLUGIN_OPTIONS,
@@ -312,16 +324,191 @@ describe("allowImpersonatingAdmins decision (kept true — the app route depends
   });
 });
 
+/**
+ * IMP-3 — Better Auth's OWN self-service endpoints are closed to an
+ * IMPERSONATED session.
+ *
+ * IMP-1 made the app's `/api/account/*` and `/api/v1/me/*` guard refuse an
+ * impersonated session by default, but self-service SESSION MANAGEMENT never
+ * went through that guard: the account panel calls `authClient.listSessions()`
+ * / `revokeSession()` / `revokeOtherSessions()`, which land on the catch-all
+ * and resolve "the current user" as the BORROWED one. So an admin holding only
+ * `admin.users.impersonate` could enumerate the target's sessions (IP,
+ * user-agent, every tenant) and revoke them — capabilities otherwise gated by
+ * `admin.users.sessions` — with the resulting rows attributed to the target.
+ *
+ * Driven through the real `auth.handler` with a REAL impersonated session
+ * (started via the server-side `auth.api.impersonateUser`, which the hook lets
+ * through), so the marker under test is Better Auth's own `impersonatedBy`.
+ */
+describe("IMP-3: an impersonated session cannot reach Better Auth self-service", () => {
+  beforeEach(() => auditMock.mockReset());
+
+  /** Starts impersonation server-side and returns the borrowed session cookie. */
+  async function borrowSession(auth: TestAuth, headers: Headers, targetId: string) {
+    const started = await auth.api.impersonateUser({
+      body: { userId: targetId },
+      headers,
+      returnHeaders: true,
+    });
+    expect(started.response.user.id).toBe(targetId);
+    return cookieHeaderFrom(started.headers);
+  }
+
+  /** Every closed path, with the request shape the account panel would send. */
+  function callClosedPath(auth: TestAuth, route: string, cookie: string) {
+    if (route === "/list-sessions") return httpGet(auth, route, cookie);
+    if (route === "/revoke-session") return httpPost(auth, route, cookie, { token: "whatever" });
+    if (route === "/update-user") return httpPost(auth, route, cookie, { name: "renamed" });
+    return httpPost(auth, route, cookie, {});
+  }
+
+  it("403s every closed path, and the admin-plugin 404 still applies alongside it", async () => {
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    for (const route of IMPERSONATION_CLOSED_PATHS) {
+      const res = await callClosedPath(auth, route, borrowed);
+      expect(res.status, route).toBe(403);
+    }
+    // Composed, not replaced: wiring one policy would silently drop the other.
+    expect((await httpGet(auth, "/admin/list-users?limit=100", borrowed)).status).toBe(404);
+  });
+
+  it("revokes NOTHING — the borrowed user's real sessions survive the attempt", async () => {
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const ctx = await auth.$context;
+    // A real device of the target's, alongside the borrowed session.
+    await signInOverHttp(auth, "member@example.com");
+    const borrowed = await borrowSession(auth, headers, memberId);
+    const before = (await ctx.internalAdapter.listSessions(memberId)).filter(
+      (session) => !impersonatedBy(session),
+    );
+    expect(before.length).toBeGreaterThan(0);
+
+    expect((await httpPost(auth, "/revoke-other-sessions", borrowed, {})).status).toBe(403);
+    expect((await httpPost(auth, "/revoke-sessions", borrowed, {})).status).toBe(403);
+
+    const after = (await ctx.internalAdapter.listSessions(memberId)).filter(
+      (session) => !impersonatedBy(session),
+    );
+    expect(after.map((session) => session.id).sort()).toEqual(
+      before.map((session) => session.id).sort(),
+    );
+  });
+
+  it("enumerates nothing — the refusal body carries no session metadata", async () => {
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    const res = await httpGet(auth, "/list-sessions", borrowed);
+
+    expect(res.status).toBe(403);
+    expect(await res.text()).not.toContain("userAgent");
+  });
+
+  it("audits the refusal against the IMPERSONATOR, naming the borrowed identity", async () => {
+    const { auth, adminId, memberId, headers } = await setup({ guarded: true });
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    await httpPost(auth, "/revoke-other-sessions", borrowed, {});
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "account.impersonated_access.denied",
+        outcome: "denied",
+        reason: "forbidden_while_impersonating",
+        // The human behind the session, never the identity they borrowed —
+        // the whole point is that the trail names who actually did it.
+        actorBetterAuthUserId: adminId,
+        metadata: expect.objectContaining({
+          impersonatedBetterAuthUserId: memberId,
+          path: "/revoke-other-sessions",
+        }),
+      }),
+    );
+  });
+
+  it("CONTROL: the session's OWN owner still reaches every closed path (200, unaudited)", async () => {
+    // Proves the 403s above are the impersonation marker biting and not a
+    // blanket closure — self-service must keep working for the actual user.
+    const { auth } = await setup({ guarded: true });
+
+    for (const route of IMPERSONATION_CLOSED_PATHS) {
+      // A FRESH session per route: `/revoke-sessions` destroys every session
+      // the caller holds, including the one making the call, so a shared
+      // cookie would 401 the rest of the loop for the wrong reason.
+      const cookie = await signInOverHttp(auth, "ba-admin@example.com");
+      const res = await callClosedPath(auth, route, cookie);
+      expect(res.status, route).toBe(200);
+    }
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("CONTROL: without the hook the impersonated session succeeds — the 403 is ours", async () => {
+    const { auth, memberId, headers } = await setup({ guarded: false });
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    expect((await httpGet(auth, "/list-sessions", borrowed)).status).toBe(200);
+    expect((await httpPost(auth, "/revoke-other-sessions", borrowed, {})).status).toBe(200);
+  });
+
+  it("leaves the impersonated session its way out: /get-session and /sign-out stay open", async () => {
+    // A borrowed session that cannot read itself renders no shell, and one that
+    // cannot sign out strands the admin — the failure mode this whole review is
+    // about. Both must stay reachable.
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    const me = await httpGet(auth, "/get-session", borrowed);
+    expect(me.status).toBe(200);
+    expect(((await me.json()) as { user: { id: string } }).user.id).toBe(memberId);
+    expect((await httpPost(auth, "/sign-out", borrowed, {})).status).toBe(200);
+  });
+
+  it("lets the app's own server-side updateUser through (PATCH /api/account/profile)", async () => {
+    // `/update-user` is closed over HTTP, but `PATCH /api/account/profile`
+    // deliberately admits impersonation and reaches Better Auth with headers
+    // and no `request` — that support flow must be untouched.
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    const updated = await auth.api.updateUser({
+      body: { name: "Set by the support admin" },
+      headers: new Headers({ cookie: borrowed }),
+    });
+
+    expect(updated.status).toBe(true);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("wiring: src/lib/auth.ts installs the guard and the shared plugin options", () => {
   const authSource = readFileSync(path.resolve(__dirname, "../../src/lib/auth.ts"), "utf8");
 
-  it("registers rejectAdminPluginOverHttp as the global hooks.before", () => {
-    expect(authSource).toMatch(/hooks:\s*\{\s*before:\s*rejectAdminPluginOverHttp\s*\}/);
+  it("registers rejectClosedAuthEndpoints as the global hooks.before", () => {
+    // The composed middleware, not either policy on its own — Better Auth takes
+    // exactly one `before` hook, so wiring a single policy here would silently
+    // drop the other (IMP-3).
+    expect(authSource).toMatch(/hooks:\s*\{\s*before:\s*rejectClosedAuthEndpoints\s*\}/);
   });
 
   it("passes ADMIN_PLUGIN_OPTIONS to admin() and never inlines allowImpersonatingAdmins", () => {
     expect(authSource).toMatch(/admin\(ADMIN_PLUGIN_OPTIONS\)/);
     expect(authSource).not.toMatch(/allowImpersonatingAdmins:/);
+  });
+
+  it("isImpersonationClosedPath matches the closed list exactly", () => {
+    // Exact paths, not a prefix: `/list-sessions` must not drag in some
+    // `/list-sessions-*` a future plugin mounts, and the two endpoints the
+    // borrowed session needs to render and to get out must stay OFF the list.
+    expect(isImpersonationClosedPath("/revoke-other-sessions")).toBe(true);
+    expect(isImpersonationClosedPath("/list-sessions")).toBe(true);
+    expect(isImpersonationClosedPath("/list-sessions-extra")).toBe(false);
+    expect(isImpersonationClosedPath("/get-session")).toBe(false);
+    expect(isImpersonationClosedPath("/sign-out")).toBe(false);
+    expect(isImpersonationClosedPath(undefined)).toBe(false);
   });
 
   it("isAdminPluginPath matches only the plugin prefix", () => {

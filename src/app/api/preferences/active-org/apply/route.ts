@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { ACTIVE_ORG_COOKIE, userHasActiveMembership } from "@/lib/active-org.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
-import { getUserAccessContext } from "@/lib/auth-status";
+import { getSessionAccessContext } from "@/lib/session-access.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 import { ORG_SIGNUP_HINT_COOKIE } from "@/lib/scoped-auth";
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
   if (getImpersonatorId(session)) {
     return redirect;
   }
-  const access = await getUserAccessContext(session.user.id);
+  const access = await getSessionAccessContext(session);
   if (!access.appUserId) {
     return redirect;
   }

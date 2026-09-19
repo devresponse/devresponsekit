@@ -20,12 +20,28 @@ export const dynamic = "force-dynamic";
  * Lists the CALLER'S OWN API keys (design §5.4). Strictly self-scoped via
  * the account guard — no id is accepted; rows are keyed on the session/
  * credential principal. The secret and hash are never returned.
+ *
+ * IMP-1 — an impersonated session is ADMITTED here (the account panel has to
+ * render, and the row set is non-secret metadata the target already sees) but
+ * the listing is CONFINED to the organization the impersonated session
+ * resolved, which the IMP-1 confinement caps to the impersonator's own
+ * tenancy. `app_user_id` alone spans every tenant the target belongs to, so an
+ * unconfined list would hand the admin the ids of that user's keys in tenants
+ * the admin has no business in — the enumeration step of the rotate attack the
+ * mutations below refuse outright. A confined session with no resolvable org
+ * sees nothing.
  */
 export async function GET(request: NextRequest) {
-  const guard = await requireApiAccount(request, "account.read");
+  const guard = await requireApiAccount(request, "account.read", { allowImpersonation: true });
   if (!guard.ok) return guard.response;
+  const { actor } = guard;
 
-  const items = await listApiKeysForUser(guard.actor.appUserId);
+  // Called with ONE argument on the ordinary path so the unconfined listing
+  // keeps its exact existing shape; the confinement is added only when the
+  // caller is a borrowed session.
+  const items = actor.impersonatorId
+    ? await listApiKeysForUser(actor.appUserId, { organizationId: actor.access.organizationId })
+    : await listApiKeysForUser(actor.appUserId);
   return v1JsonResponse({ items }, request);
 }
 
@@ -41,6 +57,10 @@ export async function GET(request: NextRequest) {
  *   - Requested scopes are checked against the caller's OWN authority
  *     ({@link ungrantableScopesForCaller}) so a credential can never mint
  *     a broader credential than itself (design §7, §10.3).
+ *   - An IMPERSONATED session is refused (403). This is the account guard's
+ *     DEFAULT, not a check written here (IMP-1): minting is where an
+ *     impersonation would be laundered into a standalone bearer credential
+ *     that outlives it and authenticates as the borrowed user.
  */
 const createSchema = z
   .object({

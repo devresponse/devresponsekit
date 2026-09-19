@@ -10,9 +10,12 @@ import {
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { hasCrossOrgReach, isOrgBound } from "@/lib/admin/access-scope.server";
+import {
+  permissionKeysByActiveOrg,
+  permissionKeysHeldInAnyOrg,
+} from "@/lib/admin/grantable-permissions.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
-import { getUserAccessContext } from "@/lib/auth-status";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
@@ -34,6 +37,11 @@ type RouteContext = { params: Promise<{ id: string }> };
  *   - Caller MUST hold `admin.users.impersonate`.
  *   - Caller MUST NOT impersonate themselves; we reject with 400 to
  *     avoid an audit trail of meaningless self-impersonation events.
+ *   - The escalation guard compares the actor against the target's authority
+ *     in EVERY org the target is an active member of (IMP-1) AND, tenant by
+ *     tenant, in every org the two SHARE (IMP-2); the session it hands back is
+ *     confined at use time to the impersonator's own reach
+ *     (`getUserAccessContext`) — see the long note on the guard below.
  *   - Caller MUST NOT be an ORG-BOUND bearer credential (MACHINE-2): the
  *     returned session is a cookie session and therefore unbound, so this is
  *     the one action that could convert a tenant-confined credential into an
@@ -73,14 +81,29 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // SUPERADMIN, or a more-privileged peer). SUPERADMIN already holds every
   // power, so the subset check is moot for them and is skipped.
   //
-  // This evaluates the target in a SINGLE org (the actor's active_org). That is
-  // sound only because an impersonated session is tenant-confined: POST/GET
-  // `/api/preferences/active-org(/apply)` refuse to change active_org while
-  // `impersonatedBy` is set, so the impersonated session can only ever act in
-  // the org checked here. Without that confinement a target who is a plain
-  // member locally but an admin in another tenant could be impersonated and
-  // then switched into that tenant (P0-1) — do not relax the pin without also
-  // widening this guard to the union of the target's memberships.
+  // IMP-1 — this used to evaluate the target in a SINGLE org (the actor's
+  // `active_org`), on the premise that an impersonated session is
+  // tenant-confined because `/api/preferences/active-org(/apply)` refuse to
+  // switch while `impersonatedBy` is set. That premise was FALSE: `active_org`
+  // is a plain UNSIGNED cookie read by `getUserAccessContext` for whichever
+  // user the session names — during an impersonation, the TARGET — so the
+  // admin holding the browser could simply rewrite it (devtools, or curl) and
+  // land in a tenant this guard never evaluated. Exactly the shape the old
+  // comment warned about: a target who is a plain member locally but an ADMIN
+  // in another tenant passed here and was then pivoted into that tenant.
+  //
+  // So the guard now evaluates the UNION of the target's authority across every
+  // org they are an active member of (`permissionKeysHeldInAnyOrg`), and the
+  // tenancy hole itself is closed independently in `getUserAccessContext`
+  // (IMP-1 confinement: an impersonated session may only resolve an org the
+  // IMPERSONATOR could already reach). Both are needed — the union stops the
+  // impersonation starting, the confinement stops the pivot afterwards — and
+  // neither is a licence to drop the other.
+  //
+  // IMP-2 — nor are those two enough between them, because they never meet on
+  // the same axis: the confinement bounds WHICH tenants, the union bounds rank
+  // but only against ONE of the actor's tenants. The per-tenant bound after the
+  // union closes that seam; its long note is at the call site below.
   //
   // MACHINE-2: an ORG-BOUND bearer credential may not impersonate AT ALL.
   //
@@ -96,7 +119,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // the case that matters the subset check is vacuous: `getUserAccessContext`
   // expands a bound SUPERUSER credential to the whole `ADMIN_PERMISSION_CATALOG`
   // (auth-status.ts — correctly; see the comment there), so
-  // `targetAccess.permissions.some(p => !actorPermissions.has(p))` is
+  // `targetPermissions.some(p => !actorPermissions.has(p))` is
   // structurally unsatisfiable and every target would pass. Today the exchange
   // is also blocked incidentally — Better Auth's `impersonateUser` resolves the
   // actor from the request's own session cookie, and a pure-bearer request has
@@ -125,9 +148,9 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // so the tenant-boundary predicate stays the one used for every such decision
   // (and so re-introducing a bound caller here cannot silently skip the check).
   if (!hasCrossOrgReach(guard.access)) {
-    const targetAccess = await getUserAccessContext(target.betterAuthUserId);
+    const targetPermissions = await permissionKeysHeldInAnyOrg(target.appUserId);
     const actorPermissions = new Set(guard.access.permissions);
-    const escalates = targetAccess.permissions.some((perm) => !actorPermissions.has(perm));
+    const escalates = targetPermissions.some((perm) => !actorPermissions.has(perm));
     if (escalates) {
       await auditUserAction("admin.user.impersonation_failed", "failure", {
         request,
@@ -136,6 +159,90 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
         email: target.primaryEmail,
         reason: "privilege_escalation",
         metadata: { targetBetterAuthUserId: target.betterAuthUserId },
+      });
+      return adminErrorResponse("forbidden", 403, request);
+    }
+
+    // IMP-2 — PER-TENANT RANK BOUND. The union test above and the tenant
+    // confinement in `getUserAccessContext` were believed to cover each other,
+    // but they measure DIFFERENT axes and so never intersect: the confinement
+    // caps WHICH orgs the borrowed session may resolve (the impersonator's own)
+    // and says nothing about rank inside them, while the union compares the
+    // target's cross-org total against the actor's authority in ONE org — the
+    // actor's active one. The gap costs an attacker nothing to reach wherever
+    // support or partner staff are guest members of several tenants:
+    //
+    //   actor  — admin of org A (impersonate + users.read + roles.update),
+    //            ordinary role-less member of org B
+    //   target — plain member of A, ADMIN of B (users.read + roles.update)
+    //
+    // The union is {users.read, roles.update} ⊆ the actor's org-A set, so the
+    // impersonation starts. The confinement then ADMITS org B, because the
+    // actor really is a member there. Rewriting the unsigned `active_org`
+    // cookie to B lands a session holding `admin.roles.update` in a tenant the
+    // actor has no authority in — and from there `POST /api/administrator/
+    // api-keys` mints a bearer credential on behalf of an org-B user, which is
+    // exactly the durable laundering Layer 2 refuses on the self-service
+    // rotate route. The more tenants the impersonator belongs to, the closer
+    // the confinement gets to a no-op.
+    //
+    // So the rule is about AUTHORITY PER ORGANIZATION, not membership: for
+    // every org BOTH parties are active members of, the target may hold
+    // nothing there the actor does not also hold THERE. Orgs the actor is not
+    // a member of are deliberately not judged here — the confinement already
+    // makes them unreachable, and the union above is what refuses the one
+    // target that would escape both (a global superuser: see
+    // `permissionKeysHeldInAnyOrg`).
+    //
+    // A superadmin actor is skipped along with the union, by the same
+    // `hasCrossOrgReach` test above: they already hold every permission in
+    // every org, so there is no rank for them to escalate to. That is also why
+    // the tenant confinement can safely leave a superadmin impersonator
+    // unconfined (src/lib/impersonation-reach.server.ts).
+    const actorAppUserId = guard.access.appUserId;
+    if (!actorAppUserId) {
+      // Fail closed. `requireAdminPermission` only admits an active, provisioned
+      // member, so this is unreachable — but the rank bound below is meaningless
+      // without an actor to measure, and a null must never read as "no shared
+      // tenant, therefore allowed".
+      await auditUserAction("admin.user.impersonation_failed", "failure", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        reason: "actor_not_provisioned",
+        metadata: { targetBetterAuthUserId: target.betterAuthUserId },
+      });
+      return adminErrorResponse("forbidden", 403, request);
+    }
+
+    const [targetByOrg, actorByOrg] = await Promise.all([
+      permissionKeysByActiveOrg(target.appUserId),
+      permissionKeysByActiveOrg(actorAppUserId),
+    ]);
+    const outrankedOrgIds = [...targetByOrg]
+      .filter(([organizationId, targetKeys]) => {
+        const actorKeys = actorByOrg.get(organizationId);
+        // Not a SHARED tenant — the confinement, not this bound, is what keeps
+        // the borrowed session out of it.
+        if (actorKeys === undefined) return false;
+        return [...targetKeys].some((perm) => !actorKeys.has(perm));
+      })
+      .map(([organizationId]) => organizationId);
+
+    if (outrankedOrgIds.length > 0) {
+      await auditUserAction("admin.user.impersonation_failed", "failure", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        reason: "privilege_escalation_in_shared_org",
+        // Only orgs the ACTOR is an active member of can appear here, so this
+        // names no tenant they could not already enumerate.
+        metadata: {
+          targetBetterAuthUserId: target.betterAuthUserId,
+          organizationIds: outrankedOrgIds,
+        },
       });
       return adminErrorResponse("forbidden", 403, request);
     }

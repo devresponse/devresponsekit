@@ -1312,6 +1312,7 @@
     "auth_settings_not_found": "Aucune configuration d'inscription à supprimer.",
     "not_provisioned": "Votre compte n'est pas encore entièrement configuré. Contactez un administrateur.",
     "insufficient_scope": "Cette autorisation ne couvre pas cette action.",
+    "forbidden_while_impersonating": "Cette action n'est pas disponible pendant l'usurpation d'identité d'un autre utilisateur.",
     "last_superadmin": "Il s'agit du dernier super-administrateur de la plateforme ; cette modification ne laisserait personne pour l'administrer."
   },
   "account": {

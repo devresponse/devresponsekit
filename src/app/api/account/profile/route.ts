@@ -48,7 +48,13 @@ export const dynamic = "force-dynamic";
  */
 
 export async function PATCH(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.profile.write");
+  // IMP-1: opted in. Display name / Better Auth name are ordinary profile
+  // fields — no credential is issued or revoked — and editing them on a user's
+  // behalf is a routine support action. Audited with the acting session either
+  // way.
+  const guard = await requireAccountUser(request, "account.profile.write", {
+    allowImpersonation: true,
+  });
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

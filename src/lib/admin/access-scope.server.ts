@@ -352,6 +352,45 @@ export async function userIsGlobalSuperuser(appUserId: string): Promise<boolean>
 }
 
 /**
+ * {@link userIsGlobalSuperuser}, keyed on the BETTER AUTH user id instead of
+ * the `app_users` primary key — one statement rather than an id resolution
+ * followed by the probe.
+ *
+ * IMP-2. The only identifier Better Auth's `impersonatedBy` marker carries is
+ * the Better Auth id, and the impersonation tenant confinement has to know
+ * whether the admin BEHIND a borrowed session is an unbound superuser before
+ * it decides how far that session may reach — see
+ * `src/lib/impersonation-reach.server.ts`.
+ *
+ * Same predicate as its sibling, plus `u.status = 'active'`: the confinement's
+ * invariant is "no further than the BORROWER could reach AS THEMSELVES", and a
+ * blocked, suspended or deactivated admin reaches nothing at all
+ * (`decideSecureAccess`), whatever their role rows still say. Without that
+ * filter a suspended superadmin would keep an unconfined borrowed session
+ * until it expired.
+ */
+export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string): Promise<boolean> {
+  const row = await db
+    .selectFrom("app_user_roles as ur")
+    .innerJoin("app_users as u", "u.id", "ur.app_user_id")
+    .innerJoin("app_organization_memberships as m", (join) =>
+      join
+        .onRef("m.app_user_id", "=", "ur.app_user_id")
+        .onRef("m.organization_id", "=", "ur.organization_id")
+        .on("m.status", "=", "active"),
+    )
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.id")
+    .where("u.better_auth_user_id", "=", betterAuthUserId)
+    .where("u.status", "=", "active")
+    .where("p.key", "=", SUPERADMIN_PERMISSION)
+    .limit(1)
+    .executeTakeFirst();
+  return row !== undefined;
+}
+
+/**
  * REVOKE-2 — the LAST-SUPERADMIN invariant.
  *
  * {@link userIsGlobalSuperuser} makes global superuser authority a function of

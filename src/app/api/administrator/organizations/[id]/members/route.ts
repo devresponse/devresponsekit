@@ -13,15 +13,108 @@ import {
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
+import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
-import { isUuid } from "@/lib/admin/user-target.server";
+import {
+  canAccessOrg,
+  wouldStripLastGlobalSuperuser,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
+  LAST_SUPERADMIN_STATUS,
+  type AccessLike,
+} from "@/lib/admin/access-scope.server";
+import { isUuid, refuseOutrankingTarget } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
+}
+
+/**
+ * One membership row this route is about to mutate, joined with enough of its
+ * `app_users` row to run the review #7 rank guard on the member it belongs to.
+ */
+interface ScopedMemberRow {
+  id: string;
+  app_user_id: string;
+  better_auth_user_id: string;
+  primary_email: string;
+  display_name: string | null;
+  status: string;
+}
+
+/**
+ * Resolve the membership ids named in the body, confined to THIS organization,
+ * carrying the target-user columns the rank guard needs. Shared by PATCH and
+ * DELETE so the two cannot drift.
+ */
+async function loadScopedMembers(
+  organizationId: string,
+  membershipIds: ReadonlyArray<string>,
+): Promise<ScopedMemberRow[]> {
+  return db
+    .selectFrom("app_organization_memberships as m")
+    .innerJoin("app_users as u", "u.id", "m.app_user_id")
+    .select([
+      "m.id as id",
+      "m.app_user_id as app_user_id",
+      "u.better_auth_user_id as better_auth_user_id",
+      "u.primary_email as primary_email",
+      "u.display_name as display_name",
+      "u.status as status",
+    ])
+    .where("m.organization_id", "=", organizationId)
+    .where("m.id", "in", [...membershipIds])
+    .execute();
+}
+
+/**
+ * REVOKE-1 (rank): refuse the WHOLE batch when any member it names outranks
+ * the actor (review #7).
+ *
+ * This route is ORG-CENTRIC — it never calls `resolveTargetUser`, so it was the
+ * one place where `admin.orgs.update` alone let an org admin block, suspend or
+ * delete the membership of a SUPERADMIN co-member, which the user-centric twin
+ * (and every other account-level action) refuses. The batch is denied whole
+ * rather than partially applied: a caller who mixes an ordinary member with a
+ * superadmin gets one unambiguous 403 and no half-done mutation.
+ *
+ * `refuseOutrankingTarget` costs a `getUserAccessContext` round-trip per
+ * DISTINCT member, and a SUPERADMIN cookie actor short-circuits before any of
+ * them — so the cost is paid only by the delegated admins this guard exists for.
+ * The loop is SEQUENTIAL on purpose: it stops at the first refusal, so a mixed
+ * batch writes ONE `admin.user.action_denied` audit row rather than one per
+ * member. Both body schemas therefore cap `membershipIds` at `MAX_BULK_IDS` —
+ * see the note there — so the fan-out is bounded.
+ */
+async function refuseOutrankedMembers(
+  guard: { access: AccessLike; betterAuthUserId: string; requestId?: string },
+  members: ReadonlyArray<ScopedMemberRow>,
+  request: NextRequest,
+  action: string,
+): Promise<NextResponse | null> {
+  const checked = new Set<string>();
+  for (const member of members) {
+    if (checked.has(member.app_user_id)) continue;
+    checked.add(member.app_user_id);
+    const refused = await refuseOutrankingTarget(
+      guard,
+      {
+        appUserId: member.app_user_id,
+        betterAuthUserId: member.better_auth_user_id,
+        primaryEmail: member.primary_email,
+        displayName: member.display_name,
+        status: member.status,
+      },
+      request,
+      action,
+    );
+    if (refused) return refused;
+  }
+  return null;
 }
 
 /**
@@ -238,9 +331,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
  *
  * Caller MUST hold `admin.orgs.update`.
  */
+/**
+ * `membershipIds` is capped at {@link MAX_BULK_IDS} — the same ceiling
+ * `POST /users/bulk` and the group sub-resources use — because REVOKE-1's
+ * `refuseOutrankedMembers` costs a `getUserAccessContext` per DISTINCT member
+ * and runs them one at a time. Uncapped, a single rate-limited request from a
+ * delegated admin could turn into thousands of sequential round-trips holding
+ * one pool connection for the whole batch. (The console only ever sends one id.)
+ */
 const patchMembersSchema = z
   .object({
-    membershipIds: z.array(z.string().uuid()).min(1),
+    membershipIds: z.array(z.string().uuid()).min(1).max(MAX_BULK_IDS),
     status: z.enum(["active", "pending_approval", "blocked", "suspended"]),
   })
   .strict();
@@ -287,22 +388,60 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   const input = parsed.data;
 
-  const memberships = await db
-    .selectFrom("app_organization_memberships")
-    .select(["id", "app_user_id"])
-    .where("organization_id", "=", id)
-    .where("id", "in", input.membershipIds)
-    .execute();
+  const memberships = await loadScopedMembers(id, input.membershipIds);
   if (memberships.length === 0) {
     return adminErrorResponse("membership_not_found", 404, request);
   }
 
-  await db
-    .updateTable("app_organization_memberships")
-    .set({ status: input.status })
-    .where("id", "in", input.membershipIds)
-    .where("organization_id", "=", id)
-    .execute();
+  const outranked = await refuseOutrankedMembers(guard, memberships, request, "member_update");
+  if (outranked) return outranked;
+
+  // REVOKE-2: a move away from `active` breaks the active-membership join that
+  // makes a superuser assignment count. Reactivation can only ever ADD a grant,
+  // so it is never gated.
+  const outcome = await db.transaction().execute(async (trx) => {
+    if (
+      input.status !== "active" &&
+      (await wouldStripLastGlobalSuperuser(
+        {
+          memberships: memberships.map((m) => ({
+            appUserId: m.app_user_id,
+            organizationId: id,
+          })),
+        },
+        trx,
+      ))
+    ) {
+      return "last_superadmin" as const;
+    }
+    await trx
+      .updateTable("app_organization_memberships")
+      .set({ status: input.status })
+      .where("id", "in", input.membershipIds)
+      .where("organization_id", "=", id)
+      .execute();
+    return "updated" as const;
+  });
+
+  if (outcome === "last_superadmin") {
+    await auditOrgAction(LAST_SUPERADMIN_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: id,
+      requestId: guard.requestId,
+      reason: LAST_SUPERADMIN_REASON,
+      metadata: {
+        action: "member_update",
+        organizationId: id,
+        slug: org.slug,
+        membershipIds: memberships.map((m) => m.id),
+        status: input.status,
+      },
+    });
+    return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   const auditPromises = [
     auditOrgAction("admin.organization.member_updated", "success", {
@@ -340,9 +479,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
  *
  * Caller MUST hold `admin.orgs.update`.
  */
+/** Same cap as {@link patchMembersSchema}, for the same reason. */
 const deleteMembersSchema = z
   .object({
-    membershipIds: z.array(z.string().uuid()).min(1),
+    membershipIds: z.array(z.string().uuid()).min(1).max(MAX_BULK_IDS),
   })
   .strict();
 
@@ -388,21 +528,50 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
   const input = parsed.data;
 
-  const memberships = await db
-    .selectFrom("app_organization_memberships")
-    .select(["id", "app_user_id"])
-    .where("organization_id", "=", id)
-    .where("id", "in", input.membershipIds)
-    .execute();
+  const memberships = await loadScopedMembers(id, input.membershipIds);
   if (memberships.length === 0) {
     return adminErrorResponse("membership_not_found", 404, request);
   }
 
-  await db
-    .deleteFrom("app_organization_memberships")
-    .where("id", "in", input.membershipIds)
-    .where("organization_id", "=", id)
-    .execute();
+  const outranked = await refuseOutrankedMembers(guard, memberships, request, "member_remove");
+  if (outranked) return outranked;
+
+  // REVOKE-2: deleting the membership removes the ACTIVE row every superuser
+  // grant in this org hangs off, so it is checked unconditionally.
+  const outcome = await db.transaction().execute(async (trx) => {
+    const stripsLast = await wouldStripLastGlobalSuperuser(
+      {
+        memberships: memberships.map((m) => ({ appUserId: m.app_user_id, organizationId: id })),
+      },
+      trx,
+    );
+    if (stripsLast) return "last_superadmin" as const;
+    await trx
+      .deleteFrom("app_organization_memberships")
+      .where("id", "in", input.membershipIds)
+      .where("organization_id", "=", id)
+      .execute();
+    return "removed" as const;
+  });
+
+  if (outcome === "last_superadmin") {
+    await auditOrgAction(LAST_SUPERADMIN_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: id,
+      requestId: guard.requestId,
+      reason: LAST_SUPERADMIN_REASON,
+      metadata: {
+        action: "member_remove",
+        organizationId: id,
+        slug: org.slug,
+        membershipIds: memberships.map((m) => m.id),
+      },
+    });
+    return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   const auditPromises = [
     auditOrgAction("admin.organization.members_removed", "success", {

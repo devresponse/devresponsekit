@@ -151,6 +151,9 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
  *
  * Remove the target user from a group. Body: `{ groupId }`. Caller MUST hold
  * `admin.groups.assign`.
+ *
+ * Carries the SAME AUTHZ-3 subset test as POST, measured against the authority
+ * the removal takes away (REVOKE-1 — 403 `forbidden`).
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
@@ -181,6 +184,21 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const group = await loadGroup(parsed.data.groupId);
   if (!group || !canAccessOrg(guard.access, group.organization_id)) {
     return adminErrorResponse("group_not_found", 404, request);
+  }
+
+  // REVOKE-1 (symmetry): the user-centric twin of the group-members DELETE
+  // guard. POST refuses to let a non-SUPERADMIN ADD anyone to a group that
+  // confers more than they hold; removing that member destroys the same
+  // authority, so the same subset test bounds it. Otherwise an admin holding
+  // only `admin.groups.assign` could strip a high-authority group membership
+  // they were never trusted to grant, with no way to restore it (AUTHZ-3
+  // forbids re-conferring what you lack). A bearer credential is bounded by its
+  // scopes and never takes the SUPERADMIN fast-path (P1-1).
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+    const conferred = await permissionKeysForGroup(group.id);
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheld = unheldPermissionKeys(conferrable, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
   await db

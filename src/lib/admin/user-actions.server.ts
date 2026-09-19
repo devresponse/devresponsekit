@@ -3,6 +3,11 @@ import { sql } from "kysely";
 import { db } from "@/db/database";
 import {
   requiresSuperadminForSharedTarget,
+  membershipCascadeStripsLastGlobalSuperuser,
+  LastSuperadminCascadeError,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
   type AccessLike,
   type OrgScope,
 } from "@/lib/admin/access-scope.server";
@@ -145,9 +150,27 @@ async function performStatusAction(
   if (result.ok) {
     return { ok: true, appUserId: target.appUserId };
   }
+  // REVOKE-2 (review #444): `block` / `suspend` reach the last-superadmin guard
+  // inside `performAdminStatusChange`, which audits the denial and returns
+  // `last_superadmin`. Surfacing `result.error` verbatim (as this helper always
+  // has) is what keeps the bulk path from being a way around the single-row
+  // 409 — the row simply fails and the rest of the batch proceeds.
   return { ok: false, appUserId: target.appUserId, error: result.error };
 }
 
+/**
+ * REVOKE-2 scope note (review #444): `ban` / `unban` are deliberately NOT gated
+ * by the last-superadmin invariant. That invariant is defined on ROWS — an
+ * active membership plus an assignment of a role carrying `superuser` — and a
+ * ban touches none of them: the grant survives intact, `userIsGlobalSuperuser`
+ * still reports the target, and `unban` restores access without re-conferring
+ * anything. Banning the last superadmin does lock them out of the UI, so it is
+ * a real (if reversible-by-row-edit) lockout; gating it needs a different
+ * predicate — "at least one superadmin can still SIGN IN", which would also
+ * have to read `app_users.status` and the Better Auth ban flags — and that is a
+ * separate change, recorded as such in docs/admin-manager.md §8.1 rather than
+ * implied closed here.
+ */
 async function performBan(
   target: BulkUserTarget,
   actor: BulkUserActor,
@@ -248,6 +271,15 @@ async function performSoftDelete(
 
   try {
     await db.transaction().execute(async (trx) => {
+      // REVOKE-2 (review #444): identical to the `[id]` route's soft-delete —
+      // the cascade below blocks every membership the target holds, which is
+      // how a `superuser` assignment stops counting. The bulk path must refuse
+      // it for the same reason and by the same predicate, or `POST /users/bulk`
+      // would be the way around the single-row 409.
+      if (await membershipCascadeStripsLastGlobalSuperuser(target.appUserId, trx)) {
+        throw new LastSuperadminCascadeError();
+      }
+
       await trx
         .updateTable("app_users")
         .set({
@@ -291,6 +323,23 @@ async function performSoftDelete(
           bulk: true,
         },
       });
+    }
+    // REVOKE-2: an expected per-row refusal, not a fault. The transaction rolled
+    // back and the ban was compensated above, so the row is untouched — report
+    // it with the shared code the single-row route answers 409 with, so the
+    // console can tell "refused to strip the last superadmin" apart from "the
+    // cascade blew up".
+    if (err instanceof LastSuperadminCascadeError) {
+      await auditUserAction(LAST_SUPERADMIN_EVENT, "denied", {
+        request: actor.request,
+        actorBetterAuthUserId: actor.betterAuthUserId,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        requestId: actor.requestId ?? null,
+        reason: LAST_SUPERADMIN_REASON,
+        metadata: { action: "soft_delete", bulk: true },
+      });
+      return { ok: false, appUserId: target.appUserId, error: LAST_SUPERADMIN_ERROR };
     }
     await auditUserAction("admin.user.soft_delete_failed", "error", {
       request: actor.request,

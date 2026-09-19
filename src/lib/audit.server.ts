@@ -1,6 +1,8 @@
 import "server-only";
+import type { Kysely } from "kysely";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
 import { logServerError } from "@/lib/observability/logger.server";
@@ -34,6 +36,41 @@ export interface AuditEventInput {
    */
   requestId?: string | null;
   metadata?: Record<string, unknown>;
+  /**
+   * Write the row through THIS handle instead of the shared pool — i.e. inside
+   * the caller's transaction. Per-call context like `request` / `requestId`
+   * above, not part of the event itself. Defaults to the pool, which is what
+   * every call site that audits AFTER its mutation wants.
+   *
+   * DB-3: the call sites that MUST pass one are the audits naming a row the
+   * same request is about to delete. `organization_id` carries a real FK to
+   * `app_organizations`; `ON DELETE SET NULL` rescues rows that ALREADY EXIST
+   * when the parent goes away, but it says nothing about a NEW insert naming an
+   * id that is already gone — that insert is a plain foreign-key violation.
+   * Writing the row inside the deleting transaction, ahead of the delete, both
+   * satisfies the FK and makes the audit atomic with the outcome it describes:
+   * nothing is removed without its audit row, and a delete that rolls back
+   * leaves no row claiming it happened.
+   *
+   * DB-4 — the inverse hazard, stated here because this is a public knob on a
+   * primitive every route reaches: a row written through a transaction handle
+   * is DISCARDED, silently and with no error raised anywhere, when that
+   * transaction rolls back. For the DB-3 `success` row that is the point — it
+   * must not outlive the outcome it claims. For a `denied` or an `error` row it
+   * is exactly backwards: those are the rows the contract below refuses to
+   * suppress, because a lost denial is an unrecorded attack, and the
+   * OBSERVABILITY-2 stdout mirror is no safety net either (it fires for
+   * `error`/`failure`, never for `denied`). So a caller that wraps a mutation in
+   * a transaction MUST NOT thread the same handle into its failure audit out of
+   * symmetry.
+   *
+   * The rule, in one line: pass `executor` ONLY for an audit that names a row
+   * this very transaction is deleting, and therefore SHOULD vanish with it.
+   * Every other audit — including every denial and failure raised inside a
+   * transaction — belongs on the pool, written after the rollback, the way the
+   * tenant DELETE writes its `admin.organization.delete_blocked` row.
+   */
+  executor?: Kysely<AppDatabase>;
 }
 
 /**
@@ -46,6 +83,12 @@ export interface AuditEventInput {
  *     the caller — log them but never include secrets in the metadata.
  *   - `metadata` is serialized as JSON. Callers MUST NOT pass tokens,
  *     refresh tokens, or raw passwords.
+ *   - `input.executor` (DB-3) writes the row inside the caller's transaction,
+ *     which also means a ROLLBACK discards it without raising anything — the
+ *     one suppression path this function has. DB-4: that is mandatory for an
+ *     audit naming a row the same transaction deletes, and FORBIDDEN for a
+ *     `denied`/`error` audit, which must outlive the rollback for the reason
+ *     in the bullet above. See the field's doc for the full rule.
  */
 export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;
@@ -74,7 +117,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
     });
   }
 
-  await db
+  await (input.executor ?? db)
     .insertInto("app_audit_events")
     .values({
       event_type: input.eventType,

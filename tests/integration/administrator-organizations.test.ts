@@ -69,8 +69,24 @@ vi.mock("@/db/database", () => {
     );
     return proxy;
   }
+  // DB-3: the tenant DELETE runs its success audit and the delete statement in
+  // ONE transaction, so the stub must hand the callback something that answers
+  // `deleteFrom(...).where(...).execute()`. Deliberately narrow — the audit
+  // call inside the transaction goes through the mocked `@/lib/audit.server`,
+  // never through this handle.
+  const trx = {
+    deleteFrom: () => ({
+      where: () => ({
+        execute: itemsExecute,
+        where: () => ({ execute: itemsExecute }),
+      }),
+    }),
+  };
   return {
     db: {
+      transaction: () => ({
+        execute: (cb: (handle: unknown) => Promise<void>) => cb(trx),
+      }),
       selectFrom: () => makeChain(),
       insertInto: () => ({
         values: () => ({
@@ -301,7 +317,7 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns ok and audits success on a clean delete (DB-1)", async () => {
+  it("returns ok and audits success BEFORE the delete, on the transaction handle (DB-1, DB-3)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
     // existing lookup + assertOrgNotDefault + assertOrgEmpty all read this row.
@@ -311,7 +327,28 @@ describe("DELETE /api/administrator/organizations/:id", () => {
       params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
     });
     expect(res.status).toBe(200);
-    expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "success" }));
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.deleted",
+        outcome: "success",
+        organizationId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        // The org id and slug ride in metadata too: the DB-1 SET NULL cascade
+        // nulls the column moments later, so metadata is what still answers
+        // WHICH tenant was removed.
+        metadata: { organizationId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", slug: "acme" },
+        // DB-3: written through the transaction handle, not the pool.
+        executor: expect.objectContaining({ deleteFrom: expect.any(Function) }),
+      }),
+    );
+    // DB-3: and written BEFORE the delete statement. Reversed (the original
+    // bug) the INSERT names an organization_id whose row is already gone and
+    // the real FK rejects it — which no mocked `auditEvent` can show, hence
+    // tests/db/organizations-delete-route.db.test.ts as well.
+    const [auditOrder] = auditMock.mock.invocationCallOrder;
+    const [deleteOrder] = itemsExecute.mock.invocationCallOrder;
+    expect(auditOrder).toBeDefined();
+    expect(deleteOrder).toBeDefined();
+    expect(auditOrder as number).toBeLessThan(deleteOrder as number);
   });
 
   it("maps a FK violation to 409 organization_in_use instead of a raw 500 (DB-1)", async () => {
@@ -329,5 +366,35 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     const body = await res.json();
     expect(body).toMatchObject({ error: "organization_in_use" });
     expect(auditMock).toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
+    // The success audit written inside the transaction is discarded by the
+    // ROLLBACK, which a stubbed `db.transaction` cannot model — that half of
+    // DB-3 is asserted against real Postgres in
+    // tests/db/organizations-delete-route.db.test.ts.
+  });
+
+  it("answers 404, not 500, when the tenant vanishes before the transaction (DB-5)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
+    // The existence read still sees the org...
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
+    // ...but a second superadmin commits its own delete before this request
+    // opens its transaction, so the success audit — the FIRST statement in it
+    // (DB-3) — is what finds the parent gone. This is the exact error node-pg
+    // raises for that FK.
+    auditMock.mockRejectedValueOnce(
+      new Error(
+        'insert or update on table "app_audit_events" violates foreign key constraint "app_audit_events_organization_id_fkey"',
+      ),
+    );
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "organization_not_found" });
+    // The delete statement is never reached, and nothing is audited: the 409
+    // branch must not claim `organization_in_use` for a tenant that is simply
+    // gone, and the rolled-back success row is already discarded.
+    expect(itemsExecute).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledTimes(1);
   });
 });

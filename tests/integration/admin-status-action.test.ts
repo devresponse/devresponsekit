@@ -16,6 +16,16 @@ const auditMock = vi.fn();
 const trxRun = vi.fn(); // counts UPDATE executes inside the transaction
 const userExecuteTakeFirst = vi.fn(); // app_users target lookup
 const sharedExecuteTakeFirst = vi.fn(); // app_organization_memberships "outside org" probe (AUTHZ-1)
+/**
+ * REVOKE-2 (review #444). The core now runs the last-superadmin predicate
+ * inside its own transaction before writing, which issues two SELECTs there:
+ * the target's affected memberships, then the platform's surviving superuser
+ * grants. These stubs feed both. The default `[]` grants exercise the
+ * documented escape hatch — a platform with no direct-assignment superuser has
+ * nothing to protect — so every pre-existing case below is unaffected.
+ */
+const trxMembershipRows = vi.fn(); // app_organization_memberships rows in the trx
+const trxGrantRows = vi.fn(); // activeGlobalSuperuserGrants rows in the trx
 
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
@@ -41,11 +51,37 @@ function selectChain(table: string): unknown {
   );
   return proxy;
 }
+function trxSelectChain(table: string): unknown {
+  // Any-length .select().innerJoin().where()....forUpdate().execute().
+  const rows = table === "app_user_roles" ? trxGrantRows : trxMembershipRows;
+  const p: unknown = new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        if (prop === "execute") return rows;
+        return (...args: unknown[]) => {
+          // innerJoin(cb) — exercise the join callback harmlessly.
+          const cb = args[1];
+          if (typeof cb === "function") {
+            try {
+              (cb as (x: unknown) => unknown)(trxSelectChain(table));
+            } catch {
+              /* join stub */
+            }
+          }
+          return p;
+        };
+      },
+    },
+  );
+  return p;
+}
 const dbStub = {
   selectFrom: (t: unknown) => selectChain(tableKey(t)),
   transaction: () => ({
     execute: (fn: (trx: unknown) => unknown) =>
       fn({
+        selectFrom: (t: unknown) => trxSelectChain(tableKey(t)),
         updateTable: () => {
           // Any-length .set().where()....execute() routes to trxRun.
           const p: unknown = new Proxy(
@@ -78,6 +114,10 @@ beforeEach(async () => {
   userExecuteTakeFirst.mockReset();
   sharedExecuteTakeFirst.mockReset();
   sharedExecuteTakeFirst.mockResolvedValue(undefined); // not shared by default
+  trxMembershipRows.mockReset();
+  trxMembershipRows.mockResolvedValue([{ organization_id: ORG_A }]);
+  trxGrantRows.mockReset();
+  trxGrantRows.mockResolvedValue([]); // no superuser grant to protect by default
   ({ performAdminStatusChange } = await import("@/lib/admin-status.server"));
 });
 afterEach(() => vi.resetModules());
@@ -217,5 +257,116 @@ describe("performAdminStatusChange — org scoping (AUTHZ-1)", () => {
     expect(result).toEqual({ ok: true, status: "active" });
     // Grant lifts a pending account to active (conditional UPDATE) + membership.
     expect(trxRun).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * REVOKE-2 (review #444) — the last-superadmin invariant lives in this shared
+ * core, not in the three routes above it (`POST …/users/[id]/status`, its
+ * `/api/v1` twin, and the `block`/`suspend` bulk actions), because an invariant
+ * enforced per-route is one the next route forgets. The rank guard those routes
+ * carry keeps an ORG ADMIN off a superadmin target, but `targetOutranksActor`
+ * exempts a SUPERADMIN actor outright — so this is the only thing between
+ * "block a co-superadmin" and "leave the platform with nobody able to
+ * administer it", including when the actor blocks themselves.
+ */
+describe("performAdminStatusChange — last superadmin (REVOKE-2)", () => {
+  const ROLE = "44444444-4444-4444-8444-444444444444";
+  beforeEach(() => {
+    userExecuteTakeFirst.mockResolvedValue({ id: TARGET_ID, primary_email: "target@x.com" });
+    // The target's membership in ORG_A is the platform's ONLY superuser grant.
+    trxGrantRows.mockResolvedValue([
+      { app_user_id: TARGET_ID, organization_id: ORG_A, role_id: ROLE },
+    ]);
+  });
+
+  it.each(["blocked", "suspended"] as const)(
+    "refuses a %s transition that would strip the only remaining grant",
+    async (newMembershipStatus) => {
+      const result = await performAdminStatusChange({
+        actorBetterAuthUserId: ACTOR_ID,
+        scope: ALL,
+        targetAppUserId: TARGET_ID,
+        newStatus: newMembershipStatus,
+        newMembershipStatus,
+        eventType: "admin.user.blocked",
+      });
+      expect(result).toEqual({ ok: false, error: "last_superadmin" });
+      // Nothing was written: the refusal happens before both UPDATEs.
+      expect(trxRun).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.superuser.revocation_denied",
+          outcome: "denied",
+          reason: "last_global_superuser",
+          appUserId: TARGET_ID,
+        }),
+      );
+      // The success audit must NOT fire.
+      expect(auditMock).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "success" }));
+    },
+  );
+
+  it("allows the block when ANOTHER user still holds a grant", async () => {
+    trxGrantRows.mockResolvedValue([
+      { app_user_id: TARGET_ID, organization_id: ORG_A, role_id: ROLE },
+      { app_user_id: "other-superadmin", organization_id: ORG_A, role_id: ROLE },
+    ]);
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
+      targetAppUserId: TARGET_ID,
+      newStatus: "blocked",
+      newMembershipStatus: "blocked",
+      eventType: "admin.user.blocked",
+    });
+    expect(result).toEqual({ ok: true, status: "blocked" });
+    expect(trxRun).toHaveBeenCalledTimes(2);
+  });
+
+  it("never gates a transition back TO active — a grant can only be added", async () => {
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
+      targetAppUserId: TARGET_ID,
+      newStatus: "active",
+      newMembershipStatus: "active",
+      eventType: "admin.user.reactivated",
+    });
+    expect(result).toEqual({ ok: true, status: "active" });
+    // The predicate is not even consulted.
+    expect(trxGrantRows).not.toHaveBeenCalled();
+  });
+
+  it("an ORG-SCOPED actor measures only THEIR org's membership (AUTHZ-1)", async () => {
+    // The grant lives in ORG_B; the org admin is confined to ORG_A, so their
+    // block cannot destroy it and must be allowed.
+    const ORG_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    trxMembershipRows.mockResolvedValue([{ organization_id: ORG_A }]);
+    trxGrantRows.mockResolvedValue([
+      { app_user_id: TARGET_ID, organization_id: ORG_B, role_id: ROLE },
+    ]);
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: { kind: "org", organizationId: ORG_A },
+      targetAppUserId: TARGET_ID,
+      newStatus: "blocked",
+      newMembershipStatus: "blocked",
+      eventType: "admin.user.blocked",
+    });
+    expect(result).toEqual({ ok: true, status: "blocked" });
+  });
+
+  it("a platform with NO grant today is never blocked from ordinary administration", async () => {
+    trxGrantRows.mockResolvedValue([]);
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
+      targetAppUserId: TARGET_ID,
+      newStatus: "blocked",
+      newMembershipStatus: "blocked",
+      eventType: "admin.user.blocked",
+    });
+    expect(result).toEqual({ ok: true, status: "blocked" });
   });
 });

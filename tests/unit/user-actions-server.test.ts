@@ -16,12 +16,21 @@ const txRun = vi.fn();
 const requiresSuperadminMock = vi.fn();
 // Review #7 privilege-ordering guard (targetOutranksActor). Default false.
 const outranksMock = vi.fn();
+// REVOKE-2 (review #444) — would the soft-delete cascade strip the last global
+// superuser? Default false, i.e. the platform has other superadmins.
+const cascadeStripsLastMock = vi.fn();
 
 vi.mock("@/lib/admin-status.server", () => ({
   performAdminStatusChange: (...a: unknown[]) => performStatusChange(...a),
 }));
 vi.mock("@/lib/admin/access-scope.server", () => ({
   requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
+  membershipCascadeStripsLastGlobalSuperuser: (...a: unknown[]) => cascadeStripsLastMock(...a),
+  // The real class, so `instanceof` in the module under test still matches.
+  LastSuperadminCascadeError: class LastSuperadminCascadeError extends Error {},
+  LAST_SUPERADMIN_ERROR: "last_superadmin",
+  LAST_SUPERADMIN_EVENT: "admin.superuser.revocation_denied",
+  LAST_SUPERADMIN_REASON: "last_global_superuser",
 }));
 vi.mock("@/lib/admin/user-target.server", () => ({
   targetOutranksActor: (...a: unknown[]) => outranksMock(...a),
@@ -78,9 +87,11 @@ beforeEach(async () => {
     txRun,
     requiresSuperadminMock,
     outranksMock,
+    cascadeStripsLastMock,
   ])
     m.mockReset();
   outranksMock.mockResolvedValue(false);
+  cascadeStripsLastMock.mockResolvedValue(false);
   performStatusChange.mockResolvedValue({ ok: true });
   banMock.mockResolvedValue(undefined);
   unbanMock.mockResolvedValue(undefined);
@@ -177,6 +188,29 @@ describe("soft_delete / restore", () => {
     expect(out).toEqual({ ok: false, appUserId: "u1", error: "db_cascade_failed" });
     // The Better Auth ban must be reversed so the two systems stay in sync.
     expect(unbanMock).toHaveBeenCalledWith("ba1", actor.request);
+  });
+
+  it("soft_delete is REFUSED when the cascade would strip the last global superuser (REVOKE-2)", async () => {
+    cascadeStripsLastMock.mockResolvedValue(true);
+    const out = await executeBulkUserAction("soft_delete", target, actor, {});
+    // Reported with the same code the single-row route answers 409 with, so
+    // the bulk path cannot be used to get around it.
+    expect(out).toEqual({ ok: false, appUserId: "u1", error: "last_superadmin" });
+    // The ban was already applied, so the saga must compensate it — the row
+    // must be left exactly as it was.
+    expect(unbanMock).toHaveBeenCalledWith("ba1", actor.request);
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.superuser.revocation_denied",
+      "denied",
+      expect.objectContaining({ reason: "last_global_superuser" }),
+    );
+    // NOT the generic cascade failure — an operator must be able to tell the
+    // two apart.
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.user.soft_delete_failed",
+      "error",
+      expect.anything(),
+    );
   });
 
   it("restore unbans then reverses the cascade", async () => {

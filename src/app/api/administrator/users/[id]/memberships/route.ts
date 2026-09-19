@@ -14,8 +14,20 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import {
+  canAccessOrg,
+  resolveOrgScope,
+  wouldStripLastGlobalSuperuser,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
+  LAST_SUPERADMIN_STATUS,
+} from "@/lib/admin/access-scope.server";
+import {
+  isResolvedUserResponse,
+  refuseOutrankingTarget,
+  resolveTargetUser,
+} from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -241,6 +253,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
+  // REVOKE-1 (rank): a membership status change is a LOCKOUT primitive — the
+  // active-membership join in `userIsGlobalSuperuser`, and `decideSecureAccess`
+  // itself, both hang off it — yet these two verbs carried no review #7 rank
+  // guard, unlike ban / unban / soft-delete / restore / status / sessions /
+  // password next door. Without it an org admin holding `admin.users.update`
+  // could suspend or block a SUPERADMIN co-member they cannot ban, soft-delete
+  // or set a password for, and take the platform down that way instead. Same
+  // ordering as every sibling: straight after `resolveTargetUser`, before the
+  // body is even read.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "membership_update");
+  if (outranked) return outranked;
+
   let json: unknown;
   try {
     json = await request.json();
@@ -272,12 +296,51 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   const allowedMembershipIds = memberships.map((m) => m.id);
 
-  await db
-    .updateTable("app_organization_memberships")
-    .set({ status: input.status })
-    .where("app_user_id", "=", target.appUserId)
-    .where("id", "in", allowedMembershipIds)
-    .execute();
+  // REVOKE-2: only a move AWAY from `active` can destroy a superuser grant —
+  // reactivating a membership can only ever create one, so it is never gated
+  // (blocking it would strand the very admin who could fix the platform).
+  const outcome = await db.transaction().execute(async (trx) => {
+    if (
+      input.status !== "active" &&
+      (await wouldStripLastGlobalSuperuser(
+        {
+          memberships: memberships.map((m) => ({
+            appUserId: target.appUserId,
+            organizationId: m.organization_id,
+          })),
+        },
+        trx,
+      ))
+    ) {
+      return "last_superadmin" as const;
+    }
+    await trx
+      .updateTable("app_organization_memberships")
+      .set({ status: input.status })
+      .where("app_user_id", "=", target.appUserId)
+      .where("id", "in", allowedMembershipIds)
+      .execute();
+    return "updated" as const;
+  });
+
+  if (outcome === "last_superadmin") {
+    await auditUserAction(LAST_SUPERADMIN_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      requestId: guard.requestId,
+      reason: LAST_SUPERADMIN_REASON,
+      metadata: {
+        action: "membership_update",
+        membershipIds: allowedMembershipIds,
+        status: input.status,
+      },
+    });
+    return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   const auditPromises = [
     auditUserAction("admin.user.membership_updated", "success", {
@@ -339,6 +402,13 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
+  // REVOKE-1 (rank): removing a membership is the strongest lockout primitive
+  // on this route — it revokes every role the target held in that org along
+  // with the membership row. See the PATCH twin above for why review #7 has to
+  // reach here.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "membership_remove");
+  if (outranked) return outranked;
+
   let json: unknown;
   try {
     json = await request.json();
@@ -370,11 +440,42 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
   const allowedMembershipIds = memberships.map((m) => m.id);
 
-  await db
-    .deleteFrom("app_organization_memberships")
-    .where("app_user_id", "=", target.appUserId)
-    .where("id", "in", allowedMembershipIds)
-    .execute();
+  // REVOKE-2: deleting the membership removes the ACTIVE row the superuser
+  // grant hangs off, so it is checked unconditionally (unlike PATCH, which only
+  // matters on a move away from `active`).
+  const outcome = await db.transaction().execute(async (trx) => {
+    const stripsLast = await wouldStripLastGlobalSuperuser(
+      {
+        memberships: memberships.map((m) => ({
+          appUserId: target.appUserId,
+          organizationId: m.organization_id,
+        })),
+      },
+      trx,
+    );
+    if (stripsLast) return "last_superadmin" as const;
+    await trx
+      .deleteFrom("app_organization_memberships")
+      .where("app_user_id", "=", target.appUserId)
+      .where("id", "in", allowedMembershipIds)
+      .execute();
+    return "removed" as const;
+  });
+
+  if (outcome === "last_superadmin") {
+    await auditUserAction(LAST_SUPERADMIN_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      requestId: guard.requestId,
+      reason: LAST_SUPERADMIN_REASON,
+      metadata: { action: "membership_remove", membershipIds: allowedMembershipIds },
+    });
+    return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   const auditPromises = [
     auditUserAction("admin.user.membership_removed", "success", {

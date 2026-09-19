@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as RouteModule from "@/app/api/administrator/roles/[id]/permissions/route";
 
@@ -11,6 +12,10 @@ import type * as RouteModule from "@/app/api/administrator/roles/[id]/permission
  * superuser-owned but narrowly-scoped key confers only within its scopes).
  * The five sibling conferral routes share the identical wiring
  * (`conferrablePermissions` + the qualified `isSuperadmin` skip).
+ *
+ * REVOKE-1 put that same wiring on the DELETE twin, so the scope bound is
+ * pinned there too — a superuser-owned key scoped to `admin.roles.update` must
+ * not be able to DISMANTLE authority it could not confer.
  *
  * The security suite drives the REAL `requireAdminPermission`, which can't
  * inject a bearer credential's `grantedScopes`, so this mocks the guard
@@ -26,10 +31,13 @@ vi.mock("@/lib/admin/permissions.server", () => ({
   isAdminPermissionDenial: (result: unknown) =>
     typeof result === "object" && result !== null && "response" in result,
 }));
-vi.mock("@/lib/admin/access-scope.server", () => ({
-  isSuperadmin: (a: { permissions: string[] }) => a.permissions.includes("superuser"),
-  canAccessOrg: () => true,
-}));
+// Only the org boundary is stubbed open (this suite is about SCOPES, not
+// tenancy); everything else in the module — including the REVOKE-2 helpers the
+// DELETE twin uses — runs for real against the stubbed db below.
+vi.mock("@/lib/admin/access-scope.server", async () => {
+  const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
+  return { ...actual, canAccessOrg: () => true };
+});
 vi.mock("@/lib/admin/rate-limit.server", () => ({
   DEFAULT_ADMIN_MUTATION_LIMIT: { capacity: 10, refillMs: 1000 },
   enforceRateLimit: () => undefined,
@@ -89,6 +97,7 @@ function grant(permissions: string[], grantedScopes: string[] | null) {
 }
 
 let POST: typeof RouteModule.POST;
+let DELETE: typeof RouteModule.DELETE;
 
 beforeEach(async () => {
   requireAdminMock.mockReset();
@@ -102,7 +111,7 @@ beforeEach(async () => {
     key: "custom.role",
   });
   rowsExecute.mockResolvedValue([]);
-  ({ POST } = await import("@/app/api/administrator/roles/[id]/permissions/route"));
+  ({ POST, DELETE } = await import("@/app/api/administrator/roles/[id]/permissions/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -137,5 +146,38 @@ describe("POST /api/administrator/roles/[id]/permissions — bearer scope bound 
     const res = await POST(req({ ids: ["admin.users.delete"] }), ctx);
     expect(res.status).toBe(403);
     expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/administrator/roles/[id]/permissions — bearer scope bound (REVOKE-1)", () => {
+  it("REJECTS (403) a bearer key DETACHING a permission outside its scopes, even from a superuser owner", async () => {
+    requireAdminMock.mockResolvedValue(
+      grant(["admin.roles.update", "admin.users.delete", "superuser"], ["admin.roles.update"]),
+    );
+    const res = await DELETE(req({ ids: ["admin.users.delete"] }), ctx);
+    expect(res.status).toBe(403);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("REJECTS (403) a superuser-owned key detaching the `superuser` marker itself", async () => {
+    requireAdminMock.mockResolvedValue(
+      grant(["admin.roles.update", "superuser"], ["admin.roles.update"]),
+    );
+    const res = await DELETE(req({ ids: ["superuser"] }), ctx);
+    expect(res.status).toBe(403);
+  });
+
+  it("ALLOWS a bearer key to detach a permission within its (wildcard) scopes", async () => {
+    requireAdminMock.mockResolvedValue(
+      grant(["admin.roles.update", "admin.users.delete", "superuser"], ["admin.roles.*"]),
+    );
+    const res = await DELETE(req({ ids: ["admin.roles.update"] }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("preserves the SUPERADMIN fast-path for a cookie session (grantedScopes null)", async () => {
+    requireAdminMock.mockResolvedValue(grant(["admin.roles.update", "superuser"], null));
+    const res = await DELETE(req({ ids: ["admin.users.delete"] }), ctx);
+    expect(res.status).toBe(200);
   });
 });

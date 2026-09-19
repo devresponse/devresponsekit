@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as UserTargetModule from "@/lib/admin/user-target.server";
 import type * as Route from "@/app/api/administrator/users/[id]/memberships/route";
 
 /**
@@ -12,15 +13,26 @@ import type * as Route from "@/app/api/administrator/users/[id]/memberships/rout
  *   - PATCH/DELETE mutate ONLY the memberships the org-scoped lookup
  *     resolved — never the raw request id list — so a foreign-org id passed
  *     alongside a valid one cannot be mutated.
+ *
+ * Plus the revocation guards the membership lockout primitives were missing:
+ *   - REVOKE-1 — the review #7 rank guard (a target who outranks the actor),
+ *   - REVOKE-2 — the last-superadmin invariant.
  */
 const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
 const auditMock = vi.fn();
 
+const ACTOR_BA = "ba-actor";
+
 const state: {
   org: { id: string; slug: string } | undefined;
   memberships: Array<{ id: string; organization_id: string; slug: string }>;
-} = { org: undefined, memberships: [] };
+  /**
+   * Rows `activeGlobalSuperuserGrants` sees (REVOKE-2). Empty by default so a
+   * platform with nothing to protect behaves exactly as before.
+   */
+  superuserGrants: Array<{ app_user_id: string; organization_id: string; role_id: string }>;
+} = { org: undefined, memberships: [], superuserGrants: [] };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -32,14 +44,26 @@ vi.mock("@/lib/admin/audit-helpers.server", () => ({
   auditOrgAction: (...a: unknown[]) => auditMock(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMock(...a) }));
-vi.mock("@/lib/admin/user-target.server", () => ({
-  resolveTargetUser: async () => ({
-    appUserId: "u-target",
-    betterAuthUserId: "ba-target",
-    primaryEmail: "target@x.com",
-  }),
-  isResolvedUserResponse: (v: unknown) => v instanceof Response,
-}));
+// Only target RESOLUTION is stubbed. `refuseOutrankingTarget` /
+// `targetOutranksActor` run for REAL (they read the mocked
+// `getUserAccessContext`), so the REVOKE-1 rank tests below exercise the
+// actual guard rather than a stand-in.
+vi.mock("@/lib/admin/user-target.server", async () => {
+  const actual = await vi.importActual<typeof UserTargetModule>("@/lib/admin/user-target.server");
+  return {
+    ...actual,
+    // Literal, not `TARGET_BA`: a `vi.mock` factory is hoisted above the
+    // module's own consts, so it must not close over them.
+    resolveTargetUser: async () => ({
+      appUserId: "u-target",
+      betterAuthUserId: "ba-target",
+      primaryEmail: "target@x.com",
+      displayName: null,
+      status: "active",
+    }),
+    isResolvedUserResponse: (v: unknown) => v instanceof Response,
+  };
+});
 
 function tableKey(t: unknown): string {
   return String(t).split(" ")[0] ?? "";
@@ -51,6 +75,8 @@ function firstFor(table: string) {
 }
 function execFor(table: string): unknown[] {
   if (table === "app_organization_memberships") return state.memberships;
+  // activeGlobalSuperuserGrants(...) reads the surviving superuser grants.
+  if (table === "app_user_roles") return state.superuserGrants;
   return [];
 }
 function makeChain(table: string): unknown {
@@ -82,6 +108,16 @@ vi.mock("@/db/database", () => ({
     insertInto: (t: unknown) => makeChain(tableKey(t)),
     updateTable: (t: unknown) => makeChain(tableKey(t)),
     deleteFrom: (t: unknown) => makeChain(tableKey(t)),
+    // PATCH/DELETE now check REVOKE-2 and write in ONE transaction, so the
+    // trx stub has to read as well as write.
+    transaction: () => ({
+      execute: async (cb: (trx: unknown) => Promise<unknown>) =>
+        cb({
+          selectFrom: (t: unknown) => makeChain(tableKey(t)),
+          updateTable: (t: unknown) => makeChain(tableKey(t)),
+          deleteFrom: (t: unknown) => makeChain(tableKey(t)),
+        }),
+    }),
   },
 }));
 
@@ -126,7 +162,8 @@ beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
   state.org = { id: ORG_A, slug: "org-a" };
   state.memberships = [{ id: M1, organization_id: ORG_A, slug: "org-a" }];
-  sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
+  state.superuserGrants = [];
+  sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
   ({ GET, POST, PATCH, DELETE } =
     await import("@/app/api/administrator/users/[id]/memberships/route"));
 });
@@ -192,5 +229,116 @@ describe("PATCH/DELETE — mutate only the org-scoped resolved ids", () => {
   it("403 without admin.users.update", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.users.read"]));
     expect((await DELETE(jsonReq({ membershipIds: [M1] }), ctx)).status).toBe(403);
+  });
+});
+
+/**
+ * REVOKE-1 — blocking, suspending or deleting a membership is a LOCKOUT
+ * primitive, so it takes the same review #7 rank guard as ban / soft-delete /
+ * set-password. Before this, `admin.users.update` alone let an org admin
+ * suspend a SUPERADMIN co-member they could not otherwise touch.
+ *
+ * The real `refuseOutrankingTarget` runs here (only target RESOLUTION is
+ * stubbed), so these pin the actual guard.
+ */
+describe("PATCH/DELETE memberships — rank guard (REVOKE-1)", () => {
+  /** Actor holds `perms`; the TARGET resolves to `targetPerms`. */
+  function ranks(perms: string[], targetPerms: string[]) {
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_BA
+        ? orgAdmin(perms)
+        : { ...orgAdmin(perms), permissions: targetPerms, appUserId: "u-target" },
+    );
+  }
+
+  it("PATCH 403 + denied audit when the target is a SUPERADMIN and the actor is not", async () => {
+    ranks(["admin.users.update"], ["admin.users.update", "superuser"]);
+    const res = await PATCH(jsonReq({ membershipIds: [M1], status: "blocked" }), ctx);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "forbidden" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.action_denied",
+      "denied",
+      expect.objectContaining({ reason: "target_outranks_actor" }),
+    );
+  });
+
+  it("DELETE 403 when the target is a SUPERADMIN and the actor is not", async () => {
+    ranks(["admin.users.update"], ["admin.users.update", "superuser"]);
+    expect((await DELETE(jsonReq({ membershipIds: [M1] }), ctx)).status).toBe(403);
+  });
+
+  it("PATCH 403 when the target is a more-privileged peer (strict superset)", async () => {
+    ranks(["admin.users.update"], ["admin.users.update", "admin.roles.update"]);
+    expect((await PATCH(jsonReq({ membershipIds: [M1], status: "suspended" }), ctx)).status).toBe(
+      403,
+    );
+  });
+
+  it("PATCH 200 for a plain member — ordinary org administration is unchanged", async () => {
+    ranks(["admin.users.update", "shell.view"], ["shell.view"]);
+    expect((await PATCH(jsonReq({ membershipIds: [M1], status: "suspended" }), ctx)).status).toBe(
+      200,
+    );
+  });
+
+  it("DELETE 200 for a SUPERADMIN actor against a superadmin target", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.users.update"]));
+    expect((await DELETE(jsonReq({ membershipIds: [M1] }), ctx)).status).toBe(200);
+  });
+});
+
+/** REVOKE-2 — the last global superadmin cannot be locked out. */
+describe("PATCH/DELETE memberships — last-superadmin invariant (REVOKE-2)", () => {
+  const onlyGrant = [{ app_user_id: "u-target", organization_id: ORG_A, role_id: "r-super" }];
+
+  it("PATCH 409 `last_superadmin` when blocking the only remaining superadmin's membership", async () => {
+    state.superuserGrants = onlyGrant;
+    accessGetter.mockResolvedValue(superadmin(["admin.users.update"]));
+    const res = await PATCH(jsonReq({ membershipIds: [M1], status: "blocked" }), ctx);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "last_superadmin",
+      message: "errors.last_superadmin",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.superuser.revocation_denied",
+      "denied",
+      expect.objectContaining({ reason: "last_global_superuser" }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.user.membership_updated",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("PATCH 200 REACTIVATING that same membership — a move TO active can only add a grant", async () => {
+    state.superuserGrants = onlyGrant;
+    accessGetter.mockResolvedValue(superadmin(["admin.users.update"]));
+    expect((await PATCH(jsonReq({ membershipIds: [M1], status: "active" }), ctx)).status).toBe(200);
+  });
+
+  it("DELETE 409 when removing the only remaining superadmin's membership", async () => {
+    state.superuserGrants = onlyGrant;
+    accessGetter.mockResolvedValue(superadmin(["admin.users.update"]));
+    expect((await DELETE(jsonReq({ membershipIds: [M1] }), ctx)).status).toBe(409);
+  });
+
+  it("DELETE 200 while ANOTHER superadmin survives elsewhere", async () => {
+    state.superuserGrants = [
+      ...onlyGrant,
+      { app_user_id: "u-other", organization_id: ORG_B, role_id: "r-super" },
+    ];
+    accessGetter.mockResolvedValue(superadmin(["admin.users.update"]));
+    expect((await DELETE(jsonReq({ membershipIds: [M1] }), ctx)).status).toBe(200);
+  });
+
+  it("DELETE 200 for an ordinary member while superadmin grants exist elsewhere", async () => {
+    state.superuserGrants = [
+      { app_user_id: "u-other", organization_id: ORG_A, role_id: "r-super" },
+    ];
+    accessGetter.mockResolvedValue(superadmin(["admin.users.update"]));
+    expect((await DELETE(jsonReq({ membershipIds: [M1] }), ctx)).status).toBe(200);
   });
 });

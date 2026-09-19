@@ -2,7 +2,11 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
-import { resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  resolveOrgScope,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_STATUS,
+} from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -115,6 +119,17 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   if (!result.ok) {
+    // REVOKE-2 (review #444): `block` / `suspend` move the target's memberships
+    // away from `active`, which is how a `superuser` assignment stops counting.
+    // The rank guard above exempts a SUPERADMIN actor outright, so without this
+    // branch the platform's last superadmin could block themselves here and
+    // leave nobody able to administer it — the same unrecoverable state the
+    // revocation routes refuse. The core audits the denial.
+    if (result.error === "last_superadmin") {
+      return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+        requestId: guard.requestId,
+      });
+    }
     return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });
   }
   return NextResponse.json({ ok: true, status: result.status });

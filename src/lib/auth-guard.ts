@@ -2,7 +2,8 @@ import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
+import { decideSecureAccess } from "@/lib/auth-status";
+import { getSessionAccessContext } from "@/lib/session-access.server";
 import { withTrustedClientIp } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { isSessionPastAbsoluteLifetime } from "@/lib/session-lifetime";
@@ -153,7 +154,10 @@ export async function requireSecureSession(locale: string, returnTo?: string) {
     redirect(`/${locale}/sign-in?${params.toString()}`);
   }
 
-  const access = await getUserAccessContext(session.user.id);
+  // IMP-1: resolved THROUGH the session, so an impersonated shell is confined
+  // to the impersonator's own tenancy rather than to whatever the (unsigned)
+  // `active_org` cookie names among the TARGET's memberships.
+  const access = await getSessionAccessContext(session);
   const decision = decideSecureAccess(access.status, access.membershipStatus);
 
   if (decision === "pending_approval") {

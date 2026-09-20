@@ -1,5 +1,6 @@
 import "server-only";
 import { type NextRequest, type NextResponse } from "next/server";
+import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { type UserAccessContext } from "@/lib/auth-status";
@@ -27,6 +28,11 @@ import { problemResponse } from "@/lib/api-auth/problem";
  * trusted-origin CSRF check, mirroring the administrator mutation guard.
  * This is user-level: it requires no `admin.*` permission, only an active
  * session + active membership (`shell.view` is implied by membership).
+ *
+ * IMP-1: it additionally refuses an IMPERSONATED session unless the route
+ * passes `{ allowImpersonation: true }` — see {@link AccountAccessOptions} for
+ * why that default is the safe one on a surface that mints and revokes
+ * credentials.
  */
 export interface AccountActor {
   betterAuthUserId: string;
@@ -47,6 +53,36 @@ export interface AccountActor {
 
 export type AccountGuardResult =
   { ok: true; actor: AccountActor } | { ok: false; response: NextResponse };
+
+/**
+ * Per-route options for the shared account decision.
+ *
+ * IMP-1 — the self-service surface is CLOSED TO IMPERSONATED SESSIONS BY
+ * DEFAULT, and a route that wants to stay reachable while an administrator is
+ * impersonating must say so explicitly. The default is the safe one on
+ * purpose: this family is where credentials are MINTED, ROTATED and REVOKED,
+ * and while impersonating, ownership checks all pass — the session simply IS
+ * the target. An admin could therefore `POST /api/v1/me/api-keys/[id]/rotate`
+ * on a key belonging to the person they borrowed, pocket the one-time
+ * plaintext, and walk away with a standalone bearer credential carrying that
+ * user's authority in that user's tenant — an impersonation laundered into a
+ * credential that outlives it and is attributed to someone else. Revocation is
+ * the same story in reverse: destroying another person's credentials or
+ * sessions from inside their own account.
+ *
+ * Putting the default HERE rather than writing a check in each handler is the
+ * point: the next self-service route to be added is refused until its author
+ * decides otherwise, instead of inheriting the hole by omission.
+ */
+export interface AccountAccessOptions {
+  /**
+   * Admit an IMPERSONATED session to this route. Set it ONLY with a reason in
+   * a comment at the call site, and only for surfaces that neither issue nor
+   * destroy credentials — read-only introspection, or a route that applies its
+   * own (narrower or differently-shaped) impersonation refusal.
+   */
+  allowImpersonation?: boolean;
+}
 
 /**
  * A rejection, expressed once and rendered per surface (review #45).
@@ -80,6 +116,7 @@ const BEARER_REALM = 'Bearer realm="devresponse-api"';
 async function decideAccountAccess(
   request: NextRequest,
   requiredScope?: string,
+  options: AccountAccessOptions = {},
 ): Promise<{ ok: true; actor: AccountActor } | { ok: false; rejection: AccountGuardRejection }> {
   // CSRF origin guard applies only to ambient (cookie) credentials; a
   // bearer token cannot be attached cross-site (design §10.3). Both
@@ -131,6 +168,39 @@ async function decideAccountAccess(
       },
     };
   }
+  // IMP-1 — fail closed for an impersonated session unless the route opted in
+  // (see {@link AccountAccessOptions}). `impersonatorId` is always null for a
+  // bearer credential, so this only ever refuses a cookie session, and it is
+  // evaluated AFTER the status checks so the reason reported is the most
+  // specific true one. The denial is attributed to the HUMAN BEHIND the
+  // session — the impersonating admin, not the borrowed identity — matching
+  // `/api/sso/launch`, so the audit row names who actually tried.
+  if (caller.impersonatorId && options.allowImpersonation !== true) {
+    await auditEvent({
+      eventType: "account.impersonated_access.denied",
+      outcome: "denied",
+      reason: "forbidden_while_impersonating",
+      actorBetterAuthUserId: caller.impersonatorId,
+      appUserId: access.appUserId,
+      organizationId: access.organizationId,
+      request,
+      metadata: {
+        impersonatedBetterAuthUserId: caller.betterAuthUserId,
+        method: request.method,
+        requiredScope: requiredScope ?? null,
+      },
+    });
+    return {
+      ok: false,
+      rejection: {
+        adminCode: "forbidden_while_impersonating",
+        problemCode: "forbidden",
+        status: 403,
+        detail: "An impersonated session cannot perform this action.",
+      },
+    };
+  }
+
   // Bearer credentials must carry the required account scope. Cookie
   // callers have `grantedScopes === null` and pass unconditionally.
   if (requiredScope && !scopesAuthorize(caller.grantedScopes, requiredScope)) {
@@ -170,12 +240,15 @@ async function decideAccountAccess(
  * @param requiredScope Account scope a BEARER credential must carry to be
  *   admitted (e.g. `account.profile.write`). Cookie sessions carry full
  *   user authority and ignore it. Omit for read-only entry points.
+ * @param options Per-route exceptions — today only the IMP-1 impersonation
+ *   opt-in (see {@link AccountAccessOptions}).
  */
 export async function requireAccountUser(
   request: NextRequest,
   requiredScope?: string,
+  options?: AccountAccessOptions,
 ): Promise<AccountGuardResult> {
-  const decision = await decideAccountAccess(request, requiredScope);
+  const decision = await decideAccountAccess(request, requiredScope, options);
   if (decision.ok) return { ok: true, actor: decision.actor };
   // The `WWW-Authenticate` challenge is a bearer-protocol affordance for the
   // v1 rendering only; the first-party envelope keeps its existing shape.
@@ -199,8 +272,9 @@ export async function requireAccountUser(
 export async function requireApiAccount(
   request: NextRequest,
   requiredScope?: string,
+  options?: AccountAccessOptions,
 ): Promise<AccountGuardResult> {
-  const decision = await decideAccountAccess(request, requiredScope);
+  const decision = await decideAccountAccess(request, requiredScope, options);
   if (decision.ok) return { ok: true, actor: decision.actor };
   const { problemCode, status, detail, headers } = decision.rejection;
   return {

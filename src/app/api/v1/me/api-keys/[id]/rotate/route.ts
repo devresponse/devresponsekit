@@ -23,6 +23,15 @@ type RouteContext = { params: Promise<{ id: string }> };
  *
  * (The design wrote this as `:rotate`; Next.js path segments cannot
  * contain `:`, so it is exposed as a `/rotate` sub-resource.)
+ *
+ * An IMPERSONATED session is refused (403) by the account guard's default
+ * (IMP-1). This is the sharpest edge of the whole self-service surface: the
+ * ownership check passes (the session IS the target), `rotateApiKey` re-mints
+ * with the EXISTING `organization_id` and the ORIGINAL scopes, and the new
+ * plaintext is returned once — so an administrator would walk away with a
+ * standalone bearer credential carrying the borrowed user's authority in the
+ * borrowed user's tenant, outliving the impersonation and attributed to
+ * someone else.
  */
 export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiAccount(request, "account.apikeys.manage");

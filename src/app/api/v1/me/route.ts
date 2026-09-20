@@ -15,7 +15,10 @@ export const dynamic = "force-dynamic";
  * before attempting a scoped call.
  */
 export async function GET(request: NextRequest) {
-  const guard = await requireApiAccount(request, "account.read");
+  // IMP-1: opted in. Read-only introspection of the identity the caller is
+  // ALREADY acting as — it grants nothing an impersonated session does not
+  // already have, and the impersonated shell reads it to render itself.
+  const guard = await requireApiAccount(request, "account.read", { allowImpersonation: true });
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 

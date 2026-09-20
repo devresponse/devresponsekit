@@ -6,7 +6,16 @@ import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import {
+  canAccessOrg,
+  isSuperadmin,
+  wouldStripLastGlobalSuperuser,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
+  LAST_SUPERADMIN_STATUS,
+  SUPERADMIN_PERMISSION,
+} from "@/lib/admin/access-scope.server";
 import {
   conferrablePermissions,
   unheldPermissionKeys,
@@ -224,6 +233,28 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   if (!canAccessOrg(guard.access, role.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
   }
+  // REVOKE-1 (symmetry): the same AUTHZ-3 subset test POST applies, against the
+  // REMOVED set. Without it the guard was one-directional — an org admin could
+  // not ATTACH `superuser` (or anything else they lack) to a role, but could
+  // DETACH it from the seeded org-scoped `superuser` role and silently destroy
+  // platform authority they were never trusted with, with no way to put it
+  // back (AUTHZ-3 forbids re-conferring it). Measured against the raw requested
+  // keys, exactly as POST does, so the two directions cannot drift.
+  //
+  // Consequence worth stating (review #444): a key that is NOT in
+  // `app_permissions` is in nobody's held set, so `unheldPermissionKeys` always
+  // reports it and a non-superadmin now gets a 403 where the same request used
+  // to be a silent 200 no-op (the key resolved to nothing and nothing was
+  // deleted). That is precisely the failure POST has always had for an unknown
+  // key; measuring against the catalog-resolved set instead would restore the
+  // no-op but break the symmetry this guard exists to hold, so it stays
+  // fail-closed. A client replaying a permission key retired from the catalog
+  // must drop it from the request.
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheld = unheldPermissionKeys(conferrable, parsed.data.ids);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+  }
 
   const permRows = await db
     .selectFrom("app_permissions")
@@ -232,8 +263,20 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     .execute();
   const resolved = permRows.map((r) => ({ id: r.id, key: r.key }));
 
+  // REVOKE-2: stripping `superuser` off a role kills EVERY grant conferred
+  // through it at once, so this is the single most destructive revocation on
+  // the platform — and a SUPERADMIN passes the guard above by construction,
+  // including when the role they are editing is the one that makes them super.
+  // Only the removals that actually land count: `resolved` is what the delete
+  // below touches, and a body naming `superuser` for a role that does not carry
+  // it removes nothing. The check shares the deleting transaction and its row
+  // lock (see `activeGlobalSuperuserGrants`).
+  const strippingSuperuser = resolved.some((r) => r.key === SUPERADMIN_PERMISSION);
   if (resolved.length > 0) {
-    await db.transaction().execute(async (trx) => {
+    const outcome = await db.transaction().execute(async (trx) => {
+      if (strippingSuperuser && (await wouldStripLastGlobalSuperuser({ roleIds: [id] }, trx))) {
+        return "last_superadmin" as const;
+      }
       await trx
         .deleteFrom("app_role_permissions")
         .where("role_id", "=", id)
@@ -243,7 +286,27 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
           resolved.map((r) => r.id),
         )
         .execute();
+      return "detached" as const;
     });
+
+    if (outcome === "last_superadmin") {
+      await auditRoleAction(LAST_SUPERADMIN_EVENT, "denied", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        organizationId: role.organization_id,
+        requestId: guard.requestId,
+        reason: LAST_SUPERADMIN_REASON,
+        metadata: {
+          action: "role_permissions_detach",
+          roleId: id,
+          key: role.key,
+          removed: resolved.map((r) => r.key).sort(),
+        },
+      });
+      return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+        requestId: guard.requestId,
+      });
+    }
   }
 
   const finalKeys = await currentPermissionKeys(id);

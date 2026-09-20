@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { getOrgAuthSettingsRow, upsertOrgAuthSettings } from "@/lib/admin/auth-settings.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -19,6 +19,11 @@ export const dynamic = "force-dynamic";
  * org admin (403 `forbidden` — its existence is documented, so there is no
  * tenant-existence leak to hide behind a 404).
  *
+ * MACHINE-2: both verbs gate on `hasCrossOrgReach`, not `isSuperadmin`. This
+ * row has NO organization column, so an ORG-BOUND bearer credential has no
+ * tenant to match it against — a superuser-owned key minted in one org must
+ * not be able to rewrite the signup policy that every other tenant inherits.
+ *
  * There is deliberately NO DELETE: the baseline must always exist (the
  * resolver fails closed if it somehow doesn't, but offering deletion of the
  * platform baseline is a pure footgun).
@@ -28,7 +33,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
-  if (!isSuperadmin(guard.access)) {
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);
   }
 
@@ -54,7 +59,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
-  if (!isSuperadmin(guard.access)) {
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);
   }
 

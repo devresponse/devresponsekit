@@ -526,3 +526,131 @@ describe("users/[id]/groups", () => {
     expect(res.status).toBe(201);
   });
 });
+
+/**
+ * REVOKE-1 (review #444) — group REVOCATION is bounded by the same AUTHZ-3
+ * subset test as the grant.
+ *
+ * The conferral guard was applied only to the three POSTs above, so the grant
+ * side and the revoke side disagreed about who is trusted with a group: an
+ * admin holding nothing but `admin.groups.assign` could not BUILD a group
+ * carrying authority they lack, but could dismantle one with a single DELETE —
+ * and AUTHZ-3 then forbade them from putting it back. On a deployment that
+ * models administrative authority as a group, that is a one-request,
+ * unrecoverable lockout, one route over from the four the branch already
+ * closed. Each DELETE is checked against what the removal destroys:
+ * `permissionKeysForRoles` for the role detach, `permissionKeysForGroup` for
+ * both membership removals.
+ */
+describe("group revocation carries the conferral guard (REVOKE-1)", () => {
+  const rolesBody = { roleIds: [ROLE] };
+  const membersBody = { appUserIds: [USER] };
+
+  it("roles DELETE → 403 when the detached role confers `superuser`", async () => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await roles.DELETE(
+      req(`groups/${GROUP}/roles`, { method: "DELETE", body: rolesBody }),
+      groupCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("roles DELETE → 403 when the detached role confers a permission the actor lacks", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await roles.DELETE(
+      req(`groups/${GROUP}/roles`, { method: "DELETE", body: rolesBody }),
+      groupCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("roles DELETE → 200 when the removed permissions are a subset the actor holds", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign", "admin.users.read"]));
+    const res = await roles.DELETE(
+      req(`groups/${GROUP}/roles`, { method: "DELETE", body: rolesBody }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("roles DELETE → SUPERADMIN may still detach a `superuser`-granting role (200)", async () => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.groups.assign"]));
+    const res = await roles.DELETE(
+      req(`groups/${GROUP}/roles`, { method: "DELETE", body: rolesBody }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("members DELETE → 403 when the group confers a permission the actor lacks", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await members.DELETE(
+      req(`groups/${GROUP}/members`, { method: "DELETE", body: membersBody }),
+      groupCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("members DELETE → 200 for a subset group, and SUPERADMIN is never gated", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign", "admin.users.read"]));
+    expect(
+      (
+        await members.DELETE(
+          req(`groups/${GROUP}/members`, { method: "DELETE", body: membersBody }),
+          groupCtx,
+        )
+      ).status,
+    ).toBe(200);
+
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.groups.assign"]));
+    expect(
+      (
+        await members.DELETE(
+          req(`groups/${GROUP}/members`, { method: "DELETE", body: membersBody }),
+          groupCtx,
+        )
+      ).status,
+    ).toBe(200);
+  });
+
+  it("users/[id]/groups DELETE → 403 when the group confers a permission the actor lacks", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await userGroups.DELETE(
+      req(`users/${USER}/groups`, { method: "DELETE", body: { groupId: GROUP } }),
+      userCtx,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("users/[id]/groups DELETE → 200 for a subset group, and SUPERADMIN is never gated", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign", "admin.users.read"]));
+    expect(
+      (
+        await userGroups.DELETE(
+          req(`users/${USER}/groups`, { method: "DELETE", body: { groupId: GROUP } }),
+          userCtx,
+        )
+      ).status,
+    ).toBe(200);
+
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.groups.assign"]));
+    expect(
+      (
+        await userGroups.DELETE(
+          req(`users/${USER}/groups`, { method: "DELETE", body: { groupId: GROUP } }),
+          userCtx,
+        )
+      ).status,
+    ).toBe(200);
+  });
+});

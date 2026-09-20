@@ -84,14 +84,45 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApi
   return { ...row, plaintext };
 }
 
-/** Lists a single user's keys (never returns the hash or plaintext). */
-export async function listApiKeysForUser(appUserId: string): Promise<ApiKeySummary[]> {
-  return db
+/**
+ * Optional tenant confinement for {@link listApiKeysForUser} (IMP-1).
+ *
+ * `app_user_id` is an ACCOUNT-WIDE key: one identity can hold keys in every
+ * organization it is a member of, so the self-scoped listing spans tenants by
+ * construction. That is right for the user themselves and wrong for a session
+ * an administrator has BORROWED, which must see no further than the tenant the
+ * impersonation is confined to. Supplying this narrows the listing to one org;
+ * a `null` organizationId means "the caller resolved no org", which lists
+ * NOTHING rather than everything (fail closed).
+ */
+export interface ApiKeyOrgConfinement {
+  organizationId: string | null;
+}
+
+/**
+ * Lists a single user's keys (never returns the hash or plaintext).
+ *
+ * Pass `confinement` to additionally restrict the rows to one organization —
+ * see {@link ApiKeyOrgConfinement}. Omitted, the listing is account-wide,
+ * which is the pre-existing behaviour for a caller acting as themselves.
+ */
+export async function listApiKeysForUser(
+  appUserId: string,
+  confinement?: ApiKeyOrgConfinement,
+): Promise<ApiKeySummary[]> {
+  // Fail closed: a confined caller with no resolvable org has no tenant to
+  // list in, so it must see an empty list — never the unfiltered account-wide
+  // set a dropped predicate would return (and `organization_id = NULL` would
+  // not be that predicate anyway).
+  const confinedOrgId = confinement?.organizationId;
+  if (confinement && confinedOrgId == null) return [];
+
+  const base = db
     .selectFrom("app_api_keys")
     .select(SUMMARY_COLUMNS)
-    .where("app_user_id", "=", appUserId)
-    .orderBy("created_at", "desc")
-    .execute();
+    .where("app_user_id", "=", appUserId);
+  const scoped = confinedOrgId == null ? base : base.where("organization_id", "=", confinedOrgId);
+  return scoped.orderBy("created_at", "desc").execute();
 }
 
 export interface AdminApiKeyListQuery {

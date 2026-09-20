@@ -143,6 +143,24 @@ describe("listApiKeysForUser", () => {
     state.execute = [];
     expect(await mod.listApiKeysForUser("nobody")).toEqual([]);
   });
+
+  // IMP-1: `app_user_id` alone spans every tenant the identity belongs to, so
+  // an impersonated caller must additionally be pinned to one org.
+  it("adds the organization predicate when a confinement is supplied (IMP-1)", async () => {
+    state.execute = [{ id: "k1" }];
+    const rows = await mod.listApiKeysForUser("user-1", { organizationId: "org-a" });
+    expect(rows).toEqual([{ id: "k1" }]);
+    expect(whereClauses()).toContain("app_user_id = user-1");
+    expect(whereClauses()).toContain("organization_id = org-a");
+  });
+
+  it("lists NOTHING — and queries nothing — for a confinement with no resolvable org", async () => {
+    // Fail closed. The alternative reading, "no org means no filter", would
+    // hand a confined caller the unfiltered account-wide set.
+    state.execute = [{ id: "k1" }, { id: "k2" }];
+    expect(await mod.listApiKeysForUser("user-1", { organizationId: null })).toEqual([]);
+    expect(whereClauses()).toEqual([]);
+  });
 });
 
 describe("getApiKeyById", () => {

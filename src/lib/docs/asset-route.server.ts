@@ -2,7 +2,8 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { getCurrentSession } from "@/lib/auth-guard";
-import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
+import { decideSecureAccess } from "@/lib/auth-status";
+import { getSessionAccessContext } from "@/lib/session-access.server";
 import { resolveAssetFile } from "@/lib/docs/safe-path.server";
 import type { DocSpace } from "@/lib/docs/source/types";
 
@@ -29,7 +30,7 @@ export async function serveSpaceAsset(space: DocSpace, path: string[]): Promise<
   const session = await getCurrentSession();
   if (!session) return notFound();
 
-  const access = await getUserAccessContext(session.user.id);
+  const access = await getSessionAccessContext(session);
   if (decideSecureAccess(access.status, access.membershipStatus) !== "allow") return notFound();
   if (!access.permissions.includes("shell.view")) return notFound();
 

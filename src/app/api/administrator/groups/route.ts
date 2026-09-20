@@ -13,7 +13,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -151,6 +151,11 @@ export async function POST(request: NextRequest) {
   }
 
   // The org must exist and (defence in depth) be reachable by the caller.
+  // MACHINE-2: the error SHAPE follows the same predicate as the reach itself —
+  // a caller that may see every tenant learns "no such org" (404), everyone
+  // else — including an ORG-BOUND superuser-owned credential, which
+  // `canAccessOrg` now caps — gets a flat 403 that confirms nothing about
+  // another tenant's existence.
   const org = await db
     .selectFrom("app_organizations")
     .select(["id"])
@@ -158,8 +163,8 @@ export async function POST(request: NextRequest) {
     .executeTakeFirst();
   if (!org || !canAccessOrg(guard.access, organizationId)) {
     return adminErrorResponse(
-      isSuperadmin(guard.access) ? "organization_not_found" : "forbidden",
-      isSuperadmin(guard.access) ? 404 : 403,
+      hasCrossOrgReach(guard.access) ? "organization_not_found" : "forbidden",
+      hasCrossOrgReach(guard.access) ? 404 : 403,
       request,
     );
   }

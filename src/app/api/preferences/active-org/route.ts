@@ -37,7 +37,14 @@ const bodySchema = z.object({ organizationId: z.string().uuid() });
  *   - An impersonated session is refused (P0-1, below).
  */
 export async function POST(request: NextRequest) {
-  const guard = await requireAccountUser(request, "account.preferences.write");
+  // IMP-1: opted in at the GUARD so this route keeps applying its OWN,
+  // older refusal below (P0-1) — same 403, but a distinct
+  // `forbidden_while_impersonating` body that clients and the e2e suite pin.
+  // Letting the shared guard answer first would change that wire contract for
+  // no security gain: both paths refuse the identical set of callers.
+  const guard = await requireAccountUser(request, "account.preferences.write", {
+    allowImpersonation: true,
+  });
   if (!guard.ok) return guard.response;
   const { actor } = guard;
 
@@ -46,13 +53,22 @@ export async function POST(request: NextRequest) {
     return adminErrorResponse("forbidden", 403, request, { requestId });
   }
 
-  // An impersonated session must never change tenant. The impersonation
-  // escalation guard (POST /api/administrator/users/[id]/impersonate) validates
-  // the target's permissions only in the org active when impersonation STARTED;
-  // were the impersonated session then free to switch active_org, a
-  // non-superadmin actor could pivot into a tenant the guard never checked and
-  // wield the target's admin.* permissions there — a cross-tenant privilege
-  // escalation. Confine the impersonated session to its starting org. (P0-1)
+  // An impersonated session must never change tenant DELIBERATELY: switching
+  // is a user affordance, and the user is not the one at the browser. (P0-1)
+  //
+  // IMP-1/IMP-2 — this refusal is no longer the tenant boundary, and reading
+  // it as one is what made the original hole invisible. It used to say "confine
+  // the impersonated session to its starting org", which was never true of the
+  // SESSION, only of this route: `active_org` is an unsigned cookie that
+  // `getUserAccessContext` reads for whichever user the session names — the
+  // TARGET — so the admin holding the browser rewrote it directly and never
+  // came here at all. The starting org is not recorded anywhere. What actually
+  // bounds the session is the confinement in `getUserAccessContext`: it may
+  // resolve any org the IMPERSONATOR could reach as themselves, and no other.
+  // This refusal survives as the strictly stricter rule on this one route —
+  // both paths refuse the same callers, and keeping it preserves the distinct
+  // `forbidden_while_impersonating` body clients and the e2e suite pin.
+  //
   // The marker rides the resolved caller (`actor.impersonatorId`) so no second
   // session lookup is needed (review #28).
   if (actor.impersonatorId) {

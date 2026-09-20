@@ -6,7 +6,7 @@ import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { AdminError, assertPermissionNotInUse } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 
@@ -42,7 +42,10 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   if (limited) return limited;
   // ADR-0001: the permission catalog is platform-global; confine writes to
   // SUPERADMIN even if an org admin holds `admin.permissions.manage`.
-  if (!isSuperadmin(guard.access)) {
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);
   }
 
@@ -107,7 +110,10 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   if (limited) return limited;
   // ADR-0001: the permission catalog is platform-global; confine writes to
   // SUPERADMIN even if an org admin holds `admin.permissions.manage`.
-  if (!isSuperadmin(guard.access)) {
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);
   }
 

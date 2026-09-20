@@ -179,6 +179,9 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
  *
  * Detach roles from the group. Body: same `{ roleIds: string[] }`. Caller MUST
  * hold `admin.groups.assign`.
+ *
+ * Carries the SAME AUTHZ-3 subset test as POST, measured against the REMOVED
+ * roles (REVOKE-1 — 403 `forbidden`).
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
@@ -208,6 +211,24 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const group = await loadGroup(id);
   if (!group || !canAccessOrg(guard.access, group.organization_id)) {
     return adminErrorResponse("not_found", 404, request);
+  }
+
+  // REVOKE-1 (symmetry): the AUTHZ-3 guard on POST bounds what a delegated
+  // admin may BUNDLE into a group; until now it bounded nothing on the way out,
+  // so the grant path and the revoke path disagreed about who is trusted with a
+  // role. Group roles confer their permissions to every member (ADR-0002), so
+  // detaching one is a mutation of authority the actor may not hold — and on a
+  // deployment that models administrative authority as a group, an admin
+  // holding only `admin.groups.assign` could dismantle it with one DELETE and
+  // never put it back, since AUTHZ-3 forbids conferring what you lack.
+  // Measured against the roles named in the body, exactly as POST measures
+  // them, so the two directions cannot drift. A bearer credential is bounded by
+  // its scopes and never takes the SUPERADMIN fast-path (P1-1).
+  if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+    const conferred = await permissionKeysForRoles(parsed.data.roleIds);
+    const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+    const unheld = unheldPermissionKeys(conferrable, conferred);
+    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
   await db

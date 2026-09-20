@@ -378,6 +378,37 @@ Grids support per-row actions and two selection modes (the client state lives in
 Bulk actions and CSV export are surfaced by the grid toolbar
 (`_components/grid/data-grid-toolbar.tsx`) and detailed in §13 and §19.
 
+### 7.2 Sortable header accessibility (A11Y-4)
+
+A column is sortable when it declares an `accessorKey` and does not set
+`enableSorting: false`; `DataGrid` then wraps its header in the
+`DataGridColumnHeader` button. Two rules hold for that button:
+
+- **The accessible name is the column name, and nothing else.** It is computed
+  from the rendered header (name-from-content) — the button carries no
+  `aria-label`. An `aria-label` overrides the visible text, and the one this
+  component used to build collapsed to `"— Not sorted"` for every column,
+  because `header` is a function for all of them and the label was only
+  composed when `children` was a string. Deriving the name from what is on
+  screen cannot drift that way again, and it satisfies WCAG 2.5.3 (Label in
+  Name) by construction, so voice control can target the control by the name a
+  user can see.
+- **The sort state is a separate channel.** `aria-sort` on the wrapping `<th>`
+  is the ARIA-designated mechanism (it is not valid on `role=button`), and the
+  button additionally points `aria-describedby` at a visually-hidden span for
+  assistive technology that under-reports `aria-sort` while focus is on the
+  button. That span is `aria-hidden` so it stays out of name-from-content —
+  otherwise it would leak the sort state into the `<th>`'s name, which screen
+  readers prefix onto every data cell in the column.
+
+Consequently a sortable column **must** render text. Row-action columns have no
+`accessorKey`, render their header raw and no button, and may keep
+`header: () => ""`. The rule is enforced two ways:
+`tests/component/administrator-data-grid.test.tsx` pins the rendering contract
+(name, description and `aria-sort` per state) and
+`tests/unit/admin-grid-column-label-invariant.test.ts` statically checks every
+sortable column definition in every Administrator grid.
+
 ---
 
 ## 8. Administrator areas
@@ -425,14 +456,14 @@ Manages the application user lifecycle and per-user administration.
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
 | `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`; `admin.user.created` |
-| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore |
-| `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated` |
+| `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
+| `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email; `admin.user.password_set` / `.password_reset_email_sent` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`) |
 | `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
-| `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs |
+| `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `PATCH/DELETE …/memberships` are rank-gated and `DELETE …/app-roles` is conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/bulk` | per-action key | Batch actions; see §13, §19 |
 
 The Better Auth `role` (`user`/`admin`) is distinct from app roles in
@@ -461,6 +492,79 @@ carries the same guard: `POST /api/v1/users/[id]/status` returns a **403**
 cannot do what the console refuses. Self-service `/api/account/*` surfaces are
 unaffected.
 
+**Revocation is bounded by the same guards as the grant (REVOKE-1).** The
+conferral guard (AUTHZ-3) and the rank guard (§ above, review #7) used to apply
+only to paths that *hand out* authority. Four revocation paths had neither, and
+a delegated admin of the default organization could use them to dismantle the
+platform's own superuser: `DELETE /users/[id]/app-roles`,
+`DELETE /roles/[id]/permissions`, `PATCH/DELETE /users/[id]/memberships` and
+`PATCH/DELETE /organizations/[id]/members`. They now carry the mirror image of
+their grant twin:
+
+- **Conferral symmetry** — `DELETE /users/[id]/app-roles` and
+  `DELETE /roles/[id]/permissions` run the AUTHZ-3 subset test
+  (`conferrablePermissions` + `unheldPermissionKeys`) against the **removed**
+  set. A non-superadmin may only revoke what they could confer; a bearer
+  credential is bounded by its scopes and never takes the superadmin fast-path
+  (P1-1). **403** `forbidden`, exactly as the POST twin.
+- **Rank** — both membership routes call `refuseOutrankingTarget`. The
+  org-centric `…/organizations/[id]/members` route never resolves a target
+  user, so it resolves the affected members itself and refuses the **whole**
+  batch (one unambiguous 403, no half-applied mutation) when any member
+  outranks the actor.
+
+**Last superadmin (REVOKE-2).** Global superuser authority is the conjunction of
+three revocable rows — an `app_user_roles` assignment, an
+`app_role_permissions` link carrying `superuser`, and an **active** membership
+pairing them (`userIsGlobalSuperuser`) — and no org admin can confer it back.
+`stripsLastGlobalSuperuser` / `wouldStripLastGlobalSuperuser`
+(`src/lib/admin/access-scope.server.ts`) is the single predicate: a revocation
+that would destroy **every** remaining grant is refused with **409**
+`last_superadmin` and an `admin.superuser.revocation_denied` (`denied`, reason
+`last_global_superuser`, `metadata.action`) audit row. It is not a "superadmins
+are untouchable" rule — a superadmin may still demote a co-superadmin, a
+membership PATCH **to** `active` is never gated (it can only add a grant), and a
+platform with no such grant today has nothing to protect, so nothing is refused.
+
+It binds the four revocation paths above **and** the account-lifecycle cascades
+that move memberships away from `active` by another name. Those cascades are
+rank-guarded, but `targetOutranksActor` exempts a superadmin actor outright, so
+without the invariant a superadmin could reach the identical unrecoverable state
+in one request — including on themselves:
+
+| Path | Where the check lives |
+| --- | --- |
+| `DELETE /users/[id]/app-roles`, `DELETE /roles/[id]/permissions`, `PATCH\|DELETE /users/[id]/memberships`, `PATCH\|DELETE /organizations/[id]/members` | the route handler |
+| `POST /users/[id]/status`, `POST /api/v1/users/[id]/status`, `block`/`suspend` via `POST /users/bulk` | `performAdminStatusChange` (`src/lib/admin-status.server.ts`) — the shared core, so a fourth caller cannot forget it |
+| `DELETE /users/[id]`, `soft_delete` via `POST /users/bulk` | inside the soft-delete transaction; the saga's compensating unban runs first, so a refusal leaves the account untouched |
+
+The bulk endpoint reports it as a per-row `last_superadmin` outcome rather than a
+status code; `/api/v1` returns the RFC 7807 twin.
+
+**Not covered**, stated so the wording above is not read as wider than it is:
+
+- **`ban` / `unban`.** The invariant is defined on rows, and a ban changes none
+  of them — the grant survives and `unban` restores access without re-conferring
+  anything. Banning the last superadmin still locks them out of the UI; gating
+  that needs a different predicate ("at least one superadmin can still sign in",
+  which must also read `app_users.status` and the Better Auth ban flags). Open
+  follow-up.
+- **Authority conferred through a GROUP.** See §8.3.
+
+**Concurrency.** The check shares the writing transaction, and the grant read
+takes `for update of app_user_roles, app_organization_memberships,
+app_role_permissions`. The relation list matters: under READ COMMITTED a blocked
+`SELECT … FOR UPDATE` re-evaluates its predicate (EvalPlanQual) only for rows of
+a **locked** relation that the committing transaction actually changed. Only the
+role-assignment revoke writes `app_user_roles`; the membership paths and the
+lifecycle cascades write `app_organization_memberships`, and the permission strip
+writes `app_role_permissions`. Locking only the assignments would let a second
+caller acquire the released lock on an unmodified tuple, skip the recheck, and
+still see the other superadmin's membership as `active` in its own pre-commit
+snapshot — so two concurrent revocations aimed at two different superadmins could
+each conclude that the other survives. With all three relations locked, the
+recheck drops the row and the second caller is correctly refused.
+
 **The Better Auth admin plugin's raw HTTP surface is closed.** Every plugin
 endpoint (`/api/auth/admin/list-users`, `/set-user-password`,
 `/impersonate-user`, `/set-role`, `/remove-user`, …) is mounted on the public
@@ -477,6 +581,25 @@ merely what the plugin's own `hasPermission` requires for the `auth.api.*` calls
 those routes make on the actor's behalf. Minting it (`POST /users/[id]/role`)
 stays superadmin-only. Never pass `request` to an `auth.api.*` admin call.
 
+**Better Auth's own self-service endpoints are closed while impersonating
+(IMP-3).** The same `hooks.before` middleware answers **403** when an
+impersonated session reaches `/api/auth/list-sessions`, `/revoke-session`,
+`/revoke-sessions`, `/revoke-other-sessions` or `/update-user` over HTTP, and
+audits `account.impersonated_access.denied` against the **impersonator**. These
+endpoints are not `/api/account/*`, so the account guard's default refusal
+(§19) never saw them: the account panel calls them through `authClient`, and
+Better Auth resolves "the current user" as the borrowed one — which handed an
+admin holding only `admin.users.impersonate` the ability to enumerate the
+target's sessions (IP, user agent, every tenant) and revoke them, capabilities
+otherwise gated by `admin.users.sessions`, with the rows attributed to the
+target rather than to them. The app's own server-side `auth.api.updateUser`
+call behind `PATCH /api/account/profile` still passes (headers, no `request`),
+so the support flow is unaffected. `/get-session` and `/sign-out` are
+deliberately **not** closed — a borrowed session must be able to render and to
+be left. Adding a Better Auth self-service endpoint means deciding whether it
+belongs on that list; `tests/security/better-auth-admin-http-surface.test.ts`
+pins the current one.
+
 ### 8.2 Organizations
 
 Manages the tenant entity and its memberships.
@@ -486,7 +609,7 @@ Manages the tenant entity and its memberships.
 | `GET /organizations` | `admin.orgs.read` | List with member counts; an org admin sees only their own org row |
 | `POST /organizations` | `admin.orgs.create` | **Superadmin-only** (the tenant entity); `admin.organization.created` |
 | `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked` |
-| `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`) |
+| `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`). PATCH/DELETE are rank-gated (REVOKE-1, whole batch refused with 403) and may return 409 `last_superadmin` (REVOKE-2) |
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` | IdP org links; `admin.organization.provider_bound` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
 | `GET/PATCH /auth-settings/defaults` | `admin.orgs.read` / `.update` + **superadmin** | The platform-default sign-up policy (`organization_id IS NULL`); 403 for org admins; no DELETE (the baseline must always exist); `admin.platform.auth_policy_updated` |
@@ -511,6 +634,19 @@ search of `app_organization_memberships` joined to users and organizations,
 scoped to the actor's org. Membership **mutations** happen through the
 organization-members and user-memberships sub-routes (§8.2).
 
+**A membership delete does not delete the role assignments that hung off it.**
+`app_user_roles` references `app_users` and `app_organizations` but **not**
+`app_organization_memberships` (migration `0001-initial-schema.sql`), and there
+is no cascade. Removing a membership therefore leaves the user's assignments in
+place, invisibly: re-adding that user to the org silently restores everything
+those roles confer — including `superuser`, a grant nobody consciously
+re-conferred and one AUTHZ-3 would forbid an org admin from conferring directly.
+This is long-standing behaviour, not new, but REVOKE-2 is defined on exactly the
+membership→assignment join, so read its guarantee precisely: a revocation makes
+the grant stop **counting**, it does not delete the row. Removing a member's
+roles is a separate step (§8.1, the Roles tab). Closing it properly means a
+schema change and is tracked as an operator-gated follow-up.
+
 ### 8.4 Roles
 
 Application RBAC roles (`app_roles`). A role is org-scoped (`organization_id`
@@ -521,7 +657,7 @@ nullable; `NULL` = a global/platform role, superadmin-only).
 | `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization`, `scope`, `permission` |
 | `POST /roles` | `admin.roles.create` | Org admin may create only within their own org; `admin.role.created` |
 | `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete |
-| `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed` |
+| `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden`; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
 | `GET /roles/[id]/members` | `admin.roles.read` | Users carrying the role |
 | `POST /roles/[id]/duplicate` | `admin.roles.create` | Clone a role |
 
@@ -548,8 +684,33 @@ permissions directly, so they add zero new authority primitives.
 | `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped) |
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
 | `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted` |
-| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed`. A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only |
-| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed` |
+| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed`. A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
+| `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
+
+**Group revocation is bounded by the same guard as the grant (REVOKE-1).** The
+three routes that take a group-conferred role away —
+`DELETE /groups/[id]/roles`, `DELETE /groups/[id]/members` and
+`DELETE /users/[id]/groups` — run the same `conferrablePermissions` +
+`unheldPermissionKeys` subset test their POST twin does, measured against the
+permissions the removal destroys (403 `forbidden`; a bearer credential is
+bounded by its scopes and never takes the superadmin fast-path, P1-1). Without
+it the guard was one-directional: an admin holding only `admin.groups.assign`
+could not *build* a high-authority group but could dismantle one with a single
+DELETE, and AUTHZ-3 then forbade them from putting it back.
+
+**Conferring `superuser` through a group is not supported.**
+`getUserAccessContext` does union group-conferred roles into the permission set
+and expands a bare `superuser` marker to the full superuser set, so inside the
+group's org such a principal really does act as a platform superadmin — but
+`userIsGlobalSuperuser` reads only direct `app_user_roles`, so they are **not**
+a global superuser anywhere rank, machine-credential reach (MACHINE-2) or the
+REVOKE-2 last-superadmin invariant is decided. On a platform whose only
+superadmin is group-conferred, REVOKE-2 sees zero grants and refuses nothing.
+**Confer `superuser` by direct role assignment.** Changing this means teaching
+`userIsGlobalSuperuser` and `activeGlobalSuperuserGrants` about
+`app_group_roles` in one change, so the two predicates stay identical; until
+then the REVOKE-1 guard above is what keeps a delegated admin from building or
+dismantling such a group.
 
 ### 8.7 Enterprise applications
 
@@ -803,13 +964,82 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
 
 - Caller MUST hold `admin.users.impersonate`. Self-impersonation is rejected
   (400 `cannot_impersonate_self`).
-- **Privilege-escalation guard.** Impersonation grants the actor the target's
-  session. A **non-superadmin** actor may not assume a session carrying any
-  permission they do not already hold (an org admin cannot impersonate a
+- **Privilege-escalation guard (IMP-1).** Impersonation grants the actor the
+  target's session. A **non-superadmin** actor may not assume a session carrying
+  any permission they do not already hold (an org admin cannot impersonate a
   superadmin or a more-privileged peer); a mismatch audits
   `admin.user.impersonation_failed` and returns 403. A superadmin already holds
   every power, so the check is skipped for them. The same subset test guards
   the other account-level actions via `targetOutranksActor` (§6, §8.1).
+
+  The comparison is against the target's authority in **every organization they
+  are an active member of** (`permissionKeysHeldInAnyOrg`), not just the actor's
+  current one. It used to be single-org, which was sound only if an impersonated
+  session were genuinely tenant-confined — and it was not: `active_org` is an
+  unsigned cookie that `getUserAccessContext` reads for whichever user the
+  session names, i.e. the **target**, so the admin holding the browser could
+  rewrite it and land in a tenant this guard never evaluated. The union is
+  deliberately conservative: a non-superadmin cannot impersonate someone who
+  administers an unrelated tenant. A superadmin can.
+- **Per-tenant rank bound (IMP-2).** The union and the confinement below
+  measure **different axes** and so do not cover each other: the confinement
+  caps *which* tenants a borrowed session may resolve and says nothing about
+  rank inside them, while the union compares the target's cross-org total
+  against the actor's authority in *one* org. An actor who administers org A
+  and is an ordinary role-less member of org B therefore passed the union
+  against a target who is a plain member of A and an **admin of B**, and the
+  confinement then admitted B. So the guard additionally requires, for every
+  organization **both** parties are active members of, that the target hold
+  nothing there the actor does not also hold **there**
+  (`permissionKeysByActiveOrg`). A mismatch audits
+  `admin.user.impersonation_failed` with reason
+  `privilege_escalation_in_shared_org` and returns 403. Tenants the actor does
+  not belong to are deliberately not judged by this bound — the confinement
+  makes them unreachable — with one exception the union is what covers: a
+  target who is a **global superuser**, whose marker expands for the principal
+  whichever single tenant the session lands in. Do not replace the union with
+  this bound.
+- **Tenant confinement (IMP-1/IMP-2).** An impersonated session may only
+  resolve an organization the **impersonator could already reach as
+  themselves** — applied in `getUserAccessContext`, to both the `active_org`
+  cookie lookup and the earliest-membership fallback. An empty intersection
+  resolves no membership at all (fail closed). Every cookie caller therefore
+  resolves its context through `getSessionAccessContext`, which is enforced by
+  a source scan (`tests/unit/session-access-context-invariant.test.ts`).
+
+  "Could reach as themselves" is **reach, not membership**
+  (`src/lib/impersonation-reach.server.ts`). For every principal but one the
+  two are the same thing; the exception is an unbound **global superuser**,
+  whose reach is conferred by permission — `canAccessUser` returns true for any
+  user, and creating an organization does not enrol the creator, so supporting
+  a customer tenant the superadmin does not belong to is the *normal* case.
+  Measured by membership rows it produced an empty intersection, i.e. a
+  borrowed session with no org, no permissions and not even `shell.view`:
+  `pending_approval` everywhere, and a redirect to a page outside the `(secure)`
+  group that renders neither the Stop control nor a sign-out button. A
+  superadmin impersonator is therefore **unconfined**, which cannot reopen the
+  pivot — the attack needs a non-superadmin actor, since a superadmin already
+  holds every permission in every organization. Everyone else keeps the
+  intersection, and it is measured against an **active account** as well as
+  active memberships, so a suspended admin's borrowed session fails closed
+  rather than keeping its reach until the session expires.
+- **The self-service surface is closed while impersonating (IMP-1).** The
+  account guard refuses an impersonated session by default, so
+  `POST /api/v1/me/api-keys`, `DELETE …/[id]` and `POST …/[id]/rotate` answer
+  403 and audit `account.impersonated_access.denied` against the **original
+  admin**. Rotation was the sharp edge: ownership passes (the session *is* the
+  target), and the re-mint keeps the existing organization and scopes, so an
+  admin would have walked away with a standalone bearer credential carrying the
+  borrowed user's authority. Routes that neither issue nor destroy credentials
+  opt back in explicitly with `{ allowImpersonation: true }`; the key **listing**
+  stays available but is confined to the impersonated session's organization.
+
+  That default covers the app's **own** routes only. Better Auth's self-service
+  endpoints are mounted on the `/api/auth/[...all]` catch-all and never reach
+  this guard, so session listing and revocation are closed separately, in the
+  `hooks.before` middleware — see **IMP-3** in §8.1 for the exact list and for
+  what stays open. Anything reachable while impersonating is one of the two
+  lists or it is a gap.
 - This route is the **only** path to Better Auth's `impersonateUser` — the raw
   `POST /api/auth/admin/impersonate-user` endpoint is closed (404; see §8.1).
   The plugin is configured with `allowImpersonatingAdmins: true` on purpose:

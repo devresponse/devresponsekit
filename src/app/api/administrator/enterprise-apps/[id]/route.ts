@@ -15,7 +15,7 @@ import {
 } from "@/lib/admin/enterprise-apps-audience.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -129,7 +129,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
   // Re-homing an app to another org (or to global) is a tenancy boundary
   // change — SUPERADMIN only. An org admin cannot move apps in or out.
-  if (input.organization_id !== undefined && !isSuperadmin(guard.access)) {
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (input.organization_id !== undefined && !hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request);
   }
   // Review #15: an audience may not be moved onto a value another app owns.

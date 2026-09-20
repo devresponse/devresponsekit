@@ -193,7 +193,8 @@ so the fix is a floor in `pnpm.overrides`, not a mute. The floors below took thi
 | `undici@5` → `undici` | `^6.28.0` | **A deliberate major.** Most undici advisories affecting the installed 5.x line are only patched in 6.x, so there is no in-major fix; `@vercel/node` pins 5.28.4. See the note below. |
 | `js-yaml@4` | `^4.3.2` | Four advisories, worst high. |
 | `minimatch@10` | `^10.2.3` | Three advisories, high. The 3.x copy in the tree is unaffected and deliberately untouched. |
-| `path-to-regexp@8` | `^8.4.0` | Three advisories. The 6.x copies resolve to a patched version already, so no 6.x floor is needed. |
+| `path-to-regexp@8` | `^8.4.0` | Three advisories. |
+| `path-to-regexp@6` | `^6.3.0` | GHSA-9wv6-86v2-598j (high, backtracking regex). `@vercel/node` pulls **both** 6.1.0 and 6.3.0; only the former is vulnerable. Note `pnpm audit` does **not** report this one — GitHub's advisory database does. Check both. |
 | `smol-toml@1` | `^1.7.1` | Two advisories, worst high. |
 | `ajv@8` | `^8.18.0` | One moderate. |
 | `@tootallnate/once@2` | `^2.0.1` | One low. |

@@ -119,3 +119,28 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: jsdom
         update-types: ["version-update:semver-minor"]
+
+  # The deploy CLI (`vercel-cli/`) is its own pnpm package with its own lockfile,
+  # and Dependabot's VERSION updates are per-directory. Without this entry the
+  # `/` block above never looked at it, so nothing ever proposed an upgrade there
+  # — while security ALERTS, which scan every manifest regardless of this file,
+  # quietly accumulated to 37 (one critical, seventeen high) before anyone looked.
+  # That gap is the reason this entry exists; do not remove it.
+  #
+  # Almost everything in that tree is transitive under `vercel`, which is already
+  # on its latest version, so most fixes there are override floors rather than
+  # upgrades (documented in vercel-cli/README.md). Expect this directory to open
+  # few PRs — its value is that a fixable upgrade can no longer go unnoticed.
+  - package-ecosystem: npm
+    directory: /vercel-cli
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 1
+    groups:
+      vercel-cli-minor-patch:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: deps(vercel-cli)

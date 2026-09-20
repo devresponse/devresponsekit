@@ -200,6 +200,8 @@ Every workflow lives in [`.github/workflows/`](../.github/workflows/) and pins i
 
 The three scheduled workflows exist because a gate that only runs when a commit lands never re-checks an **idle** `main`: the dependency audit sat red for weeks in mid-2026 with nobody the wiser (review #227). The weekly `pnpm audit --audit-level high` run re-audits the unchanged tree, and a **failed scheduled run** opens a GitHub issue titled "Dependency audit failing on main" (or comments on the open one) — a PR or push failure is already in front of its author, so only the schedule notifies. Fix it the way [SECURITY.md → Dependency advisory allowlist](../SECURITY.md#dependency-advisory-allowlist) describes: bump or floor the package; mute only a dev/build/test-only advisory with no fix. `tests/unit/dependency-governance.test.ts` pins that the audit workflow keeps its schedule, its job name, and its SHA-pinned actions.
 
+A workflow file is never executed by the test suite, so anything load-bearing in one is pinned the same way. [`deploy.yml`](../.github/workflows/deploy.yml) — the only workflow that can apply DDL to production or promote a build — is covered by `tests/unit/deploy-workflow-guards.test.ts` (**DEPLOY-1**, and the fork guard from review 2026-09-04 #10): that its `preflight` job **fails the run** when only *some* of the four deploy credentials are set and skips green only when *none* are, and that the fork/trigger guard is restated on `deploy` itself — the job that checks out the triggering sha and holds `PRODUCTION_DIRECT_DATABASE_URL` — rather than inherited through `needs:`. See [Deployment §1.2](./deployment.md#12-the-actions-pipeline-optional-and-not-configured-deploy-1).
+
 ---
 
 _Next: [Troubleshooting](./troubleshooting.md)_

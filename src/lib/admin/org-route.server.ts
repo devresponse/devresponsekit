@@ -1,10 +1,9 @@
 import "server-only";
 import type { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/database";
-import { canAccessOrg } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, type AccessLike } from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isUuid } from "@/lib/admin/user-target.server";
-import type { UserAccessContext } from "@/lib/auth-status";
 
 export interface ScopedOrg {
   id: string;
@@ -22,15 +21,19 @@ export interface ScopedOrg {
  *   - missing OR out-of-scope → `organization_not_found` (404)
  *
  * A foreign org returns 404 (not 403) so its existence is never confirmed;
- * SUPERADMIN bypasses the scope check. Returns the org row (`id`, `slug`,
- * `name` — the superset every caller needs) or a ready-to-return error
- * `NextResponse`, so callers keep the `if (org instanceof NextResponse)
+ * SUPERADMIN bypasses the scope check — except an ORG-BOUND credential, which
+ * `canAccessOrg` holds to its bound org (MACHINE-2). Returns the org row
+ * (`id`, `slug`, `name` — the superset every caller needs) or a ready-to-return
+ * error `NextResponse`, so callers keep the `if (org instanceof NextResponse)
  * return org;` shape and the exact machine codes.
+ *
+ * The `access` parameter takes the shared {@link AccessLike} slice rather than
+ * its own narrower `Pick`, so the MACHINE-2 marker cannot be typed away here.
  */
 export async function loadScopedOrg(
   request: NextRequest,
   orgId: string,
-  access: Pick<UserAccessContext, "permissions" | "organizationId">,
+  access: AccessLike,
 ): Promise<ScopedOrg | NextResponse> {
   if (!isUuid(orgId)) {
     return adminErrorResponse("invalid_id", 400, request);

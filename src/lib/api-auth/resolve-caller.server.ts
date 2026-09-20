@@ -4,6 +4,7 @@ import { getUserAccessContext, type UserAccessContext } from "@/lib/auth-status"
 import { getServerEnv } from "@/lib/env";
 import { getClientIp } from "@/lib/client-ip";
 import { readImpersonatorId } from "@/lib/impersonation";
+import { getSessionAccessContext } from "@/lib/session-access.server";
 import { looksLikeApiKey } from "@/lib/api-auth/api-key";
 import { touchApiKeyUsage, verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
@@ -247,7 +248,10 @@ export async function resolveCallerDetailed(
   // ---- Cookie session path -------------------------------------------
   const session = await getCurrentSession();
   if (!session) return reject("no_credential");
-  const access = await getUserAccessContext(session.user.id);
+  // IMP-1: resolved THROUGH the session so an impersonated caller is confined
+  // to the impersonator's tenancy — a bearer credential is never an
+  // impersonation, which is why only this branch goes through the helper.
+  const access = await getSessionAccessContext(session);
   return {
     ok: true,
     caller: {

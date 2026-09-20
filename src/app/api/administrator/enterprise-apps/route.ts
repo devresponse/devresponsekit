@@ -20,7 +20,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { canAccessOrg, hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -171,9 +171,12 @@ export async function POST(request: NextRequest) {
 
   // ADR-0001: an org admin may create an app ONLY in their own org — never
   // a global app and never another org's. SUPERADMIN bypasses.
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
   const targetOrg = input.organization_id ?? null;
   if (
-    !isSuperadmin(guard.access) &&
+    !hasCrossOrgReach(guard.access) &&
     (targetOrg === null || !canAccessOrg(guard.access, targetOrg))
   ) {
     return adminErrorResponse("forbidden", 403, request);

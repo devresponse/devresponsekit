@@ -12,17 +12,29 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  */
 
 const userTakeFirst = vi.fn();
-const membershipTakeFirst = vi.fn(); // fallback: .where().orderBy().executeTakeFirst()
-const membershipByOrgTakeFirst = vi.fn(); // active-org: .where().where().executeTakeFirst()
+const membershipTakeFirst = vi.fn(); // fallback: …orderBy("created_at").executeTakeFirst()
+const membershipByOrgTakeFirst = vi.fn(); // active-org: …where(org).executeTakeFirst()
 const rolesExecute = vi.fn();
 const readActiveOrgId = vi.fn();
 const userIsGlobalSuperuser = vi.fn();
+const listActiveOrganizationIdsForBetterAuthUser = vi.fn();
+/**
+ * IMP-2: the confinement asks whether the IMPERSONATOR is an unbound global
+ * superuser before it measures their tenancy by membership — a superadmin's
+ * reach is conferred by permission, not by membership rows.
+ */
+const betterAuthUserIsGlobalSuperuser = vi.fn();
+/** Every `.where(...)` argument list the membership builder received. */
+const membershipWheres: unknown[][] = [];
 
 vi.mock("@/lib/active-org.server", () => ({
   readActiveOrgId: () => readActiveOrgId(),
+  listActiveOrganizationIdsForBetterAuthUser: (...a: unknown[]) =>
+    listActiveOrganizationIdsForBetterAuthUser(...a),
 }));
 vi.mock("@/lib/admin/access-scope.server", () => ({
   userIsGlobalSuperuser: () => userIsGlobalSuperuser(),
+  betterAuthUserIsGlobalSuperuser: (...a: unknown[]) => betterAuthUserIsGlobalSuperuser(...a),
 }));
 
 vi.mock("@/db/database", () => ({
@@ -36,16 +48,37 @@ vi.mock("@/db/database", () => ({
         };
       }
       if (table === "app_organization_memberships") {
-        return {
-          select: () => ({
-            where: () => ({
-              // cookie-scoped: .where("organization_id","=",activeOrgId).executeTakeFirst()
-              where: () => ({ executeTakeFirst: membershipByOrgTakeFirst }),
-              // fallback: .orderBy("created_at","asc").executeTakeFirst()
-              orderBy: () => ({ executeTakeFirst: membershipTakeFirst }),
-            }),
-          }),
-        };
+        // A chainable recorder rather than a fixed shape: since IMP-1 the
+        // membership lookup may carry an EXTRA `where("organization_id","in",…)`
+        // confinement predicate, so the number of `.where` links is no longer
+        // fixed. The two terminal fakes are told apart by whether `.orderBy`
+        // ran — that is exactly what distinguishes the earliest-membership
+        // fallback from the active-org lookup.
+        let ordered = false;
+        const chain: unknown = new Proxy(
+          {},
+          {
+            get(_t, prop) {
+              if (prop === "executeTakeFirst") {
+                return ordered ? membershipTakeFirst : membershipByOrgTakeFirst;
+              }
+              if (prop === "orderBy") {
+                return () => {
+                  ordered = true;
+                  return chain;
+                };
+              }
+              if (prop === "where") {
+                return (...args: unknown[]) => {
+                  membershipWheres.push(args);
+                  return chain;
+                };
+              }
+              return () => chain;
+            },
+          },
+        );
+        return chain;
       }
       // Permission-resolution chains: the direct (app_user_roles) and
       // group (app_group_memberships) builders feed a UNION; only the left
@@ -76,6 +109,10 @@ beforeEach(async () => {
   readActiveOrgId.mockResolvedValue(null); // no active-org cookie by default
   userIsGlobalSuperuser.mockReset();
   userIsGlobalSuperuser.mockResolvedValue(false); // not a global superuser by default
+  listActiveOrganizationIdsForBetterAuthUser.mockReset();
+  betterAuthUserIsGlobalSuperuser.mockReset();
+  betterAuthUserIsGlobalSuperuser.mockResolvedValue(false); // an ordinary admin by default
+  membershipWheres.length = 0;
   ({ getUserAccessContext } = await import("@/lib/auth-status"));
 });
 afterEach(() => vi.resetModules());
@@ -92,6 +129,9 @@ describe("getUserAccessContext (DB-backed)", () => {
       membershipStatus: null,
       preferredLocale: "en",
       permissions: [],
+      // MACHINE-2: set explicitly even on this short-circuit — the marker
+      // records HOW the caller presented itself (no `boundOrg` → a session).
+      orgBound: false,
     });
     expect(membershipTakeFirst).not.toHaveBeenCalled();
   });
@@ -211,6 +251,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1");
     expect(ctx.organizationId).toBe("o-cookie");
+    // MACHINE-2: the cookie/session path is NOT bound — a human superadmin at a
+    // browser keeps cross-org reach.
+    expect(ctx.orgBound).toBe(false);
     // An active member always carries the baseline `shell.view` (implied by
     // membership), in addition to whatever their roles grant.
     expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
@@ -250,6 +293,7 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1");
     // Recognized as a superadmin everywhere, with the full admin authority.
+    expect(ctx.orgBound).toBe(false);
     expect(ctx.permissions).toContain("superuser");
     expect(ctx.permissions).toContain("admin.users.read");
     expect(ctx.permissions).toContain("admin.audit.read");
@@ -269,6 +313,8 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1", { organizationId: "o-bound" });
     expect(ctx.organizationId).toBe("o-bound");
+    // MACHINE-2: the marker that lets the scope helpers cap this context.
+    expect(ctx.orgBound).toBe(true);
     // An active member always carries the baseline `shell.view` (implied by
     // membership), in addition to whatever their roles grant.
     expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
@@ -287,6 +333,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1", { organizationId: "o-foreign" });
     expect(ctx.organizationId).toBeNull();
+    // MACHINE-2: still bound — `resolveOrgScope` must answer null (deny), not
+    // "all", for a bound credential that resolved to no membership.
+    expect(ctx.orgBound).toBe(true);
     expect(ctx.membershipStatus).toBeNull();
     expect(ctx.permissions).toEqual([]);
     expect(rolesExecute).not.toHaveBeenCalled();
@@ -306,6 +355,9 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     const ctx = await getUserAccessContext("ba-1", { organizationId: null });
     expect(ctx.organizationId).toBe("o-earliest");
+    // MACHINE-2: an ORG-LESS credential is still a credential — it is bound to
+    // whatever single membership resolved, never to "every org".
+    expect(ctx.orgBound).toBe(true);
     expect(membershipByOrgTakeFirst).not.toHaveBeenCalled();
     expect(readActiveOrgId).not.toHaveBeenCalled();
   });
@@ -332,5 +384,187 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(ctx.permissions).toContain("admin.orgs.update");
     // The marker is already present, so the redundant lookup is skipped.
     expect(userIsGlobalSuperuser).not.toHaveBeenCalled();
+  });
+
+  it("MACHINE-2: a GLOBAL superuser on the bound-org path keeps the full permission set AND is marked org-bound", async () => {
+    // This is the exact shape of the vulnerability: a credential minted in
+    // org-a whose owner is a global superuser. The permission EXPANSION must
+    // still happen (dropping it would turn a scoping bug into an
+    // authentication bug — every `permissions.includes("admin.*")` gate would
+    // start failing for a legitimate bound superuser), so the ONLY thing that
+    // stops the credential reaching org-b is the `orgBound` marker travelling
+    // with it to `resolveOrgScope` / `canAccessOrg` / `canAccessUser`.
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "su@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "shell.view" }]);
+    userIsGlobalSuperuser.mockResolvedValue(true);
+
+    const ctx = await getUserAccessContext("ba-1", { organizationId: "o-a" });
+    expect(ctx.orgBound).toBe(true);
+    expect(ctx.organizationId).toBe("o-a");
+    expect(ctx.permissions).toContain("superuser");
+    expect(ctx.permissions).toContain("admin.users.read");
+  });
+
+  /* ---------------------------------------------------------------------- */
+  /*  IMP-1 — impersonation tenant confinement                               */
+  /* ---------------------------------------------------------------------- */
+
+  const ACTIVE_USER = {
+    id: "u-target",
+    primary_email: "target@x.com",
+    status: "active",
+    preferred_locale: "en",
+  };
+
+  it("IMP-1: confines an impersonated session to orgs the IMPERSONATOR is an active member of", async () => {
+    // The shape of the vulnerability: the target is a member of org-a (shared
+    // with the admin) AND org-b (the admin is NOT in org-b), and the admin has
+    // rewritten the unsigned active_org cookie to org-b. The cookie lookup must
+    // carry the impersonator's org set as a predicate, so org-b can never be
+    // selected — not because the cookie is unreadable, but because the query
+    // cannot return a row outside the intersection.
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-b");
+    listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue(["o-a"]);
+    membershipByOrgTakeFirst.mockResolvedValue(undefined); // no row inside the intersection
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-target", undefined, {
+      betterAuthUserId: "ba-admin",
+    });
+
+    expect(listActiveOrganizationIdsForBetterAuthUser).toHaveBeenCalledWith("ba-admin");
+    // The confinement predicate reached BOTH the cookie lookup and the
+    // earliest-membership fallback — a fallback that skipped it would still
+    // land the session in a foreign tenant.
+    const confinements = membershipWheres.filter((w) => w[1] === "in");
+    expect(confinements).toHaveLength(2);
+    expect(confinements[0]).toEqual(["organization_id", "in", ["o-a"]]);
+    expect(confinements[1]).toEqual(["organization_id", "in", ["o-a"]]);
+    // …and the cookie's org was still asked for, so this is the confinement
+    // biting rather than the cookie being ignored.
+    expect(membershipWheres).toContainEqual(["organization_id", "=", "o-b"]);
+    expect(ctx.organizationId).toBe("o-a");
+  });
+
+  it("IMP-1: an impersonated session still resolves an org SHARED with the impersonator", async () => {
+    // The control. Ordinary impersonation — the admin and the target share
+    // org-a and the cookie names org-a — must keep working exactly as before,
+    // permissions and all, or the fix has simply broken the feature.
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-a");
+    listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue(["o-a", "o-c"]);
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
+
+    const ctx = await getUserAccessContext("ba-target", undefined, {
+      betterAuthUserId: "ba-admin",
+    });
+
+    expect(ctx.organizationId).toBe("o-a");
+    expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
+    expect(membershipTakeFirst).not.toHaveBeenCalled();
+    // A borrowed cookie session is NOT a bearer credential, so it keeps the
+    // unbound marker — the confinement is a membership rule, not MACHINE-2.
+    expect(ctx.orgBound).toBe(false);
+  });
+
+  it("IMP-1: fails closed when the impersonator holds no active membership anywhere", async () => {
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-b");
+    listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-target", undefined, {
+      betterAuthUserId: "ba-admin",
+    });
+
+    // No org, no membership, no permissions — `decideSecureAccess` then blocks
+    // every secure surface. And no membership query ran at all, so an empty
+    // `in ()` never reaches SQL.
+    expect(ctx.organizationId).toBeNull();
+    expect(ctx.membershipStatus).toBeNull();
+    expect(ctx.permissions).toEqual([]);
+    expect(membershipWheres).toEqual([]);
+    expect(membershipByOrgTakeFirst).not.toHaveBeenCalled();
+    expect(membershipTakeFirst).not.toHaveBeenCalled();
+    expect(rolesExecute).not.toHaveBeenCalled();
+  });
+
+  it("IMP-2: a SUPERADMIN impersonator is UNCONFINED — the target's own tenant resolves", async () => {
+    // The platform-support flow the membership intersection broke. A superadmin
+    // reaches every tenant AS THEMSELVES (`hasCrossOrgReach` / `canAccessUser`
+    // short-circuit on the marker, and creating an organization never enrols
+    // the creator), so measuring their reach by membership rows resolved NO
+    // org at all: the borrowed session landed on `pending_approval`, every
+    // route answered 403, and the admin was stranded on a page outside the
+    // secure layout that renders neither the Stop control nor a sign-out.
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-customer");
+    betterAuthUserIsGlobalSuperuser.mockResolvedValue(true);
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-customer", status: "active" });
+    rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
+
+    const ctx = await getUserAccessContext("ba-target", undefined, {
+      betterAuthUserId: "ba-superadmin",
+    });
+
+    expect(betterAuthUserIsGlobalSuperuser).toHaveBeenCalledWith("ba-superadmin");
+    // Unconfined means the membership query carries NO `in` predicate at all,
+    // and the membership list is never even fetched.
+    expect(listActiveOrganizationIdsForBetterAuthUser).not.toHaveBeenCalled();
+    expect(membershipWheres.some((w) => w[1] === "in")).toBe(false);
+    expect(ctx.organizationId).toBe("o-customer");
+    expect(ctx.permissions).toContain("admin.users.read");
+  });
+
+  it("IMP-2: a NON-superadmin in the same position still fails closed", async () => {
+    // The control that keeps the exemption honest: same target, same tenant,
+    // an ordinary org admin behind the session — and nothing resolves.
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-customer");
+    betterAuthUserIsGlobalSuperuser.mockResolvedValue(false);
+    listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue([]); // no shared tenant
+
+    const ctx = await getUserAccessContext("ba-target", undefined, {
+      betterAuthUserId: "ba-admin",
+    });
+
+    expect(ctx.organizationId).toBeNull();
+    expect(ctx.permissions).toEqual([]);
+    expect(membershipWheres).toEqual([]);
+  });
+
+  it("IMP-1: a NON-impersonated session is untouched — no confinement lookup, no predicate", async () => {
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    readActiveOrgId.mockResolvedValue("o-b");
+    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-b", status: "active" });
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-target");
+
+    expect(listActiveOrganizationIdsForBetterAuthUser).not.toHaveBeenCalled();
+    // …and the superuser probe on the IMPERSONATOR is not run either: there is
+    // no impersonator to probe (IMP-2).
+    expect(betterAuthUserIsGlobalSuperuser).not.toHaveBeenCalled();
+    expect(membershipWheres.some((w) => w[1] === "in")).toBe(false);
+    expect(ctx.organizationId).toBe("o-b");
+  });
+
+  it("MACHINE-2: an UNPROVISIONED user still reports how it presented itself", async () => {
+    // The synthetic pending_approval short-circuit returns before any
+    // membership lookup; the marker describes the CALLER, not what was found,
+    // so it must be set on that path too rather than defaulting to undefined.
+    userTakeFirst.mockResolvedValue(undefined);
+    expect((await getUserAccessContext("ba-missing")).orgBound).toBe(false);
+    expect((await getUserAccessContext("ba-missing", { organizationId: "o-a" })).orgBound).toBe(
+      true,
+    );
   });
 });

@@ -32,6 +32,7 @@ export function UserMembershipsPanel({
   canUpdate: boolean;
 }) {
   const t = useTranslations("administrator.users.memberships");
+  const tErr = useTranslations("administrator.errors");
   const locale = useLocale();
   const dialogs = useDialogs();
 
@@ -58,13 +59,20 @@ export function UserMembershipsPanel({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ membershipIds: [membershipId] }),
       });
+      // REVOKE-2: name the last-superadmin refusal rather than showing the
+      // generic remove error — see the note in `_user-roles-panel.tsx`.
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRowError(body?.error === "last_superadmin" ? tErr("lastSuperadmin") : t("removeError"));
+        return;
+      }
       if (!res.ok) {
         setRowError(t("removeError"));
         return;
       }
       setReloadKey((k) => k + 1);
     },
-    [t, userId, dialogs],
+    [t, tErr, userId, dialogs],
   );
 
   const columns = useMemo<ColumnDef<MembershipRow, unknown>[]>(

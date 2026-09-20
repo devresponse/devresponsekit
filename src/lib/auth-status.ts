@@ -3,6 +3,7 @@ import { cache } from "react";
 import { db } from "@/db/database";
 import { readActiveOrgId } from "@/lib/active-org.server";
 import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
+import { listImpersonationReachableOrgIds } from "@/lib/impersonation-reach.server";
 import {
   SHELL_BASELINE_PERMISSION,
   SUPERADMIN_PERMISSION,
@@ -24,6 +25,24 @@ export interface UserAccessContext {
   membershipStatus: MembershipStatus | null;
   preferredLocale: string;
   permissions: string[];
+  /**
+   * True when this context was resolved against a BEARER CREDENTIAL'S BOUND
+   * ORG (MACHINE-2) rather than the browser's `active_org` cookie — i.e. the
+   * caller is a machine credential pinned to one tenant.
+   *
+   * `getUserAccessContext` ALWAYS sets it explicitly (`true` whenever a
+   * `boundOrg` argument was supplied, `false` on the cookie/session path), so
+   * no real code path is ever ambiguous. It is declared OPTIONAL only so the
+   * many hand-built `UserAccessContext` literals in the test suite — and any
+   * other caller that constructs a context by hand — keep compiling; an
+   * absent marker means "not org-bound", the pre-existing behaviour.
+   *
+   * Consumers must not read this directly to make an authorization decision:
+   * the cap lives in `@/lib/admin/access-scope.server`
+   * (`resolveOrgScope` / `canAccessOrg` / `canAccessUser` / `hasCrossOrgReach`)
+   * so the rule has exactly one home.
+   */
+  orgBound?: boolean;
 }
 
 /** Status values that block access to all secure routes. */
@@ -86,6 +105,48 @@ export interface BoundOrg {
 }
 
 /**
+ * Marks a COOKIE SESSION as an IMPERSONATION and names the admin behind it
+ * (Better Auth's `session.impersonatedBy`) — the sibling of {@link BoundOrg}
+ * for the other credential kind (IMP-1).
+ *
+ * Passing this to {@link getUserAccessContext} confines the resolved
+ * organization to one the IMPERSONATOR could already reach as themselves, so
+ * a borrowed session can never leave the borrower's own tenancy. "Could reach"
+ * is membership for every principal except an unbound global superuser, whose
+ * reach is conferred by permission — `src/lib/impersonation-reach.server.ts`
+ * owns that distinction (IMP-2).
+ *
+ * WHY THIS EXISTS. The impersonate route's escalation guard evaluates the
+ * target's permissions in ONE organization, and the only thing that used to
+ * make that sound was the pair of refusals on
+ * `/api/preferences/active-org(/apply)`. But `active_org` is a plain UNSIGNED
+ * cookie that `getUserAccessContext` reads for whichever user the session
+ * names — during an impersonation, the TARGET. `httpOnly` stops other sites
+ * reading it; it does not stop the browser's own owner rewriting it in
+ * devtools or replaying the request with curl. So an org-A admin could
+ * impersonate a user who is a plain member in A but an ADMIN in org B (the
+ * escalation guard passes, because the target holds nothing in A), then set
+ * `active_org` to B and wield the target's admin authority in a tenant the
+ * guard never evaluated. Enumeration was the only obstacle, and the
+ * impersonated shell renders the target's org ids itself.
+ *
+ * WHY THE INTERSECTION RATHER THAN REFUSING ADMIN POWERS OUTRIGHT. Assuming
+ * an org admin's session inside the admin's OWN tenant is the point of
+ * impersonation ("reproduce what this user sees"); blanket-refusing `admin.*`
+ * while impersonating would break that legitimate support flow and would be a
+ * permission rule bolted onto a tenancy problem. The intersection fixes the
+ * tenancy problem where it actually is: whatever the borrowed session can
+ * reach, the borrower could already reach as themselves.
+ *
+ * NOT A SCHEMA CHANGE. Better Auth already persists `impersonatedBy` on the
+ * session row; this only threads the value that is already there.
+ */
+export interface ImpersonatedBy {
+  /** The ORIGINAL admin's Better Auth user id. */
+  betterAuthUserId: string;
+}
+
+/**
  * Loads application-level access context for a Better Auth user id.
  *
  * Returns a synthetic `pending_approval` context when the user has not yet
@@ -98,10 +159,20 @@ export interface BoundOrg {
  * single set of DB round-trips. The memoization is per-request (and a
  * no-op outside React rendering), so it never serves stale permissions
  * across requests.
+ *
+ * IMP-1: a COOKIE-SESSION caller must not call this directly — it cannot see
+ * the session and therefore cannot know whether the session is an
+ * impersonation. Use `getSessionAccessContext` (src/lib/session-access.server.ts),
+ * which derives {@link ImpersonatedBy} from the session itself. That rule is
+ * enforced by the source scan in
+ * tests/unit/session-access-context-invariant.test.ts, which allow-lists the
+ * few modules that legitimately resolve a NON-session principal (a
+ * credential's bound org, a target user, a credential owner).
  */
 export const getUserAccessContext = cache(async function getUserAccessContext(
   betterAuthUserId: string,
   boundOrg?: BoundOrg,
+  impersonatedBy?: ImpersonatedBy,
 ): Promise<UserAccessContext> {
   const user = await db
     .selectFrom("app_users")
@@ -118,6 +189,10 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
       membershipStatus: null,
       preferredLocale: "en",
       permissions: [],
+      // Set even on the unprovisioned short-circuit: the marker describes HOW
+      // the caller presented itself, not what was found, so every context this
+      // function returns carries it explicitly (MACHINE-2).
+      orgBound: boundOrg !== undefined,
     };
   }
 
@@ -148,22 +223,56 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     // membership (the historical single-org behavior). The `app_user_id`
     // filter makes a forged cookie harmless — it can only ever select among
     // the user's own memberships.
-    const activeOrgId = await readActiveOrgId();
-    membership = activeOrgId
-      ? await db
+    //
+    // IMP-1 — …and during an IMPERSONATION "the user" is the TARGET, so that
+    // filter alone lets the admin holding the browser rewrite the unsigned
+    // `active_org` cookie and steer the borrowed session into any tenant the
+    // target belongs to, including ones the impersonate route's escalation
+    // guard never evaluated. So when the session is an impersonation, both the
+    // cookie lookup AND the earliest-membership fallback are additionally
+    // confined to the organizations the IMPERSONATOR could reach AS THEMSELVES:
+    // the borrowed session reaches exactly that much, and nothing more. See
+    // {@link ImpersonatedBy}.
+    //
+    // IMP-2 — "could reach as themselves" is `listImpersonationReachableOrgIds`,
+    // NOT a raw membership query: for an unbound global superuser reach is
+    // conferred by permission rather than by membership, and measuring them by
+    // membership stranded the platform operator's own support flow in a dead
+    // session. That module owns the distinction and the argument for why
+    // exempting a superadmin cannot reopen the pivot.
+    let confinedOrgIds: string[] | null = null;
+    if (impersonatedBy) {
+      confinedOrgIds = await listImpersonationReachableOrgIds(impersonatedBy.betterAuthUserId);
+    }
+
+    if (confinedOrgIds !== null && confinedOrgIds.length === 0) {
+      // FAIL CLOSED. An impersonator who could reach no tenant as themselves —
+      // their account was suspended or their last membership revoked
+      // mid-session — shares no tenant with the target, so the intersection is
+      // empty and the borrowed session resolves to NO membership: no org, no
+      // permissions, and `decideSecureAccess` blocks every secure surface.
+      // Skipping the queries here also keeps an empty `in ()` out of the SQL.
+      membership = undefined;
+    } else {
+      // One builder shape for both lookups so the confinement can never be
+      // applied to the cookie hit but forgotten on the fallback — which would
+      // reopen the pivot for any target whose EARLIEST membership is outside
+      // the impersonator's tenancy.
+      const scopedMemberships = () => {
+        const base = db
           .selectFrom("app_organization_memberships")
           .select(["organization_id", "status"])
-          .where("app_user_id", "=", user.id)
-          .where("organization_id", "=", activeOrgId)
-          .executeTakeFirst()
-      : undefined;
-    if (!membership) {
-      membership = await db
-        .selectFrom("app_organization_memberships")
-        .select(["organization_id", "status"])
-        .where("app_user_id", "=", user.id)
-        .orderBy("created_at", "asc")
-        .executeTakeFirst();
+          .where("app_user_id", "=", user.id);
+        return confinedOrgIds === null ? base : base.where("organization_id", "in", confinedOrgIds);
+      };
+
+      const activeOrgId = await readActiveOrgId();
+      membership = activeOrgId
+        ? await scopedMemberships().where("organization_id", "=", activeOrgId).executeTakeFirst()
+        : undefined;
+      if (!membership) {
+        membership = await scopedMemberships().orderBy("created_at", "asc").executeTakeFirst();
+      }
     }
   }
 
@@ -218,7 +327,19 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
 
   // Global superuser: holding the `superuser` permission via a role in ANY
   // org the user is an active member of makes them a SUPERADMIN everywhere —
-  // the active org must never downgrade it. Expand the marker to the FULL
+  // the active org must never downgrade it.
+  //
+  // MACHINE-2: "everywhere" is about the PRINCIPAL, not about a credential the
+  // principal owns. The expansion below therefore still runs on the bound-org
+  // path (an org-bound superuser genuinely holds every capability INSIDE its
+  // bound tenant, and downgrading the permission set here would silently break
+  // every `permissions.includes("admin.*")` gate). What must NOT follow from it
+  // is cross-tenant REACH: `orgBound` is returned alongside the permissions so
+  // `resolveOrgScope` / `canAccessOrg` / `canAccessUser` can cap a bound
+  // credential to its own org. Do not "fix" this by dropping the expansion —
+  // that would turn a scoping bug into an authentication bug.
+  //
+  // Expand the marker to the FULL
   // superuser permission set so every consumer of `permissions` — the admin
   // gates, the server-filtered nav menu, and the per-feature `canX` toggles
   // on the RSC pages — recognizes them uniformly, EVEN when their role
@@ -242,5 +363,9 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     membershipStatus: memberStatus,
     preferredLocale: user.preferred_locale,
     permissions,
+    // MACHINE-2 — always explicit: a `boundOrg` argument means this context
+    // belongs to a bearer credential pinned to one tenant, and the scope
+    // helpers cap it there even for a global superuser principal.
+    orgBound: boundOrg !== undefined,
   };
 });

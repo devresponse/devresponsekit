@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getCurrentSession } from "@/lib/auth-guard";
-import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
+import { decideSecureAccess } from "@/lib/auth-status";
+import { getSessionAccessContext } from "@/lib/session-access.server";
 import { loadShellMenu } from "@/lib/navigation.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { auditEvent } from "@/lib/audit.server";
@@ -35,7 +36,7 @@ export async function GET(request: NextRequest) {
     return adminErrorResponse("invalid_query", 400, request);
   }
 
-  const access = await getUserAccessContext(session.user.id);
+  const access = await getSessionAccessContext(session);
   const decision = decideSecureAccess(access.status, access.membershipStatus);
   if (decision !== "allow") {
     await auditEvent({

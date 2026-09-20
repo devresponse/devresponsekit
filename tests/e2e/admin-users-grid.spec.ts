@@ -24,3 +24,32 @@ test("users grid shows the Organization column and loads rows from the route", a
   // subquery is valid SQL.
   await expect(page.getByText("admin@devresponse.local").first()).toBeVisible();
 });
+
+/**
+ * A11Y-4 — the sort button of a SORTABLE column is named after the column.
+ *
+ * The real-browser half of the contract (docs/admin-manager.md §7.2). The
+ * component test pins it in jsdom; this proves the same accessible-name
+ * computation in a real engine, against the real translated headers.
+ *
+ * It lives here rather than in tests/accessibility because axe cannot see this
+ * defect: before the fix every sort button was labelled "— Not sorted", which
+ * is a non-empty accessible name, so the WCAG 2.1 AA sweep over this very page
+ * stayed green while every column control was unnamed and indistinguishable.
+ */
+test("sortable column headers are named after their column, not their sort state", async ({
+  page,
+}) => {
+  await page.goto("/en/app/administrator/users");
+  await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+
+  // `exact` matters: the failure being guarded against is extra text (the sort
+  // state) joining — or replacing — the column name.
+  const emailHeader = page.getByRole("columnheader", { name: "Email", exact: true });
+  await expect(emailHeader).toBeVisible();
+  await expect(emailHeader.getByRole("button", { name: "Email", exact: true })).toBeVisible();
+
+  // The sort state rides `aria-sort` and an `aria-describedby` span, neither of
+  // which may leak into a name.
+  await expect(page.getByRole("table").getByRole("button", { name: /sorted/i })).toHaveCount(0);
+});

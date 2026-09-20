@@ -15,7 +15,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { isSuperadmin, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 
 export const dynamic = "force-dynamic";
 
@@ -147,7 +147,10 @@ export async function POST(request: NextRequest) {
 
   // ADR-0001: creating a new tenant is a SUPERADMIN-only action; an org
   // admin manages only their existing org.
-  if (!isSuperadmin(guard.access)) {
+  // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin` — an ORG-BOUND bearer
+  // credential never takes the SUPERADMIN bypass on a platform-wide action,
+  // even when its owner is a global superuser.
+  if (!hasCrossOrgReach(guard.access)) {
     return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
   }
 

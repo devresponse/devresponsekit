@@ -671,7 +671,8 @@
       "exportTruncated": "A exportação atingiu o limite máximo de linhas. Refine os filtros e exporte novamente para obter o restante.",
       "originNotAllowed": "O anfitrião de origem não está na lista permitida para redirecionamentos de SSO.",
       "memberExists": "Este endereço já pertence a um membro ativo.",
-      "invitationExists": "Já existe um convite pendente para este endereço."
+      "invitationExists": "Já existe um convite pendente para este endereço.",
+      "lastSuperadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la."
     },
     "roles": {
       "title": "Funções",
@@ -1310,7 +1311,9 @@
     "invitation_email_mismatch": "Este convite foi emitido para outro endereço de e-mail.",
     "auth_settings_not_found": "Nenhuma configuração de cadastro para remover.",
     "not_provisioned": "Sua conta ainda não está totalmente configurada. Contate um administrador.",
-    "insufficient_scope": "Esta credencial não está autorizada para essa ação."
+    "insufficient_scope": "Esta credencial não está autorizada para essa ação.",
+    "forbidden_while_impersonating": "Esta ação não está disponível enquanto você personifica outro usuário.",
+    "last_superadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la."
   },
   "account": {
     "appTitle": "Conta",

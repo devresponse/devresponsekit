@@ -13,6 +13,12 @@ import {
 import {
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
+  membershipCascadeStripsLastGlobalSuperuser,
+  LastSuperadminCascadeError,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
+  LAST_SUPERADMIN_STATUS,
 } from "@/lib/admin/access-scope.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
@@ -263,6 +269,20 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   // don't drift (#B6).
   try {
     await db.transaction().execute(async (trx) => {
+      // REVOKE-2 (review #444): the cascade below blocks EVERY membership this
+      // user holds, which is precisely what stops a `superuser` assignment
+      // counting — the same transition `PATCH/DELETE …/memberships` refuses
+      // with 409. The rank guard above exempts a SUPERADMIN actor outright, so
+      // without this the platform's last superadmin could soft-delete
+      // themselves in one click and leave nobody able to administer it. Run
+      // inside the transaction that performs the cascade so it shares the row
+      // locks that serialize it against the four revocation routes; the throw
+      // rolls the transaction back and the saga's compensating unban (below)
+      // undoes the Better Auth ban we already applied.
+      if (await membershipCascadeStripsLastGlobalSuperuser(target.appUserId, trx)) {
+        throw new LastSuperadminCascadeError();
+      }
+
       await trx
         .updateTable("app_users")
         .set({
@@ -314,6 +334,24 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
         metadata: {
           message: unbanErr instanceof Error ? unbanErr.message : "unknown",
         },
+      });
+    }
+    // REVOKE-2: an expected refusal, not a fault. The transaction rolled back
+    // untouched and the ban has just been compensated above, so the account is
+    // exactly as it was — answer 409 with the shared vocabulary the four
+    // revocation routes use, never the 500 a real cascade failure gets.
+    if (err instanceof LastSuperadminCascadeError) {
+      await auditUserAction(LAST_SUPERADMIN_EVENT, "denied", {
+        request,
+        actorBetterAuthUserId: guard.betterAuthUserId,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        requestId: guard.requestId,
+        reason: LAST_SUPERADMIN_REASON,
+        metadata: { action: "soft_delete" },
+      });
+      return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+        requestId: guard.requestId,
       });
     }
     await auditUserAction("admin.user.soft_delete_failed", "error", {

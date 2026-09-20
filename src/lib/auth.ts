@@ -3,7 +3,7 @@ import { admin } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
-import { ADMIN_PLUGIN_OPTIONS, rejectAdminPluginOverHttp } from "@/lib/auth-admin-surface";
+import { ADMIN_PLUGIN_OPTIONS, rejectClosedAuthEndpoints } from "@/lib/auth-admin-surface";
 import { ssoSession } from "@/lib/auth-sso-session";
 import {
   EMAIL_VERIFICATION_WAIVED_FIELD,
@@ -467,7 +467,7 @@ export const auth = betterAuth({
   // server-side `auth.api.*` calls (headers, never `request`), which this
   // hook lets through; real HTTP requests to `/admin/*` get 404. Policy and
   // rationale live in `auth-admin-surface.ts`.
-  hooks: { before: rejectAdminPluginOverHttp },
+  hooks: { before: rejectClosedAuthEndpoints },
 
   // The nextCookies plugin makes Better Auth set cookies via Next.js
   // server actions and route handlers correctly — it MUST stay last.

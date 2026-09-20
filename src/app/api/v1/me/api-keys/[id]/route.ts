@@ -20,6 +20,11 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Revokes one of the CALLER'S OWN keys (design §5.3, §5.4). Ownership is
  * re-checked against the session principal — a caller can never revoke
  * another user's key. Idempotent.
+ *
+ * An IMPERSONATED session is refused (403) by the account guard's default
+ * (IMP-1): while impersonating, the ownership check above passes for every key
+ * the borrowed user holds in ANY tenant, so this would let an administrator
+ * destroy another person's credentials from inside their own account.
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiAccount(request, "account.apikeys.manage");

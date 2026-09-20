@@ -17,6 +17,15 @@ import { db } from "@/db/database";
  * here) is the authority — a forged or stale cookie naming an org the user
  * is not an active member of simply falls back to their primary membership
  * and can never grant access. So the cookie does not need to be signed.
+ *
+ * IMP-1 — "the caller's own memberships" is the memberships of whoever the
+ * SESSION NAMES, which during an impersonation is the TARGET, not the admin
+ * holding the browser. The cookie is unsigned and freely editable by its own
+ * owner, so that sentence alone does NOT confine an impersonated session to
+ * the tenant impersonation started in. The confinement is
+ * `listImpersonationReachableOrgIds` (src/lib/impersonation-reach.server.ts),
+ * which is built on {@link listActiveOrganizationIdsForBetterAuthUser} and is
+ * applied by `getUserAccessContext` on the cookie path.
  */
 export const ACTIVE_ORG_COOKIE = "active_org";
 
@@ -52,6 +61,50 @@ export async function listUserActiveOrganizations(appUserId: string): Promise<Us
     .where("m.status", "=", "active")
     .orderBy("o.name", "asc")
     .execute();
+}
+
+/**
+ * Organization ids the principal holds an ACTIVE membership in, keyed by
+ * BETTER AUTH user id (not the `app_users` primary key).
+ *
+ * IMP-1 (impersonation tenant confinement). `getUserAccessContext` uses this —
+ * through {@link listImpersonationReachableOrgIds}, which owns the superuser
+ * exemption — to intersect an IMPERSONATED session's memberships with the
+ * IMPERSONATOR'S, so a borrowed session can never resolve an organization the
+ * admin who borrowed it does not already belong to. It is keyed on the Better
+ * Auth id because that is the only identifier Better Auth's `impersonatedBy`
+ * marker carries — resolving it to an `app_users` row first would cost a
+ * second round trip for nothing.
+ *
+ * BOTH status filters are load-bearing, and they are different statuses:
+ *   - `m.status = 'active'` (the MEMBERSHIP), mirroring
+ *     {@link userHasActiveMembership}: a suspended or pending membership does
+ *     not let the admin act in that tenant themselves, so it must not widen
+ *     what a session they borrow can reach either.
+ *   - `u.status = 'active'` (the ACCOUNT, IMP-2). Suspending or blocking a
+ *     user writes `app_users.status` (`POST /api/administrator/users/[id]/
+ *     status`) and leaves their membership rows untouched, so without this the
+ *     confinement's own fail-closed branch was a fiction: a just-suspended
+ *     admin kept the full intersection and the session they had borrowed kept
+ *     its full reach until it expired. `decideSecureAccess` is the authority
+ *     on which statuses block, and it allows exactly `active`.
+ *
+ * An unprovisioned, suspended or membership-less impersonator yields `[]`,
+ * which the caller MUST treat as "resolve nothing" (fail closed), never as
+ * "unconfined".
+ */
+export async function listActiveOrganizationIdsForBetterAuthUser(
+  betterAuthUserId: string,
+): Promise<string[]> {
+  const rows = await db
+    .selectFrom("app_organization_memberships as m")
+    .innerJoin("app_users as u", "u.id", "m.app_user_id")
+    .select("m.organization_id as organization_id")
+    .where("u.better_auth_user_id", "=", betterAuthUserId)
+    .where("u.status", "=", "active")
+    .where("m.status", "=", "active")
+    .execute();
+  return [...new Set(rows.map((r) => r.organization_id))];
 }
 
 /**

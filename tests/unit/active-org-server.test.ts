@@ -126,6 +126,43 @@ describe("listUserActiveOrganizations", () => {
   });
 });
 
+describe("listActiveOrganizationIdsForBetterAuthUser (IMP-1 confinement source)", () => {
+  it("keys on the BETTER AUTH id via the app_users join and keeps only ACTIVE memberships", async () => {
+    execute.mockResolvedValue([{ organization_id: "o-a" }, { organization_id: "o-b" }]);
+    await expect(mod.listActiveOrganizationIdsForBetterAuthUser("ba-admin")).resolves.toEqual([
+      "o-a",
+      "o-b",
+    ]);
+
+    const q = recorded[0]!;
+    expect(q.table).toBe("app_organization_memberships as m");
+    expect(q.joins).toEqual([["app_users as u", "u.id", "m.app_user_id"]]);
+    // TWO different statuses, both load-bearing, and neither substitutes for
+    // the other. `m.status` is the MEMBERSHIP: a suspended membership does not
+    // let the ADMIN act in that tenant, so it must not widen what a session
+    // they borrow can reach either. `u.status` is the ACCOUNT (IMP-2):
+    // suspending or blocking a user writes `app_users.status` and leaves the
+    // membership rows alone, so without it a just-suspended admin kept the full
+    // intersection and the session they had borrowed kept its full reach —
+    // the exact opposite of what the confinement's fail-closed branch claims.
+    expect(q.wheres).toEqual([
+      ["u.better_auth_user_id", "=", "ba-admin"],
+      ["u.status", "=", "active"],
+      ["m.status", "=", "active"],
+    ]);
+  });
+
+  it("deduplicates and returns [] for an impersonator with no active membership (fail closed)", async () => {
+    execute.mockResolvedValue([{ organization_id: "o-a" }, { organization_id: "o-a" }]);
+    await expect(mod.listActiveOrganizationIdsForBetterAuthUser("ba-admin")).resolves.toEqual([
+      "o-a",
+    ]);
+
+    execute.mockResolvedValue([]);
+    await expect(mod.listActiveOrganizationIdsForBetterAuthUser("ba-nobody")).resolves.toEqual([]);
+  });
+});
+
 describe("readActiveOrgId", () => {
   it("returns the trimmed cookie value", async () => {
     cookieStore.mockResolvedValue({ get: () => ({ value: "  o-1  " }) });

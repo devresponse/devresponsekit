@@ -137,6 +137,7 @@ release that satisfies the floor on its own; the override can then go.
 | `brace-expansion@1` | `^1.1.18` | `GHSA-3jxr-9vmj-r5cp`, `GHSA-mh99-v99m-4gvg`, `GHSA-rgw5-rvv9-x895` (high, ReDoS). | Dev (`minimatch@3` under eslint). | 2026-12-01 |
 | `brace-expansion@5` | `^5.0.9` | Same three advisories on the 5.x line. | Dev (`minimatch@10` under Stryker). | 2026-12-01 |
 | `typed-rest-client>qs` | `^6.16.0` | `GHSA-q8mj-m7cp-5q26`, `GHSA-x5fp-wj9c-mxmx`, `GHSA-4mjr-xmp4-gh2g` (moderate). `typed-rest-client` pins `qs@6.15.1` exactly. | Dev (Stryker dashboard client). The direct dev `qs` is `^6.16.0`. | 2026-12-01 |
+| `lodash-es@4` | `^4.18.0` | `GHSA-r5fr-rjxr-66jc` (high — `_.template` code injection). Arrived with `mermaid@12`, which adds `chevrotain@11.1.2`. **Major-scoped, not parent-scoped, on purpose:** `chevrotain`, `@chevrotain/gast` and `@chevrotain/cst-dts-gen` each declare `"lodash-es": "4.17.23"` — an exact pin at the top of the vulnerable range, so it can never float to the fix — and a `chevrotain>lodash-es` floor would leave the other two parents live. | **Runtime** (`mermaid` → `chevrotain`, which mermaid 12 uses for the `usecase` diagram parser only; `dagre-d3-es` already resolved 4.18.1). Verified in Chromium: the docs diagrams and chevrotain-parsed `usecase` diagrams render identically with 4.17.23 and 4.18.1. | 2026-12-01 |
 
 To confirm a floor took effect: `pnpm why <pkg>` must show a single resolved
 version at or above the floor for every parent the row names, and

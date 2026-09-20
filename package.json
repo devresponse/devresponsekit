@@ -87,7 +87,7 @@
     "jose": "6.2.12",
     "kysely": "0.29.6",
     "lucide-react": "1.46.0",
-    "mermaid": "^11.16.1",
+    "mermaid": "^12.0.0",
     "next": "16.3.5",
     "next-intl": "4.14.5",
     "pg": "8.23.0",
@@ -176,7 +176,8 @@
       "browserslist": "^4.28.7",
       "brace-expansion@1": "^1.1.18",
       "brace-expansion@5": "^5.0.9",
-      "typed-rest-client>qs": "^6.16.0"
+      "typed-rest-client>qs": "^6.16.0",
+      "lodash-es@4": "^4.18.0"
     },
     "auditConfig": {
       "//": "Allowlist for `pnpm audit --audit-level high` (BUILD-1). Each muted advisory is dev/build/test-only — see SECURITY.md ('Dependency advisory allowlist') for the per-GHSA package, reachability rationale, and review-by date. A NEW high/critical not listed here fails CI; drop entries when the upstream fix lands.",

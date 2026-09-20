@@ -176,3 +176,36 @@ its own `tsconfig.json` and dependency tree, and the kit's required checks gate 
 Files: `src/lib/env-spec.ts` is the environment contract, and the one to edit when the kit's
 `src/lib/env.ts` changes. `src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/commands/` is one
 file per command group.
+
+---
+
+## Dependency override floors
+
+Everything this CLI ships is transitive: the only direct dependencies are `@vercel/sdk`,
+`vercel` and `commander`. When an advisory lands inside that tree there is usually nothing to
+upgrade — `vercel` is already on its latest version and pins the vulnerable package itself —
+so the fix is a floor in `pnpm.overrides`, not a mute. The floors below took this package from
+50 advisories (1 critical, 20 high) to none.
+
+| Override | Floor | Advisory / reason |
+| --- | --- | --- |
+| `tar@7` | `^7.5.21` | Nine advisories, one **critical**. Reached through the CLI's archive handling. |
+| `undici@5` → `undici` | `^6.28.0` | **A deliberate major.** Most undici advisories affecting the installed 5.x line are only patched in 6.x, so there is no in-major fix; `@vercel/node` pins 5.28.4. See the note below. |
+| `js-yaml@4` | `^4.3.2` | Four advisories, worst high. |
+| `minimatch@10` | `^10.2.3` | Three advisories, high. The 3.x copy in the tree is unaffected and deliberately untouched. |
+| `path-to-regexp@8` | `^8.4.0` | Three advisories. The 6.x copies resolve to a patched version already, so no 6.x floor is needed. |
+| `smol-toml@1` | `^1.7.1` | Two advisories, worst high. |
+| `ajv@8` | `^8.18.0` | One moderate. |
+| `@tootallnate/once@2` | `^2.0.1` | One low. |
+
+**Why the undici major is safe here.** The vulnerable copy is reached only through
+`vercel > @vercel/{elysia,express,fastify,h3,hono,koa,…} > @vercel/node`, the framework
+adapters for standalone serverless functions. This CLI deploys a **Next.js** application,
+which is built by `@vercel/next`, so those adapters are installed but never executed. The
+override was verified rather than assumed: after forcing it, the package builds, its own test
+suite passes, the bundled `vercel` CLI still reports its version, and both `drk-deploy doctor`
+and `drk-deploy status` complete against the live Vercel API, which exercises the real HTTP
+path end to end.
+
+Re-check with `pnpm audit --audit-level low` from this directory. If a floor ever becomes
+unnecessary because the upstream pin moves, delete it rather than leaving it to rot.

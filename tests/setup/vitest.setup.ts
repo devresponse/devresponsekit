@@ -57,6 +57,18 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
     }) as MediaQueryList;
 }
 
+// jsdom is PINNED at 30.0.1 for these components, not just polyfilled. 30.1.0
+// changed what happens when the focused element is removed: it parks focus on
+// the Document instead of clearing it, and the next `focus()` then fires a
+// `blur` event AT `window`. @radix-ui/react-select and @radix-ui/react-menu
+// both close on a window blur ("the user switched away"), and RTL's `cleanup()`
+// removes the focused trigger after every test — so from the second popup test
+// in a file onwards the popup opens on pointerdown and immediately closes
+// again, and `findByRole("listbox"|"menuitem")` times out. A real browser fires
+// no window blur here. Do NOT "fix" that by resetting focus in an afterEach:
+// that hides a live upstream bug (jsdom/jsdom#4347) and does not help a test
+// that unmounts a focused element mid-test. See the jsdom hold and its revisit
+// condition in .github/dependabot.yml.
 if (typeof globalThis.Element !== "undefined") {
   const ElementProto = globalThis.Element.prototype as Element & {
     hasPointerCapture?: (pointerId: number) => boolean;

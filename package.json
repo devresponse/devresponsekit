@@ -135,7 +135,7 @@
     "@types/react-dom": "19.3.0",
     "@vitest/coverage-v8": "4.1.9",
     "axe-core": "4.13.0",
-    "dotenv": "17.4.2",
+    "dotenv": "18.0.1",
     "eslint": "9.39.2",
     "eslint-config-next": "16.3.5",
     "fast-check": "^4.10.1",

@@ -121,8 +121,8 @@ export const SENTRY_DATA_COLLECTION: DataCollection = {
   cookies: false,
   // Sentry 10.74 renamed `queryParams` to `urlQueryParams` and DEFAULTS THE NEW
   // ONE TO `true`, dropping the old key from the resolved policy entirely
-  // (`ResolvedDataCollection` is `Omit<DataCollection, 'queryParams'>`). Setting
-  // only the deprecated name would therefore have silently started shipping
+  // (`ResolvedDataCollection` omits `queryParams`). Setting only the
+  // deprecated name would therefore have silently started shipping
   // query strings — which on this app carry one-time reset and invite tokens.
   // Both are set: the new name is what the SDK reads, the old one keeps the
   // policy correct if a dependency pins an older SDK. `tests/unit/
@@ -131,11 +131,38 @@ export const SENTRY_DATA_COLLECTION: DataCollection = {
   queryParams: false,
   urlQueryParams: false,
   httpBodies: [],
+  // Sentry 10.75 widened `httpHeaders` from `{ request?, response? }` to
+  // `CollectBehavior | HttpHeadersCollection`, so a bare `{ deny: [...] }` is
+  // now accepted and fanned out to both directions (`resolveHttpHeaders`,
+  // @sentry/core build/cjs/utils/data-collection/
+  // resolveDataCollectionOptions.js:20-31). We deliberately
+  // keep the explicit per-direction form: it resolves identically on 10.75 and
+  // is still correct on 10.74, whereas the bare form on a <10.75 SDK would fall
+  // through to the `{ request: true, response: true }` default and collect every
+  // header with an EMPTY deny list. Same reasoning as the two query-param keys
+  // above — the policy must not depend on which SDK actually gets installed.
+  // The resolved-policy test pins the direction key set, so an SDK that adds a
+  // third direction (which would default to `true`) fails the build.
   httpHeaders: {
     request: { deny: HEADER_DENY_LIST },
     response: { deny: HEADER_DENY_LIST },
   },
   genAI: { inputs: false, outputs: false },
+  // The three categories below are inert in this app today — `graphQL` needs a
+  // GraphQL integration, `databaseQueryData` is read only by the Supabase
+  // integration, and `stackFrameVariables` is read only after
+  // `includeLocalVariables` is enabled — but all three DEFAULT TO `true` under
+  // `dataCollection` (resolveDataCollectionOptions.js:5-16), so leaving them
+  // unset would make the header comment's "every category is spelled out" claim
+  // false and would silently open a channel the day one of those integrations
+  // is added. `databaseQueryData` is also a regression the switch to
+  // `dataCollection` introduced on its own: the old `sendDefaultPii: false`
+  // bridge mapped it to `false` (defaultPiiToCollectionOptions.js:30) while the
+  // `dataCollection` defaults map it to `true` — and DB query values on this app
+  // are hashed credentials, emails and session tokens.
+  graphQL: { document: false, variables: false },
+  databaseQueryData: false,
+  stackFrameVariables: false,
   // The `sendDefaultPii: false` bridge used 7 (the ContextLines default);
   // the `dataCollection` defaults drop to 5. Keep the stack-context parity.
   frameContextLines: 7,

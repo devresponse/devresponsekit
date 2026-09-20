@@ -489,21 +489,94 @@ describe("SDK parity: real @sentry/core writer + SENTRY_DATA_COLLECTION", () => 
     return client.getDataCollectionOptions();
   }
 
+  /**
+   * The SDK's per-direction header policy, derived from the RESOLVED shape
+   * rather than imported by name so a renamed export cannot quietly turn this
+   * suite into a no-op. Sentry 10.75 widened the *input* `httpHeaders` to
+   * `CollectBehavior | HttpHeadersCollection`; the resolved value is still
+   * `Required<HttpHeadersCollection>`, i.e. a `CollectBehavior` per direction.
+   */
+  type HeaderPolicy = ReturnType<typeof resolvedPolicy>["httpHeaders"];
+  type HeaderBehavior = HeaderPolicy["request"];
+
+  /**
+   * Narrows a resolved `CollectBehavior` (`boolean | { allow } | { deny }`) to
+   * its deny-list form. A type guard, not a cast: if 10.75+ ever resolves a
+   * direction to `true` (collect everything, empty deny list) or to an
+   * allow-list, this throws and the test fails instead of silently asserting
+   * nothing. That is the whole point of the tripwire — the union member we get
+   * back is itself part of the policy under test.
+   */
+  function denyList(behavior: HeaderBehavior): string[] {
+    if (typeof behavior !== "object" || !("deny" in behavior)) {
+      throw new Error(
+        `expected a { deny: [...] } header policy, got ${JSON.stringify(behavior)} — ` +
+          "the SDK resolved our policy to something that collects headers",
+      );
+    }
+    return behavior.deny;
+  }
+
   it("resolves with every channel closed and the bridge's frameContextLines", () => {
     // `queryParams` is deliberately absent here: the SDK resolves it away
-    // (`ResolvedDataCollection = Required<Omit<DataCollection, 'queryParams'>>`)
-    // in favour of `urlQueryParams`. Asserting the RESOLVED shape is the point
-    // of this test — it is what proves the rename did not quietly re-open query
-    // collection, whose default is `true`.
+    // (`ResolvedDataCollection = Required<Omit<DataCollection, 'queryParams' |
+    // 'httpHeaders'>>`) in favour of `urlQueryParams`. Asserting the RESOLVED
+    // shape is the point of this test — it is what proves the rename did not
+    // quietly re-open query collection, whose default is `true`.
+    //
+    // `graphQL` / `databaseQueryData` / `stackFrameVariables` all default to
+    // `true` and are pinned here too, so an SDK that flips one back on (or a
+    // config that stops spelling it out) fails the build rather than shipping
+    // GraphQL variables, DB query values or local-variable dumps.
     expect(resolvedPolicy()).toMatchObject({
       userInfo: false,
       cookies: false,
       urlQueryParams: false,
       httpBodies: [],
       genAI: { inputs: false, outputs: false },
+      graphQL: { document: false, variables: false },
+      databaseQueryData: false,
+      stackFrameVariables: false,
       frameContextLines: 7,
     });
     expect(resolvedPolicy()).not.toHaveProperty("queryParams");
+  });
+
+  it("resolves both header directions to our deny list and no others", () => {
+    const httpHeaders = resolvedPolicy().httpHeaders;
+    // 10.75 reshaped the INPUT to `CollectBehavior | HttpHeadersCollection`, so
+    // assert what the SDK actually resolved: a deny list on each direction. An
+    // SDK that added a third direction would default it to `true` (collect
+    // everything) while these two assertions still passed — hence the exact key
+    // set. "The parity test failing is the feature."
+    expect(Object.keys(httpHeaders).sort()).toEqual(["request", "response"]);
+    const expected = [
+      "authorization",
+      "cookie",
+      "x-api-key",
+      "referer",
+      // the SDK's own `ipHeaderNames` (vendor/getIpAddress)
+      "x-client-ip",
+      "x-forwarded-for",
+      "fly-client-ip",
+      "cf-connecting-ip",
+      "fastly-client-ip",
+      "true-client-ip",
+      "x-real-ip",
+      "x-cluster-client-ip",
+      "x-forwarded",
+      "forwarded-for",
+      "forwarded",
+      "x-vercel-forwarded-for",
+      // the bridge's PII_HEADER_SNIPPETS
+      "forwarded",
+      "-ip",
+      "remote-",
+      "via",
+      "-user",
+    ];
+    expect(denyList(httpHeaders.request)).toEqual(expect.arrayContaining(expected));
+    expect(denyList(httpHeaders.response)).toEqual(expect.arrayContaining(expected));
   });
 
   it("denies at least every header the old sendDefaultPii:false bridge denied", () => {
@@ -574,45 +647,18 @@ describe("SDK parity: real @sentry/core writer + SENTRY_DATA_COLLECTION", () => 
 });
 
 describe("SENTRY_DATA_COLLECTION", () => {
-  it("closes every write-time channel (cookies, query, bodies, user info)", () => {
+  /**
+   * The RESOLVED policy is asserted above (SDK parity); the only thing that
+   * cannot be observed there is the deprecated `queryParams` key, because the
+   * SDK resolves it away in favour of `urlQueryParams`. Both spellings must
+   * stay set so the policy is still closed if a transitive pin drags the SDK
+   * back below the 10.74 rename.
+   */
+  it("sets both query-param spellings so an older SDK is still closed", () => {
     expect(SENTRY_DATA_COLLECTION).toMatchObject({
-      userInfo: false,
-      cookies: false,
       queryParams: false,
       urlQueryParams: false,
-      httpBodies: [],
-      genAI: { inputs: false, outputs: false },
-      frameContextLines: 7,
     });
-    const req = SENTRY_DATA_COLLECTION.httpHeaders?.request as { deny: string[] };
-    const res = SENTRY_DATA_COLLECTION.httpHeaders?.response as { deny: string[] };
-    const expected = [
-      "authorization",
-      "cookie",
-      "x-api-key",
-      "referer",
-      // the SDK's own `ipHeaderNames` (vendor/getIpAddress)
-      "x-client-ip",
-      "x-forwarded-for",
-      "fly-client-ip",
-      "cf-connecting-ip",
-      "fastly-client-ip",
-      "true-client-ip",
-      "x-real-ip",
-      "x-cluster-client-ip",
-      "x-forwarded",
-      "forwarded-for",
-      "forwarded",
-      "x-vercel-forwarded-for",
-      // the bridge's PII_HEADER_SNIPPETS
-      "forwarded",
-      "-ip",
-      "remote-",
-      "via",
-      "-user",
-    ];
-    expect(req.deny).toEqual(expect.arrayContaining(expected));
-    expect(res.deny).toEqual(expect.arrayContaining(expected));
   });
 });
 

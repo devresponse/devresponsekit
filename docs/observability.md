@@ -68,7 +68,14 @@ Two layers, both fail-safe (redact-by-default):
   is also told not to _record_ cookies, query parameters, bodies, or user info in the first
   place (`dataCollection` in all three `Sentry.init` calls — this **replaces** the
   deprecated `sendDefaultPii: false` bridge, so every deny list it used to apply is spelled
-  out explicitly); the hooks are the backstop (review #22).
+  out explicitly); the hooks are the backstop (review #22). Because `dataCollection` builds
+  on the SDK's own **permissive** defaults rather than the bridge's, the categories that
+  default to _on_ are closed by name too — GraphQL documents/variables, database query
+  values (`databaseQueryData`, which the bridge mapped to `false`), and stack-frame local
+  variables. They are inert until the matching integration is enabled; spelling them out is
+  what keeps enabling one from silently opening a channel. `tests/unit/sentry-scrub.test.ts`
+  asserts the policy **as the SDK resolves it**, so an upstream rename or default flip fails
+  the build instead of leaking.
 - **Email outbox** — `src/lib/email/outbox-secrets.ts` redacts one-time links (the
   `/reset-password/<token>` path segment and every `token=` query value → `[redacted]`) from
   the `app_outbox` columns the administrator API can read (`subject`, `body_html`,

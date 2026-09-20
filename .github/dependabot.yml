@@ -80,6 +80,42 @@ updates:
     # 2026-09-04 review): @tanstack/react-table v9 (187 type errors across 19
     # files: useTable + tableFeatures registry, TFeatures generics, prototype
     # methods; PR #378). Minor/patch bumps still arrive.
+    #
+    # jsdom is HELD at 30.0.1 on a MINOR hold (not a decline) because 30.1.0
+    # regressed focus emulation in a way that silently breaks every Radix popup
+    # test. Evidence, so the next person does not re-derive it:
+    #
+    #   * jsdom 30.1.0 added a focus-fixup rule to Node-impl.js `_removingSteps`:
+    #     removing the focused element now sets `_lastFocusedElement` to the
+    #     DOCUMENT (30.0.1 set it to `null`). The next `element.focus()` then
+    #     treats that Document as the previously-focused thing, and
+    #     `fireFocusEventWithTargetAdjustment` retargets a Document to its
+    #     Window — so a `blur` event is dispatched AT `window`.
+    #   * @radix-ui/react-select and @radix-ui/react-menu both do
+    #     `window.addEventListener("blur", close)` to notice "the user switched
+    #     away". Under RTL, `cleanup()` unmounts the focused trigger, so from
+    #     the SECOND popup test in a file onwards the trigger opens on
+    #     pointerdown and is closed again by the spurious window blur that the
+    #     same click's `focus()` fires. Symptom: `findByRole("listbox")` /
+    #     `findByRole("menuitem")` time out (Dependabot PR #440, CI run
+    #     35487650398).
+    #   * This is NOT what a browser does. Control run in Chromium: focus A,
+    #     remove A, focus B — Chromium fires a blur targeted at the REMOVED
+    #     ELEMENT and no window-targeted blur at all, so Radix's window
+    #     listener never fires. jsdom 30.1.0 is the outlier.
+    #   * Upstream: jsdom/jsdom#4347 (open, cites this exact Radix Select
+    #     symptom); fix PRs jsdom/jsdom#4346 / #4348 / #4351 are in flight and
+    #     30.1.0 is still `latest`.
+    #
+    # The hold is narrow on purpose. Only the minor line is ignored, so 30.0.x
+    # patches — and any SECURITY update, which `ignore` never suppresses — still
+    # arrive, and a future jsdom major still opens a PR for normal review.
+    # REVISIT when jsdom/jsdom#4347 ships fixed: drop this entry, bump jsdom,
+    # and confirm tests/component/locale-switcher.test.tsx and
+    # administrator-top-header.test.tsx stay green (they are the regression
+    # detector — CI, not this entry, is what actually stops a bad jsdom).
     ignore:
       - dependency-name: "@tanstack/react-table"
         update-types: ["version-update:semver-major"]
+      - dependency-name: jsdom
+        update-types: ["version-update:semver-minor"]

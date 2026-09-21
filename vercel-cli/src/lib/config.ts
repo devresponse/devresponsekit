@@ -1,7 +1,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { DeploymentContext } from "./env-spec.js";
 import { CliError } from "./log.js";
+import { type DeployTarget, type SatelliteConfig, resolveProfile } from "./target.js";
 
 /**
  * Project settings live in the repo (`vercel-cli/.drk-deploy.json`, gitignored);
@@ -10,6 +12,14 @@ import { CliError } from "./log.js";
  */
 
 export interface ProjectConfig {
+  /**
+   * WHAT is being deployed. Absent means `kit`, which is the shape every
+   * config written before satellites existed has — those keep behaving
+   * exactly as they did. See `lib/target.ts` for why the two differ so much.
+   */
+  target?: DeployTarget;
+  /** Present only when `target` is `satellite`. */
+  satellite?: SatelliteConfig;
   /** Vercel project id (prj_…) or name. */
   projectId: string;
   /** Vercel team id (team_…). Omitted for a personal account. */
@@ -121,4 +131,37 @@ export function tokenSource(): "env" | "file" | "none" {
 /** The kit checkout this CLI lives inside, unless configured otherwise. */
 export function defaultKitRoot(cliRoot: string): string {
   return resolve(cliRoot, "..");
+}
+
+/* ------------------------------------------------------------------ */
+/*  Target-aware views of the config                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The checkout `vercel pull/build/deploy` runs in.
+ *
+ * For the kit that is the kit itself; for a satellite it is the satellite's
+ * own app folder. The kit checkout stays recorded either way, because it is
+ * still where migrations come from (the satellites' migration runners are
+ * deliberately disabled) and it is what the "run it in the kit instead"
+ * message points at.
+ */
+export function deployRoot(config: ProjectConfig): string {
+  const profile = resolveProfile(config);
+  if (profile.kind === "satellite") {
+    // resolveProfile has already refused a satellite target with no block.
+    return config.satellite!.appRoot;
+  }
+  return config.kitRoot;
+}
+
+/** Everything the environment contract needs to know about this deployment. */
+export function deploymentContext(config: ProjectConfig): DeploymentContext {
+  return {
+    profile: resolveProfile(config),
+    origin: config.origin,
+    appName: config.appName,
+    audiencePrefix: config.audiencePrefix,
+    applicationId: config.applicationId,
+  };
 }

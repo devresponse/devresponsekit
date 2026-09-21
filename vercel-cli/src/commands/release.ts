@@ -1,10 +1,19 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type ProjectConfig, requireConfig, requireToken } from "../lib/config.js";
+import { type ProjectConfig, deployRoot, requireConfig, requireToken } from "../lib/config.js";
 import { runOrThrow } from "../lib/exec.js";
-import { probe, describe, isHealthy, jwksKeyCount } from "../lib/health.js";
+import {
+  probe,
+  probeConsumer,
+  describe,
+  describeConsumer,
+  isConsumerHealthy,
+  isHealthy,
+  jwksKeyCount,
+} from "../lib/health.js";
 import { applyMigrations, coreMigrations, ensureKitDependencies } from "../lib/kit.js";
 import { CliError, bold, dim, field, green, heading, info, ok, red, step, warn, yellow } from "../lib/log.js";
+import { type DeploymentProfile, describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
 import { envCheck, envSync } from "./env.js";
 
 /**
@@ -31,16 +40,33 @@ function vercelEntry(cliRoot: string): string {
  * (the lock silently does nothing through a transaction pooler), so the pooled
  * shape is refused up front unless explicitly allowed.
  */
-function resolveMigrationUrl(options: { databaseUrl?: string; allowPooled?: boolean }): string {
-  const url =
-    options.databaseUrl ??
-    process.env.PRODUCTION_DIRECT_DATABASE_URL ??
-    process.env.DIRECT_DATABASE_URL ??
-    process.env.DATABASE_URL;
+function resolveMigrationUrl(options: {
+  databaseUrl?: string;
+  allowPooled?: boolean;
+  /**
+   * A satellite must NAME the database it migrates.
+   *
+   * The ambient fallbacks below are the kit's: a shell set up to deploy the
+   * primary has PRODUCTION_DIRECT_DATABASE_URL pointing at the primary's
+   * database. Letting a satellite inherit that would migrate the KIT's
+   * database from a satellite's config — the exact confusion this target
+   * split exists to prevent — and it would look like it worked, because the
+   * migrations are the kit's either way.
+   */
+  requireExplicit?: boolean;
+}): string {
+  const url = options.requireExplicit
+    ? (options.databaseUrl ?? process.env.SATELLITE_DIRECT_DATABASE_URL)
+    : (options.databaseUrl ??
+      process.env.PRODUCTION_DIRECT_DATABASE_URL ??
+      process.env.DIRECT_DATABASE_URL ??
+      process.env.DATABASE_URL);
 
   if (!url) {
     throw new CliError("No database URL for migrations.", {
-      hint: "Pass --database-url <direct-url>, or set PRODUCTION_DIRECT_DATABASE_URL. Use the DIRECT (non-pooled) endpoint.",
+      hint: options.requireExplicit
+        ? "A satellite must name its own database: pass --database-url <direct-url> (or set SATELLITE_DIRECT_DATABASE_URL). The kit's PRODUCTION_DIRECT_DATABASE_URL is deliberately NOT used here."
+        : "Pass --database-url <direct-url>, or set PRODUCTION_DIRECT_DATABASE_URL. Use the DIRECT (non-pooled) endpoint.",
     });
   }
   if (/-pooler\./.test(url) && !options.allowPooled) {
@@ -57,15 +83,41 @@ export async function migrate(
   options: { databaseUrl?: string; schema?: string; allowPooled?: boolean; dryRun?: boolean },
 ): Promise<void> {
   const config = requireConfig(cliRoot);
-  const databaseUrl = resolveMigrationUrl(options);
+  const profile = resolveProfile(config);
+
+  // The guard, before anything is resolved or connected to. There is no
+  // --force: a satellite that shares the kit's database does not own its
+  // schema, and the escape is to record in the config that it owns its own
+  // (see `migrationPolicy`), which is a decision that outlives the session.
+  const policy = migrationPolicy(profile);
+  if (!policy.allowed) {
+    heading("Database migrations");
+    field("target", describeProfile(profile));
+    info("");
+    throw new CliError(policy.why, {
+      ...(policy.hint ? { hint: policy.hint } : {}),
+      exitCode: 2,
+    });
+  }
+
+  const isSatellite = profile.kind === "satellite";
+  const databaseUrl = resolveMigrationUrl({ ...options, requireExplicit: isSatellite });
   const schema = options.schema ?? "auth";
 
   heading("Database migrations");
+  field("target", describeProfile(profile));
   field("kit checkout", config.kitRoot);
   field("schema", schema);
   field("endpoint", dim(redactUrl(databaseUrl)));
   const migrations = coreMigrations(config.kitRoot);
   field("core migrations", `${migrations.length} on disk (${migrations.at(-1) ?? "none"} newest)`);
+  if (isSatellite) {
+    info("");
+    // Worth saying out loud: the satellites' own migration runners are the
+    // refusal stub, so the schema still comes from the kit checkout — it is
+    // simply being applied to a database the satellite owns.
+    warn("Applying the KIT's migration set to a satellite-owned database. Check the endpoint above.");
+  }
   info("");
 
   await ensureKitDependencies(config.kitRoot, options.dryRun ?? false);
@@ -98,8 +150,22 @@ export async function deploy(
   const config = requireConfig(cliRoot);
   const token = requireToken();
   const vercelJs = vercelEntry(cliRoot);
+  const profile = resolveProfile(config);
+  const root = deployRoot(config);
+  if (!existsSync(root)) {
+    // Caught here rather than as a confusing spawn error three steps later,
+    // when `vercel pull` is handed a working directory that does not exist.
+    throw new CliError(`The checkout to deploy does not exist: ${root}`, {
+      hint:
+        profile.kind === "satellite"
+          ? "Re-run `drk-deploy init --app-root <path-to-the-satellite-checkout>`."
+          : "Re-run `drk-deploy init --kit-root <path-to-the-kit-checkout>`.",
+    });
+  }
 
   heading("Preflight");
+  field("target", describeProfile(profile));
+  field("checkout", root);
   if (options.skipChecks) {
     warn("--skip-checks: the environment contract was not verified.");
   } else {
@@ -111,8 +177,17 @@ export async function deploy(
     }
   }
 
+  const policy = migrationPolicy(profile);
   if (options.skipMigrations) {
     warn("--skip-migrations: the schema was NOT touched. Only safe when nothing changed.");
+  } else if (!policy.allowed) {
+    // Not an error: deploying a satellite that shares the kit's database is
+    // an ordinary thing to do. It simply has no migration step, and the safe
+    // order for it is env → build → promote → verify.
+    heading("Database migrations");
+    step("Skipped by policy — this deployment does not own its schema.");
+    info(`  ${dim(policy.why)}`);
+    if (policy.hint) info(`  ${dim(policy.hint)}`);
   } else {
     await migrate(cliRoot, {
       ...(options.databaseUrl !== undefined ? { databaseUrl: options.databaseUrl } : {}),
@@ -136,45 +211,51 @@ export async function deploy(
     return;
   }
 
-  await ensureLinked(vercelJs, config, env);
+  await ensureLinked(vercelJs, config, root, env);
 
   step("Pulling production environment and project settings");
   await runOrThrow(process.execPath, [vercelJs, "pull", "--yes", "--environment=production"], {
-    cwd: config.kitRoot,
+    cwd: root,
     env,
     failureMessage: "vercel pull failed",
   });
 
   step("Building");
   await runOrThrow(process.execPath, [vercelJs, "build", "--prod"], {
-    cwd: config.kitRoot,
+    cwd: root,
     env,
     failureMessage: "vercel build failed — nothing was promoted",
   });
 
   step("Promoting the prebuilt output to production");
   await runOrThrow(process.execPath, [vercelJs, "deploy", "--prebuilt", "--prod"], {
-    cwd: config.kitRoot,
+    cwd: root,
     env,
     failureMessage: "vercel deploy failed",
   });
   ok("Promoted");
 
-  await verify(config);
+  await verify(config, profile);
 }
 
 /**
  * `vercel pull/build/deploy` need to know which project they are acting on.
- * Linking writes `.vercel/project.json` in the kit checkout, which works for a
- * personal account as well as a team (VERCEL_ORG_ID alone does not, because a
- * personal account's org id is the user id, which this CLI never asks for).
+ * Linking writes `.vercel/project.json` in the checkout being deployed, which
+ * works for a personal account as well as a team (VERCEL_ORG_ID alone does
+ * not, because a personal account's org id is the user id, which this CLI
+ * never asks for).
+ *
+ * `root` is the deployed checkout — the kit, or a satellite's own app folder.
+ * Each satellite is its own Vercel project, so each gets its own link file and
+ * they cannot be confused for one another.
  */
 async function ensureLinked(
   vercelJs: string,
   config: ProjectConfig,
+  root: string,
   env: Record<string, string>,
 ): Promise<void> {
-  if (existsSync(join(config.kitRoot, ".vercel", "project.json"))) return;
+  if (existsSync(join(root, ".vercel", "project.json"))) return;
   step("Linking the checkout to the Vercel project");
   await runOrThrow(
     process.execPath,
@@ -185,14 +266,39 @@ async function ensureLinked(
       `--project=${config.projectId}`,
       ...(config.teamId ? [`--scope=${config.teamId}`] : []),
     ],
-    { cwd: config.kitRoot, env, failureMessage: "vercel link failed" },
+    { cwd: root, env, failureMessage: "vercel link failed" },
   );
 }
 
-/** Post-deploy proof, not a claim: probe what is actually serving. */
-async function verify(config: ProjectConfig): Promise<void> {
+/**
+ * Post-deploy proof, not a claim: probe what is actually serving.
+ *
+ * The two targets are asked different questions, because "healthy" means
+ * different things. The kit is an issuer: it must serve, accept a sign-in
+ * attempt, and publish a key. A satellite is a consumer: it must serve, reach
+ * its database, and REFUSE a token it cannot verify. Probing a consumer for a
+ * published key would report failure on a perfectly healthy deployment, which
+ * is how a check stops being read.
+ */
+async function verify(config: ProjectConfig, profile: DeploymentProfile): Promise<void> {
   heading("Verify");
   step(`Probing ${config.origin}`);
+
+  if (profile.kind === "satellite") {
+    const report = await probeConsumer(config.origin);
+    for (const line of describeConsumer(report)) info(`  ${line}`);
+    await reportSatelliteKeys(config.origin);
+    await reportIssuerKeys(profile.issuerOrigin);
+
+    info("");
+    if (isConsumerHealthy(report)) ok(`${bold(config.origin)} is healthy.`);
+    else
+      throw new CliError("The satellite is live but not healthy — see the probe results above.", {
+        exitCode: 3,
+      });
+    return;
+  }
+
   const report = await probe(config.origin);
   for (const line of describe(report)) info(`  ${line}`);
 
@@ -214,6 +320,60 @@ async function verify(config: ProjectConfig): Promise<void> {
 }
 
 /**
+ * The inverse of the kit's JWKS check, and the reason it is worth making.
+ *
+ * A satellite must publish ZERO keys. If it publishes one, it holds
+ * `SSO_HANDOFF_PRIVATE_KEY` and has quietly become an issuer the rest of the
+ * fleet will trust — which `env:check` catches from the project's variables,
+ * but this catches from the RUNNING deployment, including a key set by hand in
+ * the dashboard or inherited from an earlier build.
+ */
+async function reportSatelliteKeys(origin: string): Promise<void> {
+  const keys = await jwksKeyCount(origin);
+  if (keys === null) return; // no JWKS route, or unreachable — nothing to claim
+  if (keys > 0) {
+    info("");
+    warn(`This satellite PUBLISHES ${keys} signing key(s) — a consumer must publish none.`);
+    info(`  It holds SSO_HANDOFF_PRIVATE_KEY and can mint handoff tokens the fleet will trust.`);
+    info(`  Remove it with ${bold("drk-deploy env:prune")}, then redeploy.`);
+  } else {
+    info(`  ${green("✓")} publishes no signing keys (correct for a consumer)`);
+  }
+}
+
+/**
+ * The other half of a consumer's health, and the half it does not control.
+ *
+ * A satellite verifies every handoff against `${issuer}/api/sso/jwks.json`.
+ * Everything about that document is the ISSUER's state — so a satellite can be
+ * perfectly configured, pass every probe above, and still reject every handoff
+ * because the kit publishes an empty key set or is not reachable from here. It
+ * is one GET against the origin the operator just recorded, and it answers the
+ * only question the satellite's own probes cannot: "is the thing I was pointed
+ * at actually an issuer?"
+ *
+ * Reported, never fatal: a transient network failure while probing the kit is
+ * not a reason to fail a satellite's deploy that has otherwise succeeded.
+ */
+async function reportIssuerKeys(issuerOrigin: string): Promise<void> {
+  const keys = await jwksKeyCount(issuerOrigin);
+  if (keys === null) {
+    info("");
+    warn(`The configured issuer ${issuerOrigin} did not serve /api/sso/jwks.json.`);
+    info("  This satellite verifies every handoff against that document — until it is served,");
+    info("  every handoff fails here with what looks like a bad signature.");
+    return;
+  }
+  if (keys === 0) {
+    info("");
+    warn(`The configured issuer ${issuerOrigin} publishes an EMPTY key set.`);
+    info(`  Set SSO_HANDOFF_PRIVATE_KEY on the KIT (${bold("drk-deploy env:sync")} there) and redeploy it.`);
+    return;
+  }
+  info(`  ${green("✓")} issuer ${issuerOrigin} publishes ${keys} key(s)`);
+}
+
+/**
  * `drk-deploy up` — the whole thing, in order, for someone who does not want
  * to remember the order.
  */
@@ -228,8 +388,15 @@ export async function up(
     yes?: boolean;
   },
 ): Promise<void> {
-  heading("Deploy devresponsekit to Vercel");
-  info(dim("  env:sync → migrate → build → promote → verify"));
+  const profile = resolveProfile(requireConfig(cliRoot));
+  const migrates = migrationPolicy(profile).allowed;
+
+  heading(profile.kind === "satellite" ? "Deploy a satellite to Vercel" : "Deploy devresponsekit to Vercel");
+  info(dim(`  ${describeProfile(profile)}`));
+  // The safe order for a deployment that does not own its schema has no
+  // migrate step at all — saying so up front beats printing a step that then
+  // announces it did nothing.
+  info(dim(`  env:sync → ${migrates ? "migrate → " : ""}build → promote → verify`));
 
   await envSync(cliRoot, {
     ...(options.fromEnv !== undefined ? { fromEnv: options.fromEnv } : {}),
@@ -265,11 +432,18 @@ export async function status(cliRoot: string): Promise<void> {
   const { VercelClient } = await import("../lib/vercel-client.js");
   const client = new VercelClient(requireToken(), config.teamId);
 
+  const profile = resolveProfile(config);
+
   heading("Project");
   const project = await client.getProject(config.projectId);
   field("name", `${project.name} ${dim(project.id)}`);
+  field("target", describeProfile(profile));
   field("framework", project.framework ?? dim("(unset)"));
   field("origin", config.origin);
+  if (profile.kind === "satellite") {
+    field("sso issuer", profile.issuerOrigin);
+    field("checkout", deployRoot(config));
+  }
   field("team", config.teamId ?? dim("(personal account)"));
 
   heading("Latest production deployment");
@@ -284,9 +458,37 @@ export async function status(cliRoot: string): Promise<void> {
   }
 
   heading("Health");
+  const keys = await jwksKeyCount(config.origin);
+
+  if (profile.kind === "satellite") {
+    const consumer = await probeConsumer(config.origin);
+    for (const line of describeConsumer(consumer)) info(`  ${line}`);
+    // Zero is the correct answer for a consumer, and a non-zero count is the
+    // alarming one — the opposite of the kit's reading of the same number.
+    field(
+      "sso jwks keys",
+      keys === null
+        ? dim("unreachable")
+        : keys === 0
+          ? green("0 — correct for a consumer")
+          : red(`${keys} — this satellite holds a SIGNING KEY it must not have`),
+    );
+    // The issuer's key set is the half a consumer cannot fix and cannot see
+    // from its own probes: zero keys there means every handoff fails HERE.
+    const issuerKeys = await jwksKeyCount(profile.issuerOrigin);
+    field(
+      "issuer jwks keys",
+      issuerKeys === null
+        ? yellow(`${profile.issuerOrigin} — no JWKS served`)
+        : issuerKeys === 0
+          ? red(`0 at ${profile.issuerOrigin} — no handoff can be verified here`)
+          : green(`${issuerKeys} at ${profile.issuerOrigin}`),
+    );
+    return;
+  }
+
   const report = await probe(config.origin);
   for (const line of describe(report)) info(`  ${line}`);
-  const keys = await jwksKeyCount(config.origin);
   field(
     "sso jwks keys",
     keys === null

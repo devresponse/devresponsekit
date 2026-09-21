@@ -18,12 +18,18 @@ program
   .name("drk-deploy")
   .description(
     [
-      "Deploy devresponsekit to Vercel.",
+      "Deploy devresponsekit — or one of its satellites — to Vercel.",
       "",
       "The short version:",
       "  drk-deploy login            store a Vercel access token",
       "  drk-deploy init             link this checkout to a Vercel project",
       "  drk-deploy up               environment, migrations, build, promote, verify",
+      "",
+      "Two targets. The KIT issues SSO handoffs and owns the database schema. A",
+      "SATELLITE consumes handoffs, holds no signing key, and — unless it owns its",
+      "own database — is refused migrations. Configure one with:",
+      "  drk-deploy init --satellite <standalone|handoff|shared> \\",
+      "                  --app-root <path> --issuer <the kit's url>",
       "",
       "Every command is idempotent and takes --dry-run.",
     ].join("\n"),
@@ -49,6 +55,17 @@ program
   .option("--app-name <name>", "product name for NEXT_PUBLIC_APP_NAME")
   .option("--kit-root <path>", "path to the devresponsekit checkout (defaults to the parent directory)")
   .option("--create", "create the project when it does not exist")
+  .option("--audience-prefix <prefix>", 'SSO audience prefix (default "devresponse-app")')
+  .option("--application-id <id>", "this deployment's SSO application id")
+  .option(
+    "--satellite <option>",
+    "configure a SATELLITE instead of the kit: standalone (A), handoff (B) or shared (C)",
+  )
+  .option("--app-root <path>", "satellite only: the satellite checkout to build and deploy")
+  .option("--issuer <origin>", "satellite only: the KIT's origin, whose JWKS it verifies against")
+  .option("--cookie-domain <domain>", "satellite Option C only: the shared parent domain, e.g. .example.com")
+  .option("--own-database", "satellite only: this satellite has its OWN database and may be migrated")
+  .option("--kit-database", "satellite only: this satellite shares the kit's database (migrations refused)")
   .option("-y, --yes", "do not prompt")
   .action(async (options) => init(CLI_ROOT, options));
 
@@ -71,7 +88,9 @@ program
 
 program
   .command("env:sync")
-  .description("Create every variable the kit needs, generating the secrets it can")
+  .description(
+    "Create every variable THIS target needs, generating only the secrets it may (never an Option C session secret, never a satellite signing key)",
+  )
   .option("--from-env <file>", "read supplied values (DATABASE_URL, …) from a .env file")
   .option("--target <targets>", 'production | preview | development | all (default "production")')
   .option("--force", "overwrite variables that already exist (rotates secrets)")
@@ -89,7 +108,9 @@ program
 
 program
   .command("env:prune")
-  .description("Remove development-only variables that should never exist on a deployment")
+  .description(
+    "Remove variables that must not exist here: the development-only ones, plus a satellite's issuer-only ones (a stray signing key)",
+  )
   .option("--dry-run", "show what would be removed")
   .option("-y, --yes", "actually remove them")
   .action(async (options) => envPrune(CLI_ROOT, options));
@@ -100,7 +121,9 @@ program
 
 program
   .command("db:provision")
-  .description("Create a marketplace Postgres store and connect it to the project")
+  .description(
+    "Create a marketplace Postgres store and connect it to the project (refused for a deployment that runs on the kit's database)",
+  )
   .option("--name <name>", "store name")
   .option("--integration <slugOrId>", "which installed integration to use (default: the first Postgres one)")
   .option("--product <slugOrId>", "which product of that integration")
@@ -115,7 +138,10 @@ program
 program
   .command("migrate")
   .description("Apply the kit's migrations to the target database (direct endpoint)")
-  .option("--database-url <url>", "the DIRECT connection string (defaults to PRODUCTION_DIRECT_DATABASE_URL)")
+  .option(
+    "--database-url <url>",
+    "the DIRECT connection string. Kit: defaults to PRODUCTION_DIRECT_DATABASE_URL / DIRECT_DATABASE_URL / DATABASE_URL. A satellite must NAME its own: this flag, or SATELLITE_DIRECT_DATABASE_URL — the kit's variables are deliberately not inherited",
+  )
   .option("--schema <name>", 'target schema (default "auth")')
   .option("--allow-pooled", "permit a pooled connection string (not recommended)")
   .option("--dry-run", "show what would run")

@@ -20,13 +20,13 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" README.md package.json"
   },
   "dependencies": {
-    "@vercel/sdk": "1.28.30",
+    "@vercel/sdk": "1.28.35",
     "commander": "15.0.0",
-    "vercel": "59.16.0"
+    "vercel": "59.23.2"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
-    "prettier": "3.6.2",
+    "prettier": "3.9.8",
     "typescript": "5.9.3"
   },
   "pnpm": {

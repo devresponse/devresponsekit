@@ -1,13 +1,38 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, resolveToken, tokenSource } from "../lib/config.js";
+import { type ProjectConfig, deployRoot, loadConfig, resolveToken, tokenSource } from "../lib/config.js";
 import { pnpmCommand, run } from "../lib/exec.js";
 import { coreMigrations } from "../lib/kit.js";
-import { dim, field, green, heading, info, ok, red, warn, yellow } from "../lib/log.js";
+import { CliError, dim, field, green, heading, info, ok, red, warn, yellow } from "../lib/log.js";
+import {
+  type DeploymentProfile,
+  describeProfile,
+  migrationPolicy,
+  resolveProfile,
+  satelliteConfigProblems,
+} from "../lib/target.js";
 import { VercelClient } from "../lib/vercel-client.js";
 
 const PASS = green("ok");
 const FAIL = red("missing");
+
+/**
+ * Resolves the target, turning a refusal into a counted problem.
+ *
+ * `resolveProfile` throws for a config that half-describes a satellite — which
+ * is right everywhere else, because guessing which half is correct is how a
+ * migration reaches the wrong database. Here it would only rob the operator of
+ * the rest of the report.
+ */
+function readProfile(config: ProjectConfig, bad: (message: string) => string): DeploymentProfile | null {
+  try {
+    return resolveProfile(config);
+  } catch (err) {
+    field("config", bad(`${red("unreadable")} — ${(err as Error).message}`));
+    if (err instanceof CliError && err.hint) info(`    ${dim(err.hint)}`);
+    return null;
+  }
+}
 
 /**
  * `drk-deploy doctor` — checks the machine and the link before anything is
@@ -65,12 +90,56 @@ export async function doctor(cliRoot: string): Promise<number> {
   }
 
   heading("Project link");
-  const config = loadConfig(cliRoot);
+  // Unparseable JSON gets the same treatment as an unresolvable target, for the
+  // same reason: `doctor` exists to list what is wrong, so it must survive
+  // finding something wrong.
+  let config: ProjectConfig | null = null;
+  let unreadable = false;
+  try {
+    config = loadConfig(cliRoot);
+  } catch (err) {
+    unreadable = true;
+    field("config", bad(`${red("unreadable")} — ${(err as Error).message}`));
+    if (err instanceof CliError && err.hint) info(`    ${dim(err.hint)}`);
+  }
   if (!config) {
-    field("config", bad(`${FAIL} — run \`drk-deploy init\``));
+    // Absent and unreadable are different facts, and only one of them is fixed
+    // by running `init` — so only one of them says to.
+    if (!unreadable) field("config", bad(`${FAIL} — run \`drk-deploy init\``));
   } else {
     field("project", `${PASS} ${dim(config.projectId)}`);
+    // `doctor` is the command you run when something is already wrong, so a
+    // config it cannot parse must be REPORTED as a problem, not thrown as one:
+    // throwing here abandons the toolchain, credential and kit-checkout
+    // results the operator came for, and exits 1 for the whole run without
+    // saying what else is fine. Every other check in this file counts.
+    const profile = readProfile(config, bad);
+    field("target", profile ? describeProfile(profile) : red("unreadable"));
     field("origin", config.origin);
+
+    if (profile?.kind === "satellite") {
+      const appRoot = deployRoot(config);
+      const appOk = existsSync(join(appRoot, "package.json"));
+      field("app checkout", appOk ? `${PASS} ${dim(appRoot)}` : bad(`${red("not found")} ${appRoot}`));
+      field("sso issuer", profile.issuerOrigin);
+      field(
+        "migrations",
+        migrationPolicy(profile).allowed
+          ? `${yellow("allowed")} ${dim("(this satellite owns its database)")}`
+          : `${PASS} ${dim("refused — the kit owns this schema")}`,
+      );
+      // A satellite that is misconfigured in these ways deploys, serves, and
+      // then fails on the first handoff. Say so here, where it costs nothing.
+      for (const problem of satelliteConfigProblems({
+        profile,
+        origin: config.origin,
+        applicationId: config.applicationId,
+        audiencePrefix: config.audiencePrefix,
+      })) {
+        field(problem.what, bad(`${red("wrong")} — ${problem.why}`), 26);
+      }
+    }
+
     const kitOk = existsSync(join(config.kitRoot, "package.json"));
     field(
       "kit checkout",

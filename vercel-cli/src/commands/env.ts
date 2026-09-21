@@ -1,14 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
-import { requireConfig, requireToken } from "../lib/config.js";
+import { deploymentContext, requireConfig, requireToken } from "../lib/config.js";
 import {
   ALL_TARGETS,
-  ENV_SPECS,
+  type DeploymentContext,
   type EnvTarget,
   type EnvVarSpec,
   FORBIDDEN_ON_VERCEL,
-  derivedValues,
+  derivedValuesFor,
+  envSpecsFor,
+  mayGenerateAuthSecret,
+  refusedFor,
   vercelTypeFor,
 } from "../lib/env-spec.js";
+import { describeProfile, migrationPolicy, satelliteConfigProblems } from "../lib/target.js";
 import {
   CliError,
   blue,
@@ -49,12 +53,28 @@ export function parseEnvFile(contents: string): Record<string, string> {
   return out;
 }
 
-function loadSuppliedValues(fromEnvFile: string | undefined): Record<string, string> {
+/**
+ * Collects values the operator has supplied, from the shell and from a file.
+ *
+ * `alsoCollect` is how the must-not-be-set keys get seen at all. They are, by
+ * definition, absent from the spec list, so a shell-exported
+ * `SSO_HANDOFF_PRIVATE_KEY` was invisible to the refusal check while the
+ * refusal's own hint told the operator to "drop them from any --from-env file
+ * or shell environment" — a promise the code could not keep. Collected here,
+ * never planned (the planner iterates the SPECS), so seeing one can only
+ * abort the sync, never write it.
+ */
+export function loadSuppliedValues(
+  specs: readonly EnvVarSpec[],
+  fromEnvFile: string | undefined,
+  alsoCollect: readonly string[] = [],
+): Record<string, string> {
   const supplied: Record<string, string> = {};
+  const keys = [...specs.map((s) => s.key), ...alsoCollect];
   // Process environment first, so an explicit shell value wins over a file.
-  for (const spec of ENV_SPECS) {
-    const value = process.env[spec.key];
-    if (value) supplied[spec.key] = value;
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value) supplied[key] = value;
   }
   if (fromEnvFile) {
     if (!existsSync(fromEnvFile)) throw new CliError(`No such file: ${fromEnvFile}`);
@@ -87,27 +107,41 @@ export async function envSync(
   const config = requireConfig(cliRoot);
   const client = new VercelClient(requireToken(), config.teamId);
   const targets = parseTargets(options.target);
+  const context = deploymentContext(config);
+  const specs = envSpecsFor(context);
+  const refused = refusedFor(context.profile);
 
   heading(`Sync environment → ${config.projectId}`);
+  info(dim(`  target:  ${describeProfile(context.profile)}`));
   info(dim(`  targets: ${targets.join(", ")}`));
 
   const existing = await client.listEnv(config.projectId);
   const present = new Set(existing.map((e) => e.key));
-  const supplied = loadSuppliedValues(options.fromEnv);
-  const derived = derivedValues({
-    origin: config.origin,
-    appName: config.appName,
-    audiencePrefix: config.audiencePrefix,
-    applicationId: config.applicationId,
-  });
+  const supplied = loadSuppliedValues(
+    specs,
+    options.fromEnv,
+    refused.map((f) => f.key),
+  );
+  const derived = derivedValuesFor(context);
+
+  // Refusals come first, before anything is planned. A satellite holding a
+  // signing key is not a deployment to top up with a few more variables — it
+  // is a consumer that can forge tokens, and syncing it would leave that
+  // property in place while printing a page of green ticks.
+  assertNoRefusedVariables(refused, present, supplied);
 
   const planned: PlannedVar[] = [];
-  const skipped: string[] = [];
+  /** Already on the project: left alone unless --force. */
+  const unchanged: string[] = [];
+  /** Nothing to set them from — reported separately, because "already set" and
+   *  "there was no value" are different facts and only one of them is fixed by
+   *  --force. */
+  const noValue: string[] = [];
   const blocked: Array<{ key: string; why: string }> = [];
 
-  for (const spec of ENV_SPECS) {
+  for (const spec of specs) {
     if (present.has(spec.key) && !options.force) {
-      skipped.push(spec.key);
+      unchanged.push(spec.key);
       continue;
     }
 
@@ -121,16 +155,27 @@ export async function envSync(
     if (!value) {
       switch (spec.source) {
         case "auth-secret":
-          value = generateAuthSecret();
-          origin = "generated";
+          // Belt and braces. The Option C spec already declares this value
+          // "supplied" so we never reach here for it, but this is the rule
+          // that must not be lost to a refactor: generating a session secret
+          // for a satellite that shares the kit's session breaks the shared
+          // session silently, and silently is the whole problem.
+          if (mayGenerateAuthSecret(context.profile)) {
+            value = generateAuthSecret();
+            origin = "generated";
+          }
           break;
         case "operator-secret":
           value = generateOperatorSecret();
           origin = "generated";
           break;
         case "handoff-key":
-          value = generateHandoffKeypair().privateJwk;
-          origin = "generated";
+          // A consumer must never be handed signing material, whatever a spec
+          // list says.
+          if (context.profile.kind !== "satellite") {
+            value = generateHandoffKeypair().privateJwk;
+            origin = "generated";
+          }
           break;
         default:
           break;
@@ -139,9 +184,13 @@ export async function envSync(
 
     if (!value) {
       if (spec.level === "required") {
-        blocked.push({ key: spec.key, why: "no value available" });
+        // `noValueHint` exists for the values that are deliberately not
+        // generatable — an Option C satellite's shared session secret, its
+        // cookie domain — where "no value available" would read like a bug in
+        // this CLI rather than a decision it is holding to.
+        blocked.push({ key: spec.key, why: spec.noValueHint ?? "no value available" });
       } else {
-        skipped.push(spec.key);
+        noValue.push(spec.key);
       }
       continue;
     }
@@ -160,7 +209,17 @@ export async function envSync(
     info("");
     info(`Supply them with ${bold("--from-env <file>")} or as shell variables, then re-run.`);
     if (blocked.some((b) => b.key === "DATABASE_URL")) {
-      info(`For a new database: ${bold("drk-deploy db:provision")}`);
+      // `db:provision` refuses for a deployment that does not own a schema, so
+      // recommending it there would send the operator at a command that says
+      // no — and, if it did not, at an empty database. Same policy, one source.
+      info(
+        migrationPolicy(context.profile).allowed
+          ? `For a new database: ${bold("drk-deploy db:provision")}`
+          : `This deployment runs against the ${bold("KIT's")} database — supply the kit's DATABASE_URL (and matching DB_SCHEMA). ${dim("db:provision is refused here.")}`,
+      );
+    }
+    if (blocked.some((b) => b.key === "COOKIE_DOMAIN")) {
+      info(`Record the cookie domain: ${bold("drk-deploy init --cookie-domain .example.com")}`);
     }
     throw new CliError(`${blocked.length} required variable(s) unresolved.`);
   }
@@ -175,10 +234,15 @@ export async function envSync(
           : dim("supplied");
     field(item.spec.key, `${note} ${item.spec.secret ? mask(item.value) : item.value}`, 32);
   }
-  if (skipped.length > 0) {
+  if (unchanged.length > 0) {
     info("");
-    info(dim(`  unchanged (already set): ${skipped.join(", ")}`));
+    info(dim(`  unchanged (already set): ${unchanged.join(", ")}`));
     info(dim("  pass --force to overwrite them"));
+  }
+  if (noValue.length > 0) {
+    info("");
+    info(dim(`  not set (no value supplied, and not required): ${noValue.join(", ")}`));
+    info(dim("  supply them with --from-env or as shell variables if the feature is wanted"));
   }
 
   if (planned.length === 0) {
@@ -235,15 +299,24 @@ export async function envSync(
 export async function envCheck(cliRoot: string): Promise<number> {
   const config = requireConfig(cliRoot);
   const client = new VercelClient(requireToken(), config.teamId);
+  const context = deploymentContext(config);
+  const specs = envSpecsFor(context);
+  const refused = refusedFor(context.profile);
 
   heading(`Environment → ${config.projectId}`);
+  info(dim(`  ${describeProfile(context.profile)}`));
   const existing = await client.listEnv(config.projectId);
   const byKey = new Map(existing.map((e) => [e.key, e]));
 
   let problems = 0;
 
+  // Configuration errors first: they are cheaper to read than a wall of
+  // variables, and a satellite that names itself as its own SSO issuer will
+  // show every variable "set" while no handoff can ever succeed.
+  problems += reportConfigProblems(context);
+
   const rows: Array<[string, string]> = [];
-  for (const spec of ENV_SPECS) {
+  for (const spec of specs) {
     const found = byKey.get(spec.key);
     if (found) {
       const scope = found.target.length ? dim(found.target.join(",")) : dim("(no target)");
@@ -262,6 +335,17 @@ export async function envCheck(cliRoot: string): Promise<number> {
   }
   for (const [key, value] of rows) field(key, value, 32);
 
+  const presentRefused = refused.filter((f) => byKey.has(f.key));
+  if (presentRefused.length > 0) {
+    heading(`Must NOT be set on this ${context.profile.kind === "satellite" ? "satellite" : "deployment"}`);
+    for (const f of presentRefused) {
+      field(f.key, `${red("present")} — ${f.why}`, 32);
+      problems += 1;
+    }
+    info("");
+    info(`Remove with: ${bold("drk-deploy env:prune")}`);
+  }
+
   const forbidden = FORBIDDEN_ON_VERCEL.filter((f) => byKey.has(f.key));
   if (forbidden.length > 0) {
     heading("Should not be set on a deployment");
@@ -274,7 +358,10 @@ export async function envCheck(cliRoot: string): Promise<number> {
   }
 
   const unknown = existing.filter(
-    (e) => !ENV_SPECS.some((s) => s.key === e.key) && !FORBIDDEN_ON_VERCEL.some((f) => f.key === e.key),
+    (e) =>
+      !specs.some((s) => s.key === e.key) &&
+      !FORBIDDEN_ON_VERCEL.some((f) => f.key === e.key) &&
+      !refused.some((f) => f.key === e.key),
   );
   if (unknown.length > 0) {
     heading("Not part of the contract (left alone)");
@@ -292,16 +379,21 @@ export async function envCheck(cliRoot: string): Promise<number> {
 export async function envPrune(cliRoot: string, options: { dryRun?: boolean; yes?: boolean }): Promise<void> {
   const config = requireConfig(cliRoot);
   const client = new VercelClient(requireToken(), config.teamId);
+  const context = deploymentContext(config);
+  // On a satellite this is the command that removes a stray signing key, so it
+  // prunes the target-specific refusals as well as the development-only ones.
+  const removable = [...refusedFor(context.profile), ...FORBIDDEN_ON_VERCEL];
   const existing = await client.listEnv(config.projectId);
-  const doomed = existing.filter((e) => FORBIDDEN_ON_VERCEL.some((f) => f.key === e.key));
+  const doomed = existing.filter((e) => removable.some((f) => f.key === e.key));
 
-  heading("Prune development-only variables");
+  heading("Prune variables that must not be set here");
+  info(dim(`  ${describeProfile(context.profile)}`));
   if (doomed.length === 0) {
     ok("Nothing to remove.");
     return;
   }
   for (const item of doomed) {
-    const why = FORBIDDEN_ON_VERCEL.find((f) => f.key === item.key)?.why ?? "";
+    const why = removable.find((f) => f.key === item.key)?.why ?? "";
     field(item.key, dim(why), 32);
   }
   if (options.dryRun) {
@@ -314,6 +406,60 @@ export async function envPrune(cliRoot: string, options: { dryRun?: boolean; yes
     await client.removeEnv(config.projectId, item.id);
     ok(`removed ${item.key}`);
   }
+}
+
+/**
+ * Refuses to sync when a must-not-be-set variable is already on the project,
+ * or is about to be supplied to one.
+ *
+ * `env:sync` only ever writes variables that are in the active spec list, so a
+ * refused key could not be written by accident — but "could not be written" is
+ * not the same as "is not there". A satellite that already holds
+ * SSO_HANDOFF_PRIVATE_KEY can mint handoff tokens the whole fleet trusts, and
+ * topping up its other variables would leave that in place while reporting
+ * success. Fail closed, name the variable, point at the one command that
+ * removes it.
+ *
+ * `supplied` covers the shell and the --from-env file (see
+ * `loadSuppliedValues`), which is what lets the hint below honestly tell the
+ * operator to clear both.
+ */
+function assertNoRefusedVariables(
+  refused: ReadonlyArray<{ key: string; why: string }>,
+  present: ReadonlySet<string>,
+  supplied: Readonly<Record<string, string>>,
+): void {
+  const offenders = refused.filter((f) => present.has(f.key) || supplied[f.key] !== undefined);
+  if (offenders.length === 0) return;
+
+  heading("Refusing to sync");
+  for (const f of offenders) {
+    const where = present.has(f.key) ? "set on this project" : "supplied to this run";
+    field(f.key, `${red(where)} — ${f.why}`, 32);
+  }
+  info("");
+  throw new CliError(`${offenders.length} variable(s) must not exist on this deployment target.`, {
+    hint: "Remove them with `drk-deploy env:prune`, and drop them from any --from-env file or shell environment, then re-run.",
+  });
+}
+
+/** Config-level mistakes that no amount of correctly-set variables can fix. */
+function reportConfigProblems(context: DeploymentContext): number {
+  if (context.profile.kind !== "satellite") return 0;
+  const problems = satelliteConfigProblems({
+    profile: context.profile,
+    origin: context.origin,
+    applicationId: context.applicationId,
+    audiencePrefix: context.audiencePrefix,
+  });
+  if (problems.length === 0) return 0;
+
+  heading("Configuration");
+  for (const problem of problems) {
+    field(problem.what, `${red("wrong")} — ${problem.why}`, 32);
+    if (problem.hint) info(`  ${dim(`  ${problem.hint}`)}`);
+  }
+  return problems.length;
 }
 
 function parseTargets(value: string | undefined): EnvTarget[] {

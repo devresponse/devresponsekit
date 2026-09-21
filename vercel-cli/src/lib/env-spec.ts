@@ -1,4 +1,12 @@
 import { isValidHandoffPrivateJwk } from "./secrets.js";
+import {
+  type DeploymentProfile,
+  type SatelliteProfile,
+  hostSitsUnder,
+  isCookieDomainShaped,
+  optionLabel,
+  originOf,
+} from "./target.js";
 
 /**
  * The environment contract between this CLI and devresponsekit.
@@ -50,6 +58,13 @@ export interface EnvVarSpec {
   consequence: string;
   /** Returns an error string when the value would fail the kit's schema. */
   validate?: (value: string) => string | null;
+  /**
+   * What `env:sync` should tell the operator when it has no value and cannot
+   * make one. The default ("no value available") is fine for a connection
+   * string; it is not fine for a value that is deliberately un-generatable,
+   * like an Option C satellite's shared session secret.
+   */
+  noValueHint?: string;
 }
 
 const atLeast =
@@ -274,3 +289,415 @@ export function vercelTypeFor(spec: EnvVarSpec): "encrypted" | "plain" {
 }
 
 export const ALL_TARGETS: readonly EnvTarget[] = ["production", "preview", "development"];
+
+/* ================================================================== */
+/*  Satellite profile                                                  */
+/* ================================================================== */
+
+/**
+ * The environment contract for a SATELLITE (devresponseapps: app-standalone,
+ * app-handoff, app-shared), derived from those apps' own `src/lib/env.ts` and
+ * `src/lib/jwt-handoff.server.ts` rather than from their READMEs.
+ *
+ * A satellite is a CONSUMER. It verifies handoff tokens against the kit's
+ * published JWKS (`createRemoteJWKSet` over `${SSO_HANDOFF_ISSUER}` +
+ * `/api/sso/jwks.json`, EdDSA) and holds no signing material of its own. Three
+ * things therefore invert relative to the kit, and each of them is the kind of
+ * mistake that looks fine in the dashboard:
+ *
+ *   1. `SSO_HANDOFF_ISSUER` names the KIT, not this deployment;
+ *   2. the issuer-only variables are REFUSED here, not merely omitted;
+ *   3. Option C shares the kit's session, so its secret is supplied, never
+ *      generated.
+ *
+ * Note on what is deliberately absent: the retired `SSO_HANDOFF_JWT_SECRET`
+ * (the old shared HS256 secret) is NOT part of this contract. The handoff has
+ * been EdDSA + JWKS for some time; a shared symmetric secret would have given
+ * every consumer the ability to mint tokens, which is the exact property the
+ * current design exists to remove.
+ */
+
+/** Everything a profile-aware spec list needs to know about this deployment. */
+export interface DeploymentContext {
+  profile: DeploymentProfile;
+  /** THIS deployment's own public origin. */
+  origin: string;
+  appName: string;
+  audiencePrefix: string;
+  applicationId: string;
+}
+
+const atLeastChars =
+  (n: number, why: string) =>
+  (value: string): string | null =>
+    value.length >= n ? null : `must be at least ${n} characters (${why})`;
+
+/**
+ * May this deployment generate its own `BETTER_AUTH_SECRET`?
+ *
+ * No, for an Option C satellite. That app validates the KIT's session cookie
+ * directly, which only works when both hold the identical secret. Generating a
+ * fresh one would not fail loudly — the satellite boots, serves, and passes
+ * every health probe, while users bounce between "signed in" on the kit and
+ * "signed out" here. That is a bug report reading "sometimes I get logged
+ * out", and it takes days to trace.
+ */
+export function mayGenerateAuthSecret(profile: DeploymentProfile): boolean {
+  return !(profile.kind === "satellite" && profile.sharesSession);
+}
+
+const SHARED_SECRET_HINT = [
+  "cannot be generated for an Option C satellite: it must be byte-identical to the KIT's BETTER_AUTH_SECRET,",
+  "because this app validates the kit's session cookie directly. A freshly generated secret would boot cleanly",
+  "and then log users out at random. Copy the kit's value (--from-env, or the shell) and re-run.",
+].join(" ");
+
+/** The satellite's variables, in the order an operator reads them. */
+export function satelliteEnvSpecs(context: DeploymentContext & { profile: SatelliteProfile }): EnvVarSpec[] {
+  const { profile } = context;
+  /** Option C: shares the kit's SESSION (same secret, parent-domain cookie). */
+  const shared = profile.sharesSession;
+  /**
+   * Shares the kit's DATABASE — which is a different question, and the one
+   * most of this contract actually turns on.
+   *
+   * `shared-with-kit` is the DEFAULT for every option, so the common Option A
+   * or B satellite has `sharesSession === false` and still runs against the
+   * primary's Postgres (the apps' own `scripts/db-owned-by-kit.mjs` says so in
+   * as many words). Branching the database variables on session sharing told
+   * that satellite to give itself a database — and then `migrate` refused it,
+   * which is the CLI telling an operator to do the opposite of what it permits.
+   */
+  const usesKitDatabase = profile.database === "shared-with-kit";
+  const ownOrigin = originOf(context.origin);
+
+  const specs: EnvVarSpec[] = [
+    {
+      key: "BETTER_AUTH_SECRET",
+      level: "required",
+      secret: true,
+      // The Option C rule, expressed where `env:sync` already looks: a
+      // "supplied" source is never generated.
+      source: shared ? "supplied" : "auth-secret",
+      comment: shared
+        ? "MUST be the SAME value as the kit's: this app validates the kit's session cookie directly."
+        : "Signs THIS app's own session cookies. Independent of the kit; rotating it signs out only this app.",
+      consequence: "The server will not boot.",
+      validate: atLeastChars(32, "the kit uses 32+ and an Option C satellite must match it exactly"),
+      ...(shared ? { noValueHint: SHARED_SECRET_HINT } : {}),
+    },
+    {
+      key: "BETTER_AUTH_URL",
+      level: "required",
+      secret: false,
+      source: "derived",
+      comment: "THIS app's own public origin. Callback URLs and its trusted-origin list are built from it.",
+      consequence: "The server will not boot.",
+      validate: isUrl,
+    },
+    {
+      key: "DATABASE_URL",
+      level: "required",
+      secret: true,
+      source: "supplied",
+      comment: usesKitDatabase
+        ? shared
+          ? "The KIT's Postgres — Option C reads the primary's user/session tables. Do not point it elsewhere."
+          : "The KIT's Postgres: this satellite does not own its schema, so it must be the primary's connection string."
+        : "This app's OWN Postgres (recorded as `database: own`) — separate from the kit's.",
+      consequence: usesKitDatabase
+        ? "The server will not boot. Pointed at a SEPARATE database it boots and looks healthy — /api/health/ready only proves the connection works — while every handoff nonce and session lookup misses, and `drk-deploy migrate` refuses to populate it."
+        : "The server will not boot.",
+      validate: (v) =>
+        v.startsWith("postgres://") || v.startsWith("postgresql://") ? null : "must be a postgres:// URL",
+    },
+    {
+      key: "SSO_HANDOFF_ISSUER",
+      level: "required",
+      secret: false,
+      source: "derived",
+      comment:
+        "The KIT's origin — NOT this app's. Handoffs are verified against its /api/sso/jwks.json (EdDSA).",
+      consequence: "The server will not boot.",
+      validate: (value) => {
+        const issuer = originOf(value);
+        if (issuer === null) return "must be the issuer's http(s) origin — its JWKS is fetched from it";
+        if (ownOrigin !== null && issuer === ownOrigin) {
+          return "must be the KIT's origin, not this deployment's own: a satellite that names itself as issuer verifies against its own EMPTY key set, so every handoff fails";
+        }
+        return null;
+      },
+    },
+    {
+      key: "SSO_HANDOFF_AUDIENCE_PREFIX",
+      level: "required",
+      secret: false,
+      source: "derived",
+      comment: "Must match the kit's exactly. A token's audience is ${prefix}:${applicationId}.",
+      consequence: "The server will not boot.",
+    },
+    {
+      key: "SSO_HANDOFF_APPLICATION_ID",
+      level: "required",
+      secret: false,
+      source: "derived",
+      comment: `Identifies THIS satellite (${optionLabel(profile.option)}) when it consumes a handoff, and binds the nonce burn.`,
+      consequence: "The server will not boot.",
+    },
+  ];
+
+  if (shared) {
+    specs.push({
+      key: "COOKIE_DOMAIN",
+      level: "required",
+      secret: false,
+      source: "derived",
+      comment:
+        "Parent domain the session cookie is scoped to, e.g. .example.com. Option C only — it is what makes one session span both hosts.",
+      consequence:
+        "The cookie stays scoped to this host, so the kit's session is never presented here: the app boots, looks healthy, and users appear randomly signed out.",
+      noValueHint:
+        "must be supplied for an Option C satellite and is never guessed — record it with `drk-deploy init --cookie-domain .example.com` (the domain BOTH the kit and this app sit under).",
+      validate: (value) => {
+        if (!isCookieDomainShaped(value)) {
+          return "must be a registrable domain with at least one dot, e.g. .example.com (a bare public suffix is refused by browsers)";
+        }
+        if (ownOrigin !== null && !hostSitsUnder(new URL(ownOrigin).host, value)) {
+          return `this deployment's host does not sit under \`${value}\`, so the browser would discard the cookie`;
+        }
+        return null;
+      },
+    });
+  }
+
+  specs.push(
+    {
+      key: "DB_SCHEMA",
+      // Recommended whenever the tables belong to the kit, not just for Option
+      // C: an A or B satellite on the primary's database reads the primary's
+      // rows, so a schema mismatch is the same silent emptiness.
+      level: usesKitDatabase ? "recommended" : "optional",
+      secret: false,
+      source: "supplied",
+      comment: usesKitDatabase
+        ? "Must equal the KIT's DB_SCHEMA exactly — this app reads the primary's tables. Defaults to `auth`."
+        : "Schema every table is deployed into. Defaults to `auth`.",
+      consequence: usesKitDatabase
+        ? "Falls back to `auth`; if the kit uses another schema this app reads an empty one — sessions look invalid and every handoff nonce lookup misses."
+        : "Falls back to `auth`, which is usually right.",
+      validate: (v) =>
+        /^[a-z_][a-z0-9_]*$/i.test(v) ? null : "must be a plain SQL identifier (it is interpolated into DDL)",
+    },
+    {
+      key: "ADMIN_TRUSTED_ORIGINS",
+      // Optional, and deliberately NOT "add the kit's origin". The satellite's
+      // trusted-origin list (`src/lib/trusted-origins.ts`) feeds Better Auth's
+      // CSRF check and the admin origin guard, and it is consulted only for
+      // UNSAFE methods. No unsafe cross-origin request from the kit ever
+      // arrives here: the handoff is a GET redirect (unchecked), and the
+      // confirm POST is submitted by this app's own interstitial, so it is
+      // same-origin. Listing the kit would widen the CSRF allow-list for a
+      // request that does not happen — a cost with no matching benefit.
+      level: "optional",
+      secret: false,
+      source: "supplied",
+      comment:
+        "Comma-separated EXTRA origins of this same app (a preview host, a second alias). Not the kit's — the handoff is a GET redirect and the confirm POST is same-origin, so trusting the kit only widens the CSRF allow-list.",
+      consequence:
+        "Only this app's own origin (NEXT_PUBLIC_APP_URL / BETTER_AUTH_URL) is trusted, which is correct unless this deployment answers on a second hostname.",
+    },
+    {
+      key: "CRON_SECRET",
+      /**
+       * Gated on database OWNERSHIP, because that is what decides whether this
+       * app may drain the outbox at all.
+       *
+       * No satellite ships a `crons` entry — all three `vercel.json` files
+       * carry only `$schema` and `regions`; the kit's is the one with the
+       * schedule. That is deliberate, and the route says why in its own header:
+       * `app_outbox` has no originating-app column, so a drain here claims the
+       * PRIMARY's rows, sends the primary's mail through this app's provider
+       * credentials, and reads `delivery_payload` — the unredacted copy that
+       * carries live password-reset and invitation tokens.
+       *
+       * So on a shared database the variable is `supplied`, never generated:
+       * `env:sync` generates for any `operator-secret` source regardless of
+       * level, and generating this one is precisely what arms a route that is
+       * currently, correctly, failing closed at 401.
+       */
+      level: profile.database === "own" ? "recommended" : "optional",
+      secret: true,
+      source: profile.database === "own" ? "operator-secret" : "supplied",
+      comment: usesKitDatabase
+        ? "Leave UNSET. This app ships no cron, and it shares the KIT's outbox — the kit's own cron drains it with the right credentials. Setting this arms /api/internal/outbox-drain to send the PRIMARY's mail from this app."
+        : "Bearer token for /api/internal/outbox-drain. This app ships NO crons entry, so schedule that path externally; the route fails closed (401) until this is set.",
+      consequence: usesKitDatabase
+        ? "Unset is the correct state: the drain route answers 401 and the kit's cron sends this app's queued mail."
+        : "Nothing drains the outbox: the route answers 401 to every caller, so queued email is retried by nobody.",
+      ...(usesKitDatabase
+        ? {
+            noValueHint:
+              "is deliberately not generated for a satellite on the kit's database: it would arm a drain route that would send the PRIMARY's mail. Supply one only if you own the database and have scheduled the route yourself.",
+          }
+        : {}),
+      // NOT a schema rule: unlike the kit, the satellites do not declare
+      // CRON_SECRET in `serverEnvSchema` at all — the route reads process.env
+      // directly and compares in constant time. 32 is this CLI's own floor for
+      // a bearer secret.
+      validate: atLeastChars(32, "this CLI's floor for a bearer token compared in constant time"),
+    },
+    {
+      key: "NEXT_PUBLIC_APP_URL",
+      level: "recommended",
+      secret: false,
+      source: "derived",
+      buildTime: true,
+      comment:
+        "The origin as the browser sees it. Inlined at build time, and part of the trusted-origin list.",
+      consequence: "Client-side links may point at the wrong origin.",
+      validate: isUrl,
+    },
+    {
+      key: "METRICS_TOKEN",
+      level: "optional",
+      secret: true,
+      source: "operator-secret",
+      comment: "Bearer token gating the Prometheus scrape endpoint.",
+      consequence: "/api/metrics stays closed (401).",
+      // Same caveat as CRON_SECRET: not declared in the satellites'
+      // `serverEnvSchema` — the route reads process.env itself.
+      validate: atLeastChars(32, "this CLI's floor for a bearer token compared in constant time"),
+    },
+    {
+      key: "NEXT_PUBLIC_PRODUCTION_HOST",
+      level: "optional",
+      secret: false,
+      source: "derived",
+      buildTime: true,
+      comment: "Canonical production hostname, used to tell production from a preview.",
+      consequence: "Previews may not identify themselves correctly.",
+    },
+    {
+      key: "NEXT_PUBLIC_APP_NAME",
+      level: "optional",
+      secret: false,
+      source: "derived",
+      buildTime: true,
+      comment: "Product name shown in the shell, page titles and email chrome.",
+      consequence: "The UI falls back to a default name.",
+    },
+    {
+      key: "EMAIL_FROM",
+      level: "optional",
+      secret: false,
+      source: "supplied",
+      comment: "From header for outbound email.",
+      consequence: "Mail is sent from a localhost address (the default), which most providers reject.",
+    },
+  );
+
+  return specs;
+}
+
+/**
+ * Variables that must NEVER be set on a satellite.
+ *
+ * The first two are the security ones, and they are not theoretical: a
+ * satellite ships the SAME `/api/sso/launch` route the kit does. Give it
+ * `SSO_HANDOFF_PRIVATE_KEY` and it stops being a consumer — it starts minting
+ * handoff tokens the whole fleet will verify and trust. The EdDSA + JWKS
+ * design exists so that compromising a satellite lets an attacker forge
+ * NOTHING; a stray private key on a consumer hands that property back.
+ *
+ * The rest are inert rather than dangerous, and are listed for the same reason
+ * FORBIDDEN_ON_VERCEL lists seed variables: an inert setting that looks
+ * load-bearing is how an operator ends up believing a control is enforced here
+ * when it is enforced somewhere else entirely.
+ */
+export const SATELLITE_ISSUER_ONLY: ReadonlyArray<{ key: string; why: string }> = [
+  {
+    key: "SSO_HANDOFF_PRIVATE_KEY",
+    why: "ISSUER ONLY. A consumer holds no signing material — with this set, THIS app's /api/sso/launch mints tokens the fleet trusts, so compromising a satellite becomes enough to forge a session anywhere",
+  },
+  {
+    key: "SSO_HANDOFF_PREVIOUS_PRIVATE_KEY",
+    why: "ISSUER ONLY. The rotation-overlap half of the issuer's signing key — the same regression as above, one rotation behind",
+  },
+  {
+    key: "SSO_HANDOFF_KID",
+    why: "issuer-only: it pins the key id the ISSUER publishes; a consumer publishes no keys",
+  },
+  {
+    key: "SSO_HANDOFF_PREVIOUS_KID",
+    why: "issuer-only: names the previous published key id; a consumer publishes no keys",
+  },
+  {
+    key: "SSO_ALLOWED_ORIGIN_SUFFIXES",
+    why: "issuer-only: the allow-list of satellite origins the ISSUER may register for handoff. Inert here, and it reads like a control this app enforces",
+  },
+];
+
+/**
+ * Must-not-be-set list for a given deployment, on top of FORBIDDEN_ON_VERCEL.
+ *
+ * Empty for the kit — the kit IS the issuer.
+ *
+ * `COOKIE_DOMAIN` is refused for Options A and B, but for the INERT reason,
+ * not a dangerous one: only app-shared reads it (`src/lib/auth.ts` passes it as
+ * the session cookie's `domain`), so on A and B it is a variable that does
+ * nothing at all. It is listed here for the same reason FORBIDDEN_ON_VERCEL
+ * lists the seed variables — a setting that looks load-bearing and is not is
+ * how an operator comes to believe a control is enforced here when it is not.
+ * And it stops being inert the moment this app is re-pointed at Option C.
+ */
+export function refusedFor(profile: DeploymentProfile): ReadonlyArray<{ key: string; why: string }> {
+  if (profile.kind !== "satellite") return [];
+  if (profile.sharesSession) return SATELLITE_ISSUER_ONLY;
+  return [
+    ...SATELLITE_ISSUER_ONLY,
+    {
+      key: "COOKIE_DOMAIN",
+      why: `Option ${profile.option === "standalone" ? "A" : "B"} holds its OWN host-scoped session and never reads this variable — only the Option C app does. Inert here, and it reads like a shared-session setting this app honours`,
+    },
+  ];
+}
+
+/** The spec list for whatever this deployment is. The kit's is untouched. */
+export function envSpecsFor(context: DeploymentContext): readonly EnvVarSpec[] {
+  if (context.profile.kind !== "satellite") return ENV_SPECS;
+  return satelliteEnvSpecs({ ...context, profile: context.profile });
+}
+
+/**
+ * The values this CLI computes from the project's own settings.
+ *
+ * The one line worth staring at is SSO_HANDOFF_ISSUER: on the kit it is the
+ * kit's own origin, on a satellite it is the KIT's origin as seen from the
+ * satellite. Same variable, opposite meaning — so it is derived from the
+ * recorded issuer, never from the deployment's own domain.
+ */
+export function derivedValuesFor(context: DeploymentContext): Record<string, string> {
+  const base = derivedValues({
+    origin: context.origin,
+    appName: context.appName,
+    audiencePrefix: context.audiencePrefix,
+    applicationId: context.applicationId,
+  });
+  if (context.profile.kind !== "satellite") return base;
+
+  const satellite: Record<string, string> = {
+    ...base,
+    SSO_HANDOFF_ISSUER: context.profile.issuerOrigin,
+  };
+  if (context.profile.sharesSession && context.profile.cookieDomain) {
+    satellite.COOKIE_DOMAIN = context.profile.cookieDomain;
+  }
+  return satellite;
+}
+
+/** The required keys for a deployment, whatever it is. */
+export function requiredKeysFor(context: DeploymentContext): string[] {
+  return envSpecsFor(context)
+    .filter((s) => s.level === "required")
+    .map((s) => s.key);
+}

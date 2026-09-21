@@ -26,6 +26,12 @@ const attackish = fc.oneof(
     "////evil",
     "/%2f%2fevil",
     "/en/app/x?next=//evil",
+    // The SSO launch continuation shapes. The property below asserts no input
+    // ever yields an `/api/` result, but the generator never sampled a value
+    // of this shape, so the assertion was not actually exercised against the
+    // one path a caller now deliberately round-trips through the sanitizer.
+    "/en/sso/launch?applicationId=x&locale=en",
+    "/api/sso/launch?applicationId=x&locale=en",
   ),
   fc.tuple(fc.constantFrom("//", "/\\", "\\/"), fc.domain()).map(([p, d]) => p + d),
 );

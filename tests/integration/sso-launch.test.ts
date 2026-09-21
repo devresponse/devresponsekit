@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as LaunchRouteModule from "@/app/api/sso/launch/route";
 import type { NextRequest } from "next/server";
+import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
+import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 /**
  * Route integration tests for `/api/sso/launch` (§29.6.10).
@@ -104,7 +106,14 @@ describe("GET /api/sso/launch", () => {
       makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=fr"),
     );
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toContain("/fr/sign-in");
+    // Asserted exactly, not with `toContain`: a loose match passes whether or
+    // not the return target is present, which would let the continuation this
+    // redirect exists for regress silently.
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/fr/sign-in");
+    expect(location.searchParams.get("returnTo")).toBe(
+      "/fr/sso/launch?applicationId=portal&locale=fr",
+    );
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "sso.launch.failure",
@@ -114,12 +123,28 @@ describe("GET /api/sso/launch", () => {
     );
   });
 
+  it("never returns the signed-out user to an /api/ path", () => {
+    // The sanitizer refuses `/api/` returnTo values; the route must therefore
+    // hand sign-in a page path, or the continuation collapses to the dashboard.
+    // Pinned here as well as in the unit suite because this is the caller that
+    // has to honour it.
+    const returnTo = buildSsoLaunchReturnPath("portal", "fr");
+    expect(returnTo).toBe("/fr/sso/launch?applicationId=portal&locale=fr");
+    expect(getSafeReturnTo(returnTo!, "fr")).toBe(returnTo);
+  });
+
   it("falls back to the default locale when `locale` is unsupported", async () => {
     sessionGetter.mockResolvedValue(null);
     const res = await GET(
       makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=zz"),
     );
-    expect(res.headers.get("location")).toContain("/en/sign-in");
+    // The locale must narrow in BOTH positions — the redirect path and the
+    // return target — or the user signs in under `en` and resumes under `zz`.
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/en/sign-in");
+    expect(location.searchParams.get("returnTo")).toBe(
+      "/en/sso/launch?applicationId=portal&locale=en",
+    );
   });
 
   it("issues the redirect with no-referrer + no-store on success", async () => {

@@ -4,6 +4,7 @@ import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
 import { isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
+import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
 import {
   DEFAULT_SSO_LAUNCH_LIMIT,
   actorIdFromRequest,
@@ -43,6 +44,16 @@ export const dynamic = "force-dynamic";
  *      (a consumer-only satellite never issues), so a deployment that tries
  *      to LAUNCH without one fails closed here — `503 sso_not_configured`,
  *      audited + logged — before any nonce/purge write.
+ *
+ * Signed-out continuation: the redirect to sign-in carries a `returnTo` so the
+ * launch survives authentication. Without it a user arriving from a satellite's
+ * application switcher — which links here because a consumer holds no signing
+ * key — signed in and landed on this deployment's dashboard rather than the
+ * application they clicked; satellite sessions are independent of this one, so
+ * that is the ordinary case, not an edge case. The target is a localized PAGE
+ * (`/{locale}/sso/launch`), never this API path: `getSafeReturnTo` refuses
+ * `/api/` returnTo values on purpose, and that rule stays intact. See
+ * `@/lib/sso-launch-return`.
  */
 export async function GET(request: NextRequest) {
   const applicationId = request.nextUrl.searchParams.get("applicationId");
@@ -74,7 +85,13 @@ export async function GET(request: NextRequest) {
       targetApplicationId: applicationId,
       request,
     });
-    return NextResponse.redirect(new URL(`/${locale}/sign-in`, request.url));
+    const signInUrl = new URL(`/${locale}/sign-in`, request.url);
+    // Non-null in practice — `applicationId` passed APP_ID_RE above and
+    // `locale` is already narrowed — but the builder owns that judgement, so a
+    // null result simply omits the parameter and preserves the old behaviour.
+    const returnTo = buildSsoLaunchReturnPath(applicationId, locale);
+    if (returnTo) signInUrl.searchParams.set("returnTo", returnTo);
+    return NextResponse.redirect(signInUrl);
   }
 
   const impersonatorId = getImpersonatorId(session);

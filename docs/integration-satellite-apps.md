@@ -132,6 +132,10 @@ Both changes are specified precisely in [Design: Satellite Apps §2.1](./design-
 
 As shipped, an unauthenticated hit on a satellite's `(secure)` route redirects to the satellite's **local sign-in page** (the forks keep the kit's full auth UI). For a pure satellite that must never own sign-in, implement the [design doc §7](./design-satellite-apps.md#7-the-not-logged-in-path) bounce instead: redirect to `${SSO_HANDOFF_ISSUER}/api/sso/launch?applicationId=${SSO_HANDOFF_APPLICATION_ID}&returnTo=<original path>` and remove the local sign-in/sign-up pages.
 
+**The primary now preserves the launch intent across its own sign-in.** A satellite's application switcher links at `${SSO_HANDOFF_ISSUER}/api/sso/launch?...` (a consumer holds no signing key, so its own launch route answers `503`), and satellite sessions are independent of the primary's — so the visitor routinely arrives there with no session on the primary. That redirect now carries `?returnTo=/{locale}/sso/launch?applicationId=…`, a localized trampoline page that forwards back to `/api/sso/launch` once the visitor is authenticated. The return target is a page rather than the API path on purpose: `getSafeReturnTo` refuses `/api/` values, and that rule is pinned by the security suite rather than widened for this feature.
+
+Two things this does **not** do. It does not implement §7's `&returnTo=<original path>` deep link *into* the satellite — that parameter is still ignored, and delivering it would need a new token claim plus a consume-side redirect. And it does not change which applications a user may launch: the trampoline reads no session and decides nothing, leaving every check at `/api/sso/launch` and `createSsoHandoffRedirect`.
+
 ## 5. Option C in detail — shared `auth` schema
 
 ### 5.1 The single code delta

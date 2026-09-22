@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import {
@@ -14,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
 import { RolePicker, type RoleOption } from "./_role-picker";
 
 /**
@@ -125,8 +124,8 @@ export function UserRolesPanel({
     }
   }, [selectedRole, userId, t]);
 
-  const columns = useMemo<ColumnDef<RoleRow, unknown>[]>(() => {
-    const base: ColumnDef<RoleRow, unknown>[] = [
+  const columns = useMemo<GridColumnDef<RoleRow>[]>(() => {
+    const base: GridColumnDef<RoleRow>[] = [
       {
         id: "role_name",
         accessorKey: "role_name",
@@ -192,7 +191,7 @@ export function UserRolesPanel({
             </Button>
           </div>
         ),
-      } as ColumnDef<RoleRow, unknown>,
+      } as GridColumnDef<RoleRow>,
     ];
   }, [t, locale, dateFormatter, canAssign, onRemove]);
 

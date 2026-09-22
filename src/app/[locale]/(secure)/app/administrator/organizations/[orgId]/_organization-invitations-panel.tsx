@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,7 +32,7 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useZodForm } from "@/lib/forms/use-zod-form";
 import { createInvitationSchema, type CreateInvitationInput } from "@/lib/validation/invitations";
-import { DataGrid } from "../../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
 
 /**
  * Invitations panel on the organization detail's Members tab (0008).
@@ -193,7 +192,7 @@ export function OrganizationInvitationsPanel({
     [dialogs, orgId, t],
   );
 
-  const columns = useMemo<ColumnDef<InvitationRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<InvitationRow>[]>(
     () => [
       {
         id: "email",
@@ -255,7 +254,7 @@ export function OrganizationInvitationsPanel({
                     </Button>
                   </div>
                 ) : null,
-            } as ColumnDef<InvitationRow, unknown>,
+            } as GridColumnDef<InvitationRow>,
           ]
         : []),
     ],

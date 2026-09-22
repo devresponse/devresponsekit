@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { DataGrid } from "../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { useGridState } from "../_components/grid/use-grid-state";
 
 /**
@@ -69,7 +68,7 @@ export function AdministratorOutboxGrid({ canManage }: { canManage: boolean }) {
   // send lands a new outbox row.
   const [gridEpoch, setGridEpoch] = useState(0);
 
-  const columns = useMemo<ColumnDef<OutboxRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<OutboxRow>[]>(
     () => [
       {
         id: "created_at",

@@ -3,12 +3,11 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 
 /** Role scopes — the allow-listed `scope` filter values. */
@@ -115,7 +114,7 @@ export function AdministratorRolesGrid({
     [t, locale, router, dialogs],
   );
 
-  const columns = useMemo<ColumnDef<RoleRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<RoleRow>[]>(
     () => [
       {
         id: "key",
@@ -219,7 +218,7 @@ export function AdministratorRolesGrid({
                   ) : null}
                 </div>
               ),
-            } as ColumnDef<RoleRow, unknown>,
+            } as GridColumnDef<RoleRow>,
           ]
         : []),
     ],

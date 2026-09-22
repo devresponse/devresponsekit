@@ -34,6 +34,24 @@ import {
 } from "./use-grid-state";
 
 /**
+ * The column shape every Administrator grid declares.
+ *
+ * This alias is the ONLY place the TanStack column type is named outside this
+ * file. That is deliberate: the library's generic signature is not stable
+ * across majors. v9 prepends a `TFeatures` parameter, so a written-out
+ * `ColumnDef<Row, unknown>` silently rebinds `TFeatures = Row, TData = unknown`
+ * and every `row.original` downstream collapses to `unknown`. Spelled out in
+ * each grid that is an 18-file diff for every such change, forever; behind this
+ * alias it is a one-line diff here.
+ *
+ * `TValue` is always `unknown` because these grids render cells from
+ * `row.original` rather than through a typed accessor. Consumers import this
+ * alongside {@link DataGrid} from this module, so a grid file needs no direct
+ * dependency on the table library at all.
+ */
+export type GridColumnDef<TItem> = ColumnDef<TItem, unknown>;
+
+/**
  * DataGrid
  *
  * The shared client-side grid used by every Administrator list view
@@ -52,7 +70,7 @@ export interface DataGridProps<TItem> {
   /** API endpoint; receives URL state appended as query string. */
   endpoint: string;
   /** TanStack column definitions. `header` renders verbatim, so it must already be translated. */
-  columns: ColumnDef<TItem, unknown>[];
+  columns: GridColumnDef<TItem>[];
   /** Hook options forwarded to {@link useGridState}. */
   options?: UseGridStateOptions;
   /**
@@ -120,12 +138,12 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
 
   const selection = props.selection;
-  const selectionColumn = useMemo<ColumnDef<TItem, unknown> | null>(() => {
+  const selectionColumn = useMemo<GridColumnDef<TItem> | null>(() => {
     if (!selection) return null;
     return buildSelectionColumn<TItem>(selection.state, selection.getRowId, items, t);
   }, [selection, items, t]);
 
-  const tableColumns = useMemo<ColumnDef<TItem, unknown>[]>(
+  const tableColumns = useMemo<GridColumnDef<TItem>[]>(
     () => (selectionColumn ? [selectionColumn, ...props.columns] : props.columns),
     [selectionColumn, props.columns],
   );
@@ -295,7 +313,7 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
  * jsx-a11y). `undefined` = column not sortable, attribute omitted.
  */
 function ariaSortFor<TItem>(
-  columnDef: ColumnDef<TItem, unknown>,
+  columnDef: GridColumnDef<TItem>,
   state: GridState,
 ): "ascending" | "descending" | "none" | undefined {
   const accessorKey =
@@ -320,7 +338,7 @@ function ariaSortFor<TItem>(
  * The selection column is always rendered raw.
  */
 function renderSortableHeader<TItem>(
-  columnDef: ColumnDef<TItem, unknown>,
+  columnDef: GridColumnDef<TItem>,
   getContext: () => HeaderContext<TItem, unknown>,
   state: GridState,
   onToggle: (field: string, next: ColumnSortDirection) => void,
@@ -364,7 +382,7 @@ function buildSelectionColumn<TItem>(
   getRowId: (item: TItem) => string,
   items: TItem[],
   t: ReturnType<typeof useTranslations>,
-): ColumnDef<TItem, unknown> {
+): GridColumnDef<TItem> {
   const pageIds = items.map(getRowId);
   const pageAllSelected =
     selection.mode === "all" ||

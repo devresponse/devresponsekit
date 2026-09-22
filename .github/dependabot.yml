@@ -76,10 +76,59 @@ updates:
     commit-message:
       prefix: deps
       prefix-development: deps-dev
-    # Declined majors (each is a real port, tracked separately — see the
-    # 2026-09-04 review): @tanstack/react-table v9 (187 type errors across 19
-    # files: useTable + tableFeatures registry, TFeatures generics, prototype
-    # methods; PR #378). Minor/patch bumps still arrive.
+    # @tanstack/react-table is HELD on the v8 line (declined 2026-09-04 after
+    # PR #378, re-measured 2026-09-21). Evidence, so the next person does not
+    # re-derive it:
+    #
+    #   * The headline "187 type errors" was a SYMPTOM COUNT, not a cost. v9
+    #     prepends a `TFeatures` generic, so a written-out `ColumnDef<Row,
+    #     unknown>` silently rebinds `TFeatures = Row, TData = unknown` and
+    #     every `row.original` downstream collapses. That single mistake was
+    #     echoed 168 times. Re-measured on today's tree it is 189 errors, and
+    #     it collapses in five mechanical steps: the column alias + import
+    #     rewrites (189 -> 46), porting data-grid.tsx (-> 11), a `RowData`
+    #     constraint (-> 3), pinning the hook generics (-> 1), and one option
+    #     rename (-> 0). A day or two of work, not a project.
+    #   * Most of that is now ALREADY DONE. PR #465 confined the column type to
+    #     `GridColumnDef` in the grid module, so the 18-file half of the port is
+    #     a one-line diff in that file. What remains is data-grid.tsx alone.
+    #   * The one genuine design decision is the feature registry: v9 requires
+    #     `tableFeatures({ ... })` and this grid needs exactly `rowSortingFeature`
+    #     (for the per-column `enableSorting` flag). Sorting, filtering and
+    #     pagination are all server-driven through URL state, so
+    #     getCoreRowModel / manualPagination / manualFiltering / pageCount all
+    #     become no-ops.
+    #   * THE REAL HAZARD IS NOT TYPES. v9's breaks are render-time and invisible
+    #     to `tsc`: row/cell/header accessors move to memoized PROTOTYPE methods
+    #     (a detached `h.getContext` reference throws — pinned by
+    #     tests/unit/admin-grid-no-detached-table-methods.test.ts),
+    #     `row.getVisibleCells()` is gone (`getAllCells` replaces it), and the
+    #     option key is `features` — the underscore spelling is silently ignored,
+    #     yielding a table with no sorting flags and no error. The component and
+    #     e2e suites that RENDER the grid are the only detector; typecheck is
+    #     evidence of nothing here.
+    #   * What it buys THIS codebase is close to nothing today. v9's headline is
+    #     fine-grained reactivity via an atom store, but the grid holds at most
+    #     one server-fetched page and re-renders on URL change anyway. Package
+    #     dist is bigger before tree-shaking (~97 kB vs ~54 kB gzipped; v9 sets
+    #     sideEffects:false, and the built-app delta is UNMEASURED). v9 is also
+    #     ESM-only and adds @tanstack/react-store as a runtime dependency.
+    #   * Cost of staying: drift, not exposure. 8.21.3 shipped 2025-04-14 and the
+    #     v8 line has had no release since, but there has never been a security
+    #     advisory for @tanstack/react-table or @tanstack/table-core, and its
+    #     peer range (react >=16.8) conflicts with nothing here.
+    #
+    # The hold is narrow on purpose. Only the MAJOR line is ignored, so 8.x
+    # minor/patch — and any SECURITY update, which `ignore` never suppresses —
+    # still arrive.
+    # REVISIT when any of these fire, and do the port then rather than on a
+    # calendar: (a) a React or Next major that v8 cannot follow; (b) any GHSA
+    # against @tanstack/react-table or @tanstack/table-core; (c) a product need
+    # for a CLIENT-side grid feature (client sorting/filtering/pagination,
+    # virtualization, column visibility or resizing) — v8 can still do these, but
+    # they are what makes v9's model worth its cost. Do NOT target
+    # @tanstack/react-table/legacy (`useLegacyTable`): it would shrink the diff
+    # but is deprecated on arrival.
     #
     # jsdom is HELD at 30.0.1 on a MINOR hold (not a decline) because 30.1.0
     # regressed focus emulation in a way that silently breaks every Radix popup

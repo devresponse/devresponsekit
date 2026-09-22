@@ -242,6 +242,22 @@ export default defineConfig({
         },
         // The pure impersonation-marker reader shared by both guards (review #28).
         "**/lib/impersonation.ts": { lines: 100, statements: 100, functions: 100, branches: 100 },
+        // The shared Administrator grid. Not a security module — it is here
+        // because it is the single render path behind all ~18 Administrator
+        // list views, so a regression in it is the widest UI blast radius in
+        // the app, and because it owns every TanStack call site: the table
+        // library's failure modes across majors are render-time, not
+        // type-time (detached prototype methods, a removed cell accessor, a
+        // silently-ignored option key), which makes the tests that RENDER it
+        // the only real detector. Pinned a few points below the measured
+        // actuals (74 lines / 72 statements / 55 functions / 76 branches).
+        // Raise as coverage improves; never lower.
+        "**/_components/grid/data-grid.tsx": {
+          lines: 70,
+          statements: 68,
+          functions: 52,
+          branches: 72,
+        },
       },
     },
   },

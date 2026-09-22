@@ -84,6 +84,33 @@ describe("DataGrid", () => {
     expect(screen.getByText(/2 rows/)).toBeInTheDocument();
   });
 
+  it("hands each header a usable context object", async () => {
+    // The grid renders headers through `flexRender(columnDef.header, ctx)`,
+    // where `ctx` comes from the header's own `getContext()`. This pins that
+    // the object actually reaching a header is the real, bound context rather
+    // than something merely shaped like one — a column that reads from it must
+    // render what it read.
+    //
+    // It does NOT fail on the pinned v8 if `getContext` is detached, because v8
+    // closes over the owning header; nothing observable can distinguish that.
+    // `tests/unit/admin-grid-no-detached-table-methods.test.ts` is what holds
+    // that line. The two together mean the contract is pinned from both ends:
+    // the context is usable, and it stays bound.
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [{ id: "u1", name: "Ada" }], total: 1 }),
+    });
+    const CONTEXT_COLUMNS: GridColumnDef<Row>[] = [
+      {
+        id: "name",
+        accessorKey: "name",
+        header: (ctx) => `col:${ctx.column.id}`,
+      },
+    ];
+    renderWithIntl(<DataGrid<Row> name="t" endpoint="/api/test" columns={CONTEXT_COLUMNS} />);
+    expect(await screen.findByText("col:name")).toBeInTheDocument();
+  });
+
   it("shows the error state with a retry button when the fetch fails", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
     renderWithIntl(<DataGrid<Row> name="t" endpoint="/api/test" columns={COLUMNS} />);

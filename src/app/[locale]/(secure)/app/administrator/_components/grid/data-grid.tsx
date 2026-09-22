@@ -266,7 +266,17 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
                         ? null
                         : renderSortableHeader(
                             h.column.columnDef,
-                            h.getContext,
+                            // Invoked ON the header rather than passed as a bare
+                            // reference: `getContext` is a method, and detaching
+                            // it drops `this`. It survives today only because v8
+                            // closes over the header when it builds each object
+                            // — an implementation detail, not a contract. v9
+                            // installs these as memoized PROTOTYPE methods that
+                            // read private state off `this`, so the detached
+                            // form throws during render while typecheck stays
+                            // green. The cell path below always invoked it
+                            // properly; this makes the two consistent.
+                            () => h.getContext(),
                             state,
                             onSortToggle,
                           )}

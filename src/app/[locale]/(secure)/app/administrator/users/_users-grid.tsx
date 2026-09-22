@@ -2,12 +2,11 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
-import { DataGrid } from "../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import type { BulkActionDescriptor } from "../_components/grid/data-grid-toolbar";
 import { useGridSelection } from "../_components/grid/use-grid-selection";
@@ -77,7 +76,7 @@ export function AdministratorUsersGrid({
     [intlLocale],
   );
 
-  const columns = useMemo<ColumnDef<UserRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<UserRow>[]>(
     () => [
       {
         id: "primary_email",

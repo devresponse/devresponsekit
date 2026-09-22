@@ -2,12 +2,11 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 
 /** Enterprise-app statuses — the allow-listed `status` filter values. */
@@ -93,7 +92,7 @@ export function AdministratorEnterpriseAppsGrid({
     [dialogs, t, tErr],
   );
 
-  const columns = useMemo<ColumnDef<EnterpriseAppRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<EnterpriseAppRow>[]>(
     () => [
       {
         id: "id",
@@ -168,7 +167,7 @@ export function AdministratorEnterpriseAppsGrid({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<EnterpriseAppRow, unknown>,
+            } as GridColumnDef<EnterpriseAppRow>,
           ]
         : []),
     ],

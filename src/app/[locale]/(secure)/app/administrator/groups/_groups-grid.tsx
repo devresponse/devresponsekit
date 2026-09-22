@@ -2,11 +2,10 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 
 /**
  * Client-side groups grid (ADR-0002). Mirrors the roles grid: the `key`
@@ -69,7 +68,7 @@ export function AdministratorGroupsGrid({
     [t, tErr, dialogs],
   );
 
-  const columns = useMemo<ColumnDef<GroupRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<GroupRow>[]>(
     () => [
       {
         id: "key",
@@ -130,7 +129,7 @@ export function AdministratorGroupsGrid({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<GroupRow, unknown>,
+            } as GridColumnDef<GroupRow>,
           ]
         : []),
     ],

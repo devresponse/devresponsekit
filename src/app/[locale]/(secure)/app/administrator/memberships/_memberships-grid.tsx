@@ -2,10 +2,9 @@
 
 import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 
 /** Membership statuses — the allow-listed `status` filter values. */
@@ -38,7 +37,7 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
     [intlLocale],
   );
 
-  const columns = useMemo<ColumnDef<MembershipRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<MembershipRow>[]>(
     () => [
       {
         id: "organization_slug",

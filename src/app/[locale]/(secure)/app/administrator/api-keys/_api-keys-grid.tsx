@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -15,7 +14,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 import { ApiKeyRevealDialog } from "@/components/api-keys/api-key-reveal";
 
@@ -123,7 +122,7 @@ export function AdministratorApiKeysGrid({
     [dialogs, t],
   );
 
-  const columns = useMemo<ColumnDef<ApiKeyRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<ApiKeyRow>[]>(
     () => [
       {
         id: "name",

@@ -2,9 +2,8 @@
 
 import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
 
 /**
  * Members tab for the role detail (docs/admin-manager.md §8.4 — Members).
@@ -34,7 +33,7 @@ export function RoleMembersGrid({ roleId }: { roleId: string }) {
     [intlLocale],
   );
 
-  const columns = useMemo<ColumnDef<MemberRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<MemberRow>[]>(
     () => [
       {
         id: "primary_email",

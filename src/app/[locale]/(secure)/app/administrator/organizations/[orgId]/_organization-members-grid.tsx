@@ -2,12 +2,11 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import type { ColumnDef } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
-import { DataGrid } from "../../_components/grid/data-grid";
+import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
 
 /**
  * Members tab for the organization detail (docs/admin-manager.md §8.2).
@@ -77,7 +76,7 @@ export function OrganizationMembersGrid({
     [t, tErr, orgId, dialogs],
   );
 
-  const columns = useMemo<ColumnDef<MemberRow, unknown>[]>(
+  const columns = useMemo<GridColumnDef<MemberRow>[]>(
     () => [
       {
         id: "user_display_name",
@@ -132,7 +131,7 @@ export function OrganizationMembersGrid({
                   </Button>
                 </div>
               ),
-            } as ColumnDef<MemberRow, unknown>,
+            } as GridColumnDef<MemberRow>,
           ]
         : []),
     ],

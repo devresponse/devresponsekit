@@ -2,8 +2,10 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ColumnDef } from "@tanstack/react-table";
-import { DataGrid } from "@/app/[locale]/(secure)/app/administrator/_components/grid/data-grid";
+import {
+  DataGrid,
+  type GridColumnDef,
+} from "@/app/[locale]/(secure)/app/administrator/_components/grid/data-grid";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
@@ -33,9 +35,7 @@ interface Row {
   name: string;
 }
 
-const COLUMNS: ColumnDef<Row, unknown>[] = [
-  { id: "name", accessorKey: "name", header: () => "Name" },
-];
+const COLUMNS: GridColumnDef<Row>[] = [{ id: "name", accessorKey: "name", header: () => "Name" }];
 
 const fetchMock = vi.fn();
 
@@ -143,7 +143,7 @@ describe("DataGrid sortable column headers (A11Y-4)", () => {
     status: string;
   }
 
-  const A11Y_COLUMNS: ColumnDef<A11yRow, unknown>[] = [
+  const A11Y_COLUMNS: GridColumnDef<A11yRow>[] = [
     // The shape EVERY production admin column uses.
     { id: "email", accessorKey: "email", header: () => "Email" },
     // TanStack also allows a bare string header.

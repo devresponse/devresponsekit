@@ -305,9 +305,14 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       requestId: guard.requestId,
       metadata: { targetBetterAuthUserId: target.betterAuthUserId },
     });
-    return adminErrorResponse("forbidden_while_impersonating", 403, request, {
-      requestId: guard.requestId,
-    });
+    return liveImpersonatorId
+      ? adminErrorResponse("forbidden_while_impersonating", 403, request, {
+          requestId: guard.requestId,
+        })
+      : adminErrorResponse("forbidden", 403, request, {
+          requestId: guard.requestId,
+          extra: { reason: "session_principal_mismatch" },
+        });
   }
 
   try {

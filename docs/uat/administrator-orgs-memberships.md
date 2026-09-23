@@ -10,7 +10,7 @@ order: 50
 
 User Acceptance Testing stories for the **tenancy** area of the Administrator console: the organizations list, the create-organization form, the organization detail (Members / Providers / Settings tabs), and the cross-org memberships search. Each story is runnable by a non-technical tester and doubles as living documentation of what the screen is, who may use it, and what it does.
 
-The area is anchored on a single load-bearing rule (ADR-0001): **the organization record itself is a platform-level, SUPERADMIN-only entity.** An Org Admin manages the *contents* of their one organization (members, provider bindings) but can never create, rename, re-status, set-default, or delete the organization record. Cross-tenant existence is never leaked: an out-of-scope organization returns **Not Found (404)**, not Forbidden.
+The area is anchored on a single load-bearing rule (ADR-0001): **the organization record itself is a platform-level, SUPERADMIN-only entity.** An Org Admin manages the *contents* of their one organization (members; viewing and removing provider bindings — creating one is Superadmin-only, F-04) but can never create, rename, re-status, set-default, or delete the organization record. Cross-tenant existence is never leaked: an out-of-scope organization returns **Not Found (404)**, not Forbidden.
 
 ## Key rules validated against code
 
@@ -197,9 +197,9 @@ i18n: in `uk`/`ja`, field labels, the slug help text, validation messages, and t
 ### UAT-ADMIN-ORG-DETAIL — Organization detail (Members / Providers / Authentication / Settings)
 
 - Route: `/app/administrator/organizations/[orgId]`  ·  Example URL: `/en/app/administrator/organizations/<uuid>`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/[orgId]/page.tsx:27`
-- Purpose: Per-organization admin surface. Header shows name, slug, status badge, and a "default" badge. Four tabs: **Members** (paginated memberships, add/remove, plus the **invitations** panel — invite by email + optional role, resend, revoke), **Providers** (provider bindings, bind/unbind), **Authentication** (the per-org sign-up policy — email verification, approval mode incl. invite-only, allowed methods, auto-approve domains, 0007), **Settings** (edit slug/name/status/default — Superadmin only).
+- Purpose: Per-organization admin surface. Header shows name, slug, status badge, and a "default" badge. Four tabs: **Members** (paginated memberships, add/remove, plus the **invitations** panel — invite by email + optional role, resend, revoke), **Providers** (provider bindings: list and unbind; binding is Superadmin-only via the API, F-04), **Authentication** (the per-org sign-up policy — email verification, approval mode incl. invite-only, allowed methods, auto-approve domains, 0007), **Settings** (edit slug/name/status/default — Superadmin only).
 - Guard / who can access: `admin.orgs.read`; the `orgId` must be a valid UUID (else 404); and `canAccessOrg` must pass — a foreign org returns `notFound()` (404, **not** 403) so its existence is not leaked (`page.tsx:38,54`). Invitations and the Authentication policy are editable when `canUpdate` (`admin.orgs.update`) is held; the Settings fields' write is still SUPERADMIN-only.
-- Access matrix: Visitor / Pending / Member / Limited Admin -> 404. Org Admin -> can view + manage Members/Invitations/Providers/Authentication for their own org; Settings fields are shown but a save returns 403; a foreign `orgId` returns 404. Superadmin -> full access to any org including Settings and the platform sign-up defaults.
+- Access matrix: Visitor / Pending / Member / Limited Admin -> 404. Org Admin -> can view + manage Members/Invitations/Authentication and view/unbind Providers for their own org (binding is 403, F-04); Settings fields are shown but a save returns 403; a foreign `orgId` returns 404. Superadmin -> full access to any org including Settings and the platform sign-up defaults.
 - Preconditions & test data: use an org UUID from the list. ORG A has members `user1..5@orga.local` plus cross-org `multi1..3@shared.local`. Member statuses: active / pending_approval / blocked / suspended (`members/route.ts:118`).
 
 User stories
@@ -380,7 +380,7 @@ Legend: `see` = screen renders with data; `act` = at least one write action succ
 
 - [x] Organizations list — happy (Superadmin all-rows, Org Admin scoped), negative (Member/Limited Admin 404), filter/sort, empty/loading/error, a11y + i18n.
 - [x] New organization — happy (Superadmin create), negative (Org Admin 404, duplicate slug 409, required-field, SUPERADMIN-only 403), a11y + i18n.
-- [x] Org detail — Members happy + remove; Providers bind/unbind; Settings edit (Superadmin) + save-403 (Org Admin); cross-tenant 404; a11y + i18n.
+- [x] Org detail — Members happy + remove; Providers unbind (Org Admin) + bind (Superadmin, API); Settings edit (Superadmin) + save-403 (Org Admin); cross-tenant 404; a11y + i18n.
 - [x] Memberships — happy (Superadmin cross-org, Org Admin scoped), negative (Member/Limited Admin 404), read-only, a11y + i18n.
 - [x] Every gated screen has a can-see persona and a cannot-see persona asserting 404-not-403.
 - [x] SUPERADMIN vs ORG ADMIN access matrix + coverage matrix included.

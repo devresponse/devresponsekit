@@ -238,7 +238,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     await auditEvent({
       eventType: "admin.organization.provider_bind_denied",
       outcome: "denied",
-      actorBetterAuthUserId: guard.betterAuthUserId,
+      // The human behind an impersonated session, as the F-02 refusals record.
+      actorBetterAuthUserId: guard.impersonatorId ?? guard.betterAuthUserId,
       organizationId: id,
       reason: "cross_org_reach_required",
       request,

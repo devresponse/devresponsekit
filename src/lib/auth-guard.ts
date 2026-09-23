@@ -8,6 +8,7 @@ import { withTrustedClientIp } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { isSessionPastAbsoluteLifetime } from "@/lib/session-lifetime";
 import { readImpersonatorId } from "@/lib/impersonation";
+import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 
 /**
@@ -55,6 +56,11 @@ async function readSession(requestHeaders: Headers) {
   if (
     !isSessionPastAbsoluteLifetime(session.session, getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS)
   ) {
+    // F-07: an impersonated session is recorded against the ambient headers —
+    // the carrier the RSC admin gate audits its denials with — so those rows
+    // name the human behind the session, not the borrowed identity. Inside the
+    // memo, so it runs once per request like the read itself.
+    noteSessionImpersonation(requestHeaders, session);
     return session;
   }
 

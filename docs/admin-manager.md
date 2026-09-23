@@ -880,6 +880,29 @@ impersonated user), `app_user_id`, `organization_id`, `target_application_id`,
 `provider`, `email`, `reason`, `request_id` (the §5.1 correlation id), the
 trusted-hop `ip_address` and `user_agent`, and a JSON `metadata` blob.
 
+**Impersonation attribution (F-07).** An impersonated session carries the
+borrowed identity, so every guard hands its route the **target** as
+`betterAuthUserId`. `auditEvent` corrects that itself instead of relying on each
+call site: when the request's session is an impersonation, a row whose actor is
+the borrowed identity is written with `actor_better_auth_user_id` = the
+**impersonating admin** and `metadata.impersonatedBetterAuthUserId` = the
+borrowed identity, the shape the impersonation refusals (§8.1, §19) have always
+used. This covers the admin console, `/api/v1`, the account and preference
+routes, and the RSC denial rows alike. The session read records the
+impersonation against the request (`src/lib/impersonation-attribution.server.ts`:
+the caller resolver behind every guard, and `getCurrentSession` for the RSC
+gate), so a row is attributed whenever it is written with the request that
+resolved the session. A row naming some other principal, or none, is left as
+written. The same request record keys the per-actor **rate-limit buckets** on
+the human. The Better Auth user-id "who" columns a route writes directly also
+store the human (`auditEvent` cannot correct those, so each route passes it):
+`deactivated_by` (single-row and bulk soft delete), an invitation's
+`revoked_by`, and a sign-up policy's `updated_by` (org override and platform
+default). The admin test email names the human as its sender too. So the audit explorer, the CSV export and `GET /api/v1/audit-events` show
+the admin as the actor, and filtering the explorer by an admin's id finds what
+they did while impersonating as well; the borrowed identity is in the row's
+metadata (shown in the explorer's detail pane).
+
 **Metadata contract:** callers MUST NOT pass tokens, refresh tokens, plaintext
 keys, or raw passwords. Internal exception detail may go in `metadata` (e.g.
 `message`) but never secrets.
@@ -1090,6 +1113,14 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   call rate via the mutation bucket so a missing confirm cannot loop.
 - Both success and failure are audited, with the **original** admin as the actor
   (`admin.user.impersonation_started`).
+- **What the admin does while impersonating is audited against the admin
+  (F-07).** Every audit row the impersonated session writes (bans, password
+  resets, approvals, role changes, profile edits, v1 calls, denied probes) names
+  the impersonating admin as the actor, with the borrowed identity in
+  `metadata.impersonatedBetterAuthUserId`. The rate-limit buckets are charged
+  to the admin too, so impersonating several users does not give the admin
+  several budgets, and the "who" columns (`deactivated_by`, an invitation's
+  `revoked_by`, a sign-up policy's `updated_by`) name the admin. See §12.
 
 `DELETE /api/administrator/users/[id]/impersonate` ends impersonation and
 restores the original actor's cookies. **The stop endpoint is deliberately NOT

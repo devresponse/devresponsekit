@@ -240,6 +240,13 @@ export async function consumeInvitation(input: {
   appUser: { id: string; primaryEmail: string; status: string };
   actorBetterAuthUserId: string | null;
   provider?: string;
+  /**
+   * The accepting request, when there is one (the explicit accept endpoint;
+   * sign-up provisioning has none). Stamps the audit row with the request's
+   * IP, user agent and correlation id, and lets `auditEvent` attribute an
+   * acceptance made from an impersonated session to the human (F-07).
+   */
+  request?: { headers: Headers };
 }): Promise<ConsumeInvitationResult> {
   const { invitation, appUser } = input;
 
@@ -351,6 +358,7 @@ export async function consumeInvitation(input: {
     organizationId: invitation.organizationId,
     provider: input.provider ?? null,
     email: invitation.email,
+    request: input.request,
     metadata: {
       invitationId: invitation.id,
       roleGranted,

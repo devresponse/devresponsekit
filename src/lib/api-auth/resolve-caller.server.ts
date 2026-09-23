@@ -4,6 +4,7 @@ import { getUserAccessContext, type UserAccessContext } from "@/lib/auth-status"
 import { getServerEnv } from "@/lib/env";
 import { getClientIp } from "@/lib/client-ip";
 import { readImpersonatorId } from "@/lib/impersonation";
+import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { getSessionAccessContext } from "@/lib/session-access.server";
 import { looksLikeApiKey } from "@/lib/api-auth/api-key";
 import { touchApiKeyUsage, verifyApiKey } from "@/lib/api-auth/api-keys.server";
@@ -252,6 +253,11 @@ export async function resolveCallerDetailed(
   // to the impersonator's tenancy — a bearer credential is never an
   // impersonation, which is why only this branch goes through the helper.
   const access = await getSessionAccessContext(session);
+  // F-07: record the impersonation against THIS request's headers so every
+  // audit row the route writes with the same `request` names the human behind
+  // the session, and per-actor rate limits charge the human's bucket. Only the
+  // cookie branch can be an impersonation, so only it records one.
+  noteSessionImpersonation(request, session);
   return {
     ok: true,
     caller: {

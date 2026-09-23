@@ -23,6 +23,7 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { humanActorId } from "@/lib/impersonation-attribution.server";
 import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
@@ -289,7 +290,9 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
           status: "deactivated",
           status_reason: reason,
           deactivated_at: sql`now()`,
-          deactivated_by: guard.betterAuthUserId,
+          // F-07: the human who did it — the impersonating admin, not the
+          // borrowed identity, when the session is an impersonation.
+          deactivated_by: humanActorId(guard),
           deactivated_reason: reason,
           updated_at: sql`now()`,
         })

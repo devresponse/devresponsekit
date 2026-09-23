@@ -286,6 +286,34 @@ describe("enforceSharedRateLimit", () => {
     // The key the shared bucket saw is the composed scope:actor key.
     expect(consumeCalls()[0]!.parameters).toContain("invitations.accept:ba-1");
   });
+
+  it("charges the human behind an impersonated request, not the borrowed identity (F-07)", async () => {
+    // The accept route passes `session.user.id` (the BORROWED identity) and
+    // its `request`, on which the session read recorded the impersonation.
+    const { noteSessionImpersonation } = await import("@/lib/impersonation-attribution.server");
+    const request = { headers: new Headers() };
+    noteSessionImpersonation(request, {
+      user: { id: "ba-borrowed" },
+      session: { id: "s-imp", impersonatedBy: "ba-human" },
+    });
+    answer([{ tokens_after: 2, prior_tokens: 3, prior_updated_at: new Date(0) }]);
+
+    expect(
+      await mod.enforceSharedRateLimit("invitations.accept", "ba-borrowed", OPTS, request),
+    ).toBeNull();
+    const params = consumeCalls()[0]!.parameters;
+    expect(params).toContain("invitations.accept:ba-human");
+    expect(params).not.toContain("invitations.accept:ba-borrowed");
+  });
+
+  it("leaves the key alone on an ordinary request", async () => {
+    answer([{ tokens_after: 2, prior_tokens: 3, prior_updated_at: new Date(0) }]);
+    const request = { headers: new Headers() };
+    expect(
+      await mod.enforceSharedRateLimit("invitations.accept", "ba-1", OPTS, request),
+    ).toBeNull();
+    expect(consumeCalls()[0]!.parameters).toContain("invitations.accept:ba-1");
+  });
 });
 
 /**

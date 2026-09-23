@@ -395,6 +395,37 @@ describe("POST /api/administrator/email/test", () => {
     );
   });
 
+  it("names the human behind an impersonated session as the sender, not the borrowed identity (F-07)", async () => {
+    // The email's `sentBy` must agree with the audit row, which `auditEvent`
+    // attributes to the impersonating admin.
+    sessionGetter.mockResolvedValue({
+      user: { id: "ba-borrowed" },
+      session: { id: "s-imp", impersonatedBy: "ba-human" },
+    });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.manage"]));
+    sendMock.mockResolvedValue({ outboxId: "o-9", status: "logged" });
+    const res = await testPOST(
+      makeReq("/api/administrator/email/test", { method: "POST", body: { to: "t@x.com" } }),
+    );
+    expect(res.status).toBe(200);
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: expect.objectContaining({ sentBy: "ba-human" }),
+      }),
+    );
+  });
+
+  it("names the admin as the sender on their own session", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.manage"]));
+    sendMock.mockResolvedValue({ outboxId: "o-10", status: "logged" });
+    await testPOST(
+      makeReq("/api/administrator/email/test", { method: "POST", body: { to: "t@x.com" } }),
+    );
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({ variables: expect.objectContaining({ sentBy: "ba-1" }) }),
+    );
+  });
+
   it("audits delivery failure as error but still returns the outbox row", async () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.email.manage"]));
     sendMock.mockResolvedValue({ outboxId: "o-8", status: "failed" });

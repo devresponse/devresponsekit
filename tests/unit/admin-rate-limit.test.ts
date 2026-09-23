@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  __rateLimitBucketKeysForTests,
   __resetRateLimitForTests,
   consumeToken,
   enforceRateLimit,
   rateLimitKey,
 } from "@/lib/admin/rate-limit.server";
+import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 
 // `enforceRateLimit` lazy-imports `auditEvent` on the deny path; intercept it.
 const auditSpy = vi.hoisted(() => vi.fn((_input: unknown) => Promise.resolve()));
@@ -136,6 +138,64 @@ describe("admin rate limiter", () => {
         actorBetterAuthUserId: null,
         metadata: expect.objectContaining({ actor: "ip:1.2.3.4" }),
       });
+    });
+  });
+
+  /**
+   * F-07 — per-actor buckets are charged to the HUMAN behind an impersonated
+   * session. Every caller passes `guard.betterAuthUserId`, which on such a
+   * request is the borrowed identity: without this an admin got a fresh budget
+   * per user they impersonated, and spent that user's own budget doing it.
+   */
+  describe("impersonated requests (F-07)", () => {
+    function impersonatedRequest(): { headers: Headers } {
+      const request = { headers: new Headers() };
+      noteSessionImpersonation(request, {
+        user: { id: "ba-borrowed" },
+        session: { impersonatedBy: "ba-human" },
+      });
+      return request;
+    }
+
+    it("keys the bucket on the impersonating admin, not the borrowed identity", () => {
+      enforceRateLimit("admin.users.ban", "ba-borrowed", undefined, impersonatedRequest(), "r", 0);
+      expect(__rateLimitBucketKeysForTests()).toEqual(["admin.users.ban:ba-human"]);
+    });
+
+    it("shares ONE budget across every identity the admin borrows", () => {
+      const opts = { capacity: 1, refillPerSec: 0.001 };
+      const asBob = { headers: new Headers() };
+      noteSessionImpersonation(asBob, {
+        user: { id: "ba-bob" },
+        session: { impersonatedBy: "ba-human" },
+      });
+      const asCarol = { headers: new Headers() };
+      noteSessionImpersonation(asCarol, {
+        user: { id: "ba-carol" },
+        session: { impersonatedBy: "ba-human" },
+      });
+      expect(enforceRateLimit("scope", "ba-bob", opts, asBob, "r1", 0)).toBeNull();
+      // A second borrowed identity is NOT a fresh budget.
+      expect(enforceRateLimit("scope", "ba-carol", opts, asCarol, "r2", 0)?.status).toBe(429);
+      // …and the borrowed users' own budgets were never touched.
+      expect(enforceRateLimit("scope", "ba-bob", opts, undefined, undefined, 0)).toBeNull();
+    });
+
+    it("audits the denial against the admin", async () => {
+      const opts = { capacity: 1, refillPerSec: 1 };
+      const request = impersonatedRequest();
+      enforceRateLimit("scope", "ba-borrowed", opts, request, "r", 0); // allow
+      enforceRateLimit("scope", "ba-borrowed", opts, request, "r", 0); // deny → audit
+      await vi.waitFor(() => expect(auditSpy).toHaveBeenCalledTimes(1));
+      expect(auditSpy.mock.calls[0]![0]).toMatchObject({
+        actorBetterAuthUserId: "ba-human",
+        metadata: expect.objectContaining({ actor: "ba-human" }),
+      });
+    });
+
+    it("leaves an ordinary request's bucket on the actor it was given", () => {
+      enforceRateLimit("scope", "ba-self", undefined, { headers: new Headers() }, "r", 0);
+      expect(__rateLimitBucketKeysForTests()).toEqual(["scope:ba-self"]);
     });
   });
 });

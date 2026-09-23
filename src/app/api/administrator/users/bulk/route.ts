@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
       target,
       {
         betterAuthUserId: guard.betterAuthUserId,
+        impersonatorId: guard.impersonatorId,
         request,
         scope,
         access: guard.access,

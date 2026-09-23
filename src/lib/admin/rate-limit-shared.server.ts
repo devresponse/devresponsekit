@@ -10,6 +10,7 @@ import {
   type RateLimitOptions,
   type RateLimitResult,
 } from "@/lib/admin/rate-limit.server";
+import { humanActorFor } from "@/lib/impersonation-attribution.server";
 import { logger } from "@/lib/observability/logger.server";
 import { rateLimitSharedFallbacksTotal } from "@/lib/observability/metrics.server";
 
@@ -278,7 +279,9 @@ export async function enforceSharedRateLimit(
   requestId?: string,
   nowMs?: number,
 ): Promise<NextResponse | null> {
-  const result = await consumeSharedToken(rateLimitKey(scope, actorId), options, nowMs);
+  // F-07: charge the human behind an impersonated session, as `enforceRateLimit` does.
+  const bucketActor = humanActorFor(actorId, request);
+  const result = await consumeSharedToken(rateLimitKey(scope, bucketActor), options, nowMs);
   if (result.ok) return null;
-  return rateLimitDeniedResponse(scope, actorId, result, request, requestId, nowMs);
+  return rateLimitDeniedResponse(scope, bucketActor, result, request, requestId, nowMs);
 }

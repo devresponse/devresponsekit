@@ -18,6 +18,7 @@ import {
 } from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse } from "@/lib/api-auth/problem";
+import { humanActorId } from "@/lib/impersonation-attribution.server";
 
 /**
  * Authorization guard for the versioned REST surface (`/api/v1`). Mirrors
@@ -139,6 +140,10 @@ function unauthenticatedResponse(
  * the credential id (api_key id / jwt jti / client id) when bearer, else
  * the principal — so one noisy key cannot exhaust the principal's whole
  * budget (design §10.2). Returns a problem+json 429 on deny, else null.
+ *
+ * F-07: a cookie caller on an impersonated session is charged to the HUMAN
+ * behind it, not the borrowed identity — the same rule `enforceRateLimit`
+ * applies to the first-party surfaces.
  */
 export function enforceApiRateLimit(
   scope: string,
@@ -146,7 +151,7 @@ export function enforceApiRateLimit(
   request: NextRequest,
   options: RateLimitOptions = DEFAULT_ADMIN_MUTATION_LIMIT,
 ): NextResponse | null {
-  const actorId = grant.caller.credentialId ?? grant.caller.betterAuthUserId;
+  const actorId = grant.caller.credentialId ?? humanActorId(grant.caller);
   const result = consumeToken(rateLimitKey(scope, actorId), options);
   if (result.ok) return null;
   return problemResponse("rate_limited", 429, request, {

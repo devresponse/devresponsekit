@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getCurrentSession } from "@/lib/auth-guard";
+import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { decideSecureAccess } from "@/lib/auth-status";
 import { getSessionAccessContext } from "@/lib/session-access.server";
 import { loadApplicationsMenu } from "@/lib/navigation.server";
@@ -31,6 +32,9 @@ export async function GET(request: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
+  // F-07: read directly, not through a guard, so record an impersonation for
+  // `auditEvent` here — the denial row below then names the human behind it.
+  noteSessionImpersonation(request, session);
 
   const queryRaw = Object.fromEntries(request.nextUrl.searchParams.entries());
   const queryParsed = querySchema.safeParse(queryRaw);

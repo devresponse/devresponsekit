@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AuditServerModule from "@/lib/audit.server";
+import type * as AttributionModule from "@/lib/impersonation-attribution.server";
 
 /**
  * Unit tests for `audit.server.ts` (§29.6.13).
@@ -29,6 +30,7 @@ vi.mock("@/lib/observability/logger.server", () => ({
 }));
 
 let auditEvent: typeof AuditServerModule.auditEvent;
+let noteSessionImpersonation: typeof AttributionModule.noteSessionImpersonation;
 
 beforeEach(async () => {
   insertExecute.mockClear();
@@ -36,6 +38,8 @@ beforeEach(async () => {
   logServerError.mockReset();
   vi.stubEnv("TRUSTED_PROXY_COUNT", "1"); // one proxy in front → rightmost XFF is real
   ({ auditEvent } = await import("@/lib/audit.server"));
+  // Imported after the same reset so it is the registry instance audit.server reads.
+  ({ noteSessionImpersonation } = await import("@/lib/impersonation-attribution.server"));
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -156,5 +160,84 @@ describe("auditEvent", () => {
     // semantics for an audit naming a row the same transaction deletes, and the
     // reason a `denied`/`error` audit must never be handed a transaction.
     expect(insertExecute).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-07 — an impersonated session's rows name the HUMAN. Every guard hands
+ * routes the BORROWED identity as `betterAuthUserId`, and a hundred call sites
+ * audit exactly that; `auditEvent` re-attributes from what the request's
+ * session read recorded (`noteSessionImpersonation`, called by the caller
+ * resolver and `getCurrentSession`), so docs/admin-manager.md §12 — "the actor
+ * is the original admin, never the impersonated user" — holds for every row.
+ */
+describe("auditEvent — impersonation attribution (F-07)", () => {
+  function impersonatedRequest(): { headers: Headers } {
+    const request = { headers: new Headers() };
+    noteSessionImpersonation(request, {
+      user: { id: "ba-borrowed" },
+      session: { impersonatedBy: "ba-human" },
+    });
+    return request;
+  }
+
+  it("writes the impersonating admin as the actor and the borrowed identity into metadata", async () => {
+    await auditEvent({
+      eventType: "admin.user.banned",
+      outcome: "success",
+      actorBetterAuthUserId: "ba-borrowed",
+      appUserId: "u-victim",
+      request: impersonatedRequest(),
+      metadata: { expiresInSeconds: null },
+    });
+    const row = valuesArg.mock.calls[0]![0];
+    expect(row.actor_better_auth_user_id).toBe("ba-human");
+    expect(row.app_user_id).toBe("u-victim");
+    expect(JSON.parse(row.metadata as string)).toEqual({
+      expiresInSeconds: null,
+      impersonatedBetterAuthUserId: "ba-borrowed",
+    });
+  });
+
+  it("mirrors the attributed metadata to the error stream too", async () => {
+    await auditEvent({
+      eventType: "admin.user.ban_failed",
+      outcome: "error",
+      actorBetterAuthUserId: "ba-borrowed",
+      request: impersonatedRequest(),
+      metadata: { message: "boom" },
+    });
+    expect(logServerError).toHaveBeenCalledWith(
+      "audit.admin.user.ban_failed",
+      expect.objectContaining({
+        metadata: { message: "boom", impersonatedBetterAuthUserId: "ba-borrowed" },
+      }),
+    );
+    expect(valuesArg.mock.calls[0]![0].actor_better_auth_user_id).toBe("ba-human");
+  });
+
+  it("leaves a row on an ordinary request exactly as the caller wrote it", async () => {
+    await auditEvent({
+      eventType: "admin.user.banned",
+      outcome: "success",
+      actorBetterAuthUserId: "ba-borrowed",
+      request: { headers: new Headers() },
+      metadata: { expiresInSeconds: null },
+    });
+    const row = valuesArg.mock.calls[0]![0];
+    expect(row.actor_better_auth_user_id).toBe("ba-borrowed");
+    expect(row.metadata).toBe(JSON.stringify({ expiresInSeconds: null }));
+  });
+
+  it("leaves a row naming a different principal untouched, even on an impersonated request", async () => {
+    await auditEvent({
+      eventType: "system.job",
+      outcome: "success",
+      actorBetterAuthUserId: "ba-system",
+      request: impersonatedRequest(),
+    });
+    const row = valuesArg.mock.calls[0]![0];
+    expect(row.actor_better_auth_user_id).toBe("ba-system");
+    expect(row.metadata).toBe("{}");
   });
 });

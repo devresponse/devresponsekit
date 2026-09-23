@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import type { AppDatabase } from "@/db/schema/app-schema";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
+import { attributeAuditActor } from "@/lib/impersonation-attribution.server";
 import { logServerError } from "@/lib/observability/logger.server";
 
 /**
@@ -22,6 +23,12 @@ export type AuditOutcome = "success" | "denied" | "error" | "failure";
 export interface AuditEventInput {
   eventType: string;
   outcome: AuditOutcome;
+  /**
+   * The principal the caller believes acted — usually `guard.betterAuthUserId`.
+   * On an impersonated request this is the BORROWED identity, and the row is
+   * re-attributed to the human behind the session (F-07); see
+   * {@link auditEvent}.
+   */
   actorBetterAuthUserId?: string | null;
   appUserId?: string | null;
   organizationId?: string | null;
@@ -83,6 +90,14 @@ export interface AuditEventInput {
  *     the caller — log them but never include secrets in the metadata.
  *   - `metadata` is serialized as JSON. Callers MUST NOT pass tokens,
  *     refresh tokens, or raw passwords.
+ *   - Impersonation (F-07): on a request whose session is an impersonation,
+ *     a row naming the borrowed identity (or already the human) is written
+ *     with `actor_better_auth_user_id` = the IMPERSONATING admin and
+ *     `metadata.impersonatedBetterAuthUserId` = the borrowed identity, so the
+ *     audit trail names who actually acted (docs/admin-manager.md §12). The
+ *     request's session read records the impersonation
+ *     (`impersonation-attribution.server.ts`); this reads it, so a row is
+ *     attributed only when the caller passes `request`.
  *   - `input.executor` (DB-3) writes the row inside the caller's transaction,
  *     which also means a ROLLBACK discards it without raising anything — the
  *     one suppression path this function has. DB-4: that is mandatory for an
@@ -98,6 +113,12 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
   const ipAddress = reqHeaders ? getClientIp(reqHeaders) : null;
   const userAgent = reqHeaders?.get("user-agent") ?? null;
   const requestId = input.requestId ?? (input.request ? getOrCreateRequestId(input.request) : null);
+  // F-07: a row written by an impersonated session names the HUMAN, with the
+  // borrowed identity in `metadata.impersonatedBetterAuthUserId`. Decided here,
+  // once, from what the request's session read recorded — not by each of the
+  // hundred call sites that pass `guard.betterAuthUserId`, which on an
+  // impersonated request is the target.
+  const { actorBetterAuthUserId, metadata } = attributeAuditActor(input);
 
   // OBSERVABILITY-2: mirror unexpected failures to the structured stdout
   // logger so a no-Sentry deployment (the default) still has a correlated
@@ -113,7 +134,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
       organizationId: input.organizationId ?? undefined,
       appUserId: input.appUserId ?? undefined,
       reason: input.reason ?? undefined,
-      metadata: input.metadata,
+      metadata,
     });
   }
 
@@ -122,7 +143,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
     .values({
       event_type: input.eventType,
       outcome: input.outcome,
-      actor_better_auth_user_id: input.actorBetterAuthUserId ?? null,
+      actor_better_auth_user_id: actorBetterAuthUserId,
       app_user_id: input.appUserId ?? null,
       organization_id: input.organizationId ?? null,
       target_application_id: input.targetApplicationId ?? null,
@@ -132,7 +153,7 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
       user_agent: userAgent,
       reason: input.reason ?? null,
       request_id: requestId,
-      metadata: JSON.stringify(input.metadata ?? {}),
+      metadata: JSON.stringify(metadata ?? {}),
     })
     .execute();
 }

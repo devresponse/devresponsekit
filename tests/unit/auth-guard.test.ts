@@ -151,6 +151,30 @@ describe("getCurrentSession - per-request memoization (review #75)", () => {
     expect(mod.getImpersonatorId(await mod.getCurrentSession())).toBe("admin-9");
     expect(getSessionMock).toHaveBeenCalledTimes(1);
   });
+
+  it("records an impersonated session against the ambient headers for audit attribution (F-07)", async () => {
+    // The RSC admin gate audits its denials with `{ headers: await headers() }`,
+    // so the ambient store is the carrier `auditEvent` must find the human on.
+    const { readRequestImpersonation } = await import("@/lib/impersonation-attribution.server");
+    getSessionMock.mockResolvedValue({
+      user: { id: "target" },
+      session: { id: "s", impersonatedBy: "admin-9" },
+    });
+    ambient.headers = new Headers({ cookie: "ba.session=x" });
+    await mod.getCurrentSession();
+    expect(readRequestImpersonation({ headers: ambient.headers })).toEqual({
+      impersonatedBetterAuthUserId: "target",
+      impersonatorBetterAuthUserId: "admin-9",
+    });
+  });
+
+  it("records nothing for an ordinary session (F-07)", async () => {
+    const { readRequestImpersonation } = await import("@/lib/impersonation-attribution.server");
+    getSessionMock.mockResolvedValue({ user: { id: "ba-1" }, session: { id: "s" } });
+    ambient.headers = new Headers({ cookie: "ba.session=x" });
+    await mod.getCurrentSession();
+    expect(readRequestImpersonation(ambient.headers)).toBeNull();
+  });
 });
 
 /**

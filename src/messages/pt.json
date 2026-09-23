@@ -672,7 +672,8 @@
       "originNotAllowed": "O anfitrião de origem não está na lista permitida para redirecionamentos de SSO.",
       "memberExists": "Este endereço já pertence a um membro ativo.",
       "invitationExists": "Já existe um convite pendente para este endereço.",
-      "lastSuperadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la."
+      "lastSuperadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la.",
+      "organizationNotActive": "Esta organização não está ativa. Reative-a antes de convidar alguém."
     },
     "roles": {
       "title": "Funções",
@@ -1313,7 +1314,8 @@
     "not_provisioned": "Sua conta ainda não está totalmente configurada. Contate um administrador.",
     "insufficient_scope": "Esta credencial não está autorizada para essa ação.",
     "forbidden_while_impersonating": "Esta ação não está disponível enquanto você personifica outro usuário.",
-    "last_superadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la."
+    "last_superadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la.",
+    "organization_not_active": "Esta organização não está ativa. Reative-a primeiro."
   },
   "account": {
     "appTitle": "Conta",

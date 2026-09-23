@@ -82,6 +82,13 @@ export function OrganizationSettingsForm({
         return;
       }
       if (res.status === 409) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        // F-09 + REVOKE-2: moving the org away from `active` would suspend the
+        // platform's last superuser grant. Not a slug problem, so say so.
+        if (body?.error === "last_superadmin") {
+          form.setError("root", { type: "server", message: tErr("lastSuperadmin") });
+          return;
+        }
         form.setError("slug", { type: "server", message: tErr("slugTaken") });
         return;
       }

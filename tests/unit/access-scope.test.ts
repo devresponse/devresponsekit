@@ -329,6 +329,18 @@ describe("stripsLastGlobalSuperuser (REVOKE-2)", () => {
   it("an empty removal never strips anything", () => {
     expect(stripsLastGlobalSuperuser([g1], {})).toBe(false);
   });
+
+  it("F-09: an ORGANIZATION leaving `active` kills every grant held there, whoever holds it", () => {
+    // Organization status gates superuser authority now, so suspending the org
+    // that holds the grants is a removal in its own right — by default the
+    // seeded default org, which holds the only one.
+    const sameOrg: SuperuserGrant = { appUserId: "u3", organizationId: "org-a", roleId: "r-x" };
+    expect(stripsLastGlobalSuperuser([g1, sameOrg], { organizationIds: ["org-a"] })).toBe(true);
+    // A grant in ANOTHER org survives, so the suspension may proceed.
+    expect(stripsLastGlobalSuperuser([g1, g2], { organizationIds: ["org-a"] })).toBe(false);
+    // Suspending an org that holds no grant strips nothing.
+    expect(stripsLastGlobalSuperuser([g1], { organizationIds: ["org-z"] })).toBe(false);
+  });
 });
 
 describe("activeGlobalSuperuserGrants / wouldStripLastGlobalSuperuser (REVOKE-2)", () => {

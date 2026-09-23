@@ -14,16 +14,24 @@ import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
  */
 const accessGetter = vi.fn();
 const auditMock = vi.fn();
-const globalSuperuserMock = vi.fn();
+const superuserGrantMock = vi.fn();
 
 vi.mock("@/lib/auth-status", () => ({
   getUserAccessContext: (...a: unknown[]) => accessGetter(...a),
 }));
-// `isOrgBound` / `isSuperadmin` run for REAL — they are the rule under test.
-// Only the DB-backed rank lookup is stubbed.
+// `hasCrossOrgReach` / `isSuperadmin` run for REAL — they are the rule under
+// test. Only the DB-backed rank lookup is stubbed: `userHoldsSuperuserGrant`,
+// the RANK predicate that still counts a grant asleep in a suspended org
+// (F-09). The AUTHORITY predicate is poisoned so a regression back to it shows.
 vi.mock("@/lib/admin/access-scope.server", async () => {
   const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
-  return { ...actual, userIsGlobalSuperuser: (...a: unknown[]) => globalSuperuserMock(...a) };
+  return {
+    ...actual,
+    userHoldsSuperuserGrant: (...a: unknown[]) => superuserGrantMock(...a),
+    userIsGlobalSuperuser: () => {
+      throw new Error("rank must be read with userHoldsSuperuserGrant, not userIsGlobalSuperuser");
+    },
+  };
 });
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...a: unknown[]) => auditMock(...a),
@@ -57,8 +65,8 @@ const target = {
 beforeEach(async () => {
   accessGetter.mockReset();
   auditMock.mockReset();
-  globalSuperuserMock.mockReset();
-  globalSuperuserMock.mockResolvedValue(false);
+  superuserGrantMock.mockReset();
+  superuserGrantMock.mockResolvedValue(false);
   ({ targetOutranksActor, refuseOutrankingTarget } =
     await import("@/lib/admin/user-target.server"));
 });
@@ -129,14 +137,14 @@ describe("targetOutranksActor", () => {
    * platform superuser who happens to be a member of its bound org.
    */
   it("an ORG-BOUND actor may NOT act on a GLOBAL SUPERUSER target, whatever its own set", async () => {
-    globalSuperuserMock.mockResolvedValue(true);
+    superuserGrantMock.mockResolvedValue(true);
     const actor = {
       permissions: ["superuser", "admin.users.setPassword", "admin.users.ban"],
       organizationId: ORG,
       orgBound: true,
     };
     await expect(targetOutranksActor(actor, target)).resolves.toBe(true);
-    expect(globalSuperuserMock).toHaveBeenCalledWith("u-target");
+    expect(superuserGrantMock).toHaveBeenCalledWith("u-target");
     // Short-circuits before the subset comparison — the target context is
     // never even resolved.
     expect(accessGetter).not.toHaveBeenCalled();
@@ -145,7 +153,7 @@ describe("targetOutranksActor", () => {
   it("an ORG-BOUND actor still falls through to the subset test for an ORDINARY target", async () => {
     // Additive only: the rank rule adds a refusal, it never replaces the
     // stricter subset comparison for a bound NON-superuser actor.
-    globalSuperuserMock.mockResolvedValue(false);
+    superuserGrantMock.mockResolvedValue(false);
     accessGetter.mockResolvedValue(targetCtx(["shell.view", "admin.roles.update"]));
     const actor = {
       permissions: ["shell.view", "admin.users.ban"],
@@ -159,7 +167,36 @@ describe("targetOutranksActor", () => {
   it("an UNBOUND superadmin pays no rank round-trip (cookie sessions unchanged)", async () => {
     const actor = { permissions: ["superuser"], organizationId: ORG };
     await expect(targetOutranksActor(actor, target)).resolves.toBe(false);
-    expect(globalSuperuserMock).not.toHaveBeenCalled();
+    expect(superuserGrantMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * F-09. Organization status now gates superuser AUTHORITY, so a target whose
+   * only `superuser` grant sits in a SUSPENDED tenant resolves — in the actor's
+   * org — to a plain member: the subset test below sees nothing to object to.
+   * The grant wakes when the tenant is reactivated, though, so a delegated
+   * admin who could set that user's password now would hold a platform
+   * superadmin login later. Rank reads the grant whatever the org's status.
+   */
+  it("F-09: a NON-superadmin actor may not act on a target whose superuser grant is asleep in a suspended org", async () => {
+    superuserGrantMock.mockResolvedValue(true);
+    // What the target resolves to in the actor's org while its grant sleeps.
+    accessGetter.mockResolvedValue(targetCtx(["shell.view"]));
+    const actor = {
+      permissions: ["shell.view", "admin.users.setPassword", "admin.users.ban"],
+      organizationId: ORG,
+    };
+    await expect(targetOutranksActor(actor, target)).resolves.toBe(true);
+    expect(superuserGrantMock).toHaveBeenCalledWith("u-target");
+  });
+
+  it("F-09: without such a grant the non-superadmin actor still gets the ordinary subset test", async () => {
+    superuserGrantMock.mockResolvedValue(false);
+    accessGetter.mockResolvedValue(targetCtx(["shell.view"]));
+    const actor = { permissions: ["shell.view", "admin.users.ban"], organizationId: ORG };
+    await expect(targetOutranksActor(actor, target)).resolves.toBe(false);
+    expect(superuserGrantMock).toHaveBeenCalledWith("u-target");
+    expect(accessGetter).toHaveBeenCalledWith("ba-target", { organizationId: ORG });
   });
 });
 

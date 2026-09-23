@@ -29,6 +29,7 @@ const requireAdminMock = vi.fn();
 const accessGetter = vi.fn();
 const canAccessOrgMock = vi.fn();
 const globalSuperuserMock = vi.fn();
+const superuserGrantMock = vi.fn();
 const rowExecuteTakeFirst = vi.fn();
 const createApiKeyMock = vi.fn();
 const rotateApiKeyMock = vi.fn();
@@ -44,13 +45,19 @@ vi.mock("@/lib/auth-status", async () => {
   return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
 });
 // `isSuperadmin` / `ownerOutranksActor` run for REAL — they are the rule under
-// test. Only the two DB-backed helpers are stubbed.
+// test. Only the DB-backed helpers are stubbed. The owner's superuser status
+// has two stubs because F-09 split it in two: AUTHORITY
+// (`userIsGlobalSuperuser`, which a grant held in a suspended org no longer
+// satisfies) and RANK (`userHoldsSuperuserGrant`, which it still does). A real
+// principal with authority always holds the grant, so the "awake" cases set
+// both; the "dormant" cases set only the rank.
 vi.mock("@/lib/admin/access-scope.server", async () => {
   const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
   return {
     ...actual,
     canAccessOrg: () => canAccessOrgMock(),
-    userIsGlobalSuperuser: () => globalSuperuserMock(),
+    userIsGlobalSuperuser: (...a: unknown[]) => globalSuperuserMock(...a),
+    userHoldsSuperuserGrant: (...a: unknown[]) => superuserGrantMock(...a),
   };
 });
 vi.mock("@/lib/admin/rate-limit.server", () => ({
@@ -138,6 +145,7 @@ beforeEach(async () => {
     accessGetter,
     canAccessOrgMock,
     globalSuperuserMock,
+    superuserGrantMock,
     rowExecuteTakeFirst,
     createApiKeyMock,
     rotateApiKeyMock,
@@ -147,6 +155,7 @@ beforeEach(async () => {
   }
   canAccessOrgMock.mockReturnValue(true);
   globalSuperuserMock.mockResolvedValue(false);
+  superuserGrantMock.mockResolvedValue(false);
   rowExecuteTakeFirst.mockResolvedValue({
     id: "owner-1",
     better_auth_user_id: "ba-owner",
@@ -197,6 +206,45 @@ describe("POST /api/administrator/api-keys — owner-reach bound (MACHINE-2)", (
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: "denied", reason: "owner_outranks_actor" }),
     );
+  });
+
+  it("F-09: REFUSES (403) minting for an owner whose only superuser grant sleeps in a SUSPENDED org", async () => {
+    // The owner is an active member of the actor's org, but their `superuser`
+    // grant sits in a suspended tenant: it confers no authority today, so the
+    // owner's resolved context carries no marker. The grant wakes the moment
+    // that tenant is reactivated, and a key minted now would then authenticate
+    // as a platform superuser inside this org. Rank must still count it.
+    requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
+    accessGetter.mockResolvedValue(
+      access({ appUserId: "owner-1", permissions: ["admin.apikeys.manage"] }),
+    );
+    superuserGrantMock.mockResolvedValue(true);
+
+    const res = await POST(
+      createRequest({ name: "k", ownerAppUserId: OWNER_UUID, scopes: ["admin.apikeys.manage"] }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(superuserGrantMock).toHaveBeenCalledWith("owner-1");
+    expect(createApiKeyMock).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "owner_outranks_actor" }),
+    );
+  });
+
+  it("F-09: a SUPERADMIN actor may still mint for an owner with a dormant grant (201)", async () => {
+    requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage", "superuser"]));
+    accessGetter.mockResolvedValue(
+      access({ appUserId: "owner-1", permissions: ["admin.apikeys.manage"] }),
+    );
+    superuserGrantMock.mockResolvedValue(true);
+
+    const res = await POST(
+      createRequest({ name: "k", ownerAppUserId: OWNER_UUID, scopes: ["admin.apikeys.manage"] }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(createApiKeyMock).toHaveBeenCalledTimes(1);
   });
 
   it("ALLOWS (201) a SUPERADMIN actor to mint for a superuser owner", async () => {
@@ -290,6 +338,7 @@ describe("POST /api/administrator/api-keys/[id]/rotate — owner-reach bound (MA
     // through the scope bounds at all — the reach bound is the only guard.
     requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
     globalSuperuserMock.mockResolvedValue(true);
+    superuserGrantMock.mockResolvedValue(true);
 
     const res = await ROTATE(rotateRequest(), rotateCtx);
 
@@ -300,9 +349,29 @@ describe("POST /api/administrator/api-keys/[id]/rotate — owner-reach bound (MA
     );
   });
 
+  it("F-09: REFUSES (403) reissuing the key of an owner whose only superuser grant sleeps in a SUSPENDED org", async () => {
+    // Authority says "not a superadmin" (the grant's org is suspended); rank
+    // says "holds a grant that wakes on reactivation". The bound reads rank:
+    // the reissued plaintext would authenticate as a platform superuser inside
+    // this org the moment that tenant is reactivated.
+    requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
+    globalSuperuserMock.mockResolvedValue(false);
+    superuserGrantMock.mockResolvedValue(true);
+
+    const res = await ROTATE(rotateRequest(), rotateCtx);
+
+    expect(res.status).toBe(403);
+    expect(superuserGrantMock).toHaveBeenCalledWith(OWNER_UUID);
+    expect(rotateApiKeyMock).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "owner_outranks_actor" }),
+    );
+  });
+
   it("ALLOWS (201) a SUPERADMIN actor to rotate a superuser owner's key", async () => {
     requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage", "superuser"]));
     globalSuperuserMock.mockResolvedValue(true);
+    superuserGrantMock.mockResolvedValue(true);
 
     const res = await ROTATE(rotateRequest(), rotateCtx);
 

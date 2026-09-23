@@ -10,6 +10,7 @@ import {
 import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
 import { auditEvent } from "@/lib/audit.server";
 import { getServerEnv } from "@/lib/env";
+import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 /**
  * Organization invitations.
@@ -156,10 +157,19 @@ export async function createInvitation(input: {
 }
 
 /**
- * Resolves a presented token to its LIVE invitation: `pending` and not past
- * `expires_at`. Returns null for unknown/consumed/revoked/expired tokens —
- * callers show one generic "invalid or expired" answer for all of these so
- * nothing about organizations or invitees leaks to token guessers.
+ * Resolves a presented token to its LIVE invitation: `pending`, not past
+ * `expires_at`, and into an organization that is ACTIVE. Returns null for
+ * unknown/consumed/revoked/expired tokens — callers show one generic "invalid
+ * or expired" answer for all of these so nothing about organizations or
+ * invitees leaks to token guessers.
+ *
+ * F-09 — an invitation into a suspended, archived or pending organization is
+ * not live either. Before this, accepting one created an active membership in
+ * a tenant the operator had shut down. The row stays `pending`, so once the
+ * org is reactivated an unexpired link works again. Every consumer inherits
+ * the rule from here: the explicit accept route, sign-up provisioning, the
+ * `/invite` and `/sign-up` pages, and the verification waiver in the
+ * `user.create.before` hook (a dead invitation is no proof of a mailbox).
  */
 export async function findValidInvitationByToken(
   plaintextToken: string,
@@ -181,6 +191,7 @@ export async function findValidInvitationByToken(
     .where("i.token_hash", "=", tokenHash)
     .where("i.status", "=", "pending")
     .where("i.expires_at", ">", sql<Date>`now()`)
+    .where("o.status", "=", ACTIVE_ORGANIZATION_STATUS)
     .executeTakeFirst();
   if (!row) {
     return null;
@@ -260,6 +271,11 @@ export async function consumeInvitation(input: {
     return { consumed: false, reason: "user_not_eligible" };
   }
 
+  // F-09: the flip re-asserts that the inviting org is still ACTIVE. The
+  // caller looked the invitation up a moment ago, but an operator suspending
+  // the tenant in between must not lose to it. A refusal here reads as
+  // `already_consumed` — the invitation is no longer consumable — which every
+  // caller already answers with the generic `invitation_invalid`.
   const flipped = await db
     .updateTable("app_organization_invitations")
     .set({
@@ -270,6 +286,12 @@ export async function consumeInvitation(input: {
     })
     .where("id", "=", invitation.id)
     .where("status", "=", "pending")
+    .where("organization_id", "in", (eb) =>
+      eb
+        .selectFrom("app_organizations")
+        .select("id")
+        .where("status", "=", ACTIVE_ORGANIZATION_STATUS),
+    )
     .executeTakeFirst();
   if (flipped.numUpdatedRows === 0n) {
     return { consumed: false, reason: "already_consumed" };

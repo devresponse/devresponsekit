@@ -24,7 +24,13 @@ const insertExecute = vi.fn();
  */
 const superuserGrants: {
   rows: Array<{ app_user_id: string; organization_id: string; role_id: string }>;
-} = { rows: [] };
+  /**
+   * What the rank guard's single-row `userHoldsSuperuserGrant` probe (F-09)
+   * finds for the member. `undefined` = no superuser grant anywhere; a row =
+   * one, possibly asleep in a suspended org.
+   */
+  holdsGrant: { id: string } | undefined;
+} = { rows: [], holdsGrant: undefined };
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -49,7 +55,11 @@ vi.mock("@/db/database", () => {
           if (prop === "execute") {
             return table === "app_user_roles" ? async () => superuserGrants.rows : itemsExecute;
           }
-          if (prop === "executeTakeFirst") return selectFirst;
+          if (prop === "executeTakeFirst") {
+            return table === "app_user_roles"
+              ? async () => superuserGrants.holdsGrant
+              : selectFirst;
+          }
           if (prop === "executeTakeFirstOrThrow") {
             return async () => {
               const v = await selectFirst();
@@ -186,6 +196,7 @@ beforeEach(async () => {
   ])
     m.mockReset();
   superuserGrants.rows = [];
+  superuserGrants.holdsGrant = undefined;
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({
     id: ORG_ID,
@@ -406,6 +417,19 @@ describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () 
     ranks(["admin.orgs.update", "shell.view"], ["shell.view"]);
     const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
     expect(res.status).toBe(200);
+  });
+
+  it("F-09: DELETE 403 when the member's superuser grant is asleep in a SUSPENDED org", async () => {
+    // Resolved in this org the member looks plain (the grant's org is not
+    // active, so nothing expands) — but the grant is still there, and comes
+    // back when that org is reactivated. Rank must not dip in between.
+    ranks(["admin.orgs.update", "shell.view"], ["shell.view"]);
+    superuserGrants.holdsGrant = { id: "p-superuser" };
+    const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
+    expect(res.status).toBe(403);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "target_outranks_actor" }),
+    );
   });
 
   it("DELETE 200 for a SUPERADMIN actor against a superadmin member", async () => {

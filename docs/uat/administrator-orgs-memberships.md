@@ -24,6 +24,9 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 | Org Admin sees only their org | List is scoped by `resolveOrgScope`; a null scope returns an empty list | `api/administrator/organizations/route.ts:49`, `lib/admin/access-scope.server.ts:51` |
 | Cross-tenant detail is 404, not 403 | A foreign `orgId` returns `notFound()` / a 404 envelope, never 403 | `organizations/[orgId]/page.tsx:54`, `api/administrator/organizations/[id]/route.ts:39` |
 | Delete of a default org | Blocked with **409** `organization_is_default` | `api/administrator/organizations/[id]/route.ts:188`, `lib/admin/orgs.server.ts:120` |
+| Organization status is enforced (F-09) | Only an `active` org confers membership: a `pending` / `suspended` / `archived` org's members, org admins, bound credentials, SSO launches and invitations stop working, and a `superuser` grant held there confers nothing, until it is reactivated | `lib/auth-status.ts` (`getUserAccessContext`), `lib/admin/access-scope.server.ts` (`userIsGlobalSuperuser`) |
+| Suspending the tenant that holds the last superuser grant | Blocked with **409** `last_superadmin` (REVOKE-2); reactivation is never blocked | `api/administrator/organizations/[id]/route.ts` (PATCH) |
+| Inviting into / resending for a non-active org | Blocked with **409** `organization_not_active`; revoke still works | `api/administrator/organizations/[id]/invitations/route.ts`, `…/[invitationId]/resend/route.ts` |
 | Delete of a non-empty org | Blocked with **409** `organization_not_empty` (any membership, any status) | `api/administrator/organizations/[id]/route.ts:189`, `lib/admin/orgs.server.ts:104` |
 | Delete of an org with other dependents (roles, bindings, apps, credentials) | FK violation translated to **409** `organization_in_use` | `api/administrator/organizations/[id]/route.ts:212` |
 | Member / binding mutations | `POST`/`PATCH`/`DELETE` on members and bindings require `admin.orgs.update` (NOT `.delete`, NOT `.manage`); **creating** a binding additionally requires a Superadmin (F-04) | `api/administrator/organizations/[id]/members/route.ts:123,239,340`, `.../provider-bindings/route.ts:113,207` |
@@ -240,16 +243,32 @@ User stories
     | 6 | As the Superadmin, add the same provider + key twice. | The second attempt is rejected (binding already exists) and no duplicate row appears. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
-- UAT-ADMIN-ORG-DETAIL-S4 — As a Superadmin, I want to rename an organization and change its status, so that I can correct tenant records.
-  - Acceptance criteria: Given I am a Superadmin on the Settings tab, when I change the name and status and save, then a success message appears and the header reflects the change on reload.
+- UAT-ADMIN-ORG-DETAIL-S4 — As a Superadmin, I want to rename an organization and suspend it, so that I can correct tenant records and actually cut a tenant off.
+  - Acceptance criteria: Given I am a Superadmin on the Settings tab, when I change the name and status and save, then a success message appears and the header reflects the change on reload. A suspended org's members, org admin and superuser lose access to it (F-09) until it is set back to Active, and I keep managing it throughout.
+  - Note: suspend **`org-c`**, not `org-a`. Organization status is enforced, so suspending `org-a` would also suspend the `superuser` grant `superuser@orga.local` holds there, and you would be signed in as someone who is no longer a superadmin.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Sign in as `superuser@orga.local` and open `org-a` → **Settings**. | The Settings form shows editable Slug, Name, Status (a select), and a "default" checkbox, with a required legend. |
-    | 2 | Change **Name** to `ORG A (renamed)`. | The field accepts the edit. |
+    | 1 | Sign in as `superuser@orga.local` and open `org-c` → **Settings**. | The Settings form shows editable Slug, Name, Status (a select), and a "default" checkbox, with a required legend. |
+    | 2 | Change **Name** to `ORG C (renamed)`. | The field accepts the edit. |
     | 3 | Change **Status** to `suspended`. | The select shows the localized "Suspended" option selected. |
     | 4 | Click **Save**. | A success message `role="status"` ("saved") appears. |
-    | 5 | Reload the page. | The header shows the new name and a Suspended status badge. |
+    | 5 | Reload the page. | The header shows the new name and a Suspended status badge. You can still open every tab of the suspended org. |
+    | 6 | In a private window, sign in as `user1@orgc.local`. | The pending-approval screen, not the dashboard: the only membership is in a suspended org. |
+    | 7 | Sign in as `orgadmin@orgc.local`, then as `superuser@orgc.local`. | Both see the pending-approval screen. The ORG C superuser is no superadmin while ORG C is suspended. |
+    | 8 | Sign in as `multi1@shared.local` (a member of all three orgs) and open the org switcher. | ORG C is not listed; the session works in ORG A or ORG B. |
+    | 9 | As `superuser@orga.local`, open `org-c` → **Members** → *Invite member* and invite any address. | Refused with an inline "This organization is not active…" error; no invitation is created. |
+    | 10 | Back on **Settings**, set **Status** to `active` and save. Repeat steps 6–7. | Everyone is back exactly as before, the ORG C superuser included. |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+
+- UAT-ADMIN-ORG-DETAIL-S4b — As the platform, I want suspending the tenant that holds the last superuser grant to be refused, so that one save cannot lock every administrator out (F-09, REVOKE-2).
+  - Acceptance criteria: Given the only remaining `superuser` grants live in one org, when a Superadmin sets that org's status to anything but Active, then the save is refused and nothing changes.
+  - UAT script (needs a database where the default org's seeded admin is the only superuser, e.g. `pnpm db:seed` without `db:seed:dev`):
+    | # | Step (what to do) | Expected result |
+    |---|---|---|
+    | 1 | Sign in as the seeded admin and open the default org → **Settings**. | The form renders. |
+    | 2 | Set **Status** to `suspended` and click **Save**. | A root inline error `role="alert"` says this is the last platform superadmin; no success message. |
+    | 3 | Reload the page. | Status is still Active. The audit explorer shows `admin.superuser.revocation_denied` (`reason: last_global_superuser`, `metadata.action: organization_status_update`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-ORG-DETAIL-S5 — As an Org Admin, I want the Settings save to be refused, so that I cannot mutate the org record I do not own at the platform level.

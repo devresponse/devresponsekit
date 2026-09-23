@@ -3,11 +3,12 @@ import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { loadScopedOrg } from "@/lib/admin/org-route.server";
+import { loadScopedOrg, ORGANIZATION_NOT_ACTIVE_ERROR } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { regenerateInvitationToken, sendInvitationEmail } from "@/lib/invitations.server";
+import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,8 @@ interface RouteContext {
  * Rotates a PENDING invitation's token + expiry in place and re-sends the
  * email: the previous link dies immediately, and an expired-but-pending
  * invitation is deliberately revived with a fresh 7-day window. 404
- * `invitation_not_found` for accepted/revoked/unknown rows.
+ * `invitation_not_found` for accepted/revoked/unknown rows; 409
+ * `organization_not_active` while the org is not `active` (F-09).
  *
  * Caller MUST hold `admin.orgs.update`.
  */
@@ -44,6 +46,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
   const org = await loadScopedOrg(request, id, guard.access);
   if (org instanceof NextResponse) return org;
+
+  // F-09: a fresh link into a non-active org would be dead on arrival, and
+  // rotating the token would also kill the one the invitee already holds. The
+  // invitation keeps its current link and can be resent once the org is
+  // reactivated; revoking it stays available.
+  if (org.status !== ACTIVE_ORGANIZATION_STATUS) {
+    return adminErrorResponse(ORGANIZATION_NOT_ACTIVE_ERROR, 409, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   const invitation = await db
     .selectFrom("app_organization_invitations")

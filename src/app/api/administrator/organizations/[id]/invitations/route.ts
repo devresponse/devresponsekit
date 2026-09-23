@@ -18,11 +18,12 @@ import {
   parseListQuery,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
-import { loadScopedOrg } from "@/lib/admin/org-route.server";
+import { loadScopedOrg, ORGANIZATION_NOT_ACTIVE_ERROR } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { createInvitation, sendInvitationEmail } from "@/lib/invitations.server";
 import { createInvitationSchema } from "@/lib/validation/invitations";
+import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 export const dynamic = "force-dynamic";
 
@@ -114,7 +115,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
  * Invites an email address into the organization (optionally with a role
  * belonging to it) and sends the accept link through the outbox. 409
  * `member_exists` when the address already belongs to an ACTIVE member;
- * 409 `invitation_exists` when a pending invitation is already out.
+ * 409 `invitation_exists` when a pending invitation is already out; 409
+ * `organization_not_active` when the org is not `active` (F-09).
  *
  * Attaching a role is a deferred role ASSIGNMENT, so it is bound by the same
  * privilege-escalation guard (AUTHZ-3) as `users/[id]/app-roles`: a
@@ -139,6 +141,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   const org = await loadScopedOrg(request, id, guard.access);
   if (org instanceof NextResponse) return org;
+
+  // F-09: an invitation into a suspended, archived or pending org could not be
+  // accepted (`findValidInvitationByToken` treats it as dead), so sending one
+  // would only mail out a link that fails. Refuse it up front instead.
+  if (org.status !== ACTIVE_ORGANIZATION_STATUS) {
+    return adminErrorResponse(ORGANIZATION_NOT_ACTIVE_ERROR, 409, request, {
+      requestId: guard.requestId,
+    });
+  }
 
   let json: unknown;
   try {

@@ -139,6 +139,10 @@ export function OrganizationInvitationsPanel({
         form.setError("email", { type: "server", message: tErr("invitationExists") });
         return;
       }
+      if (body?.error === "organization_not_active") {
+        form.setError("root", { type: "server", message: tErr("organizationNotActive") });
+        return;
+      }
       form.setError("root", { type: "server", message: t("sendError") });
     } catch {
       form.setError("root", { type: "server", message: t("sendError") });
@@ -161,13 +165,20 @@ export function OrganizationInvitationsPanel({
         { method: "POST", credentials: "same-origin" },
       );
       if (!res.ok) {
-        setRowNotice({ kind: "error", text: t("resendError") });
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setRowNotice({
+          kind: "error",
+          text:
+            body?.error === "organization_not_active"
+              ? tErr("organizationNotActive")
+              : t("resendError"),
+        });
         return;
       }
       setRowNotice({ kind: "success", text: t("resent") });
       setReloadKey((k) => k + 1);
     },
-    [dialogs, orgId, t],
+    [dialogs, orgId, t, tErr],
   );
 
   const onRevoke = useCallback(

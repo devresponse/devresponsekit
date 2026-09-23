@@ -129,7 +129,9 @@ The pipeline, in order:
    `unauthenticated`.
 4. **Secure-access decision.** `decideSecureAccess(status, membershipStatus)`
    must return `allow`; a blocked / suspended / inactive caller or membership →
-   **403** `forbidden`.
+   **403** `forbidden`. A membership in an organization that is not `active`
+   never resolves in the first place (F-09, §8.2), so an org admin of a
+   suspended tenant is refused here too, and so is a credential bound to one.
 5. **Permission + scope check.** The caller must hold the required permission
    **and**, for bearer credentials, the credential's scopes must authorize it
    (`scopesAuthorize` — scopes ⊆ permissions; a key can never out-scope its
@@ -516,7 +518,9 @@ their grant twin:
 **Last superadmin (REVOKE-2).** Global superuser authority is the conjunction of
 three revocable rows — an `app_user_roles` assignment, an
 `app_role_permissions` link carrying `superuser`, and an **active** membership
-pairing them (`userIsGlobalSuperuser`) — and no org admin can confer it back.
+pairing them, in an **active** organization (`userIsGlobalSuperuser`; the
+organization's status joined the conjunction with F-09) — and no org admin can
+confer it back.
 `stripsLastGlobalSuperuser` / `wouldStripLastGlobalSuperuser`
 (`src/lib/admin/access-scope.server.ts`) is the single predicate: a revocation
 that would destroy **every** remaining grant is refused with **409**
@@ -537,6 +541,7 @@ in one request — including on themselves:
 | `DELETE /users/[id]/app-roles`, `DELETE /roles/[id]/permissions`, `PATCH\|DELETE /users/[id]/memberships`, `PATCH\|DELETE /organizations/[id]/members` | the route handler |
 | `POST /users/[id]/status`, `POST /api/v1/users/[id]/status`, `block`/`suspend` via `POST /users/bulk` | `performAdminStatusChange` (`src/lib/admin-status.server.ts`) — the shared core, so a fourth caller cannot forget it |
 | `DELETE /users/[id]`, `soft_delete` via `POST /users/bulk` | inside the soft-delete transaction; the saga's compensating unban runs first, so a refusal leaves the account untouched |
+| `PATCH /organizations/[id]` with `status` other than `active` (F-09) | the route handler, in the same transaction as the update. Every grant held in that org stops counting, so suspending the tenant that holds the last ones (out of the box, the default org) is refused. Reactivation is never gated. |
 
 The bulk endpoint reports it as a per-row `last_superadmin` outcome rather than a
 status code; `/api/v1` returns the RFC 7807 twin.
@@ -553,7 +558,7 @@ status code; `/api/v1` returns the RFC 7807 twin.
 
 **Concurrency.** The check shares the writing transaction, and the grant read
 takes `for update of app_user_roles, app_organization_memberships,
-app_role_permissions`. The relation list matters: under READ COMMITTED a blocked
+app_organizations, app_role_permissions`. The relation list matters: under READ COMMITTED a blocked
 `SELECT … FOR UPDATE` re-evaluates its predicate (EvalPlanQual) only for rows of
 a **locked** relation that the committing transaction actually changed. Only the
 role-assignment revoke writes `app_user_roles`; the membership paths and the
@@ -562,8 +567,11 @@ writes `app_role_permissions`. Locking only the assignments would let a second
 caller acquire the released lock on an unmodified tuple, skip the recheck, and
 still see the other superadmin's membership as `active` in its own pre-commit
 snapshot — so two concurrent revocations aimed at two different superadmins could
-each conclude that the other survives. With all three relations locked, the
-recheck drops the row and the second caller is correctly refused.
+each conclude that the other survives. With every mutable relation locked, the
+recheck drops the row and the second caller is correctly refused. The org status
+change writes `app_organizations`, which is why that relation joined the list
+with F-09: two superadmins suspending two different tenants, each holding one of
+the last two grants, must not each see the other tenant as still active.
 
 **The Better Auth admin plugin's raw HTTP surface is closed.** Every plugin
 endpoint (`/api/auth/admin/list-users`, `/set-user-password`,
@@ -622,14 +630,14 @@ Manages the tenant entity and its memberships.
 | --- | --- | --- |
 | `GET /organizations` | `admin.orgs.read` | List with member counts; an org admin sees only their own org row |
 | `POST /organizations` | `admin.orgs.create` | **Superadmin-only** (the tenant entity); `admin.organization.created` |
-| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked` |
+| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below) |
 | `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`). PATCH/DELETE are rank-gated (REVOKE-1, whole batch refused with 403) and may return 409 `last_superadmin` (REVOKE-2) |
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` (POST: + **superadmin**) | IdP org links and email-domain routing; creating one is a platform-wide claim, so POST also requires cross-org reach (F-04) and validates the provider, lowercases an `email` domain and refuses consumer mailbox domains; `admin.organization.provider_bound` / `.provider_bind_denied` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
 | `GET/PATCH /auth-settings/defaults` | `admin.orgs.read` / `.update` + **superadmin** | The platform-default sign-up policy (`organization_id IS NULL`); 403 for org admins; no DELETE (the baseline must always exist); `admin.platform.auth_policy_updated` |
-| `GET/POST …/[id]/invitations` | `admin.orgs.read` / `admin.orgs.update` | Organization invitations (0008): paginated list (token hashes never exposed) and create-with-email (outbox-first accept link; 409 `member_exists` / `invitation_exists`, 404 `role_not_found` for a cross-org role; an attached `roleId` is a deferred role assignment under the AUTHZ-3 conferral guard — 403 `forbidden` when the role confers a permission the non-superadmin caller cannot confer, and re-checked against the inviter's current authority at accept time — see [Sign-up Policy §6](./auth-signup-policy.md#6-invitations)); `admin.organization.invitation_created` |
+| `GET/POST …/[id]/invitations` | `admin.orgs.read` / `admin.orgs.update` | Organization invitations (0008): paginated list (token hashes never exposed) and create-with-email (outbox-first accept link; 409 `member_exists` / `invitation_exists`, 409 `organization_not_active` while the org is not `active` (F-09), 404 `role_not_found` for a cross-org role; an attached `roleId` is a deferred role assignment under the AUTHZ-3 conferral guard — 403 `forbidden` when the role confers a permission the non-superadmin caller cannot confer, and re-checked against the inviter's current authority at accept time — see [Sign-up Policy §6](./auth-signup-policy.md#6-invitations)); `admin.organization.invitation_created` |
 | `DELETE …/[id]/invitations/[invitationId]` | `admin.orgs.update` | Revoke a pending invitation (the link dies immediately); `admin.organization.invitation_revoked` |
-| `POST …/[id]/invitations/[invitationId]/resend` | `admin.orgs.update` | Rotate the token + expiry in place and re-send (revives expired-pending); `admin.organization.invitation_resent` |
+| `POST …/[id]/invitations/[invitationId]/resend` | `admin.orgs.update` | Rotate the token + expiry in place and re-send (revives expired-pending); 409 `organization_not_active` while the org is not `active` (the current link is left alone); `admin.organization.invitation_resent` |
 
 Acceptance itself is NOT an administrator surface: invitees land on the public
 `/invite?token=…` page, and signed-in users accept via
@@ -640,6 +648,52 @@ session's email must equal the invited address). See
 
 Creating, renaming, and deleting an **organization** is superadmin-only — an org
 admin manages the *contents* of their org, not the org record (ADR-0001).
+
+**Organization status is enforced (F-09).** Only an `active` organization
+confers anything. While an org is `pending`, `suspended` or `archived`, every
+membership in it resolves as if it did not exist
+(`getUserAccessContext`, `src/lib/auth-status.ts`), and every surface inherits
+that from the one resolver:
+
+- its members and org admins lose the secure shell, the administrator console
+  and the account API for it. Someone who belongs only to that org sees the
+  pending-approval screen; someone who also belongs to an active org is resolved
+  into that one, even if their `active_org` cookie still names the suspended org;
+- API keys and OAuth clients **bound** to it stop authenticating, and
+  `/api/v1/auth/token` stops minting for them;
+- SSO launches stop, since the launch requires a resolved org;
+- the org switcher no longer lists it and refuses to switch into it;
+- its invitations are dead, and creating or resending one answers 409
+  `organization_not_active` (see [Sign-up Policy §6](./auth-signup-policy.md#6-invitations));
+- a `superuser` grant held there stops making anyone a platform superadmin
+  (`userIsGlobalSuperuser`), including the impersonation reach check.
+
+Nothing is deleted: memberships, roles, credentials and pending invitations are
+left as they were, and setting the org back to `active` restores all of it at
+once. `pending` behaves like `suspended`.
+
+Superadmins manage a non-active org exactly as before. Loading an org, its
+members, providers, sign-up policy and invitations never looks at its status,
+so a superadmin can open a suspended tenant and reactivate it from **Settings**.
+The one refusal is the lockout guard: a status change away from `active` that
+would suspend the platform's **last** superuser grant (out of the box, the
+seeded admin's grant in the default org) is refused with 409 `last_superadmin`
+(REVOKE-2, §8.1). A superadmin whose own grant lives in the org they suspend
+still demotes themselves if other grants survive elsewhere, just as they could by
+suspending their own membership. Suspend a tenant from an account whose
+authority lives somewhere else.
+
+**Rank does not follow status.** A grant that sleeps in a suspended org comes
+back when the org is reactivated, so both rank guards still count it
+(`userHoldsSuperuserGrant`): the account-action guard (`targetOutranksActor`)
+and the owner-reach bound on the four on-behalf credential paths
+(`ownerOutranksActor`: `POST /api-keys`, `POST /api-keys/[id]/rotate`,
+`POST /api/v1/admin/oauth-clients` and its `[id]/rotate-secret`). Otherwise a
+delegated admin who shares another active tenant with that superuser could, in
+the meantime, set their password or mint, rotate or register a credential that
+authenticates as them, and hold a platform-superadmin login or credential once
+the org is reactivated. The impersonation escalation guards likewise keep
+counting authority held in suspended tenants.
 
 ### 8.3 Memberships
 
@@ -716,7 +770,8 @@ DELETE, and AUTHZ-3 then forbade them from putting it back.
 `getUserAccessContext` does union group-conferred roles into the permission set
 and expands a bare `superuser` marker to the full superuser set, so inside the
 group's org such a principal really does act as a platform superadmin — but
-`userIsGlobalSuperuser` reads only direct `app_user_roles`, so they are **not**
+`userIsGlobalSuperuser` (and its rank twin `userHoldsSuperuserGrant`) reads
+only direct `app_user_roles`, so they are **not**
 a global superuser anywhere rank, machine-credential reach (MACHINE-2) or the
 REVOKE-2 last-superadmin invariant is decided. On a platform whose only
 superadmin is group-conferred, REVOKE-2 sees zero grants and refuses nothing.
@@ -765,7 +820,10 @@ account-writing scope (`account.apikeys.manage`, `account.profile.write`,
 `account.preferences.write`) on another person's key — the form does not
 offer them. A **rotation** is bound by the same
 rule against the key's existing scopes, so an admin can revoke any in-scope
-key but can only rotate (and receive) one they could have minted.
+key but can only rotate (and receive) one they could have minted. Minting or
+rotating a key whose owner holds a `superuser` grant is refused with **403**
+(`owner_outranks_actor`) for anyone but a superadmin at a browser (MACHINE-2),
+including when that grant sleeps in a suspended org (§8.2).
 
 ### 8.9 OAuth clients
 

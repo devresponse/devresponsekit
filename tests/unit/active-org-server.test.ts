@@ -69,21 +69,25 @@ beforeEach(async () => {
 afterEach(() => vi.resetModules());
 
 describe("userHasActiveMembership", () => {
-  it("filters on the user, the org AND status = 'active' — never on user + org alone", async () => {
+  it("filters on the user, the org, status = 'active' AND the ORG's status = 'active' — never on user + org alone", async () => {
     executeTakeFirst.mockResolvedValue({ id: "m-1" });
     await expect(mod.userHasActiveMembership("u-1", "o-1")).resolves.toBe(true);
 
     expect(recorded).toHaveLength(1);
     const q = recorded[0]!;
-    expect(q.table).toBe("app_organization_memberships");
+    expect(q.table).toBe("app_organization_memberships as m");
+    // F-09: the switch gate is also the gate into a SUSPENDED tenant — an
+    // active membership there must not let the cookie name it.
+    expect(q.joins).toEqual([["app_organizations as o", "o.id", "m.organization_id"]]);
     expect(q.wheres).toEqual(
       expect.arrayContaining([
-        ["app_user_id", "=", "u-1"],
-        ["organization_id", "=", "o-1"],
-        ["status", "=", "active"],
+        ["m.app_user_id", "=", "u-1"],
+        ["m.organization_id", "=", "o-1"],
+        ["m.status", "=", "active"],
+        ["o.status", "=", "active"],
       ]),
     );
-    expect(q.wheres).toHaveLength(3);
+    expect(q.wheres).toHaveLength(4);
   });
 
   it("is false when no ACTIVE row matches (pending / blocked / foreign org all hit this path)", async () => {
@@ -98,15 +102,15 @@ describe("userHasActiveMembership", () => {
     // The builder receives the raw value as a bound parameter, verbatim.
     expect(recorded[0]!.wheres).toEqual(
       expect.arrayContaining([
-        ["app_user_id", "=", hostile],
-        ["organization_id", "=", hostile],
+        ["m.app_user_id", "=", hostile],
+        ["m.organization_id", "=", hostile],
       ]),
     );
   });
 });
 
 describe("listUserActiveOrganizations", () => {
-  it("joins memberships to organizations, keeps only ACTIVE rows for the user, ordered by name", async () => {
+  it("joins memberships to organizations, keeps only ACTIVE rows in ACTIVE orgs for the user, ordered by name", async () => {
     const rows = [
       { id: "o-a", slug: "a", name: "A" },
       { id: "o-b", slug: "b", name: "B" },
@@ -121,6 +125,8 @@ describe("listUserActiveOrganizations", () => {
     expect(q.wheres).toEqual([
       ["m.app_user_id", "=", "u-1"],
       ["m.status", "=", "active"],
+      // F-09: a suspended org is not a switch target.
+      ["o.status", "=", "active"],
     ]);
     expect(q.orderBy).toEqual([["o.name", "asc"]]);
   });
@@ -136,8 +142,11 @@ describe("listActiveOrganizationIdsForBetterAuthUser (IMP-1 confinement source)"
 
     const q = recorded[0]!;
     expect(q.table).toBe("app_organization_memberships as m");
-    expect(q.joins).toEqual([["app_users as u", "u.id", "m.app_user_id"]]);
-    // TWO different statuses, both load-bearing, and neither substitutes for
+    expect(q.joins).toEqual([
+      ["app_users as u", "u.id", "m.app_user_id"],
+      ["app_organizations as o", "o.id", "m.organization_id"],
+    ]);
+    // THREE different statuses, all load-bearing, and none substitutes for
     // the other. `m.status` is the MEMBERSHIP: a suspended membership does not
     // let the ADMIN act in that tenant, so it must not widen what a session
     // they borrow can reach either. `u.status` is the ACCOUNT (IMP-2):
@@ -145,10 +154,13 @@ describe("listActiveOrganizationIdsForBetterAuthUser (IMP-1 confinement source)"
     // membership rows alone, so without it a just-suspended admin kept the full
     // intersection and the session they had borrowed kept its full reach —
     // the exact opposite of what the confinement's fail-closed branch claims.
+    // `o.status` is the ORGANIZATION (F-09): an admin cannot act as themselves
+    // in a suspended tenant, so a session they borrow cannot reach it either.
     expect(q.wheres).toEqual([
       ["u.better_auth_user_id", "=", "ba-admin"],
       ["u.status", "=", "active"],
       ["m.status", "=", "active"],
+      ["o.status", "=", "active"],
     ]);
   });
 

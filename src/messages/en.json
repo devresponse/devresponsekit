@@ -672,7 +672,8 @@
       "originNotAllowed": "Origin host is not in the allowed list for SSO redirects.",
       "memberExists": "This address already belongs to an active member.",
       "invitationExists": "A pending invitation for this address already exists.",
-      "lastSuperadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform."
+      "lastSuperadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform.",
+      "organizationNotActive": "This organization is not active. Reactivate it before inviting anyone."
     },
     "roles": {
       "title": "Roles",
@@ -1313,7 +1314,8 @@
     "not_provisioned": "Your account isn't fully set up yet. Contact an administrator.",
     "insufficient_scope": "This credential isn't authorized for that action.",
     "forbidden_while_impersonating": "This action isn't available while impersonating another user.",
-    "last_superadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform."
+    "last_superadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform.",
+    "organization_not_active": "This organization is not active. Reactivate it first."
   },
   "account": {
     "appTitle": "Account",

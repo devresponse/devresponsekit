@@ -5,7 +5,7 @@ import { getOauthClientById, rotateOauthClientSecret } from "@/lib/api-auth/oaut
 import {
   canAccessOrg,
   ownerOutranksActor,
-  userIsGlobalSuperuser,
+  userHoldsSuperuserGrant,
 } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
@@ -63,13 +63,16 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // a within-tenant identity+scope escalation rather than a platform-wide one;
   // it is still precisely what layer 2 exists to refuse.)
   //
-  // `userIsGlobalSuperuser` (not `isSuperadmin` on a resolved context) because
-  // all we hold here is the principal's `app_user_id`, and it is the canonical
-  // "is this principal a superadmin in ANY org" determination — the rank check
-  // must not depend on which org happens to resolve for them.
+  // `userHoldsSuperuserGrant` (not `isSuperadmin` on a resolved context)
+  // because all we hold here is the principal's `app_user_id`, and the rank
+  // check must not depend on which org happens to resolve for them. It is the
+  // RANK predicate, not `userIsGlobalSuperuser` (AUTHORITY), and deliberately
+  // so (F-09): a grant sleeping in a suspended org confers nothing today, but
+  // it wakes when that org is reactivated, and the secret reissued now would
+  // then authenticate as a platform superuser inside this org.
   if (
     ownerOutranksActor(
-      await userIsGlobalSuperuser(client.app_user_id),
+      await userHoldsSuperuserGrant(client.app_user_id),
       grant.caller.access,
       grant.caller.grantedScopes,
     )

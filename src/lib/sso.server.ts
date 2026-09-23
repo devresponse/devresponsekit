@@ -42,6 +42,10 @@ async function loadSsoAccessContext(
 
   // Verify access to the target application: either the application is
   // global (no organization_id) or it belongs to the user's organization.
+  // F-09: `access.organizationId` is only ever an ACTIVE org (the resolver
+  // ignores memberships in suspended, archived or pending tenants), so this
+  // equality also refuses a launch into an app whose owning org is not active,
+  // and a member of only such tenants never gets this far (`decision` above).
   if (targetApp.organization_id && targetApp.organization_id !== access.organizationId) {
     throw new Error("sso_denied:application_not_in_organization");
   }

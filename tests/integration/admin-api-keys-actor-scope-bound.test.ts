@@ -34,9 +34,17 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
 });
+// The owner-reach bound's rank lookup (`userHoldsSuperuserGrant`, F-09) is a
+// DB read the one-row mock below would answer with the owner row. Every owner
+// here is an ordinary user; `on-behalf-mint-owner-reach-bound.test.ts` pins the
+// superuser cases.
 vi.mock("@/lib/admin/access-scope.server", async () => {
   const actual = await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server");
-  return { ...actual, canAccessOrg: () => canAccessOrgMock() };
+  return {
+    ...actual,
+    canAccessOrg: () => canAccessOrgMock(),
+    userHoldsSuperuserGrant: async () => false,
+  };
 });
 vi.mock("@/lib/admin/rate-limit.server", () => ({
   DEFAULT_ADMIN_MUTATION_LIMIT: { capacity: 10, refillMs: 1000 },

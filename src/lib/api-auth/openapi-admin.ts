@@ -229,7 +229,8 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
       {
         name: "Organizations",
         description: "Tenants and their members / provider bindings / sign-up policy.",
-        "x-permissions": "`admin.orgs.*` (`/auth-settings/defaults`: + **superadmin**)",
+        "x-permissions":
+          "`admin.orgs.*` (`/auth-settings/defaults`, `POST …/provider-bindings`: + **superadmin**)",
       },
       {
         name: "Memberships",

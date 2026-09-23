@@ -32,6 +32,14 @@ const superuserGrants: {
   holdsGrant: { id: string } | undefined;
 } = { rows: [], holdsGrant: undefined };
 
+/**
+ * Tables the DELETE transaction deleted from, in order. Since F-12 the
+ * member's grants in the org go with the membership; the grant deletes return
+ * no rows here (a member holding no role), so the REVOKE-1 lookups never run.
+ * The F-12 behaviour itself is pinned in `membership-delete-grants.test.ts`.
+ */
+const deletedFrom: string[] = [];
+
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
 }));
@@ -89,6 +97,28 @@ vi.mock("@/db/database", () => {
     return proxy;
   }
   const tableKey = (t: unknown) => String(t).split(" ")[0] ?? "";
+  /**
+   * The transaction's deletes: every builder call (`using`, `whereRef`,
+   * `returning`, ...) chains, and `execute` records the table. The F-12 grant
+   * deletes return no rows.
+   */
+  function makeDeleteChain(table: string): unknown {
+    const proxy: unknown = new Proxy(
+      {},
+      {
+        get(_, prop) {
+          if (prop === "execute") {
+            return async () => {
+              deletedFrom.push(table);
+              return table === "app_organization_memberships" ? itemsExecute() : [];
+            };
+          }
+          return () => proxy;
+        },
+      },
+    );
+    return proxy;
+  }
   const updateChain = () => ({
     set: () => ({
       where: () => ({
@@ -130,7 +160,7 @@ vi.mock("@/db/database", () => {
           cb({
             selectFrom: (t: unknown) => makeChain(tableKey(t)),
             updateTable: updateChain,
-            deleteFrom: deleteChain,
+            deleteFrom: (t: unknown) => makeDeleteChain(tableKey(t)),
           }),
       }),
     },
@@ -197,6 +227,7 @@ beforeEach(async () => {
     m.mockReset();
   superuserGrants.rows = [];
   superuserGrants.holdsGrant = undefined;
+  deletedFrom.length = 0;
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({
     id: ORG_ID,
@@ -417,6 +448,12 @@ describe("PATCH/DELETE organizations/:id/members — rank guard (REVOKE-1)", () 
     ranks(["admin.orgs.update", "shell.view"], ["shell.view"]);
     const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
     expect(res.status).toBe(200);
+    // F-12: the member's grants in this org go in the same transaction, first.
+    expect(deletedFrom).toEqual([
+      "app_user_roles",
+      "app_group_memberships",
+      "app_organization_memberships",
+    ]);
   });
 
   it("F-09: DELETE 403 when the member's superuser grant is asleep in a SUSPENDED org", async () => {
@@ -477,6 +514,8 @@ describe("PATCH/DELETE organizations/:id/members — last-superadmin invariant (
   it("DELETE 409 when removing the only remaining superadmin's membership", async () => {
     const res = await DELETE(jsonReq(memberBody), { params: Promise.resolve({ id: ORG_ID }) });
     expect(res.status).toBe(409);
+    // Refused before anything is deleted, grants included (F-12).
+    expect(deletedFrom).toEqual([]);
   });
 
   it("DELETE 200 while another superadmin survives in a different org", async () => {

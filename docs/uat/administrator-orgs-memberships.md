@@ -220,7 +220,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-ORG-DETAIL-S2 — As an Org Admin, I want to remove a member, so that they lose access to the org.
-  - Acceptance criteria: Given a member exists, when I click Remove and confirm, then the row disappears and a repeat removal reports "not found".
+  - Acceptance criteria: Given a member exists, when I click Remove and confirm, then the row disappears and a repeat removal reports "not found". The member's roles and group memberships in this org go with the membership (F-12), so adding them back later restores none of them; their roles and groups in other orgs are untouched.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -228,6 +228,8 @@ User stories
     | 2 | Click **Remove** on a `user5@orga.local` row. | A destructive confirm dialog appears naming the user. |
     | 3 | Confirm the removal. | The dialog closes, the grid refreshes, and the `user5` row is gone. |
     | 4 | If the remove fails server-side, observe the alert. | An inline error `role="alert"` with the localized "remove error" message is shown (`_organization-members-grid.tsx:136`). |
+    | 5 | As the Superadmin, open `user5`'s detail → **Roles** and **Groups**. | Nothing from `org-a` is listed (F-12). Any role or group `user5` holds in another org is still there. |
+    | 6 | Add `user5` back to `org-a` (`POST .../members`), then re-open **Roles** and **Groups**. | Still nothing from `org-a`: the old roles and groups did not come back. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-ORG-DETAIL-S3 — As an Org Admin, I want to see and remove my organization's provider bindings; as a Superadmin, I want to create them, so that SSO/provisioning maps to the right org.
@@ -301,6 +303,7 @@ Negative & edge cases
 5. Member add errors: adding a non-existent `appUserId` returns `user_not_found` (404); adding an existing membership returns `membership_exists` (409).
 6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:107,195`).
 7. Rate-limit: rapid member/binding mutations hit the admin mutation limit and return a friendly rate-limited response (`members/route.ts:126`).
+8. Removing a member whose roles or groups in the org confer a permission the caller cannot confer is refused with **403** `forbidden` and an `admin.membership.revocation_denied` audit row, and nothing is removed (REVOKE-1, F-12). An Org Admin at a browser is normally stopped earlier by the rank guard; the case to try is a bearer key scoped only to `admin.orgs.update`, removing a member who holds an `admin.*` role. The same key removes a plain member (`user1..5`, the `member` role) with **200**: `shell.view` goes with the membership and is not measured.
 
 Accessibility: tab through the three tabs (arrow-key tab navigation), the grids, and the Settings form; dialogs (Remove confirm) trap focus and close on Esc; the success message uses `role="status"`, errors use `role="alert"`.
 i18n: in `uk`/`ja`, tab labels (Members / Providers / Settings), status options, buttons, and dates localize; no raw keys.

@@ -74,6 +74,12 @@ function firstFor(table: string) {
   return undefined;
 }
 function execFor(table: string): unknown[] {
+  // Deletes are keyed `delete:<table>` so a delete never answers with the rows
+  // a SELECT of the same table would. Since F-12 the DELETE transaction also
+  // deletes the target's grants in those orgs; none here (a target holding no
+  // role), so the REVOKE-1 lookups never run. The F-12 behaviour itself is
+  // pinned in `membership-delete-grants.test.ts`.
+  if (table.startsWith("delete:")) return [];
   if (table === "app_organization_memberships") return state.memberships;
   // activeGlobalSuperuserGrants(...) reads the surviving superuser grants.
   if (table === "app_user_roles") return state.superuserGrants;
@@ -107,7 +113,7 @@ vi.mock("@/db/database", () => ({
     selectFrom: (t: unknown) => makeChain(tableKey(t)),
     insertInto: (t: unknown) => makeChain(tableKey(t)),
     updateTable: (t: unknown) => makeChain(tableKey(t)),
-    deleteFrom: (t: unknown) => makeChain(tableKey(t)),
+    deleteFrom: (t: unknown) => makeChain(`delete:${tableKey(t)}`),
     // PATCH/DELETE now check REVOKE-2 and write in ONE transaction, so the
     // trx stub has to read as well as write.
     transaction: () => ({
@@ -115,7 +121,7 @@ vi.mock("@/db/database", () => ({
         cb({
           selectFrom: (t: unknown) => makeChain(tableKey(t)),
           updateTable: (t: unknown) => makeChain(tableKey(t)),
-          deleteFrom: (t: unknown) => makeChain(tableKey(t)),
+          deleteFrom: (t: unknown) => makeChain(`delete:${tableKey(t)}`),
         }),
     }),
   },

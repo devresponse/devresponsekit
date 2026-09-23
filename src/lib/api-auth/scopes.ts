@@ -47,6 +47,26 @@ export function isKnownScope(scope: string): boolean {
   return CATALOG_SET.has(scope) || isWildcardScope(scope);
 }
 
+/**
+ * True when SOME scope a credential can be issued would authorize the
+ * permission `key`: a catalog scope equal to it, or a wildcard sharing its
+ * prefix. {@link ungrantableScopes} issues a wildcard only when it covers a
+ * catalog key, so a key outside the catalog is nameable exactly when its first
+ * segment starts a catalog scope (`admin.reports.view`, under `admin.*`).
+ *
+ * Everything else (`shell.view`, the `superuser` marker, `audit.view`, a
+ * custom app key such as `crm.deals.write`) lies outside every credential's
+ * scopes, whatever the credential's owner holds. A bound measured against
+ * scopes alone refuses such a key to every bearer caller.
+ */
+export function isScopeNameable(key: string): boolean {
+  if (CATALOG_SET.has(key)) return true;
+  const dot = key.indexOf(".");
+  if (dot <= 0) return false;
+  const root = key.slice(0, dot + 1);
+  return API_SCOPE_CATALOG.some((scope) => scope.startsWith(root));
+}
+
 /** True when `scope` is an `account.*` self-service scope. */
 export function isAccountScope(scope: string): boolean {
   return ACCOUNT_SCOPE_SET.has(scope);

@@ -539,7 +539,8 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  * (group role detach, both member removals, and deleting the group itself —
  * the last added by F-11) run the AUTHZ-3 subset test against the removed set,
  * so a delegated admin who does not hold `superuser` can neither build nor
- * dismantle such a group.
+ * dismantle such a group. The two membership deletes, which since F-12 take
+ * the member's group memberships in that org with them, run it too.
  * Closing the gap properly means teaching BOTH predicates about
  * `app_group_roles` in one change; see docs/admin-manager.md §8.6.
  */
@@ -568,16 +569,16 @@ export interface SuperuserGrantRemoval {
    * because the active-membership join in {@link userIsGlobalSuperuser} is what
    * makes the assignment count.
    *
-   * Note the model this implies: for this shape the grant is SUSPENDED, not
-   * destroyed. `app_user_roles` references `app_users` and `app_organizations`
-   * but NOT `app_organization_memberships` (migration 0001), and there is no
-   * cascade, so deleting a membership leaves the role assignment behind
-   * invisibly — re-adding that user to the org silently restores whatever the
-   * assignment confers, including `superuser`. Pre-existing and not something
-   * this predicate can fix (the cascade would need a schema change, which is an
-   * operator gate here), but REVOKE-2 is defined on exactly that join, so it is
-   * worth being explicit that "the grant is gone" means "the grant no longer
-   * counts", not "the row is gone". See docs/admin-manager.md §8.3.
+   * What happens to the assignment row depends on the mutation, not on this
+   * predicate. `app_user_roles` references `app_users` and `app_organizations`
+   * but NOT `app_organization_memberships` (migration 0001) and nothing
+   * cascades. A status change away from `active` SUSPENDS the grant: the row
+   * stays and reactivating the membership brings it back. A membership DELETE
+   * destroys it: since F-12 both delete routes remove the (user, org)
+   * `app_user_roles` and group-membership rows in the same transaction, so
+   * re-adding the user no longer revives them. Those routes must call this
+   * BEFORE their grant deletes, while the assignments are still there to
+   * count. See docs/admin-manager.md §8.3.
    */
   memberships?: ReadonlyArray<{ appUserId: string; organizationId: string }>;
   /**

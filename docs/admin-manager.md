@@ -465,7 +465,7 @@ Manages the application user lifecycle and per-user administration.
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`) |
 | `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
-| `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `PATCH/DELETE …/memberships` are rank-gated and `DELETE …/app-roles` is conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2) |
+| `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `PATCH/DELETE …/memberships` are rank-gated, and `DELETE …/app-roles` and `DELETE …/memberships` are conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2). `DELETE …/memberships` also deletes the user's roles and group memberships in that org (F-12, §8.3) |
 | `POST /users/bulk` | per-action key | Batch actions; see §13, §19 |
 
 The Better Auth `role` (`user`/`admin`) is distinct from app roles in
@@ -508,7 +508,10 @@ their grant twin:
   (`conferrablePermissions` + `unheldPermissionKeys`) against the **removed**
   set. A non-superadmin may only revoke what they could confer; a bearer
   credential is bounded by its scopes and never takes the superadmin fast-path
-  (P1-1). **403** `forbidden`, exactly as the POST twin.
+  (P1-1). **403** `forbidden`, exactly as the POST twin. Since F-12 both
+  membership DELETEs run it too, against the roles and group memberships they
+  delete with the membership, less what the membership itself implies
+  (`shell.view`; §8.3).
 - **Rank** — both membership routes call `refuseOutrankingTarget`. The
   org-centric `…/organizations/[id]/members` route never resolves a target
   user, so it resolves the affected members itself and refuses the **whole**
@@ -631,7 +634,7 @@ Manages the tenant entity and its memberships.
 | `GET /organizations` | `admin.orgs.read` | List with member counts; an org admin sees only their own org row |
 | `POST /organizations` | `admin.orgs.create` | **Superadmin-only** (the tenant entity); `admin.organization.created` |
 | `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below) |
-| `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`). PATCH/DELETE are rank-gated (REVOKE-1, whole batch refused with 403) and may return 409 `last_superadmin` (REVOKE-2) |
+| `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`). PATCH/DELETE are rank-gated (REVOKE-1, whole batch refused with 403) and may return 409 `last_superadmin` (REVOKE-2). DELETE also deletes each member's roles and group memberships in this org and is conferral-gated on them (F-12, §8.3) |
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` (POST: + **superadmin**) | IdP org links and email-domain routing; creating one is a platform-wide claim, so POST also requires cross-org reach (F-04) and validates the provider, lowercases an `email` domain and refuses consumer mailbox domains; `admin.organization.provider_bound` / `.provider_bind_denied` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
 | `GET/PATCH /auth-settings/defaults` | `admin.orgs.read` / `.update` + **superadmin** | The platform-default sign-up policy (`organization_id IS NULL`); 403 for org admins; no DELETE (the baseline must always exist); `admin.platform.auth_policy_updated` |
@@ -702,18 +705,88 @@ search of `app_organization_memberships` joined to users and organizations,
 scoped to the actor's org. Membership **mutations** happen through the
 organization-members and user-memberships sub-routes (§8.2).
 
-**A membership delete does not delete the role assignments that hung off it.**
-`app_user_roles` references `app_users` and `app_organizations` but **not**
-`app_organization_memberships` (migration `0001-initial-schema.sql`), and there
-is no cascade. Removing a membership therefore leaves the user's assignments in
-place, invisibly: re-adding that user to the org silently restores everything
-those roles confer — including `superuser`, a grant nobody consciously
-re-conferred and one AUTHZ-3 would forbid an org admin from conferring directly.
-This is long-standing behaviour, not new, but REVOKE-2 is defined on exactly the
-membership→assignment join, so read its guarantee precisely: a revocation makes
-the grant stop **counting**, it does not delete the row. Removing a member's
-roles is a separate step (§8.1, the Roles tab). Closing it properly means a
-schema change and is tracked as an operator-gated follow-up.
+**A membership delete takes the member's grants in that org with it (F-12).**
+`DELETE /organizations/[id]/members` and `DELETE /users/[id]/memberships`
+delete, in the same transaction as the membership row, the user's
+`app_user_roles` rows for that org and their `app_group_memberships` in that
+org's groups. Neither table references `app_organization_memberships`
+(migration `0001-initial-schema.sql`) and nothing cascades, so before F-12 both
+routes left those rows behind, invisibly. Re-adding the user
+(`POST …/members`, or an invitation they accept) then revived everything they
+conferred, `superuser` included, with no conferral check and no audit row: a
+junior org admin who could never have conferred those roles got them back to
+the user by adding a member. Now a re-added or re-invited user starts with no
+roles and no groups in that org.
+
+- **Only that org.** Roles and groups in the user's other orgs are untouched.
+  There is no org-less assignment to worry about: `app_user_roles.organization_id`
+  is `NOT NULL`, even for a global role, so leaving one org never touches
+  authority held in another, including a `superuser` grant held elsewhere.
+- **The removal is a revocation, so it is guarded as one.** REVOKE-2 (last
+  superadmin) is read first, before anything is deleted. REVOKE-1 then runs the
+  AUTHZ-3 subset test on exactly the rows the transaction deleted: a
+  non-superadmin may only remove grants they could have conferred, and a bearer
+  credential is bounded by its scopes and never takes the superadmin fast-path
+  (P1-1). For an org admin at a browser this refuses nothing the rank guard
+  (§8.1) does not already refuse; it matters for a bearer key, which the rank
+  guard measures against its owner's authority rather than its scopes. A
+  refusal is **403** `forbidden` with an `admin.membership.revocation_denied`
+  row (`denied`, reason `unheld_permissions`, the refused keys in
+  `metadata.unheldPermissions`), and the transaction rolls back: the
+  membership and every grant stay. The org-centric route refuses the whole
+  batch.
+- **What the membership implies is not measured.** No scope can name
+  `shell.view`, and every seeded role confers it, so measured like any other
+  key it would stop every API key and OAuth token from removing any member
+  who holds a role. An active membership implies `shell.view` anyway, so it
+  goes with the membership, which the route's own permission authorizes. A
+  key outside every scope (a custom app key such as `crm.deals.write`, or
+  `audit.view`) is bounded for a bearer credential by what its owner could
+  confer: anything, for a superadmin owner, and otherwise only the keys the
+  owner holds. That is the rank guard's bound. A key a scope can name
+  (every `admin.*` key, including a custom one) and the `superuser` marker stay
+  bounded by the credential's scopes, so no bearer credential strips a
+  superuser grant. `isScopeNameable` (`src/lib/api-auth/scopes.ts`) and
+  `unheldOnMembershipRemoval` (`src/lib/admin/membership-grants.server.ts`)
+  hold the rule.
+- **Audit.** Each removed role writes `admin.user.role_revoked` and each group
+  the member leaves writes `admin.group.members_removed`, the same events the
+  single-row routes write, with `metadata.cause: "membership_removed"`. Each
+  membership's own row lists the ids it took in `revokedRoleIds` and
+  `removedGroupIds`: on the org-centric route that is the per-member
+  `admin.user.membership_removed` row (the batch's
+  `admin.organization.members_removed` row lists only `membershipIds`); on the
+  user-centric route it is the per-org `admin.organization.members_removed`
+  row, and the `admin.user.membership_removed` row lists every id removed.
+
+A membership **status** change is different: moving a membership away from
+`active` suspends its grants (they stop counting, and REVOKE-2 is read on it)
+but keeps the rows, and reactivating the membership brings them back. That is
+deliberate, and the rank guard on `PATCH` counts those grants.
+
+**Grants left behind before F-12.** Rows orphaned by a membership delete made
+before this change are still there and still revive on re-add. A superadmin can
+also assign a role in an org the user does not belong to yet, which takes effect
+when the membership is created. To review both, list the assignments and group
+memberships that have no membership row in their org, and delete the ones
+nobody meant to keep:
+
+```sql
+select ur.app_user_id, ur.organization_id, ur.role_id
+from app_user_roles ur
+where not exists (
+  select 1 from app_organization_memberships m
+  where m.app_user_id = ur.app_user_id and m.organization_id = ur.organization_id
+);
+
+select gm.app_user_id, g.organization_id, gm.group_id
+from app_group_memberships gm
+join app_groups g on g.id = gm.group_id
+where not exists (
+  select 1 from app_organization_memberships m
+  where m.app_user_id = gm.app_user_id and m.organization_id = g.organization_id
+);
+```
 
 ### 8.4 Roles
 
@@ -758,7 +831,9 @@ permissions directly, so they add zero new authority primitives.
 **Group revocation is bounded by the same guard as the grant (REVOKE-1).** The
 four routes that take a group-conferred role away —
 `DELETE /groups/[id]/roles`, `DELETE /groups/[id]/members`,
-`DELETE /users/[id]/groups` and `DELETE /groups/[id]` — run the same
+`DELETE /users/[id]/groups` and `DELETE /groups/[id]` — and the two membership
+deletes, which since F-12 remove the member from that org's groups (§8.3), run
+the same
 `conferrablePermissions` + `unheldPermissionKeys` subset test their POST twin
 does, measured against the permissions the removal destroys (403 `forbidden`; a
 bearer credential is bounded by its scopes and never takes the superadmin

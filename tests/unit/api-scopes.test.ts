@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAccountScope,
+  isScopeNameable,
   normalizeScopes,
   scopeMatches,
   scopesAuthorize,
@@ -88,5 +89,23 @@ describe("grantability (least privilege)", () => {
 
   it("rejects a wildcard whose prefix covers no known scope", () => {
     expect(ungrantableScopes(["admin.users.read"], ["zzz.nothing.*"])).toEqual(["zzz.nothing.*"]);
+  });
+});
+
+describe("scope-nameable permission keys", () => {
+  it("a catalog key, or a key under an issuable wildcard's prefix, can be named by a scope", () => {
+    expect(isScopeNameable("admin.users.read")).toBe(true);
+    expect(isScopeNameable("account.read")).toBe(true);
+    // A custom key under `admin.`: the issuable `admin.*` wildcard authorizes it.
+    expect(isScopeNameable("admin.reports.view")).toBe(true);
+    expect(scopesAuthorize(["admin.*"], "admin.reports.view")).toBe(true);
+  });
+
+  it("no scope can name the baseline, the superuser marker, audit.view or a custom app key", () => {
+    for (const key of ["shell.view", "superuser", "audit.view", "crm.deals.write", "admin"]) {
+      expect(isScopeNameable(key), key).toBe(false);
+    }
+    // No issuable wildcard reaches them either: the one that would is refused.
+    expect(ungrantableScopes(["crm.deals.write"], ["crm.*"])).toEqual(["crm.*"]);
   });
 });

@@ -499,13 +499,14 @@ i18n: run `en` + `uk`; title, buttons, dialog, empty and error text localize.
 User stories
 
 - ADMIN-USERS-DETAIL-MEMBERSHIPS-S1 — As an Org Admin, I want to see and manage a user's org memberships, so that I can correct their tenancy.
-  - Acceptance criteria: Given the Memberships tab with `admin.users.update`, when I remove a membership and confirm, then the row disappears after reload.
+  - Acceptance criteria: Given the Memberships tab with `admin.users.update`, when I remove a membership and confirm, then the row disappears after reload, and the user's roles and group memberships in that org are removed with it (F-12). Their roles and groups in other orgs stay.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `orgadmin@orga.local`; open a user's detail; click **Memberships**. | A grid of memberships renders with a status badge per row. |
     | 2 | Note the organization column links to the org detail page. | Each org slug is a link. |
     | 3 | Click **Remove** on a membership and confirm the destructive dialog. | The row is removed after reload. |
+    | 4 | As the Superadmin, open the same user's detail → **Roles** and **Groups**. (The Org Admin can no longer reach this user: they share no org now.) | Nothing from `org-a` is listed (F-12). Roles and groups the user holds in other orgs are still there. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - ADMIN-USERS-DETAIL-MEMBERSHIPS-S2 — As a Limited Admin, I want membership removal to be unavailable, so that I cannot change tenancy without the update permission.
@@ -521,6 +522,7 @@ Negative & edge cases
 1. Cross-tenant scoping → an org admin sees only ORG A memberships of the user; a shared user's other-org memberships do not appear.
 2. Inline error → a failed remove shows `role="alert"` text (`_user-memberships-panel.tsx:140`).
 3. Empty state → a user with no in-scope memberships shows the grid empty state.
+4. Grants the caller could not confer → a removal whose roles or groups in that org confer a permission the caller cannot confer is refused with **403** `forbidden` and an `admin.membership.revocation_denied` audit row, and nothing is removed (REVOKE-1, F-12). The panel shows the generic remove error.
 
 Accessibility: the grid header row is semantic; the remove confirm dialog traps focus and closes on Esc. No axe violations.
 i18n: run `en` + `uk`; column headers, the status badge, and the joined date localize.

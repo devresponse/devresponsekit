@@ -4,6 +4,7 @@ import { db } from "@/db/database";
 import type { AppDatabase } from "@/db/schema/app-schema";
 import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
 import type { UserAccessContext } from "@/lib/auth-status";
+import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 /**
  * Three-tier access control — the core security context
@@ -129,9 +130,18 @@ export function hasCrossOrgReach(
  * resulting credential to its bound org; this refuses the mint outright so the
  * caller gets an explicit 403 instead of a silently narrowed credential.
  *
- * Returns true when the OWNER outranks the ACTOR: the owner resolves as a
- * superadmin and the actor does not. A superadmin actor is exempt — they
+ * Returns true when the OWNER outranks the ACTOR: the owner ranks as a
+ * superuser and the actor does not. A superadmin actor is exempt — they
  * already hold every power, so they confer nothing they lack.
+ *
+ * `ownerIsSuperadmin` is the owner's RANK, and every caller must compute it
+ * with {@link userHoldsSuperuserGrant} (the api-keys POST ORs in the owner's
+ * resolved context too, for a group-conferred marker), never with
+ * {@link userIsGlobalSuperuser} alone. Since F-09 that is AUTHORITY, which a
+ * grant sleeping in a suspended org no longer satisfies; the grant wakes when
+ * the org is reactivated, and a credential minted or rotated for its holder in
+ * the meantime would then authenticate as a platform superuser.
+ * `tests/unit/credential-issuance-invariant.test.ts` scans every caller for it.
  *
  * P1-1 — the actor exemption requires `actorGrantedScopes === null` (a COOKIE
  * session), the same form this codebase writes everywhere else on a
@@ -325,14 +335,63 @@ export async function requiresSuperadminForSharedTarget(
  * orgs, always" a hard invariant for the PRINCIPAL: `getUserAccessContext`
  * calls it so the active-org selector can never downgrade a superadmin. The
  * active-membership join ensures a suspended/blocked membership cannot confer
- * the marker.
+ * the marker, and the active-ORGANIZATION join (F-09) does the same for a
+ * grant held in a tenant that is suspended, archived or still pending: it
+ * confers nothing until the org is reactivated. Suspending the org that holds
+ * the last such grant is refused by REVOKE-2 (`organizationIds` below), so the
+ * platform cannot be suspended into a lockout.
  *
  * MACHINE-2: "all orgs" describes the human, not every credential they own. A
  * request presenting an org-bound credential is capped to that org by
- * {@link hasCrossOrgReach}; this predicate is unchanged and still reports the
- * principal's true rank (the on-behalf mint bounds rely on exactly that).
+ * {@link hasCrossOrgReach}; this predicate is unchanged by it and still
+ * reports the principal's authority whatever credential they present.
+ *
+ * This answers "is this principal a superadmin NOW" (authority). The rank
+ * guards — `targetOutranksActor` and the on-behalf credential bound
+ * {@link ownerOutranksActor} — ask a different question; see
+ * {@link userHoldsSuperuserGrant}.
  */
 export async function userIsGlobalSuperuser(appUserId: string): Promise<boolean> {
+  const row = await db
+    .selectFrom("app_user_roles as ur")
+    .innerJoin("app_organization_memberships as m", (join) =>
+      join
+        .onRef("m.app_user_id", "=", "ur.app_user_id")
+        .onRef("m.organization_id", "=", "ur.organization_id")
+        .on("m.status", "=", "active"),
+    )
+    .innerJoin("app_organizations as o", (join) =>
+      join.onRef("o.id", "=", "m.organization_id").on("o.status", "=", ACTIVE_ORGANIZATION_STATUS),
+    )
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.id")
+    .where("ur.app_user_id", "=", appUserId)
+    .where("p.key", "=", SUPERADMIN_PERMISSION)
+    .limit(1)
+    .executeTakeFirst();
+  return row !== undefined;
+}
+
+/**
+ * Whether the user holds a direct `superuser` grant through an ACTIVE
+ * membership, WHATEVER the status of the organization it sits in — the RANK
+ * twin of {@link userIsGlobalSuperuser} (F-09).
+ *
+ * The two differ only while a grant's organization is not active, and they
+ * have to. Authority follows the org's status: a superuser whose grant lives
+ * in a suspended tenant is not a superadmin today. Rank must not follow it,
+ * because the grant comes back the moment an operator reactivates that tenant,
+ * without anyone re-conferring it. If the rank guards read authority instead,
+ * a delegated admin who shares another, still active tenant with that
+ * superuser could, while the grant sleeps, set their password
+ * (`targetOutranksActor`) or mint, rotate or register a credential that
+ * authenticates as them ({@link ownerOutranksActor}, on all four on-behalf
+ * issuance paths), and hold a platform-superadmin login or credential once it
+ * wakes. Before F-09 the grant counted for both, so reading it here keeps the
+ * rank guards exactly as strict as they were.
+ */
+export async function userHoldsSuperuserGrant(appUserId: string): Promise<boolean> {
   const row = await db
     .selectFrom("app_user_roles as ur")
     .innerJoin("app_organization_memberships as m", (join) =>
@@ -367,7 +426,9 @@ export async function userIsGlobalSuperuser(appUserId: string): Promise<boolean>
  * blocked, suspended or deactivated admin reaches nothing at all
  * (`decideSecureAccess`), whatever their role rows still say. Without that
  * filter a suspended superadmin would keep an unconfined borrowed session
- * until it expired.
+ * until it expired. The active-ORGANIZATION join is its sibling's (F-09): an
+ * admin whose only superuser grant sits in a suspended tenant is not a
+ * superadmin as themselves, so a session they borrow is confined too.
  */
 export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string): Promise<boolean> {
   const row = await db
@@ -378,6 +439,9 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
         .onRef("m.app_user_id", "=", "ur.app_user_id")
         .onRef("m.organization_id", "=", "ur.organization_id")
         .on("m.status", "=", "active"),
+    )
+    .innerJoin("app_organizations as o", (join) =>
+      join.onRef("o.id", "=", "m.organization_id").on("o.status", "=", ACTIVE_ORGANIZATION_STATUS),
     )
     .innerJoin("app_role_permissions as rp", "rp.role_id", "ur.role_id")
     .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
@@ -396,7 +460,8 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  * {@link userIsGlobalSuperuser} makes global superuser authority a function of
  * three ordinary, individually-revocable rows: an `app_user_roles` assignment,
  * an `app_role_permissions` link carrying {@link SUPERADMIN_PERMISSION}, and an
- * ACTIVE `app_organization_memberships` row pairing the two. The seeded
+ * ACTIVE `app_organization_memberships` row pairing the two — plus, since
+ * F-09, the status of the organization that pairing sits in. The seeded
  * `superuser` role is ORG-SCOPED to the default organization, so every one of
  * those rows is reachable by a delegated admin OF THAT ORG — someone holding
  * `admin.roles.assign`, `admin.roles.update`, `admin.users.update` or
@@ -435,6 +500,10 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  *   6. The soft-delete cascade (review #444) — `DELETE /users/[id]` and the
  *      `soft_delete` bulk action, both of which blanket-block every membership
  *      the target holds.
+ *   7. `PATCH /organizations/[id]` moving the org away from `active` (F-09) —
+ *      since a grant counts only in an active org, suspending, archiving or
+ *      un-activating the tenant that holds the last grants (by default the
+ *      seeded default org) would otherwise lock the platform out in one save.
  *
  * NOT enforced on, stated so the wording above is not read as wider than it
  * is: `ban` / `unban` (see the note on `performBan` — they change no row this
@@ -509,11 +578,21 @@ export interface SuperuserGrantRemoval {
    * counts", not "the row is gone". See docs/admin-manager.md §8.3.
    */
   memberships?: ReadonlyArray<{ appUserId: string; organizationId: string }>;
+  /**
+   * Organizations that will stop being ACTIVE (F-09) — `PATCH
+   * /organizations/[id]` to `pending`, `suspended` or `archived`. Every grant
+   * held in that org dies, whoever holds it, because
+   * {@link userIsGlobalSuperuser} joins on the org's status. Like the
+   * membership shape, the grant is suspended rather than destroyed:
+   * reactivating the org brings it back.
+   */
+  organizationIds?: ReadonlyArray<string>;
 }
 
 /** Pure: would `removal` destroy this particular grant? */
 function grantIsRemoved(grant: SuperuserGrant, removal: SuperuserGrantRemoval): boolean {
   if (removal.roleIds?.includes(grant.roleId)) return true;
+  if (removal.organizationIds?.includes(grant.organizationId)) return true;
   if (
     removal.assignments?.some(
       (a) =>
@@ -579,6 +658,13 @@ export function stripsLastGlobalSuperuser(
  * the row, and the second caller is correctly refused. `app_permissions` is a
  * static catalog and is deliberately left out.
  *
+ * F-09 made the ORGANIZATION'S status part of the join (it must match
+ * {@link userIsGlobalSuperuser} exactly), and `PATCH /organizations/[id]` is a
+ * guarded path that writes `app_organizations`. By the same argument that
+ * relation is locked too: two superadmins suspending two different tenants,
+ * each holding one of the last two grants, would otherwise each see the other
+ * org as still active.
+ *
  * Pass the enclosing transaction as `executor`; calling this on the shared
  * pool takes and releases the lock immediately and protects nothing.
  *
@@ -601,6 +687,11 @@ export async function activeGlobalSuperuserGrants(
         )
         .on("app_organization_memberships.status", "=", "active"),
     )
+    .innerJoin("app_organizations", (join) =>
+      join
+        .onRef("app_organizations.id", "=", "app_organization_memberships.organization_id")
+        .on("app_organizations.status", "=", ACTIVE_ORGANIZATION_STATUS),
+    )
     .innerJoin("app_role_permissions", "app_role_permissions.role_id", "app_user_roles.role_id")
     .innerJoin("app_permissions", "app_permissions.id", "app_role_permissions.permission_id")
     .where("app_permissions.key", "=", SUPERADMIN_PERMISSION)
@@ -609,7 +700,12 @@ export async function activeGlobalSuperuserGrants(
       "app_user_roles.organization_id as organization_id",
       "app_user_roles.role_id as role_id",
     ])
-    .forUpdate(["app_user_roles", "app_organization_memberships", "app_role_permissions"])
+    .forUpdate([
+      "app_user_roles",
+      "app_organization_memberships",
+      "app_organizations",
+      "app_role_permissions",
+    ])
     .execute();
   return rows.map((row) => ({
     appUserId: row.app_user_id,

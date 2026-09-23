@@ -42,6 +42,26 @@ describe("OrganizationSettingsForm", () => {
     expect(screen.getByRole("textbox", { name: "Slug" })).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("F-09: a 409 last_superadmin (suspending the org holding the last superuser grant) is a root error, not a slug error", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "last_superadmin", message: "errors.last_superadmin" }),
+    });
+    render();
+    await user.type(screen.getByRole("textbox", { name: "Name" }), " Corp");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This is the last platform superadmin",
+    );
+    expect(screen.getByRole("textbox", { name: "Slug" })).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
+
   it("PATCHes and shows the saved confirmation", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) });

@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
-import { updateOrganizationSchema } from "@/lib/validation/organizations";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -12,8 +11,20 @@ import {
 } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { canAccessOrg, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
+import {
+  canAccessOrg,
+  hasCrossOrgReach,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_EVENT,
+  LAST_SUPERADMIN_REASON,
+  LAST_SUPERADMIN_STATUS,
+  wouldStripLastGlobalSuperuser,
+} from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import {
+  ACTIVE_ORGANIZATION_STATUS,
+  updateOrganizationSchema,
+} from "@/lib/validation/organizations";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +72,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
  *   - name: string
  *   - status: "active" | "pending" | "suspended" | "archived"
  *   - isDefault: boolean
+ *
+ * Status is ENFORCED (F-09): only an `active` org confers membership, so any
+ * other status cuts off its members, org admins, bound credentials, SSO
+ * launches and invitations until it is set back to `active`. A move away from
+ * `active` that would suspend the platform's last superuser grant is refused
+ * with 409 `last_superadmin` (REVOKE-2).
  */
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -121,25 +138,57 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (input.isDefault !== undefined) updates.is_default = input.isDefault;
   updates.updated_at = new Date();
 
+  // F-09 + REVOKE-2: organization status is enforced now — a membership, and
+  // so a `superuser` grant, counts only in an ACTIVE org. Moving an org away
+  // from `active` therefore suspends every grant held there, and if those are
+  // the platform's last ones (by default: the seeded superuser in the default
+  // org) one save would leave nobody able to reactivate anything. The check
+  // shares the writing transaction so its row locks cover the update
+  // (see `activeGlobalSuperuserGrants`). Setting `active`, or leaving the
+  // status alone, can only ever ADD a grant and is never gated.
+  const leavesActive = input.status !== undefined && input.status !== ACTIVE_ORGANIZATION_STATUS;
+
+  let outcome: "updated" | "last_superadmin";
   try {
-    if (input.isDefault === true) {
-      await db.transaction().execute(async (trx) => {
+    outcome = await db.transaction().execute(async (trx) => {
+      if (leavesActive && (await wouldStripLastGlobalSuperuser({ organizationIds: [id] }, trx))) {
+        return "last_superadmin" as const;
+      }
+      if (input.isDefault === true) {
         await trx
           .updateTable("app_organizations")
           .set({ is_default: false })
           .where("is_default", "=", true)
           .execute();
-        await trx.updateTable("app_organizations").set(updates).where("id", "=", id).execute();
-      });
-    } else {
-      await db.updateTable("app_organizations").set(updates).where("id", "=", id).execute();
-    }
+      }
+      await trx.updateTable("app_organizations").set(updates).where("id", "=", id).execute();
+      return "updated" as const;
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     if (/duplicate key|unique constraint/i.test(message)) {
       return adminErrorResponse("slug_taken", 409, request);
     }
     throw err;
+  }
+
+  if (outcome === "last_superadmin") {
+    await auditOrgAction(LAST_SUPERADMIN_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: id,
+      requestId: guard.requestId,
+      reason: LAST_SUPERADMIN_REASON,
+      metadata: {
+        action: "organization_status_update",
+        organizationId: id,
+        slug: existing.slug,
+        status: input.status,
+      },
+    });
+    return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+      requestId: guard.requestId,
+    });
   }
 
   await auditOrgAction("admin.organization.updated", "success", {

@@ -8,7 +8,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import {
   canAccessOrg,
   ownerOutranksActor,
-  userIsGlobalSuperuser,
+  userHoldsSuperuserGrant,
 } from "@/lib/admin/access-scope.server";
 import { rotateApiKey } from "@/lib/api-auth/api-keys.server";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
@@ -86,13 +86,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // `admin.apikeys.manage` could hand themselves a superuser co-member's
   // fully-scoped key without holding a single one of those scopes.
   //
-  // `userIsGlobalSuperuser` (not `isSuperadmin` on a resolved context) because
-  // all we hold here is the owner's `app_user_id`, and it is the canonical
-  // "is this principal a superadmin in ANY org" determination — the rank check
-  // must not depend on which org happens to resolve for them.
+  // `userHoldsSuperuserGrant` (not `isSuperadmin` on a resolved context)
+  // because all we hold here is the owner's `app_user_id`, and the rank check
+  // must not depend on which org happens to resolve for them. It is the RANK
+  // predicate, not `userIsGlobalSuperuser` (AUTHORITY), and deliberately so
+  // (F-09): a grant sleeping in a suspended org confers nothing today, but it
+  // wakes when that org is reactivated, and the key reissued now would then
+  // authenticate as a platform superuser inside this org.
   if (
     ownerOutranksActor(
-      await userIsGlobalSuperuser(existing.app_user_id),
+      await userHoldsSuperuserGrant(existing.app_user_id),
       guard.access,
       guard.grantedScopes,
     )

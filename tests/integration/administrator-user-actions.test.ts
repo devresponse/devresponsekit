@@ -36,6 +36,8 @@ const statusChangeMock = vi.fn();
 // REVOKE-2 last-superadmin predicate for the soft-delete cascade (review #444).
 // Default false = the platform has other superadmins.
 const cascadeStripsLastMock = vi.fn();
+// F-09 rank predicate (`userHoldsSuperuserGrant`). Default false.
+const superuserGrantMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -46,6 +48,10 @@ vi.mock("@/lib/admin/access-scope.server", async () => {
     ...actual,
     requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
     membershipCascadeStripsLastGlobalSuperuser: (...a: unknown[]) => cascadeStripsLastMock(...a),
+    // F-09: the rank guard reads the target's superuser GRANT (awake or asleep
+    // in a suspended org) for every non-superadmin actor. Default false = the
+    // target holds none; rank then comes from the subset test below.
+    userHoldsSuperuserGrant: (...a: unknown[]) => superuserGrantMock(...a),
   };
 });
 vi.mock("@/lib/auth-status", async () => {
@@ -172,6 +178,8 @@ beforeEach(() => {
   statusChangeMock.mockResolvedValue({ ok: true, status: "active" });
   cascadeStripsLastMock.mockReset();
   cascadeStripsLastMock.mockResolvedValue(false);
+  superuserGrantMock.mockReset();
+  superuserGrantMock.mockResolvedValue(false);
 });
 afterEach(() => vi.resetModules());
 
@@ -922,6 +930,29 @@ describe.each(guardedRoutes)("$name — target-outranks-actor guard (review #7)"
     // `{ organizationId }` argument), never via the request's active_org
     // cookie.
     expect(accessGetter).toHaveBeenCalledWith("ba-target", { organizationId: "o-1" });
+  });
+
+  it("F-09: org admin vs a superadmin whose grant is ASLEEP in a suspended org → 403, no side effect", async () => {
+    // While the tenant holding the target's `superuser` grant is suspended, the
+    // target resolves in the actor's org as a plain member — the subset test
+    // alone would let this through, and reactivating the tenant would then
+    // hand the actor (say, via a password they set) a platform superadmin.
+    superuserGrantMock.mockResolvedValue(true);
+    accessGetter.mockImplementation((id: string) =>
+      id === ACTOR_BA
+        ? { ...grantedAccess(route.perm), permissions: [route.perm, "shell.view"] }
+        : { ...grantedAccess(route.perm), permissions: ["shell.view"] },
+    );
+    const res = await route.invoke();
+    expect(res.status).toBe(403);
+    expect(route.effect()).not.toHaveBeenCalled();
+    expect(superuserGrantMock).toHaveBeenCalledWith(TARGET_ID);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.action_denied",
+        reason: "target_outranks_actor",
+      }),
+    );
   });
 
   it("org admin vs a more-privileged peer (strict superset) → 403", async () => {

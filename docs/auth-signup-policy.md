@@ -70,6 +70,8 @@ The policy consulted is the policy of the organization the account will land in,
 
 An organization auto-created by a first OAuth sign-in has no policy row yet, so the platform default governs its first member.
 
+**A sign-up routed into an organization that is not `active` is not re-routed (F-09).** Steps 3–5 (provider metadata, an email-domain binding, `default`) do not look at the target organization's status, so a new account whose domain maps to a suspended tenant still lands there. Its membership simply does not count until an operator reactivates the tenant: the account resolves to no organization and sees the pending-approval screen. That is deliberate. Falling through to `default` instead would let a suspended tenant's people sign up into a different tenant. Steps 1 and 2 do skip a non-active organization: its invitations are dead (§6), and the scoped-sign-in hint only ever matches active organizations (§7).
+
 For email/password sign-ups the verification decision is made by the `user.create.before` hook with steps 2–5 (an invitation is handled by the hook itself: presenting a live token for the address is mailbox proof, so it pre-verifies regardless of policy); provisioning then applies the full order for placement and activation.
 
 ## 5. Activation re-evaluation at sign-in
@@ -100,6 +102,8 @@ An administrator invites an email address into an organization (optionally with 
 - A pending-approval account accepting an invitation is activated; `blocked` / `suspended` / `deactivated` accounts are refused — explicit administrator denials always win.
 
 Unknown, expired, revoked, and already-used tokens all get one generic "invalid or expired" answer, so nothing about organizations or invitees leaks to token guessers. Tokens are ~190-bit CSPRNG secrets stored only as SHA-256 hashes — the plaintext exists solely inside the email.
+
+**Invitations into an organization that is not `active` are dead (F-09).** While the inviting organization is `pending`, `suspended` or `archived`, its invitations get the same generic "invalid or expired" answer, on every path (the `/invite` page, the explicit accept endpoint, and a token riding a sign-up, which then also stops counting as mailbox proof). The acceptance re-checks the organization inside its single-use flip, so a suspension that lands between opening the link and accepting it still wins. Creating or resending an invitation for such an organization is refused with **409 `organization_not_active`**; revoking stays available. The rows are left `pending`, so once the organization is reactivated an unexpired link works again. See [Administrator console §8.2](./admin-manager.md#82-organizations).
 
 ## 7. Organization-scoped sign-in (`/sign-in/<org>`, `?org=<slug>`)
 

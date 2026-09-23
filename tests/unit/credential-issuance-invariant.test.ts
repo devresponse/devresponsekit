@@ -220,6 +220,37 @@ describe("F-01: the self-service key surface derives its tenant from tenantConfi
   });
 });
 
+describe("F-09: the on-behalf owner-reach bound reads RANK, not authority", () => {
+  // `userIsGlobalSuperuser` is AUTHORITY: since F-09 a grant held in a
+  // suspended org no longer satisfies it. A credential minted or rotated for
+  // that principal now would authenticate as a platform superuser the moment
+  // the org is reactivated, so the mint-time bound must read RANK
+  // (`userHoldsSuperuserGrant`), the same predicate `targetOutranksActor` uses.
+  const bounded = apiFiles.flatMap(({ file, source }) =>
+    handlers(source)
+      .filter((h) => /\bownerOutranksActor\s*\(/.test(h.body))
+      .map((h) => ({ at: `${rel(file)} ${h.method}`, body: h.body })),
+  );
+
+  it("discovers the bounded handlers (mint, rotate, OAuth create, rotate-secret)", () => {
+    expect(bounded.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("each one reads the owner's rank with userHoldsSuperuserGrant", () => {
+    const missing = bounded
+      .filter((h) => !/\buserHoldsSuperuserGrant\s*\(/.test(h.body))
+      .map((h) => h.at);
+    expect(missing).toEqual([]);
+  });
+
+  it("none of them reads the owner's rank from userIsGlobalSuperuser", () => {
+    const authority = bounded
+      .filter((h) => /\buserIsGlobalSuperuser\s*\(/.test(h.body))
+      .map((h) => h.at);
+    expect(authority).toEqual([]);
+  });
+});
+
 describe("the scanner itself", () => {
   // A module that breaks the rule in every way the scan must catch. Each
   // expectation below FAILS if comment stripping is removed or if a handler's

@@ -63,8 +63,11 @@ describe("activeGlobalSuperuserGrants — compiled SQL", () => {
 
     expect(captured).toHaveLength(1);
     const sql = captured[0]!;
+    // `app_organizations` joined the list with F-09: the grant join now reads
+    // the ORGANIZATION's status, and `PATCH /organizations/[id]` is a guarded
+    // path that writes it.
     expect(sql).toContain(
-      'for update of "app_user_roles", "app_organization_memberships", "app_role_permissions"',
+      'for update of "app_user_roles", "app_organization_memberships", "app_organizations", "app_role_permissions"',
     );
     // The assignment table alone is exactly the shape that does NOT deliver the
     // guarantee — pin that it is not what we emit.
@@ -80,5 +83,47 @@ describe("activeGlobalSuperuserGrants — compiled SQL", () => {
     expect(sql).toContain('"app_organization_memberships"."status" =');
     expect(sql).toContain('inner join "app_role_permissions"');
     expect(sql).toContain('inner join "app_permissions"');
+  });
+
+  it("F-09: counts only grants held in an ACTIVE organization — the same set userIsGlobalSuperuser reports", async () => {
+    await mod.activeGlobalSuperuserGrants();
+    const sql = captured[0]!;
+    expect(sql).toContain(
+      'inner join "app_organizations" on "app_organizations"."id" = "app_organization_memberships"."organization_id" and "app_organizations"."status" = $',
+    );
+  });
+});
+
+/**
+ * F-09 — superuser AUTHORITY follows the organization's status; superuser RANK
+ * does not. Compiled through the real query compiler so the predicate is seen
+ * where it matters (the join condition), not on a mocked builder.
+ */
+describe("superuser predicates — organization status (F-09)", () => {
+  const ORG_ACTIVE_JOIN =
+    'inner join "app_organizations" as "o" on "o"."id" = "m"."organization_id" and "o"."status" = $';
+
+  it("userIsGlobalSuperuser requires the grant's organization to be ACTIVE", async () => {
+    await mod.userIsGlobalSuperuser("u-1");
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toContain(ORG_ACTIVE_JOIN);
+  });
+
+  it("betterAuthUserIsGlobalSuperuser (the impersonation-reach probe) requires it too", async () => {
+    await mod.betterAuthUserIsGlobalSuperuser("ba-1");
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toContain(ORG_ACTIVE_JOIN);
+  });
+
+  it("userHoldsSuperuserGrant (the RANK twin) deliberately does NOT read the org's status", async () => {
+    await mod.userHoldsSuperuserGrant("u-1");
+    expect(captured).toHaveLength(1);
+    const sql = captured[0]!;
+    // Same membership join as its authority twin…
+    expect(sql).toContain('inner join "app_organization_memberships" as "m"');
+    expect(sql).toContain('"m"."status" = $');
+    // …and no organization join at all: a grant asleep in a suspended tenant
+    // still outranks a delegated admin.
+    expect(sql).not.toContain('"app_organizations"');
   });
 });

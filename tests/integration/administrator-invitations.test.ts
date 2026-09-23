@@ -89,7 +89,9 @@ const INVITATION_ID = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
 const ROLE_ID = "c3d4e5f6-a7b8-4012-8def-123456789012";
 const BASE = `http://test.local/api/administrator/organizations/${ORG_ID}/invitations`;
 
-const ORG_ROW = { id: ORG_ID, slug: "test-org", name: "Test Org" };
+const ORG_ROW = { id: ORG_ID, slug: "test-org", name: "Test Org", status: "active" };
+// F-09: the same org, suspended by a superadmin.
+const SUSPENDED_ORG_ROW = { ...ORG_ROW, status: "suspended" };
 
 function getReq(url: string): NextRequest {
   return { nextUrl: new URL(url), headers: new Headers() } as unknown as NextRequest;
@@ -316,6 +318,50 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
         organizationId: ORG_ID,
       }),
     );
+  });
+});
+
+describe("F-09 — no invitations into an organization that is not active", () => {
+  it.each(["suspended", "archived", "pending"])(
+    "POST: 409 organization_not_active for a %s org — nothing created, nothing mailed",
+    async (status) => {
+      // A superadmin can still open a suspended org (loading is status-agnostic
+      // so it can be inspected and reactivated), but a link into it would be
+      // dead on arrival: `findValidInvitationByToken` refuses it.
+      accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+      selectFirst.mockResolvedValueOnce({ ...ORG_ROW, status });
+      const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({
+        error: "organization_not_active",
+        message: "errors.organization_not_active",
+      });
+      expect(createInvitationMock).not.toHaveBeenCalled();
+      expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+      expect(auditMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: "admin.organization.invitation_created" }),
+      );
+    },
+  );
+
+  it("resend: 409 organization_not_active — the invitee's current link is NOT rotated away", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    selectFirst
+      .mockResolvedValueOnce(SUSPENDED_ORG_ROW)
+      .mockResolvedValueOnce({ id: INVITATION_ID, email: "ada@example.com" });
+    const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toBe("organization_not_active");
+    expect(regenerateMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("revoke still works in a suspended org (cleanup is always allowed)", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(SUSPENDED_ORG_ROW);
+    const res = await revokeDELETE(getReq(`${BASE}/${INVITATION_ID}`), itemCtx());
+    expect(res.status).toBe(200);
+    expect(revokeInvitationMock).toHaveBeenCalled();
   });
 });
 

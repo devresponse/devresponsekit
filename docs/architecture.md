@@ -143,6 +143,8 @@ The boundary is enforced by four primitives in `src/lib/admin/access-scope.serve
 
 **Permission resolution** happens in `getUserAccessContext()` (`src/lib/auth-status.ts`): a user's effective permissions for the **active organization** are the **union of directly assigned roles and roles conferred through groups** (ADR-0002), expanded with the full Super Admin set if the `superuser` marker is present in any active membership. The result is memoized per request.
 
+**Only an `active` organization counts (F-09).** Every membership lookup in that resolver, and the helpers built on the same question (`userIsGlobalSuperuser`, the org switcher, the impersonation reach, the invitation lookup), joins `app_organizations` and requires `status = 'active'` (`ACTIVE_ORGANIZATION_STATUS`). A membership in a `pending`, `suspended` or `archived` org therefore resolves as no membership at all, and the secure shell, both admin and v1 guards, the token endpoint, bound API keys and OAuth clients, SSO launch and invitations all inherit that from the one resolver. A `superuser` grant held only in such an org confers nothing. The rank guards are the deliberate exception (`userHoldsSuperuserGrant`, read by `targetOutranksActor` and by the on-behalf credential bound `ownerOutranksActor`), because the grant returns on reactivation. Superadmins can still open and reactivate a non-active org, and suspending the tenant that holds the platform's last superuser grant is refused (REVOKE-2). See [Administrator console §8.2](./admin-manager.md#82-organizations).
+
 ### Request authorization flow
 
 ```mermaid
@@ -266,7 +268,7 @@ Every tenant-scoped resource is filtered by the column that carries its tenant �
 
 - An org admin **creating** a tenant resource has its `organization_id` **forced** to their org.
 - `[id]` mutations **re-fetch the row, run `canAccessOrg`, and 404 on miss _before_ mutating** — so an out-of-scope write is indistinguishable from a missing row and is never audited as a real action.
-- An org admin with **no active membership** resolves to `null` scope and is **denied** — provisioning order matters.
+- An org admin with **no active membership** resolves to `null` scope and is **denied** — provisioning order matters. A membership in an organization whose own status is not `active` does not count either (F-09).
 
 #### ADR-0002 — groups bundle roles, never permissions
 

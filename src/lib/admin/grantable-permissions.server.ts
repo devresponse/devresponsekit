@@ -157,6 +157,12 @@ export async function permissionKeysHeldInAnyOrg(appUserId: string): Promise<str
   // Both halves require an ACTIVE membership in the org that confers the role,
   // mirroring `permissionKeysHeldInOrg`: a role left attached in a tenant the
   // user is suspended from grants nothing there and must not count here.
+  //
+  // The ORGANIZATION'S status is deliberately NOT filtered (F-09), unlike every
+  // access-resolving query. This is a rank test, and the stricter one: a
+  // tenant suspended now can be reactivated while the borrowed session is
+  // still alive, and its grants (a bare `superuser` marker included) come back
+  // with it. So they keep counting here.
   const directPerms = db
     .selectFrom("app_user_roles as ur")
     .innerJoin("app_organization_memberships as m", (join) =>
@@ -216,7 +222,10 @@ export async function permissionKeysHeldInAnyOrg(appUserId: string): Promise<str
  * The membership seed carries the `status = 'active'` filter (mirroring
  * {@link permissionKeysHeldInOrg}), so the permission statements below need no
  * membership join of their own: a role left attached in a tenant the user is
- * suspended from lands on an org that is not in the map and is dropped.
+ * suspended from lands on an org that is not in the map and is dropped. The
+ * ORGANIZATION'S status is not filtered, for the reason given on
+ * {@link permissionKeysHeldInAnyOrg} (F-09): a shared tenant that is
+ * suspended today is still compared, since it can be reactivated mid-session.
  *
  * Does NOT expand the `superuser` marker into the full catalog — same contract
  * as its two siblings, and for the same reason: callers short-circuit on

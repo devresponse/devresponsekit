@@ -5,9 +5,9 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
   canAccessUser,
-  isOrgBound,
+  hasCrossOrgReach,
   isSuperadmin,
-  userIsGlobalSuperuser,
+  userHoldsSuperuserGrant,
   type AccessLike,
 } from "@/lib/admin/access-scope.server";
 import { getUserAccessContext } from "@/lib/auth-status";
@@ -133,8 +133,22 @@ type ActorAccess = AccessLike;
  * The check is deliberately ADDITIVE — it only ever adds a refusal. An
  * org-bound NON-superuser credential still falls through to the subset test,
  * which is the stricter rule for it (a more-privileged peer who is not a global
- * superuser must still outrank it). The extra `userIsGlobalSuperuser` round-trip
- * is paid only by bearer callers; cookie sessions skip it entirely.
+ * superuser must still outrank it).
+ *
+ * F-09 — THE SAME RANK CHECK NOW RUNS FOR EVERY NON-SUPERADMIN ACTOR, and it
+ * reads {@link userHoldsSuperuserGrant} (a grant through an active membership,
+ * whatever the ORGANIZATION'S status) rather than `userIsGlobalSuperuser`.
+ * Organization status now gates superuser AUTHORITY: a grant held in a
+ * suspended tenant confers nothing, so the target's context in the actor's org
+ * is no longer expanded and the subset test below stops seeing it. The grant
+ * is only asleep, though. It wakes when the tenant is reactivated, so a
+ * delegated admin who shares another active tenant with that superuser could
+ * otherwise set their password today and sign in as a platform superadmin
+ * tomorrow. For a target whose grant is awake the line changes nothing, since
+ * the expanded subset test already refused them. It costs every non-superadmin
+ * actor one indexed lookup; a superadmin at a browser still skips it. The
+ * sibling mint-time bound (`ownerOutranksActor`, on the four on-behalf
+ * credential paths) reads the same predicate for the same reason.
  *
  * The `isSuperadmin` exemption itself stays unnarrowed for the ordinary case:
  * the target set was already produced by `resolveTargetUser` → `canAccessUser`,
@@ -149,7 +163,12 @@ export async function targetOutranksActor(
   access: ActorAccess,
   target: Pick<ResolvedTargetUser, "betterAuthUserId" | "appUserId">,
 ): Promise<boolean> {
-  if (isOrgBound(access) && (await userIsGlobalSuperuser(target.appUserId))) return true;
+  // A superadmin at a browser outranks everyone (they hold every power
+  // already) and skips every lookup.
+  if (hasCrossOrgReach(access)) return false;
+  // MACHINE-2 (org-bound credentials) and F-09 (dormant grants): nobody else
+  // may act on a principal holding a superuser grant, awake or asleep.
+  if (await userHoldsSuperuserGrant(target.appUserId)) return true;
   if (isSuperadmin(access)) return false;
   if (!access.organizationId) return true;
   const targetAccess = await getUserAccessContext(target.betterAuthUserId, {

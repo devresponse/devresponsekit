@@ -10,7 +10,7 @@ import {
   ownerOutranksActor,
   resolveOrgScope,
   userHasMembershipInOrg,
-  userIsGlobalSuperuser,
+  userHoldsSuperuserGrant,
 } from "@/lib/admin/access-scope.server";
 import { offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -159,9 +159,14 @@ export async function POST(request: NextRequest) {
   // Refused rather than silently narrowed: layer 1 caps the resulting tokens to
   // the client's bound org, so a caller who got a 201 here would receive a
   // credential that quietly does less than they asked for.
+  //
+  // The principal's rank is read with `userHoldsSuperuserGrant`, not
+  // `userIsGlobalSuperuser` (F-09): a grant sleeping in a suspended org confers
+  // no authority today, but it wakes when that org is reactivated, and the
+  // client registered now would then authenticate as a platform superuser.
   if (
     ownerOutranksActor(
-      await userIsGlobalSuperuser(parsed.data.serviceAppUserId),
+      await userHoldsSuperuserGrant(parsed.data.serviceAppUserId),
       grant.caller.access,
       grant.caller.grantedScopes,
     )

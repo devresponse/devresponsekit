@@ -10,6 +10,7 @@ import {
   SUPERUSER_PERMISSIONS,
 } from "@/lib/admin/permissions";
 import { APP_USER_STATUS_VALUES, MEMBERSHIP_STATUS_VALUES } from "@/lib/status-values";
+import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 /** Possible application-level user statuses (mirrored by a DB CHECK, review #217). */
 export type AppUserStatus = (typeof APP_USER_STATUS_VALUES)[number];
@@ -196,26 +197,47 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
     };
   }
 
+  // F-09 — a membership COUNTS only while its organization is `active`. Every
+  // lookup below starts from this one builder, so an org that is `pending`,
+  // `suspended` or `archived` resolves exactly as if the membership row did not
+  // exist: no org, no permissions, and `decideSecureAccess` refuses the caller
+  // (pending_approval, the same answer as for a user with no membership). That
+  // single rule is what the secure shell, the admin and v1 guards, the token
+  // endpoint, SSO launch and every bound credential inherit. Before it, the
+  // status an operator set on the Settings tab was a badge and nothing more:
+  // a suspended tenant's members, org admins, API keys and SSO launches all
+  // kept working.
+  //
+  // Filtering in SQL (rather than reading the org's status back and deciding
+  // here) keeps the cookie lookup and the fallback on ONE predicate, so a
+  // stale `active_org` cookie naming a suspended org falls through to the
+  // user's earliest membership in an org that still counts — a member of both
+  // a suspended and an active tenant keeps working in the active one.
+  const countingMemberships = () =>
+    db
+      .selectFrom("app_organization_memberships as m")
+      .innerJoin("app_organizations as o", "o.id", "m.organization_id")
+      .select(["m.organization_id as organization_id", "m.status as status"])
+      .where("m.app_user_id", "=", user.id)
+      .where("o.status", "=", ACTIVE_ORGANIZATION_STATUS);
+
   let membership;
   if (boundOrg !== undefined) {
     // Bearer-credential path: act in the org the credential is bound to, and
     // NEVER read the active_org cookie (MACHINE-1). A bound org the principal
     // no longer holds an active membership in resolves to no membership, so
     // the access context carries no permissions and the guard denies — the
-    // credential fails closed rather than silently acting elsewhere.
+    // credential fails closed rather than silently acting elsewhere. The same
+    // holds while the bound org is not active (F-09): a key or token minted
+    // for a suspended tenant stops authenticating, and works again only when
+    // the tenant is reactivated. An ORG-LESS credential takes the earliest
+    // membership that still counts, i.e. a suspended org is skipped exactly as
+    // a deleted membership would be.
     membership = boundOrg.organizationId
-      ? await db
-          .selectFrom("app_organization_memberships")
-          .select(["organization_id", "status"])
-          .where("app_user_id", "=", user.id)
-          .where("organization_id", "=", boundOrg.organizationId)
+      ? await countingMemberships()
+          .where("m.organization_id", "=", boundOrg.organizationId)
           .executeTakeFirst()
-      : await db
-          .selectFrom("app_organization_memberships")
-          .select(["organization_id", "status"])
-          .where("app_user_id", "=", user.id)
-          .orderBy("created_at", "asc")
-          .executeTakeFirst();
+      : await countingMemberships().orderBy("m.created_at", "asc").executeTakeFirst();
   } else {
     // Cookie/session path. Multi-org: the active org is selected by a cookie.
     // Prefer the membership it names; if the cookie is unset, stale, or names
@@ -257,21 +279,21 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
       // One builder shape for both lookups so the confinement can never be
       // applied to the cookie hit but forgotten on the fallback — which would
       // reopen the pivot for any target whose EARLIEST membership is outside
-      // the impersonator's tenancy.
+      // the impersonator's tenancy. The F-09 organization-status predicate
+      // rides the same builder for the same reason.
       const scopedMemberships = () => {
-        const base = db
-          .selectFrom("app_organization_memberships")
-          .select(["organization_id", "status"])
-          .where("app_user_id", "=", user.id);
-        return confinedOrgIds === null ? base : base.where("organization_id", "in", confinedOrgIds);
+        const base = countingMemberships();
+        return confinedOrgIds === null
+          ? base
+          : base.where("m.organization_id", "in", confinedOrgIds);
       };
 
       const activeOrgId = await readActiveOrgId();
       membership = activeOrgId
-        ? await scopedMemberships().where("organization_id", "=", activeOrgId).executeTakeFirst()
+        ? await scopedMemberships().where("m.organization_id", "=", activeOrgId).executeTakeFirst()
         : undefined;
       if (!membership) {
-        membership = await scopedMemberships().orderBy("created_at", "asc").executeTakeFirst();
+        membership = await scopedMemberships().orderBy("m.created_at", "asc").executeTakeFirst();
       }
     }
   }
@@ -327,7 +349,9 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
 
   // Global superuser: holding the `superuser` permission via a role in ANY
   // org the user is an active member of makes them a SUPERADMIN everywhere —
-  // the active org must never downgrade it.
+  // the active org must never downgrade it. "Org" means an ACTIVE org (F-09):
+  // a grant held only in a suspended tenant makes nobody a platform superadmin
+  // (`userIsGlobalSuperuser` carries the same predicate as the lookups above).
   //
   // MACHINE-2: "everywhere" is about the PRINCIPAL, not about a credential the
   // principal owns. The expansion below therefore still runs on the bound-org

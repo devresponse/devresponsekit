@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { db } from "@/db/database";
+import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 /**
  * Active-organization selection (cookie-based multi-org support).
@@ -51,7 +52,12 @@ export async function readActiveOrgId(): Promise<string | null> {
   }
 }
 
-/** Organizations the user is an ACTIVE member of (for the switcher), by name. */
+/**
+ * Organizations the user is an ACTIVE member of (for the switcher), by name.
+ * Only ACTIVE organizations are listed (F-09): `getUserAccessContext` can
+ * never resolve a suspended one, so offering it would be a switch that lands
+ * back where it started.
+ */
 export async function listUserActiveOrganizations(appUserId: string): Promise<UserOrganization[]> {
   return db
     .selectFrom("app_organization_memberships as m")
@@ -59,6 +65,7 @@ export async function listUserActiveOrganizations(appUserId: string): Promise<Us
     .select(["o.id as id", "o.slug as slug", "o.name as name"])
     .where("m.app_user_id", "=", appUserId)
     .where("m.status", "=", "active")
+    .where("o.status", "=", ACTIVE_ORGANIZATION_STATUS)
     .orderBy("o.name", "asc")
     .execute();
 }
@@ -89,6 +96,10 @@ export async function listUserActiveOrganizations(appUserId: string): Promise<Us
  *     its full reach until it expired. `decideSecureAccess` is the authority
  *     on which statuses block, and it allows exactly `active`.
  *
+ * A third filter joined in by F-09: `o.status = 'active'` (the
+ * ORGANIZATION). An admin cannot act as themselves in a suspended tenant, so a
+ * session they borrow cannot reach into it either.
+ *
  * An unprovisioned, suspended or membership-less impersonator yields `[]`,
  * which the caller MUST treat as "resolve nothing" (fail closed), never as
  * "unconfined".
@@ -99,28 +110,35 @@ export async function listActiveOrganizationIdsForBetterAuthUser(
   const rows = await db
     .selectFrom("app_organization_memberships as m")
     .innerJoin("app_users as u", "u.id", "m.app_user_id")
+    .innerJoin("app_organizations as o", "o.id", "m.organization_id")
     .select("m.organization_id as organization_id")
     .where("u.better_auth_user_id", "=", betterAuthUserId)
     .where("u.status", "=", "active")
     .where("m.status", "=", "active")
+    .where("o.status", "=", ACTIVE_ORGANIZATION_STATUS)
     .execute();
   return [...new Set(rows.map((r) => r.organization_id))];
 }
 
 /**
  * Whether the user holds an ACTIVE membership in the given org. Gate for
- * switching: you may only make an org active if you can actually enter it.
+ * switching: you may only make an org active if you can actually enter it —
+ * which since F-09 also requires the ORGANIZATION to be active. Without that,
+ * `POST /api/preferences/active-org` would accept (and audit) a switch INTO a
+ * suspended tenant that `getUserAccessContext` then silently ignores.
  */
 export async function userHasActiveMembership(
   appUserId: string,
   organizationId: string,
 ): Promise<boolean> {
   const row = await db
-    .selectFrom("app_organization_memberships")
-    .select("id")
-    .where("app_user_id", "=", appUserId)
-    .where("organization_id", "=", organizationId)
-    .where("status", "=", "active")
+    .selectFrom("app_organization_memberships as m")
+    .innerJoin("app_organizations as o", "o.id", "m.organization_id")
+    .select("m.id")
+    .where("m.app_user_id", "=", appUserId)
+    .where("m.organization_id", "=", organizationId)
+    .where("m.status", "=", "active")
+    .where("o.status", "=", ACTIVE_ORGANIZATION_STATUS)
     .executeTakeFirst();
   return row !== undefined;
 }

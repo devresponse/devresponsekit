@@ -26,6 +26,22 @@ export type CreateOrganizationInput = z.input<typeof createOrganizationSchema>;
 /** Organization statuses (matches the DB + PATCH route). */
 export const ORGANIZATION_STATUSES = ["active", "pending", "suspended", "archived"] as const;
 
+export type OrganizationStatus = (typeof ORGANIZATION_STATUSES)[number];
+
+/**
+ * The ONE organization status under which a membership counts (F-09).
+ *
+ * `pending`, `suspended` and `archived` all mean "this tenant confers nothing":
+ * a membership in such an org resolves as no membership at all
+ * (`getUserAccessContext`), so its members, org admins, bound credentials, SSO
+ * launches and pending invitations stop working, and a `superuser` grant held
+ * there stops making anyone a platform superadmin. The rows are untouched, so
+ * reactivating the org restores exactly what was there. Every query that asks
+ * "does this membership count" joins `app_organizations` on this value — grep
+ * for it to find the family.
+ */
+export const ACTIVE_ORGANIZATION_STATUS = "active" satisfies OrganizationStatus;
+
 /** Partial update contract for `PATCH /api/administrator/organizations/[id]`. */
 export const updateOrganizationSchema = z
   .object({

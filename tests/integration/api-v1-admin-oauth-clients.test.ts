@@ -25,9 +25,12 @@ import type * as ClientRoute from "@/app/api/v1/admin/oauth-clients/[id]/route";
  *     (`unissuableScopes`): no account-WRITING scope on another principal's
  *     client, and a rotation may only hand the actor a scope set they could
  *     have granted themselves.
+ *   - F-09: both reach bounds read the principal's RANK
+ *     (`userHoldsSuperuserGrant`), so a superuser grant sleeping in a
+ *     suspended org still refuses them: it wakes on reactivation.
  * resolveOrgScope / canAccessOrg / userHasMembershipInOrg /
- * userIsGlobalSuperuser / unissuableScopes / ownerOutranksActor run for real;
- * the guard + repo + DB are mocked.
+ * userHoldsSuperuserGrant / unissuableScopes / ownerOutranksActor run for
+ * real; the guard + repo + DB are mocked.
  */
 const requireApiPermission = vi.fn();
 const enforceApiRateLimit = vi.fn();
@@ -41,12 +44,23 @@ const auditEvent = vi.fn();
 const state: {
   serviceUser: { id: string; status: string } | undefined;
   membership: { id: string } | undefined;
-  /** Drives the REAL `userIsGlobalSuperuser` (an `app_user_roles` join). */
+  /**
+   * Drives the REAL superuser predicates (both start from `app_user_roles`):
+   * whether the service principal holds a `superuser` grant at all.
+   */
   serviceIsSuperuser: boolean;
+  /**
+   * F-09: whether the org that grant sits in is ACTIVE. When false the grant
+   * is dormant: a query that joins `app_organizations` (authority,
+   * `userIsGlobalSuperuser`) no longer sees it, one that does not (rank,
+   * `userHoldsSuperuserGrant`) still does — exactly the real SQL's split.
+   */
+  serviceGrantOrgActive: boolean;
 } = {
   serviceUser: undefined,
   membership: undefined,
   serviceIsSuperuser: false,
+  serviceGrantOrgActive: true,
 };
 
 vi.mock("@/lib/api-auth/v1-guard.server", () => ({
@@ -66,7 +80,7 @@ vi.mock("@/db/database", () => {
   function tableKey(t: unknown) {
     return String(t).split(" ")[0] ?? "";
   }
-  function chain(table: string): unknown {
+  function chain(table: string, joinsOrgs = false): unknown {
     return new Proxy(
       {},
       {
@@ -78,12 +92,15 @@ vi.mock("@/db/database", () => {
                 : table === "app_organization_memberships"
                   ? state.membership
                   : table === "app_user_roles"
-                    ? state.serviceIsSuperuser
+                    ? state.serviceIsSuperuser && (state.serviceGrantOrgActive || !joinsOrgs)
                       ? { id: "perm-superuser" }
                       : undefined
                     : undefined;
           if (prop === "execute") return async () => [];
-          return () => chain(table);
+          if (prop === "innerJoin")
+            return (target: unknown) =>
+              chain(table, joinsOrgs || tableKey(target) === "app_organizations");
+          return () => chain(table, joinsOrgs);
         },
       },
     );
@@ -178,6 +195,7 @@ beforeEach(async () => {
   state.serviceUser = { id: SVC, status: "active" };
   state.membership = { id: "m1" };
   state.serviceIsSuperuser = false;
+  state.serviceGrantOrgActive = true;
   ({ GET, POST } = await import("@/app/api/v1/admin/oauth-clients/route"));
   ({ POST: ROTATE_SECRET } =
     await import("@/app/api/v1/admin/oauth-clients/[id]/rotate-secret/route"));
@@ -355,6 +373,21 @@ describe("POST /api/v1/admin/oauth-clients", () => {
     expect(res.status).toBe(201);
   });
 
+  it("F-09: 403 when the principal's only superuser grant sleeps in a SUSPENDED org", async () => {
+    // The grant confers no authority while its org is suspended, but it wakes
+    // on reactivation, and the client would then authenticate as a platform
+    // superuser inside this org. The bound reads rank, which still counts it.
+    state.serviceIsSuperuser = true;
+    state.serviceGrantOrgActive = false;
+    requireApiPermission.mockResolvedValue(orgAdmin());
+    const res = await POST(req({ method: "POST", body: body() }));
+    expect(res.status).toBe(403);
+    expect(createOauthClient).not.toHaveBeenCalled();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "service_principal_outranks_actor" }),
+    );
+  });
+
   it("SUPERADMIN may still register a client for a superuser service principal", async () => {
     state.serviceIsSuperuser = true;
     requireApiPermission.mockResolvedValue(superadmin());
@@ -389,6 +422,20 @@ describe("POST /api/v1/admin/oauth-clients/[id]/rotate-secret — service-princi
         outcome: "denied",
         reason: "service_principal_outranks_actor",
       }),
+    );
+  });
+
+  it("F-09: 403 when the principal's only superuser grant sleeps in a SUSPENDED org", async () => {
+    state.serviceIsSuperuser = true;
+    state.serviceGrantOrgActive = false;
+    requireApiPermission.mockResolvedValue(orgAdmin());
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "service_principal_outranks_actor" }),
     );
   });
 

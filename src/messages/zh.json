@@ -672,7 +672,8 @@
       "originNotAllowed": "源主机不在 SSO 重定向的允许列表中。",
       "memberExists": "该地址已属于一名活跃成员。",
       "invitationExists": "该地址已有待处理的邀请。",
-      "lastSuperadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。"
+      "lastSuperadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。",
+      "organizationNotActive": "此组织未处于活跃状态。请先重新激活该组织，再发送邀请。"
     },
     "roles": {
       "title": "角色",
@@ -1313,7 +1314,8 @@
     "not_provisioned": "您的账户尚未完成设置。请联系管理员。",
     "insufficient_scope": "此凭证无权执行该操作。",
     "forbidden_while_impersonating": "在模拟其他用户期间无法执行此操作。",
-    "last_superadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。"
+    "last_superadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。",
+    "organization_not_active": "此组织未处于活跃状态。请先重新激活该组织。"
   },
   "account": {
     "appTitle": "账户",

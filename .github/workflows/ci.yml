@@ -93,13 +93,18 @@ jobs:
         # Better Auth's own tables (`user`, `session`, `account`, ...) are
         # applied too: production has them, and DB-backed suites that read them
         # (the F-10 issuance fence re-checks a caller's `session` row) otherwise
-        # fail with `relation "session" does not exist`. Same CI-only secret and
-        # URL as the schema-drift job below.
-        env:
-          BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
-          BETTER_AUTH_URL: http://localhost:3000
+        # fail with `relation "session" does not exist`. `db:auth:migrate`
+        # imports @/lib/auth, which validates the whole server env at load, so
+        # it gets the schema-drift job's CI-only placeholders — on that command
+        # alone, so the suites below run in the job's unchanged env.
         run: |
           pnpm db:app:migrate
+          BETTER_AUTH_SECRET=ci-only-better-auth-secret-not-for-production \
+          BETTER_AUTH_URL=http://localhost:3000 \
+          NEXT_PUBLIC_APP_URL=http://localhost:3000 \
+          SSO_HANDOFF_ISSUER=http://localhost:3000 \
+          SSO_HANDOFF_AUDIENCE_PREFIX=devresponse-app \
+          SSO_HANDOFF_APPLICATION_ID=portal \
           pnpm db:auth:migrate
           pnpm test:db
 

@@ -14,8 +14,8 @@ import type { AuthContext } from "better-auth";
  * session alive, acting with the target's authority and invisible on the
  * admin's own Sessions tab.
  *
- * So every containment path calls this after the vendor call succeeds: the
- * admin wrappers in `src/lib/admin/auth-admin.server.ts` (ban, which the
+ * So every containment path calls this after its own by-`userId` sweep
+ * succeeds: the admin wrappers in `src/lib/admin/auth-admin.server.ts` (ban, which the
  * soft-delete sagas reuse; revoke-all; set-password), the password-reset
  * hook in `src/lib/auth.ts`, and (F-10) the after-hook that follows a user's
  * own "sign out my other sessions" (`src/lib/auth-session-sweep.ts`). The

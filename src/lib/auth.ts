@@ -152,8 +152,7 @@ export const auth = betterAuth({
     // self-service change-password form already passes revokeOtherSessions.)
     // Better Auth honors this flag at runtime (deletes the user's sessions
     // after the reset) but does not yet expose it in its options type, so
-    // the block is asserted to the option type — the same pattern the
-    // admin-plugin wrappers use in auth-admin.server.ts.
+    // the block is asserted to the option type.
     revokeSessionsOnPasswordReset: true,
     // F-03: a completed reset PROVES the mailbox (the link was delivered
     // there) and replaces whatever password was set before, so the address is

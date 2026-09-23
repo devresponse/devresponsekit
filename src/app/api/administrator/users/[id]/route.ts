@@ -145,13 +145,10 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   // record can be reconciled later — but we audit the failure.
   if (parsed.data.displayName !== undefined) {
     try {
-      await updateBetterAuthUser(
-        {
-          userId: target.betterAuthUserId,
-          data: { name: parsed.data.displayName },
-        },
-        request,
-      );
+      await updateBetterAuthUser({
+        userId: target.betterAuthUserId,
+        data: { name: parsed.data.displayName },
+      });
     } catch (err) {
       await auditUserAction("admin.user.update_auth_mirror_failed", "error", {
         request,
@@ -240,14 +237,14 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   // delete so we don't leave the auth record signed-in-able while the
   // app row says "deactivated".
   try {
-    await banBetterAuthUser(
-      {
-        userId: target.betterAuthUserId,
-        banReason: reason ?? "deleted",
-        // Omit `banExpiresIn` for indefinite per Better Auth semantics.
-      },
-      request,
-    );
+    await banBetterAuthUser({
+      userId: target.betterAuthUserId,
+      banReason: reason ?? "deleted",
+      // Omit `banExpiresIn` for indefinite per Better Auth semantics.
+      // A caller soft-deleting themselves is refused here, before anything
+      // app-side changes.
+      actorBetterAuthUserId: guard.betterAuthUserId,
+    });
   } catch (err) {
     await auditUserAction("admin.user.soft_delete_failed", "error", {
       request,
@@ -325,7 +322,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
     // change the response status — the caller still needs to know the
     // operation failed.
     try {
-      await unbanBetterAuthUser(target.betterAuthUserId, request);
+      await unbanBetterAuthUser(target.betterAuthUserId);
     } catch (unbanErr) {
       await auditUserAction("admin.user.soft_delete_compensation_failed", "error", {
         request,

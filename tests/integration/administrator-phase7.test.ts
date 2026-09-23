@@ -317,6 +317,25 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
       );
     });
 
+    it("refuses a caller with no cookie session at all (a bearer credential) with 403, never a 502 (F-13)", async () => {
+      // Impersonation is the one cookie-session-only admin action: Better Auth
+      // acts on the caller's own session cookie and hands back a new one. The
+      // guard admits a bearer caller, so the route refuses it here, before the
+      // plugin could fail on the missing cookie.
+      sessionGetter.mockResolvedValueOnce({ user: { id: ACTOR_ID } }).mockResolvedValue(null);
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+      dbMock.mockResolvedValue(targetRow);
+      const { POST } = await importRoute();
+
+      const res = await POST(makeRequest(url, { method: "POST" }), {
+        params: Promise.resolve({ id: TARGET_ID }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(authImpersonate).not.toHaveBeenCalled();
+      expect(((await res.json()) as { reason?: string }).reason).toBe("session_principal_mismatch");
+    });
+
     it("refuses when the COOKIE Better Auth will act on is borrowed, even if the guard's caller was not", async () => {
       // Defence in depth: the guard resolves one principal (e.g. a bearer
       // credential it prefers), but Better Auth's impersonateUser acts on the

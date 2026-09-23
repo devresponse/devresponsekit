@@ -90,4 +90,22 @@ describe("NewUserForm", () => {
     expect(body).toMatchObject({ email: "ada@example.com", password: "password123", role: "user" });
     await waitFor(() => expect(push).toHaveBeenCalledWith("/en/app/administrator/users/user-42"));
   });
+
+  // F-13: the API refuses the Better Auth `admin` role (403) to a creator
+  // without cross-org reach, so the form offers it only when the page says so.
+  it("does not offer the Better Auth admin role by default", () => {
+    renderWithIntl(<NewUserForm locale="en" />);
+
+    const role = screen.getByRole("combobox", { name: /Better Auth role/ });
+    const options = Array.from((role as HTMLSelectElement).options).map((o) => o.value);
+    expect(options).toEqual(["user"]);
+  });
+
+  it("offers it to a creator the API lets mint it", () => {
+    renderWithIntl(<NewUserForm locale="en" canGrantPlatformAdmin />);
+
+    const role = screen.getByRole("combobox", { name: /Better Auth role/ });
+    const options = Array.from((role as HTMLSelectElement).options).map((o) => o.value);
+    expect(options).toEqual(["user", "admin"]);
+  });
 });

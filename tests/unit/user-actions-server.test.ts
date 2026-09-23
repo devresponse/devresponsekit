@@ -151,10 +151,14 @@ describe("ban / unban", () => {
       expiresInSeconds: 3600,
     });
     expect(out).toEqual({ ok: true, appUserId: "u1" });
-    expect(banMock).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "ba1", banReason: "abuse", banExpiresIn: 3600 }),
-      actor.request,
-    );
+    // F-13: the acting admin is named so a ban of oneself is refused; no
+    // caller credentials go to the wrapper.
+    expect(banMock).toHaveBeenCalledWith({
+      userId: "ba1",
+      banReason: "abuse",
+      banExpiresIn: 3600,
+      actorBetterAuthUserId: "admin",
+    });
     expect(auditMock).toHaveBeenCalledWith("admin.user.banned", "success", expect.anything());
   });
 
@@ -168,7 +172,7 @@ describe("ban / unban", () => {
   it("unban calls Better Auth and audits", async () => {
     const out = await executeBulkUserAction("unban", target, actor);
     expect(out).toEqual({ ok: true, appUserId: "u1" });
-    expect(unbanMock).toHaveBeenCalledWith("ba1", actor.request);
+    expect(unbanMock).toHaveBeenCalledWith("ba1");
   });
 
   it("unban failure is structured", async () => {
@@ -182,7 +186,11 @@ describe("soft_delete / restore", () => {
   it("soft_delete bans then cascades the DB deactivation", async () => {
     const out = await executeBulkUserAction("soft_delete", target, actor, { reason: "gone" });
     expect(out).toEqual({ ok: true, appUserId: "u1" });
-    expect(banMock).toHaveBeenCalled();
+    expect(banMock).toHaveBeenCalledWith({
+      userId: "ba1",
+      banReason: "gone",
+      actorBetterAuthUserId: "admin",
+    });
     expect(txRun).toHaveBeenCalledTimes(1);
   });
 
@@ -215,7 +223,7 @@ describe("soft_delete / restore", () => {
     const out = await executeBulkUserAction("soft_delete", target, actor, {});
     expect(out).toEqual({ ok: false, appUserId: "u1", error: "db_cascade_failed" });
     // The Better Auth ban must be reversed so the two systems stay in sync.
-    expect(unbanMock).toHaveBeenCalledWith("ba1", actor.request);
+    expect(unbanMock).toHaveBeenCalledWith("ba1");
   });
 
   it("soft_delete is REFUSED when the cascade would strip the last global superuser (REVOKE-2)", async () => {
@@ -226,7 +234,7 @@ describe("soft_delete / restore", () => {
     expect(out).toEqual({ ok: false, appUserId: "u1", error: "last_superadmin" });
     // The ban was already applied, so the saga must compensate it — the row
     // must be left exactly as it was.
-    expect(unbanMock).toHaveBeenCalledWith("ba1", actor.request);
+    expect(unbanMock).toHaveBeenCalledWith("ba1");
     expect(auditMock).toHaveBeenCalledWith(
       "admin.superuser.revocation_denied",
       "denied",

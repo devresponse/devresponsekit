@@ -78,7 +78,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   }
 
   try {
-    await unbanBetterAuthUser(target.betterAuthUserId, request);
+    await unbanBetterAuthUser(target.betterAuthUserId);
   } catch (err) {
     await auditUserAction("admin.user.restore_failed", "error", {
       request,

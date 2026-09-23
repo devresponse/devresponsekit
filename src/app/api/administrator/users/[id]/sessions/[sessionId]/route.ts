@@ -58,7 +58,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
 
   let sessionToken: string | null;
   try {
-    const sessions = await listBetterAuthUserSessions(target.betterAuthUserId, request);
+    const sessions = await listBetterAuthUserSessions(target.betterAuthUserId);
     sessionToken = findSessionToken(sessions, sessionId);
   } catch (err) {
     await auditUserAction("admin.user.session_revoke_failed", "failure", {
@@ -76,7 +76,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   }
 
   try {
-    await revokeBetterAuthUserSession(sessionToken, request);
+    await revokeBetterAuthUserSession(sessionToken);
   } catch (err) {
     await auditUserAction("admin.user.session_revoke_failed", "failure", {
       request,

@@ -215,42 +215,70 @@ describe("POST /api/administrator/users (create)", () => {
     );
   });
 
-  describe("F-03: only a creator with cross-org reach vouches for the address", () => {
-    async function create(access: ReturnType<typeof grantedAccess>) {
-      sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-      accessGetter.mockResolvedValue(access);
-      dbMock
-        .mockResolvedValueOnce(undefined) // no existing app user
-        .mockResolvedValue({ id: "u-new", primary_email: "new@x.com", status: "pending_approval" });
-      authCreateUser.mockResolvedValue({ user: { id: "ba-new" } });
-      const { POST } = await import("@/app/api/administrator/users/route");
-      return POST(
-        makeRequest("http://test.local/api/administrator/users", {
-          method: "POST",
-          body: JSON.stringify({ email: "new@x.com", password: "Password#123" }),
-        }),
-      );
-    }
+  async function create(access: ReturnType<typeof grantedAccess>, extra: object = {}) {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(access);
+    dbMock
+      .mockResolvedValueOnce(undefined) // no existing app user
+      .mockResolvedValue({ id: "u-new", primary_email: "new@x.com", status: "pending_approval" });
+    authCreateUser.mockResolvedValue({ user: { id: "ba-new" } });
+    const { POST } = await import("@/app/api/administrator/users/route");
+    return POST(
+      makeRequest("http://test.local/api/administrator/users", {
+        method: "POST",
+        body: JSON.stringify({ email: "new@x.com", password: "Password#123", ...extra }),
+      }),
+    );
+  }
+  const superadminAccess = () => ({
+    ...grantedAccess("admin.users.create"),
+    permissions: ["admin.users.create", "superuser"],
+  });
 
+  describe("F-03: only a creator with cross-org reach vouches for the address", () => {
     it("an ORG admin's creation carries no mailbox proof", async () => {
       const res = await create(grantedAccess("admin.users.create"));
       expect(res.status).toBe(201);
-      expect(authCreateUser).toHaveBeenCalledWith(
-        expect.objectContaining({ emailUnproven: true }),
-        expect.anything(),
-      );
+      // F-13: and no caller credentials reach the wrapper (a trusted call).
+      expect(authCreateUser).toHaveBeenCalledWith(expect.objectContaining({ emailUnproven: true }));
+      expect(authCreateUser.mock.calls[0]).toHaveLength(1);
     });
 
     it("a SUPERADMIN's creation is vouched for", async () => {
-      const res = await create({
-        ...grantedAccess("admin.users.create"),
-        permissions: ["admin.users.create", "superuser"],
-      });
+      const res = await create(superadminAccess());
       expect(res.status).toBe(201);
       expect(authCreateUser).toHaveBeenCalledWith(
         expect.objectContaining({ emailUnproven: false }),
-        expect.anything(),
       );
+    });
+  });
+
+  describe("F-13: the Better Auth `admin` role needs cross-org reach, as on POST …/role", () => {
+    it("an ORG admin may not create a user with it: 403, and no identity is created", async () => {
+      const res = await create(grantedAccess("admin.users.create"), { role: "admin" });
+      expect(res.status).toBe(403);
+      expect(authCreateUser).not.toHaveBeenCalled();
+    });
+
+    it("an ORG-BOUND superuser credential may not either (MACHINE-2)", async () => {
+      const res = await create(
+        { ...superadminAccess(), orgBound: true } as ReturnType<typeof grantedAccess>,
+        { role: "admin" },
+      );
+      expect(res.status).toBe(403);
+      expect(authCreateUser).not.toHaveBeenCalled();
+    });
+
+    it("a SUPERADMIN may", async () => {
+      const res = await create(superadminAccess(), { role: "admin" });
+      expect(res.status).toBe(201);
+      expect(authCreateUser).toHaveBeenCalledWith(expect.objectContaining({ role: "admin" }));
+    });
+
+    it("an ORG admin still creates ordinary users", async () => {
+      const res = await create(grantedAccess("admin.users.create"), { role: "user" });
+      expect(res.status).toBe(201);
+      expect(authCreateUser).toHaveBeenCalledWith(expect.objectContaining({ role: "user" }));
     });
   });
 
@@ -342,12 +370,14 @@ describe("POST /api/administrator/users/[id]/ban", () => {
       { params: Promise.resolve({ id: TARGET_ID }) },
     );
     expect(res.status).toBe(200);
+    // F-13: the caller the guard authorized is named, so the wrapper can
+    // refuse a ban of oneself; no caller credentials are passed.
     expect(authBan).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "ba-target",
         banReason: "spam",
+        actorBetterAuthUserId: "ba-1",
       }),
-      expect.anything(),
     );
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -561,8 +591,13 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
     );
     expect(res.status).toBe(200);
     // Better Auth ban issued first (so the user can't sign in even if
-    // the app-side update fails).
-    expect(authBan).toHaveBeenCalled();
+    // the app-side update fails), naming the caller so a self-delete is
+    // refused (F-13).
+    expect(authBan).toHaveBeenCalledWith({
+      userId: "ba-target",
+      banReason: "spam-account",
+      actorBetterAuthUserId: "ba-1",
+    });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.soft_deleted",
@@ -696,7 +731,7 @@ describe("DELETE /api/administrator/users/[id]/sessions/[sessionId] (revoke by i
     ]);
     const res = await revoke(SESSION_ID);
     expect(res.status).toBe(200);
-    expect(authListSessions).toHaveBeenCalledWith("ba-target", expect.anything());
+    expect(authListSessions).toHaveBeenCalledWith("ba-target");
     expect(authRevokeSession).toHaveBeenCalledTimes(1);
     expect(authRevokeSession.mock.calls[0]![0]).toBe(SESSION_TOKEN_SECRET);
     // The session token must not appear in `metadata` (the only field

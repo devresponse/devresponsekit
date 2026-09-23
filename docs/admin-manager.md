@@ -416,7 +416,8 @@ sortable column definition in every Administrator grid.
 ## 8. Administrator areas
 
 Each area is one or more route groups under `src/app/api/administrator/**` plus
-its RSC pages. All endpoints require a cookie session and the noted permission;
+its RSC pages. All endpoints require a cookie session or a scope-bound bearer
+credential (§4) and the noted permission, except where a row says otherwise;
 mutations are rate-limited (§2.5) and audited (§12). Out-of-scope `[id]` access
 returns 404 (§6.2). The committed
 [`docs/openapi-admin.json`](./openapi-admin.json) is canonical for exact
@@ -457,12 +458,12 @@ Manages the application user lifecycle and per-user administration.
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
-| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`; `admin.user.created` |
+| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13); `admin.user.created` |
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
-| `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19); `admin.user.banned` |
+| `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it signs the user out everywhere: their own sessions and the ones they opened by impersonating someone. It also revokes every API key they own and every OAuth client that acts as them, which ends the tokens minted from those too. The reset email changes nothing until the user completes the reset, which does the same (F-08, F-10, §19). A failed step returns 502 and is safe to retry. `admin.user.password_set` / `.password_reset_email_sent`, plus an `api_key.revoked` / `oauth_client.revoked` row per credential with `metadata.reason` `password_set` |
-| `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`) |
+| `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`). Needs cross-org reach, so only a superadmin's cookie session: every API key and JWT is bound to one org (MACHINE-2, [design §3](./design-api-keys-and-tokens.md#3-caller-resolution)) and gets 403 `forbidden` |
 | `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
 | `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `PATCH/DELETE …/memberships` are rank-gated, and `DELETE …/app-roles` and `DELETE …/memberships` are conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2). `DELETE …/memberships` also deletes the user's roles and group memberships in that org (F-12, §8.3) |
@@ -471,6 +472,33 @@ Manages the application user lifecycle and per-user administration.
 The Better Auth `role` (`user`/`admin`) is distinct from app roles in
 `app_user_roles`. Created passwords are forwarded to Better Auth and never
 logged, returned, or placed in audit metadata.
+
+**Every caller the guard admits can use the Better Auth-backed actions
+(F-13).** Create (`POST /users`, `POST /api/v1/users` and the MCP `createUser`
+tool), edit, ban, unban, soft-delete, restore, set-password, the session list
+and revokes, and their bulk variants all change Better Auth state. The
+wrappers in `src/lib/admin/auth-admin.server.ts` used to call the admin
+plugin's endpoints with the caller's headers, and those endpoints authorize
+the **cookie** session they find there a second time. So an API key or JWT
+passed every app check above and then got a 502 on every one of them, and so
+did a cookie caller without the Better Auth `admin` role, on set-role too. The
+app's guards are the authority now. The wrappers take no caller credentials and
+write through Better Auth's internal adapter (create is the plugin endpoint
+called as a trusted server call, with no headers), with the vendor's own side
+effects (a ban deletes the user's sessions; a password is hashed with Better
+Auth's hasher, into a credential account created if missing) and the vendor
+checks that were not authorization: the target must exist, the password
+length bounds hold, and nobody may ban themselves. Minting the Better Auth
+`admin` role, the one check the plugin made with no app twin, is gated in the
+create routes as in `POST /users/[id]/role`: it needs cross-org reach, which
+only a superadmin's cookie session has. Every API key and JWT is bound to one
+org (MACHINE-2), so a bearer caller gets 403 on set-role (as it always did) and
+on a create with `role: "admin"`. A display-name edit (`PATCH /users/[id]`)
+now actually reaches the Better Auth `name` (F-14); it
+used to go to the self-service `/update-user` endpoint, which never touched
+the target. Impersonation is the exception: it acts on the caller's own
+cookie session and hands back a cookie session, so `POST
+/users/[id]/impersonate` refuses a caller without one (403, §19).
 
 **Target outranks actor (privilege ordering).** Every action that reaches into
 *another* user's account — `POST …/password` (both `mode: "set"` and
@@ -587,10 +615,13 @@ middleware (`src/lib/auth-admin-surface.ts`) therefore returns **404** for any
 own server-side `auth.api.*` calls (headers only, never `request`;
 `src/lib/admin/auth-admin.server.ts`) pass through. The routes in the table
 above are the **only** way to reach the plugin, so the app's checks always run.
-Consequence for the `admin` role: holding it grants nothing by itself — it is
-merely what the plugin's own `hasPermission` requires for the `auth.api.*` calls
-those routes make on the actor's behalf. Minting it (`POST /users/[id]/role`)
-stays superadmin-only. Never pass `request` to an `auth.api.*` admin call.
+Consequence for the `admin` role: holding it grants nothing by itself. Since
+F-13 it is only what the plugin's own `hasPermission` requires of an admin who
+starts an impersonation; every other console action writes through Better
+Auth's internal adapter behind the app's guards. Minting it
+(`POST /users/[id]/role`, or `POST /users` with `role: "admin"`) stays
+superadmin-only, and cookie-session only (MACHINE-2). Never pass `request` to
+an `auth.api.*` admin call.
 
 **An impersonated session reaches only `/get-session` and `/sign-out` on
 `/api/auth/*` (IMP-3, deny-by-default since F-06).** The same `hooks.before`

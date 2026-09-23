@@ -31,8 +31,9 @@ import {
  *      untouched.
  *   3. Server-side `auth.api.*` calls with headers but no `request` — the
  *      exact shape `src/lib/admin/auth-admin.server.ts` uses for the app's
- *      impersonate / ban / set-password / list-sessions / create-user routes —
- *      still succeed, including stop-impersonating.
+ *      impersonate route — still succeed, including stop-impersonating. (Since
+ *      F-13 the other admin wrappers write through the internal adapter; they
+ *      are driven against the real plugin in admin-wrappers-real-plugin.test.ts.)
  *   4. `allowImpersonatingAdmins: true` is load-bearing: a superadmin
  *      impersonating an org admin (who holds the Better Auth `admin` role by
  *      design) only works with the flag on.

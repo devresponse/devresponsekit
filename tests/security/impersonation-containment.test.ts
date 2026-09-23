@@ -224,7 +224,11 @@ describe("F-08: containment reaches the sessions an admin opened as someone else
     const w = await world();
     const { banBetterAuthUser } = await import("@/lib/admin/auth-admin.server");
 
-    await banBetterAuthUser({ userId: w.s, banReason: "compromised" }, w.peerHeaders);
+    await banBetterAuthUser({
+      userId: w.s,
+      banReason: "compromised",
+      actorBetterAuthUserId: w.peer,
+    });
 
     expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
     await expectOnlySContained(w);
@@ -234,7 +238,7 @@ describe("F-08: containment reaches the sessions an admin opened as someone else
     const w = await world();
     const { revokeAllBetterAuthUserSessions } = await import("@/lib/admin/auth-admin.server");
 
-    await revokeAllBetterAuthUserSessions(w.s, w.peerHeaders);
+    await revokeAllBetterAuthUserSessions(w.s);
 
     expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
     await expectOnlySContained(w);

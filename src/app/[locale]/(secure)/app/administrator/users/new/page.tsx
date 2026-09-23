@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { NewUserForm } from "./_new-user-form";
 
@@ -36,7 +37,9 @@ export default async function AdministratorNewUserPage({
         <p className="text-muted-foreground text-sm">{t("new.description")}</p>
       </div>
 
-      <NewUserForm locale={locale} />
+      {/* The Better Auth `admin` role is offered only to a caller the API lets
+          mint it (F-13, the same predicate as `POST /api/administrator/users`). */}
+      <NewUserForm locale={locale} canGrantPlatformAdmin={hasCrossOrgReach(guard.access)} />
     </section>
   );
 }

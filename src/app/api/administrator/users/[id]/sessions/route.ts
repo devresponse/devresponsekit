@@ -51,7 +51,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
 
   let sessions: unknown;
   try {
-    sessions = await listBetterAuthUserSessions(target.betterAuthUserId, request);
+    sessions = await listBetterAuthUserSessions(target.betterAuthUserId);
   } catch (err) {
     await auditUserAction("admin.user.sessions_list_failed", "failure", {
       request,
@@ -109,7 +109,7 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   }
 
   try {
-    await revokeAllBetterAuthUserSessions(target.betterAuthUserId, request);
+    await revokeAllBetterAuthUserSessions(target.betterAuthUserId);
   } catch (err) {
     await auditUserAction("admin.user.sessions_revoke_all_failed", "failure", {
       request,

@@ -225,6 +225,12 @@ describe("resolveCaller — API key path", () => {
       scopes: ["admin.users.read"],
     });
     expect((await mod.resolveCaller(req("Bearer drk_live_abc")))?.boundOrganizationId).toBeNull();
+    // MACHINE-2: still resolved AS a bound credential (an explicit, null
+    // binding), so the context is org-bound and has no cross-org reach. The
+    // docs promise that no API key can mint the Better Auth platform role
+    // (F-13); passing `undefined` here would hand an org-less superuser key
+    // the reach of a cookie session.
+    expect(getUserAccessContext).toHaveBeenCalledWith("ba1", { organizationId: null });
   });
 
   it("resolves against the key's bound org, not the active_org cookie (MACHINE-1)", async () => {
@@ -317,6 +323,8 @@ describe("resolveCaller — JWT path", () => {
     env.API_JWT_ENABLED = true;
     verifyAccessToken.mockResolvedValue(verifiedToken({ organizationId: null }));
     expect((await mod.resolveCaller(req("Bearer eyJ.token.sig")))?.boundOrganizationId).toBeNull();
+    // MACHINE-2: same as an org-less key, an explicit null binding (F-13).
+    expect(getUserAccessContext).toHaveBeenCalledWith("ba1", { organizationId: null });
   });
 
   it("re-checks the SOURCE credential on every request and rejects once it is revoked (review #43)", async () => {

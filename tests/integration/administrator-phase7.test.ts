@@ -309,6 +309,9 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
 
       expect(res.status).toBe(403);
       expect(authImpersonate).not.toHaveBeenCalled();
+      expect(((await res.json()) as { error?: string; reason?: string }).reason).toBe(
+        "session_principal_mismatch",
+      );
       expect(auditMock).toHaveBeenCalledWith(
         expect.objectContaining({ outcome: "denied", reason: "session_principal_mismatch" }),
       );

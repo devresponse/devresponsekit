@@ -106,8 +106,11 @@ export const auth = betterAuth({
   // as a distinct, server-only user field so it is never mistaken for a
   // mailbox proof (`decideInitialStatus` refuses domain auto-approval for
   // it). `input: false` makes Better Auth replace any client-supplied value
-  // with the default — only the `user.create.before` hook below sets it.
-  // Rationale and the read helper live in `auth-verification-waiver.ts`.
+  // with the default; server code sets it — the `user.create.before` hook below
+  // for a policy waiver, and admin/machine-API creation without cross-org reach
+  // (F-03, `createBetterAuthUser`) — and a password reset clears it.
+  // Rationale, the read helper and the linking gate live in
+  // `auth-verification-waiver.ts`.
   user: {
     additionalFields: {
       [EMAIL_VERIFICATION_WAIVED_FIELD]: EMAIL_VERIFICATION_WAIVED_USER_FIELD,

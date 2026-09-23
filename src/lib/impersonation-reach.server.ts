@@ -2,6 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { listActiveOrganizationIdsForBetterAuthUser } from "@/lib/active-org.server";
 import { betterAuthUserIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
+import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 
 /**
  * How far an IMPERSONATED session may reach — the single definition of the
@@ -42,15 +43,33 @@ import { betterAuthUserIsGlobalSuperuser } from "@/lib/admin/access-scope.server
  * same reasons comes back empty, and an empty list means "resolve nothing",
  * never "unconfined".
  *
+ * F-08 — A BANNED IMPERSONATOR REACHES NOTHING. Both queries above read the
+ * APP's account status, and a Better Auth ban does not write it: `POST
+ * …/ban` sets the vendor's `banned` flag and leaves `app_users.status`,
+ * memberships and role rows untouched. So a banned superadmin still passed
+ * `betterAuthUserIsGlobalSuperuser` and the session they had borrowed stayed
+ * UNCONFINED. The ban is decided before anything else and wins, through
+ * the same predicate the bearer paths use (`isBetterAuthUserBanned`, which
+ * honours a lapsed temporary ban). The ban itself also deletes the borrowed
+ * sessions (`banBetterAuthUser`); this check is what still holds when that
+ * delete failed, or when a ban lands by any other path.
+ *
  * Wrapped in React `cache()` so the shell layout and every guard in one render
- * share a single pair of round trips. The argument is a plain string, so the
- * memo actually hits (`cache()` compares arguments with `Object.is`).
+ * share one set of round trips (the ban and superuser probes run in parallel).
+ * The argument is a plain string, so the memo actually hits (`cache()`
+ * compares arguments with `Object.is`).
  */
 export const listImpersonationReachableOrgIds = cache(
   async function listImpersonationReachableOrgIds(
     impersonatorBetterAuthUserId: string,
   ): Promise<string[] | null> {
-    if (await betterAuthUserIsGlobalSuperuser(impersonatorBetterAuthUserId)) return null;
+    const [banned, superuser] = await Promise.all([
+      isBetterAuthUserBanned(impersonatorBetterAuthUserId),
+      betterAuthUserIsGlobalSuperuser(impersonatorBetterAuthUserId),
+    ]);
+    // Fail closed: `[]` resolves nothing; it must never be read as `null`.
+    if (banned) return [];
+    if (superuser) return null;
     return listActiveOrganizationIdsForBetterAuthUser(impersonatorBetterAuthUserId);
   },
 );

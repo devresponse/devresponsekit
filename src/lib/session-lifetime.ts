@@ -58,3 +58,40 @@ export function isSessionPastAbsoluteLifetime(
 
   return nowMs - createdMs >= absoluteLifetimeHours * 60 * 60 * 1000;
 }
+
+/**
+ * The longest an IMPERSONATION session may live, measured from its creation
+ * (F-08). Fixed, not an operator knob: it is the support window the product
+ * promises, and nothing legitimate needs a borrowed identity for longer.
+ *
+ * Better Auth is told the same number (`impersonationSessionDuration` in
+ * `ADMIN_PLUGIN_OPTIONS`), but there it is only the row's INITIAL `expiresAt`.
+ * The plugin skips the rolling refresh only while the signed `dont_remember`
+ * cookie rides along; a holder who drops that cookie and calls `/get-session`
+ * gets the row pushed to now + 8 h, every 15 minutes, indefinitely. So the
+ * cap that actually holds is {@link isImpersonationSessionPastMaxAge}, applied
+ * at the app's session chokepoint (`getCurrentSession`).
+ */
+export const IMPERSONATION_SESSION_MAX_AGE_SECONDS = 60 * 60;
+
+/**
+ * True when an impersonation session is older than
+ * {@link IMPERSONATION_SESSION_MAX_AGE_SECONDS} and must be refused.
+ *
+ * Unlike {@link isSessionPastAbsoluteLifetime} this FAILS CLOSED: a borrowed
+ * session whose creation time cannot be read is treated as over age. The
+ * operator cap is opt-in and defaults to "keep"; this one is a security bound
+ * on a privileged identity, so "unknown age" must not mean "unbounded".
+ */
+export function isImpersonationSessionPastMaxAge(
+  session: SessionAgeInput | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  const createdAt = session?.createdAt;
+  if (createdAt === null || createdAt === undefined) return true;
+
+  const createdMs = (createdAt instanceof Date ? createdAt : new Date(createdAt)).getTime();
+  if (Number.isNaN(createdMs)) return true;
+
+  return nowMs - createdMs >= IMPERSONATION_SESSION_MAX_AGE_SECONDS * 1000;
+}

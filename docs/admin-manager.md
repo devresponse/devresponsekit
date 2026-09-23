@@ -458,10 +458,10 @@ Manages the application user lifecycle and per-user administration.
 | `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`; `admin.user.created` |
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
-| `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global); `admin.user.banned` |
-| `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email; `admin.user.password_set` / `.password_reset_email_sent` |
+| `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19); `admin.user.banned` |
+| `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it ends the sessions the user opened by impersonating someone, but not their own sessions (F-08, F-10, §19); `admin.user.password_set` / `.password_reset_email_sent` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`) |
-| `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). `admin.user.sessions_revoked_all` / `.session_revoked` |
+| `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
 | `…/[id]/memberships`, `/app-roles`, `/roles`, `/groups`, `/audit` | per action | User-detail tabs. `PATCH/DELETE …/memberships` are rank-gated and `DELETE …/app-roles` is conferral-gated (REVOKE-1); both may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/bulk` | per-action key | Batch actions; see §13, §19 |
@@ -1079,7 +1079,44 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   holds every permission in every organization. Everyone else keeps the
   intersection, and it is measured against an **active account** as well as
   active memberships, so a suspended admin's borrowed session fails closed
-  rather than keeping its reach until the session expires.
+  rather than keeping its reach until the session expires. A Better Auth
+  **ban** writes none of those rows, so it is checked separately and wins over
+  everything, the superadmin exemption included: a banned impersonator reaches
+  nothing (F-08).
+- **Containing the impersonator ends the borrowed session (F-08).** An
+  impersonation session belongs to the **target**: Better Auth stores it under
+  the target's user id and names the admin only in `impersonatedBy`, and every
+  vendor call that ends "a user's sessions" deletes by user id. So a ban (single
+  or bulk), a soft-delete, **Revoke all sessions** or a completed password
+  reset used to end the admin's own sessions and leave the one they were
+  driving as someone else, which does not appear on the admin's Sessions tab.
+  Each of those actions, and `POST …/password` with `mode: "set"`, now also
+  deletes every session whose `impersonatedBy` is that admin
+  (`revokeSessionsImpersonatedBy`, `src/lib/impersonation-sessions.server.ts`,
+  called from the wrappers in `src/lib/admin/auth-admin.server.ts` and from
+  `onPasswordReset`). If that delete fails, the admin action reports failure
+  (the route's 502 and failure audit row, or a failed row in a bulk batch) so
+  the operator retries; every one of these actions is safe to repeat. A
+  password reset has already changed the password, so there the failure is
+  logged instead. Suspending or blocking an admin deletes no sessions, theirs
+  or borrowed ones; the reach check above already confines a non-active
+  impersonator to nothing.
+- **Setting a password does not sign the admin out (F-10, open).**
+  `POST …/password` with `mode: "set"` ends **only** the sessions the admin
+  opened as someone else. Better Auth's `setUserPassword` deletes none of the
+  admin's own sessions and neither does the route, so a browser already signed
+  in as the admin keeps that admin's full authority. To contain a compromised
+  admin, use **Revoke all sessions** or a ban, not a new password alone.
+- **One hour, hard (F-08).** An impersonation session is refused and deleted
+  one hour after it was **created**, at the same chokepoint as
+  `SESSION_ABSOLUTE_LIFETIME_HOURS` (`getCurrentSession`), whatever that
+  variable says. Better Auth's own one-hour expiry
+  (`impersonationSessionDuration`, set to the same constant) is not a bound:
+  the plugin skips the rolling refresh only while its signed `dont_remember`
+  cookie is present, and a holder who drops that cookie and calls
+  `/get-session` has the row extended by 8 hours every 15 minutes. That
+  endpoint and `/sign-out` are all the borrowed session reaches in Better Auth
+  over HTTP; everything else it can do goes through `getCurrentSession`.
 - **The self-service surface is closed while impersonating (IMP-1).** The
   account guard refuses an impersonated session by default, so
   `POST /api/v1/me/api-keys`, `DELETE …/[id]` and `POST …/[id]/rotate` answer

@@ -36,6 +36,11 @@ vi.mock("@/lib/admin/access-scope.server", () => ({
   userIsGlobalSuperuser: () => userIsGlobalSuperuser(),
   betterAuthUserIsGlobalSuperuser: (...a: unknown[]) => betterAuthUserIsGlobalSuperuser(...a),
 }));
+// F-08: the confinement also asks whether the impersonator is BANNED in Better
+// Auth; nobody is here (the ban itself is pinned in impersonation-reach.test).
+vi.mock("@/lib/api-auth/ban-status.server", () => ({
+  isBetterAuthUserBanned: async () => false,
+}));
 
 vi.mock("@/db/database", () => ({
   db: {

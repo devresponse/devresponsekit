@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isSessionPastAbsoluteLifetime } from "@/lib/session-lifetime";
+import {
+  IMPERSONATION_SESSION_MAX_AGE_SECONDS,
+  isImpersonationSessionPastMaxAge,
+  isSessionPastAbsoluteLifetime,
+} from "@/lib/session-lifetime";
 
 /**
  * The absolute-session-lifetime rule (review #200, ASVS V3 absolute timeout).
@@ -67,5 +71,44 @@ describe("isSessionPastAbsoluteLifetime", () => {
     expect(isSessionPastAbsoluteLifetime({ createdAt: new Date(Date.now() - 2 * HOUR) }, 24)).toBe(
       false,
     );
+  });
+});
+
+/**
+ * F-08 — the hard cap on an impersonation session. Better Auth's one-hour
+ * `expiresAt` rolls forward once the `dont_remember` cookie is dropped, so the
+ * bound is measured here from CREATION, and — unlike the opt-in operator cap
+ * above — an unreadable age counts as over, never as unbounded.
+ */
+describe("isImpersonationSessionPastMaxAge", () => {
+  const NOW = Date.UTC(2026, 8, 23, 12, 0, 0);
+  const CAP_MS = IMPERSONATION_SESSION_MAX_AGE_SECONDS * 1000;
+
+  it("is one hour", () => {
+    expect(IMPERSONATION_SESSION_MAX_AGE_SECONDS).toBe(60 * 60);
+  });
+
+  it("keeps a borrowed session younger than the cap", () => {
+    expect(isImpersonationSessionPastMaxAge({ createdAt: new Date(NOW - CAP_MS + 1) }, NOW)).toBe(
+      false,
+    );
+  });
+
+  it("refuses a borrowed session at and past the cap, whatever its expiresAt says", () => {
+    expect(isImpersonationSessionPastMaxAge({ createdAt: new Date(NOW - CAP_MS) }, NOW)).toBe(true);
+    expect(
+      isImpersonationSessionPastMaxAge(
+        { createdAt: new Date(NOW - 9 * CAP_MS).toISOString() },
+        NOW,
+      ),
+    ).toBe(true);
+  });
+
+  it("FAILS CLOSED when the creation time is missing or unreadable", () => {
+    expect(isImpersonationSessionPastMaxAge({}, NOW)).toBe(true);
+    expect(isImpersonationSessionPastMaxAge({ createdAt: null }, NOW)).toBe(true);
+    expect(isImpersonationSessionPastMaxAge({ createdAt: "not a date" }, NOW)).toBe(true);
+    expect(isImpersonationSessionPastMaxAge(null, NOW)).toBe(true);
+    expect(isImpersonationSessionPastMaxAge(undefined, NOW)).toBe(true);
   });
 });

@@ -6,7 +6,10 @@ import { decideSecureAccess } from "@/lib/auth-status";
 import { getSessionAccessContext } from "@/lib/session-access.server";
 import { withTrustedClientIp } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
-import { isSessionPastAbsoluteLifetime } from "@/lib/session-lifetime";
+import {
+  isImpersonationSessionPastMaxAge,
+  isSessionPastAbsoluteLifetime,
+} from "@/lib/session-lifetime";
 import { readImpersonatorId } from "@/lib/impersonation";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
@@ -46,6 +49,7 @@ import { getSafeReturnTo } from "@/lib/safe-return-to";
  *   - Absolute lifetime (review #200). The cap lives INSIDE the memoized
  *     value: `readSession` applies it, so a session past the operator cap is
  *     reported as absent (and revoked once) no matter which guard asks first.
+ *     The one-hour impersonation cap (F-08) rides the same path.
  */
 const sessionByRequestHeaders = new WeakMap<object, ReturnType<typeof readSession>>();
 
@@ -53,9 +57,22 @@ async function readSession(requestHeaders: Headers) {
   const session = await auth.api.getSession({ headers: withTrustedClientIp(requestHeaders) });
   if (!session) return null;
 
-  if (
-    !isSessionPastAbsoluteLifetime(session.session, getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS)
-  ) {
+  // F-08: an impersonation session is ALSO capped at one hour from creation,
+  // whatever the operator cap says. Better Auth's own one-hour `expiresAt` is
+  // soft — the plugin skips the rolling refresh only while the signed
+  // `dont_remember` cookie is present, so a holder who drops it and calls
+  // `/get-session` rolls the row forward 8 h at a time, indefinitely. The
+  // borrowed shell reaches Better Auth over HTTP only for `/get-session` and
+  // `/sign-out` (F-06); everything it can DO goes through this function, so
+  // this is where the bound holds.
+  const pastCap =
+    isSessionPastAbsoluteLifetime(
+      session.session,
+      getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS,
+    ) ||
+    (readImpersonatorId(session) !== null && isImpersonationSessionPastMaxAge(session.session));
+
+  if (!pastCap) {
     // F-07: an impersonated session is recorded against the ambient headers —
     // the carrier the RSC admin gate audits its denials with — so those rows
     // name the human behind the session, not the borrowed identity. Inside the
@@ -100,6 +117,10 @@ async function readSession(requestHeaders: Headers) {
  * so every caller (browser guards, server actions, the `/api/v1` cookie path)
  * inherits the cap from this one chokepoint. The variable is UNSET by
  * default, which keeps the pre-existing "rolls forever" behaviour exactly.
+ *
+ * IMPERSONATION CAP (F-08): a session carrying `impersonatedBy` is refused
+ * and revoked the same way once it is an hour old
+ * (`IMPERSONATION_SESSION_MAX_AGE_SECONDS`), independent of that variable.
  *
  * Memoized per request — see {@link sessionByRequestHeaders} (review #75).
  * The memo holds the CAPPED answer, so the absolute-lifetime check and its

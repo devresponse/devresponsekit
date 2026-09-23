@@ -3,6 +3,7 @@ import { headers as nextHeaders } from "next/headers";
 import { auth } from "@/lib/auth";
 import { EMAIL_VERIFICATION_WAIVED_FIELD } from "@/lib/auth-verification-waiver";
 import { withTrustedClientIp } from "@/lib/client-ip";
+import { revokeSessionsImpersonatedBy } from "@/lib/impersonation-sessions.server";
 
 /**
  * Server-side wrappers around the Better Auth `admin()` plugin
@@ -31,6 +32,25 @@ import { withTrustedClientIp } from "@/lib/client-ip";
  * `await`-style call signatures that match the documented public API
  * without re-declaring them, and let TypeScript infer return types from
  * the live `auth.api` module.
+ */
+
+/*
+ * F-08 — CONTAINMENT REACHES THE SESSIONS A USER OPENED AS SOMEONE ELSE.
+ *
+ * Better Auth ends "a user's sessions" by `userId`, and an impersonation
+ * session carries the TARGET's id there (the admin behind it is only in
+ * `impersonatedBy`). So banning, soft-deleting, revoking every session of, or
+ * setting the password of a compromised admin left the session they were
+ * driving as someone else alive — with that person's authority, and, for a
+ * superadmin, with no tenant confinement. Each wrapper below that is a
+ * containment action therefore also ends those borrowed sessions, AFTER the
+ * vendor call succeeded (a refused ban must not sign anyone out).
+ *
+ * A failure propagates: the route then reports the action as failed (502 +
+ * failure audit) and the operator retries. Every one of these actions is
+ * idempotent, and reporting success while the borrowed session lives on is
+ * the defect itself. For a ban, the impersonation reach check
+ * (`listImpersonationReachableOrgIds`) fails closed on its own as well.
  */
 
 function asActorHeaders(input?: Headers | { headers: Headers }): Headers | undefined {
@@ -133,15 +153,25 @@ export interface SetUserPasswordParams {
 /**
  * Force-sets a user's password. The password is forwarded to Better
  * Auth and never logged or echoed by this helper or its call-sites.
+ *
+ * Also ends the sessions the user opened as someone else (F-08): replacing
+ * a credential is a compromise response, and a borrowed session is exactly
+ * what a stolen admin credential would have been used to open.
+ *
+ * It does NOT end the user's OWN sessions: Better Auth's `setUserPassword`
+ * deletes none, and neither does this helper (F-10, open). So on its own it
+ * does not contain a compromised admin; revoke-all or a ban does.
  */
 export async function setBetterAuthUserPassword(
   params: SetUserPasswordParams,
   actor?: Headers | { headers: Headers },
 ) {
-  return auth.api.setUserPassword({
+  const result = await auth.api.setUserPassword({
     body: { userId: params.userId, newPassword: params.newPassword },
     headers: await actorHeaders(actor),
   } as Parameters<typeof auth.api.setUserPassword>[0]);
+  await revokeSessionsImpersonatedBy(params.userId);
+  return result;
 }
 
 export interface BanUserParams {
@@ -151,11 +181,16 @@ export interface BanUserParams {
   banExpiresIn?: number;
 }
 
+/**
+ * Bans a user in Better Auth, which deletes their own sessions, and ends the
+ * sessions they opened as someone else (F-08). Used by `POST …/ban`, the
+ * soft-delete of `DELETE /users/[id]` and both through `POST /users/bulk`.
+ */
 export async function banBetterAuthUser(
   params: BanUserParams,
   actor?: Headers | { headers: Headers },
 ) {
-  return auth.api.banUser({
+  const result = await auth.api.banUser({
     body: {
       userId: params.userId,
       banReason: params.banReason,
@@ -163,6 +198,8 @@ export async function banBetterAuthUser(
     },
     headers: await actorHeaders(actor),
   } as Parameters<typeof auth.api.banUser>[0]);
+  await revokeSessionsImpersonatedBy(params.userId);
+  return result;
 }
 
 export async function unbanBetterAuthUser(userId: string, actor?: Headers | { headers: Headers }) {
@@ -196,14 +233,21 @@ export async function revokeBetterAuthUserSession(
   } as Parameters<typeof auth.api.revokeUserSession>[0]);
 }
 
+/**
+ * "Sign out everywhere": every session of the user, including the ones they
+ * opened as someone else (F-08) — otherwise the operator containing a
+ * compromised admin ends everything but the session doing the damage.
+ */
 export async function revokeAllBetterAuthUserSessions(
   userId: string,
   actor?: Headers | { headers: Headers },
 ) {
-  return auth.api.revokeUserSessions({
+  const result = await auth.api.revokeUserSessions({
     body: { userId },
     headers: await actorHeaders(actor),
   } as Parameters<typeof auth.api.revokeUserSessions>[0]);
+  await revokeSessionsImpersonatedBy(userId);
+  return result;
 }
 
 /* -------------------------------------------------------------------------- */

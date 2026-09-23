@@ -87,7 +87,8 @@ describe("RSC admin gate — denial rows under impersonation (F-07)", () => {
   it("names the impersonating admin, with the borrowed identity in metadata", async () => {
     getSession.mockResolvedValue({
       user: { id: BORROWED },
-      session: { id: "s-imp", impersonatedBy: HUMAN },
+      // Just started (F-08 refuses a borrowed session it cannot age).
+      session: { id: "s-imp", impersonatedBy: HUMAN, createdAt: new Date() },
     });
 
     const row = await deniedRow();

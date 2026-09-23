@@ -63,6 +63,16 @@ let memberships: MembershipRow[] = [];
  */
 let superusers = new Set<string>();
 
+/**
+ * Better Auth ids that are currently BANNED (F-08). A Better Auth ban writes
+ * none of the rows the fixtures above model, which is exactly why it has to
+ * be consulted on its own.
+ */
+let banned = new Set<string>();
+vi.mock("@/lib/api-auth/ban-status.server", () => ({
+  isBetterAuthUserBanned: async (id: string) => banned.has(id),
+}));
+
 /** Permissions the target's roles confer, per organization. */
 const PERMISSIONS_BY_ORG: Record<string, string[]> = {
   [ORG_A]: [],
@@ -228,6 +238,7 @@ beforeEach(() => {
   getCurrentSession.mockReset();
   cookieValue.mockReset();
   superusers = new Set();
+  banned = new Set();
   seedMemberships([ORG_A]);
 });
 afterEach(() => vi.resetModules());
@@ -338,6 +349,32 @@ describe("IMP-1 controls: the cookie still works for everyone it should", () => 
     seedMemberships([]);
     getCurrentSession.mockResolvedValue(impersonatedSession);
     cookieValue.mockImplementation((name: string) => (name === "active_org" ? ORG_B : undefined));
+    const { GET } = await import("@/app/api/v1/me/route");
+
+    expect((await GET(meRequest())).status).toBe(403);
+  });
+
+  it("F-08: a BANNED superadmin's borrowed session resolves nothing", async () => {
+    // The containment scenario. A peer bans the compromised superadmin S while
+    // S is impersonating a customer. The ban leaves S's role, membership and
+    // `app_users` rows untouched, so without F-08 S still read as a global
+    // superuser and the borrowed session kept its UNCONFINED reach — the case
+    // just above. The ban must win.
+    seedMemberships([]);
+    superusers.add("ba-admin");
+    banned.add("ba-admin");
+    getCurrentSession.mockResolvedValue(impersonatedSession);
+    cookieValue.mockImplementation((name: string) => (name === "active_org" ? ORG_B : undefined));
+    const { GET } = await import("@/app/api/v1/me/route");
+
+    expect((await GET(meRequest())).status).toBe(403);
+  });
+
+  it("F-08: …and so does a banned org admin's, inside their own tenant", async () => {
+    // Same-tenant impersonation (the control below) with the admin banned.
+    banned.add("ba-admin");
+    getCurrentSession.mockResolvedValue(impersonatedSession);
+    cookieValue.mockImplementation((name: string) => (name === "active_org" ? ORG_A : undefined));
     const { GET } = await import("@/app/api/v1/me/route");
 
     expect((await GET(meRequest())).status).toBe(403);

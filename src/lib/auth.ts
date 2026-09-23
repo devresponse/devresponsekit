@@ -9,6 +9,7 @@ import {
   EMAIL_VERIFICATION_WAIVED_FIELD,
   EMAIL_VERIFICATION_WAIVED_USER_FIELD,
   isEmailVerificationWaived,
+  validateUserInfoForLinking,
 } from "@/lib/auth-verification-waiver";
 import { CLIENT_IP_HEADER } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
@@ -111,6 +112,17 @@ export const auth = betterAuth({
     additionalFields: {
       [EMAIL_VERIFICATION_WAIVED_FIELD]: EMAIL_VERIFICATION_WAIVED_USER_FIELD,
     },
+    // F-03 — no provider link into an account without mailbox proof. Better
+    // Auth runs this gate (fail-closed: a throw rejects) immediately before it
+    // links a provider account to an EXISTING user — implicitly (a social
+    // sign-in whose verified email matches) and on the OAuth-redirect leg of an
+    // explicit linkSocial. The
+    // local account's `emailVerified` is true for a policy waiver or an
+    // org-admin-created identity without anyone having proved the mailbox, so
+    // linking would hand the real owner an account whose password someone
+    // else set. Proving the mailbox (a password reset) clears the marker and
+    // lifts the refusal. See `auth-verification-waiver.ts`.
+    validateUserInfo: validateUserInfoForLinking,
   },
 
   emailAndPassword: {
@@ -134,6 +146,24 @@ export const auth = betterAuth({
     // the block is asserted to the option type — the same pattern the
     // admin-plugin wrappers use in auth-admin.server.ts.
     revokeSessionsOnPasswordReset: true,
+    // F-03: a completed reset PROVES the mailbox (the link was delivered
+    // there) and replaces whatever password was set before, so the address is
+    // no longer unproven — clear the marker that refuses provider linking.
+    // Best-effort: failing to clear leaves the account MORE restricted, never
+    // less, so it must not fail the reset the user just completed.
+    onPasswordReset: async ({ user }) => {
+      try {
+        await pgPool.query(
+          `update "user" set "${EMAIL_VERIFICATION_WAIVED_FIELD}" = false where "id" = $1 and "${EMAIL_VERIFICATION_WAIVED_FIELD}" is true`,
+          [user.id],
+        );
+      } catch (error) {
+        const { logServerError } = await import("@/lib/observability/logger.server");
+        logServerError("could not clear the unproven-email marker after a password reset", {
+          err: error,
+        });
+      }
+    },
     // Outbox-first delivery (specs.md §35): the email is rendered and
     // recorded in `app_outbox` even when no provider is configured, so
     // the forgot-password flow and the administrator "send reset email"

@@ -38,4 +38,14 @@ describe("account linking configuration", () => {
     // opt out of it.
     expect(authSource).not.toMatch(/requireLocalEmailVerified:\s*false/);
   });
+
+  it("installs the F-03 unproven-email link gate", () => {
+    expect(authSource).toMatch(/validateUserInfo:\s*validateUserInfoForLinking/);
+  });
+
+  it("clears the unproven-email marker when a password reset proves the mailbox", () => {
+    expect(authSource).toMatch(
+      /onPasswordReset:[\s\S]*?EMAIL_VERIFICATION_WAIVED_FIELD[\s\S]*?= false/,
+    );
+  });
 });

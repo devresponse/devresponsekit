@@ -13,7 +13,7 @@ import {
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
@@ -224,6 +224,9 @@ export async function POST(request: NextRequest) {
         password: input.password,
         name: input.name?.trim() || normalisedEmail,
         role: input.role,
+        // F-03: only a creator with cross-org reach may vouch for an address;
+        // anyone else's creation carries no mailbox proof.
+        emailUnproven: !hasCrossOrgReach(guard.access),
       },
       request,
     );

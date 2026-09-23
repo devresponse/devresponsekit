@@ -18,6 +18,7 @@ import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -372,8 +373,17 @@ export async function DELETE(request: NextRequest) {
 
   // §4 Origin/Referer defence on this cookie-authed mutation (the admin guard
   // does this for permission-gated routes; replicated here since we bypass it).
+  // Refused before the session is read: logged + counted, not audited (F-15).
   const origin = checkTrustedOrigin(request);
   if (!origin.ok) {
+    logPreAuthRefusal({
+      eventType: "administrator.access.denied",
+      outcome: "denied",
+      reason: origin.reason ?? "untrusted_origin",
+      request,
+      requestId,
+      metadata: { action: "impersonation_stop" },
+    });
     return adminErrorResponse("untrusted_origin", 403, request, { requestId });
   }
 

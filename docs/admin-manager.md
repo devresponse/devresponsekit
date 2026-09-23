@@ -122,8 +122,11 @@ The pipeline, in order:
    credentials, `checkTrustedOrigin` requires a trusted `Origin`/`Referer`.
    Bearer callers skip this (a token cannot be attached by an attacker's page).
    The check runs **before** caller resolution so an unauthenticated cross-origin
-   probe cannot trigger a DB round-trip. A failure audits
-   `administrator.access.denied` (`denied`) and returns **403** `untrusted_origin`.
+   probe cannot trigger a DB round-trip. A failure returns **403**
+   `untrusted_origin` and writes **no audit row**: nothing about the caller is
+   known yet, so an anonymous loop could otherwise grow the append-only table at
+   will (F-15). It is logged and counted instead — see
+   [§12](#12-audit-model), "Pre-authentication refusals".
 3. **Resolve the caller.** `resolveCaller` validates the session (cookie, API
    key, or JWT) and loads the application access context. No caller → **401**
    `unauthenticated`.
@@ -1043,8 +1046,9 @@ attack.
 **Outcomes** (`AuditOutcome`):
 
 - **`success`** — the operation completed.
-- **`denied`** — authorization (permission / membership / status / origin)
-  refused. Written by the pipeline on every deny (§4).
+- **`denied`** — authorization (permission / membership / status) refused.
+  Written by the pipeline on every deny once the caller is resolved (§4); an
+  origin refusal comes earlier and is logged instead (below).
 - **`error`** — an unexpected service failure (DB, Better Auth, IO).
 - **`failure`** — **deprecated** legacy alias for `error`, kept for historical
   rows. New call sites MUST use `error`.
@@ -1058,6 +1062,41 @@ acting admin — for impersonation this is the **original** admin, never the
 impersonated user), `app_user_id`, `organization_id`, `target_application_id`,
 `provider`, `email`, `reason`, `request_id` (the §5.1 correlation id), the
 trusted-hop `ip_address` and `user_agent`, and a JSON `metadata` blob.
+`user_agent` is cut to its first **512** characters (`USER_AGENT_MAX_LENGTH`,
+`src/lib/user-agent.ts`): the header is client-chosen and the row can never be
+edited (F-15).
+
+**Pre-authentication refusals are logged, not audited (F-15).** A row needs a
+caller something has **verified**: a session, an API key or JWT, or a signed SSO
+handoff token. A request refused before that could come from anyone, in any
+volume, and the table is append-only, so `logPreAuthRefusal`
+(`src/lib/observability/pre-auth-refusal.server.ts`) records it instead: one
+structured log line with `kind: "pre_auth_refusal"` carrying the same event type,
+outcome, reason, request id, capped `User-Agent` and metadata a row would have
+held, plus the method and normalized path, and one increment of
+`devresponsekit_pre_auth_refusals_total{event_type}`
+([Observability §5](./observability.md#5-metrics)). The line has **no client
+IP**: the log stream never carries one (it is user data); the edge's access log
+does. A `denied` refusal logs at `warn`; a `failure` one at `error`, the level
+its stdout mirror had while it was still a row. The refusals it covers:
+
+| Surface | Refusal | `event_type` |
+| --- | --- | --- |
+| Admin pipeline (§4), impersonation stop | Untrusted or missing `Origin` on a cookie mutation | `administrator.access.denied` |
+| `/api/v1` guard | Same | `api.access.denied` |
+| Account / preference guard | Same | `account.access.denied` |
+| `POST /api/invitations/accept` | Same | `invitation.access.denied` |
+| `/api/sso/consume` | No token; a token that fails verification; a cross-site confirm POST | `sso.consume.failure` |
+| `/api/sso/launch` | Signed out (the redirect to sign-in) | `sso.launch.failure` |
+
+The audited denials past that line are unchanged: a caller without the
+permission, an impersonated session refused by a guard, and on
+`/api/sso/consume` a token that **did** verify but names another application,
+has already been used, or cannot open a session. Their volume follows signed-in
+activity (a handoff token is minted for a signed-in launch and lives ≤60 s),
+not how often an anonymous client can call. The flood-gated
+`administrator.rate_limited` row (§2.5) is unchanged too: it is written at most
+once a minute per actor and scope, so it cannot be driven one row per request.
 
 **Impersonation attribution (F-07).** An impersonated session carries the
 borrowed identity, so every guard hands its route the **target** as

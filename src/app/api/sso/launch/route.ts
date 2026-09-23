@@ -13,6 +13,7 @@ import {
 } from "@/lib/admin/rate-limit.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { logServerError } from "@/lib/observability/logger.server";
+import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { captureServerError } from "@/lib/observability/server";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +22,9 @@ export const dynamic = "force-dynamic";
  * GET /api/sso/launch
  *
  * Generates a one-time, short-lived JWT handoff redirect for cross-
- * subdomain SSO. The token is never returned in JSON; failed launches
- * are always audit-logged. The success response sets
+ * subdomain SSO. The token is never returned in JSON; a failed launch by a
+ * signed-in user is always audit-logged, a signed-out one is logged to
+ * stdout + counted instead (F-15). The success response sets
  * `Referrer-Policy: no-referrer` so the target subdomain cannot leak
  * the launching URL to third parties.
  *
@@ -33,7 +35,8 @@ export const dynamic = "force-dynamic";
  *      able to write attacker-chosen strings into the append-only audit
  *      table.
  *   2. Per-principal rate limit (session user id, or trusted client IP while
- *      signed out) — bounds the audit/nonce/purge writes below.
+ *      signed out) — bounds the audit/nonce/purge writes below. The
+ *      signed-out redirect writes no audit row at all (F-15).
  *   3. Session, then impersonation: an impersonated session is REFUSED. The
  *      satellite session the consumer would mint carries no `impersonatedBy`,
  *      outlives the impersonation cap, and is attributed to the target — it
@@ -82,12 +85,17 @@ export async function GET(request: NextRequest) {
   if (limited) return limited;
 
   if (!session) {
-    await auditEvent({
+    // F-15: no session means no one to attribute a row to, and an anonymous
+    // loop (≈86k requests a day per IP under the limiter) must not grow the
+    // append-only audit table — this is also the ordinary signed-out
+    // continuation. Logged + counted instead; the refusals below have a
+    // session and stay audited.
+    logPreAuthRefusal({
       eventType: "sso.launch.failure",
       outcome: "failure",
       reason: "unauthenticated",
-      targetApplicationId: applicationId,
       request,
+      metadata: { targetApplicationId: applicationId },
     });
     const signInUrl = new URL(`/${locale}/sign-in`, request.url);
     // Non-null in practice — `applicationId` passed APP_ID_RE above and

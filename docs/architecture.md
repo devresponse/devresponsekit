@@ -187,7 +187,7 @@ sequenceDiagram
 Two layers, two jobs:
 
 1. **`src/proxy.ts`** — a cheap edge check that redirects unauthenticated users away from secure paths and handles locale routing. It does **not** read the database and is **not** the security boundary.
-2. **Server guards** — the real boundary. `(secure)/layout.tsx` loads the access context and applies `decideSecureAccess`; admin route handlers call `requireAdminPermission(request, "admin.x.y")`, which additionally runs an **origin (CSRF) guard**, resolves the caller (cookie session or bearer credential), checks status and permission/scope, and writes an audit row on denial.
+2. **Server guards** — the real boundary. `(secure)/layout.tsx` loads the access context and applies `decideSecureAccess`; admin route handlers call `requireAdminPermission(request, "admin.x.y")`, which additionally runs an **origin (CSRF) guard**, resolves the caller (cookie session or bearer credential), checks status and permission/scope, and writes an audit row on a permission denial. An origin refusal comes before the caller is known, so it is logged and counted rather than audited (F-15 — see [Admin Manager §12](./admin-manager.md#12-audit-model)).
 
 ### Rate limiting
 
@@ -236,7 +236,7 @@ Three guards sit around the diagram above:
 
 - **No launch while impersonating.** An impersonated hub session is refused at launch (`403 forbidden_while_impersonating`). The satellite session would carry no `impersonatedBy`, outlive the impersonation cap, escape the tenant confinement that keeps the impersonation escalation guard sound, and be attributed to the target rather than the admin.
 - **Application-id binding.** `sso_audience` is an admin-typed column; the consumer therefore also requires the token's `targetApplicationId` to equal its own `SSO_HANDOFF_APPLICATION_ID` and burns the nonce only where `target_application_id` matches. The catalog rejects a duplicate audience at registration (`409 audience_taken`); a UNIQUE index is scheduled for a later core migration.
-- **Rate limits.** Both endpoints are throttled before any audit row is written — launch per principal, consume per trusted client IP (see [Rate limiting](#rate-limiting)).
+- **Rate limits.** Both endpoints are throttled before any audit row is written — launch per principal, consume per trusted client IP (see [Rate limiting](#rate-limiting)). Below the limit, nothing refused before verification is audited either (F-15): a signed-out launch, and a consume with no token, a token that fails verification or a cross-site confirm POST, are logged (`kind: "pre_auth_refusal"`) and counted, so an anonymous loop cannot grow the append-only table. A token that verified and is refused afterwards (another application's, already used, or no session could be opened) is still audited.
 
 ### Machine API authentication
 

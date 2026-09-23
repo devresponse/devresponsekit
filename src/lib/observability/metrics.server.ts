@@ -15,6 +15,8 @@ import { Counter, Registry, collectDefaultMetrics } from "prom-client";
  *     with zero application instrumentation.
  *   - `…_rate_limit_denials_total{scope}` — the first business counter, fed from
  *     the limiter's deny path.
+ *   - `…_pre_auth_refusals_total{event_type}` — refusals decided before the
+ *     caller authenticated, which are logged instead of audited (F-15).
  *
  * Next increments (tracked in docs/observability.md §6): request latency/status
  * by route, DB latency, auth failures, and outbox delivery.
@@ -57,6 +59,23 @@ export const rateLimitSharedFallbacksTotal = new Counter({
   name: "devresponsekit_rate_limit_shared_fallbacks_total",
   help: "Times the shared (Postgres) pre-auth rate limiter fell back to the in-process bucket, by scope.",
   labelNames: ["scope"],
+  registers: [registry],
+});
+
+/**
+ * Requests refused BEFORE the caller authenticated (F-15), by the event type
+ * on the paired log line: the CSRF origin guard on every cookie surface, the
+ * SSO consume refusals decided before the handoff token verifies, and the
+ * signed-out SSO launch. None of these writes an `app_audit_events` row any
+ * more — an anonymous loop must not be able to grow the append-only table —
+ * so this counter and the `pre_auth_refusal` log line are their record. The
+ * label is a code literal per call site, never request data, so its
+ * cardinality is fixed.
+ */
+export const preAuthRefusalsTotal = new Counter({
+  name: "devresponsekit_pre_auth_refusals_total",
+  help: "Requests refused before authentication (logged, not audited), by event type.",
+  labelNames: ["event_type"],
   registers: [registry],
 });
 

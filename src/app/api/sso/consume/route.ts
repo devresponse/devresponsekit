@@ -13,6 +13,7 @@ import {
   enforceRateLimit,
 } from "@/lib/admin/rate-limit.server";
 import { logServerError } from "@/lib/observability/logger.server";
+import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { captureServerError } from "@/lib/observability/server";
 
 export const dynamic = "force-dynamic";
@@ -31,10 +32,19 @@ function ssoErrorResponse(code: string, status: number, requestId: string): Next
 
 /**
  * Per-IP throttle for both consume methods (review #16). The endpoint is
- * public and every rejected call writes an append-only audit row, so an
- * unauthenticated curl loop must hit a ceiling before it reaches the audit
- * table. Keyed on the trusted-hop client IP (P2-4) — there is no principal
- * until the token verifies. Runs before any audit/DB work.
+ * public, so an unauthenticated curl loop must hit a ceiling before it
+ * reaches verification, the nonce table or the audit table. Keyed on the
+ * trusted-hop client IP (P2-4) — there is no principal until the token
+ * verifies. Runs before any audit/DB work.
+ *
+ * F-15: the ceiling alone still let each IP add ~86k append-only audit rows a
+ * day, one per garbage token. A refusal decided BEFORE the token verifies (no
+ * token, bad signature/claims, untrusted origin on the POST) is therefore
+ * logged + counted via `logPreAuthRefusal`, not audited. Once the token HAS
+ * verified — a foreign `targetApplicationId`, a replayed nonce, a failed
+ * session — the row is written as before: the issuer minted that token for a
+ * signed-in launch and it lives ≤60 s, so those rows are tied to real
+ * handoffs, not to how often an anonymous client can call.
  */
 function rateLimitConsume(request: NextRequest, requestId: string): NextResponse | null {
   return enforceRateLimit(
@@ -91,8 +101,9 @@ function resolveExpectedAudience(
 
 /**
  * Binds a verified token to THIS deployment's application id (review #15).
- * Throws the same way `verifySsoHandoff` does so the callers' catch blocks
- * audit + 401 uniformly; the reason string lands in the audit row.
+ * Throws so the callers' catch blocks audit + 401 uniformly; the reason
+ * string lands in the audit row. Unlike a verification failure this one IS
+ * audited (F-15): the token is genuine, minted by the issuer for another app.
  */
 function assertTargetApplication(
   payload: VerifiedSsoHandoff["payload"],
@@ -100,6 +111,33 @@ function assertTargetApplication(
 ): void {
   if (payload.targetApplicationId !== applicationId) {
     throw new Error("target_application_mismatch");
+  }
+}
+
+/**
+ * Verifies the handoff token, or records the refusal and returns `null` (F-15).
+ * A token that fails here proves nothing about its sender — it may be random
+ * bytes — so the refusal goes to the log stream, never the audit table. The
+ * reason is the verifier's error message: jose / schema text chosen by code,
+ * not by the request.
+ */
+async function verifyOrRefuse(
+  token: string,
+  expectedAudience: string,
+  request: NextRequest,
+  requestId: string,
+): Promise<VerifiedSsoHandoff | null> {
+  try {
+    return await verifySsoHandoff({ token, expectedAudience });
+  } catch (error) {
+    logPreAuthRefusal({
+      eventType: "sso.consume.failure",
+      outcome: "failure",
+      reason: error instanceof Error ? error.message : "unknown_error",
+      request,
+      requestId,
+    });
+    return null;
   }
 }
 
@@ -139,11 +177,12 @@ export async function GET(request: NextRequest) {
   const localeParam = request.nextUrl.searchParams.get("locale");
 
   if (!token) {
-    await auditEvent({
+    logPreAuthRefusal({
       eventType: "sso.consume.failure",
       outcome: "failure",
       reason: "missing_token",
       request,
+      requestId,
     });
     return ssoErrorResponse("missing_token", 400, requestId);
   }
@@ -151,8 +190,10 @@ export async function GET(request: NextRequest) {
   const aud = resolveExpectedAudience(requestId);
   if ("error" in aud) return aud.error;
 
+  const verified = await verifyOrRefuse(token, aud.audience, request, requestId);
+  if (!verified) return ssoErrorResponse("invalid_token", 401, requestId);
+
   try {
-    const verified = await verifySsoHandoff({ token, expectedAudience: aud.audience });
     assertTargetApplication(verified.payload, aud.applicationId);
     // Verified but NOT yet consumed: hand off to the confirmation page. The
     // nonce stays live (≤ TTL) until the user confirms via POST.
@@ -195,11 +236,12 @@ export async function POST(request: NextRequest) {
 
   const origin = checkTrustedOrigin(request);
   if (!origin.ok) {
-    await auditEvent({
+    logPreAuthRefusal({
       eventType: "sso.consume.failure",
       outcome: "denied",
-      reason: origin.reason,
+      reason: origin.reason ?? "untrusted_origin",
       request,
+      requestId,
     });
     return ssoErrorResponse("forbidden", 403, requestId);
   }
@@ -213,11 +255,12 @@ export async function POST(request: NextRequest) {
     token = null;
   }
   if (!token) {
-    await auditEvent({
+    logPreAuthRefusal({
       eventType: "sso.consume.failure",
       outcome: "failure",
       reason: "missing_token",
       request,
+      requestId,
     });
     return ssoErrorResponse("missing_token", 400, requestId);
   }
@@ -225,8 +268,10 @@ export async function POST(request: NextRequest) {
   const aud = resolveExpectedAudience(requestId);
   if ("error" in aud) return aud.error;
 
+  const verified = await verifyOrRefuse(token, aud.audience, request, requestId);
+  if (!verified) return ssoErrorResponse("invalid_token", 401, requestId);
+
   try {
-    const verified = await verifySsoHandoff({ token, expectedAudience: aud.audience });
     assertTargetApplication(verified.payload, aud.applicationId);
     // Consume the jti atomically BEFORE establishing any session, so a replayed
     // token is rejected even on concurrent requests. The burn is ALSO

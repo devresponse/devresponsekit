@@ -45,7 +45,7 @@ function req(init?: { method?: string; body?: unknown }): NextRequest {
 }
 
 /** actor with explicit caller authority. grantedScopes null = cookie session. */
-function actor(opts: { permissions: string[]; grantedScopes: string[] | null }) {
+function actor(opts: { permissions: string[]; grantedScopes: string[] | null; source?: unknown }) {
   return {
     ok: true,
     actor: {
@@ -55,6 +55,7 @@ function actor(opts: { permissions: string[]; grantedScopes: string[] | null }) 
       impersonatorId: null,
       grantedScopes: opts.grantedScopes,
       access: { permissions: opts.permissions, organizationId: "o1" },
+      source: opts.source,
     },
   };
 }
@@ -171,5 +172,68 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
     expect(last?.status).toBe(429);
     // The throttled 31st request never reached the key repository.
     expect(createApiKey).toHaveBeenCalledTimes(30);
+  });
+});
+
+describe("POST /api/v1/me/api-keys — the issuance fence (F-10)", () => {
+  const mint = () => POST(req({ method: "POST", body: { name: "k", scopes: ["account.read"] } }));
+
+  beforeEach(async () => {
+    (await import("@/lib/admin/rate-limit.server")).__resetRateLimitForTests();
+  });
+
+  it("hands the caller's own credential to the repository to re-check behind the fence", async () => {
+    const source = { kind: "session", sessionId: "sess-1" };
+    requireApiAccount.mockResolvedValue(
+      actor({ permissions: ["account.apikeys.manage"], grantedScopes: null, source }),
+    );
+
+    expect((await mint()).status).toBe(201);
+    expect(createApiKey).toHaveBeenCalledWith(expect.objectContaining({ issuedVia: source }));
+  });
+
+  it("401 credential_revoked, no key and a denied audit row when the caller was revoked mid-request", async () => {
+    // A password reset deleted the caller's session (or revoked its key) while
+    // this request ran; the fence refused the insert.
+    const { IssuingCredentialRevokedError } = await import("@/lib/api-auth/issuance-fence.server");
+    createApiKey.mockRejectedValue(new IssuingCredentialRevokedError());
+    requireApiAccount.mockResolvedValue(
+      actor({
+        permissions: ["account.apikeys.manage"],
+        grantedScopes: ["account.apikeys.manage", "account.read"],
+        source: { kind: "api_key", id: "k-src" },
+      }),
+    );
+
+    const res = await mint();
+
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(res.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ code: "credential_revoked", status: 401 });
+    expect(body.key).toBeUndefined();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "api_key.create_denied",
+        outcome: "denied",
+        reason: "issuing_credential_revoked",
+        appUserId: "u1",
+        metadata: { callerKind: "api_key" },
+      }),
+    );
+    expect(auditEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "api_key.created" }),
+    );
+  });
+
+  it("any other repository failure still propagates", async () => {
+    createApiKey.mockRejectedValue(new Error("db down"));
+    requireApiAccount.mockResolvedValue(
+      actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
+    );
+
+    await expect(mint()).rejects.toThrow("db down");
+    expect(auditEvent).not.toHaveBeenCalled();
   });
 });

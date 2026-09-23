@@ -24,6 +24,7 @@ import {
   userHoldsSuperuserGrant,
 } from "@/lib/admin/access-scope.server";
 import { createApiKey } from "@/lib/api-auth/api-keys.server";
+import { IssuingCredentialRevokedError } from "@/lib/api-auth/issuance-fence.server";
 import { normalizeScopes, ungrantableScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getServerEnv } from "@/lib/env";
@@ -324,14 +325,35 @@ export async function POST(request: NextRequest) {
   const ttlDays = input.expiresInDays ?? env.API_KEY_DEFAULT_TTL_DAYS ?? null;
   const expiresAt = ttlDays ? new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) : null;
 
-  const created = await createApiKey({
-    ownerAppUserId: owner.id,
-    organizationId: ownerAccess.organizationId,
-    name: input.name,
-    scopes,
-    expiresAt,
-    createdByAppUserId: actorAppUserId,
-  });
+  // F-10: behind the issuance fence, like the self-service mint. A password
+  // reset or set that revokes the acting credential while this runs either
+  // revokes the new key too or refuses it here.
+  let created;
+  try {
+    created = await createApiKey({
+      ownerAppUserId: owner.id,
+      organizationId: ownerAccess.organizationId,
+      name: input.name,
+      scopes,
+      expiresAt,
+      createdByAppUserId: actorAppUserId,
+      issuedVia: guard.source ?? null,
+    });
+  } catch (error) {
+    if (!(error instanceof IssuingCredentialRevokedError)) throw error;
+    await auditEvent({
+      eventType: "admin.api_key.create_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: owner.id,
+      organizationId: ownerAccess.organizationId,
+      reason: "issuing_credential_revoked",
+      request,
+      requestId: guard.requestId,
+      metadata: { ownerAppUserId: owner.id, callerKind: guard.callerKind },
+    });
+    return adminErrorResponse("unauthenticated", 401, request, { requestId: guard.requestId });
+  }
 
   await auditEvent({
     eventType: "admin.api_key.created",

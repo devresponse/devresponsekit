@@ -11,6 +11,7 @@ import { getServerEnv } from "@/lib/env";
 import { createApiKey, listApiKeysForUser } from "@/lib/api-auth/api-keys.server";
 import { normalizeScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
+import { IssuingCredentialRevokedError } from "@/lib/api-auth/issuance-fence.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +69,8 @@ export async function GET(request: NextRequest) {
  *     DEFAULT, not a check written here (IMP-1): minting is where an
  *     impersonation would be laundered into a standalone bearer credential
  *     that outlives it and authenticates as the borrowed user.
+ *   - A caller whose session or key is revoked while the request runs, by a
+ *     password reset or set (F-10), gets `401 credential_revoked` and no key.
  */
 const createSchema = z
   .object({
@@ -127,14 +130,37 @@ export async function POST(request: NextRequest) {
   const ttlDays = parsed.data.expiresInDays ?? env.API_KEY_DEFAULT_TTL_DAYS ?? null;
   const expiresAt = ttlDays ? new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) : null;
 
-  const created = await createApiKey({
-    ownerAppUserId: actor.appUserId,
-    organizationId: actor.access.organizationId,
-    name: parsed.data.name,
-    scopes,
-    expiresAt,
-    createdByAppUserId: actor.appUserId,
-  });
+  // F-10: the insert runs behind the issuance fence, so a key cannot be born
+  // after a password reset or set revoked the caller's session or key: the
+  // eviction either revokes this key too or this request is refused here.
+  let created;
+  try {
+    created = await createApiKey({
+      ownerAppUserId: actor.appUserId,
+      organizationId: actor.access.organizationId,
+      name: parsed.data.name,
+      scopes,
+      expiresAt,
+      createdByAppUserId: actor.appUserId,
+      issuedVia: actor.source ?? null,
+    });
+  } catch (error) {
+    if (!(error instanceof IssuingCredentialRevokedError)) throw error;
+    await auditEvent({
+      eventType: "api_key.create_denied",
+      outcome: "denied",
+      reason: "issuing_credential_revoked",
+      actorBetterAuthUserId: actor.betterAuthUserId,
+      appUserId: actor.appUserId,
+      organizationId: actor.access.organizationId,
+      request,
+      metadata: { callerKind: actor.callerKind },
+    });
+    return problemResponse("credential_revoked", 401, request, {
+      detail: "The credential this request authenticated with was revoked while it ran.",
+      headers: { "WWW-Authenticate": 'Bearer realm="devresponse-api", error="invalid_token"' },
+    });
+  }
 
   await auditEvent({
     eventType: "api_key.created",

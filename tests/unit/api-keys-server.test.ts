@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   takeFirstOrThrow: undefined as unknown,
   inserts: [] as Record<string, unknown>[],
   updates: [] as Record<string, unknown>[],
+  isolation: [] as string[],
 }));
 
 function chain(): unknown {
@@ -51,9 +52,17 @@ vi.mock("@/db/database", () => ({
     selectFrom: () => chain(),
     insertInto: () => chain(),
     updateTable: () => chain(),
-    transaction: () => ({
-      execute: (cb: (trx: unknown) => unknown) => Promise.resolve(cb(chain())),
-    }),
+    // `inIssuanceTransaction` pins READ COMMITTED before it runs (F-10).
+    transaction: () => {
+      const builder = {
+        setIsolationLevel: (level: string) => {
+          state.isolation.push(level);
+          return builder;
+        },
+        execute: (cb: (trx: unknown) => unknown) => Promise.resolve(cb(chain())),
+      };
+      return builder;
+    },
   },
 }));
 
@@ -65,6 +74,7 @@ beforeEach(async () => {
   state.takeFirstOrThrow = undefined;
   state.inserts = [];
   state.updates = [];
+  state.isolation = [];
   mod = await import("@/lib/api-auth/api-keys.server");
 });
 afterEach(() => vi.resetModules());

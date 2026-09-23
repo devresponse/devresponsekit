@@ -8,6 +8,7 @@ import {
   AUTH_DISABLED_PATHS,
   rejectClosedAuthEndpoints,
 } from "@/lib/auth-admin-surface";
+import { endBorrowedSessionsAfterOwnSweep } from "@/lib/auth-session-sweep";
 import { ssoSession } from "@/lib/auth-sso-session";
 import { getProvisioningProvider } from "@/lib/auth-provisioning-provider";
 import {
@@ -159,7 +160,7 @@ export const auth = betterAuth({
     // no longer unproven — clear the marker that refuses provider linking.
     // Best-effort: failing to clear leaves the account MORE restricted, never
     // less, so it must not fail the reset the user just completed.
-    onPasswordReset: async ({ user }) => {
+    onPasswordReset: async ({ user }, request) => {
       try {
         await pgPool.query(
           `update "user" set "${EMAIL_VERIFICATION_WAIVED_FIELD}" = false where "id" = $1 and "${EMAIL_VERIFICATION_WAIVED_FIELD}" is true`,
@@ -186,6 +187,47 @@ export const auth = betterAuth({
       } catch (error) {
         const { logServerError } = await import("@/lib/observability/logger.server");
         logServerError("could not end impersonation sessions after a password reset", {
+          err: error,
+          betterAuthUserId: user.id,
+        });
+      }
+      // F-10: end the account's own sessions NOW, before its credentials are
+      // revoked below. Better Auth deletes them only after this hook returns,
+      // so until then a stolen cookie still authenticates, and a key it mints
+      // while the credentials are being revoked would survive. With the
+      // sessions gone first, such a request is refused by the issuance fence
+      // (`issuance-fence.server.ts`). Better Auth's own sweep then finds
+      // nothing. Own try/catch: if this fails, the credentials are still
+      // revoked and the vendor's sweep still runs after the hook.
+      try {
+        const { revokeOwnSessionsOf } = await import("@/lib/impersonation-sessions.server");
+        await revokeOwnSessionsOf(user.id);
+      } catch (error) {
+        const { logServerError } = await import("@/lib/observability/logger.server");
+        logServerError("could not end the account's sessions before revoking its credentials", {
+          err: error,
+          betterAuthUserId: user.id,
+        });
+      }
+      // F-10: sessions are not the only way in. An API key or OAuth client
+      // authenticates on its own, and one minted with a stolen cookie
+      // (`POST /api/v1/me/api-keys`) would outlive the reset that evicted the
+      // thief's session. So every bearer credential that authenticates AS this
+      // account is revoked too, which also ends the JWTs minted from it.
+      // Credentials the user minted for other principals are left alone (see
+      // `credential-eviction.server.ts`). Own try/catch, like the steps above.
+      try {
+        const { revokeBearerCredentialsOf } =
+          await import("@/lib/api-auth/credential-eviction.server");
+        await revokeBearerCredentialsOf({
+          betterAuthUserId: user.id,
+          trigger: "password_reset",
+          actorBetterAuthUserId: user.id,
+          request,
+        });
+      } catch (error) {
+        const { logServerError } = await import("@/lib/observability/logger.server");
+        logServerError("could not revoke bearer credentials after a password reset", {
           err: error,
           betterAuthUserId: user.id,
         });
@@ -533,7 +575,12 @@ export const auth = betterAuth({
   // confines an IMPERSONATED session to `/get-session` and `/sign-out`
   // (IMP-3, deny-by-default since F-06). Policy and rationale live in
   // `auth-admin-surface.ts`.
-  hooks: { before: rejectClosedAuthEndpoints },
+  //
+  // F-10: after a successful "sign out my other sessions" (the password form's
+  // `revokeOtherSessions`, `/revoke-other-sessions`), the single `after` hook
+  // also ends the sessions the user opened as someone else, which Better
+  // Auth's by-`userId` sweep never reaches. See `auth-session-sweep.ts`.
+  hooks: { before: rejectClosedAuthEndpoints, after: endBorrowedSessionsAfterOwnSweep },
 
   // The nextCookies plugin makes Better Auth set cookies via Next.js
   // server actions and route handlers correctly — it MUST stay last.

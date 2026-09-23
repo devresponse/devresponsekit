@@ -1,5 +1,6 @@
 import "server-only";
 import { headers as nextHeaders } from "next/headers";
+import { revokeBearerCredentialsOf } from "@/lib/api-auth/credential-eviction.server";
 import { auth } from "@/lib/auth";
 import { EMAIL_VERIFICATION_WAIVED_FIELD } from "@/lib/auth-verification-waiver";
 import { withTrustedClientIp } from "@/lib/client-ip";
@@ -148,19 +149,38 @@ export async function setBetterAuthUserRole(
 export interface SetUserPasswordParams {
   userId: string;
   newPassword: string;
+  /**
+   * The administrator setting it (F-10). The user's bearer credentials are
+   * revoked in their name: `appUserId` goes to `revoked_by` (null falls back
+   * to the user), `betterAuthUserId` is the audit actor, and `requestId`
+   * correlates those rows with the route's own.
+   */
+  setBy: { betterAuthUserId: string; appUserId: string | null; requestId?: string | null };
 }
 
 /**
  * Force-sets a user's password. The password is forwarded to Better
  * Auth and never logged or echoed by this helper or its call-sites.
  *
- * Also ends the sessions the user opened as someone else (F-08): replacing
- * a credential is a compromise response, and a borrowed session is exactly
- * what a stolen admin credential would have been used to open.
+ * Replacing a password is how an operator responds to a compromise, and the
+ * route cannot tell that case from a routine one. So after Better Auth accepts
+ * the new password, this ends everything that authenticated with the old one:
  *
- * It does NOT end the user's OWN sessions: Better Auth's `setUserPassword`
- * deletes none, and neither does this helper (F-10, open). So on its own it
- * does not contain a compromised admin; revoke-all or a ban does.
+ *   - every session of the user's own (F-10). Better Auth's `setUserPassword`
+ *     deletes none, so a browser already signed in as the user, possibly an
+ *     attacker's, used to keep its authority;
+ *   - the sessions the user opened as someone else (F-08). Both steps go
+ *     through {@link revokeAllBetterAuthUserSessions}, the same containment as
+ *     "revoke all sessions";
+ *   - every API key the user owns and every OAuth client that acts as them
+ *     (F-10), the same cut-off as a completed password reset
+ *     (`revokeBearerCredentialsOf`). A key minted with a stolen cookie would
+ *     otherwise outlive the new password. The sessions go FIRST, so a key
+ *     being minted by one of them at that moment is refused by the issuance
+ *     fence (`issuance-fence.server.ts`) instead of outliving the cut-off.
+ *
+ * A failure at any step propagates, so the route reports the action as failed
+ * and the operator retries. Every step is idempotent.
  */
 export async function setBetterAuthUserPassword(
   params: SetUserPasswordParams,
@@ -170,7 +190,17 @@ export async function setBetterAuthUserPassword(
     body: { userId: params.userId, newPassword: params.newPassword },
     headers: await actorHeaders(actor),
   } as Parameters<typeof auth.api.setUserPassword>[0]);
-  await revokeSessionsImpersonatedBy(params.userId);
+  await revokeAllBetterAuthUserSessions(params.userId, actor);
+  await revokeBearerCredentialsOf({
+    betterAuthUserId: params.userId,
+    trigger: "password_set",
+    actorBetterAuthUserId: params.setBy.betterAuthUserId,
+    revokedByAppUserId: params.setBy.appUserId,
+    // The route's own request, not the stamped copy: F-07 attribution is
+    // keyed on the original `Headers` object.
+    request: { headers: asActorHeaders(actor) ?? (await nextHeaders()) },
+    requestId: params.setBy.requestId,
+  });
   return result;
 }
 

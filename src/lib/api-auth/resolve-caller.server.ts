@@ -9,6 +9,7 @@ import { getSessionAccessContext } from "@/lib/session-access.server";
 import { looksLikeApiKey } from "@/lib/api-auth/api-key";
 import { touchApiKeyUsage, verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
+import type { CallerSource } from "@/lib/api-auth/issuance-fence.server";
 import {
   AccessTokenAudienceError,
   verifyAccessToken,
@@ -48,6 +49,16 @@ export interface ResolvedCaller {
   isBearer: boolean;
   /** api_key id / jwt jti, for audit + per-credential rate limiting. */
   credentialId: string | null;
+  /**
+   * The credential this request authenticated with, as a reference an
+   * issuing route hands to `createApiKey` / `createOauthClient` (F-10). They
+   * re-check it behind the issuance fence (`issuance-fence.server.ts`), so a
+   * request whose session or key was revoked while it ran cannot mint a
+   * credential that outlives the revocation. `null` for a legacy JWT with no
+   * `cid`. Optional only so hand-built test callers need not spell it out;
+   * the resolver always sets it.
+   */
+  source?: CallerSource | null;
   /**
    * The org the BEARER credential is bound to — `app_api_keys.organization_id`
    * or the JWT `org` claim — before {@link getUserAccessContext} resolves it
@@ -182,6 +193,7 @@ export async function resolveCallerDetailed(
           grantedScopes: verified.scopes,
           isBearer: true,
           credentialId: verified.id,
+          source: { kind: "api_key", id: verified.id },
           boundOrganizationId: verified.organizationId,
           impersonatorId: null,
         },
@@ -230,6 +242,9 @@ export async function resolveCallerDetailed(
           grantedScopes: verified.scopes,
           isBearer: true,
           credentialId: verified.jti,
+          source: verified.credential
+            ? { kind: "token", credential: verified.credential, issuedAt: verified.issuedAt }
+            : null,
           boundOrganizationId: verified.organizationId,
           impersonatorId: null,
           jwt: {
@@ -267,6 +282,9 @@ export async function resolveCallerDetailed(
       grantedScopes: null,
       isBearer: false,
       credentialId: null,
+      // Fail closed: a session whose id cannot be read cannot be re-checked,
+      // and the empty id matches no row, so it issues nothing (F-10).
+      source: { kind: "session", sessionId: session.session?.id ?? "" },
       boundOrganizationId: null,
       impersonatorId: readImpersonatorId(session),
     },

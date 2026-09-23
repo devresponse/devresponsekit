@@ -1,6 +1,7 @@
 import "server-only";
-import { sql } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import type { TokenCredentialRef } from "@/lib/api-auth/jwt.server";
 
 /**
@@ -42,13 +43,18 @@ import type { TokenCredentialRef } from "@/lib/api-auth/jwt.server";
  *     a client secret also retires tokens minted with the old secret.
  *
  * `issuedAt` is the token's `iat`. Unknown ids (deleted rows) are inactive.
+ *
+ * `executor` defaults to the shared pool. The issuance fence (F-10,
+ * `issuance-fence.server.ts`) passes its transaction, so the check runs after
+ * the fence's lock was granted.
  */
 export async function isSourceCredentialActive(
   credential: TokenCredentialRef,
   issuedAt: Date,
+  executor: Kysely<AppDatabase> = db,
 ): Promise<boolean> {
   if (credential.kind === "api_key") {
-    const row = await db
+    const row = await executor
       .selectFrom("app_api_keys")
       .select(["status", "expires_at"])
       .where("id", "=", credential.id)
@@ -56,7 +62,7 @@ export async function isSourceCredentialActive(
     if (!row || row.status !== "active") return false;
     return !row.expires_at || new Date(row.expires_at).getTime() > Date.now();
   }
-  const row = await db
+  const row = await executor
     .selectFrom("app_oauth_clients")
     .select(["status", "secret_rotated_at"])
     .where("id", "=", credential.id)

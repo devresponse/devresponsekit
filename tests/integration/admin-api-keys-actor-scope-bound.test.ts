@@ -196,3 +196,50 @@ describe("POST /api/administrator/api-keys — actor scope bound (privilege esca
     expect(createApiKeyMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("POST /api/administrator/api-keys — the issuance fence (F-10)", () => {
+  const body = { name: "k", ownerAppUserId: OWNER_UUID, scopes: ["admin.users.manage"] };
+  const source = { kind: "session", sessionId: "sess-admin" };
+
+  it("hands the acting credential to the repository to re-check behind the fence", async () => {
+    requireAdminMock.mockResolvedValue({
+      ...grant(["admin.apikeys.manage", "admin.users.manage"], null),
+      source,
+    });
+    accessGetter.mockResolvedValue(access({ permissions: ["admin.users.manage"] }));
+
+    expect((await POST(makeRequest(body))).status).toBe(201);
+    expect(createApiKeyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerAppUserId: "owner-1", issuedVia: source }),
+    );
+  });
+
+  it("401 and a denied audit row, with no key, when the acting credential was revoked mid-request", async () => {
+    const { IssuingCredentialRevokedError } = await import("@/lib/api-auth/issuance-fence.server");
+    createApiKeyMock.mockRejectedValue(new IssuingCredentialRevokedError());
+    requireAdminMock.mockResolvedValue({
+      ...grant(["admin.apikeys.manage", "admin.users.manage"], null),
+      source,
+    });
+    accessGetter.mockResolvedValue(access({ permissions: ["admin.users.manage"] }));
+
+    const res = await POST(makeRequest(body));
+
+    expect(res.status).toBe(401);
+    expect((await res.json()) as Record<string, unknown>).toMatchObject({
+      error: "unauthenticated",
+      message: "errors.unauthenticated",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.api_key.create_denied",
+        outcome: "denied",
+        reason: "issuing_credential_revoked",
+        requestId: "req-test",
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.api_key.created" }),
+    );
+  });
+});

@@ -649,8 +649,11 @@ describe("wiring: src/lib/auth.ts installs the guard and the shared plugin optio
   it("registers rejectClosedAuthEndpoints as the global hooks.before", () => {
     // The composed middleware, not either policy on its own — Better Auth takes
     // exactly one `before` hook, so wiring a single policy here would silently
-    // drop the other (IMP-3).
-    expect(authSource).toMatch(/hooks:\s*\{\s*before:\s*rejectClosedAuthEndpoints\s*\}/);
+    // drop the other (IMP-3). The single `after` hook is F-10's session sweep
+    // (tests/security/impersonation-containment.test.ts exercises it).
+    expect(authSource).toMatch(
+      /hooks:\s*\{\s*before:\s*rejectClosedAuthEndpoints,\s*after:\s*endBorrowedSessionsAfterOwnSweep\s*\}/,
+    );
   });
 
   it("passes ADMIN_PLUGIN_OPTIONS to admin() and never inlines allowImpersonatingAdmins", () => {

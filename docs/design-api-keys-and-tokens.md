@@ -70,6 +70,7 @@ interface ResolvedCaller {
   grantedScopes: string[] | null; // null for cookies (full authority); array for bearer
   isBearer: boolean; // bearer → CSRF/origin guard is N/A
   credentialId: string | null; // api_key id / jwt jti, for audit + per-credential rate limit
+  source?: CallerSource | null; // the session / key / token source to re-check at issuance (F-10, §5.3)
 }
 ```
 
@@ -128,10 +129,12 @@ Only the **SHA-256** hex digest of the plaintext is persisted, in `app_api_keys.
 
 ### 5.3 Lifecycle
 
-- **Create** — `createApiKey` generates, hashes, persists, and returns `plaintext` exactly once. The owner is `app_user_id`; the key is bound to `organization_id`; `created_by` records the actor.
+- **Create** — `createApiKey` generates, hashes, persists, and returns `plaintext` exactly once. The owner is `app_user_id`; the key is bound to `organization_id`; `created_by` records the actor. Every route passes the caller's own credential as `issuedVia`, which puts the insert behind the issuance fence (F-10, below).
 - **TTL** — `expires_at` is optional; `API_KEY_DEFAULT_TTL_DAYS` supplies a UI default (unset = no default expiry, and the UI warns). `verifyApiKey` rejects an expired key.
 - **Revoke** — `revokeApiKey` sets `status = 'revoked'` (+ `revoked_by`/`revoked_reason`); idempotent (guarded on `status = 'active'`), returns `false` for an unknown id.
-- **Rotate** — `rotateApiKey` issues a fresh key with the same owner/scopes/expiry and revokes the old one **in a single transaction** (`revoked_reason = 'rotated'`), so rotation is atomic.
+- **Rotate** — `rotateApiKey` issues a fresh key with the same owner/scopes/expiry and revokes the old one **in a single transaction** (`revoked_reason = 'rotated'`), so rotation is atomic. Inside it the old key is retired first, and only while it is still `active`: a key revoked after the route's check (a manual revoke, another rotation, a password eviction) is never rotated into a live successor, and its revoker and reason are kept. The transaction takes the fence's owner lock first.
+- **Revoke on a new password (F-10)** — a completed password reset (`onPasswordReset`) and an admin set-password (`setBetterAuthUserPassword`) first end every session of the account, then call `revokeBearerCredentialsOf` (`src/lib/api-auth/credential-eviction.server.ts`). It revokes every active key whose `app_user_id` is the account and every active OAuth client acting as it, with `revoked_reason = 'password_reset' | 'password_set'` and one `api_key.revoked` / `oauth_client.revoked` audit row each. A key minted with a stolen cookie therefore does not outlive the reset. Keys the account minted for *other* principals (`created_by`) are left alone, and so are MCP agents, which have no password. A self-service password change revokes nothing.
+- **The issuance fence (F-10)** — revoking from a one-time snapshot left a gap: a request that authenticated a moment earlier, with the account's cookie or with one of its keys, could insert a key after the snapshot, and keys can mint keys. So the eviction and every issuance take a row lock on the owner's `app_users` row (`src/lib/api-auth/issuance-fence.server.ts`). The eviction takes `FOR NO KEY UPDATE`, then revokes keys and clients with one set-based `UPDATE … RETURNING` each, in one transaction. `createApiKey` / `createOauthClient` with `issuedVia` take `FOR SHARE`, re-check that the caller's session row, key, or token source is still live, and only then insert. The two locks conflict, so an issuance either commits first and is revoked by the eviction that waited for it, or waits and is refused (`IssuingCredentialRevokedError`, answered as `401 credential_revoked` on `/api/v1`, `401 unauthenticated` on the first-party route, and audited as `*.create_denied` / `issuing_credential_revoked`). The transactions are pinned to READ COMMITTED so the re-check sees what committed during the lock wait. The eviction repeats its pass until one revokes nothing (at most five, then it throws), which catches an unfenced insert that committed mid-pass.
 - **Verify** — `verifyApiKey(plaintext)` returns the resolved key + owner identity, or `null` when unknown / non-`active` / expired. The owner's account status is checked downstream by the resolver via `getUserAccessContext`; the banned-owner check is the resolver's job (§3).
 - **Usage stamp** — `touchApiKeyUsage` writes `last_used_at`/`last_used_ip` fire-and-forget; it is never awaited on the hot path and never throws into it (telemetry must not break auth).
 
@@ -208,7 +211,7 @@ _Source: `src/lib/api-auth/revocation.server.ts` (review #43)._
 
 Access tokens are stateless, so killing one before its natural `exp` needs a per-request read against something that revocation actually writes. Every token carries a **`cid` claim** naming the credential it was minted from, and the resolver's JWT branch calls `isSourceCredentialActive(credential, iat)` on every request — **one primary-key read**:
 
-- **API key** — the row must be `active` and not past `expires_at`. `revokeApiKey` and `rotateApiKey` both flip the old row to `revoked`, so a revoke **or** a rotation retires every token minted from that key on its next request (`401 credential_revoked`).
+- **API key** — the row must be `active` and not past `expires_at`. `revokeApiKey` and `rotateApiKey` both flip the old row to `revoked`, so a revoke **or** a rotation retires every token minted from that key on its next request (`401 credential_revoked`). The same holds for the keys and clients a password reset or admin set-password revokes (F-10, §5.3).
 - **OAuth client** — the row must be `active`, and the token's `iat` must not precede `secret_rotated_at` (migration `0004`, stamped by `rotateOauthClientSecret`). Revoking the client kills all its tokens; rotating its secret kills those minted with the old secret while the client itself keeps minting.
 
 A token minted before the `cid` claim existed (a legacy token) has no `cid` and is honoured until its `exp` — a window of at most `API_JWT_ACCESS_TTL_SECONDS` after the deploy that closes on its own. No positive cache sits in front of the read: it would reintroduce a revocation lag equal to its TTL, which is exactly the gap this check closes, and the read replaced the (always-empty) `jti` denylist lookup, so per-request DB cost is unchanged.

@@ -15,6 +15,7 @@ import {
   type CallerKind,
 } from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
+import type { CallerSource } from "@/lib/api-auth/issuance-fence.server";
 import { isSuperadmin } from "@/lib/admin/access-scope.server";
 
 /**
@@ -35,6 +36,11 @@ export interface AdminPermissionGrant {
   callerKind: CallerKind;
   /** api_key id / jwt jti when bearer-authenticated; null for cookies. */
   credentialId: string | null;
+  /**
+   * The credential the request authenticated with, re-checked when a route
+   * issues a credential (F-10, `ResolvedCaller.source`).
+   */
+  source?: CallerSource | null;
   /** Credential scopes (null for cookies = full user authority). */
   grantedScopes: string[] | null;
   /**
@@ -171,6 +177,7 @@ export async function requireAdminPermission(
     requestId,
     callerKind: caller.kind,
     credentialId: caller.credentialId,
+    source: caller.source ?? null,
     grantedScopes: caller.grantedScopes,
     impersonatorId: caller.impersonatorId,
   };

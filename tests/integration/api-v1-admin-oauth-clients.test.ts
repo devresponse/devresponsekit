@@ -264,6 +264,44 @@ describe("POST /api/v1/admin/oauth-clients", () => {
     expect(createOauthClient).not.toHaveBeenCalled();
   });
 
+  it("F-10: hands the acting credential to the repository to re-check behind the fence", async () => {
+    const source = { kind: "api_key", id: "k-admin" };
+    const granted = orgAdmin();
+    requireApiPermission.mockResolvedValue({
+      ...granted,
+      grant: { ...granted.grant, caller: { ...granted.grant.caller, source } },
+    });
+
+    expect((await POST(req({ method: "POST", body: body() }))).status).toBe(201);
+    expect(createOauthClient).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceAppUserId: SVC, issuedVia: source }),
+    );
+  });
+
+  it("F-10: 401 credential_revoked and a denied audit row when the acting credential was revoked mid-request", async () => {
+    const { IssuingCredentialRevokedError } = await import("@/lib/api-auth/issuance-fence.server");
+    createOauthClient.mockRejectedValue(new IssuingCredentialRevokedError());
+    requireApiPermission.mockResolvedValue(orgAdmin());
+
+    const res = await POST(req({ method: "POST", body: body() }));
+
+    expect(res.status).toBe(401);
+    const problem = (await res.json()) as Record<string, unknown>;
+    expect(problem).toMatchObject({ code: "credential_revoked", status: 401 });
+    expect(problem.clientSecret).toBeUndefined();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "oauth_client.create_denied",
+        reason: "issuing_credential_revoked",
+        appUserId: SVC,
+        requestId: "r1",
+      }),
+    );
+    expect(auditEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "oauth_client.created" }),
+    );
+  });
+
   it("ORG ADMIN success forces the client into THEIR org (client-supplied org ignored)", async () => {
     const FOREIGN_ORG = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     requireApiPermission.mockResolvedValue(orgAdmin());

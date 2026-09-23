@@ -142,7 +142,9 @@ describe("getCurrentSession - per-request memoization (review #75)", () => {
   it("keeps the impersonation marker visible to every caller in the request", async () => {
     getSessionMock.mockResolvedValue({
       user: { id: "target" },
-      session: { id: "s", impersonatedBy: "admin-9" },
+      // A live borrowed session: Better Auth always returns `createdAt`, and
+      // the F-08 impersonation cap refuses one it cannot age.
+      session: { id: "s", impersonatedBy: "admin-9", createdAt: new Date() },
     });
     ambient.headers = new Headers({ cookie: "ba.session=x" });
 
@@ -158,7 +160,9 @@ describe("getCurrentSession - per-request memoization (review #75)", () => {
     const { readRequestImpersonation } = await import("@/lib/impersonation-attribution.server");
     getSessionMock.mockResolvedValue({
       user: { id: "target" },
-      session: { id: "s", impersonatedBy: "admin-9" },
+      // A live borrowed session: Better Auth always returns `createdAt`, and
+      // the F-08 impersonation cap refuses one it cannot age.
+      session: { id: "s", impersonatedBy: "admin-9", createdAt: new Date() },
     });
     ambient.headers = new Headers({ cookie: "ba.session=x" });
     await mod.getCurrentSession();

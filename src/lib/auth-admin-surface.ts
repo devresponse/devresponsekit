@@ -1,5 +1,6 @@
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { readImpersonatorId } from "@/lib/impersonation";
+import { IMPERSONATION_SESSION_MAX_AGE_SECONDS } from "@/lib/session-lifetime";
 
 /**
  * Which Better Auth HTTP endpoints this app closes, and why.
@@ -255,5 +256,14 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
  * they lack). That guard is strictly finer-grained than Better Auth's blanket
  * block, so the block would only add false negatives.
  * Pinned by tests/security/better-auth-admin-http-surface.test.ts.
+ *
+ * `impersonationSessionDuration` — the plugin's own default (one hour), named
+ * so the vendor and the app's hard cap cannot drift apart (F-08). It only
+ * seeds the row's `expiresAt`, which the rolling refresh can extend; the bound
+ * that holds is enforced in `getCurrentSession` — see
+ * `IMPERSONATION_SESSION_MAX_AGE_SECONDS` in `session-lifetime.ts`.
  */
-export const ADMIN_PLUGIN_OPTIONS = { allowImpersonatingAdmins: true } as const;
+export const ADMIN_PLUGIN_OPTIONS = {
+  allowImpersonatingAdmins: true,
+  impersonationSessionDuration: IMPERSONATION_SESSION_MAX_AGE_SECONDS,
+} as const;

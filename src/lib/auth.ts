@@ -171,6 +171,25 @@ export const auth = betterAuth({
           err: error,
         });
       }
+      // F-08: `revokeSessionsOnPasswordReset` (run by Better Auth right after
+      // this hook) deletes the user's sessions by `userId`, which misses every
+      // session they opened AS SOMEONE ELSE — those carry the target's id and
+      // name this user only in `impersonatedBy`. A reset is the "my account is
+      // compromised" action, so those end too. Its own try/catch: best-effort
+      // like the marker above (the password has already changed and throwing
+      // would also skip the vendor's session sweep), and bounded regardless by
+      // the one-hour impersonation cap `getCurrentSession` enforces.
+      try {
+        const { revokeSessionsImpersonatedBy } =
+          await import("@/lib/impersonation-sessions.server");
+        await revokeSessionsImpersonatedBy(user.id);
+      } catch (error) {
+        const { logServerError } = await import("@/lib/observability/logger.server");
+        logServerError("could not end impersonation sessions after a password reset", {
+          err: error,
+          betterAuthUserId: user.id,
+        });
+      }
     },
     // Outbox-first delivery (specs.md §35): the email is rendered and
     // recorded in `app_outbox` even when no provider is configured, so

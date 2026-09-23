@@ -118,3 +118,62 @@ describe("getCurrentSession — absolute session lifetime (review #200)", () => 
     expect(deleteSessionMock).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * F-08 — an IMPERSONATION session is capped at one hour from creation on the
+ * same path, independent of `SESSION_ABSOLUTE_LIFETIME_HOURS`. Better Auth's
+ * own one-hour `expiresAt` rolls forward 8 h at a time once the holder drops
+ * the `dont_remember` cookie, so these rows can look fresh to the vendor.
+ */
+describe("getCurrentSession — impersonation cap (F-08)", () => {
+  const MINUTE = 60 * 1000;
+
+  function borrowedSessionAgedMinutes(minutes: number, extra: Record<string, unknown> = {}) {
+    return {
+      user: { id: "ba-target" },
+      session: {
+        token: "borrowed-token",
+        impersonatedBy: "ba-admin",
+        createdAt: new Date(Date.now() - minutes * MINUTE),
+        // Rolled forward by a refresh the plugin was never meant to allow.
+        expiresAt: new Date(Date.now() + 8 * HOUR),
+        ...extra,
+      },
+    };
+  }
+
+  it("keeps a borrowed session inside the hour", async () => {
+    const mod = await loadGuard(undefined);
+    const young = borrowedSessionAgedMinutes(59);
+    getSessionMock.mockResolvedValue(young);
+    await expect(mod.getCurrentSession()).resolves.toBe(young);
+    expect(deleteSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a borrowed session past the hour absent and revokes it — with the operator cap UNSET", async () => {
+    const mod = await loadGuard(undefined);
+    getSessionMock.mockResolvedValue(borrowedSessionAgedMinutes(61));
+    await expect(mod.getCurrentSession()).resolves.toBeNull();
+    expect(deleteSessionMock).toHaveBeenCalledWith("borrowed-token");
+  });
+
+  it("applies whichever cap is tighter: a generous operator cap does not extend a borrowed session", async () => {
+    const mod = await loadGuard("168");
+    getSessionMock.mockResolvedValue(borrowedSessionAgedMinutes(90));
+    await expect(mod.getCurrentSession()).resolves.toBeNull();
+  });
+
+  it("fails closed on a borrowed session whose creation time is unreadable", async () => {
+    const mod = await loadGuard(undefined);
+    getSessionMock.mockResolvedValue(borrowedSessionAgedMinutes(1, { createdAt: undefined }));
+    await expect(mod.getCurrentSession()).resolves.toBeNull();
+  });
+
+  it("does not touch an ORDINARY session of the same age", async () => {
+    const mod = await loadGuard(undefined);
+    const own = sessionAgedHours(3);
+    getSessionMock.mockResolvedValue(own);
+    await expect(mod.getCurrentSession()).resolves.toBe(own);
+    expect(deleteSessionMock).not.toHaveBeenCalled();
+  });
+});

@@ -27,12 +27,21 @@ const ambientHeaders = new Headers({ "x-ambient": "1" });
 
 // Mocking @/lib/auth keeps the real Better Auth + pgPool chain out.
 vi.mock("@/lib/auth", () => ({ auth: { api } }));
+// F-08: the containment wrappers also end the sessions the user opened as
+// someone else. Stubbed here so the call — and its ORDER relative to the vendor
+// call — can be asserted; the real delete is exercised against the real plugin
+// in tests/security/impersonation-containment.test.ts.
+const revokeSessionsImpersonatedBy = vi.fn();
+vi.mock("@/lib/impersonation-sessions.server", () => ({
+  revokeSessionsImpersonatedBy: (...a: unknown[]) => revokeSessionsImpersonatedBy(...a),
+}));
 vi.mock("next/headers", () => ({ headers: async () => ambientHeaders }));
 
 let M: typeof Mod;
 
 beforeEach(async () => {
   for (const fn of Object.values(api)) fn.mockReset().mockResolvedValue({ ok: true });
+  revokeSessionsImpersonatedBy.mockReset().mockResolvedValue(0);
   M = await import("@/lib/admin/auth-admin.server");
 });
 afterEach(() => vi.resetModules());
@@ -226,5 +235,79 @@ describe("response passthrough", () => {
     await expect(M.banBetterAuthUser({ userId: "u1", banReason: "x" }, actor)).resolves.toEqual({
       user: { id: "u1", banned: true },
     });
+  });
+});
+
+/**
+ * F-08 — Better Auth ends "a user's sessions" by `userId`, and an
+ * impersonation session carries the TARGET's id there. Each containment
+ * wrapper must therefore also end the sessions the user opened AS SOMEONE
+ * ELSE — after the vendor call succeeded, and never when it failed.
+ */
+describe("F-08: containment wrappers end the user's impersonation sessions", () => {
+  const containment = [
+    {
+      name: "banBetterAuthUser",
+      vendor: api.banUser,
+      run: () => M.banBetterAuthUser({ userId: "u1", banReason: "compromised" }, actor),
+    },
+    {
+      name: "revokeAllBetterAuthUserSessions",
+      vendor: api.revokeUserSessions,
+      run: () => M.revokeAllBetterAuthUserSessions("u1", actor),
+    },
+    {
+      name: "setBetterAuthUserPassword",
+      vendor: api.setUserPassword,
+      run: () => M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret" }, actor),
+    },
+  ];
+
+  it.each(containment)("$name ends them, AFTER the vendor call", async ({ vendor, run }) => {
+    const order: string[] = [];
+    vendor.mockImplementation(async () => {
+      order.push("vendor");
+      return { ok: true };
+    });
+    revokeSessionsImpersonatedBy.mockImplementation(async () => {
+      order.push("impersonations");
+      return 1;
+    });
+
+    await expect(run()).resolves.toEqual({ ok: true });
+
+    expect(revokeSessionsImpersonatedBy).toHaveBeenCalledWith("u1");
+    expect(order).toEqual(["vendor", "impersonations"]);
+  });
+
+  it.each(containment)(
+    "$name signs nobody out when the vendor refuses",
+    async ({ vendor, run }) => {
+      vendor.mockRejectedValue(new Error("You cannot ban yourself"));
+
+      await expect(run()).rejects.toThrow("You cannot ban yourself");
+      expect(revokeSessionsImpersonatedBy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(containment)(
+    "$name reports failure when the borrowed sessions could not be ended",
+    async ({ run }) => {
+      // The route turns this into its 502 + failure audit, so the operator
+      // retries instead of believing the admin is contained.
+      revokeSessionsImpersonatedBy.mockRejectedValue(new Error("db down"));
+
+      await expect(run()).rejects.toThrow("db down");
+    },
+  );
+
+  it("non-containment wrappers leave impersonation sessions alone", async () => {
+    await M.unbanBetterAuthUser("u1", actor);
+    await M.setBetterAuthUserRole({ userId: "u1", role: "user" }, actor);
+    await M.updateBetterAuthUser({ userId: "u1", data: { name: "N" } }, actor);
+    await M.revokeBetterAuthUserSession("tok", actor);
+    await M.listBetterAuthUserSessions("u1", actor);
+
+    expect(revokeSessionsImpersonatedBy).not.toHaveBeenCalled();
   });
 });

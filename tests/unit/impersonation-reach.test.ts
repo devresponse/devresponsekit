@@ -24,6 +24,7 @@ import type * as ReachModule from "@/lib/impersonation-reach.server";
 
 const betterAuthUserIsGlobalSuperuser = vi.fn();
 const listActiveOrganizationIdsForBetterAuthUser = vi.fn();
+const isBetterAuthUserBanned = vi.fn();
 
 vi.mock("@/lib/admin/access-scope.server", () => ({
   betterAuthUserIsGlobalSuperuser: (...a: unknown[]) => betterAuthUserIsGlobalSuperuser(...a),
@@ -32,12 +33,16 @@ vi.mock("@/lib/active-org.server", () => ({
   listActiveOrganizationIdsForBetterAuthUser: (...a: unknown[]) =>
     listActiveOrganizationIdsForBetterAuthUser(...a),
 }));
+vi.mock("@/lib/api-auth/ban-status.server", () => ({
+  isBetterAuthUserBanned: (...a: unknown[]) => isBetterAuthUserBanned(...a),
+}));
 
 let mod: typeof ReachModule;
 
 beforeEach(async () => {
   betterAuthUserIsGlobalSuperuser.mockReset();
   listActiveOrganizationIdsForBetterAuthUser.mockReset();
+  isBetterAuthUserBanned.mockReset().mockResolvedValue(false);
   mod = await import("@/lib/impersonation-reach.server");
 });
 afterEach(() => vi.resetModules());
@@ -72,5 +77,37 @@ describe("listImpersonationReachableOrgIds", () => {
 
     expect(reach).toEqual([]);
     expect(reach).not.toBeNull();
+  });
+
+  /**
+   * F-08 — a Better Auth ban writes neither `app_users.status` nor any
+   * membership or role row, so both probes above still answered as if nothing
+   * had happened: a banned superadmin's borrowed session stayed UNCONFINED.
+   */
+  it("F-08: returns [] — NOT null — for a BANNED superadmin (the ban wins)", async () => {
+    isBetterAuthUserBanned.mockResolvedValue(true);
+    betterAuthUserIsGlobalSuperuser.mockResolvedValue(true);
+
+    const reach = await mod.listImpersonationReachableOrgIds("ba-banned-super");
+
+    expect(reach).toEqual([]);
+    expect(reach).not.toBeNull();
+    expect(isBetterAuthUserBanned).toHaveBeenCalledWith("ba-banned-super");
+  });
+
+  it("F-08: returns [] for a banned org admin, without listing their memberships", async () => {
+    isBetterAuthUserBanned.mockResolvedValue(true);
+    betterAuthUserIsGlobalSuperuser.mockResolvedValue(false);
+    listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue(["o-a"]);
+
+    await expect(mod.listImpersonationReachableOrgIds("ba-banned-admin")).resolves.toEqual([]);
+    expect(listActiveOrganizationIdsForBetterAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("F-08: a lapsed or absent ban changes nothing (the predicate owns expiry)", async () => {
+    isBetterAuthUserBanned.mockResolvedValue(false);
+    betterAuthUserIsGlobalSuperuser.mockResolvedValue(true);
+
+    await expect(mod.listImpersonationReachableOrgIds("ba-super")).resolves.toBeNull();
   });
 });

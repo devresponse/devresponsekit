@@ -4,14 +4,23 @@ import { readImpersonatorId } from "@/lib/impersonation";
 /**
  * Which Better Auth HTTP endpoints this app closes, and why.
  *
- * Two policies live here because Better Auth accepts exactly ONE
- * `hooks.before` middleware, and both are about the same thing: the catch-all
- * `/api/auth/[...all]` mounts the vendor's endpoints with no app-level guard,
- * so anything the app does not want reachable has to be refused here. They are
- * composed in {@link rejectClosedAuthEndpoints} at the bottom of the file —
- * the admin plugin's whole surface (review 2026-09-04 #3, below) and the
- * self-service endpoints an IMPERSONATED session must not reach
- * (IMP-3, see {@link IMPERSONATION_CLOSED_PATHS}).
+ * The catch-all `/api/auth/[...all]` mounts the vendor's endpoints with no
+ * app-level guard, so anything the app does not want reachable has to be
+ * refused here. Three policies:
+ *
+ *   - the admin plugin's whole surface (review 2026-09-04 #3, below);
+ *   - vendor endpoints the app never uses, closed for everyone (F-06,
+ *     {@link AUTH_DISABLED_PATHS}, passed as Better Auth's `disabledPaths`);
+ *   - an IMPERSONATED session reaches nothing but the endpoints the borrowed
+ *     shell needs (IMP-3, deny-by-default since F-06 — see
+ *     {@link IMPERSONATION_ALLOWED_PATHS}).
+ *
+ * The first and the last are composed in {@link rejectClosedAuthEndpoints} at
+ * the bottom of the file, because Better Auth accepts exactly ONE
+ * `hooks.before` middleware. Every endpoint the vendor mounts is classified
+ * against these lists by
+ * tests/security/better-auth-endpoint-classification.test.ts, so a Better Auth
+ * upgrade that adds one fails CI until someone decides where it belongs.
  *
  * ---
  *
@@ -52,76 +61,124 @@ export function isAdminPluginPath(path: string | undefined): boolean {
 }
 
 /**
- * Better Auth SELF-SERVICE endpoints closed to an IMPERSONATED session (IMP-3).
+ * Better Auth endpoints closed to EVERYONE over HTTP (F-06).
  *
- * IMP-1 closed the app's own self-service surface by making `/api/account/*`
- * and `/api/v1/me/*` refuse an impersonated session BY DEFAULT — but session
- * management never went through that guard. `_sessions-panel.tsx` calls
- * `authClient.listSessions()`, `authClient.revokeSession({ token })` and
- * `authClient.revokeOtherSessions()`, which land on Better Auth's catch-all
- * `/api/auth/[...all]`, a route that by design applies no app-level checks;
- * the admin-plugin refusal above closes only `/admin/*`. Better Auth then
- * resolves "the current user" as the BORROWED one, so an impersonating admin
- * could:
+ * Passed to Better Auth as `disabledPaths`, which its router answers with 404
+ * in `onRequest`, before any hook or handler runs — the same "unmounted"
+ * posture as the admin-plugin surface above. Each entry is vendor surface the
+ * app never calls over HTTP (no `authClient` call, form or emailed link in
+ * `src/` lands on it) that exposes or mutates identity state the app otherwise
+ * guards:
  *
- *   - enumerate every session the target holds, with IP and user-agent, across
- *     every tenant — normally gated by `admin.users.sessions` on
- *     `/api/administrator/users/[id]/sessions`;
- *   - revoke any or all of them. `revoke-other-sessions` is the sharp one: it
- *     kills the target's real devices and leaves the impersonation session
- *     itself alive.
+ *   - `/list-accounts`, `/get-access-token`, `/refresh-token`, `/account-info`
+ *     enumerate the caller's provider accounts and hand back the stored
+ *     provider OAuth tokens. A GitHub token does not expire; Google and
+ *     Microsoft access tokens are good for an hour. The app never uses them.
+ *   - `/link-social` and `/unlink-account` attach or strip a login method. The
+ *     app has no account-linking UI; implicit linking at social sign-in runs
+ *     on `/callback/:id` and is unaffected.
+ *   - `/verify-password` is a yes/no oracle on the password hash for anyone
+ *     holding a session cookie, with only the default limiter budget.
+ *   - `/update-user` and `/update-session` write the user and session rows
+ *     directly. The app's only user write is `PATCH /api/account/profile`,
+ *     which validates the input and reaches Better Auth through a server-side
+ *     `auth.api.updateUser` call. `disabledPaths` is consulted by the HTTP
+ *     router only, so that call is untouched.
+ *   - `/revoke-sessions` ends every session including the caller's; the
+ *     account panel revokes one session or the OTHERS, never all.
+ *   - `/change-email`, `/delete-user` and `/delete-user/callback` belong to
+ *     features the configuration leaves off (`user.changeEmail`,
+ *     `user.deleteUser`); a 404 makes them read as unmounted.
  *
- * Both are acquired by an admin holding only `admin.users.impersonate`, and
- * the rows they produce are attributed to the borrowed user, so the audit
- * trail does not name who actually did it. That is precisely the "sibling
- * route left unguarded" shape `AccountAccessOptions` was built to prevent for
- * the app's own routes; this is the same default for the vendor's.
- *
- * `/update-user` is included although the app's own `PATCH /api/account/profile`
- * deliberately ALLOWS impersonation: that route reaches Better Auth through a
- * server-side `auth.api.updateUser` call (headers, no `request`), which this
- * guard lets through, so the support flow is untouched while the direct,
- * unaudited HTTP channel to the same write is closed.
- *
- * Endpoints NOT listed are reachable while impersonating on purpose:
- * `/get-session` and `/sign-out` must keep working (the impersonated shell
- * renders from the first and the admin needs a way out), and
- * `/change-password` requires the current password, which the admin does not
- * have.
+ * A 404 here is not audited: `onRequest` runs before any hook sees the
+ * session. That is acceptable because the answer is the same for everyone.
+ * The impersonation rule below does not depend on this list, so re-enabling an
+ * entry still leaves it refused (and audited) for an impersonated session.
+ * Re-enabling one is a deliberate change: drop it here and move it to the
+ * reviewed "open" list in
+ * tests/security/better-auth-endpoint-classification.test.ts.
  */
-export const IMPERSONATION_CLOSED_PATHS: readonly string[] = [
-  "/list-sessions",
-  "/revoke-session",
-  "/revoke-sessions",
-  "/revoke-other-sessions",
+export const AUTH_DISABLED_PATHS: readonly string[] = [
+  "/list-accounts",
+  "/get-access-token",
+  "/refresh-token",
+  "/account-info",
+  "/link-social",
+  "/unlink-account",
+  "/verify-password",
   "/update-user",
+  "/update-session",
+  "/revoke-sessions",
+  "/change-email",
+  "/delete-user",
+  "/delete-user/callback",
 ];
 
-/** True for an endpoint path closed to impersonated sessions (IMP-3). */
-export function isImpersonationClosedPath(path: string | undefined): boolean {
-  return typeof path === "string" && IMPERSONATION_CLOSED_PATHS.includes(path);
+/**
+ * The ONLY Better Auth endpoints an IMPERSONATED session may reach over HTTP
+ * (IMP-3; an allow-list since F-06).
+ *
+ * IMP-1 made the app's own `/api/account/*` and `/api/v1/me/*` routes refuse
+ * an impersonated session by default, but Better Auth's endpoints never pass
+ * through that guard. They are mounted on the catch-all, which applies no
+ * app-level checks, and they resolve "the current user" as the BORROWED one.
+ * IMP-3 closed five of them: session listing and revocation, which the account
+ * panel calls and through which an admin holding only `admin.users.impersonate`
+ * could enumerate the target's sessions across every tenant and kill their
+ * real devices, plus `/update-user`.
+ *
+ * A deny-list of five was the wrong shape (F-06). Everything it did not name
+ * stayed open to the impersonator and was attributed to the target:
+ * `/list-accounts` then `/get-access-token` returned the target's provider
+ * tokens, `/unlink-account` stripped a login, and `/verify-password` and
+ * `/change-password` answered password guesses. Every Better Auth upgrade can
+ * add another. So the rule is now an allow-list: while the session is
+ * impersonated, an HTTP request to any Better Auth endpoint not named here is
+ * refused.
+ *
+ * These are the endpoints the borrowed shell genuinely uses:
+ *
+ *   - `/get-session` is read by the account panel to mark the current session.
+ *     Server components read the session through `auth.api.getSession`
+ *     (headers, no `request`), which this guard never sees.
+ *   - `/sign-out` must stay open so the admin always has a way out. The
+ *     banner's "Stop impersonating" button does not need an entry: it calls
+ *     `DELETE /api/administrator/users/[id]/impersonate`, which reaches
+ *     `auth.api.stopImpersonating` server-side.
+ */
+export const IMPERSONATION_ALLOWED_PATHS: readonly string[] = ["/get-session", "/sign-out"];
+
+/** True for an endpoint an impersonated session may reach (IMP-3 / F-06). */
+export function isImpersonationAllowedPath(path: string | undefined): boolean {
+  return typeof path === "string" && IMPERSONATION_ALLOWED_PATHS.includes(path);
 }
 
 /**
- * The app's single `hooks.before` middleware — Better Auth takes one, and both
- * surface policies above are expressed here so neither can be installed
- * without the other.
+ * The app's single `hooks.before` middleware. Better Auth takes one, so both
+ * hook-enforced policies above live here and neither can be installed without
+ * the other.
  *
  * Every check is conditioned on `ctx.request`, i.e. on the call arriving over
  * HTTP: the app's own server-side `auth.api.*` calls pass headers and never a
  * `request`, and they have already been through the guarded
- * `/api/administrator/*` routes.
+ * `/api/administrator/*` and `/api/account/*` routes. `ctx.path` is the
+ * endpoint's route PATTERN (`/callback/:id`, not `/callback/github`), because
+ * Better Auth dispatches every call with the endpoint's own path, so the
+ * allow-list names endpoints, not URL spellings.
  *
- *   1. Admin plugin (review 2026-09-04 #3) — 404, so the surface is
+ *   1. Admin plugin (review 2026-09-04 #3): 404, so the surface is
  *      indistinguishable from an unmounted route.
- *   2. Self-service under impersonation (IMP-3) — 403, audited against the
- *      IMPERSONATOR. 403 rather than 404 because these endpoints genuinely
- *      exist for the session's own owner; hiding them would be a lie the
- *      account panel's error state contradicts anyway.
+ *   2. Anything outside {@link IMPERSONATION_ALLOWED_PATHS} under impersonation
+ *      (IMP-3, F-06): 403, audited against the IMPERSONATOR. 403 rather than
+ *      404 because these endpoints genuinely exist for the session's own
+ *      owner; hiding them would be a lie the account panel's error state
+ *      contradicts anyway.
  *
  * The session is read with `disableCookieCache` so the refusal is decided on
- * the authoritative session row rather than a cached copy, and it is read ONLY
- * for a path in the closed list, so no other endpoint pays for it.
+ * the authoritative session row rather than a cached copy. It is read only for
+ * a path outside the allow-list, so `/get-session`, the one endpoint the shell
+ * calls routinely, never pays for it. A request without a session cookie
+ * resolves to "no session" without a database read.
  */
 export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
   if (!ctx.request) return;
@@ -130,7 +187,7 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
     throw new APIError("NOT_FOUND");
   }
 
-  if (!isImpersonationClosedPath(ctx.path)) return;
+  if (isImpersonationAllowedPath(ctx.path)) return;
 
   const session = await getSessionFromCtx(ctx, {
     // Authoritative row, not a cached copy — this is a security decision.
@@ -142,7 +199,16 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
     disableRefresh: true,
   });
   const impersonatorId = readImpersonatorId(session);
-  if (!impersonatorId) return;
+  if (!impersonatorId) {
+    // `getSessionFromCtx` memoizes its result on `ctx.context.session`, the
+    // object the endpoint's own session middleware reads first. Left in place,
+    // our no-refresh copy would be reused as is, and since F-06 this guard
+    // reads the session on every path outside the allow-list, so sessions
+    // would stop rolling forward there. Clearing it lets the endpoint read the
+    // session itself.
+    ctx.context.session = null;
+    return;
+  }
 
   // Imported lazily so the audit module — and the database handle it pulls in —
   // stays out of the auth instance's import graph until a refusal actually

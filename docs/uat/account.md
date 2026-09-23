@@ -341,11 +341,12 @@ Negative & edge cases
 - New password shorter than 8 → inline **Password must be at least 8 characters.** (`validation.passwordMin`).
 - Confirm not matching New → inline **Passwords do not match.** on the confirm field (`validation.passwordsMismatch`).
 - All three password fields show a required asterisk (the unrefined `passwordFieldsSchema` drives the markers; `_password-form.tsx:65`).
-- Sessions panel: first render shows two skeleton bars; a load failure shows "Could not load your sessions." in `role="alert"`; a failed revoke shows "Could not revoke the session." (Better Auth returns `{ error }` rather than throwing, so the panel reads `result.error`; `_sessions-panel.tsx:73`).
-- **Sign out other sessions** is disabled when only one session exists (`_sessions-panel.tsx:101`).
+- Sessions panel: first render shows two skeleton bars; a load failure shows "Could not load your sessions." in `role="alert"` in place of the list, with no "No active sessions." line; a failed revoke shows "Could not revoke the session." Better Auth returns `{ error }` rather than throwing, so the panel reads `result.error` on the load and on each revoke (`_sessions-panel.tsx:93`, `:121`).
+- **Sign out other sessions** is disabled when only one session exists (`_sessions-panel.tsx:148`).
+- While an admin is **impersonating** the user, both panels are refused: the endpoints they call (`/list-sessions`, `/revoke-session`, `/revoke-other-sessions`, `/change-password`) answer 403 to an impersonated session, which may only read the session and sign out (IMP-3 / F-06, `src/lib/auth-admin-surface.ts`). The sessions panel shows "Could not load your sessions." and no session rows, and a password change shows "Could not change your password. Check your current password." Each of those refusals is audited as `account.impersonated_access.denied` against the **admin**, not the user.
 
 Accessibility: Password fields are typed `password` with correct `autoComplete` (`current-password` / `new-password`); errors are in alert/`FormMessage` regions. The sessions list is a keyboard-navigable list of buttons; the skeleton conveys loading.
-i18n: Section titles (`account.security.*`), the confirmation, and validation messages localize in `uk`/`ja`; the expiry/IP/Device labels come from `account.security.*`; dates use `Intl.DateTimeFormat(locale, …)` (`_sessions-panel.tsx:39`).
+i18n: Section titles (`account.security.*`), the confirmation, and validation messages localize in `uk`/`ja`; the expiry/IP/Device labels come from `account.security.*`; dates use `Intl.DateTimeFormat(locale, …)` (`_sessions-panel.tsx:62`).
 
 ### UAT-ACCOUNT-APIKEYS — API keys
 

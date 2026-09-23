@@ -10,7 +10,8 @@ import { getSafeReturnTo } from "@/lib/safe-return-to";
  * Mocks the auth-guard, the SSO redirect builder, and the audit module
  * so we can verify the route's contract: a missing / malformed
  * applicationId is rejected before any DB or audit work, unauthenticated
- * users are redirected to sign-in, impersonated sessions are refused
+ * users are redirected to sign-in (logged, never audited — F-15),
+ * impersonated sessions are refused
  * (review #4), launches are rate-limited per principal (review #16), and
  * successful launches set `Referrer-Policy: no-referrer` and
  * `Cache-Control: no-store`.
@@ -39,6 +40,11 @@ vi.mock("@/lib/sso.server", () => ({
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
+// F-15: the signed-out launch is logged, not audited.
+const preAuthLog = vi.fn();
+vi.mock("@/lib/observability/pre-auth-refusal.server", () => ({
+  logPreAuthRefusal: (...args: unknown[]) => preAuthLog(...args),
+}));
 vi.mock("@/lib/jwt-handoff.server", () => ({
   isSsoHandoffSignerConfigured: () => signerConfigured.value,
 }));
@@ -65,6 +71,7 @@ beforeEach(async () => {
   sessionGetter.mockReset();
   createRedirect.mockReset();
   auditMock.mockReset();
+  preAuthLog.mockReset();
   logErrMock.mockReset();
   captureMock.mockReset();
   signerConfigured.value = true;
@@ -100,11 +107,10 @@ describe("GET /api/sso/launch", () => {
     },
   );
 
-  it("redirects unauthenticated users to localized sign-in", async () => {
+  it("redirects unauthenticated users to localized sign-in — logged, NOT audited (F-15)", async () => {
     sessionGetter.mockResolvedValue(null);
-    const res = await GET(
-      makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=fr"),
-    );
+    const request = makeRequest("http://localhost/api/sso/launch?applicationId=portal&locale=fr");
+    const res = await GET(request);
     expect(res.status).toBe(307);
     // Asserted exactly, not with `toContain`: a loose match passes whether or
     // not the return target is present, which would let the continuation this
@@ -114,13 +120,16 @@ describe("GET /api/sso/launch", () => {
     expect(location.searchParams.get("returnTo")).toBe(
       "/fr/sso/launch?applicationId=portal&locale=fr",
     );
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: "sso.launch.failure",
-        reason: "unauthenticated",
-        targetApplicationId: "portal",
-      }),
-    );
+    expect(preAuthLog).toHaveBeenCalledWith({
+      eventType: "sso.launch.failure",
+      outcome: "failure",
+      reason: "unauthenticated",
+      request,
+      metadata: { targetApplicationId: "portal" },
+    });
+    // No session, no one to attribute a row to: an anonymous loop must not
+    // grow the append-only table.
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("never returns the signed-out user to an /api/ path", () => {
@@ -317,17 +326,22 @@ describe("GET /api/sso/launch — per-principal rate limit (review #16)", () => 
     expect((await GET(makeRequest(url))).status).toBe(307);
   });
 
-  it("throttles the signed-out path per trusted client IP, bounding the `unauthenticated` audit writes", async () => {
+  it("throttles the signed-out path per trusted client IP, and never audits it (F-15)", async () => {
     sessionGetter.mockResolvedValue(null);
     const fromIp = (ip: string) => makeRequest(url, { "x-forwarded-for": ip });
 
     for (let i = 0; i < 30; i += 1) {
       expect((await GET(fromIp("203.0.113.9"))).status).toBe(307);
     }
-    auditMock.mockClear();
+    expect(preAuthLog).toHaveBeenCalledTimes(30);
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "sso.launch.failure" }),
+    );
+    preAuthLog.mockClear();
     const denied = await GET(fromIp("203.0.113.9"));
     expect(denied.status).toBe(429);
     expect(denied.headers.get("retry-after")).toBeTruthy();
+    expect(preAuthLog).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "sso.launch.failure" }),
     );

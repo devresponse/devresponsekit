@@ -8,6 +8,7 @@ import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { getCurrentSession } from "@/lib/auth-guard";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { consumeInvitation, findValidInvitationByToken } from "@/lib/invitations.server";
+import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { acceptInvitationSchema } from "@/lib/validation/invitations";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +48,14 @@ export async function POST(request: NextRequest) {
     // (permissions.server.ts). Passing `origin.reason` through would let a
     // `missing_origin` rejection emit the uncataloged i18n key
     // `errors.missing_origin`. (`invalid_origin` is a distinct 400 used by
-    // enterprise-apps for a malformed origin field.)
+    // enterprise-apps for a malformed origin field.) Refused before the
+    // session is read: logged + counted, not audited (F-15).
+    logPreAuthRefusal({
+      eventType: "invitation.access.denied",
+      outcome: "denied",
+      reason: origin.reason ?? "untrusted_origin",
+      request,
+    });
     return adminErrorResponse("untrusted_origin", 403, request);
   }
 

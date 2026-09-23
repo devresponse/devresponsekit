@@ -31,6 +31,11 @@ vi.mock("@/lib/sso.server", () => ({
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
+// F-15: a refusal decided before the token verifies is logged, not audited.
+const preAuthLog = vi.fn();
+vi.mock("@/lib/observability/pre-auth-refusal.server", () => ({
+  logPreAuthRefusal: (...args: unknown[]) => preAuthLog(...args),
+}));
 vi.mock("@/lib/auth", () => ({
   auth: {
     api: {
@@ -94,6 +99,7 @@ beforeEach(async () => {
     verifyMock,
     consumeMock,
     auditMock,
+    preAuthLog,
     createSsoSessionMock,
     logErrMock,
     captureMock,
@@ -115,12 +121,19 @@ afterEach(() => {
 });
 
 describe("GET /api/sso/consume — verify + confirmation redirect (P2-2)", () => {
-  it("rejects requests without a token and audits the failure", async () => {
+  it("rejects requests without a token and logs the refusal WITHOUT an audit row (F-15)", async () => {
     const res = await GET(getRequest("http://localhost/api/sso/consume"));
     expect(res.status).toBe(400);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: "sso.consume.failure", reason: "missing_token" }),
+    const { requestId } = (await res.json()) as { requestId: string };
+    expect(preAuthLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "sso.consume.failure",
+        outcome: "failure",
+        reason: "missing_token",
+        requestId,
+      }),
     );
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("returns 500 if the application id is not configured, with a correlated request id + log", async () => {
@@ -147,13 +160,24 @@ describe("GET /api/sso/consume — verify + confirmation redirect (P2-2)", () =>
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
-  it("returns 401 + audits when the token fails verification", async () => {
+  it("returns 401 and logs (does NOT audit) a token that fails verification (F-15)", async () => {
     verifyMock.mockRejectedValue(new Error("audience_mismatch"));
-    const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
+    const request = getRequest("http://localhost/api/sso/consume?token=abc");
+    const res = await GET(request);
     expect(res.status).toBe(401);
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: "sso.consume.failure", reason: "audience_mismatch" }),
+    expect(await res.json()).toMatchObject({ error: "invalid_token" });
+    // An unverified token proves nothing about its sender — it may be random
+    // bytes from a curl loop — so no append-only row.
+    expect(preAuthLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "sso.consume.failure",
+        outcome: "failure",
+        reason: "audience_mismatch",
+        request,
+        requestId: res.headers.get("x-request-id"),
+      }),
     );
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });
 
@@ -188,6 +212,9 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
         reason: "nonce_replay_or_expired",
       }),
     );
+    // A replay of a VERIFIED token stays audited (F-15 only moves refusals
+    // decided before verification).
+    expect(preAuthLog).not.toHaveBeenCalled();
   });
 
   it("forwards EACH Set-Cookie separately when Better Auth emits more than one (AUTH-3)", async () => {
@@ -221,17 +248,38 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
     );
   });
 
-  it("rejects a POST with no token", async () => {
+  it("rejects a POST with no token (logged, not audited — F-15)", async () => {
     const res = await POST(postRequest(null));
     expect(res.status).toBe(400);
     expect(verifyMock).not.toHaveBeenCalled();
+    expect(preAuthLog).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "sso.consume.failure", reason: "missing_token" }),
+    );
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("POST: a token that fails verification is logged, not audited, and burns nothing (F-15)", async () => {
+    verifyMock.mockRejectedValue(new Error("signature verification failed"));
+    const res = await POST(postRequest("zz"));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: "invalid_token" });
+    expect(preAuthLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "sso.consume.failure",
+        outcome: "failure",
+        reason: "signature verification failed",
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalled();
+    expect(consumeMock).not.toHaveBeenCalled();
+    expect(createSsoSessionMock).not.toHaveBeenCalled();
   });
 
   it.each([
     ["untrusted_origin", "https://evil.example"],
     ["missing_origin", null],
   ] as const)(
-    "refuses a cross-site confirm (%s) with 403 + a `denied` audit row BEFORE reading the token (review #66, P2-2)",
+    "refuses a cross-site confirm (%s) with 403 BEFORE reading the token — logged, NOT audited (review #66, P2-2, F-15)",
     async (reason, origin) => {
       originCheck.mockReturnValue({ ok: false, reason });
       verifyMock.mockResolvedValue({ payload: PAYLOAD });
@@ -242,17 +290,18 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
       const body = (await res.json()) as { error: string; requestId: string };
       expect(body.error).toBe("forbidden");
       expect(res.headers.get("x-request-id")).toBe(body.requestId);
-      // The guard saw THIS request (the same object the audit row cites).
+      // The guard saw THIS request (the same object the log line cites).
       expect(originCheck).toHaveBeenCalledWith(request);
-      expect(auditMock).toHaveBeenCalledTimes(1);
-      expect(auditMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          eventType: "sso.consume.failure",
-          outcome: "denied",
-          reason,
-          request,
-        }),
-      );
+      expect(preAuthLog).toHaveBeenCalledTimes(1);
+      expect(preAuthLog).toHaveBeenCalledWith({
+        eventType: "sso.consume.failure",
+        outcome: "denied",
+        reason,
+        request,
+        requestId: body.requestId,
+      });
+      // Refused before anything about the sender is verified: no row.
+      expect(auditMock).not.toHaveBeenCalled();
       // The login-CSRF defence: nothing past the gate ran — no token read,
       // no verification, no nonce burn, no session, no cookie.
       expect(verifyMock).not.toHaveBeenCalled();
@@ -288,6 +337,9 @@ describe("application-id binding — token minted for another app (review #15)",
         reason: "target_application_mismatch",
       }),
     );
+    // F-15 draws the line at verification: this token is GENUINE (the issuer
+    // minted it for another app), so the refusal keeps its audit row.
+    expect(preAuthLog).not.toHaveBeenCalled();
   });
 
   it("POST refuses it with 401 BEFORE burning the nonce or creating a session", async () => {
@@ -401,7 +453,7 @@ describe("per-IP rate limit (review #16)", () => {
   const ipA = { "x-forwarded-for": "203.0.113.9" };
   const ipB = { "x-forwarded-for": "198.51.100.4" };
 
-  it("GET: an unauthenticated garbage-token flood from one IP hits 429 + Retry-After and stops writing audit rows", async () => {
+  it("GET: an unauthenticated garbage-token flood from one IP writes NO audit rows and hits 429 + Retry-After", async () => {
     verifyMock.mockRejectedValue(new Error("signature_invalid"));
     // DEFAULT_SSO_CONSUME_LIMIT: 30-token burst.
     for (let i = 0; i < 30; i += 1) {
@@ -409,8 +461,11 @@ describe("per-IP rate limit (review #16)", () => {
         401,
       );
     }
-    expect(auditMock).toHaveBeenCalledTimes(30);
-    auditMock.mockClear();
+    // F-15: the limiter used to let every one of these through to the
+    // append-only table (~86k rows/day per IP). Each is now a log line.
+    expect(auditMock).not.toHaveBeenCalled();
+    expect(preAuthLog).toHaveBeenCalledTimes(30);
+    preAuthLog.mockClear();
     verifyMock.mockClear();
 
     const denied = await GET(getRequest("http://localhost/api/sso/consume?token=zz", ipA));
@@ -418,16 +473,17 @@ describe("per-IP rate limit (review #16)", () => {
     expect(Number(denied.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
     expect(await denied.json()).toMatchObject({ error: "rate_limited" });
     expect(denied.headers.get("x-request-id")).toBeTruthy();
-    // No verification and no `sso.consume.*` audit row for the denied call.
+    // No verification and no `sso.consume.*` record for the denied call.
     expect(verifyMock).not.toHaveBeenCalled();
+    expect(preAuthLog).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "sso.consume.failure" }),
     );
 
-    // Even a missing-token request is throttled before its audit write.
-    auditMock.mockClear();
+    // Even a missing-token request is throttled before it is recorded.
     const noToken = await GET(getRequest("http://localhost/api/sso/consume", ipA));
     expect(noToken.status).toBe(429);
+    expect(preAuthLog).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "sso.consume.failure" }),
     );
@@ -443,13 +499,18 @@ describe("per-IP rate limit (review #16)", () => {
     for (let i = 0; i < 30; i += 1) {
       expect((await POST(postRequest("zz", ipA))).status).toBe(401);
     }
+    // F-15: none of the 30 refusals reached the audit table.
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "sso.consume.failure" }),
+    );
     consumeMock.mockClear();
-    auditMock.mockClear();
+    preAuthLog.mockClear();
 
     const denied = await POST(postRequest("zz", ipA));
     expect(denied.status).toBe(429);
     expect(denied.headers.get("retry-after")).toBeTruthy();
     expect(consumeMock).not.toHaveBeenCalled();
+    expect(preAuthLog).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "sso.consume.failure" }),
     );

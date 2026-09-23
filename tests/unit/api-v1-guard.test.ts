@@ -31,6 +31,10 @@ vi.mock("@/lib/admin/origin-guard.server", () => ({
   checkTrustedOrigin: (...a: unknown[]) => checkTrustedOrigin(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
+const preAuthLog = vi.fn();
+vi.mock("@/lib/observability/pre-auth-refusal.server", () => ({
+  logPreAuthRefusal: (...a: unknown[]) => preAuthLog(...a),
+}));
 vi.mock("@/lib/admin/request-id.server", () => ({
   getOrCreateRequestId: () => "req-1",
   REQUEST_ID_HEADER: "x-request-id",
@@ -65,6 +69,7 @@ beforeEach(async () => {
     hasBearerCredential,
     checkTrustedOrigin,
     auditEvent,
+    preAuthLog,
     consumeToken,
   ])
     m.mockReset();
@@ -159,10 +164,21 @@ describe("requireApiPermission", () => {
   it("enforces the origin guard only for cookie (non-bearer) callers", async () => {
     hasBearerCredential.mockReturnValue(false);
     checkTrustedOrigin.mockReturnValue({ ok: false, reason: "missing_origin" });
-    const res = await mod.requireApiPermission(makeReq(), "admin.users.read");
+    const req = makeReq();
+    const res = await mod.requireApiPermission(req, "admin.users.read");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.response.status).toBe(403);
     expect(resolveCaller).not.toHaveBeenCalled(); // short-circuits before resolving
+    // F-15: refused before the caller is known — logged + counted, never a row.
+    expect(preAuthLog).toHaveBeenCalledWith({
+      eventType: "api.access.denied",
+      outcome: "denied",
+      reason: "missing_origin",
+      request: req,
+      requestId: "req-1",
+      metadata: { required: ["admin.users.read"] },
+    });
+    expect(auditEvent).not.toHaveBeenCalled();
   });
 });
 

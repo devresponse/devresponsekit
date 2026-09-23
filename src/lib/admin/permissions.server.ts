@@ -8,6 +8,7 @@ import { getSessionAccessContext } from "@/lib/session-access.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { REQUEST_PATH_HEADER, normalizeRequestPath } from "@/lib/request-id";
 import {
   hasBearerCredential,
@@ -80,6 +81,9 @@ export function isAdminPermissionDenial(
  * `active` membership, and the caller holds the requested permission.
  *
  * Threat / contract:
+ *   - A cookie request from an untrusted origin receives 403
+ *     `untrusted_origin`, logged + counted but NOT audited (F-15: it is
+ *     refused before the caller is known — see `logPreAuthRefusal`).
  *   - Unauthenticated callers receive 401.
  *   - Callers whose status/membership blocks them receive 403.
  *   - Callers missing the permission receive 403 AND an audit row with
@@ -104,10 +108,17 @@ export async function requireAdminPermission(
   // bearer callers (design §10.3). Performed BEFORE caller resolution so
   // an unauthenticated cross-origin cookie probe cannot trigger a DB
   // round-trip.
+  //
+  // F-15: and so it cannot trigger a DB WRITE either. Nothing about the
+  // caller is known yet, so this refusal used to insert one permanent
+  // `app_audit_events` row per anonymous request (a curl loop with an 8 KB
+  // User-Agent grew the append-only table at will). It is logged + counted
+  // instead, like every other origin guard; the authenticated denials below
+  // stay audited.
   if (!hasBearerCredential(request.headers)) {
     const origin = checkTrustedOrigin(request as { method?: string; headers: Headers });
     if (!origin.ok) {
-      await auditEvent({
+      logPreAuthRefusal({
         eventType: "administrator.access.denied",
         outcome: "denied",
         reason: origin.reason ?? "untrusted_origin",

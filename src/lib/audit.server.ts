@@ -7,6 +7,7 @@ import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
 import { attributeAuditActor } from "@/lib/impersonation-attribution.server";
 import { logServerError } from "@/lib/observability/logger.server";
+import { boundedUserAgent } from "@/lib/user-agent";
 
 /**
  * Permitted audit outcomes (docs/admin-manager.md §12):
@@ -88,6 +89,13 @@ export interface AuditEventInput {
  *     changes, and denied navigation. Suppressing failures here would
  *     hide attacks, so this function intentionally surfaces errors to
  *     the caller — log them but never include secrets in the metadata.
+ *   - F-15: only for a request whose caller something has VERIFIED (a
+ *     session, a credential, a signed SSO token). A refusal decided before
+ *     that — the CSRF origin guard, a garbage handoff token, a signed-out
+ *     launch — goes to `logPreAuthRefusal`
+ *     (`observability/pre-auth-refusal.server.ts`) instead: an anonymous
+ *     client picks its volume, and this table is append-only.
+ *   - `user_agent` is capped at `USER_AGENT_MAX_LENGTH` (F-15).
  *   - `metadata` is serialized as JSON. Callers MUST NOT pass tokens,
  *     refresh tokens, or raw passwords.
  *   - Impersonation (F-07): on a request whose session is an impersonation,
@@ -111,7 +119,10 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
   // leftmost X-Forwarded-For — so audit rows hold a forensically reliable
   // address even when a client spoofs the header.
   const ipAddress = reqHeaders ? getClientIp(reqHeaders) : null;
-  const userAgent = reqHeaders?.get("user-agent") ?? null;
+  // F-15: capped, because the header is client-chosen and this row can never
+  // be edited — an authenticated caller must not be able to park kilobytes in
+  // an append-only table either.
+  const userAgent = boundedUserAgent(reqHeaders);
   const requestId = input.requestId ?? (input.request ? getOrCreateRequestId(input.request) : null);
   // F-07: a row written by an impersonated session names the HUMAN, with the
   // borrowed identity in `metadata.impersonatedBetterAuthUserId`. Decided here,
@@ -124,7 +135,8 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
   // logger so a no-Sentry deployment (the default) still has a correlated
   // error stream. Only `error`/`failure` (5xx-class) outcomes are logged —
   // `success`/`denied` live in the audit table only, keeping the error
-  // stream signal-rich. `metadata` may carry an `err.message` but, per the
+  // stream signal-rich (pre-authentication denials never reach this function;
+  // F-15 logs them itself). `metadata` may carry an `err.message` but, per the
   // audit contract, never secrets.
   if (input.outcome === "error" || input.outcome === "failure") {
     logServerError(`audit.${input.eventType}`, {

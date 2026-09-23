@@ -19,9 +19,10 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | **Structured logs** | `src/lib/observability/logger.server.ts` | Pino, JSON to stdout. Ships regardless of whether Sentry is configured — your platform's log drain is the primary sink. |
 | **Server-error logging** | `logServerError(...)` + `onRequestError` (`src/instrumentation.ts`) | Every uncaught 5xx is logged with its `x-request-id`; also forwarded to Sentry when enabled. |
 | **Request-id correlation** | `src/lib/request-id.ts` (`normalizeInboundRequestId`) + `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) | Accepts an inbound `x-request-id` only as a UUID and only with a forwarded chain present (a weak bar — see [§4](#4-correlating-an-incident)); otherwise mints one. Echoed on every admin (`adminErrorResponse`) and RFC 7807 (`problemResponse`) error response. |
-| **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. Append-only; retention is an ops concern — see the note below. |
+| **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. Append-only; retention is an ops concern — see the note below. Written only for a caller something has verified (session, credential, signed SSO token); `user_agent` is capped at 512 characters. |
+| **Pre-auth refusals** | `logPreAuthRefusal` (`src/lib/observability/pre-auth-refusal.server.ts`) | A request refused **before** its caller is authenticated — the CSRF origin guard on every cookie surface, an SSO consume without a verifiable token, a signed-out SSO launch — writes **no audit row** (an anonymous loop must not grow the append-only table, F-15). It logs one `kind: "pre_auth_refusal"` line (event type, reason, request id, capped `User-Agent`, method, path — no client IP, which the log stream never carries; `warn` for `denied`, `error` for `failure`) and increments `devresponsekit_pre_auth_refusals_total` ([§5](#5-metrics)). The full list is in [admin-manager.md §12](./admin-manager.md#12-audit-model). |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
-| **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` business counter. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
+| **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` and `…_pre_auth_refusals_total{event_type}` business counters. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
 | **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Errors, transactions, and spans are all scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process — see [§3](#3-redaction--scrubbing-policy). |
 | **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the database is reachable **and** the ledger holds every core migration the build needs, `503` with `reason: database_unreachable` or `schema_behind` otherwise (missing ids go to the log, not the body). Wire both to your orchestrator probes (see [deployment.md §4](./deployment.md#4-deploy--post-deploy-verification) and [docker.md §7](./docker.md)). |
 | **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged + captured to Sentry (not swallowed) so a fault that escaped every request boundary is visible in the log stream. They do **not** exit — Next 16 treats both as non-fatal — unless `PROCESS_FATAL_ON_UNCAUGHT=1` opts uncaught exceptions into `exit(1)` (review #23; see [configuration.md](./configuration.md)). |
@@ -95,7 +96,9 @@ same change.
    (admin envelope or RFC 7807 `problem+json`).
 2. Grep the **log stream** for that id to find the structured server log + stack.
 3. Query **`app_audit_events`** by the same id to see the actor, tenant, and outcome of the
-   action that triggered it.
+   action that triggered it. A request refused before authentication (a CSRF origin
+   refusal, an unverifiable SSO token, a signed-out launch) has **no** row by design — its
+   `pre_auth_refusal` log line from step 2 is the whole record.
 4. If Sentry is enabled, the event carries the id as a tag for a fourth view with breadcrumbs.
 
 An inbound `x-request-id` is preserved end-to-end when it is a UUID and the request
@@ -133,6 +136,13 @@ business counter — not the full target set.
   to the in-process bucket for one cool-down. Non-zero means the deployment-wide floors are
   per-instance right now: the database is unhealthy or migration `0006` is not applied; the
   paired `warn` log line carries the error.
+- **`devresponsekit_pre_auth_refusals_total{event_type}`** — incremented for every request
+  refused before its caller is authenticated (F-15): `administrator.access.denied`,
+  `api.access.denied`, `account.access.denied` and `invitation.access.denied` for the CSRF
+  origin guard, `sso.consume.failure` for a consume without a verifiable token or a cross-site
+  confirm, `sso.launch.failure` for a signed-out launch. These refusals are not in
+  `app_audit_events`, so a spike here (with the paired `pre_auth_refusal` log lines) is where a
+  cross-origin probe or a garbage-token flood shows up.
 
 **Security model:**
 

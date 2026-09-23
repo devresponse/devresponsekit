@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AuditServerModule from "@/lib/audit.server";
 import type * as AttributionModule from "@/lib/impersonation-attribution.server";
+import { USER_AGENT_MAX_LENGTH } from "@/lib/user-agent";
 
 /**
  * Unit tests for `audit.server.ts` (§29.6.13).
@@ -84,6 +85,23 @@ describe("auditEvent", () => {
     headers.set("x-real-ip", "198.51.100.7");
     await auditEvent({ eventType: "system.probe", outcome: "success", request: { headers } });
     expect(valuesArg.mock.calls[0]![0].ip_address).toBe("198.51.100.7");
+  });
+
+  it("caps user_agent at USER_AGENT_MAX_LENGTH so no caller can park kilobytes in the append-only table (F-15)", async () => {
+    // The finding's payload: an 8 KB User-Agent. The row is permanent, so the
+    // cap applies to EVERY row, authenticated or not.
+    const hugeUa = `Mozilla/5.0 ${"A".repeat(8 * 1024)}`;
+    await auditEvent({
+      eventType: "administrator.access.denied",
+      outcome: "denied",
+      actorBetterAuthUserId: "ba-1",
+      reason: "missing_admin_permission",
+      request: { headers: new Headers({ "user-agent": hugeUa }) },
+    });
+    const row = valuesArg.mock.calls[0]![0];
+    expect(row.user_agent).toHaveLength(USER_AGENT_MAX_LENGTH);
+    expect(row.user_agent).toBe(hugeUa.slice(0, USER_AGENT_MAX_LENGTH));
+    expect(USER_AGENT_MAX_LENGTH).toBe(512);
   });
 
   it("nulls IP and UA when no request is supplied", async () => {

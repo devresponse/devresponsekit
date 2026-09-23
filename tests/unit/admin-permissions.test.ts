@@ -25,6 +25,12 @@ vi.mock("@/lib/auth-status", async () => {
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
+// F-15: a refusal decided before the caller is known goes here, not to the
+// audit table.
+const preAuthLog = vi.fn();
+vi.mock("@/lib/observability/pre-auth-refusal.server", () => ({
+  logPreAuthRefusal: (...args: unknown[]) => preAuthLog(...args),
+}));
 // The CSRF origin guard short-circuits under NODE_ENV=test, so its deny
 // branch inside requireAdminPermission is only reachable through a mock
 // (review #122 — the untrusted-origin denial path had no coverage).
@@ -46,6 +52,7 @@ beforeEach(() => {
   sessionGetter.mockReset();
   accessGetter.mockReset();
   auditMock.mockReset();
+  preAuthLog.mockReset();
   originCheck.mockReset().mockReturnValue({ ok: true });
   ambient.headers = new Headers();
 });
@@ -56,27 +63,31 @@ describe("requireAdminPermission — trusted-origin CSRF gate (review #122)", ()
     return await import("@/lib/admin/permissions.server");
   }
 
-  it("denies an untrusted cookie origin with 403 + a denied audit row BEFORE resolving the caller", async () => {
+  it("denies an untrusted cookie origin with 403 BEFORE resolving the caller — logged, NOT audited (F-15)", async () => {
     originCheck.mockReturnValue({ ok: false, reason: "untrusted_origin" });
     const { requireAdminPermission, isAdminPermissionDenial } = await load();
-    const result = await requireAdminPermission(makeRequest(), "admin.users.read");
+    const request = makeRequest({ "user-agent": "A".repeat(8 * 1024) });
+    const result = await requireAdminPermission(request, "admin.users.read");
     expect(isAdminPermissionDenial(result)).toBe(true);
     if (isAdminPermissionDenial(result)) {
       expect(result.response.status).toBe(403);
       const body = (await result.response.json()) as { error: string; requestId: string };
       expect(body.error).toBe("untrusted_origin");
-      // The 403 and the audit row share one correlation id.
+      // The 403 and the log line share one correlation id.
       expect(result.response.headers.get("x-request-id")).toBe(body.requestId);
-      expect(auditMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          eventType: "administrator.access.denied",
-          outcome: "denied",
-          reason: "untrusted_origin",
-          requestId: body.requestId,
-          metadata: { required: ["admin.users.read"] },
-        }),
-      );
+      expect(preAuthLog).toHaveBeenCalledTimes(1);
+      expect(preAuthLog).toHaveBeenCalledWith({
+        eventType: "administrator.access.denied",
+        outcome: "denied",
+        reason: "untrusted_origin",
+        request,
+        requestId: body.requestId,
+        metadata: { required: ["admin.users.read"] },
+      });
     }
+    // Nothing is known about the caller, so nothing reaches the append-only
+    // table: an anonymous curl loop must not be able to grow it (F-15).
+    expect(auditMock).not.toHaveBeenCalled();
     // No DB round-trip for a cross-origin probe.
     expect(sessionGetter).not.toHaveBeenCalled();
     expect(accessGetter).not.toHaveBeenCalled();
@@ -86,9 +97,10 @@ describe("requireAdminPermission — trusted-origin CSRF gate (review #122)", ()
     originCheck.mockReturnValue({ ok: false });
     const { requireAdminPermission } = await load();
     await requireAdminPermission(makeRequest(), "admin.users.read");
-    expect(auditMock).toHaveBeenCalledWith(
+    expect(preAuthLog).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: "denied", reason: "untrusted_origin" }),
     );
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("skips the origin guard for a bearer credential (a token cannot be attached cross-site)", async () => {

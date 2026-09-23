@@ -19,6 +19,7 @@ import {
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse } from "@/lib/api-auth/problem";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
+import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 
 /**
  * Authorization guard for the versioned REST surface (`/api/v1`). Mirrors
@@ -51,10 +52,19 @@ export async function requireApiPermission(
   const required = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
   const requestId = getOrCreateRequestId(request);
 
-  // CSRF origin guard applies only to ambient (cookie) credentials.
+  // CSRF origin guard applies only to ambient (cookie) credentials. Refused
+  // before the caller is known, so logged + counted, never audited (F-15).
   if (!hasBearerCredential(request.headers)) {
     const origin = checkTrustedOrigin(request);
     if (!origin.ok) {
+      logPreAuthRefusal({
+        eventType: "api.access.denied",
+        outcome: "denied",
+        reason: origin.reason ?? "untrusted_origin",
+        request,
+        requestId,
+        metadata: { required },
+      });
       return { ok: false, response: problemResponse("forbidden", 403, request, { requestId }) };
     }
   }

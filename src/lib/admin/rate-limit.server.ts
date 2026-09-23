@@ -284,8 +284,10 @@ export const DEFAULT_ADMIN_EXPORT_LIMIT: RateLimitOptions = {
 };
 
 /**
- * SSO handoff budgets (review #16). Both routes were previously unthrottled,
- * and every failed call writes an append-only `app_audit_events` row.
+ * SSO handoff budgets (review #16). Both routes were previously unthrottled.
+ * Only a failure after the handoff token verified, or with a session, writes an
+ * append-only `app_audit_events` row; a pre-authentication refusal is logged
+ * and counted instead (F-15).
  *
  * `/api/sso/launch` is keyed per PRINCIPAL — the session user id once a
  * session resolves, the trusted client IP before that — so one noisy user

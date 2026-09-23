@@ -14,6 +14,7 @@ import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse } from "@/lib/api-auth/problem";
 import type { ApiKeyOrgConfinement } from "@/lib/api-auth/api-keys.server";
 import type { CallerSource } from "@/lib/api-auth/issuance-fence.server";
+import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 
 /**
  * Shared authorization gate for the self-service Account API
@@ -170,10 +171,18 @@ async function decideAccountAccess(
   // CSRF origin guard applies only to ambient (cookie) credentials; a
   // bearer token cannot be attached cross-site (design §10.3). Both
   // origin-guard reasons collapse to the single cataloged `untrusted_origin`
-  // code.
+  // code. Refused before the caller is known, so logged + counted, never
+  // audited (F-15).
   if (!hasBearerCredential(request.headers)) {
     const origin = checkTrustedOrigin(request);
     if (!origin.ok) {
+      logPreAuthRefusal({
+        eventType: "account.access.denied",
+        outcome: "denied",
+        reason: origin.reason ?? "untrusted_origin",
+        request,
+        metadata: { requiredScope: requiredScope ?? null },
+      });
       return {
         ok: false,
         rejection: {

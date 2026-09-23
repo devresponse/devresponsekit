@@ -4,7 +4,8 @@ import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import { createOauthClient, listOauthClients } from "@/lib/api-auth/oauth-clients.server";
-import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
+import { normalizeScopes } from "@/lib/api-auth/scopes";
+import { unissuableScopes } from "@/lib/api-auth/issuance";
 import {
   ownerOutranksActor,
   resolveOrgScope,
@@ -59,7 +60,8 @@ export async function GET(request: NextRequest) {
  * `/api/v1/users` first). The admin may only grant scopes they themselves
  * hold (design §7), and may not register a client for a service principal that
  * OUTRANKS them — a superuser principal is refused to a non-superadmin actor
- * (MACHINE-2).
+ * (MACHINE-2). The account-writing scopes are refused unless the service
+ * principal is the caller themselves (F-01; see `src/lib/api-auth/issuance.ts`).
  */
 const createSchema = z
   .object({
@@ -127,11 +129,16 @@ export async function POST(request: NextRequest) {
   }
 
   const scopes = normalizeScopes(parsed.data.scopes);
-  const ungrantable = ungrantableScopesForCaller(
-    grant.caller.access.permissions,
-    grant.caller.grantedScopes,
+  const ungrantable = unissuableScopes({
+    issuer: {
+      appUserId: grant.caller.access.appUserId,
+      permissions: grant.caller.access.permissions,
+      grantedScopes: grant.caller.grantedScopes,
+      impersonatorId: grant.caller.impersonatorId,
+    },
+    ownerAppUserId: serviceUser.id,
     scopes,
-  );
+  });
   if (ungrantable.length > 0) {
     return problemResponse("invalid_scope", 403, request, {
       detail: "You cannot grant scopes you do not hold.",

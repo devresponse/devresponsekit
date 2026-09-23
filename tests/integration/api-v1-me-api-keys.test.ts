@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as Route from "@/app/api/v1/me/api-keys/route";
+import type * as GuardModule from "@/lib/account/guard.server";
+import type * as EnvModule from "@/lib/env";
 
 /**
  * /api/v1/me/api-keys — self-service key issuance (was 0% covered).
@@ -16,7 +18,9 @@ const auditEvent = vi.fn();
 
 // The v1 self-service routes gate on `requireApiAccount` — the problem+json
 // rendering of the same account decision (review #45).
-vi.mock("@/lib/account/guard.server", () => ({
+vi.mock("@/lib/account/guard.server", async (importOriginal) => ({
+  // The confinement helpers are pure and run for REAL (F-01).
+  ...(await importOriginal<typeof GuardModule>()),
   requireApiAccount: (...a: unknown[]) => requireApiAccount(...a),
 }));
 vi.mock("@/lib/api-auth/api-keys.server", () => ({
@@ -24,7 +28,10 @@ vi.mock("@/lib/api-auth/api-keys.server", () => ({
   createApiKey: (...a: unknown[]) => createApiKey(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
-vi.mock("@/lib/env", () => ({ getServerEnv: () => ({ API_KEY_DEFAULT_TTL_DAYS: null }) }));
+vi.mock("@/lib/env", async (importOriginal) => ({
+  ...(await importOriginal<typeof EnvModule>()),
+  getServerEnv: () => ({ API_KEY_DEFAULT_TTL_DAYS: null }),
+}));
 
 function req(init?: { method?: string; body?: unknown }): NextRequest {
   const url = "http://test.local/api/v1/me/api-keys";
@@ -44,6 +51,8 @@ function actor(opts: { permissions: string[]; grantedScopes: string[] | null }) 
     actor: {
       appUserId: "u1",
       betterAuthUserId: "ba1",
+      callerKind: opts.grantedScopes === null ? "session" : "api_key",
+      impersonatorId: null,
       grantedScopes: opts.grantedScopes,
       access: { permissions: opts.permissions, organizationId: "o1" },
     },
@@ -85,6 +94,17 @@ describe("GET /api/v1/me/api-keys", () => {
     const res = await GET(req());
     expect(res.status).toBe(200);
     expect(listApiKeysForUser).toHaveBeenCalledWith("u1");
+  });
+
+  it("F-01: confines a BEARER caller's listing to the org its credential acts in", async () => {
+    // Unconfined, a key bound to org A listed the owner's keys in EVERY org —
+    // the enumeration step of the cross-tenant rotate takeover.
+    requireApiAccount.mockResolvedValue(
+      actor({ permissions: ["account.read"], grantedScopes: ["account.read"] }),
+    );
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(listApiKeysForUser).toHaveBeenCalledWith("u1", { organizationId: "o1" });
   });
 });
 

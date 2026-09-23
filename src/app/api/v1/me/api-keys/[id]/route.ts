@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
-import { requireApiAccount } from "@/lib/account/guard.server";
+import { isWithinTenant, requireApiAccount, tenantConfinement } from "@/lib/account/guard.server";
 import { getApiKeyById, revokeApiKey } from "@/lib/api-auth/api-keys.server";
 import {
   consumeToken,
@@ -25,6 +25,11 @@ type RouteContext = { params: Promise<{ id: string }> };
  * (IMP-1): while impersonating, the ownership check above passes for every key
  * the borrowed user holds in ANY tenant, so this would let an administrator
  * destroy another person's credentials from inside their own account.
+ *
+ * F-01 — a BEARER caller only reaches keys in the org it acts in
+ * ({@link tenantConfinement}); a key elsewhere answers the same 404 as a key
+ * that is not the caller's, so a credential bound to one tenant can neither
+ * revoke nor probe the owner's keys in another.
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiAccount(request, "account.apikeys.manage");
@@ -44,9 +49,13 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   if (!isUuid(id)) return problemResponse("invalid_request", 400, request);
 
   const key = await getApiKeyById(id);
-  // 404 (not 403) when the key isn't the caller's own, so we don't leak
-  // the existence of other users' key ids.
-  if (!key || key.app_user_id !== actor.appUserId) {
+  // 404 (not 403) when the key isn't the caller's own, or lies outside the
+  // caller's tenant, so we don't leak the existence of those key ids.
+  if (
+    !key ||
+    key.app_user_id !== actor.appUserId ||
+    !isWithinTenant(key.organization_id, tenantConfinement(actor))
+  ) {
     return problemResponse("not_found", 404, request);
   }
 

@@ -195,6 +195,15 @@ describe("/api/administrator/mcp-agents", () => {
     expect(updateOauthClient).toHaveBeenCalledWith(UUID, { scopes: ["account.read"] });
   });
 
+  it("F-01: 422s an account-WRITING scope on the agent's credential (another principal)", async () => {
+    // The shared issuance rule runs for real. `account.read` (the agent's
+    // `whoami`) stays grantable; `account.apikeys.manage` would let whoever
+    // holds the agent's secret mint durable keys as the agent.
+    const res = await PATCH(req({ scopes: ["account.read", "account.apikeys.manage"] }), ctx());
+    expect(res.status).toBe(422);
+    expect(updateOauthClient).not.toHaveBeenCalled();
+  });
+
   it("422s a scope the admin cannot grant", async () => {
     const res = await PATCH(req({ scopes: ["admin.audit.read"] }), ctx());
     expect(res.status).toBe(422);
@@ -235,8 +244,9 @@ describe("/api/administrator/mcp-agents", () => {
     });
 
     it("422s an account scope the credential does not carry (bearer ≠ self-grantable)", async () => {
-      // Cookie admins may always grant account.* scopes; a bearer caller may
-      // delegate only what it holds itself.
+      // A cookie admin may grant `account.read` on an agent (its `whoami`) —
+      // never the account-WRITING scopes (F-01); a bearer caller may delegate
+      // only what it holds itself.
       bearerGuard(["admin.clients.manage"]);
       const res = await PATCH(req({ scopes: ["account.read"] }), ctx());
       expect(res.status).toBe(422);

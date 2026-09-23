@@ -23,11 +23,8 @@ import {
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
 import { createApiKey } from "@/lib/api-auth/api-keys.server";
-import {
-  normalizeScopes,
-  ungrantableScopes,
-  ungrantableScopesForCaller,
-} from "@/lib/api-auth/scopes";
+import { normalizeScopes, ungrantableScopes } from "@/lib/api-auth/scopes";
+import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getServerEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -158,13 +155,13 @@ export async function GET(request: NextRequest) {
  *   - The requested scopes are validated against BOTH bounds:
  *     - the OWNER's authority ({@link ungrantableScopes}), so an
  *       admin-minted key can never out-scope the user who will wield it;
- *     - AND the acting admin's own grantable authority
- *       ({@link ungrantableScopesForCaller}), so an `admin.apikeys.manage`
- *       holder cannot mint an on-behalf key carrying a more-privileged
- *       co-member's (or a superuser owner's) permissions and escalate past
- *       their own authority by pocketing the plaintext. Mirrors the actor
- *       bound already enforced on /api/v1/admin/oauth-clients and
- *       /api/v1/me/api-keys.
+ *     - AND the shared issuance rule ({@link unissuableScopes}): the acting
+ *       admin's own grantable authority, so an `admin.apikeys.manage` holder
+ *       cannot mint an on-behalf key carrying a more-privileged co-member's
+ *       (or a superuser owner's) permissions and escalate past their own
+ *       authority by pocketing the plaintext; and no account-WRITING scope
+ *       on a key for another person (F-01). The same rule bounds every other
+ *       issuance path, rotations included.
  *     - AND the owner's org REACH ({@link ownerOutranksActor}, MACHINE-2): a
  *       non-superadmin may not mint on behalf of a SUPERUSER owner at all,
  *       whatever the scopes. Scope names alone never bounded reach.
@@ -240,11 +237,21 @@ export async function POST(request: NextRequest) {
   // their own permissions. For a cookie admin `grantedScopes` is null (full
   // user authority); a superadmin holds every permission so this is a no-op
   // for them.
-  const actorUngrantable = ungrantableScopesForCaller(
-    guard.access.permissions,
-    guard.grantedScopes,
+  //
+  // The shared issuance rule also refuses the account-WRITING scopes here
+  // unless the owner is the actor (F-01): they act on the OWNER's own account,
+  // and an on-behalf key carrying `account.apikeys.manage` let the actor rotate
+  // the owner's keys in other tenants through `/api/v1/me/api-keys`.
+  const actorUngrantable = unissuableScopes({
+    issuer: {
+      appUserId: actorAppUserId,
+      permissions: guard.access.permissions,
+      grantedScopes: guard.grantedScopes,
+      impersonatorId: guard.impersonatorId,
+    },
+    ownerAppUserId: owner.id,
     scopes,
-  );
+  });
   if (actorUngrantable.length > 0) {
     return adminErrorResponse("invalid_scope", 422, request, {
       requestId: guard.requestId,

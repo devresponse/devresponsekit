@@ -11,6 +11,7 @@ import {
   userIsGlobalSuperuser,
 } from "@/lib/admin/access-scope.server";
 import { rotateApiKey } from "@/lib/api-auth/api-keys.server";
+import { unissuableScopes } from "@/lib/api-auth/issuance";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *
  * Reissuing on behalf of a SUPERUSER owner is refused with `403` for a
  * non-superadmin actor (MACHINE-2) — see the bound below.
+ *
+ * The key's scopes must also be ones the actor could grant on a fresh
+ * on-behalf mint ({@link unissuableScopes}, F-01): otherwise `403
+ * invalid_scope`. Rotation carries the ORIGINAL scopes forward and hands the
+ * plaintext to the actor, so without it an org admin holding only
+ * `admin.apikeys.manage` could rotate a co-member's `admin.users.*` key — or
+ * any key carrying an account-writing scope — and receive it.
  */
 export async function POST(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.apikeys.manage");
@@ -58,7 +66,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const existing = await db
     .selectFrom("app_api_keys")
-    .select(["id", "app_user_id", "status", "organization_id"])
+    .select(["id", "app_user_id", "status", "organization_id", "scopes"])
     .where("id", "=", id)
     .executeTakeFirst();
   // ADR-0001: org admins may only rotate their own org's keys.
@@ -101,6 +109,38 @@ export async function POST(request: NextRequest, context: RouteContext) {
       metadata: { apiKeyId: id },
     });
     return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+  }
+
+  // Scope bound (F-01) — rotation IS issuance, so the successor's scope set
+  // (the original, carried forward verbatim) must pass the same rule a fresh
+  // on-behalf mint does. The reach bound above only ever covered SUPERUSER
+  // owners; this covers every owner.
+  const unissuable = unissuableScopes({
+    issuer: {
+      appUserId: actorAppUserId,
+      permissions: guard.access.permissions,
+      grantedScopes: guard.grantedScopes,
+      impersonatorId: guard.impersonatorId,
+    },
+    ownerAppUserId: existing.app_user_id,
+    scopes: existing.scopes,
+  });
+  if (unissuable.length > 0) {
+    await auditEvent({
+      eventType: "admin.api_key.rotate_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: existing.app_user_id,
+      organizationId: existing.organization_id,
+      reason: "scope_not_grantable",
+      request,
+      requestId: guard.requestId,
+      metadata: { apiKeyId: id, ungrantableScopes: unissuable },
+    });
+    return adminErrorResponse("invalid_scope", 403, request, {
+      requestId: guard.requestId,
+      extra: { ungrantableScopes: unissuable },
+    });
   }
 
   const rotated = await rotateApiKey(id, actorAppUserId);

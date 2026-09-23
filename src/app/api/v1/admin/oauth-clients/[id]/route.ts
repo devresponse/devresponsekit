@@ -7,7 +7,8 @@ import {
   revokeOauthClient,
   updateOauthClient,
 } from "@/lib/api-auth/oauth-clients.server";
-import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
+import { normalizeScopes } from "@/lib/api-auth/scopes";
+import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
@@ -31,7 +32,12 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   return v1JsonResponse({ client }, request);
 }
 
-/** PATCH /api/v1/admin/oauth-clients/[id] — edit name/scopes (`admin.clients.manage`). */
+/**
+ * PATCH /api/v1/admin/oauth-clients/[id] — edit name/scopes (`admin.clients.manage`).
+ *
+ * New scopes pass the shared issuance rule (F-01): the caller may already hold
+ * this client's secret, so widening it is issuing the wider set to them.
+ */
 const patchSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
@@ -67,11 +73,16 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
 
   const scopes = parsed.data.scopes ? normalizeScopes(parsed.data.scopes) : undefined;
   if (scopes) {
-    const ungrantable = ungrantableScopesForCaller(
-      grant.caller.access.permissions,
-      grant.caller.grantedScopes,
+    const ungrantable = unissuableScopes({
+      issuer: {
+        appUserId: grant.caller.access.appUserId,
+        permissions: grant.caller.access.permissions,
+        grantedScopes: grant.caller.grantedScopes,
+        impersonatorId: grant.caller.impersonatorId,
+      },
+      ownerAppUserId: client.app_user_id,
       scopes,
-    );
+    });
     if (ungrantable.length > 0) {
       return problemResponse("invalid_scope", 403, request, {
         extra: { ungrantableScopes: ungrantable },

@@ -37,6 +37,13 @@ export interface AdminPermissionGrant {
   credentialId: string | null;
   /** Credential scopes (null for cookies = full user authority). */
   grantedScopes: string[] | null;
+  /**
+   * The impersonating admin's id when the caller is an impersonated session,
+   * else `null` (always `null` for bearer credentials). An impersonated
+   * session carries the BORROWED user's identity in `access`, so a route that
+   * must tell the two apart — credential issuance (F-01) — reads it here.
+   */
+  impersonatorId: string | null;
 }
 
 /**
@@ -165,6 +172,7 @@ export async function requireAdminPermission(
     callerKind: caller.kind,
     credentialId: caller.credentialId,
     grantedScopes: caller.grantedScopes,
+    impersonatorId: caller.impersonatorId,
   };
 }
 

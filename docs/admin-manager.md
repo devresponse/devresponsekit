@@ -1005,6 +1005,20 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   target who is a **global superuser**, whose marker expands for the principal
   whichever single tenant the session lands in. Do not replace the union with
   this bound.
+- **No nested impersonation (F-02).** Impersonation cannot start from an
+  impersonated session. When the borrowed identity holds
+  `admin.users.impersonate`, `POST /users/[id]/impersonate` returns 403
+  `forbidden_while_impersonating` and audits `admin.user.impersonation_failed`
+  (outcome `denied`, reason `nested_impersonation`) against the **human**
+  impersonator; when it does not, the permission guard refuses first, as it
+  would for that user. The
+  confinement below is keyed on the session's `impersonatedBy`; a second hop
+  would make Better Auth stamp the *borrowed* identity there, re-basing the
+  next session on that identity's reach — any tenant the borrowed co-admin
+  belongs to and the human does not. The route also requires the cookie
+  session Better Auth will act on to be the very principal the guards
+  evaluated, on an ordinary session (`session_principal_mismatch` otherwise).
+  Stop the current impersonation first.
 - **Tenant confinement (IMP-1/IMP-2).** An impersonated session may only
   resolve an organization the **impersonator could already reach as
   themselves** — applied in `getUserAccessContext`, to both the `active_org`

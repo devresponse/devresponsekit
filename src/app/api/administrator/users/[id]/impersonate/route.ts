@@ -18,7 +18,7 @@ import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +46,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  *     returned session is a cookie session and therefore unbound, so this is
  *     the one action that could convert a tenant-confined credential into an
  *     unconfined one. Refused with 403.
+ *   - Caller MUST NOT already be impersonating (F-02): a borrowed session is
+ *     not the admin, and impersonating FROM it re-bases the tenant
+ *     confinement on the borrowed identity's reach instead of the human's.
+ *     Refused with 403, audited against the human impersonator.
  *   - The UI MUST present a double-confirm before calling this
  *     endpoint. The server cannot enforce that, but it does cap the
  *     call rate via the shared in-memory token bucket so a missing
@@ -68,6 +72,39 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   if (limited) return limited;
 
   const { id } = await ctx.params;
+
+  // F-02 — NO NESTED IMPERSONATION. The tenant confinement of an impersonated
+  // session is the IMPERSONATOR's reach (`listImpersonationReachableOrgIds`,
+  // keyed on the session's `impersonatedBy`). Starting a second impersonation
+  // from a borrowed session makes Better Auth stamp the BORROWED identity as
+  // `impersonatedBy`, so the next session is confined to that identity's reach
+  // — which is wider than the human's whenever the borrowed user belongs to a
+  // tenant the human does not. Admin A (org P only) impersonates co-admin X
+  // (P and Q), then Y from X's session: Y's session admits Q, and A browses a
+  // tenant they were never in, with X, not A, in the audit trail.
+  //
+  // Refused before anything else about the target is examined, so the refusal
+  // leaks nothing about it, and audited against the HUMAN behind the session.
+  // Stop the current impersonation first; nothing legitimate needs a chain.
+  if (guard.impersonatorId) {
+    await auditEvent({
+      eventType: "admin.user.impersonation_failed",
+      outcome: "denied",
+      actorBetterAuthUserId: guard.impersonatorId,
+      reason: "nested_impersonation",
+      request,
+      requestId: guard.requestId,
+      metadata: {
+        impersonatedBetterAuthUserId: guard.betterAuthUserId,
+        // The raw path segment is untrusted; only a well-formed id is recorded.
+        requestedTargetId: isUuid(id) ? id : null,
+      },
+    });
+    return adminErrorResponse("forbidden_while_impersonating", 403, request, {
+      requestId: guard.requestId,
+    });
+  }
+
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
 
@@ -246,6 +283,31 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       });
       return adminErrorResponse("forbidden", 403, request);
     }
+  }
+
+  // F-02, defence in depth. Better Auth's `impersonateUser` acts on the
+  // request's SESSION COOKIE, not on the caller the guards above evaluated.
+  // Every rule in this handler is only sound if the two are the same
+  // principal, so re-read the cookie Better Auth will act on and require it to
+  // BE that principal, on an ordinary (not borrowed) session. Fails closed: no
+  // cookie session, a different user, or a borrowed session all refuse.
+  const liveSession = await getCurrentSession();
+  const liveImpersonatorId = getImpersonatorId(liveSession);
+  if (liveImpersonatorId || liveSession?.user.id !== guard.betterAuthUserId) {
+    await auditEvent({
+      eventType: "admin.user.impersonation_failed",
+      outcome: "denied",
+      actorBetterAuthUserId: liveImpersonatorId ?? guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      email: target.primaryEmail,
+      reason: liveImpersonatorId ? "nested_impersonation" : "session_principal_mismatch",
+      request,
+      requestId: guard.requestId,
+      metadata: { targetBetterAuthUserId: target.betterAuthUserId },
+    });
+    return adminErrorResponse("forbidden_while_impersonating", 403, request, {
+      requestId: guard.requestId,
+    });
   }
 
   try {

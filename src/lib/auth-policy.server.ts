@@ -150,8 +150,9 @@ function toPolicy(row: PolicyRow, source: OrgAuthPolicy["source"]): OrgAuthPolic
  * Admin-curated email-domain routing: an `app_provider_organizations` row
  * with `provider = 'email'` maps an email domain to an organization for
  * email/password signups (which otherwise land in the `default` org). Rows
- * are managed on the organization's Providers tab (or the
- * provider-bindings API); absence simply means "no routing".
+ * are created through the provider-bindings API by a superadmin only (F-04:
+ * a binding claims the domain across the whole platform) and can be removed
+ * on the organization's Providers tab; absence simply means "no routing".
  */
 export async function findEmailDomainOrganization(
   email: string,

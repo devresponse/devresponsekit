@@ -26,7 +26,7 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 | Delete of a default org | Blocked with **409** `organization_is_default` | `api/administrator/organizations/[id]/route.ts:188`, `lib/admin/orgs.server.ts:120` |
 | Delete of a non-empty org | Blocked with **409** `organization_not_empty` (any membership, any status) | `api/administrator/organizations/[id]/route.ts:189`, `lib/admin/orgs.server.ts:104` |
 | Delete of an org with other dependents (roles, bindings, apps, credentials) | FK violation translated to **409** `organization_in_use` | `api/administrator/organizations/[id]/route.ts:212` |
-| Member / binding mutations | `POST`/`PATCH`/`DELETE` on members and bindings require `admin.orgs.update` (NOT `.delete`, NOT `.manage`) | `api/administrator/organizations/[id]/members/route.ts:123,239,340`, `.../provider-bindings/route.ts:113,207` |
+| Member / binding mutations | `POST`/`PATCH`/`DELETE` on members and bindings require `admin.orgs.update` (NOT `.delete`, NOT `.manage`); **creating** a binding additionally requires a Superadmin (F-04) | `api/administrator/organizations/[id]/members/route.ts:123,239,340`, `.../provider-bindings/route.ts:113,207` |
 
 > `TODO: verify` — the catalog defines `admin.orgs.manage` ("Manage organization members and bindings", `lib/admin/permissions.ts:49`) but **no page guard or API route references it**; member and binding mutations gate on `admin.orgs.update` instead. Confirm with product whether `admin.orgs.manage` is intended to gate the Members/Providers write actions (currently dead), or is reserved for future use. A holder of only `admin.orgs.manage` (without `.update`) can read but cannot mutate members/bindings today.
 
@@ -46,7 +46,8 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 | **Rename / status / default** (Settings `PATCH`) | — | — | — | — | **No — 403** (SUPERADMIN-only; fields disabled in UI) | Yes |
 | **Delete** an org | — | — | — | — | **No — 403** (SUPERADMIN-only; no Delete button) | Yes |
 | **Add / update / remove members** | — | — | — | — | **Yes** (own org; `admin.orgs.update`) | Yes |
-| **Bind / unbind providers** | — | — | — | — | **Yes** (own org; `admin.orgs.update`) | Yes |
+| **Bind providers** | — | — | — | — | No (403 — a binding is a platform-wide claim, F-04) | Yes (API) |
+| **Unbind providers** | — | — | — | — | **Yes** (own org; `admin.orgs.update`) | Yes |
 
 Notes:
 
@@ -226,16 +227,17 @@ User stories
     | 4 | If the remove fails server-side, observe the alert. | An inline error `role="alert"` with the localized "remove error" message is shown (`_organization-members-grid.tsx:136`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
-- UAT-ADMIN-ORG-DETAIL-S3 — As an Org Admin, I want to bind and unbind a provider organization, so that SSO/provisioning maps to my org.
-  - Acceptance criteria: Given I am on the Providers tab, when I add a provider binding, then it appears; when I remove it and confirm, it disappears.
+- UAT-ADMIN-ORG-DETAIL-S3 — As an Org Admin, I want to see and remove my organization's provider bindings; as a Superadmin, I want to create them, so that SSO/provisioning maps to the right org.
+  - Acceptance criteria: Given I am on the Providers tab, I see my org's bindings and can remove one. Creating a binding is refused to an Org Admin (a binding claims a domain or provider key across the whole platform, F-04) and succeeds for a Superadmin through `POST /api/administrator/organizations/{id}/provider-bindings`.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | As `orgadmin@orga.local`, open `org-a` and click the **Providers** tab. | The provider-bindings grid loads (may be empty for a fresh org). |
-    | 2 | Add a binding (provider + provider organization key, optional display name). | A new row appears with the provider, the key in code style, and a bound date. |
-    | 3 | Click **Remove** on that binding. | A confirm dialog shows `provider: key`. |
-    | 4 | Confirm. | The grid refreshes and the binding row is gone. |
-    | 5 | Add the same provider + key twice. | The second attempt is rejected (binding already exists) and no duplicate row appears. |
+    | 1 | As `orgadmin@orga.local`, open `org-a` and click the **Providers** tab. | The provider-bindings grid loads (may be empty for a fresh org). There is no create control. |
+    | 2 | As `orgadmin@orga.local`, `POST …/organizations/{org-a id}/provider-bindings` with `{"provider":"email","providerOrganizationKey":"orga.example"}`. | **403** with `reason: "cross_org_reach_required"`; nothing is created. |
+    | 3 | As the Superadmin, send the same request with `"providerOrganizationKey":"OrgA.Example"`. | **201**; the binding appears on the Providers tab with the key lowercased (`orga.example`). |
+    | 4 | As the Superadmin, try `"providerOrganizationKey":"gmail.com"`. | **400** with `reason: "public_email_domain"`. |
+    | 5 | As `orgadmin@orga.local`, click **Remove** on the binding and confirm. | A confirm dialog shows `provider: key`; the grid refreshes and the row is gone. |
+    | 6 | As the Superadmin, add the same provider + key twice. | The second attempt is rejected (binding already exists) and no duplicate row appears. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-ORG-DETAIL-S4 — As a Superadmin, I want to rename an organization and change its status, so that I can correct tenant records.

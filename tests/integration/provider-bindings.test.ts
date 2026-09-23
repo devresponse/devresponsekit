@@ -16,7 +16,9 @@ const auditMock = vi.fn();
 const state: {
   org: { id: string; slug: string } | undefined;
   bindings: Array<{ id: string; provider: string; provider_organization_key: string }>;
-} = { org: undefined, bindings: [] };
+  /** Rows passed to `insertInto(...).values(...)`, so a test can read what was stored. */
+  inserted: unknown[];
+} = { org: undefined, bindings: [], inserted: [] };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -43,6 +45,11 @@ function makeChain(table: string): unknown {
       get(_t, prop) {
         if (prop === "executeTakeFirst") return async () => firstFor(table);
         if (prop === "executeTakeFirstOrThrow") return async () => ({ id: "b-new" });
+        if (prop === "values")
+          return (row: unknown) => {
+            state.inserted.push(row);
+            return makeChain(table);
+          };
         if (prop === "execute")
           return async () => (table === "app_provider_organizations" ? state.bindings : []);
         return (...args: unknown[]) => {
@@ -107,6 +114,7 @@ beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
   state.org = { id: ORG_A, slug: "org-a" };
   state.bindings = [{ id: BIND, provider: "google", provider_organization_key: "g-1" }];
+  state.inserted = [];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ GET, POST, DELETE } =
     await import("@/app/api/administrator/organizations/[id]/provider-bindings/route"));
@@ -132,9 +140,65 @@ describe("provider-bindings — GET", () => {
 
 describe("provider-bindings — POST", () => {
   const body = { provider: "google", providerOrganizationKey: "g-2" };
-  it("ORG ADMIN binds in own org (201)", async () => {
+  const post = (orgId: string, b: unknown) =>
+    POST(req(orgId, { method: "POST", body: b }), ctx(orgId));
+
+  /**
+   * F-04 — a binding is a PLATFORM-WIDE claim (unique across every tenant), and
+   * an `email` binding routes every uninvited sign-up from that domain into the
+   * binding org. This was a 201 for an org admin: they could bind `gmail.com`
+   * or a competitor's domain and capture those sign-ups into their tenant.
+   */
+  it("F-04: ORG ADMIN is refused (403) even in their own org, and audited", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.orgs.update"]));
-    expect((await POST(req(ORG_A, { method: "POST", body }), ctx(ORG_A))).status).toBe(201);
+    const res = await post(ORG_A, { provider: "email", providerOrganizationKey: "acme.com" });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { reason?: string }).reason).toBe("cross_org_reach_required");
+    expect(state.inserted).toEqual([]);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "cross_org_reach_required" }),
+    );
+  });
+
+  it("F-04: a superuser-owned credential BOUND to one org is refused too", async () => {
+    accessGetter.mockResolvedValue({
+      ...superadmin(["admin.orgs.update"]),
+      organizationId: ORG_A,
+      orgBound: true,
+    });
+    const res = await post(ORG_A, body);
+    expect(res.status).toBe(403);
+    expect(state.inserted).toEqual([]);
+  });
+
+  it("SUPERADMIN binds (201)", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    expect((await post(ORG_A, body)).status).toBe(201);
+  });
+
+  it("F-04: an email binding is stored LOWERCASED, the way sign-up routing looks it up", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    const res = await post(ORG_A, { provider: "email", providerOrganizationKey: "  Acme.COM " });
+    expect(res.status).toBe(201);
+    expect(state.inserted).toEqual([
+      expect.objectContaining({ provider: "email", provider_organization_key: "acme.com" }),
+    ]);
+  });
+
+  it.each([
+    [{ provider: "email", providerOrganizationKey: "gmail.com" }, "public_email_domain"],
+    [{ provider: "email", providerOrganizationKey: "Outlook.com" }, "public_email_domain"],
+    [{ provider: "email", providerOrganizationKey: "not a domain" }, "invalid_email_domain"],
+    [{ provider: "email", providerOrganizationKey: "localhost" }, "invalid_email_domain"],
+    [{ provider: "okta", providerOrganizationKey: "tenant-1" }, "unknown_provider"],
+    [{ provider: "email", providerOrganizationKey: "hotmail.ca" }, "public_email_domain"],
+    [{ provider: "github", providerOrganizationKey: "   " }, "invalid_key"],
+  ])("F-04: refuses %j even for a superadmin (400 %s)", async (b, reason) => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    const res = await post(ORG_A, b);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { reason?: string }).reason).toBe(reason);
+    expect(state.inserted).toEqual([]);
   });
   it("ORG ADMIN gets 404 binding in a foreign org", async () => {
     state.org = { id: ORG_B, slug: "org-b" };

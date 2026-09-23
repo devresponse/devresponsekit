@@ -105,7 +105,7 @@ describe("readBearerToken / hasBearerCredential", () => {
 
 describe("resolveCaller — cookie path", () => {
   it("returns a session caller (full authority, no scopes) when a session exists", async () => {
-    getCurrentSession.mockResolvedValue({ user: { id: "ba1" } });
+    getCurrentSession.mockResolvedValue({ user: { id: "ba1" }, session: { id: "sess-1" } });
     const caller = await mod.resolveCaller(req());
     expect(caller).toMatchObject({
       kind: "session",
@@ -115,7 +115,15 @@ describe("resolveCaller — cookie path", () => {
       // A cookie is not a bound credential (review #207).
       boundOrganizationId: null,
       impersonatorId: null,
+      // F-10: the session row an issuing route re-checks behind the fence.
+      source: { kind: "session", sessionId: "sess-1" },
     });
+  });
+
+  it("gives a session with no readable id a source that matches nothing (F-10, fail closed)", async () => {
+    getCurrentSession.mockResolvedValue({ user: { id: "ba1" } });
+    const caller = await mod.resolveCaller(req());
+    expect(caller?.source).toEqual({ kind: "session", sessionId: "" });
   });
 
   it("surfaces the impersonating admin on an impersonation session (review #28 / P0-1)", async () => {
@@ -182,6 +190,8 @@ describe("resolveCaller — API key path", () => {
       boundOrganizationId: "org-a",
       // A minted credential is never an impersonation (review #28).
       impersonatorId: null,
+      // F-10: the key itself is what an issuing route re-checks.
+      source: { kind: "api_key", id: "k1" },
     });
   });
 
@@ -268,6 +278,13 @@ describe("resolveCaller — JWT path", () => {
       boundOrganizationId: "org-b",
       impersonatorId: null,
     });
+    // F-10: an issuing route re-checks the token's SOURCE credential, with
+    // the token's iat (a client secret rotated since then retires it).
+    expect(caller?.source).toEqual({
+      kind: "token",
+      credential: { kind: "api_key", id: "key-1" },
+      issuedAt: ISSUED_AT,
+    });
     // The token's own claims ride along for the MCP gateway's exchange.
     expect(caller?.jwt).toEqual({
       organizationId: "org-b",
@@ -344,6 +361,8 @@ describe("resolveCaller — JWT path", () => {
     const caller = await mod.resolveCaller(req("Bearer eyJ.token.sig"));
     expect(caller?.kind).toBe("jwt");
     expect(isSourceCredentialActive).not.toHaveBeenCalled();
+    // Nothing to re-check at issuance either (F-10).
+    expect(caller?.source).toBeNull();
   });
 
   it("passes the caller's expected audience through to verification (review #50/#53)", async () => {

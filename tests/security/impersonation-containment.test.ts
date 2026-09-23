@@ -12,11 +12,18 @@ import { IMPERSONATION_SESSION_MAX_AGE_SECONDS } from "@/lib/session-lifetime";
  * S's sessions, or S's password was reset, S's own rows went and the session
  * S was driving as customer user T stayed — with T's authority, and, S being a
  * superadmin, with no tenant confinement. An admin SETTING S's password
- * deleted no session at all; it now ends the borrowed one, but still none of
- * S's own (F-10, open — see the set-password case). Its one-hour expiry was no
- * bound either: the plugin skips the rolling refresh only while the signed
- * `dont_remember` cookie rides along, so a holder who drops it keeps the row
- * alive 8 h at a time.
+ * deleted no session at all; it now ends every one of them, S's own included
+ * (F-10). Its one-hour expiry was no bound either: the plugin skips the rolling
+ * refresh only while the signed `dont_remember` cookie rides along, so a holder
+ * who drops it keeps the row alive 8 h at a time.
+ *
+ * F-10 — the same gap in the self-service sweeps: changing the password with
+ * `revokeOtherSessions`, or "Sign out other sessions", ended S's own sessions
+ * and left the one S was driving as T. And replacing a password (reset or
+ * admin set) left every bearer credential of the account alive; both paths now
+ * hand it to `revokeBearerCredentialsOf`, whose SQL is proven against Postgres
+ * in tests/db/credential-eviction.db.test.ts. Here it is a spy, so the cases
+ * pin WHO calls it, with what, and that its failure cannot undo a reset.
  *
  * BEHAVIOURAL: the REAL `auth` instance from src/lib/auth.ts (its admin plugin
  * options, its `onPasswordReset`, its hooks) on Better Auth's memory adapter,
@@ -35,6 +42,11 @@ vi.mock("@/lib/email/send.server", () => ({
 const logErrorMock = vi.fn();
 vi.mock("@/lib/observability/logger.server", () => ({
   logServerError: (...a: unknown[]) => logErrorMock(...a),
+}));
+
+const revokeBearerCredentialsMock = vi.fn();
+vi.mock("@/lib/api-auth/credential-eviction.server", () => ({
+  revokeBearerCredentialsOf: (...a: unknown[]) => revokeBearerCredentialsMock(...a),
 }));
 
 vi.mock("@/lib/auth-login-audit.server", () => ({ recordSessionLogin: vi.fn() }));
@@ -176,10 +188,23 @@ async function expectOnlySContained(w: Awaited<ReturnType<typeof world>>) {
   expect(await w.auth.api.getSession({ headers: w.tOwn })).not.toBeNull();
 }
 
+/** Requests a reset for `email` and returns the token from the outbox email. */
+async function resetTokenFor(auth: Auth, email: string): Promise<string> {
+  sendAppEmailMock.mockClear();
+  await auth.api.requestPasswordReset({ body: { email } });
+  const resetMail = sendAppEmailMock.mock.calls
+    .map(([arg]) => arg as { templateKey: string; variables: { resetUrl?: string } })
+    .find((m) => m.templateKey === "password_reset");
+  const token = /\/reset-password\/([^?]+)/.exec(resetMail?.variables.resetUrl ?? "")?.[1];
+  expect(token, "reset link not captured").toBeTruthy();
+  return token!;
+}
+
 beforeEach(() => {
   vi.resetModules();
   sendAppEmailMock.mockReset().mockResolvedValue(undefined);
   logErrorMock.mockReset();
+  revokeBearerCredentialsMock.mockReset().mockResolvedValue({ apiKeyIds: [], oauthClientIds: [] });
   ambient.headers = new Headers();
 });
 afterEach(() => vi.resetModules());
@@ -215,37 +240,353 @@ describe("F-08: containment reaches the sessions an admin opened as someone else
     await expectOnlySContained(w);
   });
 
-  it("admin set-password (POST …/password, mode set) ends S's borrowed session, not S's own", async () => {
+  it("admin set-password (POST …/password, mode set) ends S's borrowed session AND S's own (F-10)", async () => {
     const w = await world();
     const { setBetterAuthUserPassword } = await import("@/lib/admin/auth-admin.server");
 
-    await setBetterAuthUserPassword({ userId: w.s, newPassword: NEW_PASSWORD }, w.peerHeaders);
+    await setBetterAuthUserPassword(
+      {
+        userId: w.s,
+        newPassword: NEW_PASSWORD,
+        setBy: { betterAuthUserId: w.peer, appUserId: "app-peer" },
+      },
+      w.peerHeaders,
+    );
 
     await expectOnlySContained(w);
-    // …and ONLY the borrowed one. Better Auth's setUserPassword deletes none
-    // of S's own sessions, and admin-manager §19 tells operators so (revoke
-    // all or ban to contain an admin). Pinned so that doc cannot go stale in
-    // either direction: when F-10 makes set-password sign S out, flip this
-    // assertion and that paragraph together.
-    expect(await w.auth.api.getSession({ headers: w.sHeaders })).not.toBeNull();
+    // F-10: Better Auth's setUserPassword deletes none of S's own sessions, so
+    // a browser already signed in as S (possibly the attacker's) used to keep
+    // S's full authority. admin-manager §19 now says a new password signs the
+    // user out; this pins that doc in both directions.
+    expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
+    // The operator doing it is not signed out.
+    expect(await w.auth.api.getSession({ headers: w.peerHeaders })).not.toBeNull();
   });
 
   it("a completed password reset (auth.ts onPasswordReset) ends S's borrowed session", async () => {
     const w = await world();
 
-    await w.auth.api.requestPasswordReset({ body: { email: w.emails.s } });
-    const resetMail = sendAppEmailMock.mock.calls
-      .map(([arg]) => arg as { templateKey: string; variables: { resetUrl?: string } })
-      .find((m) => m.templateKey === "password_reset");
-    const token = /\/reset-password\/([^?]+)/.exec(resetMail?.variables.resetUrl ?? "")?.[1];
-    expect(token, "reset link not captured").toBeTruthy();
-
-    await w.auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token: token! } });
+    const token = await resetTokenFor(w.auth, w.emails.s);
+    await w.auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } });
 
     // The vendor's own sweep (revokeSessionsOnPasswordReset)…
     expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
     // …and the one it cannot express.
     await expectOnlySContained(w);
+  });
+});
+
+describe("F-10: signing out one's other sessions ends the ones opened as someone else", () => {
+  it("change-password with revokeOtherSessions (the account form) ends S's borrowed session", async () => {
+    const w = await world();
+    const sOther = await signIn(w.auth, w.emails.s);
+
+    await w.auth.api.changePassword({
+      body: { currentPassword: PASSWORD, newPassword: NEW_PASSWORD, revokeOtherSessions: true },
+      headers: w.sHeaders,
+    });
+
+    // The vendor's sweep…
+    expect(await w.auth.api.getSession({ headers: sOther })).toBeNull();
+    // …and the one it cannot express.
+    await expectOnlySContained(w);
+    // A password CHANGE is not a compromise response: the caller proved the
+    // current password, so the account's API keys and clients stay.
+    expect(revokeBearerCredentialsMock).not.toHaveBeenCalled();
+  });
+
+  it("the same over HTTP: the hook sees the route pattern and the parsed JSON body", async () => {
+    // `auth.handler` is what the Next catch-all mounts. The after-hook reads
+    // `ctx.path` and `ctx.body`, which the router fills from the Request, so
+    // this is the path production takes.
+    const w = await world();
+    const baseUrl = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+
+    const res = await w.auth.handler(
+      new Request(`${baseUrl}/api/auth/change-password`, {
+        method: "POST",
+        headers: {
+          cookie: w.sHeaders.get("cookie")!,
+          "content-type": "application/json",
+          origin: baseUrl,
+        },
+        body: JSON.stringify({
+          currentPassword: PASSWORD,
+          newPassword: NEW_PASSWORD,
+          revokeOtherSessions: true,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    await expectOnlySContained(w);
+  });
+
+  it("change-password WITHOUT revokeOtherSessions keeps every session, the borrowed one included", async () => {
+    const w = await world();
+
+    await w.auth.api.changePassword({
+      body: { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+      headers: w.sHeaders,
+    });
+
+    expect(await sessionExists(w.auth, w.borrowedByS.token)).toBe(true);
+  });
+
+  it("a refused change-password (wrong current password) ends nothing", async () => {
+    const w = await world();
+
+    await expect(
+      w.auth.api.changePassword({
+        body: {
+          currentPassword: "not-the-current-password",
+          newPassword: NEW_PASSWORD,
+          revokeOtherSessions: true,
+        },
+        headers: w.sHeaders,
+      }),
+    ).rejects.toThrow();
+
+    expect(await sessionExists(w.auth, w.borrowedByS.token)).toBe(true);
+  });
+
+  it("'Sign out other sessions' (/revoke-other-sessions) ends S's borrowed session", async () => {
+    const w = await world();
+    const sOther = await signIn(w.auth, w.emails.s);
+
+    await w.auth.api.revokeOtherSessions({ headers: w.sHeaders });
+
+    expect(await w.auth.api.getSession({ headers: sOther })).toBeNull();
+    // The caller's own current session survives, as the vendor intends.
+    expect(await w.auth.api.getSession({ headers: w.sHeaders })).not.toBeNull();
+    await expectOnlySContained(w);
+  });
+
+  it("/revoke-sessions (closed over HTTP, still callable server-side) ends it too", async () => {
+    const w = await world();
+
+    await w.auth.api.revokeSessions({ headers: w.sHeaders });
+
+    expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
+    await expectOnlySContained(w);
+  });
+
+  it("an impersonated caller's sweep does not end the BORROWED user's own borrowed sessions", async () => {
+    // Server-side only (over HTTP the before-hook refuses it, IMP-3): the
+    // session's user is T, but T did not ask. Give T a borrowed session of its
+    // own to prove the hook leaves it alone.
+    const w = await world();
+    const ctx = await w.auth.$context;
+    await ctx.internalAdapter.updateUser(w.t, { role: "admin" });
+    const tBorrowsPeer = await impersonate(w.auth, w.tOwn, w.peer);
+
+    await w.auth.api.revokeOtherSessions({
+      headers: new Headers({ cookie: w.borrowedByS.cookie }),
+    });
+
+    expect(await sessionExists(w.auth, tBorrowsPeer.token)).toBe(true);
+  });
+
+  it("a failure to end the borrowed sessions is logged and does not fail the password change", async () => {
+    const w = await world();
+    const sOther = await signIn(w.auth, w.emails.s);
+    const ctx = await w.auth.$context;
+    // Fail ONLY the by-`impersonatedBy` delete; the vendor's own sweep goes
+    // through the same adapter and must still run.
+    const realDeleteMany = ctx.adapter.deleteMany.bind(ctx.adapter);
+    const deleteMany = vi
+      .spyOn(ctx.adapter, "deleteMany")
+      .mockImplementation(async (args: Parameters<typeof realDeleteMany>[0]) => {
+        if (args.where.some((clause) => clause.field === "impersonatedBy")) {
+          throw new Error("db down");
+        }
+        return realDeleteMany(args);
+      });
+
+    try {
+      await expect(
+        w.auth.api.changePassword({
+          body: { currentPassword: PASSWORD, newPassword: NEW_PASSWORD, revokeOtherSessions: true },
+          headers: w.sHeaders,
+        }),
+      ).resolves.toEqual(expect.objectContaining({ token: expect.any(String) }));
+    } finally {
+      deleteMany.mockRestore();
+    }
+
+    expect(await w.auth.api.getSession({ headers: sOther })).toBeNull();
+    expect(logErrorMock).toHaveBeenCalledWith(
+      "could not end impersonation sessions after a session sweep",
+      expect.objectContaining({ betterAuthUserId: w.s, path: "/change-password" }),
+    );
+  });
+});
+
+describe("F-10: replacing a password revokes the account's bearer credentials", () => {
+  it("a completed password reset hands the account to the credential cut-off, as the account", async () => {
+    const w = await world();
+
+    const token = await resetTokenFor(w.auth, w.emails.s);
+    await w.auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } });
+
+    expect(revokeBearerCredentialsMock).toHaveBeenCalledTimes(1);
+    expect(revokeBearerCredentialsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        betterAuthUserId: w.s,
+        trigger: "password_reset",
+        actorBetterAuthUserId: w.s,
+      }),
+    );
+  });
+
+  it("a completed reset ends every session of the account BEFORE it revokes the credentials", async () => {
+    // Better Auth deletes the account's sessions only after `onPasswordReset`
+    // returns. Revoking credentials first left the thief's cookie valid for the
+    // whole revoke, long enough to mint a key the revoke never saw.
+    const w = await world();
+    const order: string[] = [];
+    revokeBearerCredentialsMock.mockImplementation(async () => {
+      order.push(
+        (await w.auth.api.getSession({ headers: w.sHeaders })) === null &&
+          !(await sessionExists(w.auth, w.borrowedByS.token))
+          ? "credentials-after-sessions"
+          : "credentials-before-sessions",
+      );
+      return { apiKeyIds: [], oauthClientIds: [] };
+    });
+
+    const token = await resetTokenFor(w.auth, w.emails.s);
+    await w.auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } });
+
+    expect(order).toEqual(["credentials-after-sessions"]);
+    await expectOnlySContained(w);
+  });
+
+  it("over HTTP, the cut-off's audit rows get the reset request itself (user agent, IP)", async () => {
+    const w = await world();
+    const token = await resetTokenFor(w.auth, w.emails.s);
+    const baseUrl = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
+
+    const res = await w.auth.handler(
+      new Request(`${baseUrl}/api/auth/reset-password`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: baseUrl,
+          "user-agent": "f10-reset-agent",
+        },
+        body: JSON.stringify({ newPassword: NEW_PASSWORD, token }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(revokeBearerCredentialsMock).toHaveBeenCalledTimes(1);
+    const [arg] = revokeBearerCredentialsMock.mock.calls[0] as [{ request?: Request }];
+    expect(arg.request?.headers.get("user-agent")).toBe("f10-reset-agent");
+    expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
+  });
+
+  it("a failure to end the sessions early is logged; the credentials still go and Better Auth still signs S out", async () => {
+    const w = await world();
+    const ctx = await w.auth.$context;
+    // Fail only OUR early delete; Better Auth's own sweep after the hook goes
+    // through the same adapter method and must still run.
+    const deleteUserSessions = vi
+      .spyOn(ctx.internalAdapter, "deleteUserSessions")
+      .mockRejectedValueOnce(new Error("db down"));
+
+    try {
+      const token = await resetTokenFor(w.auth, w.emails.s);
+      await expect(
+        w.auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } }),
+      ).resolves.toEqual({ status: true });
+    } finally {
+      deleteUserSessions.mockRestore();
+    }
+
+    expect(logErrorMock).toHaveBeenCalledWith(
+      "could not end the account's sessions before revoking its credentials",
+      expect.objectContaining({ betterAuthUserId: w.s }),
+    );
+    expect(revokeBearerCredentialsMock).toHaveBeenCalledTimes(1);
+    expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
+    await expectOnlySContained(w);
+  });
+
+  it("a failed cut-off is logged and neither undoes the reset nor skips the session sweeps", async () => {
+    const w = await world();
+    revokeBearerCredentialsMock.mockRejectedValue(new Error("db down"));
+
+    const token = await resetTokenFor(w.auth, w.emails.s);
+    await expect(
+      w.auth.api.resetPassword({ body: { newPassword: NEW_PASSWORD, token } }),
+    ).resolves.toEqual({ status: true });
+
+    expect(await w.auth.api.getSession({ headers: w.sHeaders })).toBeNull();
+    await expectOnlySContained(w);
+    expect(logErrorMock).toHaveBeenCalledWith(
+      "could not revoke bearer credentials after a password reset",
+      expect.objectContaining({ betterAuthUserId: w.s }),
+    );
+    // The new password works; the old one does not.
+    await expect(
+      w.auth.api.signInEmail({ body: { email: w.emails.s, password: NEW_PASSWORD } }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("admin set-password revokes them in the ADMIN's name, after every session ended", async () => {
+    const w = await world();
+    const order: string[] = [];
+    revokeBearerCredentialsMock.mockImplementation(async () => {
+      // Ordering: by the time credentials go, no session of S's is left.
+      order.push(
+        (await w.auth.api.getSession({ headers: w.sHeaders })) === null &&
+          !(await sessionExists(w.auth, w.borrowedByS.token))
+          ? "credentials-after-sessions"
+          : "credentials-before-sessions",
+      );
+      return { apiKeyIds: [], oauthClientIds: [] };
+    });
+    const { setBetterAuthUserPassword } = await import("@/lib/admin/auth-admin.server");
+
+    await setBetterAuthUserPassword(
+      {
+        userId: w.s,
+        newPassword: NEW_PASSWORD,
+        setBy: { betterAuthUserId: w.peer, appUserId: "app-peer", requestId: "req-1" },
+      },
+      w.peerHeaders,
+    );
+
+    expect(revokeBearerCredentialsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        betterAuthUserId: w.s,
+        trigger: "password_set",
+        actorBetterAuthUserId: w.peer,
+        revokedByAppUserId: "app-peer",
+        requestId: "req-1",
+      }),
+    );
+    expect(order).toEqual(["credentials-after-sessions"]);
+  });
+
+  it("admin set-password reports failure when the credentials could not be revoked", async () => {
+    // The route turns this into its 502 + failure audit, so the operator
+    // retries instead of believing the account is contained.
+    const w = await world();
+    revokeBearerCredentialsMock.mockRejectedValue(new Error("db down"));
+    const { setBetterAuthUserPassword } = await import("@/lib/admin/auth-admin.server");
+
+    await expect(
+      setBetterAuthUserPassword(
+        {
+          userId: w.s,
+          newPassword: NEW_PASSWORD,
+          setBy: { betterAuthUserId: w.peer, appUserId: "app-peer" },
+        },
+        w.peerHeaders,
+      ),
+    ).rejects.toThrow("db down");
   });
 });
 

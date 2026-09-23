@@ -188,6 +188,33 @@ describe("v1 self-service routes answer application/problem+json (#45)", () => {
   });
 });
 
+describe("the admitted actor (F-10)", () => {
+  it("carries the credential the caller authenticated with, for the issuance fence", async () => {
+    const source = { kind: "api_key", id: "key-1" };
+    resolveCaller.mockResolvedValue({ ...caller(["account.apikeys.manage"]), source });
+    const { requireApiAccount } = await import("@/lib/account/guard.server");
+
+    const result = await requireApiAccount(
+      makeReq("/api/v1/me/api-keys", "POST", true),
+      "account.apikeys.manage",
+    );
+
+    expect(result.ok && result.actor.source).toEqual(source);
+  });
+
+  it("carries null when the resolver gave none", async () => {
+    resolveCaller.mockResolvedValue(caller(["account.apikeys.manage"]));
+    const { requireApiAccount } = await import("@/lib/account/guard.server");
+
+    const result = await requireApiAccount(
+      makeReq("/api/v1/me/api-keys", "POST", true),
+      "account.apikeys.manage",
+    );
+
+    expect(result.ok && result.actor.source).toBeNull();
+  });
+});
+
 describe("first-party account routes keep the { error, message } envelope (#45)", () => {
   it("PATCH /api/account/profile — insufficient scope stays the admin envelope", async () => {
     resolveCaller.mockResolvedValue(caller(["account.read"]));

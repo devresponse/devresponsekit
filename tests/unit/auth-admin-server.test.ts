@@ -35,6 +35,12 @@ const revokeSessionsImpersonatedBy = vi.fn();
 vi.mock("@/lib/impersonation-sessions.server", () => ({
   revokeSessionsImpersonatedBy: (...a: unknown[]) => revokeSessionsImpersonatedBy(...a),
 }));
+// F-10: set-password also revokes the user's bearer credentials. Stubbed for
+// the same reason; its SQL is proven in tests/db/credential-eviction.db.test.ts.
+const revokeBearerCredentialsOf = vi.fn();
+vi.mock("@/lib/api-auth/credential-eviction.server", () => ({
+  revokeBearerCredentialsOf: (...a: unknown[]) => revokeBearerCredentialsOf(...a),
+}));
 vi.mock("next/headers", () => ({ headers: async () => ambientHeaders }));
 
 let M: typeof Mod;
@@ -42,11 +48,13 @@ let M: typeof Mod;
 beforeEach(async () => {
   for (const fn of Object.values(api)) fn.mockReset().mockResolvedValue({ ok: true });
   revokeSessionsImpersonatedBy.mockReset().mockResolvedValue(0);
+  revokeBearerCredentialsOf.mockReset().mockResolvedValue({ apiKeyIds: [], oauthClientIds: [] });
   M = await import("@/lib/admin/auth-admin.server");
 });
 afterEach(() => vi.resetModules());
 
 const actor = new Headers({ "x-actor": "1" });
+const setBy = { betterAuthUserId: "ba-admin", appUserId: "app-admin", requestId: "req-1" };
 
 describe("body + method routing", () => {
   it("createBetterAuthUser → createUser (name defaults to email)", async () => {
@@ -95,7 +103,7 @@ describe("body + method routing", () => {
   });
 
   it("setBetterAuthUserPassword → setUserPassword", async () => {
-    await M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret" }, actor);
+    await M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret", setBy }, actor);
     expect(api.setUserPassword).toHaveBeenCalledWith(
       expect.objectContaining({ body: { userId: "u1", newPassword: "secret" } }),
     );
@@ -259,7 +267,7 @@ describe("F-08: containment wrappers end the user's impersonation sessions", () 
     {
       name: "setBetterAuthUserPassword",
       vendor: api.setUserPassword,
-      run: () => M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret" }, actor),
+      run: () => M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret", setBy }, actor),
     },
   ];
 
@@ -309,5 +317,94 @@ describe("F-08: containment wrappers end the user's impersonation sessions", () 
     await M.listBetterAuthUserSessions("u1", actor);
 
     expect(revokeSessionsImpersonatedBy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-10 — Better Auth's `setUserPassword` deletes none of the user's sessions
+ * and touches no app credential. A new password set by an operator is the
+ * compromise response, so the wrapper ends the user's OWN sessions too and
+ * revokes the bearer credentials that authenticate as them, in that order,
+ * each only after the step before it succeeded.
+ */
+describe("F-10: set-password ends everything that authenticated with the old password", () => {
+  const run = () =>
+    M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret", setBy }, actor);
+
+  it("sets, then ends the user's own sessions, then the borrowed ones, then the credentials", async () => {
+    const order: string[] = [];
+    const step = (name: string, value: unknown) => async () => {
+      order.push(name);
+      return value;
+    };
+    api.setUserPassword.mockImplementation(step("set", { status: true }));
+    api.revokeUserSessions.mockImplementation(step("own-sessions", { success: true }));
+    revokeSessionsImpersonatedBy.mockImplementation(step("borrowed-sessions", 1));
+    revokeBearerCredentialsOf.mockImplementation(
+      step("credentials", { apiKeyIds: ["k1"], oauthClientIds: [] }),
+    );
+
+    await expect(run()).resolves.toEqual({ status: true });
+
+    expect(order).toEqual(["set", "own-sessions", "borrowed-sessions", "credentials"]);
+    expect(api.revokeUserSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { userId: "u1" } }),
+    );
+  });
+
+  it("revokes the credentials in the ADMIN's name, correlated with the route's request", async () => {
+    await run();
+
+    expect(revokeBearerCredentialsOf).toHaveBeenCalledWith({
+      betterAuthUserId: "u1",
+      trigger: "password_set",
+      actorBetterAuthUserId: "ba-admin",
+      revokedByAppUserId: "app-admin",
+      requestId: "req-1",
+      // The ORIGINAL headers object, not the stamped copy the vendor call gets:
+      // F-07 attribution is keyed on it.
+      request: { headers: actor },
+    });
+    expect(revokeBearerCredentialsOf.mock.calls[0]![0].request.headers).toBe(actor);
+  });
+
+  it("audits against the ambient request when the caller passes none", async () => {
+    await M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret", setBy });
+
+    expect(revokeBearerCredentialsOf.mock.calls[0]![0].request.headers).toBe(ambientHeaders);
+  });
+
+  it("revokes nothing when Better Auth refuses the password", async () => {
+    api.setUserPassword.mockRejectedValue(new Error("Password is too short"));
+
+    await expect(run()).rejects.toThrow("Password is too short");
+    expect(api.revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeBearerCredentialsOf).not.toHaveBeenCalled();
+  });
+
+  it("reports failure, and revokes no credential, when the user's sessions could not be ended", async () => {
+    api.revokeUserSessions.mockRejectedValue(new Error("db down"));
+
+    await expect(run()).rejects.toThrow("db down");
+    expect(revokeBearerCredentialsOf).not.toHaveBeenCalled();
+  });
+
+  it("reports failure when the credentials could not be revoked", async () => {
+    // The route turns this into its 502 + failure audit, so the operator
+    // retries instead of believing the account is contained.
+    revokeBearerCredentialsOf.mockRejectedValue(new Error("db down"));
+
+    await expect(run()).rejects.toThrow("db down");
+  });
+
+  it("no other wrapper revokes bearer credentials", async () => {
+    // A ban already stops them at resolution (AUTH-1) and an unban restores
+    // them; "revoke all sessions" is about sessions. Only a new password is a
+    // statement that the old credential is compromised.
+    await M.banBetterAuthUser({ userId: "u1", banReason: "x" }, actor);
+    await M.revokeAllBetterAuthUserSessions("u1", actor);
+    await M.unbanBetterAuthUser("u1", actor);
+
+    expect(revokeBearerCredentialsOf).not.toHaveBeenCalled();
   });
 });

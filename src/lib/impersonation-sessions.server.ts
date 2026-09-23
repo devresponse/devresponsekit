@@ -16,10 +16,12 @@ import type { AuthContext } from "better-auth";
  *
  * So every containment path calls this after the vendor call succeeds: the
  * admin wrappers in `src/lib/admin/auth-admin.server.ts` (ban, which the
- * soft-delete sagas reuse; revoke-all; set-password) and the password-reset
- * hook in `src/lib/auth.ts`. The session row's
- * `impersonatedBy` is the only link from an admin to a borrowed session, and
- * Better Auth has no API that deletes by it, so this is the one definition.
+ * soft-delete sagas reuse; revoke-all; set-password), the password-reset
+ * hook in `src/lib/auth.ts`, and (F-10) the after-hook that follows a user's
+ * own "sign out my other sessions" (`src/lib/auth-session-sweep.ts`). The
+ * session row's `impersonatedBy` is the only link from an admin to a borrowed
+ * session, and Better Auth has no API that deletes by it, so this is the one
+ * definition.
  *
  * The delete goes through Better Auth's own adapter (not Kysely, which types
  * the `session` table read-only on purpose), so the model and field mapping
@@ -30,10 +32,12 @@ import type { AuthContext } from "better-auth";
  * Throws on failure. Callers decide whether a failure fails their action: the
  * admin wrappers let it propagate so the route reports the containment as
  * failed and the operator retries (every caller is idempotent); the reset
- * hook, which cannot un-reset a password, catches and logs.
+ * hook, which cannot un-reset a password, catches and logs, and so does the
+ * sweep hook, whose own sweep has already run.
  *
- * `context` is injectable for the behavioural tests; production callers omit
- * it and get the app's instance.
+ * `context` is injectable. The behavioural tests pass one, and so does the
+ * sweep hook, which already holds its endpoint's context. Every other caller
+ * omits it and gets the app's instance.
  *
  * @returns the number of sessions deleted.
  */
@@ -54,4 +58,29 @@ export async function revokeSessionsImpersonatedBy(
     model: "session",
     where: [{ field: "impersonatedBy", value: impersonatorBetterAuthUserId }],
   });
+}
+
+/**
+ * Ends every session whose `userId` is this account, through Better Auth's
+ * own `deleteUserSessions` (so a configured secondary storage is cleared too).
+ *
+ * It is the sweep `revokeSessionsOnPasswordReset` runs, moved earlier (F-10).
+ * Better Auth runs that sweep only after `onPasswordReset` returns, and the
+ * hook revokes the account's bearer credentials before that. Until the sweep,
+ * a stolen cookie still authenticates, and a key it mints during the
+ * revocation would survive it. The reset hook calls this first, so such a
+ * request is refused by the issuance fence (`issuance-fence.server.ts`).
+ * Better Auth's own sweep then finds nothing to delete.
+ *
+ * Throws on failure; the reset hook logs it. `context` is injectable like
+ * {@link revokeSessionsImpersonatedBy}'s.
+ */
+export async function revokeOwnSessionsOf(
+  betterAuthUserId: string,
+  context?: Pick<AuthContext, "internalAdapter">,
+): Promise<void> {
+  // Same guard as above: an empty id must never reach a delete.
+  if (!betterAuthUserId) return;
+  const ctx = context ?? (await (await import("@/lib/auth")).auth.$context);
+  await ctx.internalAdapter.deleteUserSessions(betterAuthUserId);
 }

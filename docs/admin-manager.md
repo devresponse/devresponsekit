@@ -461,7 +461,7 @@ Manages the application user lifecycle and per-user administration.
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19); `admin.user.banned` |
-| `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it ends the sessions the user opened by impersonating someone, but not their own sessions (F-08, F-10, §19); `admin.user.password_set` / `.password_reset_email_sent` |
+| `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it signs the user out everywhere: their own sessions and the ones they opened by impersonating someone. It also revokes every API key they own and every OAuth client that acts as them, which ends the tokens minted from those too. The reset email changes nothing until the user completes the reset, which does the same (F-08, F-10, §19). A failed step returns 502 and is safe to retry. `admin.user.password_set` / `.password_reset_email_sent`, plus an `api_key.revoked` / `oauth_client.revoked` row per credential with `metadata.reason` `password_set` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`) |
 | `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
 | `POST /users/[id]/impersonate`, `DELETE` (stop) | `admin.users.impersonate` (start only) | See §19 |
@@ -1151,20 +1151,43 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   Each of those actions, and `POST …/password` with `mode: "set"`, now also
   deletes every session whose `impersonatedBy` is that admin
   (`revokeSessionsImpersonatedBy`, `src/lib/impersonation-sessions.server.ts`,
-  called from the wrappers in `src/lib/admin/auth-admin.server.ts` and from
-  `onPasswordReset`). If that delete fails, the admin action reports failure
+  called from the wrappers in `src/lib/admin/auth-admin.server.ts`, from
+  `onPasswordReset`, and, since F-10, after a user signs out their other
+  sessions). If that delete fails, the admin action reports failure
   (the route's 502 and failure audit row, or a failed row in a bulk batch) so
   the operator retries; every one of these actions is safe to repeat. A
-  password reset has already changed the password, so there the failure is
-  logged instead. Suspending or blocking an admin deletes no sessions, theirs
+  password reset or a self-service sweep has already done its own work, so
+  there the failure is logged instead. Suspending or blocking an admin deletes no sessions, theirs
   or borrowed ones; the reach check above already confines a non-active
   impersonator to nothing.
-- **Setting a password does not sign the admin out (F-10, open).**
-  `POST …/password` with `mode: "set"` ends **only** the sessions the admin
-  opened as someone else. Better Auth's `setUserPassword` deletes none of the
-  admin's own sessions and neither does the route, so a browser already signed
-  in as the admin keeps that admin's full authority. To contain a compromised
-  admin, use **Revoke all sessions** or a ban, not a new password alone.
+- **A new password ends everything that used the old one (F-10).**
+  Better Auth's `setUserPassword` deletes no session, so `POST …/password`
+  with `mode: "set"` used to leave a browser already signed in as the admin
+  with that admin's full authority. It now also ends all of the admin's own
+  sessions (the same call as **Revoke all sessions**, which includes the ones
+  opened as someone else). It also revokes every API key the admin owns and
+  every OAuth client that acts as them (`revokeBearerCredentialsOf`,
+  `src/lib/api-auth/credential-eviction.server.ts`), because a key minted with
+  a stolen cookie would otherwise outlive the new password. A completed
+  password reset does the same from `onPasswordReset`, and there a failure is
+  logged rather than reported. Credentials the admin minted for **other**
+  principals, such as a service user's key, are left alone: they act as someone
+  whose password did not change. Find them through the `api_key.created` /
+  `oauth_client.created` audit rows whose actor is the admin. Setting an
+  admin's own password through this route signs out the session making the
+  request too.
+- **"Sign out other sessions" reaches the borrowed session (F-10).** When a
+  user changes their own password (the form always sends
+  `revokeOtherSessions`) or clicks **Sign out other sessions**, Better Auth
+  deletes their other sessions by user id. That leaves out any session they
+  opened as someone else. The single `hooks.after` in `src/lib/auth.ts`
+  (`src/lib/auth-session-sweep.ts`) ends those too, after the sweep succeeded.
+  A password *change* does not revoke API keys or OAuth clients: it needs the
+  current password, which a cookie thief does not have, and it happens on every
+  routine change. A user who thinks the account is compromised should use the
+  forgot-password reset, or revoke keys on **Account → API keys**. For the
+  operator's side of a leaked key (expiry defaults, kill switches), see
+  [API security §6](./api-security.md#6-revocation--incident-response).
 - **One hour, hard (F-08).** An impersonation session is refused and deleted
   one hour after it was **created**, at the same chokepoint as
   `SESSION_ABSOLUTE_LIFETIME_HOURS` (`getCurrentSession`), whatever that

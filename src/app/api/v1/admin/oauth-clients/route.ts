@@ -4,6 +4,7 @@ import { db } from "@/db/database";
 import { auditEvent } from "@/lib/audit.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import { createOauthClient, listOauthClients } from "@/lib/api-auth/oauth-clients.server";
+import { IssuingCredentialRevokedError } from "@/lib/api-auth/issuance-fence.server";
 import { normalizeScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import {
@@ -188,13 +189,38 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const created = await createOauthClient({
-    name: parsed.data.name,
-    scopes,
-    organizationId,
-    serviceAppUserId: parsed.data.serviceAppUserId,
-    createdByAppUserId: grant.caller.access.appUserId ?? parsed.data.serviceAppUserId,
-  });
+  // F-10: behind the issuance fence. A password reset or set that revokes the
+  // acting credential while this runs either revokes a client bound to that
+  // account too or refuses the registration here.
+  let created;
+  try {
+    created = await createOauthClient({
+      name: parsed.data.name,
+      scopes,
+      organizationId,
+      serviceAppUserId: parsed.data.serviceAppUserId,
+      createdByAppUserId: grant.caller.access.appUserId ?? parsed.data.serviceAppUserId,
+      issuedVia: grant.caller.source ?? null,
+    });
+  } catch (error) {
+    if (!(error instanceof IssuingCredentialRevokedError)) throw error;
+    await auditEvent({
+      eventType: "oauth_client.create_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: parsed.data.serviceAppUserId,
+      organizationId,
+      reason: "issuing_credential_revoked",
+      request,
+      requestId: grant.requestId,
+      metadata: { callerKind: grant.caller.kind },
+    });
+    return problemResponse("credential_revoked", 401, request, {
+      detail: "The credential this request authenticated with was revoked while it ran.",
+      requestId: grant.requestId,
+      headers: { "WWW-Authenticate": 'Bearer realm="devresponse-api", error="invalid_token"' },
+    });
+  }
 
   await auditEvent({
     eventType: "oauth_client.created",

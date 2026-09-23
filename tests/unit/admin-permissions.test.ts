@@ -198,6 +198,26 @@ describe("requireAdminPermission", () => {
     expect(auditMock).not.toHaveBeenCalled();
   });
 
+  it("carries the session the caller authenticated with into the grant (F-10)", async () => {
+    // An issuing route re-checks it behind the issuance fence.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" }, session: { id: "sess-1" } });
+    accessGetter.mockResolvedValue({
+      appUserId: "u-1",
+      primaryEmail: "admin@x.com",
+      status: "active",
+      organizationId: "o-1",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["admin.apikeys.manage", "shell.view"],
+    });
+    const { requireAdminPermission, isAdminPermissionDenial } = await load();
+    const result = await requireAdminPermission(makeRequest(), "admin.apikeys.manage");
+    expect(isAdminPermissionDenial(result)).toBe(false);
+    if (!isAdminPermissionDenial(result)) {
+      expect(result.source).toEqual({ kind: "session", sessionId: "sess-1" });
+    }
+  });
+
   it("treats an array of permissions as 'any one matches'", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue({

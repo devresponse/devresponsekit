@@ -27,7 +27,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  * POST /api/administrator/users/[id]/password
  *
  * Two modes (docs/admin-manager.md §8.1):
- *   - `mode: "set"`     — admin sets a new password directly.
+ *   - `mode: "set"`     — admin sets a new password directly. This also
+ *                         ends every session of the user's and revokes the
+ *                         API keys and OAuth clients that act as them
+ *                         (F-08, F-10).
  *   - `mode: "reset_email"` — triggers a password-reset email via
  *                             Better Auth's `requestPasswordReset`
  *                             (`sendBetterAuthPasswordResetEmail`).
@@ -104,11 +107,20 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
       return adminErrorResponse("forbidden", 403, request);
     }
 
+    // F-10: a new password also signs the user out everywhere and revokes the
+    // API keys and OAuth clients that act as them. That happens inside the
+    // wrapper, in the actor's name, so a failure there lands in the 502 below
+    // and the operator retries.
     try {
       await setBetterAuthUserPassword(
         {
           userId: target.betterAuthUserId,
           newPassword: parsed.data.password,
+          setBy: {
+            betterAuthUserId: guard.betterAuthUserId,
+            appUserId: guard.access.appUserId,
+            requestId: guard.requestId,
+          },
         },
         request,
       );

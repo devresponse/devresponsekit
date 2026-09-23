@@ -21,11 +21,28 @@ const state = vi.hoisted(() => ({
   takeFirstOrThrow: undefined as unknown,
   inserts: [] as Record<string, unknown>[],
   updates: [] as Record<string, unknown>[],
+  isolation: [] as string[],
   wheres: [] as unknown[][],
+  // Answers for successive `executeTakeFirst()` calls, consumed first; once
+  // empty, `takeFirst` answers. Lets a case script "the key exists, then the
+  // retire matched nothing" (F-10).
+  takeFirstQueue: [] as unknown[],
+  // Table / lock steps taken INSIDE a transaction, in order (F-10). Top-level
+  // `db.*` calls are plain functions and are not recorded.
+  steps: [] as string[],
   // When set, the next terminal `.execute()` rejects — used to drive the
   // fire-and-forget `.catch()` branch in `touchApiKeyUsage`.
   rejectExecute: false,
 }));
+
+const RECORDED_STEPS = new Set([
+  "selectFrom",
+  "updateTable",
+  "insertInto",
+  "forShare",
+  "forNoKeyUpdate",
+  "forUpdate",
+]);
 
 function chain(): unknown {
   return new Proxy(function () {}, {
@@ -38,8 +55,17 @@ function chain(): unknown {
             : Promise.resolve(state.execute);
         };
       }
-      if (prop === "executeTakeFirst") return () => Promise.resolve(state.takeFirst);
+      if (prop === "executeTakeFirst")
+        return () =>
+          Promise.resolve(
+            state.takeFirstQueue.length > 0 ? state.takeFirstQueue.shift() : state.takeFirst,
+          );
       if (prop === "executeTakeFirstOrThrow") return () => Promise.resolve(state.takeFirstOrThrow);
+      if (typeof prop === "string" && RECORDED_STEPS.has(prop))
+        return (...args: unknown[]) => {
+          state.steps.push(`${prop}(${args.map(String).join(",")})`);
+          return chain();
+        };
       if (prop === "values")
         return (v: Record<string, unknown>) => {
           state.inserts.push(v);
@@ -68,9 +94,17 @@ vi.mock("@/db/database", () => ({
     selectFrom: () => chain(),
     insertInto: () => chain(),
     updateTable: () => chain(),
-    transaction: () => ({
-      execute: (cb: (trx: unknown) => unknown) => Promise.resolve(cb(chain())),
-    }),
+    // `inIssuanceTransaction` pins READ COMMITTED before it runs (F-10).
+    transaction: () => {
+      const builder = {
+        setIsolationLevel: (level: string) => {
+          state.isolation.push(level);
+          return builder;
+        },
+        execute: (cb: (trx: unknown) => unknown) => Promise.resolve(cb(chain())),
+      };
+      return builder;
+    },
   },
   // The module under test only imports `db`, but the harness contract asks
   // for both exports; providing `pgPool` keeps the mock a faithful stand-in
@@ -86,7 +120,10 @@ beforeEach(async () => {
   state.takeFirstOrThrow = undefined;
   state.inserts = [];
   state.updates = [];
+  state.isolation = [];
   state.wheres = [];
+  state.takeFirstQueue = [];
+  state.steps = [];
   state.rejectExecute = false;
   mod = await import("@/lib/api-auth/api-keys.server");
 });
@@ -290,6 +327,129 @@ describe("rotateApiKey — the new row copies the source key", () => {
       revoked_by: "actor-2",
       revoked_reason: "rotated",
     });
+  });
+});
+
+describe("rotateApiKey — fenced and retire-first (F-10)", () => {
+  const existing = {
+    id: "old",
+    status: "active",
+    app_user_id: "owner",
+    organization_id: null,
+    name: "prod",
+    scopes: ["account.read"],
+    expires_at: null,
+  };
+
+  it("locks the owner FOR SHARE, retires the old key only while active, THEN inserts", async () => {
+    state.takeFirst = existing;
+    state.takeFirstOrThrow = { id: "new" };
+
+    await expect(mod.rotateApiKey("old", "actor-2")).resolves.not.toBeNull();
+
+    // The issuance lock comes first: an eviction of the owner then either
+    // waits for this rotation and revokes the successor, or went first and
+    // left the old key revoked. The retire precedes the insert.
+    expect(state.steps).toEqual([
+      "selectFrom(app_users)",
+      "forShare()",
+      "updateTable(app_api_keys)",
+      "insertInto(app_api_keys)",
+    ]);
+    expect(state.isolation).toEqual(["read committed"]);
+    expect(whereClauses()).toEqual(
+      expect.arrayContaining(["id = owner", "id = old", "status = active"]),
+    );
+  });
+
+  it("returns null and mints nothing when the key was revoked after the check (e.g. by an eviction)", async () => {
+    // getApiKeyById: active; the owner lock; then the retire matches no row.
+    state.takeFirstQueue = [existing, { id: "owner" }, undefined];
+    state.takeFirstOrThrow = { id: "new" };
+
+    await expect(mod.rotateApiKey("old", "actor-2")).resolves.toBeNull();
+    expect(state.inserts).toEqual([]);
+    expect(state.steps).not.toContain("insertInto(app_api_keys)");
+  });
+});
+
+describe("createApiKey — the issuance fence (F-10)", () => {
+  const input = {
+    ownerAppUserId: "owner",
+    organizationId: null,
+    name: "ci",
+    scopes: ["account.read"],
+    expiresAt: null,
+    createdByAppUserId: "owner",
+  };
+
+  it("inserts directly, with no transaction, when there is no calling credential to re-check", async () => {
+    state.takeFirstOrThrow = { id: "k1" };
+
+    await mod.createApiKey(input);
+
+    expect(state.isolation).toEqual([]);
+    expect(state.steps).toEqual([]);
+    expect(state.inserts).toHaveLength(1);
+  });
+
+  it("locks the owner FOR SHARE and re-checks the calling key before inserting", async () => {
+    // The owner lock, then the source key's row: still active.
+    state.takeFirstQueue = [{ id: "owner" }, { status: "active", expires_at: null }];
+    state.takeFirstOrThrow = { id: "k1" };
+
+    await mod.createApiKey({ ...input, issuedVia: { kind: "api_key", id: "src-key" } });
+
+    expect(state.isolation).toEqual(["read committed"]);
+    expect(state.steps).toEqual([
+      "selectFrom(app_users)",
+      "forShare()",
+      "selectFrom(app_api_keys)",
+      "insertInto(app_api_keys)",
+    ]);
+    expect(whereClauses()).toEqual(expect.arrayContaining(["id = owner", "id = src-key"]));
+    expect(state.inserts).toHaveLength(1);
+  });
+
+  it("refuses, and inserts nothing, when the calling key was revoked meanwhile", async () => {
+    state.takeFirstQueue = [{ id: "owner" }, { status: "revoked", expires_at: null }];
+    const { IssuingCredentialRevokedError } = await import("@/lib/api-auth/issuance-fence.server");
+
+    await expect(
+      mod.createApiKey({ ...input, issuedVia: { kind: "api_key", id: "src-key" } }),
+    ).rejects.toBeInstanceOf(IssuingCredentialRevokedError);
+    expect(state.inserts).toEqual([]);
+  });
+
+  it("refuses when the calling session is gone (a reset deleted it first)", async () => {
+    state.takeFirstQueue = [{ id: "owner" }, undefined];
+    const { IssuingCredentialRevokedError } = await import("@/lib/api-auth/issuance-fence.server");
+
+    await expect(
+      mod.createApiKey({ ...input, issuedVia: { kind: "session", sessionId: "sess-1" } }),
+    ).rejects.toBeInstanceOf(IssuingCredentialRevokedError);
+    expect(state.steps).toContain("selectFrom(session)");
+    expect(whereClauses()).toContain("id = sess-1");
+    expect(state.inserts).toEqual([]);
+  });
+});
+
+describe("revokeActiveApiKeysOf — the eviction's set-based revoke (F-10)", () => {
+  it("revokes only the owner's ACTIVE keys, stamps the revoker and reason, and returns the rows", async () => {
+    state.execute = [{ id: "k1", organization_id: null }];
+    const trx = chain() as Parameters<typeof mod.revokeActiveApiKeysOf>[0];
+
+    await expect(mod.revokeActiveApiKeysOf(trx, "owner", "admin", "password_set")).resolves.toEqual(
+      [{ id: "k1", organization_id: null }],
+    );
+    expect(state.steps).toEqual(["updateTable(app_api_keys)"]);
+    expect(state.updates[0]).toMatchObject({
+      status: "revoked",
+      revoked_by: "admin",
+      revoked_reason: "password_set",
+    });
+    expect(state.updates[0]).toHaveProperty("revoked_at");
+    expect(whereClauses()).toEqual(["app_user_id = owner", "status = active"]);
   });
 });
 

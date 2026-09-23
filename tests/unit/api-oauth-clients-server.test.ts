@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ClientsModule from "@/lib/api-auth/oauth-clients.server";
+import type * as FenceModule from "@/lib/api-auth/issuance-fence.server";
 import { hashSecret } from "@/lib/api-auth/api-key";
 
 /**
@@ -15,6 +16,7 @@ const state = vi.hoisted(() => ({
   takeFirstOrThrow: undefined as unknown,
   inserts: [] as Record<string, unknown>[],
   updates: [] as Record<string, unknown>[],
+  wheres: [] as string[],
 }));
 
 function chain(): unknown {
@@ -33,6 +35,11 @@ function chain(): unknown {
           state.updates.push(v);
           return chain();
         };
+      if (prop === "where")
+        return (...args: unknown[]) => {
+          state.wheres.push(args.map(String).join(" "));
+          return chain();
+        };
       return () => chain();
     },
     apply() {
@@ -40,6 +47,19 @@ function chain(): unknown {
     },
   });
 }
+
+// F-10: the issuance fence is spied on here; its locking and re-check are
+// pinned in issuance-fence.test.ts and against Postgres in
+// tests/db/credential-eviction.db.test.ts.
+const fence = vi.hoisted(() => ({
+  inIssuanceTransaction: vi.fn(),
+  enterIssuanceFence: vi.fn(),
+}));
+vi.mock("@/lib/api-auth/issuance-fence.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof FenceModule>()),
+  inIssuanceTransaction: (...a: unknown[]) => fence.inIssuanceTransaction(...a),
+  enterIssuanceFence: (...a: unknown[]) => fence.enterIssuanceFence(...a),
+}));
 
 vi.mock("@/db/database", () => ({
   db: {
@@ -57,6 +77,11 @@ beforeEach(async () => {
   state.takeFirstOrThrow = undefined;
   state.inserts = [];
   state.updates = [];
+  state.wheres = [];
+  fence.inIssuanceTransaction
+    .mockReset()
+    .mockImplementation((fn: (trx: unknown) => Promise<unknown>) => fn(chain()));
+  fence.enterIssuanceFence.mockReset().mockResolvedValue(undefined);
   mod = await import("@/lib/api-auth/oauth-clients.server");
 });
 afterEach(() => vi.resetModules());
@@ -108,6 +133,73 @@ describe("createOauthClient", () => {
     expect(created.client_id).toBe("drkc_trx");
     expect(trxInserts).toHaveLength(1);
     expect(state.inserts).toHaveLength(0); // nothing touched the pool
+  });
+});
+
+describe("createOauthClient — the issuance fence (F-10)", () => {
+  const input = {
+    name: "svc",
+    scopes: ["account.read"],
+    organizationId: null,
+    serviceAppUserId: "u1",
+    createdByAppUserId: "admin",
+  };
+  const source = { kind: "session" as const, sessionId: "sess-1" };
+
+  it("does not enter the fence when there is no calling credential to re-check", async () => {
+    state.takeFirstOrThrow = { id: "c1" };
+
+    await mod.createOauthClient(input);
+
+    expect(fence.inIssuanceTransaction).not.toHaveBeenCalled();
+    expect(fence.enterIssuanceFence).not.toHaveBeenCalled();
+    expect(state.inserts).toHaveLength(1);
+  });
+
+  it("enters the fence for the SERVICE PRINCIPAL, in one transaction, before it inserts", async () => {
+    state.takeFirstOrThrow = { id: "c1" };
+    fence.enterIssuanceFence.mockImplementation(async () => {
+      expect(state.inserts).toEqual([]);
+    });
+
+    await mod.createOauthClient({ ...input, issuedVia: source });
+
+    expect(fence.inIssuanceTransaction).toHaveBeenCalledTimes(1);
+    expect(fence.enterIssuanceFence).toHaveBeenCalledWith(expect.anything(), "u1", source);
+    expect(state.inserts).toHaveLength(1);
+  });
+
+  it("runs the fence inside a caller-supplied transaction", async () => {
+    state.takeFirstOrThrow = { id: "c1" };
+    const trx = chain() as Parameters<typeof mod.createOauthClient>[1];
+
+    await mod.createOauthClient({ ...input, issuedVia: source }, trx);
+
+    expect(fence.inIssuanceTransaction).toHaveBeenCalledWith(expect.any(Function), trx);
+  });
+
+  it("registers nothing when the calling credential died meanwhile", async () => {
+    const { IssuingCredentialRevokedError } = await import("@/lib/api-auth/issuance-fence.server");
+    fence.enterIssuanceFence.mockRejectedValue(new IssuingCredentialRevokedError());
+
+    await expect(mod.createOauthClient({ ...input, issuedVia: source })).rejects.toBeInstanceOf(
+      IssuingCredentialRevokedError,
+    );
+    expect(state.inserts).toEqual([]);
+  });
+});
+
+describe("revokeActiveOauthClientsOf — the eviction's set-based revoke (F-10)", () => {
+  it("revokes only the principal's ACTIVE clients, stamps the revoker, and returns the rows", async () => {
+    state.execute = [{ id: "c1", organization_id: "org-a" }];
+    const trx = chain() as Parameters<typeof mod.revokeActiveOauthClientsOf>[0];
+
+    await expect(mod.revokeActiveOauthClientsOf(trx, "owner", "admin")).resolves.toEqual([
+      { id: "c1", organization_id: "org-a" },
+    ]);
+    expect(state.updates[0]).toMatchObject({ status: "revoked", revoked_by: "admin" });
+    expect(state.updates[0]).toHaveProperty("revoked_at");
+    expect(state.wheres).toEqual(["app_user_id = owner", "status = active"]);
   });
 });
 

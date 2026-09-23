@@ -1,9 +1,15 @@
 import "server-only";
-import { sql, type Selectable, type SqlBool } from "kysely";
+import { sql, type Kysely, type Selectable, type SqlBool } from "kysely";
 import { db } from "@/db/database";
-import type { AppApiKeysTable } from "@/db/schema/app-schema";
+import type { AppApiKeysTable, AppDatabase } from "@/db/schema/app-schema";
 import { getServerEnv } from "@/lib/env";
 import { generateApiKey, hashApiKey } from "@/lib/api-auth/api-key";
+import {
+  enterIssuanceFence,
+  inIssuanceTransaction,
+  lockOwnerForIssuance,
+  type CallerSource,
+} from "@/lib/api-auth/issuance-fence.server";
 
 /**
  * API key persistence + verification (design
@@ -52,6 +58,15 @@ export interface CreateApiKeyInput {
   scopes: string[];
   expiresAt: Date | null;
   createdByAppUserId: string;
+  /**
+   * The credential the issuing request authenticated with (F-10). When given,
+   * the insert runs behind the issuance fence: it waits out a concurrent
+   * credential eviction of the owner and is refused with
+   * `IssuingCredentialRevokedError` if that credential died meanwhile. Every
+   * route passes its caller's; omitted (or `null`, a legacy token) there is
+   * nothing to re-check and the key is inserted directly.
+   */
+  issuedVia?: CallerSource | null;
 }
 
 export interface CreatedApiKey extends ApiKeySummary {
@@ -65,21 +80,30 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApi
   const { plaintext, prefix } = generateApiKey(env.API_KEY_ENV_TAG);
   const keyHash = await hashApiKey(plaintext);
 
-  const row = await db
-    .insertInto("app_api_keys")
-    .values({
-      app_user_id: input.ownerAppUserId,
-      organization_id: input.organizationId,
-      name: input.name,
-      key_prefix: prefix,
-      key_hash: keyHash,
-      scopes: input.scopes,
-      status: "active",
-      expires_at: input.expiresAt,
-      created_by: input.createdByAppUserId,
-    })
-    .returning(SUMMARY_COLUMNS)
-    .executeTakeFirstOrThrow();
+  const insert = (executor: Kysely<AppDatabase>) =>
+    executor
+      .insertInto("app_api_keys")
+      .values({
+        app_user_id: input.ownerAppUserId,
+        organization_id: input.organizationId,
+        name: input.name,
+        key_prefix: prefix,
+        key_hash: keyHash,
+        scopes: input.scopes,
+        status: "active",
+        expires_at: input.expiresAt,
+        created_by: input.createdByAppUserId,
+      })
+      .returning(SUMMARY_COLUMNS)
+      .executeTakeFirstOrThrow();
+
+  const issuedVia = input.issuedVia;
+  const row = issuedVia
+    ? await inIssuanceTransaction(async (trx) => {
+        await enterIssuanceFence(trx, input.ownerAppUserId, issuedVia);
+        return insert(trx);
+      })
+    : await insert(db);
 
   return { ...row, plaintext };
 }
@@ -190,9 +214,44 @@ export async function revokeApiKey(
 }
 
 /**
- * Rotation: issues a fresh key with the same owner/scopes/expiry, then
- * revokes the old one. Returns the new plaintext. The two writes run in
- * one transaction so a rotation is atomic.
+ * Revokes every ACTIVE key `ownerAppUserId` owns in one statement and returns
+ * the rows it revoked. The credential eviction (F-10) calls it inside its
+ * fenced transaction; see `credential-eviction.server.ts`.
+ */
+export async function revokeActiveApiKeysOf(
+  executor: Kysely<AppDatabase>,
+  ownerAppUserId: string,
+  revokedByAppUserId: string,
+  reason: string,
+): Promise<{ id: string; organization_id: string | null }[]> {
+  return executor
+    .updateTable("app_api_keys")
+    .set({
+      status: "revoked",
+      revoked_at: sql`now()`,
+      revoked_by: revokedByAppUserId,
+      revoked_reason: reason,
+    })
+    .where("app_user_id", "=", ownerAppUserId)
+    .where("status", "=", "active")
+    .returning(["id", "organization_id"])
+    .execute();
+}
+
+/**
+ * Rotation: issues a fresh key with the same owner/scopes/expiry and revokes
+ * the old one, in one transaction. Returns the new plaintext, or `null` when
+ * the key is missing or no longer active.
+ *
+ * The old key is retired FIRST, and only while it is still `active`, so a key
+ * revoked after the check above (a manual revoke, a concurrent rotation, or a
+ * credential eviction) is never rotated into a live successor, and its
+ * revoker and reason are kept. The transaction takes the issuance lock on the
+ * owner first (F-10, `issuance-fence.server.ts`). An eviction of the owner
+ * then either waits for the rotation to commit and revokes the successor, or
+ * commits first, and the retire below finds the old key already revoked.
+ * Rotating a key the eviction is about to revoke therefore never lets a
+ * successor escape.
  */
 export async function rotateApiKey(
   id: string,
@@ -205,7 +264,23 @@ export async function rotateApiKey(
   const { plaintext, prefix } = generateApiKey(env.API_KEY_ENV_TAG);
   const keyHash = await hashApiKey(plaintext);
 
-  return db.transaction().execute(async (trx) => {
+  return inIssuanceTransaction(async (trx) => {
+    await lockOwnerForIssuance(trx, existing.app_user_id);
+
+    const retired = await trx
+      .updateTable("app_api_keys")
+      .set({
+        status: "revoked",
+        revoked_at: sql`now()`,
+        revoked_by: actorAppUserId,
+        revoked_reason: "rotated",
+      })
+      .where("id", "=", id)
+      .where("status", "=", "active")
+      .returning("id")
+      .executeTakeFirst();
+    if (!retired) return null;
+
     const created = await trx
       .insertInto("app_api_keys")
       .values({
@@ -221,17 +296,6 @@ export async function rotateApiKey(
       })
       .returning(SUMMARY_COLUMNS)
       .executeTakeFirstOrThrow();
-
-    await trx
-      .updateTable("app_api_keys")
-      .set({
-        status: "revoked",
-        revoked_at: sql`now()`,
-        revoked_by: actorAppUserId,
-        revoked_reason: "rotated",
-      })
-      .where("id", "=", id)
-      .execute();
 
     return { ...created, plaintext };
   });

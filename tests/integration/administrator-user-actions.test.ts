@@ -402,6 +402,62 @@ describe("POST /api/administrator/users/[id]/password", () => {
     }
   });
 
+  it("F-10: sets the password in the actor's name, so the credential cut-off records the admin", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.setPassword"));
+    dbMock.mockResolvedValue(targetRow);
+    authSetPassword.mockResolvedValue({ status: true });
+    const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+    const request = makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+      method: "POST",
+      body: JSON.stringify({ mode: "set", password: "supersecret-pw-123" }),
+    });
+    const res = await POST(request, { params: Promise.resolve({ id: TARGET_ID }) });
+
+    expect(res.status).toBe(200);
+    expect(authSetPassword).toHaveBeenCalledWith(
+      {
+        userId: "ba-target",
+        newPassword: "supersecret-pw-123",
+        setBy: { betterAuthUserId: "ba-1", appUserId: "u-self", requestId: expect.any(String) },
+      },
+      request,
+    );
+  });
+
+  it("reports 502 + a failure audit, and no success row, whenever the wrapper throws", async () => {
+    // The wrapper is mocked here, so this pins the ROUTE's half only. Since
+    // F-10 the wrapper also throws when ending the sessions or revoking the
+    // bearer credentials fails; that half is pinned on the real wrapper in
+    // tests/security/impersonation-containment.test.ts ("admin set-password
+    // reports failure when the credentials could not be revoked"). The operator
+    // retries instead of believing the account is contained; every step is
+    // idempotent.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.setPassword"));
+    dbMock.mockResolvedValue(targetRow);
+    authSetPassword.mockRejectedValue(new Error("db down"));
+    const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "set", password: "supersecret-pw-123" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+
+    expect(res.status).toBe(502);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.password_set_failed",
+        reason: "auth_set_password_failed",
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.password_set" }),
+    );
+  });
+
   it("dispatches reset_email mode and audits", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.setPassword"));

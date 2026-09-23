@@ -708,6 +708,18 @@ Negative & edge cases
   characters."; over 128 -> `validation.passwordMax`. The `*` marker is on both
   labels.
 - Empty Confirm password -> "This field is required." (`validation.required`).
+- A completed reset evicts every way into the account (AUTH-2, F-08, F-10):
+  every session of the account is signed out, including any it opened by
+  impersonating someone, and every API key it owns and every OAuth client
+  acting as it is revoked, so a key an attacker minted with a stolen cookie
+  stops working (`401`). Expected, for an account with a key created on
+  **Account → API keys** beforehand with the `account.read` scope ticked (so
+  `GET /api/v1/me` with it answers 200 before the reset and 401 after): after
+  the reset the key is listed as revoked, and Administrator → **Audit** shows
+  an `api_key.revoked` row with `metadata.reason` `password_reset` and the
+  account itself as the actor (`onPasswordReset` in `src/lib/auth.ts`,
+  `src/lib/api-auth/credential-eviction.server.ts`). The success message is
+  unchanged.
 
 Accessibility: both password fields labelled and `aria-required`; the no-token
 and error states are `role="alert"`, the done state is `role="status"`; keyboard

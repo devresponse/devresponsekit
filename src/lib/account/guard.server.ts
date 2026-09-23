@@ -13,6 +13,7 @@ import {
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse } from "@/lib/api-auth/problem";
 import type { ApiKeyOrgConfinement } from "@/lib/api-auth/api-keys.server";
+import type { CallerSource } from "@/lib/api-auth/issuance-fence.server";
 
 /**
  * Shared authorization gate for the self-service Account API
@@ -41,6 +42,11 @@ export interface AccountActor {
   access: UserAccessContext;
   callerKind: CallerKind;
   credentialId: string | null;
+  /**
+   * The credential the request authenticated with, re-checked when a route
+   * issues a credential (F-10, `ResolvedCaller.source`).
+   */
+  source?: CallerSource | null;
   /** The calling credential's scopes (null for cookies = full authority). */
   grantedScopes: string[] | null;
   /**
@@ -266,6 +272,7 @@ async function decideAccountAccess(
       access,
       callerKind: caller.kind,
       credentialId: caller.credentialId,
+      source: caller.source ?? null,
       grantedScopes: caller.grantedScopes,
       impersonatorId: caller.impersonatorId,
     },

@@ -4,6 +4,11 @@ import { sql, type Kysely, type Selectable } from "kysely";
 import { db } from "@/db/database";
 import type { AppDatabase, AppOauthClientsTable } from "@/db/schema/app-schema";
 import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
+import {
+  enterIssuanceFence,
+  inIssuanceTransaction,
+  type CallerSource,
+} from "@/lib/api-auth/issuance-fence.server";
 
 /**
  * Constant-time comparison of two hex digests (P2-3). A plain `!==` on a
@@ -65,6 +70,15 @@ export interface CreateOauthClientInput {
   /** Existing app_users id the client acts as (its service principal). */
   serviceAppUserId: string;
   createdByAppUserId: string;
+  /**
+   * The credential the registering request authenticated with (F-10). When
+   * given, the insert runs behind the issuance fence (`createApiKey` has the
+   * same option): it waits out a concurrent eviction of the service principal
+   * and is refused with `IssuingCredentialRevokedError` if that credential
+   * died meanwhile. MCP self-registration has no calling credential and omits
+   * it.
+   */
+  issuedVia?: CallerSource | null;
 }
 
 export interface CreatedOauthClient extends OauthClientSummary {
@@ -88,20 +102,29 @@ export async function createOauthClient(
   const clientSecret = `${CLIENT_ID_PREFIX}sec_${randomBase62(40)}`;
   const secretHash = await hashSecret(clientSecret);
 
-  const row = await executor
-    .insertInto("app_oauth_clients")
-    .values({
-      client_id: clientId,
-      client_secret_hash: secretHash,
-      app_user_id: input.serviceAppUserId,
-      organization_id: input.organizationId,
-      name: input.name,
-      scopes: input.scopes,
-      status: "active",
-      created_by: input.createdByAppUserId,
-    })
-    .returning(SUMMARY_COLUMNS)
-    .executeTakeFirstOrThrow();
+  const insert = (target: Kysely<AppDatabase>) =>
+    target
+      .insertInto("app_oauth_clients")
+      .values({
+        client_id: clientId,
+        client_secret_hash: secretHash,
+        app_user_id: input.serviceAppUserId,
+        organization_id: input.organizationId,
+        name: input.name,
+        scopes: input.scopes,
+        status: "active",
+        created_by: input.createdByAppUserId,
+      })
+      .returning(SUMMARY_COLUMNS)
+      .executeTakeFirstOrThrow();
+
+  const issuedVia = input.issuedVia;
+  const row = issuedVia
+    ? await inIssuanceTransaction(async (trx) => {
+        await enterIssuanceFence(trx, input.serviceAppUserId, issuedVia);
+        return insert(trx);
+      }, executor)
+    : await insert(executor);
 
   return { ...row, clientSecret };
 }
@@ -161,6 +184,26 @@ export async function updateOauthClient(id: string, patch: OauthClientUpdate): P
     .where("status", "=", "active")
     .executeTakeFirst();
   return Number(result.numUpdatedRows ?? 0) > 0;
+}
+
+/**
+ * Revokes every ACTIVE client whose service principal is `ownerAppUserId`, in
+ * one statement, and returns the rows it revoked. The credential eviction
+ * (F-10) calls it inside its fenced transaction; see
+ * `credential-eviction.server.ts`.
+ */
+export async function revokeActiveOauthClientsOf(
+  executor: Kysely<AppDatabase>,
+  ownerAppUserId: string,
+  revokedByAppUserId: string,
+): Promise<{ id: string; organization_id: string | null }[]> {
+  return executor
+    .updateTable("app_oauth_clients")
+    .set({ status: "revoked", revoked_at: sql`now()`, revoked_by: revokedByAppUserId })
+    .where("app_user_id", "=", ownerAppUserId)
+    .where("status", "=", "active")
+    .returning(["id", "organization_id"])
+    .execute();
 }
 
 export async function revokeOauthClient(id: string, revokedByAppUserId: string): Promise<boolean> {

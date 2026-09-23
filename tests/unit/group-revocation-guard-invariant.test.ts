@@ -12,7 +12,9 @@ import { fileURLToPath } from "node:url";
  * an actor may only take away what they could have conferred. That rule lives
  * in each route handler (there is no shared chokepoint every group mutation
  * passes through), and it had been written into three of the four handlers:
- * `DELETE /groups/[id]`, the widest of them, shipped without it. This scan
+ * `DELETE /groups/[id]`, the widest of them, shipped without it. (Since F-12
+ * the two membership deletes remove the member's group memberships in that
+ * org too, so they are group revokers under the same rule.) This scan
  * fails CI when a handler deletes group authority without the AUTHZ-3 subset
  * test wired the P1-1 way, so the next route cannot repeat that.
  *
@@ -181,6 +183,10 @@ describe("group revocation guard invariant (REVOKE-1, F-11)", () => {
         "administrator/groups/[id]/members/route.ts DELETE",
         "administrator/groups/[id]/roles/route.ts DELETE",
         "administrator/users/[id]/groups/route.ts DELETE",
+        // F-12: a membership delete takes the member's group memberships in
+        // that org with it, so both membership routes are group revokers too.
+        "administrator/organizations/[id]/members/route.ts DELETE",
+        "administrator/users/[id]/memberships/route.ts DELETE",
       ]),
     );
   });

@@ -18,6 +18,7 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import {
   canAccessOrg,
+  isSuperadmin,
   wouldStripLastGlobalSuperuser,
   LAST_SUPERADMIN_ERROR,
   LAST_SUPERADMIN_EVENT,
@@ -25,6 +26,20 @@ import {
   LAST_SUPERADMIN_STATUS,
   type AccessLike,
 } from "@/lib/admin/access-scope.server";
+import {
+  conferrablePermissions,
+  permissionKeysForGroups,
+  permissionKeysForRoles,
+  unheldPermissionKeys,
+} from "@/lib/admin/grantable-permissions.server";
+import {
+  auditRemovedMembershipGrants,
+  grantIdsRemovedWith,
+  MembershipGrantsRefusal,
+  MEMBERSHIP_REVOCATION_DENIED_EVENT,
+  MEMBERSHIP_REVOCATION_DENIED_REASON,
+  unheldOnMembershipRemoval,
+} from "@/lib/admin/membership-grants.server";
 import { isUuid, refuseOutrankingTarget } from "@/lib/admin/user-target.server";
 
 export const dynamic = "force-dynamic";
@@ -472,7 +487,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 /**
  * DELETE /api/administrator/organizations/:id/members
  *
- * Removes one or more memberships by membership id.
+ * Removes one or more memberships by membership id, and with each one the
+ * member's grants in this org: their direct role assignments here and their
+ * memberships in this org's groups (F-12). A non-SUPERADMIN may only remove
+ * grants they could have conferred (REVOKE-1: 403 `forbidden`, the whole batch
+ * refused, nothing removed).
  *
  * Body:
  *   - membershipIds: string[]
@@ -536,25 +555,124 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   const outranked = await refuseOutrankedMembers(guard, memberships, request, "member_remove");
   if (outranked) return outranked;
 
-  // REVOKE-2: deleting the membership removes the ACTIVE row every superuser
-  // grant in this org hangs off, so it is checked unconditionally.
-  const outcome = await db.transaction().execute(async (trx) => {
-    const stripsLast = await wouldStripLastGlobalSuperuser(
-      {
-        memberships: memberships.map((m) => ({ appUserId: m.app_user_id, organizationId: id })),
-      },
-      trx,
-    );
-    if (stripsLast) return "last_superadmin" as const;
-    await trx
-      .deleteFrom("app_organization_memberships")
-      .where("id", "in", input.membershipIds)
-      .where("organization_id", "=", id)
-      .execute();
-    return "removed" as const;
-  });
+  const memberUserIds = memberships.map((m) => m.app_user_id);
+  const outcome = await db
+    .transaction()
+    .execute(async (trx) => {
+      // REVOKE-2: deleting the membership removes the ACTIVE row every
+      // superuser grant in this org hangs off, so it is checked
+      // unconditionally. It must read the grants BEFORE the deletes below:
+      // afterwards the assignment rows are gone and it would see nothing left
+      // to protect.
+      const stripsLast = await wouldStripLastGlobalSuperuser(
+        {
+          memberships: memberships.map((m) => ({ appUserId: m.app_user_id, organizationId: id })),
+        },
+        trx,
+      );
+      if (stripsLast) return { kind: "last_superadmin" } as const;
 
-  if (outcome === "last_superadmin") {
+      // F-12: the members' grants IN THIS ORG leave with their memberships —
+      // their direct role assignments and their memberships in this org's
+      // groups. Left behind, they sat dormant and came back, `superuser`
+      // included, the moment anyone re-added or re-invited the user, with no
+      // conferral check and no audit row.
+      const roles = await trx
+        .deleteFrom("app_user_roles")
+        .using("app_roles")
+        .whereRef("app_roles.id", "=", "app_user_roles.role_id")
+        .where("app_user_roles.organization_id", "=", id)
+        .where("app_user_roles.app_user_id", "in", memberUserIds)
+        .returning([
+          "app_user_roles.app_user_id as app_user_id",
+          "app_user_roles.organization_id as organization_id",
+          "app_user_roles.role_id as role_id",
+          "app_roles.key as role_key",
+        ])
+        .execute();
+      const groups = await trx
+        .deleteFrom("app_group_memberships")
+        .using("app_groups")
+        .whereRef("app_groups.id", "=", "app_group_memberships.group_id")
+        .where("app_groups.organization_id", "=", id)
+        .where("app_group_memberships.app_user_id", "in", memberUserIds)
+        .returning([
+          "app_group_memberships.app_user_id as app_user_id",
+          "app_group_memberships.group_id as group_id",
+          "app_groups.key as group_key",
+          "app_groups.organization_id as organization_id",
+        ])
+        .execute();
+
+      // REVOKE-1 (conferral symmetry), F-12: removing those grants is a
+      // revocation, so it takes the AUTHZ-3 subset test the role and group
+      // routes apply when they remove the same rows one at a time. For a
+      // cookie org admin it refuses what the rank guard above already
+      // refuses; what it adds is the P1-1 bound. The rank guard measures the
+      // member against the actor's HELD permissions and exempts any superuser
+      // principal, so a superuser-owned key scoped only to this route's
+      // permission passes it, and without this test would strip an org
+      // admin's roles. A bearer credential may only take away what its scopes
+      // let it confer, and never takes the SUPERADMIN fast-path. Measured on
+      // EXACTLY the rows just deleted, so nothing is removed unchecked.
+      // `unheldOnMembershipRemoval` then drops `shell.view`, which the
+      // membership itself implies, and bounds a key no scope can name by the
+      // key owner's authority instead of the scopes. Without it no bearer
+      // credential could remove a member holding any ordinary role.
+      // Thrown, not returned, so the deletes above roll back with the refusal.
+      if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
+        const conferred = [
+          ...(await permissionKeysForRoles(
+            roles.map((r) => r.role_id),
+            trx,
+          )),
+          ...(await permissionKeysForGroups(
+            groups.map((g) => g.group_id),
+            trx,
+          )),
+        ];
+        const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
+        const unheld = unheldOnMembershipRemoval(
+          unheldPermissionKeys(conferrable, conferred),
+          guard.access,
+          guard.grantedScopes,
+        );
+        if (unheld.length > 0) throw new MembershipGrantsRefusal(unheld);
+      }
+
+      await trx
+        .deleteFrom("app_organization_memberships")
+        .where("id", "in", input.membershipIds)
+        .where("organization_id", "=", id)
+        .execute();
+      return { kind: "removed", roles, groups } as const;
+    })
+    .catch((err: unknown) => {
+      if (err instanceof MembershipGrantsRefusal) {
+        return { kind: "unheld", unheld: err.unheldPermissions } as const;
+      }
+      throw err;
+    });
+
+  if (outcome.kind === "unheld") {
+    await auditOrgAction(MEMBERSHIP_REVOCATION_DENIED_EVENT, "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: id,
+      requestId: guard.requestId,
+      reason: MEMBERSHIP_REVOCATION_DENIED_REASON,
+      metadata: {
+        action: "member_remove",
+        organizationId: id,
+        slug: org.slug,
+        membershipIds: memberships.map((m) => m.id),
+        unheldPermissions: outcome.unheld,
+      },
+    });
+    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+  }
+
+  if (outcome.kind === "last_superadmin") {
     await auditOrgAction(LAST_SUPERADMIN_EVENT, "denied", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
@@ -573,6 +691,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     });
   }
 
+  const { roles, groups } = outcome;
   const auditPromises = [
     auditOrgAction("admin.organization.members_removed", "success", {
       request,
@@ -585,9 +704,22 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: m.app_user_id,
-        metadata: { organizationId: id, slug: org.slug, membershipId: m.id },
+        metadata: {
+          organizationId: id,
+          slug: org.slug,
+          membershipId: m.id,
+          ...grantIdsRemovedWith(m.app_user_id, id, roles, groups),
+        },
       }),
     ),
+    // F-12: each removed grant is also recorded as its own revocation.
+    ...auditRemovedMembershipGrants({
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      requestId: guard.requestId,
+      roles,
+      groups,
+    }),
   ];
   await Promise.all(auditPromises);
 

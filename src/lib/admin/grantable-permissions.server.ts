@@ -1,5 +1,7 @@
 import "server-only";
+import type { Kysely } from "kysely";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 
 /**
@@ -48,14 +50,46 @@ export async function permissionKeysForGroup(groupId: string): Promise<string[]>
   return [...new Set(rows.map((r) => r.key))];
 }
 
-/** Distinct permission keys conferred by the given roles (empty for `[]`). */
-export async function permissionKeysForRoles(roleIds: ReadonlyArray<string>): Promise<string[]> {
+/**
+ * Distinct permission keys conferred by the given roles (empty for `[]`).
+ *
+ * `executor` lets a caller that measures rows it is deleting read through its
+ * own transaction (F-12) instead of taking a second pool connection while it
+ * holds the first.
+ */
+export async function permissionKeysForRoles(
+  roleIds: ReadonlyArray<string>,
+  executor: Kysely<AppDatabase> = db,
+): Promise<string[]> {
   if (roleIds.length === 0) return [];
-  const rows = await db
+  const rows = await executor
     .selectFrom("app_role_permissions as rp")
     .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
     .select("p.key as key")
     .where("rp.role_id", "in", [...roleIds])
+    .execute();
+  return [...new Set(rows.map((r) => r.key))];
+}
+
+/**
+ * Distinct permission keys conferred by ANY of the given groups (empty for
+ * `[]`) — {@link permissionKeysForGroup} for a set, in one statement.
+ *
+ * F-12: a membership delete takes the member's group memberships in that org
+ * with it, so its REVOKE-1 test measures every group it removes the member
+ * from at once.
+ */
+export async function permissionKeysForGroups(
+  groupIds: ReadonlyArray<string>,
+  executor: Kysely<AppDatabase> = db,
+): Promise<string[]> {
+  if (groupIds.length === 0) return [];
+  const rows = await executor
+    .selectFrom("app_group_roles as gr")
+    .innerJoin("app_role_permissions as rp", "rp.role_id", "gr.role_id")
+    .innerJoin("app_permissions as p", "p.id", "rp.permission_id")
+    .select("p.key as key")
+    .where("gr.group_id", "in", [...groupIds])
     .execute();
   return [...new Set(rows.map((r) => r.key))];
 }

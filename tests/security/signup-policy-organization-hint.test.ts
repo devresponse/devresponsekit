@@ -284,9 +284,14 @@ describe("social sign-up path (session hook) honours the same channel and carrie
     return hook;
   }
 
+  // The shape Better Auth REALLY passes an OAuth callback's hooks: `path` is the
+  // route PATTERN with the provider in `params.id` (pinned against a live
+  // callback in tests/security/oauth-provisioning-provider.test.ts). A concrete
+  // "/callback/google" here is what hid the provider being read as "email".
   function makeContext(authUser: Record<string, unknown>, cookie: string) {
     return {
-      path: "/callback/google",
+      path: "/callback/:id",
+      params: { id: "google" },
       request: new Request("http://localhost:3000/api/auth/callback/google", {
         headers: { cookie },
       }),
@@ -350,5 +355,28 @@ describe("social sign-up path (session hook) honours the same channel and carrie
       }),
     );
     expect(provisionMock).not.toHaveBeenCalled();
+  });
+
+  it("a pending user signing in through an OAuth callback is re-evaluated as THAT provider, not email", async () => {
+    // The allowedAuthMethods gate in decideInitialStatus judges this value: read
+    // as "email", an email-only org admitted a GitHub sign-in and a GitHub-only
+    // org parked it.
+    const auth = await loadAuth();
+    existingAppUser = { id: "app-2", status: "pending_approval" };
+    const authUser = { id: "ba-gh", email: "dev@acme.com", name: "Dev", emailVerified: true };
+
+    await sessionHook(auth)(
+      { userId: "ba-gh" } as never,
+      {
+        path: "/callback/:id",
+        params: { id: "github" },
+        request: new Request("http://localhost:3000/api/auth/callback/github?code=c&state=s"),
+        context: { internalAdapter: { findUserById: async () => authUser } },
+      } as never,
+    );
+
+    expect(reevaluateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ betterAuthUserId: "ba-gh", provider: "github" }),
+    );
   });
 });

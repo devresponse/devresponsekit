@@ -9,6 +9,7 @@ import {
   rejectClosedAuthEndpoints,
 } from "@/lib/auth-admin-surface";
 import { ssoSession } from "@/lib/auth-sso-session";
+import { getProvisioningProvider } from "@/lib/auth-provisioning-provider";
 import {
   EMAIL_VERIFICATION_WAIVED_FIELD,
   EMAIL_VERIFICATION_WAIVED_USER_FIELD,
@@ -529,18 +530,6 @@ export const auth = betterAuth({
 
 /** Convenience type for the resolved session shape. */
 export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
-
-function getProvisioningProvider(
-  context: GenericEndpointContext,
-): "email" | "google" | "microsoft" | "github" {
-  const path = context.path || context.request?.url || "";
-
-  if (path.includes("/callback/google")) return "google";
-  if (path.includes("/callback/microsoft")) return "microsoft";
-  if (path.includes("/callback/github")) return "github";
-
-  return "email";
-}
 
 /**
  * Extracts the invitation secret riding a sign-up request body (0008). The

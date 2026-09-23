@@ -24,6 +24,8 @@ describe("shouldProvisionSelfSignup", () => {
     expect(shouldProvisionSelfSignup({ path: "/callback/google" })).toBe(false);
     expect(shouldProvisionSelfSignup({ path: "/callback/microsoft" })).toBe(false);
     expect(shouldProvisionSelfSignup({ path: "/callback/github" })).toBe(false);
+    // What Better Auth actually passes an OAuth callback: the route PATTERN.
+    expect(shouldProvisionSelfSignup({ path: "/callback/:id" })).toBe(false);
   });
 
   it("skips admin / machine-API creation — the route provisions app_users itself", () => {

@@ -90,8 +90,17 @@ jobs:
       # exercised here — apply the app migrations, then run the live-DB scoping
       # suites that verify SQL / tenant-isolation correctness, not just mocks.
       - name: DB-backed integration tests
+        # Better Auth's own tables (`user`, `session`, `account`, ...) are
+        # applied too: production has them, and DB-backed suites that read them
+        # (the F-10 issuance fence re-checks a caller's `session` row) otherwise
+        # fail with `relation "session" does not exist`. Same CI-only secret and
+        # URL as the schema-drift job below.
+        env:
+          BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
+          BETTER_AUTH_URL: http://localhost:3000
         run: |
           pnpm db:app:migrate
+          pnpm db:auth:migrate
           pnpm test:db
 
       - name: Upload coverage report

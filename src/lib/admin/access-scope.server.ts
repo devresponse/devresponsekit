@@ -535,9 +535,11 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  * group-conferred has zero grants, which the escape hatch in
  * {@link stripsLastGlobalSuperuser} turns into "nothing to protect". Confer
  * `superuser` by DIRECT role assignment. What IS protected on the group paths
- * is the conferral symmetry (REVOKE-1): the three group revocation routes run
- * the AUTHZ-3 subset test against the removed set, so a delegated admin who
- * does not hold `superuser` can neither build nor dismantle such a group.
+ * is the conferral symmetry (REVOKE-1): the four group revocation routes
+ * (group role detach, both member removals, and deleting the group itself —
+ * the last added by F-11) run the AUTHZ-3 subset test against the removed set,
+ * so a delegated admin who does not hold `superuser` can neither build nor
+ * dismantle such a group.
  * Closing the gap properly means teaching BOTH predicates about
  * `app_group_roles` in one change; see docs/admin-manager.md §8.6.
  */

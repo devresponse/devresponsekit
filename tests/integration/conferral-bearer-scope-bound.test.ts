@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as RouteModule from "@/app/api/administrator/roles/[id]/permissions/route";
+import type * as GroupRouteModule from "@/app/api/administrator/groups/[id]/route";
 
 /**
  * P1-1 regression: the AUTHZ-3 conferral guard on
@@ -15,7 +16,8 @@ import type * as RouteModule from "@/app/api/administrator/roles/[id]/permission
  *
  * REVOKE-1 put that same wiring on the DELETE twin, so the scope bound is
  * pinned there too — a superuser-owned key scoped to `admin.roles.update` must
- * not be able to DISMANTLE authority it could not confer.
+ * not be able to DISMANTLE authority it could not confer. F-11 added the
+ * group delete (`DELETE /groups/[id]`), pinned the same way at the end.
  *
  * The security suite drives the REAL `requireAdminPermission`, which can't
  * inject a bearer credential's `grantedScopes`, so this mocks the guard
@@ -23,6 +25,8 @@ import type * as RouteModule from "@/app/api/administrator/roles/[id]/permission
  */
 const requireAdminMock = vi.fn();
 const auditMock = vi.fn();
+const auditOrgMock = vi.fn();
+const deleteMock = vi.fn();
 const rowExecuteTakeFirst = vi.fn();
 const rowsExecute = vi.fn();
 
@@ -44,6 +48,7 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
 }));
 vi.mock("@/lib/admin/audit-helpers.server", () => ({
   auditRoleAction: (...a: unknown[]) => auditMock(...a),
+  auditOrgAction: (...a: unknown[]) => auditOrgMock(...a),
 }));
 vi.mock("@/db/database", () => ({
   pgPool: {},
@@ -60,6 +65,10 @@ vi.mock("@/db/database", () => ({
         },
       );
       return proxy;
+    },
+    deleteFrom: (table: string) => {
+      deleteMock(table);
+      return { where: () => ({ execute: async () => undefined }) };
     },
     transaction: () => ({ execute: async () => undefined }),
   },
@@ -102,6 +111,8 @@ let DELETE: typeof RouteModule.DELETE;
 beforeEach(async () => {
   requireAdminMock.mockReset();
   auditMock.mockReset();
+  auditOrgMock.mockReset();
+  deleteMock.mockReset();
   rowExecuteTakeFirst.mockReset();
   rowsExecute.mockReset();
   // loadRoleHeader -> a role in the caller's org; catalog/current-keys reads -> [].
@@ -179,5 +190,92 @@ describe("DELETE /api/administrator/roles/[id]/permissions — bearer scope boun
     requireAdminMock.mockResolvedValue(grant(["admin.roles.update", "superuser"], null));
     const res = await DELETE(req({ ids: ["admin.users.delete"] }), ctx);
     expect(res.status).toBe(200);
+  });
+});
+
+/**
+ * F-11 — `DELETE /groups/[id]` takes every role the group bundles from every
+ * member at once, so it carries the REVOKE-1 conferral guard with the same
+ * P1-1 wiring. The verifier's case: a key owned by a superuser but scoped only
+ * to `admin.groups.delete` must not be able to delete a group conferring
+ * authority outside its scopes.
+ */
+describe("DELETE /api/administrator/groups/[id] — bearer scope bound (REVOKE-1, F-11)", () => {
+  const GROUP_ID = "44444444-4444-4444-8444-444444444401";
+  const groupReq = {
+    nextUrl: new URL(`http://test.local/api/administrator/groups/${GROUP_ID}`),
+    url: `http://test.local/api/administrator/groups/${GROUP_ID}`,
+    method: "DELETE",
+    headers: new Headers({ "content-type": "application/json" }),
+  } as unknown as NextRequest;
+  const groupCtx = { params: Promise.resolve({ id: GROUP_ID }) };
+
+  let DELETE_GROUP: typeof GroupRouteModule.DELETE;
+  beforeEach(async () => {
+    rowExecuteTakeFirst.mockResolvedValue({
+      id: GROUP_ID,
+      organization_id: "org-a",
+      key: "admins",
+    });
+    ({ DELETE: DELETE_GROUP } = await import("@/app/api/administrator/groups/[id]/route"));
+  });
+
+  it("REJECTS (403) a superuser-owned key scoped to admin.groups.delete when the group confers more", async () => {
+    // permissionKeysForGroup → what the group confers to its members.
+    rowsExecute.mockResolvedValue([{ key: "admin.users.delete" }]);
+    requireAdminMock.mockResolvedValue(
+      grant(["admin.groups.delete", "admin.users.delete", "superuser"], ["admin.groups.delete"]),
+    );
+    const res = await DELETE_GROUP(groupReq, groupCtx);
+    expect(res.status).toBe(403);
+    expect(deleteMock).not.toHaveBeenCalled();
+    expect(auditOrgMock).toHaveBeenCalledWith(
+      "admin.group.delete_denied",
+      "denied",
+      expect.objectContaining({
+        reason: "unheld_permissions",
+        requestId: "req-test",
+        metadata: expect.objectContaining({ unheldPermissions: ["admin.users.delete"] }),
+      }),
+    );
+  });
+
+  it("REJECTS (403) that key for a group conferring the `superuser` marker", async () => {
+    rowsExecute.mockResolvedValue([{ key: "superuser" }]);
+    requireAdminMock.mockResolvedValue(
+      grant(["admin.groups.delete", "superuser"], ["admin.groups.delete"]),
+    );
+    const res = await DELETE_GROUP(groupReq, groupCtx);
+    expect(res.status).toBe(403);
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("ALLOWS a bearer key whose scopes cover everything the group confers", async () => {
+    rowsExecute.mockResolvedValue([{ key: "admin.users.delete" }]);
+    requireAdminMock.mockResolvedValue(
+      grant(
+        ["admin.groups.delete", "admin.users.delete"],
+        ["admin.groups.delete", "admin.users.*"],
+      ),
+    );
+    const res = await DELETE_GROUP(groupReq, groupCtx);
+    expect(res.status).toBe(200);
+    expect(deleteMock).toHaveBeenCalledWith("app_groups");
+  });
+
+  it("preserves the SUPERADMIN fast-path for a cookie session (grantedScopes null)", async () => {
+    // A CUSTOM key the superadmin does not literally hold (getUserAccessContext
+    // expands a superadmin only to the static admin catalog), so the subset
+    // test alone would refuse it: only the fast-path makes this a 200.
+    rowsExecute.mockResolvedValue([{ key: "crm.deals.write" }]);
+    requireAdminMock.mockResolvedValue(grant(["admin.groups.delete", "superuser"], null));
+    const res = await DELETE_GROUP(groupReq, groupCtx);
+    expect(res.status).toBe(200);
+    expect(deleteMock).toHaveBeenCalledWith("app_groups");
+    expect(auditOrgMock).not.toHaveBeenCalledWith(
+      "admin.group.delete_denied",
+      expect.anything(),
+      expect.anything(),
+    );
   });
 });

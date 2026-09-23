@@ -751,20 +751,35 @@ permissions directly, so they add zero new authority primitives.
 | --- | --- | --- |
 | `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped) |
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
-| `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted` |
+| `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted`. DELETE carries the AUTHZ-3 subset test against everything the group confers (REVOKE-1, F-11): 403 `forbidden` and an `admin.group.delete_denied` row |
 | `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed`. A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
 | `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
 
 **Group revocation is bounded by the same guard as the grant (REVOKE-1).** The
-three routes that take a group-conferred role away —
-`DELETE /groups/[id]/roles`, `DELETE /groups/[id]/members` and
-`DELETE /users/[id]/groups` — run the same `conferrablePermissions` +
-`unheldPermissionKeys` subset test their POST twin does, measured against the
-permissions the removal destroys (403 `forbidden`; a bearer credential is
-bounded by its scopes and never takes the superadmin fast-path, P1-1). Without
-it the guard was one-directional: an admin holding only `admin.groups.assign`
-could not *build* a high-authority group but could dismantle one with a single
-DELETE, and AUTHZ-3 then forbade them from putting it back.
+four routes that take a group-conferred role away —
+`DELETE /groups/[id]/roles`, `DELETE /groups/[id]/members`,
+`DELETE /users/[id]/groups` and `DELETE /groups/[id]` — run the same
+`conferrablePermissions` + `unheldPermissionKeys` subset test their POST twin
+does, measured against the permissions the removal destroys (403 `forbidden`; a
+bearer credential is bounded by its scopes and never takes the superadmin
+fast-path, P1-1). Without it the guard was one-directional: an admin holding
+only `admin.groups.assign` could not *build* a high-authority group but could
+dismantle one with a single DELETE, and AUTHZ-3 then forbade them from putting
+it back.
+
+Deleting the group is the widest of the four (F-11): the cascade removes every
+bundled role from every member at once, so it is measured against everything
+the group confers, and a refusal is also audited as `admin.group.delete_denied`
+(`denied`, reason `unheld_permissions`, the refused keys in
+`metadata.unheldPermissions`). A group that bundles no roles confers nothing and
+deletes freely. The last-superadmin invariant (REVOKE-2) does not apply here: a
+group delete removes only `app_group_roles` and `app_group_memberships` rows,
+and REVOKE-2 counts direct assignments alone (see below).
+`tests/unit/group-revocation-guard-invariant.test.ts` fails CI when a route
+handler deletes group rows without this guard, and pins the reviewed guard on
+the deletes whose foreign-key cascade removes group rows (a role delete is
+refused while any group bundles the role; a tenant delete is superadmin-only and
+needs an empty org).
 
 **Conferring `superuser` through a group is not supported.**
 `getUserAccessContext` does union group-conferred roles into the permission set

@@ -103,12 +103,17 @@ function makeChain(table: string): unknown {
     },
   );
 }
+/** Tables a handler issued a DELETE against — a refusal must leave this empty. */
+const deletedTables: string[] = [];
 vi.mock("@/db/database", () => ({
   db: {
     selectFrom: (t: unknown) => makeChain(tableKey(t)),
     insertInto: (t: unknown) => makeChain(tableKey(t)),
     updateTable: (t: unknown) => makeChain(tableKey(t)),
-    deleteFrom: (t: unknown) => makeChain(tableKey(t)),
+    deleteFrom: (t: unknown) => {
+      deletedTables.push(tableKey(t));
+      return makeChain(tableKey(t));
+    },
   },
 }));
 
@@ -157,6 +162,7 @@ let userGroups: typeof UserGroupsRoute;
 
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
+  deletedTables.length = 0;
   state.group = {
     id: GROUP,
     organization_id: ORG_A,
@@ -540,7 +546,12 @@ describe("users/[id]/groups", () => {
  * unrecoverable lockout, one route over from the four the branch already
  * closed. Each DELETE is checked against what the removal destroys:
  * `permissionKeysForRoles` for the role detach, `permissionKeysForGroup` for
- * both membership removals.
+ * both membership removals and for deleting the group itself.
+ *
+ * F-11: `DELETE /groups/[id]` was the one group revocation left out. Its
+ * cascade takes every bundled role from every member at once, so an admin
+ * holding only `admin.groups.delete` could do in one request what the two
+ * guarded DELETEs refuse piecemeal.
  */
 describe("group revocation carries the conferral guard (REVOKE-1)", () => {
   const rolesBody = { roleIds: [ROLE] };
@@ -628,6 +639,88 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
       userCtx,
     );
     expect(res.status).toBe(403);
+  });
+
+  it("group DELETE → 403 when the group confers a permission the actor lacks, deletes nothing, and audits the denial (F-11)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }, { key: "admin.users.delete" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.delete", "admin.users.read"]));
+    const res = await byId.DELETE(req(`groups/${GROUP}`, { method: "DELETE" }), groupCtx);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe("forbidden");
+    expect(deletedTables).toEqual([]);
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.group.delete_denied",
+      "denied",
+      expect.objectContaining({
+        organizationId: ORG_A,
+        reason: "unheld_permissions",
+        metadata: expect.objectContaining({
+          groupId: GROUP,
+          key: "marketing",
+          // Only what the actor could not confer, not the whole bundle.
+          unheldPermissions: ["admin.users.delete"],
+        }),
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.group.deleted",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("group DELETE → 403 when the group confers `superuser` (F-11)", async () => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.delete"]));
+    const res = await byId.DELETE(req(`groups/${GROUP}`, { method: "DELETE" }), groupCtx);
+    expect(res.status).toBe(403);
+    expect(deletedTables).toEqual([]);
+  });
+
+  it("group DELETE → 200 for a subset group, and SUPERADMIN is never gated (F-11)", async () => {
+    state.conferredPermKeys = [{ key: "admin.users.read" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.delete", "admin.users.read"]));
+    expect((await byId.DELETE(req(`groups/${GROUP}`, { method: "DELETE" }), groupCtx)).status).toBe(
+      200,
+    );
+    expect(deletedTables).toEqual(["app_groups"]);
+
+    deletedTables.length = 0;
+    // The SUPERADMIN fast-path, not the subset test, must be what lets this
+    // through: the group confers a CUSTOM key (POST /permissions can mint one)
+    // that the superadmin does not literally hold, as getUserAccessContext
+    // expands a superadmin only to the static admin catalog. Without the
+    // fast-path this is a 403.
+    state.conferredPermKeys = [{ key: "crm.deals.write" }];
+    accessGetter.mockResolvedValue(superadmin(["admin.groups.delete"]));
+    expect((await byId.DELETE(req(`groups/${GROUP}`, { method: "DELETE" }), groupCtx)).status).toBe(
+      200,
+    );
+    expect(deletedTables).toEqual(["app_groups"]);
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.group.deleted",
+      "success",
+      expect.objectContaining({ organizationId: ORG_A }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.group.delete_denied",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("group DELETE → a foreign group stays 404 even when it confers `superuser` (no existence leak)", async () => {
+    state.group = { ...state.group!, organization_id: ORG_B };
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.delete"]));
+    const res = await byId.DELETE(req(`groups/${GROUP}`, { method: "DELETE" }), groupCtx);
+    expect(res.status).toBe(404);
+    expect(deletedTables).toEqual([]);
+    expect(auditMock).not.toHaveBeenCalledWith(
+      "admin.group.delete_denied",
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it("users/[id]/groups DELETE → 200 for a subset group, and SUPERADMIN is never gated", async () => {

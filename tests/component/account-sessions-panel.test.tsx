@@ -87,6 +87,29 @@ describe("AccountSessionsPanel", () => {
     expect(revokeSession).toHaveBeenCalledWith({ token: "tok-other" });
   });
 
+  // Better Auth's client resolves a refused call with `{ data: null, error }`
+  // instead of rejecting — the shape an impersonated session gets for
+  // /list-sessions (403, IMP-3 / F-06). The panel read only `data`, so a
+  // refused load rendered "No active sessions." with no alert: the admin was
+  // told the user had no sessions.
+  it("shows the load error, not an empty list, when the list resolves with { error }", async () => {
+    listSessions.mockResolvedValue({
+      data: null,
+      error: { status: 403, statusText: "Forbidden", code: "FORBIDDEN_WHILE_IMPERSONATING" },
+    });
+    renderWithIntl(<AccountSessionsPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your sessions.");
+    expect(screen.queryByText("No active sessions.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Sign out other sessions" })).toBeDisabled();
+  });
+
+  it("shows the load error, not an empty list, when the list request rejects", async () => {
+    listSessions.mockRejectedValue(new Error("offline"));
+    renderWithIntl(<AccountSessionsPanel />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your sessions.");
+    expect(screen.queryByText("No active sessions.")).toBeNull();
+  });
+
   it("still lists sessions when the current-session lookup fails (unmarked, but usable)", async () => {
     getSession.mockRejectedValue(new Error("offline"));
     renderWithIntl(<AccountSessionsPanel />);

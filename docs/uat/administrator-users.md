@@ -644,6 +644,9 @@ Negative & edge cases
 2. Missing permission → the button is absent for a persona without `admin.users.impersonate` (Limited Admin, Member).
 3. Rate limit → repeated start calls hit the mutation budget (429, `impersonate/route.ts:49`).
 4. Stop always works → even if the admin's impersonate permission was revoked mid-session, "Stop" still returns them to their own account (`impersonate/route.ts:140` comment).
+5. The target's credentials stay out of reach → while impersonating, Better Auth lets the session do only two things, read itself and sign out; everything else fails in one of two ways (IMP-3 / F-06, `src/lib/auth-admin-surface.ts`):
+   - **403, audited.** The target's **Security** page cannot list or revoke sessions or change the password: `/list-sessions`, `/revoke-session`, `/revoke-other-sessions` and `/change-password` answer 403, as does every other endpoint outside that pair except those in the next bullet. Each refusal is audited as `account.impersonated_access.denied` with the **admin** as the actor.
+   - **404, not audited.** Provider tokens, linked logins and password checks (`/list-accounts`, `/get-access-token`, `/unlink-account`, `/verify-password` and the rest of `AUTH_DISABLED_PATHS`) are not mounted at all, and the raw admin plugin (`/api/auth/admin/*`) is closed. Both answer 404 to every caller, impersonating or not, before any check of the session, so they write no audit row. Do not look for one.
 
 Accessibility: the confirm dialog traps focus, closes on Esc, and the acknowledgement is a labelled checkbox gating the destructive action. No axe violations.
 i18n: run `en` + `uk`; dialog title/description/acknowledgement and the error toast localize.

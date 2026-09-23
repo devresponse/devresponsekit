@@ -66,6 +66,13 @@ export function AccountSessionsPanel() {
 
   useEffect(() => {
     let cancelled = false;
+    const loadFailed = () => {
+      if (cancelled) return;
+      setError(t("errors.sessionsLoadFailed"));
+      setSessions([]);
+      setCurrentToken(null);
+      setBusy(false);
+    };
     // `getSession()` rides along so the caller's own row can be marked.
     // Its failure is NOT fatal: an unmarked list is still usable, so it is
     // resolved to `null` rather than rejecting the pair (review #239).
@@ -78,18 +85,20 @@ export function AccountSessionsPanel() {
     ])
       .then(([list, token]) => {
         if (cancelled) return;
-        const data = (list as { data?: ClientSession[] }).data ?? [];
-        setSessions(data);
+        // Like the revoke calls below, a refused list resolves with
+        // `{ data: null, error }` rather than rejecting — e.g. the 403 an
+        // impersonated session gets (IMP-3 / F-06). Reading only `data` showed
+        // that as "No active sessions.", a claim the panel cannot make.
+        const result = list as { data?: ClientSession[] | null; error?: unknown };
+        if (result.error) {
+          loadFailed();
+          return;
+        }
+        setSessions(result.data ?? []);
         setCurrentToken(token ?? null);
         setBusy(false);
       })
-      .catch(() => {
-        if (cancelled) return;
-        setError(t("errors.sessionsLoadFailed"));
-        setSessions([]);
-        setCurrentToken(null);
-        setBusy(false);
-      });
+      .catch(loadFailed);
     return () => {
       cancelled = true;
     };
@@ -154,7 +163,11 @@ export function AccountSessionsPanel() {
           <Skeleton className="h-8 w-full" />
         </div>
       ) : sessions.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t("security.noSessions")}</p>
+        // After a failed load the alert above is the whole answer: the panel
+        // does not know the list is empty, so it must not say so.
+        error ? null : (
+          <p className="text-muted-foreground text-sm">{t("security.noSessions")}</p>
+        )
       ) : (
         <ul className="divide-y rounded-md border text-sm">
           {sessions.map((s, idx) => {

@@ -3,7 +3,11 @@ import { admin } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { db, pgPool } from "@/db/database";
-import { ADMIN_PLUGIN_OPTIONS, rejectClosedAuthEndpoints } from "@/lib/auth-admin-surface";
+import {
+  ADMIN_PLUGIN_OPTIONS,
+  AUTH_DISABLED_PATHS,
+  rejectClosedAuthEndpoints,
+} from "@/lib/auth-admin-surface";
 import { ssoSession } from "@/lib/auth-sso-session";
 import {
   EMAIL_VERIFICATION_WAIVED_FIELD,
@@ -495,11 +499,20 @@ export const auth = betterAuth({
     },
   },
 
+  // F-06: vendor endpoints the app never calls over HTTP (provider-token
+  // readers, account linking, the password oracle, raw user/session writes)
+  // answer 404 for everyone. Server-side `auth.api.*` calls are unaffected —
+  // Better Auth checks this list in the HTTP router only. The list and the
+  // reason for every entry live in `auth-admin-surface.ts`.
+  disabledPaths: [...AUTH_DISABLED_PATHS],
+
   // Review 2026-09-04 #3: the admin plugin's raw HTTP surface
   // (`/api/auth/admin/*`) is closed. The app only ever reaches the plugin via
   // server-side `auth.api.*` calls (headers, never `request`), which this
-  // hook lets through; real HTTP requests to `/admin/*` get 404. Policy and
-  // rationale live in `auth-admin-surface.ts`.
+  // hook lets through; real HTTP requests to `/admin/*` get 404. The same hook
+  // confines an IMPERSONATED session to `/get-session` and `/sign-out`
+  // (IMP-3, deny-by-default since F-06). Policy and rationale live in
+  // `auth-admin-surface.ts`.
   hooks: { before: rejectClosedAuthEndpoints },
 
   // The nextCookies plugin makes Better Auth set cookies via Next.js

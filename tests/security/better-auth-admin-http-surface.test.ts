@@ -6,9 +6,10 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin } from "better-auth/plugins";
 import {
   ADMIN_PLUGIN_OPTIONS,
-  IMPERSONATION_CLOSED_PATHS,
+  AUTH_DISABLED_PATHS,
+  IMPERSONATION_ALLOWED_PATHS,
   isAdminPluginPath,
-  isImpersonationClosedPath,
+  isImpersonationAllowedPath,
   rejectClosedAuthEndpoints,
 } from "@/lib/auth-admin-surface";
 
@@ -52,14 +53,30 @@ vi.mock("@/lib/audit.server", () => ({
 
 const BASE_URL = "http://localhost:3000";
 const PASSWORD = "ci-only-admin-surface-password-not-for-production";
+/** A stored provider access token — short on purpose, never a real shape. */
+const GITHUB_TOKEN = "gh-tok-01";
 
-function makeAuth(opts: { guarded: boolean; allowImpersonatingAdmins?: boolean }) {
+/**
+ * Deliberately WITHOUT the app's `disabledPaths`: every vendor endpoint stays
+ * mounted, so the IMP-3 / F-06 tests below prove the hook ALONE refuses an
+ * impersonated session everywhere — the rule must not depend on that list
+ * (the real configuration is pinned in better-auth-endpoint-classification).
+ * GitHub is configured so the token-reading endpoints have a provider to
+ * serve; the credentials are placeholders and nothing is ever fetched.
+ */
+function makeAuth(opts: {
+  guarded: boolean;
+  allowImpersonatingAdmins?: boolean;
+  session?: { updateAge?: number };
+}) {
   return betterAuth({
     database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
     // Allow-listed dummy (see .gitleaks.toml) — a high-entropy literal here trips gitleaks generic-api-key.
     secret: "test-secret-test-secret-test-secret",
     baseURL: BASE_URL,
     emailAndPassword: { enabled: true },
+    socialProviders: { github: { clientId: "gh-client", clientSecret: "gh-secret" } },
+    ...(opts.session ? { session: opts.session } : {}),
     ...(opts.guarded ? { hooks: { before: rejectClosedAuthEndpoints } } : {}),
     plugins: [
       admin({
@@ -139,7 +156,7 @@ function httpGet(auth: TestAuth, route: string, cookie: string) {
   );
 }
 
-async function setup(opts: { guarded: boolean; allowImpersonatingAdmins?: boolean }) {
+async function setup(opts: Parameters<typeof makeAuth>[0]) {
   const auth = makeAuth(opts);
   const adminId = await seedUser(auth, "ba-admin@example.com", "admin");
   const superId = await seedUser(auth, "superadmin@example.com", "admin");
@@ -325,23 +342,25 @@ describe("allowImpersonatingAdmins decision (kept true — the app route depends
 });
 
 /**
- * IMP-3 — Better Auth's OWN self-service endpoints are closed to an
- * IMPERSONATED session.
+ * IMP-3 / F-06 — an IMPERSONATED session reaches NOTHING on Better Auth's
+ * catch-all except `/get-session` and `/sign-out`.
  *
  * IMP-1 made the app's `/api/account/*` and `/api/v1/me/*` guard refuse an
- * impersonated session by default, but self-service SESSION MANAGEMENT never
- * went through that guard: the account panel calls `authClient.listSessions()`
- * / `revokeSession()` / `revokeOtherSessions()`, which land on the catch-all
- * and resolve "the current user" as the BORROWED one. So an admin holding only
- * `admin.users.impersonate` could enumerate the target's sessions (IP,
- * user-agent, every tenant) and revoke them — capabilities otherwise gated by
- * `admin.users.sessions` — with the resulting rows attributed to the target.
+ * impersonated session by default, but Better Auth's own endpoints never went
+ * through that guard: they land on the catch-all and resolve "the current
+ * user" as the BORROWED one. IMP-3 closed five of them by name (session
+ * listing and revocation, `/update-user`); F-06 found everything else still
+ * open — `/list-accounts` + `/get-access-token` returned the target's provider
+ * tokens, `/unlink-account` stripped a login, `/verify-password` and
+ * `/change-password` answered password guesses — all attributed to the target.
+ * The rule is now an allow-list, and these tests enumerate every endpoint the
+ * instance mounts rather than naming the ones someone remembered.
  *
  * Driven through the real `auth.handler` with a REAL impersonated session
  * (started via the server-side `auth.api.impersonateUser`, which the hook lets
  * through), so the marker under test is Better Auth's own `impersonatedBy`.
  */
-describe("IMP-3: an impersonated session cannot reach Better Auth self-service", () => {
+describe("IMP-3 / F-06: an impersonated session reaches only the allow-list", () => {
   beforeEach(() => auditMock.mockReset());
 
   /** Starts impersonation server-side and returns the borrowed session cookie. */
@@ -355,24 +374,128 @@ describe("IMP-3: an impersonated session cannot reach Better Auth self-service",
     return cookieHeaderFrom(started.headers);
   }
 
-  /** Every closed path, with the request shape the account panel would send. */
-  function callClosedPath(auth: TestAuth, route: string, cookie: string) {
-    if (route === "/list-sessions") return httpGet(auth, route, cookie);
-    if (route === "/revoke-session") return httpPost(auth, route, cookie, { token: "whatever" });
-    if (route === "/update-user") return httpPost(auth, route, cookie, { name: "renamed" });
-    return httpPost(auth, route, cookie, {});
+  interface EndpointShape {
+    path?: string;
+    options?: { method?: string | string[]; metadata?: { SERVER_ONLY?: boolean } };
   }
 
-  it("403s every closed path, and the admin-plugin 404 still applies alongside it", async () => {
+  /**
+   * Every endpoint the router mounts outside the admin plugin, read off the
+   * instance — so an endpoint added by a Better Auth upgrade is covered here
+   * without anyone having to name it.
+   */
+  function mountedEndpoints(auth: TestAuth): Array<{ path: string; method: string }> {
+    return Object.values(auth.api as unknown as Record<string, EndpointShape>).flatMap(
+      (endpoint) => {
+        if (!endpoint.path || !endpoint.options || endpoint.options.metadata?.SERVER_ONLY) {
+          return [];
+        }
+        if (isAdminPluginPath(endpoint.path)) return [];
+        const method = endpoint.options.method;
+        return [{ path: endpoint.path, method: Array.isArray(method) ? method[0]! : method! }];
+      },
+    );
+  }
+
+  /** Calls an endpoint with an empty body: the hook runs before any validation. */
+  function callEmpty(auth: TestAuth, endpoint: { path: string; method: string }, cookie: string) {
+    const route = endpoint.path.replace(/:[^/]+/g, "x");
+    return endpoint.method === "GET"
+      ? httpGet(auth, route, cookie)
+      : httpPost(auth, route, cookie, {});
+  }
+
+  /** Links a GitHub login (with a stored provider token) to the member. */
+  async function linkGithub(auth: TestAuth, userId: string) {
+    const ctx = await auth.$context;
+    const account = await ctx.internalAdapter.createAccount({
+      userId,
+      providerId: "github",
+      accountId: "gh-4242",
+      accessToken: GITHUB_TOKEN,
+      scope: "read:user,user:email",
+    });
+    return account.id;
+  }
+
+  it("403s EVERY mounted endpoint outside the allow-list, and the admin-plugin 404 still applies", async () => {
     const { auth, memberId, headers } = await setup({ guarded: true });
     const borrowed = await borrowSession(auth, headers, memberId);
+    const refused = mountedEndpoints(auth).filter(
+      (endpoint) => !isImpersonationAllowedPath(endpoint.path),
+    );
+    // The F-06 endpoints are in the enumeration — it is not vacuous.
+    expect(refused.map((endpoint) => endpoint.path)).toEqual(
+      expect.arrayContaining([
+        "/list-accounts",
+        "/get-access-token",
+        "/refresh-token",
+        "/account-info",
+        "/unlink-account",
+        "/verify-password",
+        "/change-password",
+        "/list-sessions",
+        "/revoke-other-sessions",
+        ...AUTH_DISABLED_PATHS,
+      ]),
+    );
 
-    for (const route of IMPERSONATION_CLOSED_PATHS) {
-      const res = await callClosedPath(auth, route, borrowed);
-      expect(res.status, route).toBe(403);
+    for (const endpoint of refused) {
+      const res = await callEmpty(auth, endpoint, borrowed);
+      expect(res.status, endpoint.path).toBe(403);
     }
     // Composed, not replaced: wiring one policy would silently drop the other.
     expect((await httpGet(auth, "/admin/list-users?limit=100", borrowed)).status).toBe(404);
+  });
+
+  it("hands over no provider token (/list-accounts, /get-access-token, /account-info, /refresh-token)", async () => {
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const accountId = await linkGithub(auth, memberId);
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    const responses = [
+      await httpGet(auth, "/list-accounts", borrowed),
+      await httpPost(auth, "/get-access-token", borrowed, { accountId }),
+      await httpGet(auth, `/account-info?accountId=${accountId}`, borrowed),
+      await httpPost(auth, "/refresh-token", borrowed, { accountId }),
+    ];
+
+    for (const res of responses) {
+      expect(res.status).toBe(403);
+      const body = await res.text();
+      expect(body).not.toContain(GITHUB_TOKEN);
+      expect(body).not.toContain("gh-4242");
+    }
+  });
+
+  it("unlinks nothing — the target keeps every login method", async () => {
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const ctx = await auth.$context;
+    const accountId = await linkGithub(auth, memberId);
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    expect((await httpPost(auth, "/unlink-account", borrowed, { accountId })).status).toBe(403);
+
+    const providers = (await ctx.internalAdapter.findAccounts(memberId)).map((a) => a.providerId);
+    expect(providers.sort()).toEqual(["credential", "github"]);
+  });
+
+  it("is no password oracle — the RIGHT password gets the same 403, and nothing changes", async () => {
+    const { auth, memberId, headers } = await setup({ guarded: true });
+    const borrowed = await borrowSession(auth, headers, memberId);
+
+    const right = await httpPost(auth, "/verify-password", borrowed, { password: PASSWORD });
+    const wrong = await httpPost(auth, "/verify-password", borrowed, { password: "wrong-guess" });
+    expect([right.status, wrong.status]).toEqual([403, 403]);
+    expect(await right.text()).toBe(await wrong.text());
+
+    const changed = await httpPost(auth, "/change-password", borrowed, {
+      currentPassword: PASSWORD,
+      newPassword: "attacker-chosen-password-2",
+    });
+    expect(changed.status).toBe(403);
+    // The target's password is untouched.
+    await signInOverHttp(auth, "member@example.com");
   });
 
   it("revokes NOTHING — the borrowed user's real sessions survive the attempt", async () => {
@@ -409,9 +532,10 @@ describe("IMP-3: an impersonated session cannot reach Better Auth self-service",
 
   it("audits the refusal against the IMPERSONATOR, naming the borrowed identity", async () => {
     const { auth, adminId, memberId, headers } = await setup({ guarded: true });
+    const accountId = await linkGithub(auth, memberId);
     const borrowed = await borrowSession(auth, headers, memberId);
 
-    await httpPost(auth, "/revoke-other-sessions", borrowed, {});
+    await httpPost(auth, "/get-access-token", borrowed, { accountId });
 
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock).toHaveBeenCalledWith(
@@ -424,33 +548,50 @@ describe("IMP-3: an impersonated session cannot reach Better Auth self-service",
         actorBetterAuthUserId: adminId,
         metadata: expect.objectContaining({
           impersonatedBetterAuthUserId: memberId,
-          path: "/revoke-other-sessions",
+          path: "/get-access-token",
+          surface: "better-auth",
         }),
       }),
     );
   });
 
-  it("CONTROL: the session's OWN owner still reaches every closed path (200, unaudited)", async () => {
+  it("CONTROL: the session's OWN owner still reaches the endpoints the account panel uses (unaudited)", async () => {
     // Proves the 403s above are the impersonation marker biting and not a
     // blanket closure — self-service must keep working for the actual user.
     const { auth } = await setup({ guarded: true });
+    const calls: Array<[string, (cookie: string) => Promise<Response>]> = [
+      ["/list-sessions", (cookie) => httpGet(auth, "/list-sessions", cookie)],
+      ["/revoke-session", (cookie) => httpPost(auth, "/revoke-session", cookie, { token: "x" })],
+      ["/revoke-other-sessions", (cookie) => httpPost(auth, "/revoke-other-sessions", cookie, {})],
+      [
+        "/change-password",
+        (cookie) =>
+          httpPost(auth, "/change-password", cookie, {
+            currentPassword: PASSWORD,
+            newPassword: PASSWORD,
+          }),
+      ],
+    ];
 
-    for (const route of IMPERSONATION_CLOSED_PATHS) {
-      // A FRESH session per route: `/revoke-sessions` destroys every session
-      // the caller holds, including the one making the call, so a shared
-      // cookie would 401 the rest of the loop for the wrong reason.
-      const cookie = await signInOverHttp(auth, "ba-admin@example.com");
-      const res = await callClosedPath(auth, route, cookie);
+    for (const [route, send] of calls) {
+      // A FRESH session per route: a revocation may end the caller's others.
+      const res = await send(await signInOverHttp(auth, "ba-admin@example.com"));
       expect(res.status, route).toBe(200);
     }
     expect(auditMock).not.toHaveBeenCalled();
   });
 
-  it("CONTROL: without the hook the impersonated session succeeds — the 403 is ours", async () => {
+  it("CONTROL: without the hook the impersonated session gets the target's provider token — the 403 is ours", async () => {
     const { auth, memberId, headers } = await setup({ guarded: false });
+    const accountId = await linkGithub(auth, memberId);
     const borrowed = await borrowSession(auth, headers, memberId);
 
-    expect((await httpGet(auth, "/list-sessions", borrowed)).status).toBe(200);
+    const accounts = await httpGet(auth, "/list-accounts", borrowed);
+    expect(accounts.status).toBe(200);
+    expect(await accounts.text()).toContain("gh-4242");
+    const token = await httpPost(auth, "/get-access-token", borrowed, { accountId });
+    expect(token.status).toBe(200);
+    expect(((await token.json()) as { accessToken: string }).accessToken).toBe(GITHUB_TOKEN);
     expect((await httpPost(auth, "/revoke-other-sessions", borrowed, {})).status).toBe(200);
   });
 
@@ -465,6 +606,7 @@ describe("IMP-3: an impersonated session cannot reach Better Auth self-service",
     expect(me.status).toBe(200);
     expect(((await me.json()) as { user: { id: string } }).user.id).toBe(memberId);
     expect((await httpPost(auth, "/sign-out", borrowed, {})).status).toBe(200);
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("lets the app's own server-side updateUser through (PATCH /api/account/profile)", async () => {
@@ -481,6 +623,23 @@ describe("IMP-3: an impersonated session cannot reach Better Auth self-service",
 
     expect(updated.status).toBe(true);
     expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves a normal session's rolling refresh to the endpoint (the guard's read is not reused)", async () => {
+    // The guard reads the session with `disableRefresh` on every path outside
+    // the allow-list. Better Auth memoizes that read for the endpoint's own
+    // session middleware, so unless the guard drops it, sessions would stop
+    // rolling forward on those paths. `updateAge: 0` makes every read due for
+    // a refresh, which answers with a fresh session cookie.
+    const guarded = await setup({ guarded: true, session: { updateAge: 0 } });
+    const control = await setup({ guarded: false, session: { updateAge: 0 } });
+
+    for (const { auth } of [guarded, control]) {
+      const cookie = await signInOverHttp(auth, "member@example.com");
+      const res = await httpGet(auth, "/list-sessions", cookie);
+      expect(res.status).toBe(200);
+      expect(cookieHeaderFrom(res.headers)).toContain("session_token=");
+    }
   });
 });
 
@@ -499,16 +658,21 @@ describe("wiring: src/lib/auth.ts installs the guard and the shared plugin optio
     expect(authSource).not.toMatch(/allowImpersonatingAdmins:/);
   });
 
-  it("isImpersonationClosedPath matches the closed list exactly", () => {
-    // Exact paths, not a prefix: `/list-sessions` must not drag in some
-    // `/list-sessions-*` a future plugin mounts, and the two endpoints the
-    // borrowed session needs to render and to get out must stay OFF the list.
-    expect(isImpersonationClosedPath("/revoke-other-sessions")).toBe(true);
-    expect(isImpersonationClosedPath("/list-sessions")).toBe(true);
-    expect(isImpersonationClosedPath("/list-sessions-extra")).toBe(false);
-    expect(isImpersonationClosedPath("/get-session")).toBe(false);
-    expect(isImpersonationClosedPath("/sign-out")).toBe(false);
-    expect(isImpersonationClosedPath(undefined)).toBe(false);
+  it("passes AUTH_DISABLED_PATHS as disabledPaths (F-06)", () => {
+    expect(authSource).toMatch(/disabledPaths:\s*\[\.\.\.AUTH_DISABLED_PATHS\]/);
+  });
+
+  it("the impersonation allow-list is exactly /get-session and /sign-out, matched exactly", () => {
+    // F-06: widening this list re-opens the vendor surface to every impersonator,
+    // so it is pinned by value. Exact paths, not a prefix: `/get-session` must
+    // not admit some `/get-session-*` a future plugin mounts.
+    expect([...IMPERSONATION_ALLOWED_PATHS]).toEqual(["/get-session", "/sign-out"]);
+    expect(isImpersonationAllowedPath("/get-session")).toBe(true);
+    expect(isImpersonationAllowedPath("/sign-out")).toBe(true);
+    expect(isImpersonationAllowedPath("/get-session-extra")).toBe(false);
+    expect(isImpersonationAllowedPath("/list-sessions")).toBe(false);
+    expect(isImpersonationAllowedPath("/get-access-token")).toBe(false);
+    expect(isImpersonationAllowedPath(undefined)).toBe(false);
   });
 
   it("isAdminPluginPath matches only the plugin prefix", () => {

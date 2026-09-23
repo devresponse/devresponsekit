@@ -581,24 +581,38 @@ merely what the plugin's own `hasPermission` requires for the `auth.api.*` calls
 those routes make on the actor's behalf. Minting it (`POST /users/[id]/role`)
 stays superadmin-only. Never pass `request` to an `auth.api.*` admin call.
 
-**Better Auth's own self-service endpoints are closed while impersonating
-(IMP-3).** The same `hooks.before` middleware answers **403** when an
-impersonated session reaches `/api/auth/list-sessions`, `/revoke-session`,
-`/revoke-sessions`, `/revoke-other-sessions` or `/update-user` over HTTP, and
-audits `account.impersonated_access.denied` against the **impersonator**. These
-endpoints are not `/api/account/*`, so the account guard's default refusal
-(§19) never saw them: the account panel calls them through `authClient`, and
-Better Auth resolves "the current user" as the borrowed one — which handed an
-admin holding only `admin.users.impersonate` the ability to enumerate the
-target's sessions (IP, user agent, every tenant) and revoke them, capabilities
-otherwise gated by `admin.users.sessions`, with the rows attributed to the
-target rather than to them. The app's own server-side `auth.api.updateUser`
-call behind `PATCH /api/account/profile` still passes (headers, no `request`),
-so the support flow is unaffected. `/get-session` and `/sign-out` are
-deliberately **not** closed — a borrowed session must be able to render and to
-be left. Adding a Better Auth self-service endpoint means deciding whether it
-belongs on that list; `tests/security/better-auth-admin-http-surface.test.ts`
-pins the current one.
+**An impersonated session reaches only `/get-session` and `/sign-out` on
+`/api/auth/*` (IMP-3, deny-by-default since F-06).** The same `hooks.before`
+middleware answers **403** when an impersonated session calls any other mounted
+Better Auth endpoint over HTTP, and audits `account.impersonated_access.denied`
+against the **impersonator** (the borrowed identity and the endpoint path are in
+the metadata). The admin plugin's `/admin/*` (above) and the `disabledPaths`
+endpoints (below) answer 404 instead, to every caller and without an audit
+row. These endpoints are not `/api/account/*`, so the account guard's default
+refusal (§19) never saw them, and Better Auth resolves "the current user" as
+the borrowed one. IMP-3 first closed five of them by name (session
+listing and revocation, `/update-user`); everything it did not name stayed open
+and was attributed to the target — `/list-accounts` then `/get-access-token`
+returned the target's provider OAuth tokens, `/unlink-account` stripped a login,
+and `/verify-password` and `/change-password` answered password guesses. So the
+rule is an allow-list now: `/get-session` (the account panel marks the current
+session with it) and `/sign-out` (the admin's way out; **Stop impersonating**
+uses the app route below, not Better Auth's endpoint). The app's own
+server-side `auth.api.*` calls — e.g. `auth.api.updateUser` behind
+`PATCH /api/account/profile` — pass headers and no `request`, so they are
+unaffected.
+
+**Vendor endpoints the app never uses are not mounted (F-06).** Better Auth's
+`disabledPaths` answers **404** for everyone on `/list-accounts`,
+`/get-access-token`, `/refresh-token`, `/account-info`, `/link-social`,
+`/unlink-account`, `/verify-password`, `/update-user`, `/update-session`,
+`/revoke-sessions`, `/change-email`, `/delete-user` and `/delete-user/callback`
+(the list and a reason for each live in `src/lib/auth-admin-surface.ts`).
+`tests/security/better-auth-endpoint-classification.test.ts` enumerates every
+endpoint the real `auth` instance mounts and fails on any it cannot place — the
+admin plugin, the disabled list, the impersonation allow-list, or a reviewed
+list of endpoints open to the session's own owner — so a Better Auth upgrade
+that adds an endpoint fails CI until someone decides where it belongs.
 
 ### 8.2 Organizations
 
@@ -1054,12 +1068,15 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   opt back in explicitly with `{ allowImpersonation: true }`; the key **listing**
   stays available but is confined to the impersonated session's organization.
 
-  That default covers the app's **own** routes only. Better Auth's self-service
-  endpoints are mounted on the `/api/auth/[...all]` catch-all and never reach
-  this guard, so session listing and revocation are closed separately, in the
-  `hooks.before` middleware — see **IMP-3** in §8.1 for the exact list and for
-  what stays open. Anything reachable while impersonating is one of the two
-  lists or it is a gap.
+  That default covers the app's **own** routes only. Better Auth's endpoints
+  are mounted on the `/api/auth/[...all]` catch-all and never reach this guard,
+  so they are closed separately (see **IMP-3 / F-06** in §8.1). An impersonated
+  session reaches only `/get-session` and `/sign-out` there. Every other
+  mounted endpoint answers **403** in the `hooks.before` middleware, audited
+  against the impersonator. The endpoints in `disabledPaths` (provider tokens,
+  account linking, `/verify-password`, …) and the admin plugin's `/admin/*`
+  answer **404** to everyone before the session is checked, so they write no
+  audit row.
 - This route is the **only** path to Better Auth's `impersonateUser` — the raw
   `POST /api/auth/admin/impersonate-user` endpoint is closed (404; see §8.1).
   The plugin is configured with `allowImpersonatingAdmins: true` on purpose:

@@ -25,14 +25,16 @@ import { fileURLToPath } from "node:url";
  * `allowImpersonation: true` must be listed here with a reason, so re-opening
  * the credential surface is a reviewed decision rather than a copied line.
  *
- * NOT IN SCOPE HERE — Better Auth's OWN self-service endpoints (session
- * listing and revocation, `/update-user`). They are mounted on the
+ * NOT IN SCOPE HERE — Better Auth's OWN endpoints (session listing and
+ * revocation, provider tokens, password checks, ...). They are mounted on the
  * `/api/auth/[...all]` catch-all and are not app routes, so no scan of `src/`
  * can see them: the account guard's default never applied, and for a while
- * that was a hole (IMP-3). They are refused in `auth-admin-surface.ts` and
- * pinned behaviourally against the real plugin in
- * tests/security/better-auth-admin-http-surface.test.ts. Anything reachable
- * while impersonating is on one of those two lists or it is a gap.
+ * that was a hole (IMP-3, then F-06). `auth-admin-surface.ts` refuses every
+ * one of them to an impersonated session except `/get-session` and
+ * `/sign-out`; tests/security/better-auth-endpoint-classification.test.ts
+ * enumerates them from the real instance, and
+ * tests/security/better-auth-admin-http-surface.test.ts pins the refusal
+ * against the real plugin.
  */
 
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));

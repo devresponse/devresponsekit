@@ -160,7 +160,8 @@ export async function GET(request: NextRequest) {
  *   - Caller MUST hold `admin.users.create`.
  *   - Body validated with Zod (`.strict()` — unknown keys rejected).
  *   - The Better Auth `role` field is the auth role (`user`/`admin`),
- *     distinct from app roles managed by `app_user_roles`.
+ *     distinct from app roles managed by `app_user_roles`. `admin` needs
+ *     cross-org reach (403 otherwise), as on `POST /users/[id]/role` (F-13).
  *   - Initial app status defaults to `pending_approval` so admin
  *     approval is still required even when an admin creates the user.
  *   - The new password is forwarded to Better Auth and never logged or
@@ -196,6 +197,15 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data;
+
+  // F-13: the Better Auth `admin` role is a platform role, and minting it is
+  // SUPERADMIN-only (`POST /users/[id]/role`, same predicate). The plugin used
+  // to check it here against the actor's own role; `createBetterAuthUser` now
+  // runs as a trusted server call, so this route is the only check.
+  if (input.role === "admin" && !hasCrossOrgReach(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
+
   // Normalise email to lowercase for both the duplicate check AND
   // storage. Email comparison in `app_users` is already case-folded
   // via `lower(primary_email)` below, so persisting the lowercased
@@ -218,18 +228,15 @@ export async function POST(request: NextRequest) {
 
   let created;
   try {
-    created = await createBetterAuthUser(
-      {
-        email: normalisedEmail,
-        password: input.password,
-        name: input.name?.trim() || normalisedEmail,
-        role: input.role,
-        // F-03: only a creator with cross-org reach may vouch for an address;
-        // anyone else's creation carries no mailbox proof.
-        emailUnproven: !hasCrossOrgReach(guard.access),
-      },
-      request,
-    );
+    created = await createBetterAuthUser({
+      email: normalisedEmail,
+      password: input.password,
+      name: input.name?.trim() || normalisedEmail,
+      role: input.role,
+      // F-03: only a creator with cross-org reach may vouch for an address;
+      // anyone else's creation carries no mailbox proof.
+      emailUnproven: !hasCrossOrgReach(guard.access),
+    });
   } catch (err) {
     await auditUserAction("admin.user.create_failed", "error", {
       request,

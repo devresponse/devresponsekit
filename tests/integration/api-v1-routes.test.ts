@@ -480,8 +480,9 @@ describe("/api/v1/users", () => {
     // F-03: an unbound superadmin session vouches for the address.
     expect(createBetterAuthUser).toHaveBeenCalledWith(
       expect.objectContaining({ emailUnproven: false }),
-      expect.anything(),
     );
+    // F-13: a trusted server call; no caller credentials reach the wrapper.
+    expect(createBetterAuthUser.mock.calls[0]).toHaveLength(1);
   });
 
   it("F-03: a superuser-owned key BOUND to one org does not vouch (MACHINE-2)", async () => {
@@ -516,7 +517,6 @@ describe("/api/v1/users", () => {
     expect(res.status).toBe(201);
     expect(createBetterAuthUser).toHaveBeenCalledWith(
       expect.objectContaining({ emailUnproven: true }),
-      expect.anything(),
     );
   });
 
@@ -548,8 +548,56 @@ describe("/api/v1/users", () => {
     expect(res.status).toBe(201);
     expect(createBetterAuthUser).toHaveBeenCalledWith(
       expect.objectContaining({ emailUnproven: true }),
-      expect.anything(),
     );
+  });
+
+  // Every API key and JWT resolves org-bound (MACHINE-2: resolveCaller always
+  // passes a bound org, and getUserAccessContext then sets `orgBound`), so a
+  // bearer caller can never pass this gate. The one caller that can is a
+  // superadmin's COOKIE session, which the v1 guard also admits.
+  describe('F-13: `role: "admin"` needs cross-org reach, as on the admin twin', () => {
+    async function createAdmin(access: Record<string, unknown>) {
+      requireApiPermission.mockResolvedValue({
+        ok: true,
+        grant: { caller: { betterAuthUserId: "ba1", access }, requestId: "r1" },
+      });
+      dbState.takeFirst = undefined;
+      createBetterAuthUser.mockResolvedValue({ user: { id: "ba-new" } });
+      dbState.takeFirstOrThrow = { id: "u-new", primary_email: "new@x.com", status: "active" };
+      const { POST } = await import("@/app/api/v1/users/route");
+      return POST(
+        req("/api/v1/users", {
+          method: "POST",
+          body: { email: "new@x.com", password: "password123", role: "admin" },
+        }),
+      );
+    }
+
+    it("an org admin is refused with 403 and creates nothing", async () => {
+      const res = await createAdmin({ permissions: ["admin.users.create"], organizationId: "o1" });
+      expect(res.status).toBe(403);
+      expect(createBetterAuthUser).not.toHaveBeenCalled();
+    });
+
+    it("a superuser-owned key or JWT is refused too: every bearer credential is org-bound (MACHINE-2)", async () => {
+      const res = await createAdmin({
+        permissions: ["admin.users.create", "superuser"],
+        organizationId: "o1",
+        orgBound: true,
+      });
+      expect(res.status).toBe(403);
+      expect(createBetterAuthUser).not.toHaveBeenCalled();
+    });
+
+    it("a superadmin's cookie session (not org-bound) creates it", async () => {
+      const res = await createAdmin({
+        permissions: ["superuser"],
+        organizationId: "o1",
+        orgBound: false,
+      });
+      expect(res.status).toBe(201);
+      expect(createBetterAuthUser).toHaveBeenCalledWith(expect.objectContaining({ role: "admin" }));
+    });
   });
 
   it("POST 409 + create_failed audit when the insert loses the unique race (OPS-OBS-1)", async () => {

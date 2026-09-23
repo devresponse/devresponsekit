@@ -190,14 +190,12 @@ async function performBan(
   const refused = await refuseSharedAccountGlobal(target, actor);
   if (refused) return refused;
   try {
-    await banBetterAuthUser(
-      {
-        userId: target.betterAuthUserId,
-        banReason: options.reason,
-        banExpiresIn: options.expiresInSeconds,
-      },
-      actor.request,
-    );
+    await banBetterAuthUser({
+      userId: target.betterAuthUserId,
+      banReason: options.reason,
+      banExpiresIn: options.expiresInSeconds,
+      actorBetterAuthUserId: actor.betterAuthUserId,
+    });
   } catch (err) {
     await auditUserAction("admin.user.ban_failed", "error", {
       request: actor.request,
@@ -227,7 +225,7 @@ async function performUnban(
   const refused = await refuseSharedAccountGlobal(target, actor);
   if (refused) return refused;
   try {
-    await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
+    await unbanBetterAuthUser(target.betterAuthUserId);
   } catch (err) {
     await auditUserAction("admin.user.unban_failed", "error", {
       request: actor.request,
@@ -258,13 +256,11 @@ async function performSoftDelete(
   if (refused) return refused;
   const reason = options.reason ?? null;
   try {
-    await banBetterAuthUser(
-      {
-        userId: target.betterAuthUserId,
-        banReason: reason ?? "deleted",
-      },
-      actor.request,
-    );
+    await banBetterAuthUser({
+      userId: target.betterAuthUserId,
+      banReason: reason ?? "deleted",
+      actorBetterAuthUserId: actor.betterAuthUserId,
+    });
   } catch (err) {
     await auditUserAction("admin.user.soft_delete_failed", "error", {
       request: actor.request,
@@ -318,7 +314,7 @@ async function performSoftDelete(
     // Compensate the Better Auth ban so the two systems stay in sync
     // when the application bookkeeping fails (#B6).
     try {
-      await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
+      await unbanBetterAuthUser(target.betterAuthUserId);
     } catch (unbanErr) {
       await auditUserAction("admin.user.soft_delete_compensation_failed", "error", {
         request: actor.request,
@@ -378,7 +374,7 @@ async function performRestore(
   const refused = await refuseSharedAccountGlobal(target, actor);
   if (refused) return refused;
   try {
-    await unbanBetterAuthUser(target.betterAuthUserId, actor.request);
+    await unbanBetterAuthUser(target.betterAuthUserId);
   } catch (err) {
     await auditUserAction("admin.user.restore_failed", "error", {
       request: actor.request,

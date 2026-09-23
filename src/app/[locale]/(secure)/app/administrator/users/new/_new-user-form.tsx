@@ -31,7 +31,18 @@ import { locales, LOCALE_LABELS } from "@/config/i18n-config";
 const SELECT_CLASS =
   "border-input bg-background aria-invalid:border-destructive h-9 w-full rounded-md border px-2 text-sm";
 
-export function NewUserForm({ locale }: { locale: string }) {
+export function NewUserForm({
+  locale,
+  canGrantPlatformAdmin = false,
+}: {
+  locale: string;
+  /**
+   * Whether the Better Auth `admin` role may be chosen. The API refuses it
+   * (403) to anyone without cross-org reach (F-13), so it is not offered to
+   * them. Defaults to false: the page passes the real answer.
+   */
+  canGrantPlatformAdmin?: boolean;
+}) {
   const t = useTranslations("administrator.users");
   const tErr = useTranslations("administrator.errors");
   const router = useRouter();
@@ -155,7 +166,7 @@ export function NewUserForm({ locale }: { locale: string }) {
                 <FormControl>
                   <select className={SELECT_CLASS} {...field}>
                     <option value="user">user</option>
-                    <option value="admin">admin</option>
+                    {canGrantPlatformAdmin ? <option value="admin">admin</option> : null}
                   </select>
                 </FormControl>
                 <FormMessage />

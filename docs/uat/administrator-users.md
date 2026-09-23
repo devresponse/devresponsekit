@@ -279,7 +279,7 @@ i18n: run `en` + `uk`; column headers, status badges, filter labels, and toasts 
 - Access matrix:
   - Member / Limited Admin → **404** at the page (the `admin` role lacks `admin.users.create`). Because the CTA is hidden on the list, they reach this only by typing the URL.
   - Org Admin / Superadmin → form renders.
-- Preconditions & test data: fields — email (required), display name (optional), password (required; hint shown), Better Auth role (`user`/`admin`), initial app status (`pending_approval`/`active`), preferred locale (`en`/`es`/`fr`/`uk`). Required markers derive from the schema (`RequiredLegend`, `_new-user-form.tsx:104`).
+- Preconditions & test data: fields — email (required), display name (optional), password (required; hint shown), Better Auth role (`user`; `admin` is offered to a Superadmin only, F-13), initial app status (`pending_approval`/`active`), preferred locale (`en`/`es`/`fr`/`uk`). Required markers derive from the schema (`RequiredLegend`, `_new-user-form.tsx:104`).
 
 User stories
 
@@ -318,6 +318,8 @@ Negative & edge cases
 2. 400 (malformed body) → a form-level banner ("invalid body", `_new-user-form.tsx:85`); 403 → a "forbidden" banner (defensive — the page already 404s non-creators).
 3. Rate limit → repeated creates hit the mutation budget; the server returns 429 (`api/.../users/route.ts:173`) and the form shows the generic error toast.
 4. Concurrency → two creates racing on the same email: the loser gets the same 409 `email_taken` via the unique-index catch (`api/.../users/route.ts:271`).
+5. The platform role is Superadmin-only (F-13) → as `orgadmin@orga.local`, the **Better Auth role** select offers only `user`. A hand-made `POST /api/administrator/users` (or `POST /api/v1/users`) with `"role":"admin"` answers **403** `forbidden` and creates nobody, the same rule as `POST /users/[id]/role`. As `superuser@orga.local` the select also offers `admin`, and the create succeeds.
+6. Machine callers can do what the console does (F-13) → with `API_KEYS_ENABLED` on, sign in as `superuser@orga.local`, create a key on **Account → API keys** with the `admin.users.create`, `admin.users.ban` and `admin.users.sessions` scopes ticked, and call with `Authorization: Bearer drk_…`: `POST /api/v1/users` with `"initialAppStatus":"active"` answers **201** and the new user can sign in with the password you sent; `POST /api/administrator/users/{id}/ban` (`{"reason":"…"}`) answers **200** and signs that user out; `GET /api/administrator/users/{id}/sessions` lists their sessions. Before F-13 every one of these answered **502** after passing the permission checks (the MCP `createUser` tool too). Banning the key's own owner is refused (502 `auth_ban_failed`), as it is from the console. The platform role is the exception: the same `POST /api/v1/users` with `"role":"admin"` answers **403** `forbidden` although the key's owner is a Superadmin, because every key is bound to one org (MACHINE-2); only a Superadmin's cookie session mints that role (case 5).
 
 Accessibility: labelled fields, `noValidate` form with RHF messages, keyboard submit, visible focus. No axe violations.
 i18n: run `en` + `uk`; labels, the password hint, status options, and error messages localize. The locale dropdown offers `en`/`es`/`fr`/`uk` only (`_new-user-form.tsx:30`) — **`TODO: verify`** whether that narrower set (vs. the app's 8 locales) is intentional for admin-created users.

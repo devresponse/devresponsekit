@@ -23,7 +23,8 @@ type RouteContext = { params: Promise<{ id: string }> };
 /**
  * POST /api/administrator/users/[id]/ban
  *
- * Wraps `auth.api.banUser`. Reason is required (UX: ban without
+ * Better Auth ban (`banBetterAuthUser`), for a cookie or a bearer caller
+ * alike (F-13). Banning oneself is refused. Reason is required (UX: ban without
  * justification is the kind of action ops will want to look up later);
  * `expiresInSeconds` is optional — omit for indefinite per Better Auth
  * semantics. The reason is persisted in the audit row's `reason` column
@@ -86,14 +87,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   }
 
   try {
-    await banBetterAuthUser(
-      {
-        userId: target.betterAuthUserId,
-        banReason: parsed.data.reason,
-        banExpiresIn: parsed.data.expiresInSeconds,
-      },
-      request,
-    );
+    await banBetterAuthUser({
+      userId: target.betterAuthUserId,
+      banReason: parsed.data.reason,
+      banExpiresIn: parsed.data.expiresInSeconds,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+    });
   } catch (err) {
     await auditUserAction("admin.user.ban_failed", "failure", {
       request,

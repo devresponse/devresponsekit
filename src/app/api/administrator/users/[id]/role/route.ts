@@ -37,11 +37,12 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // Granting the Better Auth platform role (`admin`) is SUPERADMIN-only.
   // The raw `/api/auth/admin/*` plugin surface is closed (404 over HTTP —
   // see src/lib/auth-admin-surface.ts), but the role is still what the
-  // plugin's own authz requires for every `auth.api.*` admin call the
-  // console routes make on the actor's behalf (list/ban/impersonate/
-  // set-password), i.e. it is the key to the whole admin console. Holding
+  // plugin's own authz requires of the actor when the console starts an
+  // impersonation (the other console actions stopped asking the plugin to
+  // authorize anyone with F-13), and it is account-global. Holding
   // `admin.users.setRole` alone must therefore NOT let an org admin mint a
-  // platform admin (cross-tenant privilege escalation).
+  // platform admin (cross-tenant privilege escalation). Creating a user with
+  // the role is gated by the same rule (`POST /users`, `POST /api/v1/users`).
   // Org-level role management goes through `app_user_roles` / app-roles.
   //
   // MACHINE-2: `hasCrossOrgReach`, not `isSuperadmin`. The Better Auth platform
@@ -77,10 +78,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   }
 
   try {
-    await setBetterAuthUserRole(
-      { userId: target.betterAuthUserId, role: parsed.data.role },
-      request,
-    );
+    await setBetterAuthUserRole({ userId: target.betterAuthUserId, role: parsed.data.role });
   } catch (err) {
     await auditUserAction("admin.user.set_role_failed", "failure", {
       request,

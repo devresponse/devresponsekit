@@ -175,10 +175,9 @@ describe("POST /api/administrator/users/[id]/role", () => {
     const { POST } = await import("@/app/api/administrator/users/[id]/role/route");
     const res = await POST(roleRequest({ role: "admin", reason: "platform onboarding" }), params);
     expect(res.status).toBe(200);
-    expect(authSetRole).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "ba-target", role: "admin" }),
-      expect.anything(),
-    );
+    // F-13: no caller credentials go to the wrapper; the route's guard is the
+    // authority.
+    expect(authSetRole).toHaveBeenCalledWith({ userId: "ba-target", role: "admin" });
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.role_set",

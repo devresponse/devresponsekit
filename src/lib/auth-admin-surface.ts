@@ -33,14 +33,15 @@ import { IMPERSONATION_SESSION_MAX_AGE_SECONDS } from "@/lib/session-lifetime";
  * ONLY by the Better Auth `role=admin` flag: no app permission catalog, no
  * ADR-0001 org scoping, no privilege-escalation guard, no rate limit and no
  * app audit row. The application never uses that raw HTTP surface — the admin
- * console reaches the plugin exclusively through server-side `auth.api.*`
- * calls (`src/lib/admin/auth-admin.server.ts`) made by the guarded
- * `/api/administrator/users/[id]/*` routes, which layer all of the above on
- * top. But because those app routes forward the ACTOR's own session, an org
- * admin must hold the Better Auth `admin` role for the console to work at
- * all, and that same role would let them call the raw endpoints directly
- * (cross-tenant user enumeration, password reset or impersonation of a
- * superadmin). So the raw surface is closed here.
+ * console reaches Better Auth exclusively from the guarded
+ * `/api/administrator/users/*` routes, through `src/lib/admin/auth-admin.server.ts`,
+ * which layer all of the above on top. Since F-13 most of those operations
+ * write through Better Auth's internal adapter and ask the plugin to authorize
+ * nobody; impersonation still forwards the ACTOR's own session, so an admin
+ * who impersonates must hold the Better Auth `admin` role, and that same role
+ * would let them call the raw endpoints directly (cross-tenant user
+ * enumeration, password reset or impersonation of a superadmin). So the raw
+ * surface is closed here.
  *
  * Mechanism: a global `hooks.before` middleware. Better Auth runs the same
  * hook pipeline for HTTP traffic and for `auth.api.*` calls; the two are told
@@ -246,8 +247,8 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
  * ANY target holding the `admin` role ("You cannot impersonate admins") unless
  * the actor's access-control role grants `user:impersonate-admins`, which the
  * default `admin` role does not. Org admins hold the Better Auth `admin` role
- * by design (the console's `auth.api.*` calls need it — see above; the dev seed
- * grants it to `orgadmin@<org>`), so with the flag off a superadmin could not
+ * by design (impersonation needs it — see above; the dev seed grants it to
+ * `orgadmin@<org>`), so with the flag off a superadmin could not
  * impersonate an org admin — a legitimate support action the app-level guard
  * explicitly permits. With the HTTP surface closed, the ONLY path to
  * `impersonateUser` is `POST /api/administrator/users/[id]/impersonate`, which

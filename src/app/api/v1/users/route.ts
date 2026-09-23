@@ -109,7 +109,12 @@ export async function GET(request: NextRequest) {
  * POST /api/v1/users
  *
  * Creates a Better Auth user + `app_users` row. Requires
- * `admin.users.create`. Defaults to `pending_approval`. The password is
+ * `admin.users.create`. Works for every caller the guard admits — API key,
+ * JWT, the MCP `createUser` tool — since the Better Auth write no longer needs
+ * a cookie session (F-13). `role: "admin"` also requires cross-org reach,
+ * which only a superadmin's cookie session has: every API key and JWT is
+ * bound to one org (MACHINE-2), so a bearer caller always gets 403 for it.
+ * Defaults to `pending_approval`. The password is
  * forwarded to Better Auth and never logged or echoed.
  */
 const createSchema = z
@@ -146,6 +151,14 @@ export async function POST(request: NextRequest) {
   const input = parsed.data;
   const email = input.email.toLowerCase();
 
+  // F-13: minting the Better Auth platform role is SUPERADMIN-only, as on the
+  // admin twin and `POST /api/administrator/users/[id]/role`. Every API key and
+  // JWT is org-bound (MACHINE-2) and so has no cross-org reach: on this surface
+  // only a superadmin's cookie session can mint one.
+  if (input.role === "admin" && !hasCrossOrgReach(grant.caller.access)) {
+    return problemResponse("forbidden", 403, request, { requestId: grant.requestId });
+  }
+
   const existing = await db
     .selectFrom("app_users")
     .select(["id"])
@@ -160,17 +173,14 @@ export async function POST(request: NextRequest) {
 
   let created: unknown;
   try {
-    created = await createBetterAuthUser(
-      {
-        email,
-        password: input.password,
-        name: input.name ?? email,
-        role: input.role,
-        // F-03: only a creator with cross-org reach may vouch for an address.
-        emailUnproven: !hasCrossOrgReach(grant.caller.access),
-      },
-      request,
-    );
+    created = await createBetterAuthUser({
+      email,
+      password: input.password,
+      name: input.name ?? email,
+      role: input.role,
+      // F-03: only a creator with cross-org reach may vouch for an address.
+      emailUnproven: !hasCrossOrgReach(grant.caller.access),
+    });
   } catch (err) {
     return problemResponse("internal_error", 502, request, {
       cause: err,

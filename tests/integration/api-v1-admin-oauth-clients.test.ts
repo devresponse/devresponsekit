@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as Route from "@/app/api/v1/admin/oauth-clients/route";
 import type * as RotateSecretRoute from "@/app/api/v1/admin/oauth-clients/[id]/rotate-secret/route";
+import type * as ClientRoute from "@/app/api/v1/admin/oauth-clients/[id]/route";
 
 /**
  * /api/v1/admin/oauth-clients — machine-identity registration (was 0%).
@@ -20,9 +21,13 @@ import type * as RotateSecretRoute from "@/app/api/v1/admin/oauth-clients/[id]/r
  *     that authenticates as the service principal, carrying the client's
  *     existing scopes forward verbatim (it never runs
  *     `ungrantableScopesForCaller` at all).
+ *   - F-01: create, PATCH and rotate-secret all run the shared issuance rule
+ *     (`unissuableScopes`): no account-WRITING scope on another principal's
+ *     client, and a rotation may only hand the actor a scope set they could
+ *     have granted themselves.
  * resolveOrgScope / canAccessOrg / userHasMembershipInOrg /
- * userIsGlobalSuperuser / ungrantableScopesForCaller / ownerOutranksActor run
- * for real; the guard + repo + DB are mocked.
+ * userIsGlobalSuperuser / unissuableScopes / ownerOutranksActor run for real;
+ * the guard + repo + DB are mocked.
  */
 const requireApiPermission = vi.fn();
 const enforceApiRateLimit = vi.fn();
@@ -30,6 +35,7 @@ const listOauthClients = vi.fn();
 const createOauthClient = vi.fn();
 const getOauthClientById = vi.fn();
 const rotateOauthClientSecret = vi.fn();
+const updateOauthClient = vi.fn();
 const auditEvent = vi.fn();
 
 const state: {
@@ -52,6 +58,8 @@ vi.mock("@/lib/api-auth/oauth-clients.server", () => ({
   createOauthClient: (...a: unknown[]) => createOauthClient(...a),
   getOauthClientById: (...a: unknown[]) => getOauthClientById(...a),
   rotateOauthClientSecret: (...a: unknown[]) => rotateOauthClientSecret(...a),
+  updateOauthClient: (...a: unknown[]) => updateOauthClient(...a),
+  revokeOauthClient: vi.fn(),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
 vi.mock("@/db/database", () => {
@@ -134,6 +142,7 @@ const nullScope = () =>
 let GET: typeof Route.GET;
 let POST: typeof Route.POST;
 let ROTATE_SECRET: typeof RotateSecretRoute.POST;
+let PATCH: typeof ClientRoute.PATCH;
 
 beforeEach(async () => {
   for (const m of [
@@ -143,9 +152,11 @@ beforeEach(async () => {
     createOauthClient,
     getOauthClientById,
     rotateOauthClientSecret,
+    updateOauthClient,
     auditEvent,
   ])
     m.mockReset();
+  updateOauthClient.mockResolvedValue(true);
   enforceApiRateLimit.mockReturnValue(null);
   getOauthClientById.mockResolvedValue({
     id: CLIENT_ROW_ID,
@@ -153,6 +164,7 @@ beforeEach(async () => {
     app_user_id: SVC,
     organization_id: "o1",
     status: "active",
+    scopes: [],
   });
   rotateOauthClientSecret.mockResolvedValue("drkcsec_ROTATED");
   listOauthClients.mockResolvedValue({ items: [{ id: "c1" }], total: 1 });
@@ -169,6 +181,7 @@ beforeEach(async () => {
   ({ GET, POST } = await import("@/app/api/v1/admin/oauth-clients/route"));
   ({ POST: ROTATE_SECRET } =
     await import("@/app/api/v1/admin/oauth-clients/[id]/rotate-secret/route"));
+  ({ PATCH } = await import("@/app/api/v1/admin/oauth-clients/[id]/route"));
 });
 afterEach(() => vi.resetModules());
 
@@ -268,6 +281,80 @@ describe("POST /api/v1/admin/oauth-clients", () => {
     );
   });
 
+  it("F-01: 403 invalid_scope for an account-WRITING scope on ANOTHER principal's client", async () => {
+    // `account.*` is self-grantable, so the actor bound alone let an org admin
+    // register a client that acts on a co-member's own account — the entry
+    // point of the cross-tenant key takeover through /api/v1/me/api-keys.
+    // `account.read` stays grantable (read-only, tenant-confined).
+    requireApiPermission.mockResolvedValue(orgAdmin());
+    const res = await POST(
+      req({
+        method: "POST",
+        body: body({ scopes: ["account.read", "account.apikeys.manage", "account.profile.write"] }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { ungrantableScopes: string[] };
+    expect(json.ungrantableScopes).toEqual(["account.apikeys.manage", "account.profile.write"]);
+    expect(createOauthClient).not.toHaveBeenCalled();
+  });
+
+  it("F-01: account.read stays grantable on another principal's client (service /me probe)", async () => {
+    requireApiPermission.mockResolvedValue(orgAdmin());
+    const res = await POST(req({ method: "POST", body: body({ scopes: ["account.read"] }) }));
+    expect(res.status).toBe(201);
+  });
+
+  it("F-01: an IMPERSONATED session cannot put account-writing scopes on the borrowed user's client", async () => {
+    // The session carries the borrowed user's appUserId, which equals the
+    // service principal — without `impersonatorId` it would count as the owner.
+    requireApiPermission.mockResolvedValue({
+      ok: true,
+      grant: {
+        caller: {
+          betterAuthUserId: "ba-svc",
+          grantedScopes: null,
+          impersonatorId: "ba-admin",
+          access: {
+            permissions: ["admin.clients.read", "admin.clients.manage"],
+            organizationId: "o1",
+            appUserId: SVC,
+          },
+        },
+        requestId: "r1",
+      },
+    });
+    const res = await POST(
+      req({ method: "POST", body: body({ scopes: ["account.apikeys.manage"] }) }),
+    );
+    expect(res.status).toBe(403);
+    expect(createOauthClient).not.toHaveBeenCalled();
+  });
+
+  it("F-01: every account scope stays grantable when the principal is the CALLER themselves", async () => {
+    // The e2e MCP flow registers a client for the admin's own principal with
+    // `account.read` (tests/e2e/mcp-bearer-only.spec.ts); that must keep working.
+    requireApiPermission.mockResolvedValue({
+      ok: true,
+      grant: {
+        caller: {
+          betterAuthUserId: "ba-svc",
+          grantedScopes: null,
+          access: {
+            permissions: ["admin.clients.read", "admin.clients.manage"],
+            organizationId: "o1",
+            appUserId: SVC,
+          },
+        },
+        requestId: "r1",
+      },
+    });
+    const res = await POST(
+      req({ method: "POST", body: body({ scopes: ["account.read", "account.apikeys.manage"] }) }),
+    );
+    expect(res.status).toBe(201);
+  });
+
   it("SUPERADMIN may still register a client for a superuser service principal", async () => {
     state.serviceIsSuperuser = true;
     requireApiPermission.mockResolvedValue(superadmin());
@@ -343,5 +430,177 @@ describe("POST /api/v1/admin/oauth-clients/[id]/rotate-secret — service-princi
 
     expect(res.status).toBe(403);
     expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/v1/admin/oauth-clients/[id]/rotate-secret — scope bound (F-01)", () => {
+  const ctx = { params: Promise.resolve({ id: CLIENT_ROW_ID }) };
+  const rotateReq = () => req({ method: "POST" });
+  const client = (scopes: string[]) => ({
+    id: CLIENT_ROW_ID,
+    client_id: "drkc_x",
+    app_user_id: SVC,
+    organization_id: "o1",
+    status: "active",
+    scopes,
+  });
+
+  it("403 invalid_scope when the client carries a scope the actor cannot grant", async () => {
+    // Before F-01 only SUPERUSER principals were bounded: an org admin holding
+    // `admin.clients.manage` could rotate another agent's `admin.roles.assign`
+    // client, exchange the new secret, and assign themselves roles.
+    getOauthClientById.mockResolvedValue(client(["admin.roles.assign"]));
+    requireApiPermission.mockResolvedValue(orgAdmin());
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "scope_not_grantable" }),
+    );
+  });
+
+  it("403 when the client carries another principal's account-WRITING scope", async () => {
+    getOauthClientById.mockResolvedValue(client(["account.apikeys.manage"]));
+    requireApiPermission.mockResolvedValue(orgAdmin());
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+  });
+
+  it("200 when the actor holds every scope the client carries", async () => {
+    getOauthClientById.mockResolvedValue(client(["admin.roles.assign"]));
+    requireApiPermission.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(200);
+    expect(rotateOauthClientSecret).toHaveBeenCalledTimes(1);
+  });
+
+  it("a narrow BEARER actor cannot rotate a broader client even if its owner could", async () => {
+    getOauthClientById.mockResolvedValue(client(["admin.roles.assign"]));
+    requireApiPermission.mockResolvedValue(
+      grant({
+        permissions: ["admin.clients.read", "admin.clients.manage", "admin.roles.assign"],
+        organizationId: "o1",
+        grantedScopes: ["admin.clients.manage"],
+      }),
+    );
+
+    const res = await ROTATE_SECRET(rotateReq(), ctx);
+
+    expect(res.status).toBe(403);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST rotate-secret — status before scope (F-01)", () => {
+  it("409 (not a scope denial) for an inactive client, and no denial audit row", async () => {
+    getOauthClientById.mockResolvedValue({
+      id: CLIENT_ROW_ID,
+      client_id: "drkc_x",
+      app_user_id: SVC,
+      organization_id: "o1",
+      status: "revoked",
+      scopes: ["admin.roles.assign"],
+    });
+    requireApiPermission.mockResolvedValue(orgAdmin());
+
+    const res = await ROTATE_SECRET(req({ method: "POST" }), {
+      params: Promise.resolve({ id: CLIENT_ROW_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+    expect(auditEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/v1/admin/oauth-clients/[id] — issuance rule (F-01)", () => {
+  const ctx = { params: Promise.resolve({ id: CLIENT_ROW_ID }) };
+  const patch = (scopes: string[]) => req({ method: "PATCH", body: { scopes } });
+
+  it("403 for an account-WRITING scope on another principal's client", async () => {
+    // The caller may already hold this client's secret, so widening it is
+    // issuing the wider set to them.
+    requireApiPermission.mockResolvedValue(orgAdmin());
+    const res = await PATCH(patch(["account.read", "account.apikeys.manage"]), ctx);
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { ungrantableScopes: string[] };
+    expect(json.ungrantableScopes).toEqual(["account.apikeys.manage"]);
+    expect(updateOauthClient).not.toHaveBeenCalled();
+  });
+
+  it("403 for an admin scope the caller does not hold (actor bound)", async () => {
+    requireApiPermission.mockResolvedValue(orgAdmin());
+    expect((await PATCH(patch(["admin.users.read"]), ctx)).status).toBe(403);
+    expect(updateOauthClient).not.toHaveBeenCalled();
+  });
+
+  it("403 for a BEARER caller widening past its own scopes, whatever its owner holds", async () => {
+    requireApiPermission.mockResolvedValue(
+      grant({
+        permissions: ["admin.clients.read", "admin.clients.manage", "admin.users.read"],
+        organizationId: "o1",
+        grantedScopes: ["admin.clients.manage"],
+      }),
+    );
+    expect((await PATCH(patch(["admin.users.read"]), ctx)).status).toBe(403);
+    expect(updateOauthClient).not.toHaveBeenCalled();
+  });
+
+  it("200 for scopes the caller holds, account.read included", async () => {
+    requireApiPermission.mockResolvedValue(orgAdmin(["admin.users.read"]));
+    const res = await PATCH(patch(["admin.users.read", "account.read"]), ctx);
+    expect(res.status).toBe(200);
+    expect(updateOauthClient).toHaveBeenCalledWith(CLIENT_ROW_ID, {
+      name: undefined,
+      scopes: ["admin.users.read", "account.read"],
+    });
+  });
+});
+
+describe("F-01: an IMPERSONATED session is not the principal of the borrowed user's client", () => {
+  // The client's service principal IS the caller's appUserId, so without
+  // `impersonatorId` the caller would count as the owner.
+  const ctx = { params: Promise.resolve({ id: CLIENT_ROW_ID }) };
+  const ownClient = {
+    id: CLIENT_ROW_ID,
+    client_id: "drkc_x",
+    app_user_id: "admin-app-user",
+    organization_id: "o1",
+    status: "active",
+    scopes: ["account.apikeys.manage"],
+  };
+  function impersonated(impersonatorId: string | null) {
+    const g = orgAdmin();
+    return { ...g, grant: { ...g.grant, caller: { ...g.grant.caller, impersonatorId } } };
+  }
+
+  it("rotate-secret: 403 under impersonation, 200 for the owner themselves", async () => {
+    getOauthClientById.mockResolvedValue(ownClient);
+
+    requireApiPermission.mockResolvedValue(impersonated("ba-real-admin"));
+    expect((await ROTATE_SECRET(req({ method: "POST" }), ctx)).status).toBe(403);
+    expect(rotateOauthClientSecret).not.toHaveBeenCalled();
+
+    requireApiPermission.mockResolvedValue(impersonated(null));
+    expect((await ROTATE_SECRET(req({ method: "POST" }), ctx)).status).toBe(200);
+  });
+
+  it("PATCH: 403 under impersonation, 200 for the owner themselves", async () => {
+    getOauthClientById.mockResolvedValue({ ...ownClient, scopes: [] });
+    const patch = () => req({ method: "PATCH", body: { scopes: ["account.apikeys.manage"] } });
+
+    requireApiPermission.mockResolvedValue(impersonated("ba-real-admin"));
+    expect((await PATCH(patch(), ctx)).status).toBe(403);
+    expect(updateOauthClient).not.toHaveBeenCalled();
+
+    requireApiPermission.mockResolvedValue(impersonated(null));
+    expect((await PATCH(patch(), ctx)).status).toBe(200);
   });
 });

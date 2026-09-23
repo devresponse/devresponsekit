@@ -744,8 +744,14 @@ This is the counterpart to the machine `/api/v1/admin/api-keys` surface and
 | `GET/DELETE /api-keys/[id]`, `POST …/[id]/rotate` | `.read` / `.manage` | Inspect / revoke / rotate (there is no PATCH — a key's name and scopes are immutable; rotate or reissue) |
 
 Requested scopes are validated against the **owner's** authority
-(`ungrantableScopes`), never the admin's — an admin-minted key can never
-out-scope the user who will wield it.
+(`ungrantableScopes`) — an admin-minted key can never out-scope the user who
+will wield it — and against the shared issuance rule (`unissuableScopes`): the
+admin may confer only scopes they could grant themselves, and never an
+account-writing scope (`account.apikeys.manage`, `account.profile.write`,
+`account.preferences.write`) on another person's key — the form does not
+offer them. A **rotation** is bound by the same
+rule against the key's existing scopes, so an admin can revoke any in-scope
+key but can only rotate (and receive) one they could have minted.
 
 ### 8.9 OAuth clients
 

@@ -123,6 +123,7 @@ beforeEach(async () => {
     app_user_id: ACCESS.appUserId,
     organization_id: ORG_B,
     status: "active",
+    scopes: [],
   });
   rotateApiKey.mockResolvedValue({
     id: "k-new",

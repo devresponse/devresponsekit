@@ -7,7 +7,8 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { revokeOauthClient, updateOauthClient } from "@/lib/api-auth/oauth-clients.server";
-import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
+import { normalizeScopes } from "@/lib/api-auth/scopes";
+import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getMcpAgent } from "@/lib/mcp/agents.server";
 
 export const dynamic = "force-dynamic";
@@ -75,11 +76,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   // grant any scope their own permissions cover. A bearer caller (API key /
   // JWT / agent token) is additionally bounded by its own granted scopes —
   // a credential can never mint a broader one (design §7; review #12).
-  const ungrantable = ungrantableScopesForCaller(
-    guard.access.permissions,
-    guard.grantedScopes,
+  // Through the shared issuance rule (F-01): `account.read` (the agent's
+  // `whoami` tool) stays grantable; the account-WRITING scopes do not, since
+  // the agent is a principal other than the admin setting its ceiling.
+  const ungrantable = unissuableScopes({
+    issuer: {
+      appUserId: guard.access.appUserId,
+      permissions: guard.access.permissions,
+      grantedScopes: guard.grantedScopes,
+      impersonatorId: guard.impersonatorId,
+    },
+    ownerAppUserId: agent.appUserId,
     scopes,
-  );
+  });
   if (ungrantable.length > 0) {
     return adminErrorResponse("invalid_scope", 422, request, {
       requestId: guard.requestId,

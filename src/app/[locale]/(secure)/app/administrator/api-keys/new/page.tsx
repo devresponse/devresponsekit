@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
+import { ACCOUNT_WRITE_SCOPES } from "@/lib/api-auth/issuance";
 import { NewApiKeyForm } from "./_new-api-key-form";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,10 @@ export const dynamic = "force-dynamic";
  * permission graph; the server route re-validates every scope against
  * BOTH the owner's authority and the acting admin's own permissions /
  * granted scopes (`ungrantableScopesForCaller`, P0-2) regardless.
+ *
+ * The account-WRITING scopes are left out of the catalog: this form issues
+ * keys for OTHER users, and the issuance rule refuses those scopes on another
+ * person's key (F-01). A user mints them for themselves on the Account page.
  */
 export default async function AdministratorNewApiKeyPage({
   params,
@@ -35,7 +40,10 @@ export default async function AdministratorNewApiKeyPage({
         <h1 className="text-lg font-semibold">{t("new.title")}</h1>
         <p className="text-muted-foreground text-sm">{t("new.description")}</p>
       </div>
-      <NewApiKeyForm locale={locale} scopeCatalog={[...API_SCOPE_CATALOG]} />
+      <NewApiKeyForm
+        locale={locale}
+        scopeCatalog={API_SCOPE_CATALOG.filter((s) => !ACCOUNT_WRITE_SCOPES.includes(s))}
+      />
     </section>
   );
 }

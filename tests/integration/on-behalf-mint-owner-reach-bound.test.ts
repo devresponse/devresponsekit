@@ -154,6 +154,9 @@ beforeEach(async () => {
     app_user_id: OWNER_UUID,
     status: "active",
     organization_id: "org-a",
+    // A key scoped within the actor's own authority: the rotations below that
+    // are ALLOWED stay allowed under the F-01 scope bound.
+    scopes: ["admin.apikeys.manage"],
   });
   createApiKeyMock.mockResolvedValue({
     id: "key-1",
@@ -210,6 +213,62 @@ describe("POST /api/administrator/api-keys — owner-reach bound (MACHINE-2)", (
     expect(createApiKeyMock).toHaveBeenCalledTimes(1);
   });
 
+  it("F-01: REFUSES (422) an account-WRITING scope on a key for ANOTHER person", async () => {
+    // `account.*` is self-grantable, so Bound 2 used to pass it for any owner.
+    // A key authenticating as the owner with `account.apikeys.manage` let the
+    // actor list and rotate the owner's keys in OTHER tenants via /api/v1/me.
+    requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
+    accessGetter.mockResolvedValue(
+      access({ appUserId: "owner-1", permissions: ["admin.apikeys.manage"] }),
+    );
+
+    const res = await POST(
+      createRequest({
+        name: "k",
+        ownerAppUserId: OWNER_UUID,
+        scopes: ["account.read", "account.apikeys.manage"],
+      }),
+    );
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { ungrantableScopes: string[] };
+    // `account.read` stays grantable on behalf (read-only, tenant-confined).
+    expect(body.ungrantableScopes).toEqual(["account.apikeys.manage"]);
+    expect(createApiKeyMock).not.toHaveBeenCalled();
+  });
+
+  it("F-01: ALLOWS (201) account-writing scopes on a key the actor mints for THEMSELVES", async () => {
+    requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
+    accessGetter.mockResolvedValue(access({ permissions: ["admin.apikeys.manage"] }));
+    // The owner row IS the actor.
+    rowExecuteTakeFirst.mockResolvedValue({ id: "actor-1", better_auth_user_id: "ba-actor" });
+
+    const res = await POST(
+      createRequest({ name: "k", ownerAppUserId: OWNER_UUID, scopes: ["account.apikeys.manage"] }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(createApiKeyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("F-01: REFUSES (422) an IMPERSONATED session minting account-writing scopes for the borrowed user", async () => {
+    // The session carries the borrowed user's appUserId ("actor-1" here, the
+    // owner row too) — only `impersonatorId` says it is not really them.
+    requireAdminMock.mockResolvedValue({
+      ...grant(["admin.apikeys.manage"]),
+      impersonatorId: "ba-real-admin",
+    });
+    accessGetter.mockResolvedValue(access({ permissions: ["admin.apikeys.manage"] }));
+    rowExecuteTakeFirst.mockResolvedValue({ id: "actor-1", better_auth_user_id: "ba-actor" });
+
+    const res = await POST(
+      createRequest({ name: "k", ownerAppUserId: OWNER_UUID, scopes: ["account.apikeys.manage"] }),
+    );
+
+    expect(res.status).toBe(422);
+    expect(createApiKeyMock).not.toHaveBeenCalled();
+  });
+
   it("ALLOWS (201) an org admin minting for an ORDINARY owner (unchanged behaviour)", async () => {
     requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
     accessGetter.mockResolvedValue(
@@ -251,7 +310,128 @@ describe("POST /api/administrator/api-keys/[id]/rotate — owner-reach bound (MA
     expect(rotateApiKeyMock).toHaveBeenCalledTimes(1);
   });
 
-  it("ALLOWS (201) an org admin rotating an ORDINARY owner's key (unchanged behaviour)", async () => {
+  it("F-01: REFUSES (403) an org admin rotating a key carrying scopes they do NOT hold", async () => {
+    // This was a 201 before F-01: rotation carried the key's scopes forward
+    // verbatim and only the SUPERUSER reach bound ran, so an actor holding only
+    // `admin.apikeys.manage` received a co-member's `admin.users.delete` key.
+    requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
+    globalSuperuserMock.mockResolvedValue(false);
+    rowExecuteTakeFirst.mockResolvedValue({
+      id: "owner-1",
+      better_auth_user_id: "ba-owner",
+      app_user_id: OWNER_UUID,
+      status: "active",
+      organization_id: "org-a",
+      scopes: ["admin.users.delete"],
+    });
+
+    const res = await ROTATE(rotateRequest(), rotateCtx);
+
+    expect(res.status).toBe(403);
+    expect(rotateApiKeyMock).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "denied", reason: "scope_not_grantable" }),
+    );
+  });
+
+  it("F-01: REFUSES (403) rotating another person's key that carries account.* scopes", async () => {
+    requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
+    rowExecuteTakeFirst.mockResolvedValue({
+      id: "owner-1",
+      better_auth_user_id: "ba-owner",
+      app_user_id: OWNER_UUID,
+      status: "active",
+      organization_id: "org-a",
+      scopes: ["account.apikeys.manage"],
+    });
+
+    const res = await ROTATE(rotateRequest(), rotateCtx);
+
+    expect(res.status).toBe(403);
+    expect(rotateApiKeyMock).not.toHaveBeenCalled();
+  });
+
+  it("F-01: REFUSES (403) a narrow BEARER actor rotating a key broader than its own scopes", async () => {
+    // The owner of the calling credential HOLDS admin.users.delete, but the
+    // credential itself was scoped to admin.apikeys.manage only.
+    requireAdminMock.mockResolvedValue({
+      ...grant(["admin.apikeys.manage", "admin.users.delete"]),
+      callerKind: "api_key" as const,
+      grantedScopes: ["admin.apikeys.manage"],
+    });
+    rowExecuteTakeFirst.mockResolvedValue({
+      id: "owner-1",
+      better_auth_user_id: "ba-owner",
+      app_user_id: OWNER_UUID,
+      status: "active",
+      organization_id: "org-a",
+      scopes: ["admin.users.delete"],
+    });
+
+    const res = await ROTATE(rotateRequest(), rotateCtx);
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { ungrantableScopes: string[] };
+    expect(body.ungrantableScopes).toEqual(["admin.users.delete"]);
+    expect(rotateApiKeyMock).not.toHaveBeenCalled();
+  });
+
+  it("ALLOWS (201) a BEARER actor whose own scopes cover the rotated key", async () => {
+    requireAdminMock.mockResolvedValue({
+      ...grant(["admin.apikeys.manage", "admin.users.delete"]),
+      callerKind: "api_key" as const,
+      grantedScopes: ["admin.apikeys.manage", "admin.users.delete"],
+    });
+    rowExecuteTakeFirst.mockResolvedValue({
+      id: "owner-1",
+      better_auth_user_id: "ba-owner",
+      app_user_id: OWNER_UUID,
+      status: "active",
+      organization_id: "org-a",
+      scopes: ["admin.users.delete"],
+    });
+
+    const res = await ROTATE(rotateRequest(), rotateCtx);
+
+    expect(res.status).toBe(201);
+  });
+
+  describe("F-01: an IMPERSONATED session is not the owner of the borrowed user's key", () => {
+    // The session carries the borrowed user's appUserId ("actor-1"), so the key
+    // looks like the actor's own; only `impersonatorId` says otherwise.
+    const ownKeyRow = {
+      id: "actor-1",
+      better_auth_user_id: "ba-actor",
+      app_user_id: "actor-1",
+      status: "active",
+      organization_id: "org-a",
+      scopes: ["account.apikeys.manage"],
+    };
+
+    it("REFUSES (403) rotating it when it carries an account-writing scope", async () => {
+      requireAdminMock.mockResolvedValue({
+        ...grant(["admin.apikeys.manage"]),
+        impersonatorId: "ba-real-admin",
+      });
+      rowExecuteTakeFirst.mockResolvedValue(ownKeyRow);
+
+      const res = await ROTATE(rotateRequest(), rotateCtx);
+
+      expect(res.status).toBe(403);
+      expect(rotateApiKeyMock).not.toHaveBeenCalled();
+    });
+
+    it("control: the owner themselves (not impersonating) may rotate it (201)", async () => {
+      requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
+      rowExecuteTakeFirst.mockResolvedValue(ownKeyRow);
+
+      const res = await ROTATE(rotateRequest(), rotateCtx);
+
+      expect(res.status).toBe(201);
+    });
+  });
+
+  it("ALLOWS (201) an org admin rotating an ORDINARY owner's key within their own authority", async () => {
     requireAdminMock.mockResolvedValue(grant(["admin.apikeys.manage"]));
     globalSuperuserMock.mockResolvedValue(false);
 

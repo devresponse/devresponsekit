@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse } from "@/lib/api-auth/problem";
+import type { ApiKeyOrgConfinement } from "@/lib/api-auth/api-keys.server";
 
 /**
  * Shared authorization gate for the self-service Account API
@@ -53,6 +54,48 @@ export interface AccountActor {
 
 export type AccountGuardResult =
   { ok: true; actor: AccountActor } | { ok: false; response: NextResponse };
+
+/**
+ * The tenant an account caller's self-service CREDENTIAL operations are
+ * confined to, or `undefined` when the caller acts account-wide.
+ *
+ * `app_user_id` is an account-wide key: one person can hold credentials in
+ * every organization they belong to. Only the person themselves, on an
+ * ordinary cookie session, may reach all of them. Two callers may not:
+ *
+ *   - a BEARER credential (API key / JWT) acts in the one org it resolved in
+ *     (MACHINE-1), and a credential bound to org A must not list, rotate or
+ *     revoke the owner's credentials in org B — rotating hands back a secret
+ *     carrying that other tenant's authority (F-01);
+ *   - an IMPERSONATED session is confined to the impersonator's tenancy
+ *     (IMP-1).
+ *
+ * Both are confined to `access.organizationId`, the org the caller actually
+ * resolved in; `null` there means no org resolved, which confines to NOTHING
+ * (fail closed — see {@link ApiKeyOrgConfinement}). The decision keys on
+ * `callerKind === "session"` rather than on a bearer flag, so a caller shape
+ * that does not say what it is gets the confined answer.
+ */
+export function tenantConfinement(
+  actor: Pick<AccountActor, "callerKind" | "impersonatorId" | "access">,
+): ApiKeyOrgConfinement | undefined {
+  if (actor.callerKind === "session" && !actor.impersonatorId) return undefined;
+  return { organizationId: actor.access.organizationId };
+}
+
+/**
+ * True when a credential whose `organization_id` is `organizationId` lies
+ * inside `confinement` — always, when the caller is unconfined. A confinement
+ * to no org admits nothing, and an org-less credential is outside every
+ * confinement (a confined caller has exactly one tenant, and it is not that).
+ */
+export function isWithinTenant(
+  organizationId: string | null,
+  confinement: ApiKeyOrgConfinement | undefined,
+): boolean {
+  if (!confinement) return true;
+  return confinement.organizationId !== null && organizationId === confinement.organizationId;
+}
 
 /**
  * Per-route options for the shared account decision.

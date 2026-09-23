@@ -8,6 +8,7 @@ import {
   userIsGlobalSuperuser,
 } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,12 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Reissuing a client whose SERVICE PRINCIPAL is a superuser is refused with
  * `403` for any caller that is not an unbound superadmin (MACHINE-2 layer 2) —
  * see the bound below.
+ *
+ * The client's scopes must also pass the shared issuance rule
+ * ({@link unissuableScopes}, F-01), or `403 invalid_scope`: the new secret
+ * carries the client's existing scopes to the caller, so a caller holding only
+ * `admin.clients.manage` must not rotate another agent's broader client (or a
+ * client carrying another principal's account-writing scopes) and receive it.
  */
 export async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.clients.manage");
@@ -80,6 +87,44 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     });
     return problemResponse("forbidden", 403, request, {
       detail: "You cannot rotate the secret of a client whose service principal outranks you.",
+      requestId: grant.requestId,
+    });
+  }
+
+  // Scope bound (F-01) — the reach bound above only covered SUPERUSER
+  // principals; rotating ANY client hands its scope set to the caller.
+  // An inactive client answers 409 whatever its scopes — never a scope denial.
+  if (client.status !== "active") {
+    return problemResponse("conflict", 409, request, {
+      detail: "Client is not active.",
+      requestId: grant.requestId,
+    });
+  }
+  const unissuable = unissuableScopes({
+    issuer: {
+      appUserId: grant.caller.access.appUserId,
+      permissions: grant.caller.access.permissions,
+      grantedScopes: grant.caller.grantedScopes,
+      impersonatorId: grant.caller.impersonatorId,
+    },
+    ownerAppUserId: client.app_user_id,
+    scopes: client.scopes,
+  });
+  if (unissuable.length > 0) {
+    await auditEvent({
+      eventType: "oauth_client.secret_rotate_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: client.app_user_id,
+      organizationId: client.organization_id,
+      reason: "scope_not_grantable",
+      request,
+      requestId: grant.requestId,
+      metadata: { clientRowId: id, ungrantableScopes: unissuable },
+    });
+    return problemResponse("invalid_scope", 403, request, {
+      detail: "You cannot rotate the secret of a client carrying scopes you cannot grant.",
+      extra: { ungrantableScopes: unissuable },
       requestId: grant.requestId,
     });
   }

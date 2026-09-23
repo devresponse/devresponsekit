@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
-import { requireApiAccount } from "@/lib/account/guard.server";
+import { requireApiAccount, tenantConfinement } from "@/lib/account/guard.server";
 import {
   consumeToken,
   rateLimitKey,
@@ -9,7 +9,8 @@ import {
 } from "@/lib/admin/rate-limit.server";
 import { getServerEnv } from "@/lib/env";
 import { createApiKey, listApiKeysForUser } from "@/lib/api-auth/api-keys.server";
-import { normalizeScopes, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
+import { normalizeScopes } from "@/lib/api-auth/scopes";
+import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,11 @@ export const dynamic = "force-dynamic";
  * the admin has no business in — the enumeration step of the rotate attack the
  * mutations below refuse outright. A confined session with no resolvable org
  * sees nothing.
+ *
+ * F-01 — a BEARER credential is confined the same way, to the org it acts in
+ * ({@link tenantConfinement}). Unconfined, a key bound to org A listed the
+ * owner's keys in every org, which was the enumeration step of the
+ * cross-tenant rotate takeover.
  */
 export async function GET(request: NextRequest) {
   const guard = await requireApiAccount(request, "account.read", { allowImpersonation: true });
@@ -38,9 +44,10 @@ export async function GET(request: NextRequest) {
 
   // Called with ONE argument on the ordinary path so the unconfined listing
   // keeps its exact existing shape; the confinement is added only when the
-  // caller is a borrowed session.
-  const items = actor.impersonatorId
-    ? await listApiKeysForUser(actor.appUserId, { organizationId: actor.access.organizationId })
+  // caller is a borrowed session or a bearer credential.
+  const confinement = tenantConfinement(actor);
+  const items = confinement
+    ? await listApiKeysForUser(actor.appUserId, confinement)
     : await listApiKeysForUser(actor.appUserId);
   return v1JsonResponse({ items }, request);
 }
@@ -55,8 +62,8 @@ export async function GET(request: NextRequest) {
  *   - Requires the `account.apikeys.manage` scope (bearer) or a cookie
  *     session.
  *   - Requested scopes are checked against the caller's OWN authority
- *     ({@link ungrantableScopesForCaller}) so a credential can never mint
- *     a broader credential than itself (design §7, §10.3).
+ *     ({@link unissuableScopes}, the shared issuance rule) so a credential
+ *     can never mint a broader credential than itself (design §7, §10.3).
  *   - An IMPERSONATED session is refused (403). This is the account guard's
  *     DEFAULT, not a check written here (IMP-1): minting is where an
  *     impersonation would be laundered into a standalone bearer credential
@@ -97,11 +104,18 @@ export async function POST(request: NextRequest) {
   }
 
   const scopes = normalizeScopes(parsed.data.scopes);
-  const ungrantable = ungrantableScopesForCaller(
-    actor.access.permissions,
-    actor.grantedScopes,
+  // The key authenticates as the caller themselves, so only the actor bound
+  // can refuse here — but every issuance path runs the one rule.
+  const ungrantable = unissuableScopes({
+    issuer: {
+      appUserId: actor.appUserId,
+      permissions: actor.access.permissions,
+      grantedScopes: actor.grantedScopes,
+      impersonatorId: actor.impersonatorId,
+    },
+    ownerAppUserId: actor.appUserId,
     scopes,
-  );
+  });
   if (ungrantable.length > 0) {
     return problemResponse("invalid_scope", 403, request, {
       detail: "You cannot grant scopes you do not hold.",

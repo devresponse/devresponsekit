@@ -141,8 +141,8 @@ Common statuses on both surfaces: `400` invalid body, `401` unauthenticated, `40
 | --- | --- | --- | --- |
 | `/api/v1/auth/token` | POST | API key or OAuth client credentials | Exchange long-lived credentials for a short-lived JWT |
 | `/api/v1/me` | GET | `account.read` | Caller identity, permissions, effective scopes |
-| `/api/v1/me/api-keys` | GET / POST | `account.read` / `account.apikeys.manage` | List / mint the caller's own keys (plaintext once) |
-| `/api/v1/me/api-keys/[id]` | DELETE; `…/rotate` POST | `account.apikeys.manage` | Revoke / rotate one of the caller's own keys |
+| `/api/v1/me/api-keys` | GET / POST | `account.read` / `account.apikeys.manage` | List / mint the caller's own keys (plaintext once). A bearer caller sees only keys in the org its credential acts in |
+| `/api/v1/me/api-keys/[id]` | DELETE; `…/rotate` POST | `account.apikeys.manage` | Revoke / rotate one of the caller's own keys. A bearer caller reaches only keys in its own org (`404` otherwise) and may rotate only a key whose scopes its own credential carries (`403 invalid_scope`) |
 | `/api/v1/users` | GET / POST | `admin.users.read` / `.create` | User administration |
 | `/api/v1/users/[id]` | GET; `…/status` POST | `admin.users.read` / `.manage` | Read a user (emits a weak ETag); apply a status transition — a non-superadmin principal gets **403** `forbidden` (audited `admin.user.action_denied`) for a target who outranks them, exactly as the console does ([Admin Manager §8.1](./admin-manager.md#81-users)) |
 | `/api/v1/admin/api-keys` | GET; `…/[id]` DELETE | `admin.apikeys.read` / `.manage` | API-key governance (list / revoke any key) |

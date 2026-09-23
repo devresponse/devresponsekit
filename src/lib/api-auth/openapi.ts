@@ -783,6 +783,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           responses: {
             "200": { description: "Rotated", ...json(ref("OAuthClientSecret")) },
             "400": errRef("BadRequest"),
+            "403": errRef("Forbidden"),
             "404": errRef("NotFound"),
             "409": errRef("Conflict"),
             "429": errRef("RateLimited"),

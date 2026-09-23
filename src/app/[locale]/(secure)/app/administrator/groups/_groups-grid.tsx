@@ -34,6 +34,10 @@ export function AdministratorGroupsGrid({
 }) {
   const t = useTranslations("administrator.groups");
   const tErr = useTranslations("administrator.errors");
+  // The API's own error catalog: `errors.forbidden` says the ACTION is not
+  // permitted, where `administrator.errors.forbidden` talks about viewing the
+  // page, which is wrong on a page the admin is looking at.
+  const tApiErr = useTranslations("errors");
   const intlLocale = useLocale();
   const dialogs = useDialogs();
 
@@ -60,12 +64,14 @@ export function AdministratorGroupsGrid({
         credentials: "same-origin",
       });
       if (!res.ok) {
-        setRowError(tErr("generic"));
+        // F-11: a 403 is the conferral guard refusing a group that confers
+        // authority the admin lacks, not a transient fault — say so.
+        setRowError(res.status === 403 ? tApiErr("forbidden") : tErr("generic"));
         return;
       }
       setReloadKey((k) => k + 1);
     },
-    [t, tErr, dialogs],
+    [t, tErr, tApiErr, dialogs],
   );
 
   const columns = useMemo<GridColumnDef<GroupRow>[]>(

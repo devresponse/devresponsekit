@@ -115,6 +115,44 @@ describe("AdministratorGroupsGrid", () => {
     );
   });
 
+  it("says the delete is not permitted when the conferral guard refuses it (403, F-11)", async () => {
+    fetchMock.mockImplementation((_url: string, init?: { method?: string }) => {
+      if (init?.method === "DELETE") {
+        return Promise.resolve(jsonOk({ error: "forbidden", message: "errors.forbidden" }, 403));
+      }
+      return Promise.resolve(jsonOk({ items: [row], total: 1 }));
+    });
+    confirmMock.mockResolvedValue(true);
+    const user = userEvent.setup();
+
+    renderWithIntl(<AdministratorGroupsGrid locale="en" canDelete />);
+    await screen.findByText("Engineering");
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    // errors.forbidden (the ACTION is refused), not administrator.errors.forbidden,
+    // whose "view this page" is wrong on the page the admin is looking at.
+    expect(
+      await screen.findByText("You do not have permission to perform this action."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/view this page/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong. Try again.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the generic error for any other delete failure", async () => {
+    fetchMock.mockImplementation((_url: string, init?: { method?: string }) => {
+      if (init?.method === "DELETE") return Promise.resolve(jsonOk({ error: "internal" }, 500));
+      return Promise.resolve(jsonOk({ items: [row], total: 1 }));
+    });
+    confirmMock.mockResolvedValue(true);
+    const user = userEvent.setup();
+
+    renderWithIntl(<AdministratorGroupsGrid locale="en" canDelete />);
+    await screen.findByText("Engineering");
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText("Something went wrong. Try again.")).toBeInTheDocument();
+  });
+
   it("does not issue a DELETE when the confirm dialog is dismissed", async () => {
     fetchMock.mockResolvedValue(jsonOk({ items: [row], total: 1 }));
     confirmMock.mockResolvedValue(false);

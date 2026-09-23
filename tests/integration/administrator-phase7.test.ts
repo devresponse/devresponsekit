@@ -240,6 +240,106 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     );
   });
 
+  /**
+   * F-02 — no nested impersonation. The borrowed session's tenant confinement
+   * is its IMPERSONATOR's reach; impersonating again from it would make Better
+   * Auth stamp the BORROWED identity as `impersonatedBy`, re-basing the next
+   * session's confinement on that identity's (wider) reach.
+   */
+  describe("F-02: impersonation cannot start from an impersonated session", () => {
+    const impersonatedSession = {
+      user: { id: "ba-borrowed" }, // co-admin X, borrowed by the root admin
+      session: { impersonatedBy: "ba-root-admin" },
+    };
+
+    it("refuses (403), before touching the target, audited against the HUMAN", async () => {
+      sessionGetter.mockResolvedValue(impersonatedSession);
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+      dbMock.mockResolvedValue(targetRow);
+      const { POST } = await importRoute();
+
+      const res = await POST(makeRequest(url, { method: "POST" }), {
+        params: Promise.resolve({ id: TARGET_ID }),
+      });
+
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe("forbidden_while_impersonating");
+      expect(authImpersonate).not.toHaveBeenCalled();
+      expect(heldAnyOrg).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.user.impersonation_failed",
+          outcome: "denied",
+          reason: "nested_impersonation",
+          actorBetterAuthUserId: "ba-root-admin",
+          metadata: expect.objectContaining({ requestedTargetId: TARGET_ID }),
+        }),
+      );
+    });
+
+    it("records no untrusted path segment in the audit row", async () => {
+      sessionGetter.mockResolvedValue(impersonatedSession);
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+      const { POST } = await importRoute();
+
+      const res = await POST(makeRequest(url, { method: "POST" }), {
+        params: Promise.resolve({ id: "not-a-uuid " }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: "nested_impersonation",
+          metadata: expect.objectContaining({ requestedTargetId: null }),
+        }),
+      );
+    });
+
+    it("refuses when the cookie Better Auth will act on is a DIFFERENT principal than the guards evaluated", async () => {
+      sessionGetter
+        .mockResolvedValueOnce({ user: { id: ACTOR_ID } })
+        .mockResolvedValue({ user: { id: "ba-someone-else" } });
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+      dbMock.mockResolvedValue(targetRow);
+      const { POST } = await importRoute();
+
+      const res = await POST(makeRequest(url, { method: "POST" }), {
+        params: Promise.resolve({ id: TARGET_ID }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(authImpersonate).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "denied", reason: "session_principal_mismatch" }),
+      );
+    });
+
+    it("refuses when the COOKIE Better Auth will act on is borrowed, even if the guard's caller was not", async () => {
+      // Defence in depth: the guard resolves one principal (e.g. a bearer
+      // credential it prefers), but Better Auth's impersonateUser acts on the
+      // session cookie. The route re-reads that cookie before handing off.
+      sessionGetter
+        .mockResolvedValueOnce({ user: { id: ACTOR_ID } })
+        .mockResolvedValue(impersonatedSession);
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+      dbMock.mockResolvedValue(targetRow);
+      const { POST } = await importRoute();
+
+      const res = await POST(makeRequest(url, { method: "POST" }), {
+        params: Promise.resolve({ id: TARGET_ID }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(authImpersonate).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: "nested_impersonation",
+          actorBetterAuthUserId: "ba-root-admin",
+        }),
+      );
+    });
+  });
+
   it("audits failure and returns 502 when Better Auth throws", async () => {
     sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));

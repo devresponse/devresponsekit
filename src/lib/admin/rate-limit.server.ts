@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { clientIpKey } from "@/lib/client-ip";
+import { humanActorFor } from "@/lib/impersonation-attribution.server";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 
 /**
@@ -328,6 +329,13 @@ const DENIAL_AUDIT_LIMIT: RateLimitOptions = {
  * request's `x-request-id` / audit rows (the same correlation id the
  * caller's `guard` carries); `nowMs` is test-only and stays last so
  * production callers never need to pass it.
+ *
+ * F-07: on an impersonated request, a bucket keyed on the borrowed identity
+ * (`guard.betterAuthUserId`, which is what every caller passes) is charged to
+ * the HUMAN behind the session instead. Otherwise an admin who impersonates
+ * several users gets a fresh budget per borrowed identity, and spends the
+ * target's own budget while doing it. Decided here from the request, so no
+ * call site has to know it is running under impersonation.
  */
 export function enforceRateLimit(
   scope: string,
@@ -337,9 +345,10 @@ export function enforceRateLimit(
   requestId?: string,
   nowMs?: number,
 ): NextResponse | null {
-  const result = consumeToken(rateLimitKey(scope, actorId), options, nowMs);
+  const bucketActor = humanActorFor(actorId, request);
+  const result = consumeToken(rateLimitKey(scope, bucketActor), options, nowMs);
   if (result.ok) return null;
-  return rateLimitDeniedResponse(scope, actorId, result, request, requestId, nowMs);
+  return rateLimitDeniedResponse(scope, bucketActor, result, request, requestId, nowMs);
 }
 
 /**

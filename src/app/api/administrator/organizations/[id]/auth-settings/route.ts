@@ -11,6 +11,7 @@ import { loadScopedOrg } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { getAuthPolicyForOrg } from "@/lib/auth-policy.server";
+import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { authPolicySettingsSchema } from "@/lib/validation/auth-policy";
 
 export const dynamic = "force-dynamic";
@@ -81,7 +82,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const previous = await getOrgAuthSettingsRow(org.id);
-  await upsertOrgAuthSettings(org.id, parsed.data, guard.betterAuthUserId);
+  // F-07: `updated_by` names the human behind an impersonated session, as the
+  // audit row below does, not the borrowed identity.
+  await upsertOrgAuthSettings(org.id, parsed.data, humanActorId(guard));
 
   await auditOrgAction("admin.organization.auth_policy_updated", "success", {
     request,

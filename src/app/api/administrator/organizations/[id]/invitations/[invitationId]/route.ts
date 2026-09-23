@@ -6,6 +6,7 @@ import { loadScopedOrg } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { revokeInvitation } from "@/lib/invitations.server";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +47,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   const revoked = await revokeInvitation({
     invitationId,
     organizationId: org.id,
-    revokedByBetterAuthUserId: guard.betterAuthUserId,
+    // F-07: the human behind an impersonated session, not the borrowed identity.
+    revokedByBetterAuthUserId: humanActorId(guard),
   });
   if (!revoked) {
     return adminErrorResponse("invitation_not_found", 404, request);

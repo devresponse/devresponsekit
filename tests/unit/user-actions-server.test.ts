@@ -42,6 +42,10 @@ vi.mock("@/lib/admin/auth-admin.server", () => ({
 vi.mock("@/lib/admin/audit-helpers.server", () => ({
   auditUserAction: (...a: unknown[]) => auditMock(...a),
 }));
+// Every `.set(...)` payload the transaction writes, so a test can read the
+// columns (F-07: who `deactivated_by` names).
+const trxSets = vi.hoisted(() => [] as Record<string, unknown>[]);
+
 vi.mock("@/db/database", () => {
   // Chainable trx stub. `then` MUST be undefined so awaiting the proxy
   // doesn't treat it as a never-resolving thenable; `execute()` resolves.
@@ -51,6 +55,12 @@ vi.mock("@/db/database", () => {
       get(_t, prop) {
         if (prop === "then") return undefined;
         if (prop === "execute") return async () => undefined;
+        if (prop === "set") {
+          return (payload: Record<string, unknown>) => {
+            trxSets.push(payload);
+            return trx;
+          };
+        }
         return () => trx;
       },
     },
@@ -90,6 +100,7 @@ beforeEach(async () => {
     cascadeStripsLastMock,
   ])
     m.mockReset();
+  trxSets.length = 0;
   outranksMock.mockResolvedValue(false);
   cascadeStripsLastMock.mockResolvedValue(false);
   performStatusChange.mockResolvedValue({ ok: true });
@@ -173,6 +184,23 @@ describe("soft_delete / restore", () => {
     expect(out).toEqual({ ok: true, appUserId: "u1" });
     expect(banMock).toHaveBeenCalled();
     expect(txRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("soft_delete records the acting admin in deactivated_by", async () => {
+    await executeBulkUserAction("soft_delete", target, actor, { reason: "gone" });
+    expect(trxSets[0]).toMatchObject({ status: "deactivated", deactivated_by: "admin" });
+  });
+
+  it("soft_delete from an impersonated session records the HUMAN in deactivated_by (F-07)", async () => {
+    // `betterAuthUserId` is the borrowed identity on an impersonated batch; the
+    // column must name the admin who actually ran it.
+    await executeBulkUserAction(
+      "soft_delete",
+      target,
+      { ...actor, betterAuthUserId: "ba-borrowed", impersonatorId: "ba-human" },
+      { reason: "gone" },
+    );
+    expect(trxSets[0]).toMatchObject({ status: "deactivated", deactivated_by: "ba-human" });
   });
 
   it("soft_delete aborts (no DB cascade) when the ban fails", async () => {

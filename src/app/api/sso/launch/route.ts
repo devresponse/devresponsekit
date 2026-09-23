@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
+import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
 import { isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
@@ -68,6 +69,9 @@ export async function GET(request: NextRequest) {
   }
 
   const session = await getCurrentSession();
+  // F-07: read directly, not through a guard, so record an impersonation here;
+  // the per-principal bucket below then charges the human behind the session.
+  noteSessionImpersonation(request, session);
 
   const limited = enforceRateLimit(
     "sso.launch",

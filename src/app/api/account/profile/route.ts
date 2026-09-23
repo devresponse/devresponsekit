@@ -50,8 +50,10 @@ export const dynamic = "force-dynamic";
 export async function PATCH(request: NextRequest) {
   // IMP-1: opted in. Display name / Better Auth name are ordinary profile
   // fields — no credential is issued or revoked — and editing them on a user's
-  // behalf is a routine support action. Audited with the acting session either
-  // way.
+  // behalf is a routine support action. On an impersonated session both audit
+  // rows below name the impersonating admin, with this user in
+  // `metadata.impersonatedBetterAuthUserId` (F-07, applied by `auditEvent`), and
+  // the rate limit charges the admin's bucket.
   const guard = await requireAccountUser(request, "account.profile.write", {
     allowImpersonation: true,
   });

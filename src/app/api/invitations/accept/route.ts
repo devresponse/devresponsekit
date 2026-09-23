@@ -6,6 +6,7 @@ import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
 import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { getCurrentSession } from "@/lib/auth-guard";
+import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { consumeInvitation, findValidInvitationByToken } from "@/lib/invitations.server";
 import { acceptInvitationSchema } from "@/lib/validation/invitations";
 
@@ -54,6 +55,10 @@ export async function POST(request: NextRequest) {
   if (!session) {
     return adminErrorResponse("unauthenticated", 401, request);
   }
+  // F-07: read directly, not through a guard, so record an impersonation here.
+  // The acceptance audit row (written with this `request`) and the rate-limit
+  // bucket below then name the human behind the session, not the borrowed one.
+  noteSessionImpersonation(request, session);
 
   const limited = await enforceSharedRateLimit(
     "invitations.accept",
@@ -102,6 +107,7 @@ export async function POST(request: NextRequest) {
     // lag an email change); consume re-asserts the match against it.
     appUser: { id: appUser.id, primaryEmail: sessionEmail, status: appUser.status },
     actorBetterAuthUserId: session.user.id,
+    request,
   });
 
   if (!result.consumed) {

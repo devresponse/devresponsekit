@@ -247,6 +247,7 @@ Negative & edge cases
 - Whitespace-only Name is trimmed to empty and rejected (schema `.trim().min(1)`).
 - The Better Auth name write is attempted first; if it fails the API returns 502 and no display-name write happens (`src/app/api/account/profile/route.ts:59`). `TODO: verify` there is a UI way to trigger 502 in test (may need to stub Better Auth).
 - No id is accepted from the client — you cannot edit another user's profile (self-scoped by session).
+- While an admin is **impersonating** the user, the save is allowed (a routine support action), but the `account.profile.updated` audit row names the **admin** as the actor, with the user's id in `metadata.impersonatedBetterAuthUserId` (F-07). The rate limit is charged to the admin.
 
 Accessibility: `noValidate` form with React-Hook-Form; each control has a `<label>`, required controls set `aria-required`, and the error message renders in a `role="alert"` region for the root error / `FormMessage` for fields. Cancel restores via `router.refresh()`.
 i18n: Field labels (`account.fields.*`), the required legend, and validation messages (`validation.required`, `validation.max`) must localize in `uk`/`ja`; no raw keys.

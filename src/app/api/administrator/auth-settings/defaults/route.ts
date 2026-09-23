@@ -7,6 +7,7 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { FAIL_CLOSED_AUTH_POLICY } from "@/lib/auth-policy.server";
+import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { authPolicySettingsSchema } from "@/lib/validation/auth-policy";
 
 export const dynamic = "force-dynamic";
@@ -84,7 +85,9 @@ export async function PATCH(request: NextRequest) {
   }
 
   const previous = await getOrgAuthSettingsRow(null);
-  await upsertOrgAuthSettings(null, parsed.data, guard.betterAuthUserId);
+  // F-07: `updated_by` names the human behind an impersonated session, as the
+  // audit row below does, not the borrowed identity.
+  await upsertOrgAuthSettings(null, parsed.data, humanActorId(guard));
 
   // organizationId null = platform-level audit row (superadmin-visible only).
   await auditOrgAction("admin.platform.auth_policy_updated", "success", {

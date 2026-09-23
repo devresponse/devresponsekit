@@ -15,6 +15,7 @@ import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { targetOutranksActor } from "@/lib/admin/user-target.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
+import { humanActorId } from "@/lib/impersonation-attribution.server";
 
 /**
  * Shared per-user mutation helpers used by both the per-id endpoints
@@ -32,6 +33,13 @@ export type BulkUserAction =
 
 export interface BulkUserActor {
   betterAuthUserId: string;
+  /**
+   * The impersonating admin when the batch runs on an impersonated session
+   * (`guard.impersonatorId`). Written to `deactivated_by` in its place, so the
+   * column names the human who acted (F-07). The per-row audit rows need no
+   * help: `auditEvent` attributes them from `request`.
+   */
+  impersonatorId?: string | null;
   request: { headers: Headers };
   /**
    * The actor's tenant scope (AUTHZ-1/2). Status actions are confined to this
@@ -286,7 +294,7 @@ async function performSoftDelete(
           status: "deactivated",
           status_reason: reason,
           deactivated_at: sql`now()`,
-          deactivated_by: actor.betterAuthUserId,
+          deactivated_by: humanActorId(actor),
           deactivated_reason: reason,
           updated_at: sql`now()`,
         })

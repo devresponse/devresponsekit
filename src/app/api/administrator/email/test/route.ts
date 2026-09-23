@@ -7,6 +7,7 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { sendAppEmail } from "@/lib/email/send.server";
+import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { getBrand } from "@/config/brand";
 
 export const dynamic = "force-dynamic";
@@ -66,7 +67,8 @@ export async function POST(request: NextRequest) {
     organizationId,
     variables: {
       appName: getBrand().name,
-      sentBy: guard.betterAuthUserId,
+      // F-07: the human behind an impersonated session, matching the audit row.
+      sentBy: humanActorId(guard),
     },
   });
 

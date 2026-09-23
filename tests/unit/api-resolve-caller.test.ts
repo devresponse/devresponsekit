@@ -130,6 +130,27 @@ describe("resolveCaller — cookie path", () => {
     expect(caller).toMatchObject({ kind: "session", impersonatorId: "admin-9" });
   });
 
+  it("records the impersonation on the request it resolved, for audit attribution (F-07)", async () => {
+    // Every guarded route audits with the same `request` it handed the guard;
+    // `auditEvent` finds the human behind the session through this record.
+    const { readRequestImpersonation } = await import("@/lib/impersonation-attribution.server");
+    getCurrentSession.mockResolvedValue({
+      user: { id: "target" },
+      session: { id: "s-imp", impersonatedBy: "admin-9" },
+    });
+    const request = req();
+    await mod.resolveCaller(request);
+    expect(readRequestImpersonation(request)).toEqual({
+      impersonatedBetterAuthUserId: "target",
+      impersonatorBetterAuthUserId: "admin-9",
+    });
+
+    getCurrentSession.mockResolvedValue({ user: { id: "ba1" }, session: { id: "s" } });
+    const ordinary = req();
+    await mod.resolveCaller(ordinary);
+    expect(readRequestImpersonation(ordinary)).toBeNull();
+  });
+
   it("returns null when no session and no token", async () => {
     getCurrentSession.mockResolvedValue(null);
     expect(await mod.resolveCaller(req())).toBeNull();

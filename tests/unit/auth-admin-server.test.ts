@@ -49,6 +49,28 @@ describe("body + method routing", () => {
     );
   });
 
+  it("F-03: marks an admin-created identity as having NO mailbox proof by default", async () => {
+    await M.createBetterAuthUser({ email: "a@x.com", password: "pw" }, actor);
+    expect(api.createUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          data: expect.objectContaining({ emailVerified: true, emailVerificationWaived: true }),
+        }),
+      }),
+    );
+  });
+
+  it("F-03: leaves the marker off only when the caller vouches (emailUnproven: false)", async () => {
+    await M.createBetterAuthUser({ email: "a@x.com", password: "pw", emailUnproven: false }, actor);
+    expect(api.createUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          data: expect.objectContaining({ emailVerificationWaived: false }),
+        }),
+      }),
+    );
+  });
+
   it("updateBetterAuthUser → updateUser", async () => {
     await M.updateBetterAuthUser({ userId: "u1", data: { name: "N" } }, actor);
     expect(api.updateUser).toHaveBeenCalledWith(

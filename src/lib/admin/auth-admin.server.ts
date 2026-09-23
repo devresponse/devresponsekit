@@ -1,6 +1,7 @@
 import "server-only";
 import { headers as nextHeaders } from "next/headers";
 import { auth } from "@/lib/auth";
+import { EMAIL_VERIFICATION_WAIVED_FIELD } from "@/lib/auth-verification-waiver";
 import { withTrustedClientIp } from "@/lib/client-ip";
 
 /**
@@ -56,6 +57,15 @@ export interface CreateUserParams {
   name?: string;
   role?: "admin" | "user";
   data?: Record<string, unknown>;
+  /**
+   * F-03 — whether the address is WITHOUT mailbox proof. Defaults to `true`
+   * (fail closed). Callers pass `false` only when the creator is trusted to
+   * vouch for any address platform-wide (cross-org reach); an org admin's
+   * say-so is not proof, and the marker keeps such an identity from being
+   * linked to the real owner's Google or Microsoft sign-in until the mailbox
+   * is proven (a password reset).
+   */
+  emailUnproven?: boolean;
 }
 
 export async function createBetterAuthUser(
@@ -69,11 +79,17 @@ export async function createBetterAuthUser(
       name: params.name ?? params.email,
       role: params.role,
       // Programmatically-provisioned users (admin console + machine API) are
-      // created pre-verified: the caller is a trusted admin / API credential
-      // that vouches for the address, so they bypass the self-sign-up email
-      // verification gate (AUTH-4). Public self-registration still verifies.
-      // A caller may override by passing `data.emailVerified`.
-      data: { emailVerified: true, ...params.data },
+      // created pre-verified so they can sign in without the self-sign-up
+      // email verification round trip (AUTH-4). Public self-registration
+      // still verifies. A caller may override by passing `data.emailVerified`.
+      // Unless the creator has cross-org reach, the pre-verification is also
+      // marked as having no mailbox proof (F-03), which refuses provider
+      // linking into the account until the owner proves the mailbox.
+      data: {
+        emailVerified: true,
+        [EMAIL_VERIFICATION_WAIVED_FIELD]: params.emailUnproven ?? true,
+        ...params.data,
+      },
     },
     headers: await actorHeaders(actor),
   } as Parameters<typeof auth.api.createUser>[0]);

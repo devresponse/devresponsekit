@@ -477,6 +477,79 @@ describe("/api/v1/users", () => {
       "success",
       expect.objectContaining({ metadata: expect.objectContaining({ via: "api.v1" }) }),
     );
+    // F-03: an unbound superadmin session vouches for the address.
+    expect(createBetterAuthUser).toHaveBeenCalledWith(
+      expect.objectContaining({ emailUnproven: false }),
+      expect.anything(),
+    );
+  });
+
+  it("F-03: a superuser-owned key BOUND to one org does not vouch (MACHINE-2)", async () => {
+    requireApiPermission.mockResolvedValue({
+      ok: true,
+      grant: {
+        caller: {
+          betterAuthUserId: "ba1",
+          access: {
+            permissions: ["admin.users.create", "superuser"],
+            organizationId: "o1",
+            orgBound: true,
+          },
+        },
+        requestId: "r1",
+      },
+    });
+    dbState.takeFirst = undefined;
+    createBetterAuthUser.mockResolvedValue({ user: { id: "ba-new" } });
+    dbState.takeFirstOrThrow = {
+      id: "u-new",
+      primary_email: "new@x.com",
+      status: "pending_approval",
+    };
+    const { POST } = await import("@/app/api/v1/users/route");
+    const res = await POST(
+      req("/api/v1/users", {
+        method: "POST",
+        body: { email: "new@x.com", password: "password123" },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(createBetterAuthUser).toHaveBeenCalledWith(
+      expect.objectContaining({ emailUnproven: true }),
+      expect.anything(),
+    );
+  });
+
+  it("F-03: a creator WITHOUT cross-org reach creates an identity with no mailbox proof", async () => {
+    requireApiPermission.mockResolvedValue({
+      ok: true,
+      grant: {
+        caller: {
+          betterAuthUserId: "ba1",
+          access: { permissions: ["admin.users.create"], organizationId: "o1" },
+        },
+        requestId: "r1",
+      },
+    });
+    dbState.takeFirst = undefined;
+    createBetterAuthUser.mockResolvedValue({ user: { id: "ba-new" } });
+    dbState.takeFirstOrThrow = {
+      id: "u-new",
+      primary_email: "new@x.com",
+      status: "pending_approval",
+    };
+    const { POST } = await import("@/app/api/v1/users/route");
+    const res = await POST(
+      req("/api/v1/users", {
+        method: "POST",
+        body: { email: "new@x.com", password: "password123" },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(createBetterAuthUser).toHaveBeenCalledWith(
+      expect.objectContaining({ emailUnproven: true }),
+      expect.anything(),
+    );
   });
 
   it("POST 409 + create_failed audit when the insert loses the unique race (OPS-OBS-1)", async () => {

@@ -207,6 +207,45 @@ describe("POST /api/administrator/users (create)", () => {
     );
   });
 
+  describe("F-03: only a creator with cross-org reach vouches for the address", () => {
+    async function create(access: ReturnType<typeof grantedAccess>) {
+      sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+      accessGetter.mockResolvedValue(access);
+      dbMock
+        .mockResolvedValueOnce(undefined) // no existing app user
+        .mockResolvedValue({ id: "u-new", primary_email: "new@x.com", status: "pending_approval" });
+      authCreateUser.mockResolvedValue({ user: { id: "ba-new" } });
+      const { POST } = await import("@/app/api/administrator/users/route");
+      return POST(
+        makeRequest("http://test.local/api/administrator/users", {
+          method: "POST",
+          body: JSON.stringify({ email: "new@x.com", password: "Password#123" }),
+        }),
+      );
+    }
+
+    it("an ORG admin's creation carries no mailbox proof", async () => {
+      const res = await create(grantedAccess("admin.users.create"));
+      expect(res.status).toBe(201);
+      expect(authCreateUser).toHaveBeenCalledWith(
+        expect.objectContaining({ emailUnproven: true }),
+        expect.anything(),
+      );
+    });
+
+    it("a SUPERADMIN's creation is vouched for", async () => {
+      const res = await create({
+        ...grantedAccess("admin.users.create"),
+        permissions: ["admin.users.create", "superuser"],
+      });
+      expect(res.status).toBe(201);
+      expect(authCreateUser).toHaveBeenCalledWith(
+        expect.objectContaining({ emailUnproven: false }),
+        expect.anything(),
+      );
+    });
+  });
+
   it("rejects an invalid body with 400", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.create"));

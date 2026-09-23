@@ -14,7 +14,7 @@ import {
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
-import { resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 
 export const dynamic = "force-dynamic";
@@ -161,7 +161,14 @@ export async function POST(request: NextRequest) {
   let created: unknown;
   try {
     created = await createBetterAuthUser(
-      { email, password: input.password, name: input.name ?? email, role: input.role },
+      {
+        email,
+        password: input.password,
+        name: input.name ?? email,
+        role: input.role,
+        // F-03: only a creator with cross-org reach may vouch for an address.
+        emailUnproven: !hasCrossOrgReach(grant.caller.access),
+      },
       request,
     );
   } catch (err) {

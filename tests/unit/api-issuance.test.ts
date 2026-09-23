@@ -6,6 +6,7 @@ import {
   unissuableScopes,
   type CredentialIssuer,
 } from "@/lib/api-auth/issuance";
+import { API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
 
 /**
  * The shared credential-issuance rule (F-01), exercised on its own. The route
@@ -136,5 +137,49 @@ describe("unissuableScopes", () => {
     // `account.*` is refused by BOTH halves of the rule (the actor holds no
     // account wildcard, and it reaches the writing scopes on another's key).
     expect(issue(BOB, ["account.*"])).toHaveLength(1);
+  });
+});
+
+describe("F-05: on-behalf issuance is bounded by scope ∩ the issuer's live permissions", () => {
+  // The key was scoped when its owner held admin.users.delete; the owner has
+  // since been downgraded. Its grant still NAMES the scope — inert at use,
+  // where the guards intersect with live permissions.
+  const staleBearer = {
+    permissions: ["admin.clients.manage"],
+    grantedScopes: ["admin.clients.manage", "admin.users.delete"],
+  };
+
+  it("refuses conferring the stale excess on ANOTHER principal (who does hold it)", () => {
+    expect(issue(BOB, ["admin.users.delete", "admin.clients.manage"], staleBearer)).toEqual([
+      "admin.users.delete",
+    ]);
+  });
+
+  it("allows the same credential re-issuing its OWN owner's credential (confers nothing)", () => {
+    // e.g. a key rotating itself after its owner was downgraded.
+    expect(issue(ALICE, ["admin.users.delete", "admin.clients.manage"], staleBearer)).toEqual([]);
+  });
+
+  it("an on-behalf bearer wildcard needs the issuer to hold every key under it", () => {
+    const usersKeys = API_SCOPE_CATALOG.filter((k) => k.startsWith("admin.users."));
+    expect(
+      issue(BOB, ["admin.users.*"], { permissions: usersKeys, grantedScopes: ["admin.users.*"] }),
+    ).toEqual([]);
+    expect(
+      issue(BOB, ["admin.users.*"], {
+        permissions: usersKeys.slice(1),
+        grantedScopes: ["admin.users.*"],
+      }),
+    ).toEqual(["admin.users.*"]);
+  });
+
+  it("an impersonated session counts as on-behalf, so it is bounded too", () => {
+    expect(
+      issue(BOB, ["admin.users.delete"], {
+        ...staleBearer,
+        appUserId: BOB,
+        impersonatorId: "ba-admin",
+      }),
+    ).toEqual(["admin.users.delete"]);
   });
 });

@@ -14,13 +14,22 @@
  *   - re-scoping an OAuth client in place (the actor may already hold its
  *     secret, so widening it is issuing the wider set to them).
  *
- * The rule has two parts:
+ * The rule has three parts:
  *
  *   1. The ACTOR may only confer scopes it could grant itself
  *      ({@link ungrantableScopesForCaller}: a cookie session's permissions, a
  *      bearer credential's own scopes). Before this module, rotation never
  *      ran it at all, so an org admin holding only `admin.apikeys.manage`
  *      could rotate a co-member's `admin.users.*` key and receive it.
+ *   1a. On behalf of ANOTHER principal, the actor's scope must also be one
+ *      its owner's LIVE permissions cover — scope ∩ permission, F-05. A
+ *      bearer grant can name more than its owner holds (an agent ceiling set
+ *      above its service user's role, or any key whose owner was later
+ *      downgraded; scopes are never re-intersected on a role change). The
+ *      excess is inert at USE, where the guards intersect with live
+ *      permissions — but conferred on a credential for a co-member who DOES
+ *      hold it, it becomes live. For the actor's OWN credential (a key
+ *      rotating itself) the excess stays inert, so it is not refused there.
  *   2. The account-WRITING scopes (`account.apikeys.manage`,
  *      `account.profile.write`, `account.preferences.write`) are never
  *      conferred on a credential that authenticates as SOMEONE ELSE — nor by
@@ -39,7 +48,12 @@
  * `tests/unit/credential-issuance-invariant.test.ts` fails the build when a
  * route handler issues a credential without calling it.
  */
-import { ACCOUNT_SCOPES, scopeMatches, ungrantableScopesForCaller } from "@/lib/api-auth/scopes";
+import {
+  ACCOUNT_SCOPES,
+  scopeMatches,
+  ungrantableScopes,
+  ungrantableScopesForCaller,
+} from "@/lib/api-auth/scopes";
 
 /** The account scopes that change the principal's own account or credentials. */
 export const ACCOUNT_WRITE_SCOPES: ReadonlyArray<string> = ACCOUNT_SCOPES.filter(
@@ -101,6 +115,9 @@ export function unissuableScopes(issuance: CredentialIssuance): string[] {
     ungrantableScopesForCaller(issuer.permissions, issuer.grantedScopes, scopes),
   );
   if (isOnBehalfOfAnother(issuance)) {
+    // F-05: scope ∩ permission for anything conferred on someone else. A
+    // no-op for a cookie issuer (its branch above already is exactly this).
+    for (const scope of ungrantableScopes(issuer.permissions, scopes)) refused.add(scope);
     for (const scope of scopes) {
       if (reachesAccountWriteScope(scope)) refused.add(scope);
     }

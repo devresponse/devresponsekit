@@ -10,6 +10,7 @@ import {
   ungrantableScopes,
   ungrantableScopesForCaller,
 } from "@/lib/api-auth/scopes";
+import { reachesAccountWriteScope, unissuableScopes } from "@/lib/api-auth/issuance";
 
 /**
  * PROPERTY-BASED tests for the permission ∩ scope algebra (fast-check). Example
@@ -68,6 +69,36 @@ describe("permission ∩ scope algebra (properties)", () => {
             // credential's own granted scopes. A scoped-down key can't mint up.
             expect(isKnownScope(r)).toBe(true);
             expect(scopesAuthorize(grant, r)).toBe(true);
+          }
+        }
+      }),
+    );
+  });
+
+  it("F-05 INVARIANT: on behalf of another, nothing is conferred beyond scope ∩ the issuer's permissions", () => {
+    fc.assert(
+      fc.property(scopeList, scopeList, scopeList, (perms, grant, requested) => {
+        const refused = new Set(
+          unissuableScopes({
+            issuer: {
+              appUserId: "issuer",
+              permissions: perms,
+              grantedScopes: grant,
+              impersonatorId: null,
+            },
+            ownerAppUserId: "someone-else",
+            scopes: requested,
+          }),
+        );
+        for (const r of requested) {
+          const withinGrant = isKnownScope(r) && scopesAuthorize(grant, r);
+          const withinPerms = ungrantableScopes(perms, [r]).length === 0;
+          if (!refused.has(r)) {
+            // Allowed ⟹ the grant authorizes it AND the issuer's live permissions cover it.
+            expect(withinGrant && withinPerms).toBe(true);
+          } else if (withinGrant && withinPerms && !reachesAccountWriteScope(r)) {
+            // Refused although both halves allow it and it writes no account: over-refusal.
+            expect.fail(`over-refused ${r}`);
           }
         }
       }),

@@ -604,3 +604,45 @@ describe("F-01: an IMPERSONATED session is not the principal of the borrowed use
     expect((await PATCH(patch(), ctx)).status).toBe(200);
   });
 });
+
+describe("F-05: a bearer caller is bounded by scope ∩ permission, not scope names", () => {
+  it("an agent whose ceiling exceeds its role cannot register a client for a more-privileged co-member", async () => {
+    // Agent A's scope ceiling names admin.users.delete, but A's service user
+    // only holds admin.clients.* — A could never USE admin.users.delete. It
+    // tries to confer it on a client for co-member SVC, who does hold it.
+    requireApiPermission.mockResolvedValue(
+      grant({
+        permissions: ["admin.clients.read", "admin.clients.manage"],
+        organizationId: "o1",
+        grantedScopes: ["admin.clients.manage", "admin.users.delete"],
+      }),
+    );
+    const res = await POST(
+      req({
+        method: "POST",
+        body: { name: "x", scopes: ["admin.users.delete"], serviceAppUserId: SVC },
+      }),
+    );
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { ungrantableScopes: string[] };
+    expect(json.ungrantableScopes).toEqual(["admin.users.delete"]);
+    expect(createOauthClient).not.toHaveBeenCalled();
+  });
+
+  it("control: the same agent may confer a scope it both carries and holds", async () => {
+    requireApiPermission.mockResolvedValue(
+      grant({
+        permissions: ["admin.clients.read", "admin.clients.manage"],
+        organizationId: "o1",
+        grantedScopes: ["admin.clients.manage", "admin.clients.read"],
+      }),
+    );
+    const res = await POST(
+      req({
+        method: "POST",
+        body: { name: "x", scopes: ["admin.clients.read"], serviceAppUserId: SVC },
+      }),
+    );
+    expect(res.status).toBe(201);
+  });
+});

@@ -263,12 +263,13 @@ volumes:
 
 - **Rate limiting across replicas: the security floors are shared, the
   per-actor guards are not.** The **pre-auth floors** — the token endpoint,
-  MCP registration, the CSP report sink, invitation acceptance — and Better
-  Auth's own sign-in / password-reset limiter keep their buckets in Postgres
-  (`app_rate_limits` from migration `0006`, and Better Auth's `rateLimit`
-  table from `pnpm db:auth:migrate`), so they enforce **one budget across
-  every container**. The **admin per-actor** abuse guard (mutations, bulk,
-  export, SSO handoff) is still per process: under horizontal scaling its
+  MCP registration, the CSP report sink, SSO consume and a signed-out SSO
+  launch, invitation acceptance — and Better Auth's own sign-in /
+  password-reset limiter keep their buckets in Postgres (`app_rate_limits`
+  from migration `0006`, and Better Auth's `rateLimit` table from
+  `pnpm db:auth:migrate`), so they enforce **one budget across every
+  container**. The **admin per-actor** abuse guard (mutations, bulk, export,
+  a signed-in SSO launch) is still per process: under horizontal scaling its
   budget multiplies by the number of containers and resets on restart. That
   guard layers on top of authorization, so multi-instance is supported; only
   the per-actor UX limit is best-effort there. See

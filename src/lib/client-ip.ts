@@ -265,8 +265,10 @@ export function withTrustedClientIp(headers: Headers): Headers {
  * rather than each getting a fresh one). An IPv6 client is keyed by its /64
  * (F-16, {@link rateLimitSubject}), so rotating addresses inside the prefix
  * does not mint new buckets. Every per-IP limiter goes through here: the token
- * endpoint, MCP registration, the CSP sink and, through `actorIdFromRequest`,
- * the SSO launch/consume throttles.
+ * endpoint, MCP registration, the CSP sink, SSO consume and a signed-out SSO
+ * launch. Each of those takes a per-IP bucket from the SHARED store (the SSO
+ * pair since F-19); an in-memory limiter keyed on this value fails
+ * tests/unit/rate-limit-shared-floors-invariant.test.ts.
  */
 export function clientIpKey(headers: Headers): string {
   const ip = getClientIp(headers);

@@ -1,15 +1,14 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { NextRequest, NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
-import { clientIpKey } from "@/lib/client-ip";
 import { humanActorFor } from "@/lib/impersonation-attribution.server";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 
 /**
  * In-memory token-bucket rate limiter for AUTHENTICATED per-actor limits
- * (Administrator mutations, bulk, export, the v1 per-credential buckets, the
- * SSO handoff routes).
+ * (Administrator mutations, bulk, export, the v1 per-credential buckets, a
+ * signed-in SSO launch).
  *
  * Why an in-memory bucket?
  *   - The plan explicitly calls for an in-memory token bucket as the v1
@@ -32,12 +31,15 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
  *     bounded by the credentials they hold, and the limit is a UX guard on
  *     top of authorization, not the security floor. It is NOT acceptable
  *     for the PRE-AUTH floors (token endpoint, MCP registration, the CSP
- *     sink, invitation acceptance), where the attacker chooses the fan-out
- *     and a per-lambda "global" floor multiplies by the instance count
- *     (review #98): those consume from the Postgres-backed bucket in
- *     `rate-limit-shared.server.ts` instead, and the invariant test
- *     `tests/unit/rate-limit-shared-floors-invariant.test.ts` keeps them
- *     there. See docs/deployment.md §5 for the topology statement.
+ *     sink, invitation acceptance, SSO consume and a signed-out SSO launch),
+ *     where the attacker chooses the fan-out and a per-lambda bucket
+ *     multiplies by the instance count (review #98, F-19): those consume
+ *     from the Postgres-backed bucket in `rate-limit-shared.server.ts`
+ *     instead. The invariant test
+ *     `tests/unit/rate-limit-shared-floors-invariant.test.ts` scans every
+ *     call to this module's limiter under `src/` and fails on one keyed on
+ *     the client's address, so nothing pre-auth can come back here. See
+ *     docs/deployment.md §5 for the topology statement.
  *   - Deny responses include a `Retry-After` header (seconds) and a
  *     standard error envelope `{ error: "rate_limited", retryAfter }`.
  */
@@ -289,10 +291,14 @@ export const DEFAULT_ADMIN_EXPORT_LIMIT: RateLimitOptions = {
  * append-only `app_audit_events` row; a pre-authentication refusal is logged
  * and counted instead (F-15).
  *
- * `/api/sso/launch` is keyed per PRINCIPAL — the session user id once a
- * session resolves, the trusted client IP before that — so one noisy user
- * cannot starve the rest of a NAT. A real user launches one handoff per app
- * tile click, so the mutation tier (30 burst, 1/s) is generous.
+ * `/api/sso/launch` is keyed per PRINCIPAL, so one noisy user cannot starve
+ * the rest of a NAT. A real user launches one handoff per app tile click, so
+ * the mutation tier (30 burst, 1/s) is generous. The two branches keep that
+ * budget in different stores (F-19). A signed-in launch is keyed on the
+ * session user id and stays in this in-memory bucket: the caller holds a
+ * session, so the fan-out is bounded by the sessions it holds. A signed-out
+ * launch is keyed on the trusted client IP, which the caller chooses, so its
+ * budget comes from the SHARED bucket.
  */
 export const DEFAULT_SSO_LAUNCH_LIMIT: RateLimitOptions = {
   capacity: 30,
@@ -303,7 +309,18 @@ export const DEFAULT_SSO_LAUNCH_LIMIT: RateLimitOptions = {
  * `/api/sso/consume` has no principal until the token verifies, so it is
  * keyed per trusted client IP. A legitimate handoff is one GET + one POST;
  * many users may sit behind one egress IP, so the burst matches the
- * mutation tier rather than the tighter bulk/export tiers.
+ * mutation tier rather than the tighter bulk/export tiers. Both methods take
+ * it from the SHARED bucket (F-19): kept in this per-process store, a
+ * garbage-token flood spread over N warm instances got N times this budget
+ * per IP.
+ *
+ * The SSO pre-auth paths (consume, and a signed-out launch) deliberately have
+ * no deployment-wide floor, unlike the token endpoint. Such a floor answers
+ * before the token is verified, so it would refuse genuine handoffs exactly
+ * like garbage ones, and a few dozen sources each sending at the per-IP rate
+ * could hold it at zero, locking every user out of SSO. It would protect
+ * little: after F-15 a refused request costs only a signature verify and a
+ * log line.
  */
 export const DEFAULT_SSO_CONSUME_LIMIT: RateLimitOptions = {
   capacity: 30,
@@ -408,16 +425,4 @@ export function rateLimitDeniedResponse(
     extra: { retryAfter: result.retryAfterSeconds },
     headers: { "Retry-After": String(result.retryAfterSeconds) },
   });
-}
-
-/**
- * Convenience: derive a stable actor identifier for the limiter when
- * a `requireAdminPermission` grant isn't yet available — falls back to
- * the trusted client IP (P2-4: a proxy hop, not the spoofable leftmost
- * `x-forwarded-for`), then to a constant. Only used by callers that need
- * to throttle pre-auth (e.g. open list endpoints); admin mutations should
- * always rate-limit by actor id.
- */
-export function actorIdFromRequest(request: NextRequest | { headers: Headers }): string {
-  return clientIpKey(request.headers);
 }

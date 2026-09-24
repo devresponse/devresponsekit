@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
 import type * as MetricsModule from "@/lib/observability/metrics.server";
 
 /**
@@ -138,6 +139,14 @@ vi.mock("@/lib/auth", () => ({ auth: { api: {} } }));
 vi.mock("@/lib/sso.server", () => ({
   consumeSsoHandoffNonce: vi.fn(),
   createSsoHandoffRedirect: vi.fn(),
+}));
+// Both SSO endpoints limit a pre-auth caller per IP from the SHARED Postgres
+// bucket (F-19). The stub database above has no query executor, so the real
+// primitive would fall back to memory with a warning; route it to the in-memory
+// helper directly, resolved per call so each test's fresh module graph is used.
+vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+  enforceSharedRateLimit: async (...a: Parameters<typeof InMemoryLimiter.enforceRateLimit>) =>
+    (await import("@/lib/admin/rate-limit.server")).enforceRateLimit(...a),
 }));
 
 const penv = process.env as Record<string, string | undefined>;

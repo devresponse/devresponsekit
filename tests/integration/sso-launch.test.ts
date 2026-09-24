@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as LaunchRouteModule from "@/app/api/sso/launch/route";
+import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
 import type { NextRequest } from "next/server";
 import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
@@ -12,9 +13,9 @@ import { getSafeReturnTo } from "@/lib/safe-return-to";
  * applicationId is rejected before any DB or audit work, unauthenticated
  * users are redirected to sign-in (logged, never audited — F-15),
  * impersonated sessions are refused
- * (review #4), launches are rate-limited per principal (review #16), and
- * successful launches set `Referrer-Policy: no-referrer` and
- * `Cache-Control: no-store`.
+ * (review #4), launches are rate-limited per principal (review #16) — a
+ * signed-out one from the shared bucket (F-19) — and successful launches set
+ * `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
  */
 
 const sessionGetter = vi.fn();
@@ -54,6 +55,37 @@ vi.mock("@/lib/observability/logger.server", () => ({
 vi.mock("@/lib/observability/server", () => ({
   captureServerError: (...args: unknown[]) => captureMock(...args),
 }));
+// F-19: a SIGNED-OUT launch takes its per-IP bucket from the SHARED Postgres
+// bucket; a signed-in one stays in the per-process bucket. No database here, so
+// the shared primitives run on the real in-memory limiter of ONE module
+// instance, held for the whole test. It survives `vi.resetModules()`, which
+// hands a reloaded route a fresh per-process limiter the way a second warm
+// lambda has one. Every key either primitive consumes is recorded, in order, so
+// a deployment-wide key taken through `consumeSharedToken` (the tiered helper's
+// route) would be seen too.
+const shared = vi.hoisted(() => ({
+  keys: [] as string[],
+  limiter: undefined as undefined | typeof InMemoryLimiter,
+}));
+vi.mock("@/lib/admin/rate-limit-shared.server", () => {
+  const limiter = async () => (shared.limiter ??= await import("@/lib/admin/rate-limit.server"));
+  return {
+    consumeSharedToken: async (
+      key: string,
+      options: InMemoryLimiter.RateLimitOptions,
+      nowMs?: number,
+    ) => {
+      shared.keys.push(key);
+      return (await limiter()).consumeToken(key, options, nowMs);
+    },
+    enforceSharedRateLimit: async (
+      ...args: Parameters<typeof InMemoryLimiter.enforceRateLimit>
+    ) => {
+      shared.keys.push(`${args[0]}:${args[1]}`);
+      return (await limiter()).enforceRateLimit(...args);
+    },
+  };
+});
 
 function makeRequest(url: string, headers: Record<string, string> = {}): NextRequest {
   const u = new URL(url);
@@ -75,10 +107,15 @@ beforeEach(async () => {
   logErrMock.mockReset();
   captureMock.mockReset();
   signerConfigured.value = true;
+  shared.keys.length = 0;
+  shared.limiter = undefined;
   // A fresh module graph per test also resets the in-memory limiter buckets.
   ({ GET } = await import("@/app/api/sso/launch/route"));
 });
-afterEach(() => vi.resetModules());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.resetModules();
+});
 
 describe("GET /api/sso/launch", () => {
   it("rejects requests without applicationId before any session or audit work (#16)", async () => {
@@ -348,5 +385,104 @@ describe("GET /api/sso/launch — per-principal rate limit (review #16)", () => 
 
     // A different IP still gets its own budget.
     expect((await GET(fromIp("198.51.100.4"))).status).toBe(307);
+  });
+});
+
+/**
+ * F-19: the signed-out branch was keyed on the client IP in the per-process
+ * bucket, so a flood spread over N warm instances got N times the per-IP
+ * budget. The two branches are now two limits: signed in stays per user in
+ * this process, signed out takes a per-IP bucket from the SHARED store. There
+ * is no deployment-wide floor behind it: a signed-out launch is how a real
+ * user reaches sign-in, and it costs only a redirect and a log line (F-15).
+ */
+describe("GET /api/sso/launch — signed-out launches use the shared bucket (F-19)", () => {
+  const url = "http://localhost/api/sso/launch?applicationId=portal&locale=en";
+  const fromIp = (ip: string) => makeRequest(url, { "x-forwarded-for": ip });
+  const KEY_A = "sso.launch.signed_out:ip:203.0.113.9";
+  /** The i-th of a run of distinct client IPs. */
+  const freshIp = (i: number) => `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+
+  /** Freeze the clock at the real time, so no bucket refills mid-flood. */
+  function freezeClock(): void {
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+  }
+
+  it("a signed-out launch consults the shared limiter, keyed on the client IP alone", async () => {
+    sessionGetter.mockResolvedValue(null);
+    expect((await GET(fromIp("203.0.113.9"))).status).toBe(307);
+    expect(shared.keys).toEqual([KEY_A]);
+  });
+
+  it("a signed-in launch stays per user in the per-process bucket and never touches the shared one", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    createRedirect.mockResolvedValue(
+      new URL("https://portal.devresponse.com/api/sso/consume?token=abc"),
+    );
+    expect((await GET(fromIp("203.0.113.9"))).status).toBe(307);
+    expect(shared.keys).toEqual([]);
+    const inMemory = await import("@/lib/admin/rate-limit.server");
+    expect(inMemory.__rateLimitBucketKeysForTests()).toContain("sso.launch:ba-1");
+  });
+
+  it("a signed-out flood spread over two warm instances gets ONE per-IP budget, not one each", async () => {
+    freezeClock();
+    sessionGetter.mockResolvedValue(null);
+    const instanceA = GET;
+    vi.resetModules();
+    const { GET: instanceB } = await import("@/app/api/sso/launch/route");
+
+    // DEFAULT_SSO_LAUNCH_LIMIT: 30-token burst, 15 through each instance.
+    for (let i = 0; i < 30; i += 1) {
+      const get = i % 2 === 0 ? instanceA : instanceB;
+      expect((await get(fromIp("203.0.113.9"))).status).toBe(307);
+    }
+    // Kept per process, each instance had spent 15 of its own 30.
+    for (const get of [instanceA, instanceB]) {
+      const denied = await get(fromIp("203.0.113.9"));
+      expect(denied.status).toBe(429);
+      expect(Number(denied.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+      expect(await denied.json()).toMatchObject({ error: "rate_limited" });
+    }
+    expect(preAuthLog).toHaveBeenCalledTimes(30);
+    expect(new Set(shared.keys)).toEqual(new Set([KEY_A]));
+  });
+
+  it("many signed-out sources at their full per-IP rate never lock out another IP, signed out or in", async () => {
+    freezeClock();
+    sessionGetter.mockResolvedValue(null);
+    // 45 sources each spend their whole burst in the same instant (1,350
+    // admitted launches), then are refused. A deployment-wide floor sized
+    // anywhere near real launch volume would now be at zero.
+    const SOURCES = 45;
+    for (let s = 0; s < SOURCES; s += 1) {
+      for (let i = 0; i < 30; i += 1) expect((await GET(fromIp(freshIp(s)))).status).toBe(307);
+      expect((await GET(fromIp(freshIp(s)))).status).toBe(429);
+    }
+
+    // A real user on a different IP still reaches sign-in.
+    const toSignIn = await GET(fromIp("198.51.100.4"));
+    expect(toSignIn.status).toBe(307);
+    expect(toSignIn.headers.get("location")).toContain("/sign-in");
+
+    // No deployment-wide key was consulted at all: only the per-IP buckets.
+    expect(shared.keys.filter((k) => k.includes("__global__"))).toEqual([]);
+    const perIp = [
+      ...Array.from({ length: SOURCES }, (_, s) => `sso.launch.signed_out:ip:${freshIp(s)}`),
+      "sso.launch.signed_out:ip:198.51.100.4",
+    ];
+    expect(new Set(shared.keys)).toEqual(new Set(perIp));
+
+    // And a signed-in launch from a flooding IP is keyed on its user, not there.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    createRedirect.mockResolvedValue(
+      new URL("https://portal.devresponse.com/api/sso/consume?token=abc"),
+    );
+    const signedIn = await GET(fromIp(freshIp(0)));
+    expect(signedIn.status).toBe(307);
+    expect(signedIn.headers.get("location")).toContain("portal.devresponse.com");
+    expect(new Set(shared.keys)).toEqual(new Set(perIp));
   });
 });

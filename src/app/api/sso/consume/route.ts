@@ -1,17 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { auth } from "@/lib/auth";
-import { withTrustedClientIp } from "@/lib/client-ip";
+import { clientIpKey, withTrustedClientIp } from "@/lib/client-ip";
 import { consumeSsoHandoffNonce } from "@/lib/sso.server";
 import { verifySsoHandoff, type VerifiedSsoHandoff } from "@/lib/jwt-handoff.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
-import {
-  DEFAULT_SSO_CONSUME_LIMIT,
-  actorIdFromRequest,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
+import { DEFAULT_SSO_CONSUME_LIMIT } from "@/lib/admin/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { logServerError } from "@/lib/observability/logger.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { captureServerError } from "@/lib/observability/server";
@@ -35,7 +32,7 @@ function ssoErrorResponse(code: string, status: number, requestId: string): Next
  * public, so an unauthenticated curl loop must hit a ceiling before it
  * reaches verification, the nonce table or the audit table. Keyed on the
  * trusted-hop client IP (P2-4) — there is no principal until the token
- * verifies. Runs before any audit/DB work.
+ * verifies. Runs before any other audit/DB work.
  *
  * F-15: the ceiling alone still let each IP add ~86k append-only audit rows a
  * day, one per garbage token. A refusal decided BEFORE the token verifies (no
@@ -45,11 +42,21 @@ function ssoErrorResponse(code: string, status: number, requestId: string): Next
  * session — the row is written as before: the issuer minted that token for a
  * signed-in launch and it lives ≤60 s, so those rows are tied to real
  * handoffs, not to how often an anonymous client can call.
+ *
+ * F-19: the per-IP bucket lives in Postgres, shared by every instance. It was
+ * per process, so a flood spread over N warm lambdas got N times the per-IP
+ * budget. A database outage falls back to the per-instance bucket with a
+ * warning, the token endpoint's policy. There is deliberately NO
+ * deployment-wide floor behind it: this limit answers before the token is
+ * verified, so a floor would refuse genuine handoffs exactly like garbage ones,
+ * and a few dozen sources each sending at the per-IP rate could hold it at zero
+ * and lock every user out of SSO on every satellite. After F-15 a garbage token
+ * costs one signature verify and one log line, so the per-IP bucket is enough.
  */
-function rateLimitConsume(request: NextRequest, requestId: string): NextResponse | null {
-  return enforceRateLimit(
+function rateLimitConsume(request: NextRequest, requestId: string): Promise<NextResponse | null> {
+  return enforceSharedRateLimit(
     "sso.consume",
-    actorIdFromRequest(request),
+    clientIpKey(request.headers),
     DEFAULT_SSO_CONSUME_LIMIT,
     request,
     requestId,
@@ -170,7 +177,7 @@ export async function GET(request: NextRequest) {
   // Mint/echo a correlation id up front (memoised per-request), so every
   // response and the audit rows share one id (OPS-OBS-4).
   const requestId = getOrCreateRequestId(request);
-  const limited = rateLimitConsume(request, requestId);
+  const limited = await rateLimitConsume(request, requestId);
   if (limited) return limited;
 
   const token = request.nextUrl.searchParams.get("token");
@@ -231,7 +238,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const requestId = getOrCreateRequestId(request);
-  const limited = rateLimitConsume(request, requestId);
+  const limited = await rateLimitConsume(request, requestId);
   if (limited) return limited;
 
   const origin = checkTrustedOrigin(request);

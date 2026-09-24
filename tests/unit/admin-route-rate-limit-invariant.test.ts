@@ -57,15 +57,15 @@ const V1_EXEMPT: Record<string, string> = {};
 
 // Review #28: the scan used to stop at administrator/** and v1/**, so the
 // self-service and preference mutations shipped unthrottled. Every OTHER
-// `src/app/api/**/route.ts` is walked here against the union of the three
-// limiter primitives (the account/preference/invitation routes call
-// `enforceRateLimit` with the request context; the public sinks call the
-// low-level `consumeToken` per IP + a global floor).
-// The pre-auth floors (register, the CSP sink, invitation acceptance) use the
-// SHARED-bucket twins — consumeSourceThenGlobal (per-IP then global, F-18) /
-// enforceSharedRateLimit (review #98);
-// tests/unit/rate-limit-shared-floors-invariant.test.ts pins WHICH primitive
-// each of those must use, this scan only requires that one exists.
+// `src/app/api/**/route.ts` is walked here against the union of the limiter
+// primitives (the account/preference routes call `enforceRateLimit` with the
+// request context; the public sinks take a per-IP bucket + a global floor).
+// The pre-auth floors (register, the CSP sink, invitation acceptance, SSO
+// consume and the signed-out SSO launch) use the SHARED-bucket twins —
+// consumeSourceThenGlobal (per-IP then global, F-18) / enforceSharedRateLimit
+// (review #98; per IP for the SSO pair, F-19);
+// tests/unit/rate-limit-shared-floors-invariant.test.ts fails any in-memory
+// call keyed on the client IP, this scan only requires that one exists.
 const API_ROUTES_DIR = join(SRC_DIR, "app", "api");
 const ANY_RATE_LIMIT_CALL =
   /(?:enforceRateLimit|enforceSharedRateLimit|enforceApiRateLimit|consumeToken|consumeSharedToken|consumeSourceThenGlobal)\s*\(/g;

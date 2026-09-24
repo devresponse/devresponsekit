@@ -21,15 +21,17 @@ import { z } from "zod";
  * satellite needed to VERIFY a handoff was the same credential needed to
  * ISSUE one — so any A/B satellite could mint a sign-in token for any user
  * with any sibling's audience (lateral forgery across the fleet), which
- * contradicted the documented "a compromised satellite is contained" claim.
+ * contradicted the documented containment claim for A/B satellites.
  *
  * Now the ISSUER (the primary) signs with an Ed25519 private JWK
  * (`SSO_HANDOFF_PRIVATE_KEY`, `alg: EdDSA`) and publishes the public half at
  * `GET /api/sso/jwks.json`. A CONSUMER verifies against that JWKS
  * (`createRemoteJWKSet`, fetched from `SSO_HANDOFF_ISSUER`) and holds NO
- * signing capability at all — a compromised satellite can forge nothing. The
- * same contract as the machine API's `src/lib/api-auth/jwt.server.ts`, with an
- * independent key pair ("independent keys" rule).
+ * signing capability at all — a compromised satellite can forge no handoff
+ * token. That is necessary for containment, not sufficient: a satellite on
+ * the primary's database or under its COOKIE_DOMAIN is not contained (F-24).
+ * The same contract as the machine API's `src/lib/api-auth/jwt.server.ts`,
+ * with an independent key pair ("independent keys" rule).
  *
  * Self-issuing deployments (the primary consuming its own handoffs, a
  * single-instance rig, CI) verify against the LOCAL public key set derived

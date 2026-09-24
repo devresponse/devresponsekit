@@ -14,6 +14,7 @@ import { assertKitRoot, assertSatelliteRoot } from "../lib/kit.js";
 import { CliError, bold, dim, field, heading, info, mask, ok, step, warn } from "../lib/log.js";
 import {
   SATELLITE_OPTIONS,
+  SATELLITE_OPTION_SUMMARIES,
   type SatelliteConfig,
   type SatelliteOption,
   describeProfile,
@@ -23,6 +24,7 @@ import {
   satelliteConfigProblems,
 } from "../lib/target.js";
 import { VercelClient } from "../lib/vercel-client.js";
+import { reportContainment } from "./env.js";
 
 async function ask(question: string, fallback?: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -241,6 +243,8 @@ export async function init(cliRoot: string, options: InitOptions): Promise<void>
       info("");
       warn("The config was saved, but `env:check` will report these until they are fixed.");
     }
+    // Where the topology is chosen, so where it is first said (F-24).
+    reportContainment(profile, config.origin);
   }
 
   info("");
@@ -283,7 +287,7 @@ async function configureSatellite(input: {
   const optionRaw = options.satellite ?? previous?.option ?? "";
   if (optionRaw && !SATELLITE_OPTIONS.includes(optionRaw as SatelliteOption)) {
     throw new CliError(`Unknown satellite option \`${optionRaw}\`.`, {
-      hint: `Use one of: ${SATELLITE_OPTIONS.join(", ")} — A (own auth + handoff), B (handoff, table-less), C (shared session).`,
+      hint: `Use one of: ${SATELLITE_OPTIONS.join(", ")} — A (own session + handoff), B (handoff, table-less), C (shared session).`,
     });
   }
   let option = optionRaw as SatelliteOption;
@@ -294,9 +298,13 @@ async function configureSatellite(input: {
       });
     }
     info("");
-    info(`  ${bold("standalone")} (A) — own database and session, signs in via an SSO handoff`);
-    info(`  ${bold("handoff")}    (B) — like A, with no local profile table`);
-    info(`  ${bold("shared")}     (C) — shares the KIT's database, secret and session cookie`);
+    info(`  ${bold("standalone")} (A) — ${SATELLITE_OPTION_SUMMARIES.standalone}`);
+    info(`  ${bold("handoff")}    (B) — ${SATELLITE_OPTION_SUMMARIES.handoff}`);
+    info(`  ${bold("shared")}     (C) — ${SATELLITE_OPTION_SUMMARIES.shared}`);
+    // A and B are asked about their database below, and the default answer is
+    // the KIT's. Said here too, because this list used to promise A its "own
+    // database" (F-24).
+    info(dim("  A and B run on the KIT's database unless you record otherwise below."));
     const answer = await ask("Satellite option", "standalone");
     if (!SATELLITE_OPTIONS.includes(answer as SatelliteOption)) {
       throw new CliError(`Unknown satellite option \`${answer}\`.`);
@@ -356,15 +364,21 @@ async function configureSatellite(input: {
       // question to ask.
       info(dim("  Option C shares the KIT's database by definition — migrations will be refused."));
       database = "shared-with-kit";
-    } else if (checkout.databaseOwnedByKit) {
-      info("");
-      info(dim(`  ${checkout.name} disables its own db:* scripts, which is that app stating it does`));
-      info(dim("  not own its schema. Answering yes here means you have given this deployment a"));
-      info(dim("  SEPARATE database that the kit's migrations may be applied to."));
-      database = (await confirm("Does this satellite have its OWN database?", false))
-        ? "own"
-        : "shared-with-kit";
     } else {
+      info("");
+      if (checkout.databaseOwnedByKit) {
+        info(dim(`  ${checkout.name} disables its own db:* scripts, which is that app stating it does`));
+        info(dim("  not own its schema. Answering yes here means you have given this deployment a"));
+        info(dim("  SEPARATE database that the kit's migrations may be applied to."));
+      }
+      // The default answer is the uncontained topology, so it is named before
+      // anyone takes it (F-24).
+      info(dim("  No (the default) keeps it on the KIT's database, where a compromise of this app"));
+      info(dim("  reaches the kit's auth tables: security-equivalent to Option C, not contained."));
+      // Yes is taken at its word from here on (the CLI never sees the value of
+      // DATABASE_URL), so it has to mean the credentials too.
+      info(dim("  Yes contains it only if its DATABASE_URL signs in as its OWN role: a new database"));
+      info(dim("  reached as the kit's role is no boundary, because roles are cluster-wide."));
       database = (await confirm("Does this satellite have its OWN database?", false))
         ? "own"
         : "shared-with-kit";

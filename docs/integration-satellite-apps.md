@@ -27,10 +27,25 @@ Remarkably, the three options differ by **two source-level deltas plus configura
 
 Decide by trust boundary first — the full rationale and comparison matrix is in [Design: Satellite Apps §3](./design-satellite-apps.md#3-auth-data-model--a--b--c-the-load-bearing-decision):
 
-- **Third-party, mixed-trust, or defense-in-depth fleet → A or B (the handoff).** Each satellite keeps its own session store, its own subdomain-scoped cookie, and its own `BETTER_AUTH_SECRET`; it holds **no signing material** (handoffs are EdDSA-signed by the primary and verified against the primary's public JWKS), and the only bridge is a single-use, audience-bound, ≤60-second token. A compromised satellite is contained: it can forge nothing for the primary or for sibling satellites.
+- **Third-party, mixed-trust, or defense-in-depth fleet → A or B (the handoff), with database credentials of its own and outside the primary's cookie domain.** Each satellite keeps its own session store, its own subdomain-scoped cookie, and its own `BETTER_AUTH_SECRET`; it holds **no signing material** (handoffs are EdDSA-signed by the primary and verified against the primary's public JWKS), and the only bridge is a single-use, audience-bound, ≤60-second token. So a compromised satellite can forge no handoff token, for the primary or for sibling satellites. Whether it is also **contained** depends on where it runs, not on the handoff: with credentials that reach the primary's database, or under the primary's `COOKIE_DOMAIN`, it is not (§1.1).
   - **A** when the satellite persists any per-user state (preferred locale, a local `status` kill switch) — the recommended default.
   - **B** for an ultra-thin viewer with zero per-user state, accepting that revocation rides the session TTL rather than a local status flag.
 - **First-party, co-trusted, same-team fleet → C.** Least code, zero-redirect UX, one identity source, instant central revocation — bought by collapsing the whole subdomain fleet into **one security domain** (shared parent-domain cookie + shared `BETTER_AUTH_SECRET`). Never offer C to a third party.
+
+### 1.1 When A or B is actually contained
+
+The handoff's own guarantee holds in every topology: a satellite holds no signing key, so even a fully compromised one mints no handoff token. **Containment**, meaning a compromise of the satellite's server stays inside that satellite, is a stronger claim. It holds **only when both** of these are true:
+
+1. **The satellite's database credentials cannot reach the primary's tables.** Its `DATABASE_URL` signs in as a Postgres role with **no privileges** on the primary's schema: a role on a **separate cluster or project**, or a **dedicated role** on its own database or schema that is not the primary's owner or runtime role, not a member of either, not a superuser, and not a member of a role that reads or writes all data. The boundary is the credential, not the database. Postgres roles are cluster-wide, and `CONNECT` on every database is granted to `PUBLIC` by default, so a new database reached as the primary's role is no boundary at all. For example, `CREATE DATABASE app1` in the kit's Neon project, handed to the satellite as `neondb_owner`'s connection string ending `/app1`, lets a compromised satellite change `/app1` back to the kit's database name. On Neon, create that dedicated role with SQL (`CREATE ROLE … LOGIN`): a role created in the Neon Console, API or CLI joins `neon_superuser`, which holds `pg_read_all_data` and `pg_write_all_data` and so reaches every table in the project. A different `DB_SCHEMA` is no boundary either. It only sets the connection's `search_path` (`src/db/schema-config.ts`) and grants or revokes nothing, so a role that can see the primary's schema reads and writes it with a qualified name (`auth.account`, `auth.session`, `auth.app_users`, …). With that access a compromised satellite can set a password on any account, grant itself any role, or read a live password-reset token: platform-wide takeover, superadmins included. A dedicated role on the primary's own database also needs no `CREATE` on its `public` schema, which sits on the primary's `search_path` (`<DB_SCHEMA>,public`): a function or operator planted there can capture a call the primary makes unqualified.
+2. **The satellite's host is outside the primary's `COOKIE_DOMAIN`**, ideally on a different registrable domain. The primary sets `COOKIE_DOMAIN` as soon as the fleet has an Option C satellite, and from then on every visitor's browser sends the primary's session cookie to **every** host under that domain. A compromised satellite server reads it from each request and replays it on the primary. A distinct `advanced.cookiePrefix` (§6.6) stops that cookie shadowing the satellite's own. It does not stop the satellite receiving it.
+
+Miss either one and an A/B satellite is **security-equivalent to Option C**: a first-party, co-trusted choice only, and not one to describe to anyone as contained. Three topologies in this guide are exactly that:
+
+- **The stock reference forks.** Their consume POST burns the nonce row the primary inserted and requires the user's row to exist, so they only work on the primary's database (§4.5). Containment needs the §4.5 code changes *and* condition 1.
+- **The local rig in §6.6**, on purpose: A and B point at the primary's database, and the primary sets a parent-domain cookie for C.
+- **The public demo fleet.** Its satellites run on the demo primary's database, and the primary sets `COOKIE_DOMAIN=.devresponse.ca` for its Option C app, the parent domain the satellites are served under. It demonstrates the flows; it is one security domain.
+
+`drk-deploy` says so when it configures, checks or deploys an A or B satellite that runs on the kit's database or shares a parent domain with the kit. It prints a warning and still deploys ([`vercel-cli/README.md`](../vercel-cli/README.md)). It cannot see which role `DATABASE_URL` signs in as, so it takes a satellite recorded as having its own database (`init --own-database`) at its word: record that only when the credentials are its own too.
 
 ## 2. How the SSO handoff works (Options A & B)
 
@@ -82,7 +97,7 @@ sequenceDiagram
 | `NEXT_PUBLIC_APP_NAME` / `NEXT_PUBLIC_APP_URL` / `NEXT_PUBLIC_PRODUCTION_HOST` | the satellite's own identity | inlined at build time |
 | `BETTER_AUTH_SECRET` | **its own** (≥32 chars) | never shared with the primary |
 | `BETTER_AUTH_URL` | the satellite's own origin | |
-| `DATABASE_URL` / `DB_SCHEMA` | **its own** database (or own schema on a shared instance) | `DB_SCHEMA` defaults to `auth` |
+| `DATABASE_URL` / `DB_SCHEMA` | **its own** database, or its own schema on a shared instance, either way signing in **as its own Postgres role** | `DB_SCHEMA` defaults to `auth`. Neither a new database nor a different `DB_SCHEMA` is a boundary while the role can reach the primary's schema (§1.1). Either way needs the §4.5 changes |
 | `ADMIN_TRUSTED_ORIGINS` | the satellite's own origin | feeds Better Auth `trustedOrigins` + the origin guard on the consume POST |
 | `SSO_HANDOFF_ISSUER` | the **primary's** origin URL | the satellite fetches `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json` to verify — must be reachable from the satellite |
 | `SSO_HANDOFF_AUDIENCE_PREFIX` | same as primary (e.g. `devresponse-app`) | |
@@ -126,7 +141,7 @@ The kit's handoff was built for **same-database** issuer/consumer pairs, and the
 1. **Nonce model.** The nonce row is INSERTed at launch into the *issuer's* `app_sso_handoff_nonces`, and the consume POST **burns that pre-existing row**. Across two databases there is no row to burn → every handoff 401s. Fix: replace the burn with **insert-if-absent** replay protection — a local `sso_consumed_nonces` table (UNIQUE `jti`); INSERT on consume; unique-violation = replay.
 2. **User provisioning.** Session creation throws `"unknown user"` when the token's `sub` has no local Better Auth `user` row, and the stock consume POST does **not** provision. Fix: upsert the Better Auth `user` (id = `sub`, email from claims, `emailVerified: true`) — plus the thin `app_users` row under Option A — *before* creating the session.
 
-Both changes are specified precisely in [Design: Satellite Apps §2.1](./design-satellite-apps.md#21-three-code-facts-verified-in-source-that-shape-the-rewrite) and acknowledged in the reference apps' READMEs. If instead your satellite **shares the primary's database instance and schema-per-app is not in play for auth tables** (i.e. it can see the primary's nonce and user rows), the stock code works as-is — but at that point evaluate whether Option C is the honest description of your topology.
+Both changes are specified precisely in [Design: Satellite Apps §2.1](./design-satellite-apps.md#21-three-code-facts-verified-in-source-that-shape-the-rewrite) and acknowledged in the reference apps' READMEs. If instead your satellite **can see the primary's nonce and user rows** (the primary's database, or a role with privileges on its schema), the stock code works as-is. But it can then write those rows too, so it is **not contained**: the topology is security-equivalent to Option C whatever the satellite's session model (§1.1), and should be chosen, and described, as such.
 
 ### 4.6 The signed-out path
 
@@ -188,12 +203,13 @@ Each app folder is self-contained (own `package.json` + `.npmrc`): copy it out, 
 
 Every app keeps the kit's multi-stage `Dockerfile` (`output: "standalone"`, non-root) and compose setup — the whole [Docker guide](./docker.md) applies per app. Remember the boot-required env (including all four `SSO_HANDOFF_*`) and run migrations as a separate init step **per app database** — never from an Option C satellite.
 
-### 6.4 Databases — three topologies
+### 6.4 Databases — four topologies
 
 | Topology | Fits | Notes |
 | --- | --- | --- |
-| **Separate database per satellite** | A, B | Hard isolation; the default assumption for third-party satellites. Requires the §4.5 code changes. |
-| **One Postgres instance, one schema per app** (`DB_SCHEMA`) | A, B | Cost/ops consolidation only — sharing the *instance* does not share auth; each app still has its own `user`/`session`, still bridged by the handoff. |
+| **Separate database per satellite, with its own role** | A, B | The database half of containment only when the credentials are separate too: a separate cluster or project, or a dedicated role that is not the primary's. A new database reached as the primary's role is not a boundary, because roles are cluster-wide and `CONNECT` is granted to `PUBLIC` by default (§1.1). The satellite's host must also sit outside the primary's `COOKIE_DOMAIN`. The default assumption for third-party satellites. Requires the §4.5 code changes. |
+| **One Postgres instance, one schema per app** (`DB_SCHEMA`), **one role per app** | A, B | Cost/ops consolidation. Isolating only if each app connects as its own role with no privileges on the others' schemas: `DB_SCHEMA` sets the `search_path` and nothing else, so under a shared or over-granted role the satellite reads and writes the primary's `auth.*` with a qualified name. Requires the §4.5 code changes. |
+| **The primary's database and schema** (the stock forks, the §6.6 rig) | A, B | Works with the stock code, and is **not contained**: security-equivalent to Option C (§1.1). First-party, co-trusted satellites only. |
 | **Shared `auth` schema** | C | The satellite reads the primary's `auth.session`/`auth.user`; app-specific tables belong in the satellite's own schema. |
 
 ### 6.5 Cron & email
@@ -207,11 +223,11 @@ The **suggested local topology** mirrors a live subdomain deployment: the primar
 | App | URL | Cookie host |
 | --- | --- | --- |
 | Primary | `http://devresponse.local:3000` | `.devresponse.local` (parent-domain, via `COOKIE_DOMAIN`) |
-| A (`app-standalone`) | `http://app1.devresponse.local:3001` | `app1.devresponse.local` (own cookie — isolated) |
-| B (`app-handoff`) | `http://app2.devresponse.local:3002` | `app2.devresponse.local` (own cookie — isolated) |
+| A (`app-standalone`) | `http://app1.devresponse.local:3001` | `app1.devresponse.local` (own host-only session cookie; the primary's parent-domain cookie arrives too) |
+| B (`app-handoff`) | `http://app2.devresponse.local:3002` | `app2.devresponse.local` (own host-only session cookie; the primary's parent-domain cookie arrives too) |
 | C (`app-shared`) | `http://app3.devresponse.local:3003` | `.devresponse.local` — **the primary's parent-domain cookie**, exactly like a production Option C fleet |
 
-This exercises the *real* mechanics of a live fleet — per-subdomain cookie isolation for A/B, and the parent-domain shared session for C — instead of localhost approximations.
+This exercises the *real* mechanics of a live fleet — per-subdomain session cookies for A/B, and the parent-domain shared session for C — instead of localhost approximations. It is a mixed fleet on one database, so none of its satellites is contained (§1.1).
 
 **Step-by-step** (assumes the `devresponseapps` checkout sits next to the kit's):
 
@@ -274,7 +290,7 @@ This exercises the *real* mechanics of a live fleet — per-subdomain cookie iso
    BETTER_AUTH_SECRET="<its own 32+ char secret>"
    BETTER_AUTH_URL="http://app1.devresponse.local:3001"
    ADMIN_TRUSTED_ORIGINS="http://app1.devresponse.local:3001"
-   DATABASE_URL="postgresql://devresponse:devresponse@localhost:5444/devresponse_db"  # the PRIMARY's DB — same-DB topology
+   DATABASE_URL="postgresql://devresponse:devresponse@localhost:5444/devresponse_db"  # the PRIMARY's DB — same-DB topology, NOT contained (§1.1)
    DB_SCHEMA="auth"
    SSO_HANDOFF_ISSUER="http://devresponse.local:3000"   # the satellite verifies against <issuer>/api/sso/jwks.json
    SSO_HANDOFF_AUDIENCE_PREFIX="devresponse-app"
@@ -301,8 +317,8 @@ Why these steps look the way they do:
 
 - **Every app runs `next dev -H <its-hostname>`.** Route handlers build absolute URLs from the request URL (the consume → confirm redirect), and the dev server normalizes unknown hosts to `localhost` unless it is bound to the hostname. The hostnames also need to be in `allowedDevOrigins` in each `next.config.mjs` (the kit and the forks ship `*.devresponse.local` + `*.localtest.me`).
 - **The CSP `upgrade-insecure-requests` directive is production-only.** `localhost` is exempt (a trustworthy origin), but on an `http://*.devresponse.local` host the browser would silently upgrade every subresource *and the confirm form's POST* to `https://` — the handoff then dies with no request ever reaching the satellite. The kit and the forks guard it on `NODE_ENV === "production"`.
-- A/B point at the **primary's database** locally (the same-DB topology, §4.5) so the shipped consume code works unchanged; their distinct `BETTER_AUTH_SECRET`s and per-host cookies keep the sessions separate.
-- **Handoff satellites under a `COOKIE_DOMAIN` primary need their own cookie prefix.** Once the primary issues a parent-domain session cookie (this rig; any fleet that includes Option C), that cookie reaches **every** subdomain under Better Auth's default cookie name — it shadows an A/B satellite's own host-only session cookie (same name; the older cookie sorts first), fails signature validation against the satellite's secret, and the handoff appears to never stick. Give each handoff satellite a distinct `advanced.cookiePrefix` (and pass the same prefix to the proxy's `getSessionCookie` check) — the reference forks use `drk-standalone` / `drk-handoff`.
+- A/B point at the **primary's database** locally (the same-DB topology, §4.5) so the shipped consume code works unchanged; their distinct `BETTER_AUTH_SECRET`s and per-host cookies keep the sessions separate. Separate sessions are not containment: on the primary's database, and under this rig's `.devresponse.local` parent cookie, a compromised A or B app reaches everything a C app does (§1.1). Fine for a dev rig; not a topology to hand a third party.
+- **Handoff satellites under a `COOKIE_DOMAIN` primary need their own cookie prefix.** Once the primary issues a parent-domain session cookie (this rig; any fleet that includes Option C), that cookie reaches **every** subdomain under Better Auth's default cookie name — it shadows an A/B satellite's own host-only session cookie (same name; the older cookie sorts first), fails signature validation against the satellite's secret, and the handoff appears to never stick. Give each handoff satellite a distinct `advanced.cookiePrefix` (and pass the same prefix to the proxy's `getSessionCookie` check) — the reference forks use `drk-standalone` / `drk-handoff`. The prefix fixes the shadowing only: the primary's cookie still reaches the satellite's server on every request, which is why a satellite that must be contained lives outside `COOKIE_DOMAIN` altogether (§1.1).
 - `.local` names ride the **hosts file** (Windows resolves it ahead of DNS/mDNS); if a VPN or DNS agent interferes, the `*.localtest.me` fallback needs no hosts entries at all.
 
 ### 6.7 Migration & first-boot order (A/B)
@@ -341,10 +357,10 @@ More: [Troubleshooting](./troubleshooting.md) covers the kit-wide failure modes.
 
 ## 8. Security summary
 
-- The handoff is **asymmetric** (review #5): only the primary holds `SSO_HANDOFF_PRIVATE_KEY`; satellites verify against its public JWKS and can mint nothing — for themselves or for siblings. Store the private key like `BETTER_AUTH_SECRET`, keep it distinct from `API_JWT_PRIVATE_KEY`, and rotate it on the primary alone via `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY` (satellites follow automatically).
+- The handoff is **asymmetric** (review #5): only the primary holds `SSO_HANDOFF_PRIVATE_KEY`; satellites verify against its public JWKS and can mint no handoff token — for themselves or for siblings. Store the private key like `BETTER_AUTH_SECRET`, keep it distinct from `API_JWT_PRIVATE_KEY`, and rotate it on the primary alone via `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY` (satellites follow automatically).
 - The token carries only `sub`, `email`, `locale`, `targetApplicationId` and `jti` (review #60): it rides in a URL, so it never carries organization/role context — a satellite derives authority from its own store.
-- A/B satellites are separate security domains; C satellites are the same security domain as the primary. Choose accordingly, and re-read [API Security §8](./api-security.md#8-third-party-and-satellite-web-apps) before giving any external team a C-style integration.
-- **Mixed fleets (C alongside A/B) have one extra rule:** the moment the primary issues a parent-domain cookie for C, that cookie reaches every subdomain — each handoff satellite must run a distinct `advanced.cookiePrefix` so the foreign cookie can't shadow its own session (§6.6). The shadowing fails *closed* (the satellite sees no session), but it looks like a broken handoff.
+- Minting no token is not the same as being contained. An A/B satellite is a separate security domain **only** when its database credentials cannot reach the primary's schema (a separate cluster or project, or a dedicated role that is not the primary's; a new database under the primary's role does not count) **and** it is on a host outside the primary's `COOKIE_DOMAIN` (§1.1). Otherwise it is the same security domain as the primary, exactly like C, and C satellites always are. Choose accordingly, and re-read [API Security §8](./api-security.md#8-third-party-and-satellite-web-apps) before giving any external team an integration that is C in fact, whatever its option letter.
+- **Mixed fleets (C alongside A/B) have one extra rule:** the moment the primary issues a parent-domain cookie for C, that cookie reaches every subdomain — each handoff satellite must run a distinct `advanced.cookiePrefix` so the foreign cookie can't shadow its own session (§6.6). The shadowing fails *closed* (the satellite sees no session), but it looks like a broken handoff. The prefix does not keep the primary's cookie away from the satellite's server, so an A/B satellite that must be contained belongs outside `COOKIE_DOMAIN`, ideally on a different registrable domain (§1.1).
 - The consumer never trusts `aud` alone: every token is bound to the satellite's own `SSO_HANDOFF_APPLICATION_ID` (`targetApplicationId` claim + nonce row), the catalog refuses duplicate audiences, impersonated primary sessions cannot launch, and both endpoints are rate-limited before any audit write (§2). Below the limit, a refusal decided before the token verifies (or, on launch, before a session exists) is logged and counted, never audited, so an anonymous loop cannot grow the append-only audit table (F-15).
 - A satellite that needs the machine API is *also* an API client — issue it its own credential per [API Security §2](./api-security.md#2-which-credential-should-a-third-party-get); SSO artifacts are never API credentials.
 

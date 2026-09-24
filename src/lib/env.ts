@@ -104,7 +104,10 @@ const serverEnvSchema = z
      * Applied at the connection level via `search_path` (see
      * `src/db/schema-config.ts`). Must be a plain SQL identifier — it is
      * interpolated into DDL. Default `auth`; set a different value per
-     * deployment to isolate applications by schema.
+     * deployment to keep their tables apart. It is not a security boundary:
+     * a search_path grants nothing, so isolating deployments takes a Postgres
+     * role each; a separate database under the same role is no boundary
+     * (F-24).
      */
     DB_SCHEMA: z
       .string()
@@ -230,7 +233,10 @@ const serverEnvSchema = z
      * schema satellite model (Option C, docs/integration-satellite-apps.md):
      * the primary and every co-trusted satellite must then share the SAME
      * value so one session cookie spans the fleet. Never set it on a
-     * deployment whose subdomains are not all first-party and co-trusted.
+     * deployment whose subdomains are not all first-party and co-trusted:
+     * the browser sends the cookie to every host under the domain, so an A/B
+     * handoff satellite there receives it too and is no longer contained
+     * (F-24).
      *
      * When set it must cover BETTER_AUTH_URL's host and be a registrable
      * domain, written as `example.com` or `.example.com` (F-22, `superRefine`

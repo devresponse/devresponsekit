@@ -384,7 +384,9 @@ export const auth = betterAuth({
     // co-trusted satellites sharing this deployment's `auth` schema + secret
     // validate the same session with zero redirects. Unset (the default), the
     // cookie stays host-only and per-app isolation is preserved — see the env
-    // schema docstring and docs/integration-satellite-apps.md §5.
+    // schema docstring and docs/integration-satellite-apps.md §5. Set, it
+    // reaches EVERY host under the domain, A/B handoff satellites included,
+    // whose servers then see this session on each request (F-24, §1.1).
     ...(env.COOKIE_DOMAIN
       ? { crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN } }
       : {}),

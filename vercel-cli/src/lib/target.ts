@@ -18,6 +18,10 @@ import { CliError } from "./log.js";
  *     this reason — see `scripts/db-owned-by-kit.mjs` in each app);
  *   - Option C shares the kit's SESSION, which means the same
  *     `BETTER_AUTH_SECRET` and a parent-domain cookie; A and B must not.
+ *   - an A or B satellite is contained only off the kit's database and
+ *     outside its cookie domain (F-24). The default puts it on the kit's
+ *     database, so the CLI warns rather than refuses: see
+ *     `containmentWarnings`.
  *
  * Everything in this file is pure so the rules can be tested directly: this
  * package has no CI, so anything not covered here is unverified forever.
@@ -43,6 +47,25 @@ export type SatelliteDatabase = "shared-with-kit" | "own";
 
 export const SATELLITE_OPTIONS: readonly SatelliteOption[] = ["standalone", "handoff", "shared"];
 export const SATELLITE_DATABASES: readonly SatelliteDatabase[] = ["shared-with-kit", "own"];
+
+/**
+ * What `init` prints when it asks which option. Kept here so a test can hold
+ * the wording to the defaults: this list once told the operator that A had its
+ * "own database" while `init` defaulted it to the kit's (F-24), and which of
+ * the two is true decides whether a compromised satellite is contained.
+ */
+export const SATELLITE_OPTION_SUMMARIES: Readonly<Record<SatelliteOption, string>> = {
+  standalone: "own session and local profile, signs in via an SSO handoff",
+  handoff: "like A, with no local profile table",
+  shared: "shares the KIT's database, secret and session cookie",
+};
+
+/**
+ * Where the containment conditions are written up, printed with every
+ * containment warning. Relative to the kit checkout this CLI lives in; a test
+ * resolves the anchor against the real document.
+ */
+export const CONTAINMENT_DOC = "docs/integration-satellite-apps.md#11-when-a-or-b-is-actually-contained";
 
 /** The satellite half of `.drk-deploy.json`. Present only for a satellite. */
 export interface SatelliteConfig {
@@ -310,6 +333,146 @@ export function satelliteConfigProblems(input: SatelliteCheckInput): ConfigProbl
   }
 
   return problems;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Containment (F-24): warnings, never problems                       */
+/* ------------------------------------------------------------------ */
+
+export interface ContainmentWarning {
+  what: string;
+  why: string;
+  hint: string;
+}
+
+/**
+ * Why this A or B satellite is NOT contained, when it is not.
+ *
+ * The handoff guarantees that a compromised satellite forges no TOKEN: it holds
+ * no signing key. "Contained" is a stronger claim, and it rests on two things
+ * the handoff does not control:
+ *
+ *   1. The database. On the kit's, this app's credentials reach the primary's
+ *      `user`, `account`, `session` and `app_*` tables, and setting a password,
+ *      granting a role or reading a live reset token there takes over any
+ *      account, superadmins included. `DB_SCHEMA` does not help: it is a
+ *      search_path, and a schema-qualified name walks straight past it. Nor
+ *      does a new database on its own: roles are cluster-wide and CONNECT is
+ *      granted to PUBLIC by default, so the kit's role with another database
+ *      name in the URL changes the name back. The boundary is the ROLE.
+ *   2. The cookie domain. The kit sets `COOKIE_DOMAIN` for any Option C
+ *      satellite, and every host under it then receives the kit's session
+ *      cookie on every request, which a compromised server can replay on the
+ *      kit. A distinct cookie prefix stops shadowing, not theft.
+ *
+ * Either one makes the satellite security-equivalent to Option C.
+ *
+ * WARNINGS, never counted problems: `deploy` refuses on problems, and every
+ * satellite deployed so far runs on the kit's database. Those must keep
+ * deploying; what must stop is anyone reading "handoff consumer" as
+ * "contained". Option C gets no warning, because it shares the kit's security
+ * domain by definition and `describeProfile` already says so.
+ *
+ * What the CLI cannot see, it does not claim. A satellite config names the kit
+ * only by its origin, so the kit's actual COOKIE_DOMAIN is unknown here and the
+ * cookie warning is about the parent domain this host SHARES with the issuer,
+ * which is what that setting would have to cover (or, on one shared host, the
+ * host itself: cookies are not scoped by port). And `database: "own"` is taken
+ * at its word: Vercel never returns the value of DATABASE_URL. So `own` has to
+ * mean this app's own ROLE as well as its own database, and `init` and the
+ * DATABASE_URL comment say so where that answer is given.
+ */
+export function containmentWarnings(input: {
+  profile: SatelliteProfile;
+  origin: string;
+}): ContainmentWarning[] {
+  const { profile } = input;
+  if (profile.sharesSession) return [];
+  const warnings: ContainmentWarning[] = [];
+
+  if (profile.database === "shared-with-kit") {
+    warnings.push({
+      what: "database",
+      why: "this satellite runs on the KIT's database, so a compromise of its server reads and writes the primary's auth tables (users, credentials, sessions, roles): platform-wide takeover, superadmins included. It is security-equivalent to Option C, not contained",
+      hint: `Contained only when DATABASE_URL signs in as a Postgres ROLE with no privileges on the kit's schema: one on a separate cluster or project, or a dedicated role that is not the kit's. A new database under the kit's role is no boundary (roles are cluster-wide), nor is a role made in the Neon console (it joins neon_superuser, which writes every table; create it with SQL), and a different DB_SCHEMA is a search_path, not a boundary. Then record it with \`drk-deploy init --own-database\`.`,
+    });
+  }
+
+  const own = originOf(input.origin);
+  const ownHost = own === null ? "" : hostOf(own);
+  const issuerHost = hostOf(profile.issuerOrigin);
+  const parent = own === null ? null : sharedParentDomain(ownHost, issuerHost);
+  if (parent !== null && bareHost(ownHost) === bareHost(issuerHost)) {
+    // One host, two ports. No COOKIE_DOMAIN is needed for the kit's cookie to
+    // arrive: even its default host-only cookie is sent here.
+    warnings.push({
+      what: "cookie domain",
+      why: `this app and the kit share one host (\`${parent}\`), and cookies are not scoped by port, so every visitor's browser sends the kit's session cookie here whether or not the kit sets COOKIE_DOMAIN, and a compromise of this app's server can replay it on the kit. A distinct cookie prefix stops shadowing, not theft`,
+      hint: "Contained only on a host of its own outside the kit's COOKIE_DOMAIN, ideally a different registrable domain.",
+    });
+  } else if (parent !== null) {
+    warnings.push({
+      what: "cookie domain",
+      why: `this host and the kit (${issuerHost}) both sit under \`${parent}\`. If the kit's COOKIE_DOMAIN is \`.${parent}\` or wider (Option C needs one), every visitor's browser sends the kit's session cookie here, and a compromise of this app's server can replay it on the kit. A distinct cookie prefix stops shadowing, not theft`,
+      hint: "Contained only on a host outside the kit's COOKIE_DOMAIN, ideally a different registrable domain.",
+    });
+  }
+
+  return warnings;
+}
+
+/**
+ * Hosts that are public suffixes in their own right: a browser refuses a
+ * cookie scoped to one, so two apps under it share nothing a cookie can span.
+ * Only the one this CLI's deployments land on by default. See
+ * `isCookieDomainShaped` for why there is no full public-suffix list here.
+ */
+const SHARED_HOSTING_SUFFIXES: readonly string[] = ["vercel.app"];
+
+/**
+ * A host as a cookie sees it: lower-case, no port, no trailing dot. An IPv6
+ * literal keeps its brackets (`[::1]:3000` is `[::1]`, not `[`).
+ */
+function bareHost(host: string): string {
+  const lower = host.trim().toLowerCase();
+  const v6 = /^(\[[^\]]*\])(?::\d*)?$/.exec(lower);
+  return (v6 ? (v6[1] ?? "") : (lower.split(":")[0] ?? "")).replace(/\.$/, "");
+}
+
+/**
+ * The narrowest parent domain both hosts sit under, which is what a cookie
+ * domain covering both would have to include. For ONE host on two ports it is
+ * that host, IP literals and single labels such as `localhost` included:
+ * cookies are not scoped by port (RFC 6265 §8.5), so the two share every
+ * cookie, host-only ones too. Null when no cookie can span them: nothing in
+ * common, only a bare TLD, a shared-hosting suffix such as `vercel.app`, or
+ * two different IP literals.
+ *
+ * Without a public-suffix list, `a.co.uk` and `b.co.uk` come back as `co.uk`.
+ * That errs toward a warning a person can dismiss, never toward silence.
+ */
+export function sharedParentDomain(hostA: string, hostB: string): string | null {
+  const bareA = bareHost(hostA);
+  const bareB = bareHost(hostB);
+  if (!bareA || !bareB) return null;
+  if (bareA === bareB) return bareA;
+
+  const labelsOf = (bare: string): string[] | null => {
+    if (bare.startsWith("[")) return null; // IPv6 literal: no parent domain
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(bare)) return null;
+    return bare.split(".");
+  };
+  const a = labelsOf(bareA);
+  const b = labelsOf(bareB);
+  if (!a || !b) return null;
+
+  let common = 0;
+  while (common < a.length && common < b.length && a[a.length - 1 - common] === b[b.length - 1 - common]) {
+    common += 1;
+  }
+  if (common < 2) return null;
+  const parent = a.slice(a.length - common).join(".");
+  return SHARED_HOSTING_SUFFIXES.includes(parent) ? null : parent;
 }
 
 /* ------------------------------------------------------------------ */

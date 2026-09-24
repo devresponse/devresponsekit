@@ -20,8 +20,9 @@ import {
  * The CONSUMER side of review #5 — a satellite that holds NO signing key.
  * It verifies handoffs against the issuer's published JWKS
  * (`${SSO_HANDOFF_ISSUER}/api/sso/jwks.json`, fetched by jose's
- * `createRemoteJWKSet`) and can therefore forge nothing for itself or any
- * sibling. `fetch` is stubbed to play the primary's JWKS endpoint.
+ * `createRemoteJWKSet`) and can therefore forge no handoff token for itself
+ * or any sibling (which is not, alone, containment: F-24). `fetch` is stubbed
+ * to play the primary's JWKS endpoint.
  */
 const ISSUER = "https://primary.test";
 const JWKS_URL = "https://primary.test/api/sso/jwks.json";

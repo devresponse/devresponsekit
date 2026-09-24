@@ -10,8 +10,16 @@ import { Pool, type PoolConfig } from "pg";
  * CONNECTION level via the libpq `search_path`, so every unqualified Kysely
  * query, every seed insert, and Better Auth's own migrator resolve to it
  * with no per-query schema qualification. This is what lets future
- * applications share one database while staying isolated by schema: a second
- * deployment simply sets a different `DB_SCHEMA` — no code changes.
+ * applications share one database with their tables kept apart by schema: a
+ * second deployment simply sets a different `DB_SCHEMA` — no code changes.
+ * Apart is not isolated: `search_path` only decides where UNQUALIFIED names
+ * resolve, and grants nothing. A role that can reach another deployment's
+ * schema reads and writes it with a qualified name, so a security boundary
+ * between deployments is a ROLE per deployment, with no privileges on the
+ * others' schemas. A separate database
+ * reached as the same role is none either: roles are cluster-wide and CONNECT
+ * is granted to PUBLIC by default (F-24, docs/integration-satellite-apps.md
+ * §1.1).
  *
  * Extensions (pgcrypto, pg_trgm) stay in `public`, which is kept on the
  * search_path, so `gen_random_uuid()` / `gin_trgm_ops` resolve from any app

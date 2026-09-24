@@ -461,8 +461,8 @@ export function satelliteEnvSpecs(context: DeploymentContext & { profile: Satell
       comment: usesKitDatabase
         ? shared
           ? "The KIT's Postgres — Option C reads the primary's user/session tables. Do not point it elsewhere."
-          : "The KIT's Postgres: this satellite does not own its schema, so it must be the primary's connection string."
-        : "This app's OWN Postgres (recorded as `database: own`) — separate from the kit's.",
+          : "The KIT's Postgres: this satellite does not own its schema, so it must be the primary's connection string. On it, a compromise of this app reaches the kit's auth tables: not contained."
+        : "This app's OWN Postgres (recorded as `database: own`) — separate from the kit's, and reached as this app's OWN role. The kit's role with another database name in the URL still reaches the kit's auth tables: not contained.",
       consequence: usesKitDatabase
         ? "The server will not boot. Pointed at a SEPARATE database it boots and looks healthy — /api/health/ready only proves the connection works — while every handoff nonce and session lookup misses, and `drk-deploy migrate` refuses to populate it."
         : "The server will not boot.",
@@ -664,8 +664,11 @@ export function satelliteEnvSpecs(context: DeploymentContext & { profile: Satell
  * satellite ships the SAME `/api/sso/launch` route the kit does. Give it
  * `SSO_HANDOFF_PRIVATE_KEY` and it stops being a consumer — it starts minting
  * handoff tokens the whole fleet will verify and trust. The EdDSA + JWKS
- * design exists so that compromising a satellite lets an attacker forge
- * NOTHING; a stray private key on a consumer hands that property back.
+ * design exists so that compromising a satellite lets an attacker forge NO
+ * handoff token; a stray private key on a consumer hands that property back.
+ * (Forging no token is not the same as being contained: on the kit's database
+ * or under its cookie domain a satellite is not, key or no key. See
+ * `containmentWarnings` in target.ts, F-24.)
  *
  * The rest are inert rather than dangerous, and are listed for the same reason
  * FORBIDDEN_ON_VERCEL lists seed variables: an inert setting that looks

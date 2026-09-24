@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
 
 /**
  * Integration tests for the RFC 7591 DCR route (Phase 2). The env, rate
@@ -31,7 +32,14 @@ vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
   consumeSharedToken: async (...a: unknown[]) => consumeToken(...a),
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditEvent(...a) }));
-vi.mock("@/lib/client-ip", () => ({ clientIpKey: () => "ip-1" }));
+// Keyed on the request's X-Forwarded-For when a test sets one, so the F-18
+// cases can drive distinct client IPs; every other case shares "ip-1".
+vi.mock("@/lib/client-ip", () => ({
+  clientIpKey: (headers: Headers) => {
+    const ip = headers.get("x-forwarded-for");
+    return ip ? `ip:${ip}` : "ip-1";
+  },
+}));
 vi.mock("@/lib/org-lookup.server", () => ({
   resolveOrganizationByIdentifier: (...a: unknown[]) => resolveOrg(...a),
 }));
@@ -46,10 +54,10 @@ const ORGS: Record<string, { id: string; slug: string; name: string }> = {
   other: { id: "22222222-2222-4222-8222-222222222222", slug: "other", name: "Other" },
 };
 
-function post(body: unknown): NextRequest {
+function post(body: unknown, ip?: string): NextRequest {
   return new NextRequest("https://app.test/api/mcp/register", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(ip ? { "x-forwarded-for": ip } : {}) },
     body: JSON.stringify(body),
   });
 }
@@ -183,6 +191,64 @@ describe("POST /api/mcp/register (Phase 2)", () => {
 
     it("with neither configured, any active org still resolves (open multi-tenant mode)", async () => {
       expect((await POST(post({ client_name: "A", organization: "other" }))).status).toBe(201);
+    });
+  });
+
+  // F-18: the deployment-wide floor used to be consumed BEFORE the per-IP
+  // bucket, so every request the IP bucket refused still spent a global
+  // token, and one IP looping at ~2 req/s held registration at zero for
+  // everyone. The real in-memory bucket sits behind the recording spy here and
+  // the clock is frozen, so the route's budgets (5 per IP, 60 globally) are exact.
+  describe("F-18: the global floor is charged only for requests the IP bucket admitted", () => {
+    const GLOBAL_KEY = "mcp.register:__global__";
+    const ATTACKER = "203.0.113.66";
+    const VICTIM = "198.51.100.77";
+    const keys = () => consumeToken.mock.calls.map((c) => String(c[0]));
+
+    beforeEach(async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-23T12:00:00Z"));
+      const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+      actual.__resetRateLimitForTests();
+      consumeToken.mockReset().mockImplementation(actual.consumeToken);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("one IP registering past the whole global burst cannot lock registration for another IP", async () => {
+      const attempts = 100; // more than the floor's 60-token burst
+      const statuses: number[] = [];
+      for (let i = 0; i < attempts; i++) {
+        statuses.push(
+          (await POST(post({ client_name: "junk", organization: "acme" }, ATTACKER))).status,
+        );
+      }
+      expect(statuses.slice(0, 5)).toEqual(Array(5).fill(201));
+      expect(statuses.slice(5)).toEqual(Array(attempts - 5).fill(429));
+      const attackerKeys = keys();
+
+      const victim = await POST(post({ client_name: "Real agent", organization: "acme" }, VICTIM));
+      expect(victim.status).toBe(201);
+      // Because only the 5 requests the attacker's own bucket admitted reached the floor.
+      expect(attackerKeys.filter((k) => k === GLOBAL_KEY)).toHaveLength(5);
+    });
+
+    it("the floor still caps many IPs, refusing only after the request's IP bucket admitted it", async () => {
+      // 12 IPs × their 5-token burst = the floor's 60 tokens.
+      for (let ip = 0; ip < 12; ip++) {
+        for (let i = 0; i < 5; i++) {
+          const res = await POST(post({ client_name: "A", organization: "acme" }, `10.0.0.${ip}`));
+          expect(res.status).toBe(201);
+        }
+      }
+      consumeToken.mockClear();
+      const res = await POST(post({ client_name: "A", organization: "acme" }, VICTIM));
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({
+        error: "temporarily_unavailable",
+        error_description: "Registration is rate limited.",
+      });
+      expect(keys()).toEqual([`mcp.register:ip:${VICTIM}`, GLOBAL_KEY]);
+      expect(registerMcpAgent).toHaveBeenCalledTimes(60);
     });
   });
 });

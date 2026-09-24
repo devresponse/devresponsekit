@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/observability/logger.server";
-import { rateLimitKey } from "@/lib/admin/rate-limit.server";
-import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
+import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
 import { clientIpKey } from "@/lib/client-ip";
 import { redactText, stripQuery } from "@/lib/observability/sentry-shared";
 
@@ -40,11 +39,13 @@ export const dynamic = "force-dynamic";
  *
  * Flood control (P2-5): the sink is attacker-influenced and potentially
  * high-volume, so beyond the body cap it (1) applies a coarse per-IP + global
- * token-bucket floor before any work — consumed from the SHARED Postgres
- * bucket (review #98), because an in-memory floor on a per-lambda runtime
- * multiplied by the invocation count and was global in name only; when the
- * database is unreachable the floor falls back to the in-process bucket
- * with a warning rather than dropping or 5xx-ing reports — (2) processes at most
+ * token-bucket floor before any work — per IP first, so a report its IP
+ * bucket refused never spends the global budget and one flooding IP cannot
+ * silence every real report deployment-wide (F-18); consumed from the SHARED
+ * Postgres bucket (review #98), because an in-memory floor on a per-lambda
+ * runtime multiplied by the invocation count and was global in name only;
+ * when the database is unreachable the floor falls back to the in-process
+ * bucket with a warning rather than dropping or 5xx-ing reports — (2) processes at most
  * MAX_VIOLATIONS_PER_REQUEST entries from a batch (a `reports+json` array can
  * pack ~1.8k into 64 KiB), and (3) aggregates to ONE log line per effective
  * directive (with a count) instead of one per violation.
@@ -123,19 +124,14 @@ function noContent(): NextResponse {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  // Flood floor FIRST (P2-5): cap request volume per IP + globally before any
-  // parsing or logging. Always 204 so a throttled probe learns nothing.
-  if (
-    !(await consumeSharedToken(rateLimitKey("csp.report", "__global__"), CSP_GLOBAL_LIMIT)).ok ||
-    !(
-      await consumeSharedToken(
-        rateLimitKey("csp.report", clientIpKey(request.headers)),
-        CSP_IP_LIMIT,
-      )
-    ).ok
-  ) {
-    return noContent();
-  }
+  // Flood floor FIRST (P2-5): cap request volume per IP, then globally, before
+  // any parsing or logging. The global floor is charged only for a report its
+  // IP bucket admitted (F-18). Always 204 so a throttled probe learns nothing.
+  const floorCheck = await consumeSourceThenGlobal("csp.report", clientIpKey(request.headers), {
+    source: CSP_IP_LIMIT,
+    global: CSP_GLOBAL_LIMIT,
+  });
+  if (!floorCheck.ok) return noContent();
 
   let raw: string;
   try {

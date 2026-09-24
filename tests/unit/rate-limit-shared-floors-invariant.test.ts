@@ -24,18 +24,35 @@ import { fileURLToPath } from "node:url";
  *      stays in memory and is not matched.
  *   3. Nowhere under `src/` is a `"__global__"` key consumed in memory — a new
  *      global floor in a new route must be shared from day one.
+ *
+ * F-18 added the ORDER: a deployment-wide floor may only be charged for a
+ * request its per-source (per-IP) bucket admitted, or one IP spends everyone's
+ * budget with requests it is itself refused. All three routes had consumed the
+ * global token first. The order now lives in ONE helper,
+ * `consumeSourceThenGlobal` (src/lib/admin/rate-limit-tiered.server.ts), and:
+ *
+ *   4. `__global__` is spelled nowhere under `src/` but that helper, so no
+ *      route can build a global key and consume it itself, before (or
+ *      without) its per-source bucket, whether it passes the key to
+ *      `consumeSharedToken` inline or through a variable.
+ *   5. The helper itself consumes from the shared bucket.
  */
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
 
-/** route file (under src/app/api) → the shared primitive it must use. */
-const PRE_AUTH_FLOORS: ReadonlyArray<[file: string, primitive: string]> = [
-  ["v1/auth/token/route.ts", "consumeSharedToken"],
-  ["mcp/register/route.ts", "consumeSharedToken"],
-  ["security/csp-report/route.ts", "consumeSharedToken"],
-  ["invitations/accept/route.ts", "enforceSharedRateLimit"],
-];
-
 const SHARED_MODULE = "@/lib/admin/rate-limit-shared.server";
+const TIERED_MODULE = "@/lib/admin/rate-limit-tiered.server";
+const TIERED_FILE = join(SRC_DIR, "lib", "admin", "rate-limit-tiered.server.ts");
+const TIERED_PRIMITIVE = "consumeSourceThenGlobal";
+
+/** route file (under src/app/api) → the module and shared primitive it must use. */
+const PRE_AUTH_FLOORS: ReadonlyArray<[file: string, module: string, primitive: string]> = [
+  // Per-IP bucket + global floor, in that order (F-18).
+  ["v1/auth/token/route.ts", TIERED_MODULE, TIERED_PRIMITIVE],
+  ["mcp/register/route.ts", TIERED_MODULE, TIERED_PRIMITIVE],
+  ["security/csp-report/route.ts", TIERED_MODULE, TIERED_PRIMITIVE],
+  // One per-user bucket, no global floor.
+  ["invitations/accept/route.ts", SHARED_MODULE, "enforceSharedRateLimit"],
+];
 const IN_MEMORY_CALL = /\b(?:consumeToken|enforceRateLimit)\s*\(/g;
 
 function walk(dir: string): string[] {
@@ -71,9 +88,9 @@ function inMemoryCallArgs(source: string): string[] {
 }
 
 describe("review #98: pre-auth floors consume from the shared bucket", () => {
-  it.each(PRE_AUTH_FLOORS)("%s uses %s for its pre-auth budget", (file, primitive) => {
+  it.each(PRE_AUTH_FLOORS)("%s uses %s's %s for its pre-auth budget", (file, module, primitive) => {
     const source = readFileSync(join(SRC_DIR, "app", "api", file), "utf8");
-    expect(source, `${file} must import ${SHARED_MODULE}`).toContain(`from "${SHARED_MODULE}"`);
+    expect(source, `${file} must import ${module}`).toContain(`from "${module}"`);
     expect(
       (source.match(new RegExp(`\\b${primitive}\\s*\\(`, "g")) ?? []).length,
       `${file} must call ${primitive}( for its pre-auth floor`,
@@ -113,12 +130,31 @@ describe("review #98: pre-auth floors consume from the shared bucket", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("discovers the global floors it protects (the scan is not vacuous)", () => {
-    const withGlobal = walk(SRC_DIR).filter((f) =>
-      readFileSync(f, "utf8").includes('"__global__"'),
+  it("the tiered helper consumes both of its tiers from the shared bucket", () => {
+    const source = readFileSync(TIERED_FILE, "utf8");
+    expect(source).toContain(`from "${SHARED_MODULE}"`);
+    expect((source.match(/\bconsumeSharedToken\s*\(/g) ?? []).length).toBe(2);
+    expect(inMemoryCallArgs(source)).toEqual([]);
+  });
+});
+
+describe("F-18: a global floor is charged only after its per-source bucket admits", () => {
+  it('"__global__" is spelled nowhere under src/ but the tiered helper', () => {
+    // A route that spells the global key can consume it itself, and taking it
+    // first is exactly the bug: every request its IP bucket then refused had
+    // already spent a deployment-wide token. Go through consumeSourceThenGlobal.
+    const spelledIn = walk(SRC_DIR)
+      .filter((f) => readFileSync(f, "utf8").includes("__global__"))
+      .map((f) => f.replace(/\\/g, "/"));
+    expect(spelledIn).toEqual([TIERED_FILE.replace(/\\/g, "/")]);
+  });
+
+  it("discovers the tiered floors it protects (the scan is not vacuous)", () => {
+    const callers = walk(join(SRC_DIR, "app")).filter((f) =>
+      new RegExp(`\\b${TIERED_PRIMITIVE}\\s*\\(`).test(readFileSync(f, "utf8")),
     );
     // token, register, csp-report — a shrink means a floor was dropped, not
     // that the surface got smaller.
-    expect(withGlobal.length).toBeGreaterThanOrEqual(3);
+    expect(callers.length).toBeGreaterThanOrEqual(3);
   });
 });

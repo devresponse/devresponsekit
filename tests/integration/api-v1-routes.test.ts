@@ -295,8 +295,11 @@ describe("POST /api/v1/auth/token", () => {
     );
     expect(res.status).toBe(429);
     // The deny came from the shared-floor spy (mocked above), not the
-    // limiter's DB-error fallback: the first bucket consulted is the global one.
-    expect(consumeToken.mock.calls[0]?.[0]).toBe("api.token:__global__");
+    // limiter's DB-error fallback: the first bucket consulted is the per-IP
+    // one, and its refusal never reaches the global floor (F-18).
+    expect(consumeToken.mock.calls.map((c) => String(c[0]))).toEqual([
+      expect.stringMatching(/^api\.token:(?:ip:|anon$)/),
+    ]);
   });
 });
 

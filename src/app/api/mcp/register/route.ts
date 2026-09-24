@@ -1,6 +1,5 @@
 import type { NextRequest } from "next/server";
-import { rateLimitKey } from "@/lib/admin/rate-limit.server";
-import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
+import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
 import { auditEvent } from "@/lib/audit.server";
 import { clientIpKey } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
@@ -17,10 +16,11 @@ import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 export const dynamic = "force-dynamic";
 
 // Registration is a sensitive creation endpoint: a hard per-IP bucket plus a
-// deployment-wide floor a spoofed XFF cannot escape (mirrors /auth/token).
-// Both consume from the SHARED Postgres bucket (review #98) — in memory the
-// floor was per lambda, and registration is exactly the kind of unauthenticated
-// creation an attacker fans out across invocations.
+// deployment-wide floor a spoofed XFF cannot escape (mirrors /auth/token),
+// charged only for requests the per-IP bucket admitted (F-18). Both consume
+// from the SHARED Postgres bucket (review #98) — in memory the floor was per
+// lambda, and registration is exactly the kind of unauthenticated creation an
+// attacker fans out across invocations.
 const REG_LIMIT = { capacity: 5, refillPerSec: 0.1 }; // ~1 / 10s, burst 5
 const REG_GLOBAL_LIMIT = { capacity: 60, refillPerSec: 1 };
 
@@ -47,19 +47,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   const env = getServerEnv();
   if (!env.MCP_REGISTRATION_ENABLED) return notFound();
 
-  // Rate-limit before any other DB work: a global floor + a per-IP bucket.
-  const globalCheck = await consumeSharedToken(
-    rateLimitKey("mcp.register", "__global__"),
-    REG_GLOBAL_LIMIT,
-  );
-  if (!globalCheck.ok) {
-    return oauthError("temporarily_unavailable", "Registration is rate limited.", 429);
-  }
-  const ipCheck = await consumeSharedToken(
-    rateLimitKey("mcp.register", clientIpKey(request.headers)),
-    REG_LIMIT,
-  );
-  if (!ipCheck.ok) {
+  // Rate-limit before any other DB work: the per-IP bucket, then the global
+  // floor, which a request refused per IP never reaches (F-18). Otherwise one
+  // IP looping past its own bucket held registration at zero for everyone.
+  const floorCheck = await consumeSourceThenGlobal("mcp.register", clientIpKey(request.headers), {
+    source: REG_LIMIT,
+    global: REG_GLOBAL_LIMIT,
+  });
+  if (!floorCheck.ok) {
     return oauthError("temporarily_unavailable", "Registration is rate limited.", 429);
   }
 

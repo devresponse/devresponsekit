@@ -788,8 +788,11 @@ test("an A or B satellite that shares a parent domain with the kit is warned abo
     warnings.map((w) => w.what),
     ["cookie domain"],
   );
-  assert.match(warnings[0].why, /`example\.com`/, "names the domain the kit's cookie would be scoped to");
-  assert.match(warnings[0].why, /demo\.example\.com/, "and the kit it would come from");
+  assert.equal(
+    warnings[0].why.split(". ")[0],
+    "this host and the kit (demo.example.com) both sit under `example.com`",
+    "names the kit and the domain its cookie would be scoped to",
+  );
   assert.match(warnings[0].why, /replay it on the kit/, "the consequence is named");
   assert.match(warnings[0].why, /prefix stops shadowing, not theft/, "a cookie prefix is not the fix");
   assert.match(warnings[0].hint, /different registrable domain/);

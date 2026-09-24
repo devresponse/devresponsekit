@@ -124,7 +124,14 @@ let GET: typeof ExportRoute.GET;
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
   state.dataRows = [
-    { id: "r1", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    {
+      id: "r1",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      // What `applyKeyset` selects for the next page's cursor (F-31): every
+      // resource's default sort is one column + the `id` tiebreaker.
+      __keyset: ["2026-01-01T00:00:00+00:00", "r1"],
+    },
   ];
   state.whereValues = [];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
@@ -200,6 +207,7 @@ describe("GET /export/[resource] — truncation signal (bug-3)", () => {
       primary_email: `u${i}@x.com`,
       display_name: `User ${i}`,
       status: "active",
+      __keyset: ["2026-01-01T00:00:00+00:00", `r${i}`],
     }));
 
   afterEach(() => {

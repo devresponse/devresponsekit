@@ -50,8 +50,11 @@ export const dynamic = "force-dynamic";
  *     than a growing `OFFSET`: each page seeks past the previous page's
  *     last row on `(…sort, id)`, so reading row 99,000 costs the same as
  *     reading row 0 instead of forcing the DB to scan-and-discard 99,000
- *     rows. The `id` tiebreaker makes the order total, so no row is
- *     dropped or duplicated across a page boundary.
+ *     rows. The `id` tiebreaker makes the order total, and the cursor
+ *     carries each seek value as Postgres rendered it — a `created_at`
+ *     keeps its microseconds instead of the millisecond JS `Date` (F-31) —
+ *     so no row is dropped or duplicated across a page boundary, even when
+ *     a bulk transaction wrote thousands of rows sharing one `now()`.
  *   - CSV escaping is implemented locally (see {@link csvEscape}); we
  *     do NOT add a CSV library dependency for one function.
  *   - A `admin.export.completed` (or `_failed`) audit row is written
@@ -344,7 +347,11 @@ const USERS_NULLABLE_SORTS: ReadonlySet<string> = new Set(["display_name"]);
 const AUDIT_NULLABLE_SORTS: ReadonlySet<string> = new Set(["actor_better_auth_user_id"]);
 const MEMBERSHIPS_NULLABLE_SORTS: ReadonlySet<string> = new Set(["source_provider"]);
 
-/** Reads the keyset cursor off the last row of a just-fetched page. */
+/**
+ * Reads the keyset cursor off the last row of a just-fetched page. `rows` must
+ * come straight from {@link applyKeyset}: the cursor is its full-precision
+ * `__keyset` rendering, not the row's typed `Date` fields (F-31).
+ */
 function pageCursor(
   rows: ReadonlyArray<Record<string, unknown>>,
   sort: ReturnType<typeof buildKeysetSort>,

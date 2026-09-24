@@ -1489,7 +1489,21 @@ contract as the matching list endpoint (§5.2). Supported resources: `users`,
   page seeks past the previous page's last row, so reading row 99,000 costs the
   same as reading row 0, and the `id` tiebreaker makes the order total so no row
   is dropped or duplicated across a page boundary
-  (`applyKeyset` / `buildKeysetSort` / `keysetCursorFrom`).
+  (`applyKeyset` / `buildKeysetSort` / `keysetCursorFrom`). The cursor is each
+  seek column as Postgres renders it (`to_jsonb(col) #>> '{}'`, selected
+  alongside the page as `__keyset`), never the driver's typed value: `pg` turns
+  a `timestamptz` into a millisecond JS `Date` while the column keeps
+  microseconds, and seeking from that truncated value skipped (descending) or
+  repeated (ascending) the rows of the boundary millisecond — a bulk
+  transaction's rows all share one `now()`, so an ascending export looped to the
+  cap (F-31). The rendering is ISO 8601 with a numeric offset whatever the
+  session's DateStyle / TimeZone, and the seek stays a plain `created_at < $1`
+  (index-friendly). A column repeated in `sort` is kept once, at its first
+  occurrence (a later term on it cannot change the order), which bounds the
+  seek key by the resource's sortable columns plus `id`; the rendering is one
+  `json_build_array` call and Postgres caps a call at 100 arguments. The CSV's
+  own timestamp columns are still written at millisecond precision.
+  `tests/db/export-keyset-precision.db.test.ts` pins it.
 - **Hard cap.** Exports are capped at **100k rows** (`MAX_EXPORT_ROWS`,
   operator-tunable via `ADMIN_EXPORT_MAX_ROWS`). On truncation the CSV appends a
   `# export_truncated: <limit>` sentinel line (truncation is only known

@@ -7,10 +7,12 @@ import {
   CLIENT_IP_HEADER,
   applyClientIpHeader,
   getClientIp,
+  clientIpForwardHeader,
   clientIpKey,
   normalizeClientIp,
   withTrustedClientIp,
 } from "@/lib/client-ip";
+import { type ClientIpSource, parseClientIpSource } from "@/lib/client-ip-source";
 
 const h = (map: Record<string, string>) => new Headers(map);
 
@@ -324,5 +326,167 @@ describe("clientIpKey — IPv6 /64 grouping (F-16)", () => {
       ),
       { numRuns: 500 },
     );
+  });
+});
+
+/**
+ * F-17: the default source trusts X-Forwarded-For, which is only sound when
+ * the edge overwrites or appends to it. With no proxy (Next keeps a
+ * client-sent X-Forwarded-For) or a proxy that only sets X-Real-IP, a client
+ * picked a fresh bucket per request. `CLIENT_IP_SOURCE` names the one header
+ * such an edge writes, and X-Forwarded-For is then ignored.
+ */
+describe("CLIENT_IP_SOURCE (F-17)", () => {
+  /** A direct request as Next hands it on: the client's own X-Forwarded-For kept (`??=`). */
+  const forged = (xff: string, extra: Record<string, string> = {}) =>
+    h({ "x-forwarded-for": xff, ...extra });
+
+  it("default (unset) and explicit `xff`: the rightmost X-Forwarded-For is trusted, even one a client typed", () => {
+    // This is WHY the default needs an edge that overwrites the header: on a
+    // direct request nothing distinguishes a typed value from a recorded one.
+    expect(getClientIp(forged("198.51.100.1"))).toBe("198.51.100.1");
+    expect(clientIpKey(forged("198.51.100.2"))).toBe("ip:198.51.100.2");
+    vi.stubEnv("CLIENT_IP_SOURCE", "xff");
+    expect(getClientIp(forged("198.51.100.1"))).toBe("198.51.100.1");
+    vi.stubEnv("CLIENT_IP_SOURCE", " XFF ");
+    expect(getClientIp(forged("spoof, 203.0.113.9", { "x-real-ip": "192.0.2.1" }))).toBe(
+      "203.0.113.9",
+    );
+  });
+
+  it("x-real-ip: reads ONLY X-Real-IP and ignores a forged X-Forwarded-For", () => {
+    vi.stubEnv("CLIENT_IP_SOURCE", "x-real-ip");
+    const headers = forged("198.51.100.1", { "x-real-ip": "203.0.113.9" });
+    expect(getClientIp(headers)).toBe("203.0.113.9");
+    expect(clientIpKey(headers)).toBe("ip:203.0.113.9");
+    expect(withTrustedClientIp(headers).get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+  });
+
+  it("x-real-ip: an X-Forwarded-For with no X-Real-IP is no IP at all (shared bucket, header removed)", () => {
+    vi.stubEnv("CLIENT_IP_SOURCE", "x-real-ip");
+    const headers = forged("198.51.100.1", { [CLIENT_IP_HEADER]: "198.51.100.1" });
+    expect(getClientIp(headers)).toBeNull();
+    expect(clientIpKey(headers)).toBe("anon");
+    expect(withTrustedClientIp(headers).has(CLIENT_IP_HEADER)).toBe(false);
+  });
+
+  it("PROPERTY: x-real-ip: rotating X-Forwarded-For never mints a new bucket", () => {
+    vi.stubEnv("CLIENT_IP_SOURCE", "x-real-ip");
+    fc.assert(
+      fc.property(fc.oneof(fc.ipV4(), fc.ipV6()), (xff) => {
+        expect(clientIpKey(forged(xff, { "x-real-ip": "203.0.113.9" }))).toBe("ip:203.0.113.9");
+      }),
+    );
+  });
+
+  it("a custom header (cf-connecting-ip): read alone, case-insensitively, and normalized", () => {
+    vi.stubEnv("CLIENT_IP_SOURCE", "CF-Connecting-IP");
+    const headers = forged("198.51.100.1", {
+      "x-real-ip": "198.51.100.2",
+      "cf-connecting-ip": "203.0.113.9",
+    });
+    expect(getClientIp(headers)).toBe("203.0.113.9");
+    expect(withTrustedClientIp(headers).get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    // The same F-16 normalization as the X-Forwarded-For path.
+    expect(getClientIp(h({ "cf-connecting-ip": "[2001:DB8::1]:443" }))).toBe("2001:db8::1");
+    expect(getClientIp(h({ "cf-connecting-ip": "203.0.113.9:4711" }))).toBe("203.0.113.9");
+    expect(clientIpKey(h({ "cf-connecting-ip": "2001:db8:1:2::a" }))).toBe("ip:2001:db8:1:2::/64");
+    // Missing, garbage or a list: no trustworthy IP, never a fallback to another header.
+    expect(getClientIp(forged("203.0.113.9", { "x-real-ip": "203.0.113.9" }))).toBeNull();
+    expect(getClientIp(h({ "cf-connecting-ip": "unknown" }))).toBeNull();
+    expect(getClientIp(h({ "cf-connecting-ip": "203.0.113.9, 198.51.100.1" }))).toBeNull();
+  });
+
+  it("a header source ignores TRUSTED_PROXY_COUNT", () => {
+    vi.stubEnv("CLIENT_IP_SOURCE", "true-client-ip");
+    vi.stubEnv("TRUSTED_PROXY_COUNT", "3");
+    expect(getClientIp(h({ "true-client-ip": "203.0.113.9" }))).toBe("203.0.113.9");
+  });
+
+  it("an invalid value fails closed at runtime: no IP, even with a well-formed chain", () => {
+    for (const invalid of ["x-forwarded-for", "x-drk-client-ip", "forwarded", "x real ip", "a,b"]) {
+      vi.stubEnv("CLIENT_IP_SOURCE", invalid);
+      const headers = forged("203.0.113.9", {
+        "x-real-ip": "203.0.113.9",
+        [CLIENT_IP_HEADER]: "203.0.113.9",
+      });
+      expect(getClientIp(headers), invalid).toBeNull();
+      expect(clientIpKey(headers), invalid).toBe("anon");
+      expect(withTrustedClientIp(headers).has(CLIENT_IP_HEADER), invalid).toBe(false);
+    }
+  });
+
+  it("clientIpForwardHeader names the header the resolver reads, so a self-call's IP is honoured", () => {
+    expect(clientIpForwardHeader()).toBe("x-forwarded-for");
+    for (const [source, header] of [
+      ["xff", "x-forwarded-for"],
+      ["X-Real-IP", "x-real-ip"],
+      ["fly-client-ip", "fly-client-ip"],
+    ] as const) {
+      vi.stubEnv("CLIENT_IP_SOURCE", source);
+      expect(clientIpForwardHeader()).toBe(header);
+      // Round trip: what a self-call sends is what the receiving route reads.
+      expect(getClientIp(h({ [clientIpForwardHeader()]: "203.0.113.9" }))).toBe("203.0.113.9");
+    }
+  });
+});
+
+/**
+ * F-17 decision: a chain SHORTER than TRUSTED_PROXY_COUNT takes its leftmost
+ * entry rather than failing closed. A client can only lengthen the chain, so
+ * failing closed would not stop an attacker (who pads it to the count) but
+ * would put every honest client of an over-counted deployment in ONE bucket.
+ */
+describe("getClientIp — chain shorter than TRUSTED_PROXY_COUNT (F-17)", () => {
+  it("takes the leftmost entry: the address the first real proxy recorded", () => {
+    vi.stubEnv("TRUSTED_PROXY_COUNT", "3");
+    expect(getClientIp(h({ "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.9");
+    expect(getClientIp(h({ "x-forwarded-for": "203.0.113.9, 10.0.0.2" }))).toBe("203.0.113.9");
+    // Two honest clients stay in two buckets instead of one shared one.
+    expect(clientIpKey(h({ "x-forwarded-for": "203.0.113.9" }))).toBe("ip:203.0.113.9");
+    expect(clientIpKey(h({ "x-forwarded-for": "198.51.100.7" }))).toBe("ip:198.51.100.7");
+  });
+});
+
+describe("parseClientIpSource (F-17)", () => {
+  const accepted: Array<[string | undefined, ClientIpSource]> = [
+    [undefined, { kind: "xff" }],
+    ["", { kind: "xff" }],
+    ["   ", { kind: "xff" }],
+    ["xff", { kind: "xff" }],
+    ["XFF", { kind: "xff" }],
+    ["x-real-ip", { kind: "header", header: "x-real-ip" }],
+    [" X-Real-IP ", { kind: "header", header: "x-real-ip" }],
+    ["cf-connecting-ip", { kind: "header", header: "cf-connecting-ip" }],
+    ["True-Client-IP", { kind: "header", header: "true-client-ip" }],
+    ["fly-client-ip", { kind: "header", header: "fly-client-ip" }],
+    ["x-azure-clientip", { kind: "header", header: "x-azure-clientip" }],
+  ];
+  for (const [raw, source] of accepted) {
+    it(`accepts ${JSON.stringify(raw)}`, () => {
+      expect(parseClientIpSource(raw)).toEqual({ ok: true, source });
+    });
+  }
+
+  const refused: Array<[string, RegExp]> = [
+    ["x-forwarded-for", /use `xff`/],
+    ["X-Forwarded-For", /use `xff`/],
+    ["x-drk-client-ip", /stamps FROM this setting/],
+    ["forwarded", /RFC 7239/],
+    ["x real ip", /single HTTP header name/],
+    ["x-real-ip,cf-connecting-ip", /single HTTP header name/],
+    ["x-real-ip:", /single HTTP header name/],
+    ["x-réal-ip", /single HTTP header name/],
+  ];
+  for (const [raw, reason] of refused) {
+    it(`refuses ${JSON.stringify(raw)}`, () => {
+      const parsed = parseClientIpSource(raw);
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) expect(parsed.reason).toMatch(reason);
+    });
+  }
+
+  it("refuses the app's own CLIENT_IP_HEADER (the parser spells it out, it cannot import it)", () => {
+    expect(parseClientIpSource(CLIENT_IP_HEADER).ok).toBe(false);
   });
 });

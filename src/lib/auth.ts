@@ -321,7 +321,8 @@ export const auth = betterAuth({
   advanced: {
     // Client IP for the built-in limiter (sign-in 3/10 s, reset 3/60 s) and
     // `session.ipAddress`: read ONLY the header `src/proxy.ts` derives with
-    // the app's TRUSTED_PROXY_COUNT model and always overwrites (review #35).
+    // the app's CLIENT_IP_SOURCE / TRUSTED_PROXY_COUNT model (F-17) and
+    // always overwrites (review #35).
     // Better Auth's default `x-forwarded-for` read trusts a single-value
     // header only, so multi-hop chains collapsed into one deployment-wide
     // `no-trusted-ip` bucket and a bare client-supplied value was trusted.

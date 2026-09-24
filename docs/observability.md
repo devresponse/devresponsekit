@@ -60,11 +60,15 @@ Two layers, both fail-safe (redact-by-default):
   root-span attributes in `contexts.trace.data` and each `spans[].data` (`url.full`,
   `url.query`, `http.request.header.*`, …), span descriptions, and the transaction name.
   The **client IP** is treated as user info and never sent: the IP-bearing proxy headers
-  the app itself reads for rate limiting (`x-forwarded-for`, `x-real-ip`, the
-  app-derived `x-drk-client-ip` that Better Auth's limiter keys on — review #35 —
-  `cf-connecting-ip`, `true-client-ip`, `x-vercel-forwarded-for`, `forwarded`, `via`, …)
-  are denied at write time and dropped by the hooks, as are the `http.client_ip` /
-  `user.ip_address` / `client.address` span attributes the Node HTTP instrumentation sets.
+  (`x-forwarded-for`, `x-real-ip`, the app-derived `x-drk-client-ip` that Better Auth's
+  limiter keys on — review #35 — `cf-connecting-ip`, `true-client-ip`,
+  `x-vercel-forwarded-for`, `forwarded`, `via`, …) are denied at write time and dropped by
+  the hooks, as are the `http.client_ip` / `user.ip_address` / `client.address` span
+  attributes the Node HTTP instrumentation sets. The deny list is a set of names plus any
+  header whose name contains `forwarded`, `-ip`, `remote-`, `via` or `-user`. A header you
+  name in `CLIENT_IP_SOURCE` that is not in the set and contains none of those fragments
+  (Azure Front Door's `x-azure-clientip`, for one) is **not** scrubbed: add it to `IP_HEADERS` in
+  `sentry-shared.ts` when you choose it.
   Reset URLs (`/reset-password/<token>`) and other one-time tokens are never sent. The SDK
   is also told not to _record_ cookies, query parameters, bodies, or user info in the first
   place (`dataCollection` in all three `Sentry.init` calls — this **replaces** the

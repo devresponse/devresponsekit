@@ -140,6 +140,18 @@ Terminate TLS at a reverse proxy / load balancer in front of the container
 and set `BETTER_AUTH_URL` / `NEXT_PUBLIC_APP_URL` to the public `https://`
 origin.
 
+**Do not publish port 3000 straight to clients.** The per-IP limits (Better
+Auth's sign-in limiter included) and the IPs on audit rows and sessions come from
+a request header, and with nothing in front of the container every such header is
+one the client sends: a random `X-Forwarded-For` per request is a fresh sign-in
+bucket, which means unlimited password guessing (F-17). The proxy in front must
+either **overwrite or append to** the client's `X-Forwarded-For` (keep the default
+`CLIENT_IP_SOURCE=xff`), or set a header of its own and name it, for example
+`CLIENT_IP_SOURCE=x-real-ip` behind nginx `proxy_set_header X-Real-IP $remote_addr;`.
+Set `CLIENT_IP_SOURCE` explicitly either way: a production container without it logs
+a warning at boot. See
+[Choosing the client-IP source](./configuration.md#choosing-the-client-ip-source).
+
 ### docker compose (app + Postgres) for local or single-host
 
 ```yaml
@@ -163,6 +175,9 @@ services:
   app:
     build: .
     depends_on: [db]
+    # Local use only. On a real host, publish a reverse proxy instead and let
+    # only it reach this port: with nothing in front, a client-sent
+    # X-Forwarded-For picks its own rate-limit bucket (see section 5).
     ports: ["3000:3000"]
     environment:
       DATABASE_URL: postgres://app:app@db:5432/app

@@ -143,6 +143,8 @@ describe("Edge instrumentation import graph", () => {
         "src/lib/request-id.ts",
         "src/lib/forwarded-hops.ts",
         "src/lib/env.ts",
+        // F-17: env.ts validates CLIENT_IP_SOURCE with this module's parser.
+        "src/lib/client-ip-source.ts",
         "src/sentry.edge.config.ts",
       ]),
     );

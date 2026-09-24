@@ -369,6 +369,29 @@ describe("/api/mcp", () => {
     ).toBeUndefined();
   });
 
+  it("forwards the client IP in the header CLIENT_IP_SOURCE names, which is what v1 reads (F-17)", async () => {
+    // Under a header source the v1 route ignores X-Forwarded-For, so sending
+    // the agent's IP there would leave every agent call with no audit IP and
+    // in the shared limiter bucket.
+    vi.stubEnv("CLIENT_IP_SOURCE", "x-real-ip");
+    try {
+      env.MCP_DISPATCH_BASE_URL = "http://127.0.0.1:3000";
+      await POST(
+        post(
+          { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "getMe", arguments: {} } },
+          // A forged X-Forwarded-For is not the agent's IP under this source.
+          { "x-forwarded-for": "198.51.100.1", "x-real-ip": "203.0.113.9" },
+        ),
+      );
+      const [, init] = fetchMock.mock.calls[0]!;
+      const sent = (init as { headers: Record<string, string> }).headers;
+      expect(sent["x-real-ip"]).toBe("203.0.113.9");
+      expect(sent["x-forwarded-for"]).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("substitutes path params and sends a JSON body (updateOauthClient → PATCH)", async () => {
     await POST(
       post({

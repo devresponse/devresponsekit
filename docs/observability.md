@@ -23,7 +23,7 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | **Pre-auth refusals** | `logPreAuthRefusal` (`src/lib/observability/pre-auth-refusal.server.ts`) | A request refused **before** its caller is authenticated — the CSRF origin guard on every cookie surface, an SSO consume without a verifiable token, a signed-out SSO launch — writes **no audit row** (an anonymous loop must not grow the append-only table, F-15). It logs one `kind: "pre_auth_refusal"` line (event type, reason, request id, capped `User-Agent`, method, path — no client IP, which the log stream never carries; `warn` for `denied`, `error` for `failure`) and increments `devresponsekit_pre_auth_refusals_total` ([§5](#5-metrics)). The full list is in [admin-manager.md §12](./admin-manager.md#12-audit-model). |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
 | **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` and `…_pre_auth_refusals_total{event_type}` business counters. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
-| **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Errors, transactions, and spans are all scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process — see [§3](#3-redaction--scrubbing-policy). |
+| **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Errors, transactions, spans, breadcrumbs and Session Replay are all scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process — see [§3](#3-redaction--scrubbing-policy). |
 | **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the database is reachable **and** the ledger holds every core migration the build needs, `503` with `reason: database_unreachable` or `schema_behind` otherwise (missing ids go to the log, not the body). Wire both to your orchestrator probes (see [deployment.md §4](./deployment.md#4-deploy--post-deploy-verification) and [docker.md §7](./docker.md)). |
 | **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged + captured to Sentry (not swallowed) so a fault that escaped every request boundary is visible in the log stream. They do **not** exit — Next 16 treats both as non-fatal — unless `PROCESS_FATAL_ON_UNCAUGHT=1` opts uncaught exceptions into `exit(1)` (review #23; see [configuration.md](./configuration.md)). |
 
@@ -55,22 +55,52 @@ Two layers, both fail-safe (redact-by-default):
   plaintext credential; the audit log records **metadata only**.
 - **Sentry** — `sentry-shared.ts` strips cookies, query strings, URL fragments, request
   bodies, the `referer` header, emails, bearer/API tokens, and secret-like values from
-  **every event kind**: error events (`beforeSend`), sampled **transactions**
-  (`beforeSendTransaction`), and their **spans** (`beforeSendSpan`) — including the
-  root-span attributes in `contexts.trace.data` and each `spans[].data` (`url.full`,
-  `url.query`, `http.request.header.*`, …), span descriptions, and the transaction name.
+  **every channel an event leaves by**:
+  - **error events** (`beforeSend`): the request, user, message, exception values,
+    breadcrumbs, the transaction name, and every context value whose key ends in `path` or
+    `url`. The last one matters because the `onRequestError` hook records the raw request
+    path, query included, as `contexts.nextjs.request_path` (F-23);
+  - sampled **transactions** (`beforeSendTransaction`) and their **spans**
+    (`beforeSendSpan`), including the root-span attributes in `contexts.trace.data`, each
+    `spans[].data` (`url.full`, `url.query`, `http.request.header.*`, …), span
+    descriptions, and the transaction name;
+  - **breadcrumbs** (`beforeBreadcrumb`), as they are recorded. The URL loses its query,
+    and the `http.query` / `http.fragment` keys are dropped: the SDK's outgoing-request
+    breadcrumbs on the server copy both verbatim;
+  - **Session Replay** (browser only, F-23), which none of the hooks above reach. The
+    `replay_event` (`urls`, `request.url`, the `Referer` header) goes through an event
+    processor. The SDK's own recording frames (navigation, request and asset spans; click
+    and hydration-error breadcrumbs) go through `beforeAddRecordingEvent`. rrweb's DOM
+    events (the page URL each snapshot starts with, each element's `href` / `src` /
+    `action`, and any other attribute value holding a token or an email) go through an
+    rrweb plugin. Text and typed inputs stay masked, media stays blocked, and hidden inputs
+    are masked as well. The plugin is installed through a private SDK field. If an SDK
+    upgrade removes that field, the app leaves Session Replay out instead of recording
+    unscrubbed. If an upgrade keeps the field but stops using it,
+    `tests/unit/sentry-replay.test.ts` fails, because it runs the real SDK and rrweb.
+
   The **client IP** is treated as user info and never sent: the IP-bearing proxy headers
   (`x-forwarded-for`, `x-real-ip`, the app-derived `x-drk-client-ip` that Better Auth's
   limiter keys on — review #35 — `cf-connecting-ip`, `true-client-ip`,
   `x-vercel-forwarded-for`, `forwarded`, `via`, …) are denied at write time and dropped by
   the hooks, as are the `http.client_ip` / `user.ip_address` / `client.address` span
   attributes the Node HTTP instrumentation sets. The deny list is a set of names plus any
-  header whose name contains `forwarded`, `-ip`, `remote-`, `via` or `-user`. A header you
-  name in `CLIENT_IP_SOURCE` that is not in the set and contains none of those fragments
-  (Azure Front Door's `x-azure-clientip`, for one) is **not** scrubbed: add it to `IP_HEADERS` in
-  `sentry-shared.ts` when you choose it.
-  Reset URLs (`/reset-password/<token>`) and other one-time tokens are never sent. The SDK
-  is also told not to _record_ cookies, query parameters, bodies, or user info in the first
+  header whose name contains `forwarded`, `-ip`, `remote-`, `via` or `-user`. On the server
+  and edge runtimes it also holds the header `CLIENT_IP_SOURCE` names, read at startup,
+  because that header can match none of those rules (Azure Front Door's `x-azure-clientip`
+  has no `-ip`). The browser never sees it: the edge adds it on the way in.
+
+  **One-time tokens in a URL are never sent.** Every URL- or path-valued field on the
+  channels above loses its query string and fragment. The only secret the app carries as a
+  **path segment**, Better Auth's `/reset-password/<token>`, is redacted by that route. It
+  is matched by route, not by shape: every other route parameter is a record id, a locale,
+  an org slug, an export name, a docs path or a provider id. Two tests fail when a new
+  parameterised route appears, even one that reuses a parameter name such as `[id]`: the
+  Better Auth endpoint classification, which lists each route path, and the `src/app` scan
+  in `tests/unit/sentry-server-scrub.test.ts`, which lists each dynamic directory by its
+  path.
+
+  The SDK is also told not to _record_ cookies, query parameters, bodies, or user info in the first
   place (`dataCollection` in all three `Sentry.init` calls — this **replaces** the
   deprecated `sendDefaultPii: false` bridge, so every deny list it used to apply is spelled
   out explicitly); the hooks are the backstop (review #22). Because `dataCollection` builds

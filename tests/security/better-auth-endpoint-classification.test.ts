@@ -5,6 +5,7 @@ import {
   isAdminPluginPath,
 } from "@/lib/auth-admin-surface";
 import { setSignupProvisioningSuppressed } from "@/lib/auth-signup-provisioning";
+import { stripQuery } from "@/lib/observability/sentry-shared";
 import type { auth as AuthInstance } from "@/lib/auth";
 import type * as NextJsIntegration from "better-auth/next-js";
 
@@ -351,5 +352,39 @@ describe("F-06: an impersonated session on the real instance reaches only the al
 
     expect((await call({ path: "/sign-out", method: "POST" }, cookie)).status).toBe(200);
     expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-23: a route parameter is part of the path Sentry records
+ * (`contexts.nextjs.request_path`, `request.url`, span names), and the
+ * scrubber redacts path segments by route (`RESET_PATH_TOKEN_RE` in
+ * src/lib/observability/sentry-shared.ts), not by shape. So every mounted
+ * route with a parameter is listed with what the parameter holds, and a
+ * Better Auth release that adds one fails here until someone decides whether
+ * it needs a redaction rule.
+ */
+const PATH_PARAMETERS: Record<string, string> = {
+  "/callback/:id": "the provider id (`google`, `github`): not a secret",
+  "/reset-password/:token": "the one-time reset token: stripQuery redacts it",
+};
+
+describe("F-23: every parameterised Better Auth route has a Sentry disposition", () => {
+  it("lists every mounted route with a path parameter", () => {
+    const parameterised = new Set(
+      mountedEndpoints()
+        .map((endpoint) => endpoint.path)
+        .filter((path) => path.includes("/:")),
+    );
+    expect([...parameterised].sort()).toEqual(Object.keys(PATH_PARAMETERS).sort());
+  });
+
+  it("strips each one as the catch-all route receives it", () => {
+    expect(stripQuery("/api/auth/reset-password/Qx9ResetToken?callbackURL=%2Fen")).toBe(
+      "/api/auth/reset-password/[redacted-token]",
+    );
+    expect(stripQuery("https://app/api/auth/callback/google?code=abc&state=def")).toBe(
+      "https://app/api/auth/callback/google",
+    );
   });
 });

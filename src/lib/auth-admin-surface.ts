@@ -263,8 +263,14 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
  * seeds the row's `expiresAt`, which the rolling refresh can extend; the bound
  * that holds is enforced in `getCurrentSession` — see
  * `IMPERSONATION_SESSION_MAX_AGE_SECONDS` in `session-lifetime.ts`.
+ *
+ * `defaultRole` — the plugin's own default (`"user"`), which its
+ * `user.create.before` hook stamps on every new row. Named so the synthetic
+ * user a duplicate sign-up returns (`customSyntheticUser` in `auth.ts`, F-20)
+ * carries the same role as a real one.
  */
 export const ADMIN_PLUGIN_OPTIONS = {
+  defaultRole: "user",
   allowImpersonatingAdmins: true,
   impersonationSessionDuration: IMPERSONATION_SESSION_MAX_AGE_SECONDS,
 } as const;

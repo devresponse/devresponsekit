@@ -482,11 +482,24 @@ Negative & edge cases
 - Empty required fields: Name empty -> "This field is required." (`validation.required`);
   Email empty/invalid -> "Enter a valid email address." (`validation.email`). The
   `*` marker appears on all three labels (all schema-required).
-- Duplicate email: Better Auth returns an error; the form maps *any* server error
-  to the generic "An unexpected error occurred. Please try again."
-  (`auth.unexpectedError`, `src/components/auth/email-password-sign-up-form.tsx:50`).
+- Duplicate email: indistinguishable from a new address in an organization that
+  requires verification (the default). Better Auth answers the same 200 for an
+  address that already has an account, so the form redirects to
+  `/en/verify-email` exactly as in S1. No account is created and no email is
+  sent. In DevTools, the response's `user` object has the same fields in the
+  same order as a new sign-up's, including `"role": "user"`; only `id`,
+  `createdAt` and `updatedAt` differ (F-20). In an organization that waives
+  verification, a new address is signed in straight away and an existing one is
+  not, so there the two can be told apart
+  ([Sign-up Policy](../auth-signup-policy.md)). Other server errors show the generic
+  "An unexpected error occurred. Please try again." (`auth.unexpectedError`).
   `TODO: verify` whether product wants a specific "email already registered"
-  message (current behavior is intentionally generic).
+  message. Showing one would reveal which addresses have accounts.
+- Response time (F-20): in the browser's DevTools Network tab, the
+  `POST /api/auth/sign-up/email` request takes about half a second (500-550 ms
+  plus network) for a new address and for an existing one alike. The server
+  holds these responses to a minimum time so that creating an account does not
+  show up as a slower answer (`src/lib/auth-response-floor.ts`).
 - Max-length: name over 200 chars -> `validation.max`; password over 128 ->
   `validation.passwordMax`.
 - Rate-limit: `TODO: verify` — no client handling of a sign-up rate-limit is
@@ -552,7 +565,10 @@ Negative & edge cases
 - Anti-enumeration: resending for an unknown or already-verified address shows the
   **same** neutral confirmation — the response never reveals whether the account
   exists or its state (`src/components/auth/resend-verification-form.tsx:51-60`).
-  Only a network error surfaces the generic "unexpected error".
+  Only a network error surfaces the generic "unexpected error". Its timing is the
+  same too (F-20): `POST /api/auth/send-verification-email` takes about half a
+  second (500-550 ms plus network) in DevTools for every address, because the
+  email is sent after the response.
 - Empty / invalid email in the Resend form -> "Enter a valid email address."
   (`validation.email`), via the shared `forgotPasswordSchema`.
 
@@ -587,7 +603,9 @@ field label from `common`; run in `uk` and confirm no raw keys.
 - Preconditions & test data: to see a real email arrive, use an existing account
   and check the outbox (emails are recorded through the outbox pipeline —
   `src/app/[locale]/(auth)/forgot-password/page.tsx:8-11`); the confirmation is
-  identical regardless.
+  identical regardless. The email is sent just after the response (F-20), so
+  its outbox row appears a moment after the confirmation; refresh the outbox if
+  it is not there yet.
 
 User stories
 
@@ -617,6 +635,7 @@ User stories
     |---|---|---|
     | 1 | Open `/en/forgot-password`, enter `nobody@example.com` | — |
     | 2 | Click "Send reset link" | The same "If an account exists…" confirmation appears; no "user not found" hint |
+    | 3 | In DevTools → Network, compare `POST /api/auth/request-password-reset` for `nobody@example.com` and for `user1@orga.local` | Both take about half a second (500-550 ms plus network). An existing account is not slower (F-20) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases

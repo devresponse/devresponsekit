@@ -11,6 +11,7 @@ import {
 import { requireApiPermission } from "@/lib/api-auth/v1-guard.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
  * Paginated read of the structured audit log (`admin.audit.read`). Reuses
  * the shared list-query contract; filters on `event_type` and `outcome`.
  */
-export async function GET(request: NextRequest) {
+export const GET = withV1Route(async function GET(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.audit.read");
   if (!guard.ok) return guard.response;
 
@@ -69,4 +70,4 @@ export async function GET(request: NextRequest) {
   );
 
   return v1JsonResponse(buildListResponse(items, total, query), request);
-}
+});

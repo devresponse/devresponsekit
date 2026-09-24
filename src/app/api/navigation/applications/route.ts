@@ -7,6 +7,7 @@ import { getSessionAccessContext } from "@/lib/session-access.server";
 import { loadApplicationsMenu } from "@/lib/navigation.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { auditEvent } from "@/lib/audit.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ const querySchema = z.object({
  *   - Never redirects (per §23). UI handles the error envelope.
  *   - Items are filtered server-side; never returns SSO tokens.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
@@ -57,4 +58,4 @@ export async function GET(request: NextRequest) {
 
   const body = await loadApplicationsMenu(access, queryParsed.data.locale);
   return NextResponse.json(body, { status: 200 });
-}
+});

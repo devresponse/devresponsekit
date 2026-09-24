@@ -12,6 +12,7 @@ import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
 import { logServerError } from "@/lib/observability/logger.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { captureServerError } from "@/lib/observability/server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -173,7 +174,7 @@ function landingLocale(payloadLocale: unknown, fallback: string | null): string 
  * The success path sets `Referrer-Policy: no-referrer` so the token never
  * leaks via the Referer header.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   // Mint/echo a correlation id up front (memoised per-request), so every
   // response and the audit rows share one id (OPS-OBS-4).
   const requestId = getOrCreateRequestId(request);
@@ -221,7 +222,7 @@ export async function GET(request: NextRequest) {
     });
     return ssoErrorResponse("invalid_token", 401, requestId);
   }
-}
+});
 
 /**
  * POST /api/sso/consume
@@ -236,7 +237,7 @@ export async function GET(request: NextRequest) {
  * (defeating the IdP-initiated login-CSRF the GET interstitial guards against,
  * P2-2).
  */
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const requestId = getOrCreateRequestId(request);
   const limited = await rateLimitConsume(request, requestId);
   if (limited) return limited;
@@ -363,4 +364,4 @@ export async function POST(request: NextRequest) {
     });
     return ssoErrorResponse("invalid_token", 401, requestId);
   }
-}
+});

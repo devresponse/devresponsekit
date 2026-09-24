@@ -13,6 +13,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,7 @@ function parseIsoDate(value: string | undefined): Date | null {
  * secret material — only the columns explicitly selected below are
  * surfaced.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.audit.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -172,4 +173,4 @@ export async function GET(request: NextRequest) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});

@@ -1315,7 +1315,8 @@
     "insufficient_scope": "Cette autorisation ne couvre pas cette action.",
     "forbidden_while_impersonating": "Cette action n'est pas disponible pendant l'usurpation d'identité d'un autre utilisateur.",
     "last_superadmin": "Il s'agit du dernier super-administrateur de la plateforme ; cette modification ne laisserait personne pour l'administrer.",
-    "organization_not_active": "Cette organisation n'est pas active. Réactivez-la d'abord."
+    "organization_not_active": "Cette organisation n'est pas active. Réactivez-la d'abord.",
+    "internal_error": "Une erreur s’est produite sur le serveur. Indiquez l’identifiant de requête en contactant le support."
   },
   "account": {
     "appTitle": "Compte",

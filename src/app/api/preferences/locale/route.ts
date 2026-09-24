@@ -9,6 +9,7 @@ import { isSupportedLocale, locales } from "@/config/i18n-config";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ const bodySchema = z.object({
  * `app_audit_events` (review #28 — one bucket shape for every first-party
  * cookie mutation).
  */
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // IMP-1: opted in. The secure shell's locale switcher posts here on every
   // change, including inside an impersonated session; refusing would break the
   // shell for a write that issues no credential.
@@ -103,4 +104,4 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true, locale: parsed.data.locale });
-}
+});

@@ -5,14 +5,15 @@ import type * as AdminRequestIdModule from "@/lib/admin/request-id.server";
 /**
  * Request-id provenance (review #99, #224).
  *
- * The correlation id ties the user-facing "Support ID", the `x-request-id`
- * response header, the Sentry tag, the stdout log line and
- * `app_audit_events.request_id` together. Honouring a client-supplied value
- * lets a caller collide or replay the ids operators search by (the audit
- * column is NOT unique) — a gap this app accepts in exchange for edge↔app
- * correlation — and `instrumentation.ts` tagged Sentry/stdout with the RAW
- * header, no format check at all, so control characters and markup reached
- * both sinks. That second half IS closed.
+ * The correlation id ties the `x-request-id` response header, the envelope's
+ * `requestId`, the Sentry tag, the stdout log line and
+ * `app_audit_events.request_id` together (not the error boundary's "Support
+ * ID", which is a Sentry event id or Next's digest). Honouring a
+ * client-supplied value lets a caller collide or replay the ids operators
+ * search by (the audit column is NOT unique) — a gap this app accepts in
+ * exchange for edge↔app correlation — and `instrumentation.ts` tagged
+ * Sentry/stdout with the RAW header, no format check at all, so control
+ * characters and markup reached both sinks. That second half IS closed.
  *
  * These tests pin the four inputs that matter at every producer: a UUID with a
  * forwarded chain (honoured — INCLUDING when the chain is the client's own
@@ -61,8 +62,11 @@ describe("normalizeInboundRequestId", () => {
   });
 
   it("REJECTS a well-formed id from a caller that sends NO forwarded chain", () => {
-    // The only population the chain check excludes: an unmodified direct
-    // request to a non-proxied origin, and local development.
+    // Function-level only. Behind Next no handler sees an absent chain: Next
+    // fills `X-Forwarded-For` from the socket first (`??=`), so at the default
+    // TRUSTED_PROXY_COUNT=1 a direct request and local development pass too
+    // (F-17). This input reaches the check in unit tests that call a handler
+    // directly.
     expect(mod.normalizeInboundRequestId(VALID, null)).toBeUndefined();
     expect(mod.normalizeInboundRequestId(VALID, "")).toBeUndefined();
     expect(mod.normalizeInboundRequestId(VALID, undefined)).toBeUndefined();
@@ -133,7 +137,7 @@ describe("getOrCreateRequestId (review #224)", () => {
 
   it("DOCUMENTED GAP (#224): honours the id when that same caller adds an XFF", () => {
     // Same untrusted caller as the test above, one extra self-set header. The
-    // Support ID that reaches the audit row, the response header and Sentry is
+    // request id that reaches the audit row, the response header and Sentry is
     // now the client's choice — it can be replayed or collided with another
     // request's. Pinned so the residual risk is asserted, not assumed away.
     const h = headers({ "x-request-id": VALID, "x-forwarded-for": "1.2.3.4" });

@@ -13,15 +13,18 @@ import { REQUEST_ID_HEADER, normalizeInboundRequestId } from "@/lib/request-id";
  *   - An inbound `x-request-id` is honoured only when it is a well-formed
  *     UUID and arrives with a forwarded chain — see
  *     {@link normalizeInboundRequestId}, which spells out how little the
- *     second half buys: it rejects non-forwarding callers only, so a caller
- *     that sends `x-forwarded-for` (and every caller behind a real edge) can
- *     still choose the id. Review #224's replay/collision of Support IDs is
+ *     second half buys: Next fills a missing chain from the socket, so at the
+ *     default `TRUSTED_PROXY_COUNT=1` it rejects nobody and any caller can
+ *     choose the id (F-17). Review #224's replay/collision of request ids is
  *     therefore NOT closed — the id correlates sinks, it does not identify a
  *     request.
  *   - Otherwise we generate a v4 UUID.
  *   - The same id MUST be echoed back via the `x-request-id` response
  *     header AND included in the JSON error body so a UI can surface
- *     it next to a "contact support" link.
+ *     it next to a "contact support" link. `withAdminRoute` / `withV1Route`
+ *     (`lib/route-handler.server.ts`, F-29) call this first, before the
+ *     handler, and stamp the header on every response the handler returns,
+ *     a thrown 500 included.
  *   - Calls are memoised per-request (WeakMap keyed on the carrier),
  *     so a handler that calls audit + error + JSON helpers all share
  *     the same id without explicit threading.

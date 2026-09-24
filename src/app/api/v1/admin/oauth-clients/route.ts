@@ -16,13 +16,14 @@ import {
 import { offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/v1/admin/oauth-clients — list registrations (`admin.clients.read`).
  */
-export async function GET(request: NextRequest) {
+export const GET = withV1Route(async function GET(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.clients.read");
   if (!guard.ok) return guard.response;
 
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
   });
 
   return v1JsonResponse({ items, page, pageSize, total }, request);
-}
+});
 
 /**
  * POST /api/v1/admin/oauth-clients — register a machine identity
@@ -73,7 +74,7 @@ const createSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest) {
+export const POST = withV1Route(async function POST(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.clients.manage");
   if (!guard.ok) return guard.response;
   const { grant } = guard;
@@ -244,4 +245,4 @@ export async function POST(request: NextRequest) {
     request,
     { status: 201, requestId: grant.requestId },
   );
-}
+});

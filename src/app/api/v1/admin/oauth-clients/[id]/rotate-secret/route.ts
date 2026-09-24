@@ -10,6 +10,7 @@ import {
 import { isUuid } from "@/lib/admin/user-target.server";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `admin.clients.manage` must not rotate another agent's broader client (or a
  * client carrying another principal's account-writing scopes) and receive it.
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withV1Route(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.clients.manage");
   if (!guard.ok) return guard.response;
   const { grant } = guard;
@@ -153,4 +154,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   return v1JsonResponse({ id, clientId: client.client_id, clientSecret: secret }, request, {
     requestId: grant.requestId,
   });
-}
+});

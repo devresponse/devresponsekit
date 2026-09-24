@@ -17,9 +17,9 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | Signal | Source | Notes |
 | --- | --- | --- |
 | **Structured logs** | `src/lib/observability/logger.server.ts` | Pino, JSON to stdout. Ships regardless of whether Sentry is configured — your platform's log drain is the primary sink. |
-| **Server-error logging** | `logServerError(...)` + `onRequestError` (`src/instrumentation.ts`) | Every uncaught 5xx is logged with its `x-request-id`; also forwarded to Sentry when enabled. |
-| **Request-id correlation** | `src/lib/request-id.ts` (`normalizeInboundRequestId`) + `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) | Accepts an inbound `x-request-id` only as a UUID and only with a forwarded chain present (a weak bar — see [§4](#4-correlating-an-incident)); otherwise mints one. Echoed on every admin (`adminErrorResponse`) and RFC 7807 (`problemResponse`) error response. |
-| **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. Append-only; retention is an ops concern — see the note below. Written only for a caller something has verified (session, credential, signed SSO token); `user_agent` is capped at 512 characters. |
+| **Server-error logging** | `logServerError(...)`, reached through the error helpers and `withAdminRoute` / `withV1Route` (`src/lib/route-handler.server.ts`), + `onRequestError` (`src/instrumentation.ts`) | Every 5xx built with `adminErrorResponse` / `problemResponse` is logged with its `x-request-id`. On the wrapped routes (see the next row) a handler that throws becomes such a response: `500 internal_error`, logged as `admin.internal_error` / `v1.internal_error` under the id the response carries (F-29). A fault outside them (a page or server-component render, a server action, an exempt route) reaches `onRequestError`, which can tag it only with an inbound id it honoured, since nothing minted one for it. Both paths forward to Sentry when enabled. |
+| **Request-id correlation** | `src/lib/request-id.ts` (`normalizeInboundRequestId`) + `src/lib/admin/request-id.server.ts` (`getOrCreateRequestId`) + `src/lib/route-handler.server.ts` | Accepts an inbound `x-request-id` only as a UUID and only with a forwarded chain present (a weak bar — see [§4](#4-correlating-an-incident)); otherwise mints one. Stamped on **every** response of the wrapped routes, successes and uncaught 500s alike: the administrator console, `/api/v1`, and the first-party `/api/account`, `/api/preferences`, `/api/invitations`, `/api/navigation` and SSO launch/consume routes. The same id is on every audit row the route writes itself. A row written by one of Better Auth's own database hooks is not tied to a response: the catch-all that runs most of them is exempt, and when a wrapped route calls `auth.api.*` Better Auth hands the hook a copy of the headers and no request, so the `auth.session.created` login row behind an SSO consume has no request id. Exempt, each for a stated reason in `tests/unit/route-request-id-invariant.test.ts`: the Better Auth catch-all, the health probes, `/api/metrics`, the cron and CSP-report sinks, the docs/help image streams, the MCP transport and registration, and the public cacheable documents (`/api/v1/jwks.json`, `/api/v1/openapi.json`, `/api/sso/jwks.json`, which a shared cache would serve to other callers along with one request's id). |
+| **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id when it has one (see the row above). Append-only; retention is an ops concern — see the note below. Written only for a caller something has verified (session, credential, signed SSO token); `user_agent` is capped at 512 characters. |
 | **Pre-auth refusals** | `logPreAuthRefusal` (`src/lib/observability/pre-auth-refusal.server.ts`) | A request refused **before** its caller is authenticated — the CSRF origin guard on every cookie surface, an SSO consume without a verifiable token, a signed-out SSO launch — writes **no audit row** (an anonymous loop must not grow the append-only table, F-15). It logs one `kind: "pre_auth_refusal"` line (event type, reason, request id, capped `User-Agent`, method, path — no client IP, which the log stream never carries; `warn` for `denied`, `error` for `failure`) and increments `devresponsekit_pre_auth_refusals_total` ([§5](#5-metrics)). The full list is in [admin-manager.md §12](./admin-manager.md#12-audit-model). |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
 | **Email delivery** | `recordOutboxDelivery` (`src/lib/email/delivery-telemetry.server.ts`) | Every delivery outcome written to an `app_outbox` row, by the inline attempt (which the administrator test send also uses) and by the drain worker, increments `devresponsekit_outbox_delivery_total` ([§5](#5-metrics)) in the process that wrote the row. The inline attempt and the `/api/internal/outbox-drain` cron route run in the server, so their outcomes reach `/api/metrics`. A `pnpm outbox:drain` run is its own short-lived process, so its outcomes do not: they show only in its log lines, its summary line and the rows themselves (see §5). A failure also logs one `kind: "email_delivery"` line: `error` for a terminal one (`failed`, `expired`), `warn` for a transient one the worker will retry (F-27). The line carries the outcome, a `reason` (`provider_rejected`, `attempts_exhausted`, `token_expired`, `transient`), the outbox id, template, provider, attempt count, the provider's HTTP status (`providerStatus`), the error class and a system error code. It never carries the recipient, subject, body, template variables or the provider's response text; the row's sanitized `error` column holds that text, found by `outboxId`. |
@@ -127,9 +127,15 @@ same change.
 
 `x-request-id` is the join key across every surface:
 
-1. The client (or your edge/CDN) receives `x-request-id` on the error response
-   (admin envelope or RFC 7807 `problem+json`).
-2. Grep the **log stream** for that id to find the structured server log + stack.
+1. The client (or your edge/CDN) receives `x-request-id` on the response: on a
+   success, on an error envelope (admin `{ error, message, requestId }` or RFC 7807
+   `problem+json`, which also carry it as `requestId`), and on a `500 internal_error`
+   from a handler that threw. Every admin, `/api/v1` and first-party API route stamps it
+   (the exemptions are listed in [§1](#1-what-ships-today)). A page render has no such
+   header; its error boundary shows a Support ID, which is the Sentry event id when
+   Sentry is enabled (otherwise Next's error digest), not a request id.
+2. Grep the **log stream** for that id to find the structured server log + stack. A
+   thrown handler logs `admin.internal_error` / `v1.internal_error` with the cause.
 3. Query **`app_audit_events`** by the same id to see the actor, tenant, and outcome of the
    action that triggered it. A request refused before authentication (a CSRF origin
    refusal, an unverifiable SSO token, a signed-out launch) has **no** row by design — its
@@ -145,9 +151,14 @@ edge/CDN trace id flows straight into server logs and audit rows.
 it is what keeps control characters, markup and oversized junk out of the log line
 and the Sentry tag (`instrumentation.ts` previously applied no validation at all).
 The forwarded-chain half is client-supplied — any caller passes it by sending one
-extra header, and behind a real edge it is true for every request — so it rejects
-only callers that send no chain (a direct request to a non-proxied origin, local
-development) and does nothing against a deliberate forger. A client can still pin
+extra header, and behind a real edge it is true for every request. It does not even
+stop a direct request: when a request arrives without `X-Forwarded-For`, Next.js fills
+the header from the socket address before any handler or `onRequestError` reads it
+(`??=`, see [Choosing the client-IP source](./configuration.md#choosing-the-client-ip-source)).
+At the default `TRUSTED_PROXY_COUNT=1` it therefore rejects nothing, local development
+included; at a higher count it rejects only a chain shorter than the count, such as a
+request that went around one of the proxies. It does nothing against a deliberate forger
+(F-17). A client can still pin
 one id across many requests or reuse someone else's, and `app_audit_events.request_id`
 is not unique. **Treat a request id as a correlation aid, never as proof that two
 records belong to one request**, and never authorize or de-duplicate on it.

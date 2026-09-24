@@ -18,6 +18,7 @@ import {
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
 import { normalizeSessionList, toSessionItem } from "@/lib/admin/session-item";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  *
  * Caller MUST hold `admin.users.sessions`.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.sessions");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   // plugin version; normalize, then project each row to the allow-listed
   // `SessionItem` shape (drops `token`, review #67/#194).
   return NextResponse.json({ sessions: normalizeSessionList(sessions).map(toSessionItem) });
-}
+});
 
 /**
  * DELETE /api/administrator/users/[id]/sessions
@@ -76,7 +77,10 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * Force sign-out everywhere — revokes all Better Auth sessions for the
  * target user. Caller MUST hold `admin.users.sessions`.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.users.sessions");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -130,4 +134,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

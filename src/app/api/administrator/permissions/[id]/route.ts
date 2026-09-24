@@ -9,6 +9,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { AdminError, assertPermissionNotInUse } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ const patchSchema = z
   })
   .strict();
 
-export async function PATCH(request: NextRequest, ctx: RouteContext) {
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -87,7 +88,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});
 
 /**
  * DELETE /api/administrator/permissions/[id]
@@ -96,7 +97,10 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
  * referenced by `app_role_permissions`. Caller MUST hold
  * `admin.permissions.manage`.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -155,4 +159,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

@@ -9,6 +9,7 @@ import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { auditEvent } from "@/lib/audit.server";
 // Shared first-party JSON error envelope (P3-12).
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ const querySchema = z.object({
  * Returns the shell sidebar menu for the requested scope, filtered by
  * the caller's permissions. Returns 401/403 per §23 — never redirects.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
     return adminErrorResponse("unauthenticated", 401, request);
@@ -55,4 +56,4 @@ export async function GET(request: NextRequest) {
 
   const body = await loadShellMenu(access, parsed.data.scope, parsed.data.locale);
   return NextResponse.json(body, { status: 200 });
-}
+});

@@ -18,6 +18,7 @@ import {
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ const bodySchema = z.object({ groupId: z.string().regex(UUID_RE) }).strict();
  * The groups the target user belongs to, confined to the actor's org scope
  * (a foreign org's groups never appear). Caller MUST hold `admin.groups.read`.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .execute();
 
   return NextResponse.json({ groups });
-}
+});
 
 /** Loads a group's id + org for the membership-mutation guards. */
 async function loadGroup(groupId: string) {
@@ -79,7 +80,7 @@ async function loadGroup(groupId: string) {
  * the actor's scope and the user must hold an active membership in the
  * group's org. Caller MUST hold `admin.groups.assign`.
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -144,7 +145,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true }, { status: 201 });
-}
+});
 
 /**
  * DELETE /api/administrator/users/[id]/groups
@@ -155,7 +156,10 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
  * Carries the SAME AUTHZ-3 subset test as POST, measured against the authority
  * the removal takes away (REVOKE-1 — 403 `forbidden`).
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -216,4 +220,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

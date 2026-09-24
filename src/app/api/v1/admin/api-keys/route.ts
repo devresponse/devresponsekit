@@ -5,6 +5,7 @@ import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
  * their own org. Never returns secrets or hashes. Supports
  * `?page&pageSize&status&appUserId`.
  */
-export async function GET(request: NextRequest) {
+export const GET = withV1Route(async function GET(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.apikeys.read");
   if (!guard.ok) return guard.response;
 
@@ -57,4 +58,4 @@ export async function GET(request: NextRequest) {
   });
 
   return v1JsonResponse({ items, page, pageSize, total }, request);
-}
+});

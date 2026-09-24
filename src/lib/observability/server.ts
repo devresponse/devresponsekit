@@ -13,7 +13,8 @@ import * as Sentry from "@sentry/nextjs";
  * structured log but never Sentry. The error-response helpers
  * (`adminErrorResponse` / `problemResponse`) call this when they emit a 5xx
  * with a `cause`, tagging the event with the same `request_id` that ties it to
- * the audit row and the user-facing "Support ID".
+ * the audit row and the response's `x-request-id` header. (The "Support ID" a
+ * page error boundary shows is a Sentry event id or Next's digest, not this.)
  */
 
 export interface ServerErrorContext {

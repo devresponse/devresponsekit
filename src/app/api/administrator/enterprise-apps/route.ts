@@ -21,6 +21,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export const dynamic = "force-dynamic";
  *
  * Caller MUST hold `admin.apps.read`.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apps.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -125,7 +126,7 @@ export async function GET(request: NextRequest) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});
 
 /**
  * POST /api/administrator/enterprise-apps
@@ -144,7 +145,7 @@ export async function GET(request: NextRequest) {
  *   - sort_order: integer (default 100)
  *   - organization_id: optional UUID scope (null = global)
  */
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -244,4 +245,4 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true, id: input.id }, { status: 201 });
-}
+});

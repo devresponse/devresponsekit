@@ -8,6 +8,7 @@ import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/per
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { revokeApiKey } from "@/lib/api-auth/api-keys.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * emails. Caller MUST hold `admin.apikeys.read`. Never returns the
  * secret or its hash.
  */
-export async function GET(request: NextRequest, context: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.apikeys.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 
   return NextResponse.json(row);
-}
+});
 
 /**
  * DELETE /api/administrator/api-keys/:id
@@ -82,7 +83,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
  */
 const deleteBodySchema = z.object({ reason: z.string().max(500).optional() }).strict();
 
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.apikeys.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -144,4 +148,4 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

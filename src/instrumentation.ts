@@ -68,11 +68,21 @@ export async function register() {
  * App Router server-error hook (RSC, route handlers, server actions).
  *
  * We stamp the request's `x-request-id` onto the captured event as a tag
- * so a single id ties together: the user-facing "Support ID" rendered by
- * the error boundaries, the Sentry issue, and the
- * `app_audit_events.request_id` row written by `auditEvent`. That is the
- * whole point of wiring Sentry to the existing correlation id rather than
- * bolting on a parallel one.
+ * so the Sentry issue and the stdout line below carry the same correlation
+ * id as the `app_audit_events.request_id` rows written by `auditEvent`, rather
+ * than a parallel one.
+ *
+ * F-29: this hook no longer sees a throw from an admin, first-party or v1
+ * route handler. Those are exported through `withAdminRoute` / `withV1Route`
+ * (`lib/route-handler.server.ts`), which catch the throw and answer a
+ * `500 internal_error` envelope logged as `admin.internal_error` /
+ * `v1.internal_error` under the id the response header and the audit rows
+ * carry. What still arrives here (a page or server-component render, a
+ * server action, an exempt route) was never given a minted id: the handler's
+ * id is memoised on its own request object, which this hook cannot reach, so
+ * the only id it can know is an inbound one it honours below. That id matches
+ * the audit rows too, because `getOrCreateRequestId` honours the same header by
+ * the same rule. Without one, the line and the event carry no request id.
  *
  * Review #99: this hook used to tag Sentry and stdout with the RAW inbound
  * header — no UUID check, no provenance check — while every other producer

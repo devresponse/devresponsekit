@@ -17,6 +17,7 @@ import {
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ const ALLOWED_STATUS = new Set([
  * shared list-query helpers so the pagination/sort/filter contract is
  * identical to `/api/administrator/users`.
  */
-export async function GET(request: NextRequest) {
+export const GET = withV1Route(async function GET(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.users.read");
   if (!guard.ok) return guard.response;
 
@@ -104,7 +105,7 @@ export async function GET(request: NextRequest) {
   );
 
   return v1JsonResponse(buildListResponse(items, total, query), request);
-}
+});
 
 /**
  * POST /api/v1/users
@@ -132,7 +133,7 @@ const createSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest) {
+export const POST = withV1Route(async function POST(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.users.create");
   if (!guard.ok) return guard.response;
   const { grant } = guard;
@@ -260,7 +261,7 @@ export async function POST(request: NextRequest) {
     request,
     { status: 201, requestId: grant.requestId },
   );
-}
+});
 
 /** Postgres unique-violation (SQLSTATE 23505) detector — mirrors the admin twin. */
 function isUniqueViolation(err: unknown): boolean {

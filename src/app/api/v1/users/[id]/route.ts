@@ -5,6 +5,7 @@ import { canAccessUser } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 import { userEtag } from "@/lib/api-auth/etag";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `ETag` derived from `updated_at` so clients can use `If-Match` for
  * optimistic concurrency on subsequent mutations (design §8.1).
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withV1Route(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.users.read");
   if (!guard.ok) return guard.response;
 
@@ -51,4 +52,4 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     // is a Date at runtime) — NOT a redundant cast.
     headers: { ETag: userEtag(user.updated_at as unknown as Date) },
   });
-}
+});

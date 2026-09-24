@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ const idSchema = z.uuid();
  * an org admin a live credential link. The unredacted `delivery_payload`
  * column (retry-worker only) and `variables` are deliberately NOT selected.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -77,4 +78,4 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("not_found", 404, request);
   }
   return NextResponse.json(row);
-}
+});

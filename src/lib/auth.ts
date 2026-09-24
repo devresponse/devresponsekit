@@ -506,6 +506,11 @@ export const auth = betterAuth({
           // Best-effort and lazily imported — it never blocks or breaks
           // sign-in. Runs for ALL logins, so it must precede the
           // existing-user early return below.
+          // `context.request` exists only on the catch-all path. A server-side
+          // `auth.api.*` call (the SSO consume's `createSsoSession`) hands the
+          // hook no request and a COPY of its headers, so the route's memoised
+          // request id is out of reach and the row's `request_id` stays NULL
+          // (docs/observability.md §1).
           const { recordSessionLogin } = await import("@/lib/auth-login-audit.server");
           await recordSessionLogin(
             authUser.id,

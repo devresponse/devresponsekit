@@ -8,6 +8,7 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ const roleSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.setRole");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -101,4 +102,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, role: parsed.data.role });
-}
+});

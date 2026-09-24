@@ -6,6 +6,7 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { activateMcpAgent, getMcpAgent } from "@/lib/mcp/agents.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * `admin.clients.manage`. Idempotent — an already-active agent returns
  * `{ ok: true, activated: false }`.
  */
-export async function POST(request: NextRequest, context: RouteContext) {
+export const POST = withAdminRoute(async function POST(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.clients.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -66,4 +70,4 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
   }
   return NextResponse.json({ ok: true, activated });
-}
+});

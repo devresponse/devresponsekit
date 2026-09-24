@@ -16,6 +16,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, hasCrossOrgReach } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ interface RouteContext {
  * Returns an enterprise application by id (text PK, not UUID).
  * Caller MUST hold `admin.apps.read`.
  */
-export async function GET(request: NextRequest, context: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.apps.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 
   return NextResponse.json(row);
-}
+});
 
 /**
  * PATCH /api/administrator/enterprise-apps/:id
@@ -76,7 +77,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
  * stable primary key referenced by SSO handoff nonces and is therefore
  * not editable here. Caller MUST hold `admin.apps.manage`.
  */
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export const PATCH = withAdminRoute(async function PATCH(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -180,7 +184,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});
 
 /**
  * DELETE /api/administrator/enterprise-apps/:id
@@ -192,7 +196,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
  *
  * Caller MUST hold `admin.apps.manage`.
  */
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.apps.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -252,4 +259,4 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

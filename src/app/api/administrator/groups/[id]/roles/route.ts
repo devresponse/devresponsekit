@@ -13,6 +13,7 @@ import {
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ async function currentRoleIds(groupId: string): Promise<string[]> {
  *
  * The roles a group confers. Caller MUST hold `admin.groups.read`.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .execute();
 
   return NextResponse.json({ roles });
-}
+});
 
 /**
  * Review #70: `roleIds` are `app_roles.id` PRIMARY KEYS, so they must be
@@ -88,7 +89,7 @@ const idsSchema = z
  * (privilege escalation → 403, AUTHZ-3); this subsumes the old
  * `superuser`-marker check (review #138).
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -172,7 +173,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, roleIds: await currentRoleIds(id) });
-}
+});
 
 /**
  * DELETE /api/administrator/groups/[id]/roles
@@ -183,7 +184,10 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
  * Carries the SAME AUTHZ-3 subset test as POST, measured against the REMOVED
  * roles (REVOKE-1 — 403 `forbidden`).
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -245,4 +249,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, roleIds: await currentRoleIds(id) });
-}
+});

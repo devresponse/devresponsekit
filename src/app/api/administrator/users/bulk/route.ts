@@ -17,6 +17,7 @@ import {
   type BulkUserOutcome,
   type BulkUserTarget,
 } from "@/lib/admin/user-actions.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +101,7 @@ const bulkSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   let json: unknown;
   try {
     json = await request.json();
@@ -302,4 +303,4 @@ export async function POST(request: NextRequest) {
     failed,
     results,
   });
-}
+});

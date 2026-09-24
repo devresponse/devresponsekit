@@ -21,6 +21,7 @@ import {
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * permission). The shape `{ permissions: string[] }` matches what the
  * dual-list editor (§8.4) consumes.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .execute();
 
   return NextResponse.json({ permissions: rows.map((r) => r.key) });
-}
+});
 
 /**
  * POST/DELETE body shared schema. The dual-list editor sends two
@@ -104,7 +105,7 @@ async function currentPermissionKeys(roleId: string): Promise<string[]> {
  *
  * Caller MUST hold `admin.roles.update`.
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -187,7 +188,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, permissions: finalKeys });
-}
+});
 
 /**
  * DELETE /api/administrator/roles/[id]/permissions
@@ -197,7 +198,10 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
  *
  * Caller MUST hold `admin.roles.update`.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.roles.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -325,4 +329,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, permissions: finalKeys });
-}
+});

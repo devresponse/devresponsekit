@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { requireApiAccount } from "@/lib/account/guard.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import { v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  * the principal's permissions), which is what clients should introspect
  * before attempting a scoped call.
  */
-export async function GET(request: NextRequest) {
+export const GET = withV1Route(async function GET(request: NextRequest) {
   // IMP-1: opted in. Read-only introspection of the identity the caller is
   // ALREADY acting as — it grants nothing an impersonated session does not
   // already have, and the impersonated shell reads it to render itself.
@@ -46,4 +47,4 @@ export async function GET(request: NextRequest) {
     },
     request,
   );
-}
+});

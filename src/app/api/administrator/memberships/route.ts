@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export const dynamic = "force-dynamic";
  *
  * Caller MUST hold `admin.orgs.read`.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -110,4 +111,4 @@ export async function GET(request: NextRequest) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});

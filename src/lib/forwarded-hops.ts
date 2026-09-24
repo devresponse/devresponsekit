@@ -36,9 +36,16 @@ export function trustedProxyCount(): number {
  *   - behind a real edge (Vercel, any LB that sets the header) it is
  *     unconditionally TRUE, so it stops discriminating at all.
  *
- * What it therefore rules out is exactly one population: callers that send no
- * forwarded chain — i.e. an unmodified direct request to a non-proxied origin
- * or local development. That is all. The only caller is the request-id
+ * It does not even rule out a direct request. Next.js fills a missing
+ * `X-Forwarded-For` from the socket address (`??=` in its base server) before
+ * any route handler or `onRequestError` reads the header, so every request the
+ * app handles carries at least one entry. At the default `TRUSTED_PROXY_COUNT=1`
+ * this is therefore true for all of them, local development included; at a
+ * higher count it is false only for a chain shorter than the count, such as a
+ * request that went around one of the proxies. An absent header reaches it only
+ * where nothing filled it, e.g. a test calling a handler directly (F-17).
+ *
+ * The only caller is the request-id
  * normaliser ({@link import("@/lib/request-id").normalizeInboundRequestId}),
  * where the load-bearing check is the UUID format one and this is a weak
  * secondary bar over a value that is a correlation aid only. Nothing may make

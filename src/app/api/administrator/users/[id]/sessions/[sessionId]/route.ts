@@ -14,6 +14,7 @@ import {
   refuseOutrankingTarget,
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,10 @@ type RouteContext = { params: Promise<{ id: string; sessionId: string }> };
  * not one of this user's sessions is a 404 (no cross-user revocation, no
  * probing by id). Caller MUST hold `admin.users.sessions`.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.users.sessions");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -100,4 +104,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

@@ -19,6 +19,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { isAuthMethod } from "@/lib/auth-policy.server";
 import { EMAIL_DOMAIN_RE } from "@/lib/validation/auth-policy";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ interface RouteContext {
  *
  * Caller MUST hold `admin.orgs.read`.
  */
-export async function GET(request: NextRequest, context: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});
 
 /**
  * Consumer mailbox providers (a curated list, not an exhaustive one — it
@@ -203,7 +204,10 @@ const createBindingSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest, context: RouteContext) {
+export const POST = withAdminRoute(async function POST(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -308,7 +312,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, id: inserted.id }, { status: 201 });
-}
+});
 
 /**
  * DELETE /api/administrator/organizations/:id/provider-bindings
@@ -326,7 +330,10 @@ const deleteBindingsSchema = z
   })
   .strict();
 
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -397,4 +404,4 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, removed: bindings.length });
-}
+});

@@ -24,6 +24,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { createInvitation, sendInvitationEmail } from "@/lib/invitations.server";
 import { createInvitationSchema } from "@/lib/validation/invitations";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ interface RouteContext {
  *
  * Caller MUST hold `admin.orgs.read`.
  */
-export async function GET(request: NextRequest, context: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});
 
 /**
  * POST /api/administrator/organizations/:id/invitations
@@ -125,7 +126,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
  *
  * Caller MUST hold `admin.orgs.update`.
  */
-export async function POST(request: NextRequest, context: RouteContext) {
+export const POST = withAdminRoute(async function POST(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -251,4 +255,4 @@ export async function POST(request: NextRequest, context: RouteContext) {
     { ok: true, id: created.id, expiresAt: created.expiresAt.toISOString() },
     { status: 201 },
   );
-}
+});

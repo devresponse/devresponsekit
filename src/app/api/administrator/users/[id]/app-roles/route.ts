@@ -22,6 +22,7 @@ import {
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * Caller MUST hold `admin.roles.assign` (the perm consistent with the
  * mutating verbs on the same endpoint).
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .execute();
 
   return NextResponse.json({ assignments: rows });
-}
+});
 
 /**
  * POST /api/administrator/users/[id]/app-roles
@@ -98,7 +99,7 @@ const assignSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -198,7 +199,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true }, { status: 201 });
-}
+});
 
 /**
  * DELETE /api/administrator/users/[id]/app-roles
@@ -209,7 +210,10 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
  *
  * Caller MUST hold `admin.roles.assign`.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.roles.assign");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -345,4 +349,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

@@ -7,6 +7,7 @@ import { getSessionAccessContext } from "@/lib/session-access.server";
 import { loadNestedAppsMenu } from "@/lib/navigation.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { auditEvent } from "@/lib/audit.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ const querySchema = z.object({
  * MENU #2 — nested workspace selection menu. Same auth contract as the
  * other navigation routes per §23.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
@@ -53,4 +54,4 @@ export async function GET(request: NextRequest) {
 
   const body = await loadNestedAppsMenu(access, parsed.data.applicationId, parsed.data.locale);
   return NextResponse.json(body, { status: 200 });
-}
+});

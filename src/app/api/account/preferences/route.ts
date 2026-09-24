@@ -10,6 +10,7 @@ import { updatePreferencesSchema } from "@/lib/validation/account";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export const dynamic = "force-dynamic";
  * same ceiling the administrator and invitation mutations do.
  */
 
-export async function PUT(request: NextRequest) {
+export const PUT = withAdminRoute(async function PUT(request: NextRequest) {
   // IMP-1: opted in. Locale / time-zone / number-format preferences issue no
   // credential and destroy nothing; an admin reproducing a user's formatting
   // problem needs to be able to change them, and every write is already
@@ -114,4 +115,4 @@ export async function PUT(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

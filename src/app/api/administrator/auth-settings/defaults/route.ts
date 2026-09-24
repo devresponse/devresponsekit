@@ -9,6 +9,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { FAIL_CLOSED_AUTH_POLICY } from "@/lib/auth-policy.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { authPolicySettingsSchema } from "@/lib/validation/auth-policy";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export const dynamic = "force-dynamic";
  */
 
 /** GET /api/administrator/auth-settings/defaults — superadmin only. */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
   if (!hasCrossOrgReach(guard.access)) {
@@ -54,10 +55,10 @@ export async function GET(request: NextRequest) {
         }
       : FAIL_CLOSED_AUTH_POLICY,
   });
-}
+});
 
 /** PATCH /api/administrator/auth-settings/defaults — superadmin only. */
-export async function PATCH(request: NextRequest) {
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
   if (!hasCrossOrgReach(guard.access)) {
@@ -100,4 +101,4 @@ export async function PATCH(request: NextRequest) {
 
   const settings = await getOrgAuthSettingsRow(null);
   return NextResponse.json({ ok: true, settings });
-}
+});

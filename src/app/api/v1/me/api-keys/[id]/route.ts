@@ -9,6 +9,7 @@ import {
 } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * that is not the caller's, so a credential bound to one tenant can neither
  * revoke nor probe the owner's keys in another.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withV1Route(async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiAccount(request, "account.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
@@ -71,4 +72,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return v1JsonResponse({ ok: true, id, revoked }, request);
-}
+});

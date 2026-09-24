@@ -133,7 +133,7 @@ A JSON envelope with a stable machine code, an i18n message key, and the correla
 { "error": "forbidden", "message": "errors.forbidden", "requestId": "5f3c…" }
 ```
 
-Common statuses on both surfaces: `400` invalid body, `401` unauthenticated, `403` forbidden, `404` not found / out of scope, `409` conflict, `412` stale `If-Match` ETag (v1), `429` rate-limited (with `Retry-After`). Every response (success or error) carries an `x-request-id` header that matches the audit log.
+Common statuses on both surfaces: `400` invalid body, `401` unauthenticated, `403` forbidden, `404` not found / out of scope, `409` conflict, `412` stale `If-Match` ETag (v1), `429` rate-limited (with `Retry-After`). Every response (success or error) carries an `x-request-id` header that matches the audit log. That includes an unexpected server fault: a handler that throws answers `500` with the code `internal_error` in the surface's own envelope, never a bare 500. The two exceptions are the public, cacheable `GET /api/v1/jwks.json` and `GET /api/v1/openapi.json`, because a shared cache would hand one request's id to every later caller.
 
 ## 5. Machine API (`/api/v1`)
 

@@ -15,6 +15,7 @@ import {
   refuseOutrankingTarget,
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Caller MUST hold `admin.users.delete` (same permission gates both
  * directions of the soft-delete lifecycle, docs/admin-manager.md §8.1).
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -132,4 +133,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   return adminJsonResponse({ ok: true, status: "pending_approval" }, request, {
     requestId: guard.requestId,
   });
-}
+});

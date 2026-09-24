@@ -36,7 +36,11 @@ const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
 const ADMIN_ROUTES_DIR = join(SRC_DIR, "app", "api", "administrator");
 const V1_ROUTES_DIR = join(SRC_DIR, "app", "api", "v1");
 
-const MUTATING_HANDLER = /export async function (?:POST|PATCH|PUT|DELETE)\b/g;
+// Both export styles count (F-29): the wrapped `export const POST =
+// withAdminRoute(async function POST(` form the wrapped surfaces use, and a
+// plain `export async function POST(`. Matching only the plain form counted
+// ZERO mutating handlers in a wrapped file, so every file passed vacuously.
+const MUTATING_HANDLER = /export (?:async function|const) (?:POST|PATCH|PUT|DELETE)\b/g;
 // Admin calls must thread the request CONTEXT so the 429 correlates (P3-9):
 // match `enforceRateLimit(…requestId…)` — the correlation id threaded either as
 // `guard.requestId` (permission-gated routes) or a local `requestId` from
@@ -136,6 +140,23 @@ describe("every administrator mutation is rate-limited", () => {
 
   it("discovers the administrator route handlers", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
+  });
+
+  it("counts mutating handlers in both export styles (the scan is not vacuous)", () => {
+    expect(
+      "export const POST = withAdminRoute(async function POST(".match(MUTATING_HANDLER),
+    ).toHaveLength(1);
+    expect("export async function DELETE() {}".match(MUTATING_HANDLER)).toHaveLength(1);
+    expect(
+      "export const GET = withAdminRoute(async function GET(".match(MUTATING_HANDLER),
+    ).toBeNull();
+    // F-29 found this scan counting zero in every file once the handlers were
+    // wrapped; a total this low means the pattern no longer matches the source.
+    const total = routeFiles.reduce(
+      (n, f) => n + (readFileSync(f, "utf8").match(MUTATING_HANDLER) ?? []).length,
+      0,
+    );
+    expect(total).toBeGreaterThan(50);
   });
 
   it.each(routeFiles.map((f) => [rel(f, "administrator"), f] as const))(

@@ -16,6 +16,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export const dynamic = "force-dynamic";
  *
  * Caller MUST hold `admin.orgs.read`.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -121,7 +122,7 @@ export async function GET(request: NextRequest) {
   }));
 
   return NextResponse.json(buildListResponse(normalised, total, query));
-}
+});
 
 /**
  * POST /api/administrator/organizations
@@ -132,7 +133,7 @@ export async function GET(request: NextRequest) {
  * existing default then insert with `is_default = true`.
  */
 
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.orgs.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -213,4 +214,4 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true, id: inserted.id, slug: inserted.slug }, { status: 201 });
-}
+});

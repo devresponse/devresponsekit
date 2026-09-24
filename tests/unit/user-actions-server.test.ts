@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as Mod from "@/lib/admin/user-actions.server";
+import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 
 /**
  * Unit tests for the per-user bulk action executor (was 4% covered).
@@ -23,7 +24,12 @@ const cascadeStripsLastMock = vi.fn();
 vi.mock("@/lib/admin-status.server", () => ({
   performAdminStatusChange: (...a: unknown[]) => performStatusChange(...a),
 }));
-vi.mock("@/lib/admin/access-scope.server", () => ({
+vi.mock("@/lib/admin/access-scope.server", async () => ({
+  // F-32: the real org-stamp rule (pure), so the per-row audits below are
+  // filed exactly as in production.
+  scopeOrganizationId: (
+    await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server")
+  ).scopeOrganizationId,
   requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
   membershipCascadeStripsLastGlobalSuperuser: (...a: unknown[]) => cascadeStripsLastMock(...a),
   // The real class, so `instanceof` in the module under test still matches.
@@ -340,5 +346,66 @@ describe("every action refuses a target who outranks the actor (review #7)", () 
       error: "forbidden_target_outranks_actor",
     });
     expect(requiresSuperadminMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-32: every per-row audit is filed under the org the batch was confined to,
+ * so an org admin's bulk lockouts reach that org's audit explorer and the
+ * members' Audit tabs. A superadmin batch stays a platform row: its active org
+ * says nothing about which tenant each target belongs to.
+ */
+describe("per-row audits carry the batch's organization (F-32)", () => {
+  const orgActor = {
+    ...actor,
+    scope: { kind: "org", organizationId: "org-a" } as const,
+    access: { permissions: ["admin.users.ban", "admin.users.delete"], organizationId: "org-a" },
+  };
+  const superadminWithActiveOrg = {
+    ...actor,
+    access: { permissions: ["superuser"], organizationId: "org-a" },
+  };
+
+  it.each([
+    ["ban", "admin.user.banned"],
+    ["unban", "admin.user.unbanned"],
+    ["soft_delete", "admin.user.soft_deleted"],
+    ["restore", "admin.user.restored"],
+  ] as const)("%s by an org admin is stamped with the org", async (action, eventType) => {
+    await executeBulkUserAction(action, target, orgActor, { reason: "x" });
+    expect(auditMock).toHaveBeenCalledWith(
+      eventType,
+      "success",
+      expect.objectContaining({ appUserId: "u1", organizationId: "org-a" }),
+    );
+  });
+
+  it("a failure row is stamped the same way", async () => {
+    banMock.mockRejectedValue(new Error("be down"));
+    await executeBulkUserAction("ban", target, orgActor, { reason: "x" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.ban_failed",
+      "error",
+      expect.objectContaining({ organizationId: "org-a" }),
+    );
+  });
+
+  it("the rank refusal is stamped the same way", async () => {
+    outranksMock.mockResolvedValue(true);
+    await executeBulkUserAction("ban", target, orgActor, { reason: "x" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.action_denied",
+      "denied",
+      expect.objectContaining({ organizationId: "org-a" }),
+    );
+  });
+
+  it("a superadmin batch is a platform row, never its active org", async () => {
+    await executeBulkUserAction("ban", target, superadminWithActiveOrg, { reason: "x" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.banned",
+      "success",
+      expect.objectContaining({ organizationId: null }),
+    );
   });
 });

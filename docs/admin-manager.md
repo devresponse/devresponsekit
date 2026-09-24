@@ -238,6 +238,9 @@ that fix the common fields per call-site so handlers stay declarative.
 - `metadata` MUST NOT include secrets (passwords, tokens, plaintext keys).
 - Always pass the `requestId` from the `requireAdminPermission` grant so every
   row a single request writes shares one correlation id.
+- `organizationId` is **required** (`string | null`) on all three contexts, so
+  every call site decides which tenant sees the row. The rule is in §12
+  (Organization stamp); `null` is a platform row only a superadmin sees.
 
 ---
 
@@ -984,8 +987,10 @@ see [api.md §7](./api.md). Secrets are returned once and stored only as hashes.
 view of `app_audit_events` (§12). Filters: `event_type`, `outcome`, `actor`,
 `app_user_id`, `organization_id`, `target_application_id`, and a
 `created_at[from|to]` ISO-8601 range. `q` matches `event_type`, `email`, and
-`reason`. An org admin sees only their org's events; platform events with a null
-org are superadmin-only. The endpoint never returns secret material.
+`reason`. An org admin sees only their org's events: its own admins' actions and
+actions on its resources, whoever takes them, with the platform rows and edge
+cases listed in §12 (Organization stamp). Platform events with a null org are
+superadmin-only. The endpoint never returns secret material.
 
 ### 8.11 Audit explorer
 
@@ -1160,6 +1165,55 @@ insert used to fail instead, turning a finished action into a 500 with no audit
 row. A row written inside a caller's transaction (the tenant DELETE, DB-3) is
 not retried: the failed statement has already aborted that transaction.
 
+**Organization stamp (F-32).** `organization_id` decides who can read a row.
+The explorer (§8.10), a user's Audit tab, the CSV export and
+`GET /api/v1/audit-events` show an org admin exactly the rows stamped with their
+org; a row with no org is a platform row that only a superadmin sees. About
+seventy admin writes used to name no org, so a delegated admin's password sets,
+key rotations and exports were invisible to the tenant's own auditors. Every
+admin audit write now names its org explicitly (`organizationId` is required on
+`auditUserAction`, `auditRoleAction` and `auditOrgAction`, and
+`tests/unit/admin-audit-organization-invariant.test.ts` scans every write under
+`src/app/api/administrator`, `src/app/api/v1` and `src/lib/admin`), by one rule:
+
+- **An org-owned resource: the resource's org**, whoever acted. That covers a
+  membership (`admin.user.membership_*` and the refusals written beside it), a
+  role assignment (`admin.user.role_assigned` / `role_revoked`), an API key or
+  OAuth client, an enterprise application (its org after the update; a move to
+  global is filed under the org that lost the app), a group, a role and the org
+  itself.
+- **Otherwise, the org the actor is confined to** (`actingOrganizationId` in
+  `src/lib/admin/access-scope.server.ts`): an org admin's or org-bound
+  credential's actions on a user (profile, password, sessions, ban, soft delete,
+  restore, status, impersonation), user creation, the bulk summary, a CSV export,
+  and the `administrator.access.denied` / `api.access.denied` denials. Every
+  target such an actor can reach was resolved inside that org, so the stamp
+  files nothing from another tenant there. A row stamped this way must not name
+  another tenant in its metadata either: the IMP-2 shared-org impersonation
+  refusal records how many shared orgs the target outranks the actor in
+  (`outrankedOrgCount`), never which (§19, Impersonation).
+- **An unbound superadmin acting on a user: a platform row.** Its
+  `access.organizationId` is its active-org cookie, which says nothing about the
+  target's tenant; stamping it would file an action on org B's member under
+  org A. A user can belong to several orgs and the action names none of them.
+  Where a superadmin's action does have a tenant (a key, an app, a membership),
+  the resource rule applies and that tenant sees it.
+- **Platform-level events: `null`**, each listed with its reason in the scan's
+  allow-list: the permission catalog, the global email templates, the platform
+  sign-up defaults, the Better Auth platform role (`admin.user.role_set`), the
+  nested-impersonation refusal (its `guard.access` is the borrowed identity's;
+  the entry is keyed by that reason, so the route's other impersonation
+  refusals must stamp an org), and the sampled `administrator.rate_limited` row, whose bucket spans every org
+  the actor acts in (§2.5).
+
+Edge cases. A request naming memberships in several orgs (superadmin only)
+writes its single user-level row as a platform row, and each org still gets its
+own `admin.organization.member_*` row. An impersonation stop has no guard to
+resolve a scope from, so it takes the org of the start row it ends. An org
+admin's action on a member shared with another org is stamped with the actor's
+org only; the other org does not see it. Rows written before F-32 keep a null
+org: they were not backfilled.
+
 **Metadata contract:** callers MUST NOT pass tokens, refresh tokens, plaintext
 keys, or raw passwords. Internal exception detail may go in `metadata` (e.g.
 `message`) but never secrets.
@@ -1300,7 +1354,11 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   nothing there the actor does not also hold **there**
   (`permissionKeysByActiveOrg`). A mismatch audits
   `admin.user.impersonation_failed` with reason
-  `privilege_escalation_in_shared_org` and returns 403. Tenants the actor does
+  `privilege_escalation_in_shared_org` and returns 403. That row is filed under
+  the actor's org (§12, Organization stamp) and records only
+  `metadata.outrankedOrgCount`, not the org ids: an outranked org is never the
+  actor's own (the union refuses that case first), so each id would show the
+  actor's org another tenant's memberships and ranks. Tenants the actor does
   not belong to are deliberately not judged by this bound — the confinement
   makes them unreachable — with one exception the union is what covers: a
   target who is a **global superuser**, whose marker expands for the principal

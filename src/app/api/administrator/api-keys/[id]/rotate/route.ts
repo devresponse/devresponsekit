@@ -161,6 +161,7 @@ export const POST = withAdminRoute(async function POST(
     outcome: "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: existing.app_user_id,
+    organizationId: existing.organization_id,
     request,
     requestId: guard.requestId,
     metadata: { rotatedFromApiKeyId: id, apiKeyId: rotated.id, prefix: rotated.key_prefix },

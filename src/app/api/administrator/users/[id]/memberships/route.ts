@@ -36,6 +36,7 @@ import {
   MembershipGrantsRefusal,
   MEMBERSHIP_REVOCATION_DENIED_EVENT,
   MEMBERSHIP_REVOCATION_DENIED_REASON,
+  soleOrganizationId,
   unheldOnMembershipRemoval,
 } from "@/lib/admin/membership-grants.server";
 import {
@@ -214,6 +215,9 @@ export const POST = withAdminRoute(async function POST(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      // F-32: the membership's org (see `soleOrganizationId` for the rule the
+      // PATCH and DELETE below follow), so it shows on the member's Audit tab.
+      organizationId: org.id,
       metadata: {
         organizationId: org.id,
         slug: org.slug,
@@ -350,6 +354,7 @@ export const PATCH = withAdminRoute(async function PATCH(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: soleOrganizationId(memberships),
       email: target.primaryEmail,
       requestId: guard.requestId,
       reason: LAST_SUPERADMIN_REASON,
@@ -369,7 +374,8 @@ export const PATCH = withAdminRoute(async function PATCH(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
-      metadata: { membershipIds: input.membershipIds, status: input.status },
+      organizationId: soleOrganizationId(memberships),
+      metadata: { membershipIds: allowedMembershipIds, status: input.status },
     }),
     ...memberships.map((m) =>
       auditOrgAction("admin.organization.member_updated", "success", {
@@ -576,6 +582,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: soleOrganizationId(memberships),
       email: target.primaryEmail,
       requestId: guard.requestId,
       reason: MEMBERSHIP_REVOCATION_DENIED_REASON,
@@ -593,6 +600,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: soleOrganizationId(memberships),
       email: target.primaryEmail,
       requestId: guard.requestId,
       reason: LAST_SUPERADMIN_REASON,
@@ -609,8 +617,9 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: soleOrganizationId(memberships),
       metadata: {
-        membershipIds: input.membershipIds,
+        membershipIds: allowedMembershipIds,
         revokedRoleIds: roles.map((r) => r.role_id),
         removedGroupIds: groups.map((g) => g.group_id),
       },

@@ -236,6 +236,27 @@ describe("PATCH/DELETE — mutate only the org-scoped resolved ids", () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.users.read"]));
     expect((await DELETE(jsonReq({ membershipIds: [M1] }), ctx)).status).toBe(403);
   });
+
+  // F-32 made these user-level rows visible to the tenant; they must name
+  // only the memberships the request resolved, never a raw id from the body
+  // that may belong to another tenant.
+  it.each([
+    ["PATCH", "admin.user.membership_updated"],
+    ["DELETE", "admin.user.membership_removed"],
+  ] as const)("%s audits only the resolved membership ids", async (method, eventType) => {
+    state.memberships = [{ id: M1, organization_id: ORG_A, slug: "org-a" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.users.update"]));
+    const body =
+      method === "PATCH"
+        ? { membershipIds: [M1, M2], status: "suspended" }
+        : { membershipIds: [M1, M2] };
+    const res = await (method === "PATCH" ? PATCH : DELETE)(jsonReq(body), ctx);
+    expect(res.status).toBe(200);
+    const call = auditMock.mock.calls.find((c) => c[0] === eventType);
+    expect(call, eventType).toBeDefined();
+    const metadata = (call?.[2] as { metadata: { membershipIds: string[] } }).metadata;
+    expect(metadata.membershipIds).toEqual([M1]);
+  });
 });
 
 /**

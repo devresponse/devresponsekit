@@ -19,6 +19,14 @@ import { auditEvent, type AuditEventInput } from "@/lib/audit.server";
  *   - Pass `requestId` (typically from the `requireAdminPermission`
  *     grant) so every audit row written by a single request shares
  *     the same correlation id.
+ *   - F-32: `organizationId` is REQUIRED (`string | null`) on all three
+ *     contexts, so every call site decides which tenant's auditors see the
+ *     row (docs/admin-manager.md §12, "Organization stamp"). The rule: the
+ *     resource's org when the action is on an org-owned row (a membership, a
+ *     role, a group, a key); otherwise the org an org-confined actor acted in
+ *     (`actingOrganizationId`); `null` only for a platform-level action.
+ *     Every tenant-facing audit read filters on this column, so a row written
+ *     without it is invisible to the org it happened in.
  */
 export interface UserAuditContext {
   request: NextRequest | { headers: Headers };
@@ -31,6 +39,13 @@ export interface UserAuditContext {
    * is explicit at every call site.
    */
   appUserId: string | null;
+  /**
+   * F-32: the tenant the action happened in. A user has no org of its own, so
+   * this is the membership's org for a membership event, and otherwise
+   * `actingOrganizationId(guard.access)`: the org-confined actor's org, `null`
+   * for an unbound superadmin (a platform row, never its active-org cookie).
+   */
+  organizationId: string | null;
   email?: string | null;
   reason?: string | null;
   requestId?: string | null;
@@ -47,6 +62,7 @@ export async function auditUserAction(
     outcome,
     actorBetterAuthUserId: ctx.actorBetterAuthUserId,
     appUserId: ctx.appUserId,
+    organizationId: ctx.organizationId,
     email: ctx.email ?? null,
     reason: ctx.reason ?? null,
     request: ctx.request,
@@ -58,7 +74,12 @@ export async function auditUserAction(
 export interface RoleAuditContext {
   request: NextRequest | { headers: Headers };
   actorBetterAuthUserId: string;
-  organizationId?: string | null;
+  /**
+   * F-32: the role's own `organization_id` (`null` for a global role, and for
+   * the platform-wide permission catalog). Required, like on
+   * {@link UserAuditContext}.
+   */
+  organizationId: string | null;
   reason?: string | null;
   requestId?: string | null;
   metadata?: Record<string, unknown>;
@@ -73,7 +94,7 @@ export async function auditRoleAction(
     eventType,
     outcome,
     actorBetterAuthUserId: ctx.actorBetterAuthUserId,
-    organizationId: ctx.organizationId ?? null,
+    organizationId: ctx.organizationId,
     reason: ctx.reason ?? null,
     request: ctx.request,
     requestId: ctx.requestId ?? null,
@@ -84,7 +105,12 @@ export async function auditRoleAction(
 export interface OrgAuditContext {
   request: NextRequest | { headers: Headers };
   actorBetterAuthUserId: string;
-  organizationId?: string | null;
+  /**
+   * F-32: the organization acted on (`null` only for a platform-level event
+   * such as the platform sign-up defaults). Required, like on
+   * {@link UserAuditContext}.
+   */
+  organizationId: string | null;
   appUserId?: string | null;
   reason?: string | null;
   requestId?: string | null;
@@ -115,7 +141,7 @@ export async function auditOrgAction(
     eventType,
     outcome,
     actorBetterAuthUserId: ctx.actorBetterAuthUserId,
-    organizationId: ctx.organizationId ?? null,
+    organizationId: ctx.organizationId,
     appUserId: ctx.appUserId ?? null,
     reason: ctx.reason ?? null,
     request: ctx.request,

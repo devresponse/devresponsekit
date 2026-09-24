@@ -586,16 +586,24 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     // Both parties are measured, and by APP USER id.
     expect(heldByOrg).toHaveBeenCalledWith(TARGET_ID);
     expect(heldByOrg).toHaveBeenCalledWith("u-self");
-    expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: "admin.user.impersonation_failed",
-        outcome: "failure",
-        // A reason of its own: the union guard's `privilege_escalation` would
-        // hide which of the two bounds fired.
-        reason: "privilege_escalation_in_shared_org",
-        metadata: expect.objectContaining({ organizationIds: [ORG_B] }),
-      }),
-    );
+    const refusal = auditMock.mock.calls
+      .map(([row]) => row as { reason?: string })
+      .find((row) => row.reason === "privilege_escalation_in_shared_org");
+    expect(refusal).toMatchObject({
+      eventType: "admin.user.impersonation_failed",
+      outcome: "failure",
+      // A reason of its own: the union guard's `privilege_escalation` would
+      // hide which of the two bounds fired.
+      reason: "privilege_escalation_in_shared_org",
+      // F-32: filed under the actor's org (their active one, "o-1")…
+      organizationId: "o-1",
+      // …so it says HOW MANY shared tenants the target outranks them in, and
+      // never WHICH. Org B can never be the actor's own org here (the union
+      // above would have refused first), so its id is always another tenant's,
+      // and every auditor of the actor's org would read it.
+      metadata: { targetBetterAuthUserId: "ba-target", outrankedOrgCount: 1 },
+    });
+    expect(JSON.stringify(refusal)).not.toContain(ORG_B);
   });
 
   it("IMP-2: allows it when the actor holds the same authority in that shared tenant", async () => {
@@ -676,6 +684,114 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     // …and the per-tenant bound with it: a superadmin holds every permission
     // in every org, so there is no rank to escalate to (IMP-2).
     expect(heldByOrg).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-32: impersonation rows are filed under the tenant it happened in, so the
+ * org whose member was borrowed sees both ends. A delegated admin's start is
+ * stamped with their org; a superadmin's is a platform row (its active org
+ * says nothing about the target's tenant); the stop, which has no guard to
+ * resolve a scope from, reuses the org its start row was filed under.
+ */
+describe("impersonation audit organization (F-32)", () => {
+  const importRoute = () => import("@/app/api/administrator/users/[id]/impersonate/route");
+  const url = `http://test.local/api/administrator/users/${TARGET_ID}/impersonate`;
+
+  const startWith = async (access: ReturnType<typeof grantedAccess>) => {
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    accessGetter.mockResolvedValue(access);
+    dbMock.mockResolvedValue(targetRow);
+    authImpersonate.mockResolvedValue({ user: { id: "ba-target" } });
+    const { POST } = await importRoute();
+    return POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+  };
+
+  it("stamps a delegated admin's start with their org", async () => {
+    const res = await startWith(grantedAccess("admin.users.impersonate"));
+    expect(res.status).toBe(200);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_started",
+        appUserId: TARGET_ID,
+        organizationId: "o-1",
+      }),
+    );
+  });
+
+  it("files a superadmin's start as a platform row, not under its active org", async () => {
+    const res = await startWith({
+      ...grantedAccess("admin.users.impersonate"),
+      permissions: ["admin.users.impersonate", "superuser"],
+    });
+    expect(res.status).toBe(200);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_started",
+        organizationId: null,
+      }),
+    );
+  });
+
+  it("stamps a refusal with the actor's org", async () => {
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.impersonate"));
+    heldAnyOrg.mockResolvedValue(["admin.users.impersonate", "superuser"]);
+    sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+    dbMock.mockResolvedValue(targetRow);
+    const { POST } = await importRoute();
+    const res = await POST(makeRequest(url, { method: "POST" }), {
+      params: Promise.resolve({ id: TARGET_ID }),
+    });
+    expect(res.status).toBe(403);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_failed",
+        reason: "privilege_escalation",
+        organizationId: "o-1",
+      }),
+    );
+  });
+
+  it("files the stop under the org its start row was filed under", async () => {
+    sessionGetter.mockResolvedValue({
+      user: { id: "ba-target" },
+      session: { impersonatedBy: ACTOR_ID },
+    });
+    // 1st read: the impersonated user's row; 2nd: the latest start row.
+    dbMock.mockResolvedValueOnce(targetRow).mockResolvedValueOnce({ organization_id: "o-1" });
+    authStopImpersonate.mockResolvedValue({ headers: new Headers() });
+    const { DELETE } = await importRoute();
+    const res = await DELETE(makeRequest(url, { method: "DELETE" }));
+    expect(res.status).toBe(200);
+    expect(dbMock).toHaveBeenCalledTimes(2);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_stopped",
+        actorBetterAuthUserId: ACTOR_ID,
+        appUserId: TARGET_ID,
+        organizationId: "o-1",
+      }),
+    );
+  });
+
+  it("files the stop as a platform row when no start row names an org", async () => {
+    sessionGetter.mockResolvedValue({
+      user: { id: "ba-target" },
+      session: { impersonatedBy: ACTOR_ID },
+    });
+    dbMock.mockResolvedValueOnce(targetRow).mockResolvedValueOnce(undefined);
+    authStopImpersonate.mockRejectedValue(new Error("down"));
+    const { DELETE } = await importRoute();
+    const res = await DELETE(makeRequest(url, { method: "DELETE" }));
+    expect(res.status).toBe(502);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.impersonation_stop_failed",
+        organizationId: null,
+      }),
+    );
   });
 });
 

@@ -84,6 +84,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
   await auditRoleAction("admin.permission.updated", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: null,
     metadata: { permissionId: id, key: existing.key },
   });
 
@@ -142,6 +143,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       await auditRoleAction("admin.permission.delete_blocked", "denied", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
+        organizationId: null,
         reason: "permission_in_use",
         metadata: { permissionId: id, key: existing.key },
       });
@@ -155,6 +157,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   await auditRoleAction("admin.permission.deleted", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: null,
     metadata: { permissionId: id, key: existing.key },
   });
 

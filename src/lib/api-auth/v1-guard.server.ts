@@ -1,6 +1,7 @@
 import "server-only";
 import type { NextRequest, NextResponse } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
+import { actingOrganizationId } from "@/lib/admin/access-scope.server";
 import { decideSecureAccess } from "@/lib/auth-status";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
@@ -88,6 +89,8 @@ export async function requireApiPermission(
       eventType: "api.access.denied",
       outcome: "denied",
       actorBetterAuthUserId: caller.betterAuthUserId,
+      // F-32: the caller's org, as on `administrator.access.denied`.
+      organizationId: actingOrganizationId(caller.access),
       reason: "missing_permission_or_scope",
       request,
       requestId,

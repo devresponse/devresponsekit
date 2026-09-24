@@ -15,7 +15,11 @@ import {
   type ListQuery,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { resolveOrgScope, type OrgScope } from "@/lib/admin/access-scope.server";
+import {
+  resolveOrgScope,
+  scopeOrganizationId,
+  type OrgScope,
+} from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -147,6 +151,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
   // ADR-0001: confine the export to the caller's org. SUPERADMIN → all
   // orgs; ORG ADMIN → their org only; no resolvable org → empty export.
   const scope = resolveOrgScope(guard.access);
+  // F-32: every export audit below is filed under the org the export was
+  // confined to, so the tenant whose data left sees who took it. A superadmin's
+  // all-org export stays a platform row.
+  const exportOrganizationId = scopeOrganizationId(scope);
   try {
     exporter = buildExporter(resource, query, scope);
     firstPage = await exporter.fetchPage(Math.min(PAGE_SIZE, MAX_EXPORT_ROWS), null);
@@ -155,6 +163,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
       eventType: "admin.export.failed",
       outcome: "error",
       actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: exportOrganizationId,
       request,
       requestId: guard.requestId,
       reason: "export_failed",
@@ -230,6 +239,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
           eventType: "admin.export.failed",
           outcome: "error",
           actorBetterAuthUserId: guard.betterAuthUserId,
+          organizationId: exportOrganizationId,
           request,
           requestId: guard.requestId,
           reason: "export_failed",
@@ -251,6 +261,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
             eventType: "admin.export.completed",
             outcome: "success",
             actorBetterAuthUserId: guard.betterAuthUserId,
+            organizationId: exportOrganizationId,
             request,
             requestId: guard.requestId,
             reason: truncated ? "export_truncated" : null,

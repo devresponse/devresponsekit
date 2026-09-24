@@ -527,7 +527,7 @@ i18n: labels, help text, and error messages localize in `en` and `uk`.
 - Access matrix:
   - Visitor / Member -> Not Found.
   - Limited Admin (`admin` role) -> **can** open the audit log (it holds `admin.audit.read`), scoped to its org.
-  - Org Admin -> can open; sees only their org's events (platform events with a null org are superadmin-only) (`route.ts:86`).
+  - Org Admin -> can open; sees only their org's events, which include the actions of the org's own admins and every action on its keys, apps and memberships (F-32; the few platform rows are listed in [admin-manager §12](../admin-manager.md#12-audit-model)); platform events with a null org are superadmin-only (`route.ts:86`).
   - Superadmin -> sees every org's events plus org-less platform events.
 - Preconditions and test data: the seed back-dates an audit history (logins plus a spread of admin/account events) (`src/db/seeds/dev-init.ts:20`). Perform a couple of admin actions first (e.g. rotate a key) to generate fresh rows.
 
@@ -557,13 +557,15 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-AUDIT-LOG-S3 — As an Org Admin, I want the log confined to my org, so that I never see another tenant's activity.
-  - Acceptance criteria: Given I am an Org Admin, when I browse the log, then only my org's events appear; platform (org-less) events are not shown (`route.ts:86`).
+  - Acceptance criteria: Given I am an Org Admin, when I browse the log, then only my org's events appear, including what my org's other admins did; ORG B's events and platform (org-less) events are not shown (`route.ts:86`; stamping rule in [admin-manager §12](../admin-manager.md#12-audit-model)).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | As Superadmin, note an event that belongs to ORG B (or a platform/system event) | You have a reference row |
     | 2 | Sign in as `orgadmin@orga.local` and open the Audit log | That ORG B / platform event does not appear anywhere in your results |
     | 3 | Filter by an actor from ORG B | No rows are returned |
+    | 4 | As another ORG A admin holding `admin.apikeys.manage`, rotate or revoke an ORG A API key; then, as `orgadmin@orga.local`, filter by that admin as Actor | The `admin.api_key.*` row appears |
+    | 5 | Sign in as an ORG B admin and filter by the same ORG A admin | No rows are returned |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-AUDIT-LOG-S4 — As a Member, I want the audit log unreachable, so that activity data stays admin-only.

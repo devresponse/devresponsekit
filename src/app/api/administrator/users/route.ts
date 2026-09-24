@@ -13,7 +13,11 @@ import {
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  actingOrganizationId,
+  hasCrossOrgReach,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
@@ -256,6 +260,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: null,
+      organizationId: actingOrganizationId(guard.access),
       email: normalisedEmail,
       requestId: guard.requestId,
       reason: emailTaken ? "auth_user_exists" : "auth_create_user_failed",
@@ -279,6 +284,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: null,
+      organizationId: actingOrganizationId(guard.access),
       email: normalisedEmail,
       requestId: guard.requestId,
       reason: "auth_create_no_id",
@@ -322,6 +328,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: null,
+      organizationId: actingOrganizationId(guard.access),
       email: normalisedEmail,
       requestId: guard.requestId,
       reason: "db_insert_failed",
@@ -334,6 +341,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: appUser.id,
+    organizationId: actingOrganizationId(guard.access),
     email: appUser.primary_email,
     metadata: {
       betterAuthUserId,

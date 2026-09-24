@@ -67,6 +67,7 @@ export const DELETE = withV1Route(async function DELETE(request: NextRequest, ct
     outcome: "success",
     actorBetterAuthUserId: actor.betterAuthUserId,
     appUserId: actor.appUserId,
+    organizationId: key.organization_id,
     request,
     metadata: { apiKeyId: id, alreadyRevoked: !revoked },
   });

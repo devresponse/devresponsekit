@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { actingOrganizationId } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
   listBetterAuthUserSessions,
@@ -69,6 +70,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "auth_list_sessions_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown", sessionId },
@@ -86,6 +88,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "auth_revoke_session_failed",
       // The session id is an opaque identifier, safe to record; the token
@@ -99,6 +102,7 @@ export const DELETE = withAdminRoute(async function DELETE(
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     metadata: { sessionId },
   });

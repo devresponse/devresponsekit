@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as ResolveCallerModule from "@/lib/api-auth/resolve-caller.server";
 
 /**
  * Unit tests for the centralized `requireAdminPermission` helper
@@ -182,6 +183,9 @@ describe("requireAdminPermission", () => {
         eventType: "administrator.access.denied",
         outcome: "denied",
         actorBetterAuthUserId: "ba-1",
+        // F-32: filed under the org the caller was acting in, so that
+        // tenant's auditors see its members probing the console.
+        organizationId: "o-1",
         reason: "missing_admin_permission",
         metadata: expect.objectContaining({ required: ["admin.users.read"] }),
       }),
@@ -264,6 +268,91 @@ describe("requireAdminPermission", () => {
     const result = await requireAdminPermission(makeRequest(), "admin.users.read");
     expect(isAdminPermissionDenial(result)).toBe(false);
     expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-32 — which org a bearer credential's `administrator.access.denied` row is
+ * filed under. The stamp is `actingOrganizationId(caller.access)`: the org the
+ * caller is CONFINED to, never `access.organizationId` as such. For an
+ * org-bound credential the two agree (its bound org). They differ only for an
+ * unbound superadmin, whose `organizationId` is an active-org cookie that says
+ * nothing about the request; that row is a platform row.
+ */
+describe("requireAdminPermission — a bearer denial's organization stamp (F-32)", () => {
+  const resolved = vi.fn();
+
+  beforeEach(() => {
+    resolved.mockReset();
+    vi.doMock("@/lib/api-auth/resolve-caller.server", async () => {
+      const actual = await vi.importActual<typeof ResolveCallerModule>(
+        "@/lib/api-auth/resolve-caller.server",
+      );
+      return { ...actual, resolveCaller: (...a: unknown[]) => resolved(...a) };
+    });
+  });
+  afterEach(() => {
+    vi.doUnmock("@/lib/api-auth/resolve-caller.server");
+  });
+
+  /** A superuser-owned key whose scopes do not include the route's permission. */
+  const superuserKey = (access: Record<string, unknown>) => ({
+    kind: "api_key",
+    betterAuthUserId: "ba-su",
+    credentialId: "k-1",
+    isBearer: true,
+    boundOrganizationId: null,
+    grantedScopes: ["admin.audit.read"],
+    impersonatorId: null,
+    access: {
+      appUserId: "u-su",
+      primaryEmail: "su@x.com",
+      status: "active",
+      membershipStatus: "active",
+      preferredLocale: "en",
+      permissions: ["superuser", "admin.users.read", "admin.audit.read"],
+      ...access,
+    },
+  });
+
+  async function deny() {
+    const { requireAdminPermission, isAdminPermissionDenial } =
+      await import("@/lib/admin/permissions.server");
+    const result = await requireAdminPermission(
+      makeRequest({ authorization: "Bearer drk_test_x.secret" }),
+      "admin.users.read",
+    );
+    expect(isAdminPermissionDenial(result)).toBe(true);
+    if (isAdminPermissionDenial(result)) expect(result.response.status).toBe(403);
+  }
+
+  it("files an org-bound credential's denial under its bound org", async () => {
+    resolved.mockResolvedValue(superuserKey({ organizationId: "o-bound", orgBound: true }));
+    await deny();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        actorBetterAuthUserId: "ba-su",
+        organizationId: "o-bound",
+        metadata: expect.objectContaining({ callerKind: "api_key", credentialId: "k-1" }),
+      }),
+    );
+  });
+
+  it("files an UNBOUND superuser caller's denial as a platform row, not under its organizationId", async () => {
+    // Every bearer credential resolves org-bound today (MACHINE-2), so this
+    // shape pins the rule rather than a live path: if a resolver ever hands
+    // back an unbound superuser whose scopes refuse the route, its
+    // `organizationId` must not decide which tenant reads the denial.
+    resolved.mockResolvedValue(superuserKey({ organizationId: "o-active" }));
+    await deny();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        actorBetterAuthUserId: "ba-su",
+        organizationId: null,
+      }),
+    );
   });
 });
 
@@ -402,6 +491,8 @@ describe("checkAdminPermissionServer - denials are audited (review #74)", () => 
         eventType: "administrator.access.denied",
         outcome: "denied",
         actorBetterAuthUserId: "ba-1",
+        // F-32: the same stamp as the route path.
+        organizationId: "o-1",
         reason: "missing_admin_permission",
         metadata: expect.objectContaining({
           required: ["admin.audit.read"],
@@ -419,7 +510,33 @@ describe("checkAdminPermissionServer - denials are audited (review #74)", () => 
     const { checkAdminPermissionServer } = await load();
     expect(await checkAdminPermissionServer("admin.users.read")).toBe("denied");
     expect(auditMock).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: "denied", reason: "blocked" }),
+      expect.objectContaining({ outcome: "denied", reason: "blocked", organizationId: "o-1" }),
+    );
+  });
+
+  it("files a blocked SUPERADMIN's denial as a platform row, never under its active org (F-32)", async () => {
+    // The one RSC denial a cookie superadmin can reach: the permission check
+    // lets them through everywhere, the status gate does not. Its
+    // `organizationId` is the active-org cookie, which says nothing about why
+    // or where they were refused, so it must not file the row under that org.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-su" } });
+    accessGetter.mockResolvedValue({
+      ...ACTIVE_READER,
+      organizationId: "o-active",
+      permissions: ["superuser", "admin.users.read"],
+      status: "suspended",
+    });
+
+    const { checkAdminPermissionServer } = await load();
+    expect(await checkAdminPermissionServer("admin.users.read")).toBe("denied");
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        actorBetterAuthUserId: "ba-su",
+        reason: "blocked",
+        organizationId: null,
+      }),
     );
   });
 

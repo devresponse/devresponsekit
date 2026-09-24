@@ -125,6 +125,28 @@ export class MembershipGrantsRefusal extends Error {
 }
 
 /**
+ * F-32 — the organization a USER-level membership audit row
+ * (`admin.user.membership_*`, and the refusals written beside it) is stamped
+ * with: the memberships' org when they all sit in one, else `null`.
+ *
+ * A membership is an org-owned row, so its org is the tenant the action
+ * happened in, whoever acted. One request can name memberships in several
+ * orgs only for a superadmin (an org-confined caller's list is filtered to its
+ * own org first). That request writes a single user-level row about all of
+ * them, so stamping any one tenant would show it the others' membership ids;
+ * it stays a platform row, and each tenant still gets its own org-stamped
+ * `admin.organization.member_*` twin. Those twins are unchanged and carry no
+ * `app_user_id`; the stamped user-level row is what puts the event on the
+ * member's Audit tab for their org's admins, so it appears there once. Pure.
+ */
+export function soleOrganizationId(
+  memberships: ReadonlyArray<{ organization_id: string }>,
+): string | null {
+  const orgs = new Set(memberships.map((m) => m.organization_id));
+  return orgs.size === 1 ? [...orgs][0]! : null;
+}
+
+/**
  * The ids of the grants one membership took with it, for that membership's
  * own `admin.user.membership_removed` / `admin.organization.members_removed`
  * row. Pure.
@@ -166,6 +188,8 @@ export function auditRemovedMembershipGrants(input: {
       request,
       actorBetterAuthUserId,
       appUserId: r.app_user_id,
+      // F-32: the revoked assignment's org, as on the single-role revoke.
+      organizationId: r.organization_id,
       requestId,
       metadata: {
         roleId: r.role_id,

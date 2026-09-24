@@ -228,6 +228,7 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     outcome: "success",
     actorBetterAuthUserId: grant.caller.betterAuthUserId,
     appUserId: parsed.data.serviceAppUserId,
+    organizationId,
     request,
     requestId: grant.requestId,
     metadata: { clientRowId: created.id, clientId: created.client_id, scopes },

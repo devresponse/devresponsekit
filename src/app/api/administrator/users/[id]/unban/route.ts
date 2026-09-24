@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
+  actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
@@ -64,6 +65,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "auth_unban_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -75,6 +77,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
   });
 

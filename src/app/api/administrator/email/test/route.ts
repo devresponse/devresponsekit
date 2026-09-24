@@ -83,6 +83,8 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     eventType: "admin.email.test_sent",
     outcome: result.status === "failed" ? "error" : "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
+    // F-32: the same tenant the outbox row is attributed to above.
+    organizationId,
     email: parsed.data.to,
     request,
     metadata: { outboxId: result.outboxId, status: result.status },

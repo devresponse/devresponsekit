@@ -33,6 +33,7 @@ vi.mock("@/db/database", () => ({
 }));
 
 import {
+  actingOrganizationId,
   activeGlobalSuperuserGrants,
   canAccessUser,
   hasCrossOrgReach,
@@ -40,6 +41,7 @@ import {
   isSuperadmin,
   ownerOutranksActor,
   resolveOrgScope,
+  scopeOrganizationId,
   canAccessOrg,
   requiresSuperadminForSharedTarget,
   membershipCascadeStripsLastGlobalSuperuser,
@@ -177,6 +179,44 @@ describe("resolveOrgScope", () => {
   });
   it("leaves the cookie-session superadmin unscoped (no behaviour change at a browser)", () => {
     expect(resolveOrgScope({ ...superadmin, orgBound: false })).toEqual({ kind: "all" });
+  });
+});
+
+/**
+ * F-32: the organization an admin audit row is filed under when only the actor
+ * places it in a tenant. The one case that matters is the superadmin: its
+ * `organizationId` is its active-org cookie, which says nothing about the
+ * target, so stamping it would file an action on org B's user under org A.
+ */
+describe("actingOrganizationId / scopeOrganizationId (F-32)", () => {
+  it("an org admin acts in its own org", () => {
+    expect(actingOrganizationId(orgAdmin)).toBe("org-a");
+  });
+  it("an unbound superadmin is a platform actor, never its active org", () => {
+    expect(superadmin.organizationId).toBe("org-a");
+    expect(actingOrganizationId(superadmin)).toBeNull();
+    expect(actingOrganizationId({ ...superadmin, orgBound: false })).toBeNull();
+  });
+  it("an org-bound superuser credential acts in its BOUND org (MACHINE-2)", () => {
+    expect(actingOrganizationId(boundSuperadmin)).toBe("org-a");
+  });
+  it("no resolvable org stamps nothing", () => {
+    expect(actingOrganizationId(orglessAdmin)).toBeNull();
+    expect(actingOrganizationId(boundSuperadminNoOrg)).toBeNull();
+  });
+  it("reads a resolved scope the same way", () => {
+    expect(scopeOrganizationId({ kind: "org", organizationId: "org-b" })).toBe("org-b");
+    expect(scopeOrganizationId({ kind: "all" })).toBeNull();
+    expect(scopeOrganizationId(null)).toBeNull();
+    for (const access of [
+      superadmin,
+      orgAdmin,
+      orglessAdmin,
+      boundSuperadmin,
+      boundSuperadminNoOrg,
+    ]) {
+      expect(actingOrganizationId(access)).toBe(scopeOrganizationId(resolveOrgScope(access)));
+    }
   });
 });
 

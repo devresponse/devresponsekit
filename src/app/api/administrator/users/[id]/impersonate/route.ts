@@ -9,7 +9,11 @@ import {
   stopBetterAuthImpersonating,
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { hasCrossOrgReach, isOrgBound } from "@/lib/admin/access-scope.server";
+import {
+  actingOrganizationId,
+  hasCrossOrgReach,
+  isOrgBound,
+} from "@/lib/admin/access-scope.server";
 import {
   permissionKeysByActiveOrg,
   permissionKeysHeldInAnyOrg,
@@ -93,6 +97,10 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       eventType: "admin.user.impersonation_failed",
       outcome: "denied",
       actorBetterAuthUserId: guard.impersonatorId,
+      // F-32: a platform row. `guard.access` is the BORROWED identity's context,
+      // not the human's, and the requested id is an unresolved path segment
+      // that may name a user in any tenant, so no org can be derived safely.
+      organizationId: null,
       reason: "nested_impersonation",
       request,
       requestId: guard.requestId,
@@ -175,6 +183,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "org_bound_credential",
       metadata: { targetBetterAuthUserId: target.betterAuthUserId },
@@ -195,6 +204,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
+        organizationId: actingOrganizationId(guard.access),
         email: target.primaryEmail,
         reason: "privilege_escalation",
         metadata: { targetBetterAuthUserId: target.betterAuthUserId },
@@ -248,6 +258,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
+        organizationId: actingOrganizationId(guard.access),
         email: target.primaryEmail,
         reason: "actor_not_provisioned",
         metadata: { targetBetterAuthUserId: target.betterAuthUserId },
@@ -274,13 +285,20 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
+        organizationId: actingOrganizationId(guard.access),
         email: target.primaryEmail,
         reason: "privilege_escalation_in_shared_org",
-        // Only orgs the ACTOR is an active member of can appear here, so this
-        // names no tenant they could not already enumerate.
+        // F-32: a COUNT, never the ids. This row is filed under the actor's
+        // org, so every auditor of that org reads it, and none of the
+        // outranked orgs can be that org (the union above would have refused
+        // first): each id would name another tenant, and with it both users'
+        // membership there and the target's higher rank. ADR-0001 keeps a
+        // user's footprint in other tenants from an org's admins. A platform
+        // auditor who needs WHICH orgs reads the two users' memberships and
+        // grants, each change to which is audited in its own org.
         metadata: {
           targetBetterAuthUserId: target.betterAuthUserId,
-          organizationIds: outrankedOrgIds,
+          outrankedOrgCount: outrankedOrgIds.length,
         },
       });
       return adminErrorResponse("forbidden", 403, request);
@@ -301,6 +319,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       outcome: "denied",
       actorBetterAuthUserId: liveImpersonatorId ?? guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: liveImpersonatorId ? "nested_impersonation" : "session_principal_mismatch",
       request,
@@ -324,6 +343,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "auth_impersonate_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -335,6 +355,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     metadata: {
       targetBetterAuthUserId: target.betterAuthUserId,
@@ -419,6 +440,18 @@ export const DELETE = withAdminRoute(async function DELETE(request: NextRequest)
   // `auditEvent` directly (not `auditUserAction`) because the impersonated
   // user's app row is best-effort here — stop must succeed even if it's
   // missing, so `appUserId` is nullable; the original actor is the audited one.
+  //
+  // F-32: filed under the tenant its START was, so an org that saw the
+  // impersonation begin also sees it end. Nothing here resolves the admin's
+  // scope (there is no guard), and the org the borrowed session or the
+  // `active_org` cookie names now is not evidence: the cookie can be rewritten
+  // mid-impersonation (IMP-1) to an org of the admin's that the target is not
+  // in, and stamping that would show this user's row to a tenant it has nothing
+  // to do with. The start row's org was decided with the target resolved in
+  // the admin's scope, so reusing it can name no other tenant.
+  const startOrganizationId = targetRow
+    ? await impersonationStartOrganizationId(impersonatorId, targetRow.id)
+    : null;
   try {
     await stopBetterAuthImpersonating(request);
   } catch (err) {
@@ -427,6 +460,7 @@ export const DELETE = withAdminRoute(async function DELETE(request: NextRequest)
       outcome: "failure",
       actorBetterAuthUserId: impersonatorId,
       appUserId: targetRow?.id ?? null,
+      organizationId: startOrganizationId,
       email: targetRow?.primary_email ?? null,
       reason: "auth_stop_impersonate_failed",
       request,
@@ -447,6 +481,7 @@ export const DELETE = withAdminRoute(async function DELETE(request: NextRequest)
     outcome: "success",
     actorBetterAuthUserId: impersonatorId,
     appUserId: targetRow?.id ?? null,
+    organizationId: startOrganizationId,
     email: targetRow?.primary_email ?? null,
     request,
     requestId,
@@ -457,3 +492,25 @@ export const DELETE = withAdminRoute(async function DELETE(request: NextRequest)
   // Better Auth's nextCookies plugin during the call above.
   return NextResponse.json({ ok: true });
 });
+
+/**
+ * F-32: the `organization_id` of the latest `admin.user.impersonation_started`
+ * row this admin wrote for this user (the impersonation being stopped), or
+ * `null` when there is none, or it is a platform row (a superadmin's). Served
+ * by the `(actor_better_auth_user_id, created_at)` index.
+ */
+async function impersonationStartOrganizationId(
+  impersonatorId: string,
+  appUserId: string,
+): Promise<string | null> {
+  const start = await db
+    .selectFrom("app_audit_events")
+    .select("organization_id")
+    .where("actor_better_auth_user_id", "=", impersonatorId)
+    .where("event_type", "=", "admin.user.impersonation_started")
+    .where("app_user_id", "=", appUserId)
+    .orderBy("created_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  return start?.organization_id ?? null;
+}

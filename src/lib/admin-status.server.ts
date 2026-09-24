@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { sql, type SqlBool } from "kysely";
 import { db } from "@/db/database";
 import {
+  scopeOrganizationId,
   userHasMembershipOutsideOrg,
   membershipCascadeStripsLastGlobalSuperuser,
   LAST_SUPERADMIN_EVENT,
@@ -224,6 +225,7 @@ export async function performAdminStatusChange(
         outcome: "denied",
         actorBetterAuthUserId: input.actorBetterAuthUserId,
         appUserId: target.id,
+        organizationId: scopeOrganizationId(input.scope),
         email: target.primary_email,
         reason: LAST_SUPERADMIN_REASON,
         request: input.request,
@@ -246,6 +248,9 @@ export async function performAdminStatusChange(
     outcome: "success",
     actorBetterAuthUserId: input.actorBetterAuthUserId,
     appUserId: target.id,
+    // F-32: the org the change was confined to (so it reaches that org's audit
+    // views); a superadmin's account-global change is a platform row.
+    organizationId: scopeOrganizationId(input.scope),
     email: target.primary_email,
     reason: input.reason,
     request: input.request,

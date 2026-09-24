@@ -141,6 +141,7 @@ export const DELETE = withAdminRoute(async function DELETE(
     outcome: "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: existing.app_user_id,
+    organizationId: existing.organization_id,
     request,
     requestId: guard.requestId,
     reason: reason ?? null,

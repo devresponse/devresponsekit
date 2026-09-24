@@ -125,6 +125,7 @@ export const POST = withV1Route(async function POST(request: NextRequest, ctx: R
     outcome: "success",
     actorBetterAuthUserId: actor.betterAuthUserId,
     appUserId: actor.appUserId,
+    organizationId: key.organization_id,
     request,
     metadata: { previousApiKeyId: id, newApiKeyId: rotated.id, prefix: rotated.key_prefix },
   });

@@ -3,7 +3,7 @@ import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { enabledSocialProviders } from "@/lib/auth";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
-import { getSafeReturnTo } from "@/lib/safe-return-to";
+import { getSafeReturnToInLocale } from "@/lib/safe-return-to";
 
 /**
  * Organization-scoped sign-in: `/sign-in/<org>` where `<org>` is a slug or id.
@@ -25,7 +25,7 @@ export default async function ScopedSignInPage({
   const sp = await searchParams;
   const safeLocale: SupportedLocale = isSupportedLocale(locale) ? locale : "en";
   const rawReturn = typeof sp.returnTo === "string" ? sp.returnTo : null;
-  const returnTo = getSafeReturnTo(rawReturn, safeLocale);
+  const returnTo = getSafeReturnToInLocale(rawReturn, safeLocale);
   const organization = await resolveOrganizationByIdentifier(org);
 
   return (

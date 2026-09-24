@@ -1,5 +1,6 @@
 import "server-only";
 import { sql } from "kysely";
+import { defaultLocale } from "@/config/i18n-config";
 import { db } from "@/db/database";
 import { userIsGlobalSuperuser } from "@/lib/admin/access-scope.server";
 import {
@@ -66,14 +67,24 @@ function normalizeEmail(email: string): string {
 }
 
 /**
+ * The locale an invitation email is rendered in AND the locale its accept link
+ * is anchored to. An invitation is addressed to an email address, not to an
+ * account, so no recipient preference is consulted, even when the invitee
+ * already has an account. Using one constant for both keeps the link in the
+ * language of the email that carries it.
+ */
+const INVITATION_EMAIL_LOCALE = defaultLocale;
+
+/**
  * The accept link an invitation email carries. Built on BETTER_AUTH_URL —
  * the same origin the verification-email links already use — and anchored
- * to the default locale: the invitee's locale is unknown until they have an
- * account, and the invite page itself is fully localized once they land.
+ * to {@link INVITATION_EMAIL_LOCALE}. The invite page is fully localized once
+ * the invitee lands, and its language switcher keeps the `?token=` (F-35), so
+ * an invitee who switches language keeps the invitation.
  */
 export function buildInvitationAcceptUrl(plaintextToken: string): string {
   const base = getServerEnv().BETTER_AUTH_URL.replace(/\/$/, "");
-  return `${base}/en/invite?token=${encodeURIComponent(plaintextToken)}`;
+  return `${base}/${INVITATION_EMAIL_LOCALE}/invite?token=${encodeURIComponent(plaintextToken)}`;
 }
 
 /**
@@ -117,6 +128,7 @@ export async function sendInvitationEmail(input: {
     to: input.to,
     templateKey: "organization_invitation",
     organizationId: input.organizationId,
+    locale: INVITATION_EMAIL_LOCALE,
     variables: {
       inviterName: inviter?.display_name || inviter?.primary_email || "An administrator",
       organizationName: input.organizationName,

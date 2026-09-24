@@ -1,7 +1,5 @@
 "use client";
 
-import { useTransition } from "react";
-import { usePathname, useRouter } from "@/i18n/navigation";
 import {
   Select,
   SelectContent,
@@ -11,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { locales, LOCALE_LABELS, type SupportedLocale } from "@/config/i18n-config";
 import { useTranslations } from "next-intl";
+import { useSwitchLocale } from "./use-switch-locale";
 
 export interface LocaleSwitcherProps {
   current: SupportedLocale;
@@ -22,7 +21,10 @@ export interface LocaleSwitcherProps {
  * LocaleSwitcher
  *
  * Switches only the locale segment of the current URL while preserving
- * the path and query parameters. Never switches API routes — `next-intl`
+ * the path, the query string and the fragment byte-for-byte, so an invite
+ * token, an invited sign-up, a `returnTo` continuation or a grid's filters
+ * survive a language change (F-35; the logic lives in `useSwitchLocale`,
+ * shared with `LanguageMenu`). Never switches API routes — `next-intl`
  * navigation helpers refuse to rewrite paths outside the localized tree.
  *
  * For authenticated users, the selection is persisted via the locale
@@ -30,28 +32,10 @@ export interface LocaleSwitcherProps {
  */
 export function LocaleSwitcher({ current, persistAuthenticated = false }: LocaleSwitcherProps) {
   const t = useTranslations("common");
-  const router = useRouter();
-  const pathname = usePathname();
-  const [isPending, startTransition] = useTransition();
-
-  const handleChange = (next: string) => {
-    if (!locales.includes(next as SupportedLocale)) return;
-    startTransition(() => {
-      router.replace(pathname, { locale: next as SupportedLocale });
-      if (persistAuthenticated) {
-        // Fire-and-forget: server validates and audits.
-        void fetch("/api/preferences/locale", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ locale: next }),
-        });
-      }
-    });
-  };
+  const { switchLocale, isPending } = useSwitchLocale({ persistAuthenticated });
 
   return (
-    <Select value={current} onValueChange={handleChange} disabled={isPending}>
+    <Select value={current} onValueChange={switchLocale} disabled={isPending}>
       <SelectTrigger aria-label={t("language")} className="h-8 w-[10rem] text-xs">
         <SelectValue />
       </SelectTrigger>

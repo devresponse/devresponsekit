@@ -60,11 +60,10 @@ export function isKnownScope(scope: string): boolean {
  * scopes alone refuses such a key to every bearer caller.
  */
 export function isScopeNameable(key: string): boolean {
-  if (CATALOG_SET.has(key)) return true;
-  const dot = key.indexOf(".");
-  if (dot <= 0) return false;
-  const root = key.slice(0, dot + 1);
-  return API_SCOPE_CATALOG.some((scope) => scope.startsWith(root));
+  // Every catalog key has an interior dot (pinned in api-scopes.test.ts), so a
+  // catalog key matches its own root here: no separate CATALOG_SET check.
+  const root = key.slice(0, key.indexOf(".") + 1);
+  return root !== "" && API_SCOPE_CATALOG.some((scope) => scope.startsWith(root));
 }
 
 /** True when `scope` is an `account.*` self-service scope. */

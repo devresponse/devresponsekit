@@ -15,7 +15,7 @@ _Audience: developers joining the codebase. Get it running, learn the layout, an
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| **Node.js** | 24.x | Pinned via `.nvmrc` (`24`) and `package.json` `engines` (`node >=24`, `pnpm >=10`); CI, the Docker image and Vercel all run Node 24 — keep them on the same major (a Node-24-only failure inside the Next runtime once passed every check on Node 22 CI, see #400). |
+| **Node.js** | 24.x | Pinned via `.nvmrc` (`24`) and `package.json` `engines` (`node 24.x`, `pnpm >=10`); CI, the Docker image and Vercel all run Node 24 — keep them on the same major. `engines.node` names the exact major on purpose: an open range (`>=24`) would let Vercel move production to a newer major on its own (a Node-24-only failure inside the Next runtime once passed every check on Node 22 CI, see #400). |
 | **pnpm** | 10.33.2 | Pinned via `package.json` → `packageManager`, **with the release's `+sha512.…` integrity hash** (review #226) — Corepack verifies the tarball before running it. Enable with `corepack enable`; change the version only with `corepack use pnpm@<version>`, which rewrites the hash too. |
 | **Docker** | recent | Only used to run PostgreSQL locally. A managed Postgres works too. |
 | **PostgreSQL** | 17 | The local Docker image is `pgvector/pgvector:pg17`. |

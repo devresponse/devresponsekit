@@ -30,9 +30,10 @@ updates:
     commit-message:
       prefix: build
     # Node MAJOR jumps (22 -> 26, PR #388) are a deliberate runtime upgrade
-    # (.nvmrc, CI setup-node, engines, the dependency-governance invariant all
-    # pin 22) — never an unattended bump. Digest and minor/patch bumps still
-    # arrive; hand-closing a major PR would only make Dependabot re-propose it.
+    # (.nvmrc, CI setup-node, engines `24.x`, the dependency-governance
+    # invariant all pin one major — 24 today) — never an unattended bump.
+    # Digest and minor/patch bumps still arrive; hand-closing a major PR would
+    # only make Dependabot re-propose it.
     ignore:
       - dependency-name: node
         update-types: ["version-update:semver-major"]

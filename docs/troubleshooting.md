@@ -259,7 +259,8 @@ version is used: `corepack enable`, then `pnpm install`. The project pins
 dedicated change.
 
 **Node version errors.** Use Node 24 (what CI, the Docker image and Vercel run, and what `.nvmrc` +
-`package.json` `engines` pin). Point your version manager at `.nvmrc`.
+`package.json` `engines` pin — `engines.node` is `24.x`, an exact major, so Vercel cannot move
+production to a newer Node before CI and the image do). Point your version manager at `.nvmrc`.
 
 **Postgres won't start / port conflict.** `pnpm db:up` maps host port **5444**
 (not 5432). If 5444 is taken, stop the conflicting service or change the mapping

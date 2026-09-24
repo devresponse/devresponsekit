@@ -19,7 +19,7 @@
 # optimization) use prebuilt glibc binaries. Digest-pinned for reproducibility
 # + supply-chain integrity; bump the tag AND digest together (see docs/docker.md
 # "Hardening"). Digest is the multi-arch index for `node:24-bookworm-slim`
-# (22.23.2, 2026-08-25). Dependabot's `docker` ecosystem (.github/dependabot.yml)
+# (Node 24.21.0 per its NODE_VERSION). Dependabot's `docker` ecosystem (.github/dependabot.yml)
 # proposes digest bumps; keep BOTH stages on the same digest.
 # ─────────────────────────────────────────────────────────────────────
 FROM node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS builder

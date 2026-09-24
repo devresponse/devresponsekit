@@ -1,9 +1,12 @@
 import * as Sentry from "@sentry/nextjs";
 import {
   SENTRY_DATA_COLLECTION,
+  installReplayRecordingScrubber,
   parseSampleRate,
   scrubBreadcrumb,
   scrubEvent,
+  scrubReplayEvent,
+  scrubReplayRecordingEvent,
   scrubSpan,
   scrubTransaction,
 } from "@/lib/observability/sentry-shared";
@@ -19,11 +22,26 @@ import {
  *   - **Masked Session Replay** — `replayIntegration` with *all text and
  *     inputs masked and media blocked*; by default only sessions that hit
  *     an error are recorded (`replaysOnErrorSampleRate`), so an auth app
- *     never streams a clean session.
+ *     never streams a clean session. Its URLs are scrubbed on all three
+ *     channels a replay uses (F-23, see sentry-shared.ts).
  *
  * Opt-in: with no `NEXT_PUBLIC_SENTRY_DSN`, the SDK is a disabled no-op.
  */
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+const replay = Sentry.replayIntegration({
+  maskAllText: true,
+  maskAllInputs: true,
+  blockAllMedia: true,
+  // F-23: rrweb records a hidden input's value verbatim (`maskAllInputs`
+  // covers the typed fields only), and /sso/confirm carries the handoff token
+  // in one. A hidden input is never on screen, so masking it costs a replay
+  // nothing.
+  mask: ['input[type="hidden"]'],
+  // F-23: the frames the SDK adds to the recording (navigation and request
+  // spans, breadcrumbs) name full URLs, query included.
+  beforeAddRecordingEvent: scrubReplayRecordingEvent,
+});
 
 Sentry.init({
   dsn,
@@ -43,11 +61,11 @@ Sentry.init({
   ),
   integrations: [
     Sentry.browserTracingIntegration(),
-    Sentry.replayIntegration({
-      maskAllText: true,
-      maskAllInputs: true,
-      blockAllMedia: true,
-    }),
+    // F-23: rrweb's own events (the page URL each snapshot opens with, every
+    // link's `href`) reach no SDK hook, so the scrubber rides in as an rrweb
+    // plugin. An SDK that no longer takes one gets no replay at all rather
+    // than an unscrubbed one.
+    ...(installReplayRecordingScrubber(replay) ? [replay] : []),
   ],
   // Never record cookies / query strings / bodies / IPs at write time;
   // the scrubbers below are the backstop for errors, transactions, AND
@@ -58,6 +76,10 @@ Sentry.init({
   beforeSendSpan: scrubSpan,
   beforeBreadcrumb: scrubBreadcrumb,
 });
+
+// F-23: the `replay_event` goes out through event processors only, never
+// `beforeSend`, so its `urls`, `request.url` and `Referer` are scrubbed here.
+Sentry.addEventProcessor(scrubReplayEvent);
 
 // Instruments App Router client-side navigations (Next.js calls this).
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

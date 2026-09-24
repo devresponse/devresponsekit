@@ -254,6 +254,14 @@ describe("Edge instrumentation import graph", () => {
     expect(nodeImports).toEqual([]);
   });
 
+  it("keeps client-ip-source.ts, which the Sentry edge config reads, import-free (F-23)", () => {
+    expect(walk(["src/sentry.edge.config.ts"]).modules).toEqual([
+      "src/lib/client-ip-source.ts",
+      "src/lib/observability/sentry-shared.ts",
+      "src/sentry.edge.config.ts",
+    ]);
+  });
+
   it("names the API however it is reached, and ignores comments", () => {
     const uses = (text: string) => nodeGlobalApiUses(parse("probe.ts", text));
     expect(uses('process["getBuiltinModule"]("node:fs");')).toEqual(["1:getBuiltinModule"]);
@@ -262,5 +270,23 @@ describe("Edge instrumentation import graph", () => {
       "1:getBuiltinModule",
     ]);
     expect(uses("// process.getBuiltinModule\n/* getBuiltinModule( */ const a = 1;")).toEqual([]);
+  });
+});
+
+/**
+ * The browser bundle's half (F-23): `instrumentation-client.ts` ships to every
+ * visitor, so its project graph is exactly the isomorphic Sentry helpers. The
+ * CLIENT_IP_SOURCE header is added in the server and edge configs only, which
+ * is what keeps server env and the client-IP modules out of this graph.
+ */
+describe("Browser instrumentation import graph", () => {
+  it("reaches only the shared Sentry helpers", () => {
+    const { modules, nodeImports, nodeApis } = walk(["src/instrumentation-client.ts"]);
+    expect(modules).toEqual([
+      "src/instrumentation-client.ts",
+      "src/lib/observability/sentry-shared.ts",
+    ]);
+    expect(nodeImports).toEqual([]);
+    expect(nodeApis).toEqual([]);
   });
 });

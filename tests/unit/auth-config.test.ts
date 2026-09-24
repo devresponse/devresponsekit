@@ -131,6 +131,9 @@ describe("Better Auth security subtree (review #121)", () => {
 
     vi.resetModules();
     betterAuthMock.mockClear();
+    // COOKIE_DOMAIN must cover BETTER_AUTH_URL's host or the schema refuses
+    // it (F-22): a browser would drop the cookie.
+    vi.stubEnv("BETTER_AUTH_URL", "http://app.example.test");
     vi.stubEnv("COOKIE_DOMAIN", ".example.test");
     const shared = await capture();
     expect(shared.advanced?.crossSubDomainCookies).toEqual({
@@ -179,6 +182,7 @@ describe("Better Auth client-IP config (review #35)", () => {
   });
 
   it("keeps the ipAddress block when COOKIE_DOMAIN adds crossSubDomainCookies", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "http://app.example.test");
     vi.stubEnv("COOKIE_DOMAIN", ".example.test");
     const opts = await capture();
     expect(opts.advanced?.ipAddress?.ipAddressHeaders).toEqual([CLIENT_IP_HEADER]);

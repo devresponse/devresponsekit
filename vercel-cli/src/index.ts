@@ -100,7 +100,7 @@ program
 
 program
   .command("env:check")
-  .description("Report missing, invalid and must-not-be-set variables")
+  .description("Report missing and must-not-be-set variables (presence only, values are not read)")
   .action(async () => {
     const problems = await envCheck(CLI_ROOT);
     if (problems > 0) process.exitCode = 1;

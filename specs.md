@@ -869,7 +869,12 @@ SEED_DEFAULT_ORGANIZATION_SLUG="default"
 validator. Boot fails if a selected provider/feature is missing its
 companion secret — `EMAIL_PROVIDER=resend` needs `RESEND_API_KEY`,
 `EMAIL_PROVIDER=mailgun` needs `MAILGUN_API_KEY` + `MAILGUN_DOMAIN`, and
-`API_JWT_ENABLED` needs `API_JWT_PRIVATE_KEY`.
+`API_JWT_ENABLED` needs `API_JWT_PRIVATE_KEY`. Origin-valued variables must be
+http(s) origins (`https://` in production unless loopback; the two issuers with
+no trailing slash), `COOKIE_DOMAIN` must cover `BETTER_AUTH_URL` (written
+with no trailing dot), and every
+Ed25519 private key is shape-checked by the schema and imported by the Node boot
+hook (F-22, docs/configuration.md §1).
 
 Production values:
 

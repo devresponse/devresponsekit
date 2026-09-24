@@ -292,9 +292,10 @@ export async function envSync(
  * `drk-deploy env:check` — reports what the deployment is missing, and what it
  * has that it should not.
  *
- * Presence is all the API can prove for an encrypted value (Vercel does not
- * return it), so this checks presence for secrets and validates the plain ones.
- * Say so rather than implying a value was verified.
+ * It checks PRESENCE only, for every variable: `listEnv` does not fetch
+ * values, and Vercel never returns an encrypted or sensitive one anyway. The
+ * `validate` rules run in `env:sync`, and only on a value it is about to
+ * write. Say so rather than implying a value was verified.
  */
 export async function envCheck(cliRoot: string): Promise<number> {
   const config = requireConfig(cliRoot);
@@ -371,7 +372,7 @@ export async function envCheck(cliRoot: string): Promise<number> {
   info("");
   if (problems === 0) ok("Environment satisfies the contract.");
   else warn(`${problems} item(s) need attention.`);
-  info(dim("  Secrets are checked for PRESENCE only — Vercel never returns an encrypted value."));
+  info(dim("  Variables are checked for PRESENCE only — values are not read, so none is validated."));
   return problems;
 }
 

@@ -114,8 +114,12 @@ warrant a comms channel and an owner before deep debugging.
   enabled, sent to Sentry — both stamped with the `x-request-id`. Pull a few and
   find the common stack.
 - If it started at a deploy, **roll back first, debug second** (§5).
-- **Every** route 5xx-ing at once, with `Invalid server environment variables:
-  API_JWT_ISSUER` in the log, is the MCP discovery gate (review #57):
+- **Every** route 5xx-ing at once, with `Invalid server environment variables:`
+  in the log, is a variable `getServerEnv()` refuses. Each one is listed with
+  the rule it broke. An origin rule, such as a scheme typo or `http://` in
+  production, is covered under "Boot fails on an origin-valued variable" in
+  Part 2 (Setup & install). `Invalid server environment variables:
+  API_JWT_ISSUER (must be unset or identical to BETTER_AUTH_URL …)` is the MCP discovery gate (review #57):
   `MCP_ENABLED` is on and `API_JWT_ISSUER` is not the same identifier as
   `BETTER_AUTH_URL`, so `getServerEnv()` throws for every request. Unset
   `API_JWT_ISSUER` (or set it equal to `BETTER_AUTH_URL`), or clear
@@ -279,7 +283,23 @@ role default (`ALTER ROLE <app> SET search_path = auth, public;`).
 - `SSO_HANDOFF_PRIVATE_KEY`, when set, must be a valid Ed25519 private JWK JSON
   (`kty: OKP`, `crv: Ed25519`, with `d`) and must differ from `API_JWT_PRIVATE_KEY`.
 - If `API_JWT_ENABLED=1`, `API_JWT_PRIVATE_KEY` must be a valid Ed25519 JWK JSON.
+- Every one of those keys, and the `*_PREVIOUS_PRIVATE_KEY` rotation keys, is
+  checked at boot (F-22). The env schema rejects a truncated `d` or a stray
+  quote (`x` and `d` must each be 43 unpadded base64url characters), and the
+  Node boot hook imports the key and rejects an `x` that is not `d`'s public
+  half, failing startup with `Invalid Ed25519 signing keys at boot: …`.
 - If `EMAIL_PROVIDER` is set, its credentials must be present.
+
+**Boot fails on an origin-valued variable** (F-22). The error names the
+variable and the rule, e.g. `SSO_HANDOFF_ISSUER (must use the http: or https:
+scheme, not "httsp:")`. `BETTER_AUTH_URL`, `SSO_HANDOFF_ISSUER`,
+`API_JWT_ISSUER`, `MCP_DISPATCH_BASE_URL`, `MAILGUN_BASE_URL` and each
+`ADMIN_TRUSTED_ORIGINS` entry must be an http(s) origin with no path. In
+production they must be `https://` unless the host is `localhost`, `127.0.0.1`
+or `[::1]`. The two issuers must also have no trailing slash. `COOKIE_DOMAIN`
+must be `BETTER_AUTH_URL`'s host or a parent of it, must not be a public
+suffix, and must be written as `example.com` or `.example.com` (no trailing
+dot). See [Configuration §1](./configuration.md#1-how-configuration-is-loaded).
 
 **Seed does nothing / "already exists".** Seeds are idempotent. To start clean
 locally: `pnpm db:reset:reload`.

@@ -190,6 +190,19 @@ describe("GET /api/v1/jwks.json", () => {
     expect(body.keys).toHaveLength(1);
     expect(res.headers.get("Cache-Control")).toContain("max-age=300");
   });
+
+  it("answers an uncached problem+json 500 when the keys cannot be loaded (F-22, review #50)", async () => {
+    getJwks.mockRejectedValue(new Error("API_JWT_PREVIOUS_PRIVATE_KEY: secret-looking detail"));
+    const { GET } = await import("@/app/api/v1/jwks.json/route");
+    const res = await GET(req("/api/v1/jwks.json"));
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const text = await res.text();
+    expect(JSON.parse(text)).toMatchObject({ code: "internal_error", status: 500 });
+    // The cause is logged, never echoed to the client.
+    expect(text).not.toContain("secret-looking detail");
+  });
 });
 
 describe("POST /api/v1/auth/token", () => {
@@ -237,6 +250,32 @@ describe("POST /api/v1/auth/token", () => {
       expires_in: 900,
     });
     expect(auditEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "token.issued" }));
+  });
+
+  it("answers a problem+json 500, not a credential error, when the signing key fails (F-22)", async () => {
+    verifyClientCredentials.mockResolvedValue({
+      betterAuthUserId: "ba1",
+      scopes: ["admin.users.read"],
+      organizationId: null,
+    });
+    mintAccessToken.mockRejectedValue(new Error("API_JWT_PRIVATE_KEY: secret-looking detail"));
+    const POST = await load();
+    const res = await POST(
+      req("/api/v1/auth/token", {
+        method: "POST",
+        body: { grant_type: "client_credentials", client_id: "drkc_x", client_secret: "drkcsec_y" },
+      }),
+    );
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const text = await res.text();
+    expect(JSON.parse(text)).toMatchObject({ code: "internal_error" });
+    expect(text).not.toContain("secret-looking detail");
+    // Nothing was issued, so nothing is audited as issued.
+    expect(auditEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "token.issued" }),
+    );
   });
 
   it("401 invalid_client on a bad client secret", async () => {

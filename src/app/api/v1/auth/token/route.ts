@@ -253,15 +253,27 @@ export async function POST(request: NextRequest) {
   }
 
   const jti = crypto.randomUUID();
-  const minted = await mintAccessToken({
-    subject: principalBetterAuthUserId,
-    scopes: effectiveScopes,
-    organizationId,
-    jti,
-    ttlSeconds,
-    audience,
-    credential,
-  });
+  let minted: Awaited<ReturnType<typeof mintAccessToken>>;
+  try {
+    minted = await mintAccessToken({
+      subject: principalBetterAuthUserId,
+      scopes: effectiveScopes,
+      organizationId,
+      jti,
+      ttlSeconds,
+      audience,
+      credential,
+    });
+  } catch (error) {
+    // Minting fails only on the server's own signing key (F-22, review #50):
+    // a logged problem+json 500 with the cause, not an unhandled throw — the
+    // client did nothing wrong and must not be told its credentials are bad.
+    return problemResponse("internal_error", 500, request, {
+      cause: error,
+      detail: "The token could not be signed.",
+      headers: NO_STORE,
+    });
+  }
 
   await auditEvent({
     eventType: "token.issued",

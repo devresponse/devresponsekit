@@ -40,6 +40,34 @@ interface KeyMaterial {
 let cached: KeyMaterial | null = null;
 let cachedPublicJwks: JWK[] | null = null;
 
+/**
+ * The configured signing or verification keys could not be loaded: a server
+ * misconfiguration, never a fault of the presented token (F-22, review #50).
+ * The resolver rethrows it and the token and JWKS routes answer a logged 500,
+ * so a bad key is not reported as the client's bad credential. The env schema
+ * checks both keys' shape and the Node boot hook imports them
+ * (`src/lib/env-signing-keys.server.ts`), so this should never fire in a
+ * running server; it keeps the failure loud if a key ever reaches here some
+ * other way.
+ */
+export class JwtKeyMaterialError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "JwtKeyMaterialError";
+  }
+}
+
+/** Runs a key-loading step, re-labelling any failure as {@link JwtKeyMaterialError}. */
+async function loadingKeys<T>(label: string, load: () => Promise<T>): Promise<T> {
+  try {
+    return await load();
+  } catch (error) {
+    throw new JwtKeyMaterialError(`${label} could not be loaded: ${String(error)}`, {
+      cause: error,
+    });
+  }
+}
+
 /** Strips the secret `d` member and stamps the metadata clients need to select
  *  and verify with the right key. `kidOverride` wins; otherwise the JWK
  *  thumbprint (so the kid changes with the key material). */
@@ -66,15 +94,19 @@ function parseJwk(raw: string, label: string): JWK {
 async function getKeyMaterial(): Promise<KeyMaterial> {
   if (cached) return cached;
   const env = getServerEnv();
-  if (!env.API_JWT_PRIVATE_KEY) {
-    throw new Error("API_JWT_PRIVATE_KEY is not configured (API_JWT_ENABLED requires it)");
+  const raw = env.API_JWT_PRIVATE_KEY;
+  if (!raw) {
+    throw new JwtKeyMaterialError(
+      "API_JWT_PRIVATE_KEY is not configured (API_JWT_ENABLED requires it)",
+    );
   }
 
-  const jwk = parseJwk(env.API_JWT_PRIVATE_KEY, "API_JWT_PRIVATE_KEY");
-  const privateKey = (await importJWK({ ...jwk, alg: ALG }, ALG)) as CryptoKey;
-  const publicJwk = await toPublicJwk(jwk, env.API_JWT_KID);
-
-  cached = { privateKey, publicJwk, kid: publicJwk.kid! };
+  cached = await loadingKeys("API_JWT_PRIVATE_KEY", async () => {
+    const jwk = parseJwk(raw, "API_JWT_PRIVATE_KEY");
+    const privateKey = (await importJWK({ ...jwk, alg: ALG }, ALG)) as CryptoKey;
+    const publicJwk = await toPublicJwk(jwk, env.API_JWT_KID);
+    return { privateKey, publicJwk, kid: publicJwk.kid! };
+  });
   return cached;
 }
 
@@ -90,9 +122,13 @@ async function getPublicJwks(): Promise<JWK[]> {
   const env = getServerEnv();
   const { publicJwk } = await getKeyMaterial();
   const keys: JWK[] = [publicJwk];
-  if (env.API_JWT_PREVIOUS_PRIVATE_KEY) {
-    const prev = parseJwk(env.API_JWT_PREVIOUS_PRIVATE_KEY, "API_JWT_PREVIOUS_PRIVATE_KEY");
-    keys.push(await toPublicJwk(prev, env.API_JWT_PREVIOUS_KID));
+  const prevRaw = env.API_JWT_PREVIOUS_PRIVATE_KEY;
+  if (prevRaw) {
+    keys.push(
+      await loadingKeys("API_JWT_PREVIOUS_PRIVATE_KEY", async () =>
+        toPublicJwk(parseJwk(prevRaw, "API_JWT_PREVIOUS_PRIVATE_KEY"), env.API_JWT_PREVIOUS_KID),
+      ),
+    );
   }
   cachedPublicJwks = keys;
   return keys;

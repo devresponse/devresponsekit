@@ -130,7 +130,7 @@ delete it, breaking handoff verification for the whole fleet.
 | `init`         | Links this checkout to a Vercel project and records the target and its settings.                                     |
 | `doctor`       | Checks Node, pnpm, the Vercel CLI, credentials and the project link. Changes nothing.                                |
 | `status`       | Project, latest production deployment, and a live health probe.                                                      |
-| `env:check`    | Reports missing, invalid and must-not-be-set variables. Exit 1 if anything needs attention.                          |
+| `env:check`    | Reports missing and must-not-be-set variables (presence only). Exit 1 if anything needs attention.                   |
 | `env:sync`     | Creates every variable this target needs, generating the secrets it may.                                             |
 | `env:prune`    | Removes variables that must not exist here, including a satellite's stray signing key.                               |
 | `db:provision` | Creates a marketplace Postgres store and connects it to the project. Refused unless this deployment owns a database. |

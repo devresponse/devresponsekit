@@ -12,6 +12,7 @@ import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 import type { CallerSource } from "@/lib/api-auth/issuance-fence.server";
 import {
   AccessTokenAudienceError,
+  JwtKeyMaterialError,
   verifyAccessToken,
   type TokenCredentialRef,
 } from "@/lib/api-auth/jwt.server";
@@ -209,6 +210,11 @@ export async function resolveCallerDetailed(
       try {
         verified = await verifyAccessToken(token, { expectedAudience: options.expectedAudience });
       } catch (error) {
+        // The server's OWN keys failing to load is not the caller's bad
+        // credential: rethrow so the request ends in a 500 that
+        // `onRequestError` logs, instead of a 401 that makes every token look
+        // bad while nothing is logged (F-22, review #50).
+        if (error instanceof JwtKeyMaterialError) throw error;
         // A signature-valid token for ANOTHER resource is reported apart from
         // garbage / expired tokens so the resource can say which `resource`
         // to request (review #50/#53); everything else is unauthenticated.

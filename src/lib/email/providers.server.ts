@@ -150,6 +150,9 @@ function createResendProvider(apiKey: string): EmailProvider {
 
 /** https://documentation.mailgun.com/docs/mailgun/api-reference/send/ */
 function createMailgunProvider(apiKey: string, domain: string, baseUrl: string): EmailProvider {
+  // The env schema tolerates `https://api.eu.mailgun.net/` (F-22), so trim the
+  // slash here: `…net//v3/…` is not the messages endpoint.
+  const origin = baseUrl.replace(/\/+$/, "");
   return {
     id: "mailgun",
     async deliver(email) {
@@ -164,7 +167,7 @@ function createMailgunProvider(apiKey: string, domain: string, baseUrl: string):
       // (best-effort; Mailgun delivery stays at-least-once — audit #11).
       if (email.idempotencyKey) form.set("h:Message-Id", `<${email.idempotencyKey}@${domain}>`);
 
-      const res = await fetch(`${baseUrl}/v3/${domain}/messages`, {
+      const res = await fetch(`${origin}/v3/${domain}/messages`, {
         method: "POST",
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         headers: {

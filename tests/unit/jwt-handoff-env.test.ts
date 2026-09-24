@@ -59,6 +59,33 @@ describe("jwt-handoff.server env guards", () => {
     await expect(signSsoHandoff(baseInput)).rejects.toThrow(/SSO_HANDOFF_ISSUER/);
   });
 
+  // The production outage: the issuer signed with iss=`httsp://…` and every
+  // satellite rejected the token (they compare `iss` as an exact string). The
+  // sign path stamped the raw value unchecked (F-22).
+  it.each([
+    "httsp://demo.devresponse.ca",
+    "ftp://demo.devresponse.ca",
+    "https:/demo.devresponse.ca",
+    "https://demo.devresponse.ca/",
+    "https://demo.devresponse.ca/sso",
+    "https://Demo.devresponse.ca",
+    "devresponse",
+  ])("refuses to sign under an issuer that is not an exact http(s) origin (%s)", async (issuer) => {
+    process.env.SSO_HANDOFF_ISSUER = issuer;
+    await expect(signSsoHandoff(baseInput)).rejects.toThrow(
+      /SSO_HANDOFF_ISSUER must be exactly an http\(s\) origin/,
+    );
+  });
+
+  it("signs under an exact origin and stamps it verbatim as iss", async () => {
+    process.env.SSO_HANDOFF_ISSUER = "https://demo.devresponse.ca";
+    const token = await signSsoHandoff(baseInput);
+    const payload = JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as {
+      iss: string;
+    };
+    expect(payload.iss).toBe("https://demo.devresponse.ca");
+  });
+
   it("throws on verify when SSO_HANDOFF_ISSUER is missing", async () => {
     delete process.env.SSO_HANDOFF_ISSUER;
     await expect(verifySsoHandoff({ token: "x", expectedAudience: "y" })).rejects.toThrow(

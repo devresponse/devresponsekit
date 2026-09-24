@@ -22,6 +22,15 @@ export async function register() {
     // runtime — the shutdown module imports `pg`, which the edge runtime
     // cannot load. A no-op on Vercel (see the module).
     if (process.env.NEXT_PHASE !== "phase-production-build") {
+      // F-22: import the Ed25519 signing keys and check each `x` against its
+      // `d`, which the env schema cannot do (it is in the Edge graph, where
+      // node:crypto is unavailable). Allowed to throw: Next fails startup
+      // with "An error occurred while loading instrumentation hook". It runs
+      // before the handlers below, so no process-level handler is installed
+      // yet that could log the failure and carry on. Imported here, not
+      // statically, so node:crypto stays out of the Edge bundle.
+      const { assertSigningKeysImport } = await import("@/lib/env-signing-keys.server");
+      assertSigningKeysImport();
       const { registerGracefulShutdown } = await import("@/lib/shutdown.server");
       registerGracefulShutdown();
       // D5 / review #23: log + capture stray unhandledRejection /

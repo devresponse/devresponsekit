@@ -2,6 +2,12 @@ import { z } from "zod";
 import { invalidOriginSuffixes, splitOriginSuffixList } from "@/lib/admin/origin-suffixes";
 import { isSameIdentifier } from "@/lib/api-auth/resources";
 import { parseClientIpSource } from "@/lib/client-ip-source";
+import {
+  cookieDomainProblem,
+  ed25519PrivateJwkProblem,
+  httpOriginProblem,
+  splitEnvList,
+} from "@/lib/env-validators";
 
 /**
  * Server-side environment variable schema.
@@ -30,34 +36,37 @@ const EXAMPLE_SECRET_PLACEHOLDERS: ReadonlySet<string> = new Set([
 
 /**
  * An OPTIONAL Ed25519 private JWK (JSON string). Unset or empty ⇒ `undefined`;
- * when a value IS present it must parse as an OKP/Ed25519 JWK carrying the
- * private `d` member, so a truncated or wrong-type key fails at boot rather
- * than on the first SSO launch (review #5).
+ * when a value IS present its SHAPE is checked here (`ed25519PrivateJwkProblem`:
+ * kty OKP / crv Ed25519, and `x` and `d` each 32 bytes of unpadded base64url),
+ * so a truncated, corrupted or wrong-type key fails here rather than on the
+ * first SSO launch (review #5) or the first token mint / JWKS request. It used
+ * to check the member names only, so a key that could not be imported booted
+ * and then turned every machine-API token into a 401 (F-22, review #50).
+ * Whether `x` is `d`'s public half takes an import, which this Edge-reachable
+ * module cannot do: the Node boot hook does it
+ * (`src/lib/env-signing-keys.server.ts`, called from `register()`).
  */
-function optionalEd25519PrivateJwk(name: string) {
+function optionalEd25519PrivateJwk() {
   return z
     .string()
     .optional()
     .transform((value) => (value ? value : undefined))
-    .refine(
-      (value) => {
-        if (value === undefined) return true;
-        try {
-          const jwk = JSON.parse(value) as Record<string, unknown> | null;
-          return (
-            !!jwk &&
-            typeof jwk === "object" &&
-            jwk.kty === "OKP" &&
-            jwk.crv === "Ed25519" &&
-            typeof jwk.x === "string" &&
-            typeof jwk.d === "string"
-          );
-        } catch {
-          return false;
-        }
-      },
-      { message: `${name} must be a JSON-encoded Ed25519 private JWK (kty OKP, crv Ed25519, d)` },
-    );
+    .superRefine((value, ctx) => {
+      if (value === undefined) return;
+      const problem = ed25519PrivateJwkProblem(value);
+      if (problem) ctx.addIssue({ code: "custom", message: problem });
+    });
+}
+
+/**
+ * An OPTIONAL string where an empty value means unset, so an `X=` line in a
+ * `.env` file does not reach the origin rules below as `""`.
+ */
+function optionalNonEmpty() {
+  return z
+    .string()
+    .optional()
+    .transform((value) => (value ? value : undefined));
 }
 
 /**
@@ -82,7 +91,12 @@ const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     BETTER_AUTH_SECRET: z.string().min(32, "BETTER_AUTH_SECRET must be at least 32 chars"),
-    BETTER_AUTH_URL: z.url(),
+    /**
+     * The app's public origin. `z.url()` accepted any scheme (`httsp://`),
+     * so the http(s)-origin rule is in `superRefine` below, where NODE_ENV
+     * is known (https in production unless loopback, F-22).
+     */
+    BETTER_AUTH_URL: z.string().min(1),
     DATABASE_URL: z.string().min(1),
     DATABASE_TEST_URL: z.string().optional(),
     /**
@@ -150,7 +164,13 @@ const serverEnvSchema = z
     /**
      * The handoff issuer's ORIGIN URL (`iss` claim). Consumers fetch the
      * issuer's public keys from `${SSO_HANDOFF_ISSUER}/api/sso/jwks.json`, so
-     * it must be a URL — the primary's own origin.
+     * it must be a URL — the primary's own origin. Required on every
+     * deployment (the consume route is mounted everywhere), and since F-22 it
+     * must be an http(s) origin written EXACTLY (no trailing slash, https in
+     * production unless loopback): the issuer stamps it into every token and
+     * each satellite compares `iss` to its own copy character for character.
+     * Checked in `superRefine` below. A non-URL placeholder is no longer
+     * accepted; a deployment without SSO sets its own BETTER_AUTH_URL here.
      */
     SSO_HANDOFF_ISSUER: z.string().min(1),
     SSO_HANDOFF_AUDIENCE_PREFIX: z.string().min(1),
@@ -161,7 +181,7 @@ const serverEnvSchema = z
      * published JWKS and hold no signing material. Unset ⇒ this deployment
      * cannot launch handoffs (`/api/sso/launch` → 503) but still consumes.
      */
-    SSO_HANDOFF_PRIVATE_KEY: optionalEd25519PrivateJwk("SSO_HANDOFF_PRIVATE_KEY"),
+    SSO_HANDOFF_PRIVATE_KEY: optionalEd25519PrivateJwk(),
     /** Optional fixed `kid` for the handoff key (default: the JWK thumbprint). */
     SSO_HANDOFF_KID: z.string().optional(),
     /**
@@ -171,7 +191,7 @@ const serverEnvSchema = z
      * (≤60s). Set the new key as SSO_HANDOFF_PRIVATE_KEY, move the old one
      * here, and remove it once the window has passed.
      */
-    SSO_HANDOFF_PREVIOUS_PRIVATE_KEY: optionalEd25519PrivateJwk("SSO_HANDOFF_PREVIOUS_PRIVATE_KEY"),
+    SSO_HANDOFF_PREVIOUS_PRIVATE_KEY: optionalEd25519PrivateJwk(),
     /** Only needed if the previous key was published under a pinned SSO_HANDOFF_KID. */
     SSO_HANDOFF_PREVIOUS_KID: z.string().optional(),
     SSO_HANDOFF_TTL_SECONDS: z.coerce.number().int().positive().max(300).default(60),
@@ -197,7 +217,10 @@ const serverEnvSchema = z
     SSO_ALLOWED_ORIGIN_SUFFIXES: z.string().optional(),
     /**
      * Comma-separated list of additional trusted origins shared by Better
-     * Auth's `trustedOrigins` and the administrator origin guard.
+     * Auth's `trustedOrigins` and the administrator origin guard. Each entry
+     * must be an http(s) origin (https in production unless loopback, F-22):
+     * `trustedOrigins` used to reduce `httsp://x/path` to `httsp://x` and
+     * trust that.
      */
     ADMIN_TRUSTED_ORIGINS: z.string().optional(),
     /**
@@ -208,6 +231,14 @@ const serverEnvSchema = z
      * the primary and every co-trusted satellite must then share the SAME
      * value so one session cookie spans the fleet. Never set it on a
      * deployment whose subdomains are not all first-party and co-trusted.
+     *
+     * When set it must cover BETTER_AUTH_URL's host and be a registrable
+     * domain, written as `example.com` or `.example.com` (F-22, `superRefine`
+     * below). A browser silently drops a cookie that fails any of these, so a
+     * typo such as `.devresponse.com` on demo.devresponse.ca, or an FQDN
+     * trailing dot, used to boot cleanly and sign nobody in. The value is not
+     * normalised: auth.ts passes it to Better Auth, and on to the browser,
+     * exactly as written.
      */
     COOKIE_DOMAIN: z.string().optional(),
     /**
@@ -234,8 +265,11 @@ const serverEnvSchema = z
     RESEND_API_KEY: z.string().optional(),
     MAILGUN_API_KEY: z.string().optional(),
     MAILGUN_DOMAIN: z.string().optional(),
-    /** Override for the EU region: https://api.eu.mailgun.net */
-    MAILGUN_BASE_URL: z.url().default("https://api.mailgun.net"),
+    /**
+     * Override for the EU region: https://api.eu.mailgun.net. An http(s)
+     * origin (F-22, `superRefine` below): the API key is sent to it.
+     */
+    MAILGUN_BASE_URL: z.string().default("https://api.mailgun.net"),
     /**
      * Shared secret the scheduler presents (`Authorization: Bearer …`) to
      * `GET /api/internal/outbox-drain`. OPTIONAL — the route FAILS CLOSED
@@ -304,12 +338,20 @@ const serverEnvSchema = z
       .string()
       .optional()
       .transform((value) => value === "1" || value === "true"),
-    /** JWT `iss`; defaults to BETTER_AUTH_URL when unset. */
-    API_JWT_ISSUER: z.string().optional(),
+    /**
+     * JWT `iss`; defaults to BETTER_AUTH_URL when unset (an empty value is
+     * unset). When set it must be an http(s) origin written exactly, with no
+     * trailing slash (F-22, `superRefine` below): it is stamped into every
+     * token and verifiers compare it as an exact string.
+     */
+    API_JWT_ISSUER: optionalNonEmpty(),
     /** JWT `aud`. */
     API_JWT_AUDIENCE: z.string().default("devresponse-api"),
-    /** Ed25519 private key as a JSON-encoded JWK (contains `d`). */
-    API_JWT_PRIVATE_KEY: z.string().optional(),
+    /**
+     * Ed25519 private key as a JSON-encoded JWK (contains `d`). Shape-checked
+     * here and imported at Node boot when set (F-22); an empty value is unset.
+     */
+    API_JWT_PRIVATE_KEY: optionalEd25519PrivateJwk(),
     /** Optional explicit key id; defaults to the JWK thumbprint. */
     API_JWT_KID: z.string().optional(),
     /**
@@ -318,9 +360,12 @@ const serverEnvSchema = z
      * verifyAccessToken, so tokens minted BEFORE the rotation keep verifying
      * until they expire (≤ API_JWT_ACCESS_TTL_SECONDS). Remove once that window
      * drains (P3-7). Never used to mint. To rotate with zero downtime: move the
-     * old key here, set the new key as API_JWT_PRIVATE_KEY.
+     * old key here, set the new key as API_JWT_PRIVATE_KEY. Shape-checked here
+     * and imported at Node boot when set (F-22): a bad previous key breaks the
+     * WHOLE key set, so it used to turn every JWT (current-key ones included)
+     * into a 401.
      */
-    API_JWT_PREVIOUS_PRIVATE_KEY: z.string().optional(),
+    API_JWT_PREVIOUS_PRIVATE_KEY: optionalEd25519PrivateJwk(),
     /**
      * The previous key's `kid`, ONLY needed when the deployment pins a fixed
      * API_JWT_KID (otherwise the JWK thumbprint is used and matches automatically).
@@ -362,8 +407,11 @@ const serverEnvSchema = z
      * reaches the app DIRECTLY (e.g. `http://127.0.0.1:3000`) to keep the
      * hop internal; that is also what makes `MCP_FORWARD_CLIENT_IP`
      * meaningful, since an appending proxy overwrites the forwarded value.
+     * An http(s) origin (F-22, `superRefine` below): the agent's bearer rides
+     * on the hop, so production needs https unless the target is loopback,
+     * which the same-host hop always can be. An empty value is unset.
      */
-    MCP_DISPATCH_BASE_URL: z.string().url().optional(),
+    MCP_DISPATCH_BASE_URL: optionalNonEmpty(),
     /**
      * Whether the gateway forwards the AGENT's resolved client IP to the v1
      * route on that self-call, as `x-forwarded-for` (review #55). ON by
@@ -528,6 +576,50 @@ const serverEnvSchema = z
         message: "must differ from API_JWT_PRIVATE_KEY (they sign distinct trust domains)",
       });
     }
+    // Origin-valued variables (F-22). Each must be an http(s) origin, and https
+    // in production unless the host is loopback (`next build`'s placeholders
+    // and CI's `next start` run under NODE_ENV=production on
+    // http://localhost:3000). The two issuers are EXACT: they are stamped into
+    // tokens as `iss` and compared character for character by the verifier,
+    // so a trailing slash is refused rather than normalised — the peer holds
+    // its own copy and would not normalise it. The prod incident this closes:
+    // SSO_HANDOFF_ISSUER=httsp://… booted, signed, and broke every satellite.
+    const production = env.NODE_ENV === "production";
+    const origins: ReadonlyArray<readonly [string, string | undefined, boolean]> = [
+      ["BETTER_AUTH_URL", env.BETTER_AUTH_URL, false],
+      ["SSO_HANDOFF_ISSUER", env.SSO_HANDOFF_ISSUER, true],
+      ["API_JWT_ISSUER", env.API_JWT_ISSUER, true],
+      ["MCP_DISPATCH_BASE_URL", env.MCP_DISPATCH_BASE_URL, false],
+      ["MAILGUN_BASE_URL", env.MAILGUN_BASE_URL, false],
+    ];
+    for (const [key, value, exact] of origins) {
+      if (typeof value !== "string") continue;
+      const problem = httpOriginProblem(value, { production, exact });
+      if (problem) ctx.addIssue({ code: "custom", path: [key], message: problem });
+    }
+    // Each bad entry is named by its position, never echoed: an entry can
+    // carry credentials (`https://user:pass@host`), and the problem sentence
+    // already shows the canonical origin wherever the entry parses.
+    const badTrustedOrigins = splitEnvList(env.ADMIN_TRUSTED_ORIGINS).flatMap((entry, index) => {
+      const problem = httpOriginProblem(entry, { production });
+      return problem ? [`entry ${index + 1} ${problem}`] : [];
+    });
+    if (badTrustedOrigins.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ADMIN_TRUSTED_ORIGINS"],
+        message: `every entry must be an http(s) origin; ${badTrustedOrigins.join("; ")}`,
+      });
+    }
+    // COOKIE_DOMAIN must cover the deployment's own host, must not be a public
+    // suffix, and must be spelt the way a browser reads it (F-22) — otherwise
+    // the browser drops the session cookie and every sign-in "succeeds"
+    // without signing anyone in. Empty means unset, exactly as
+    // `src/lib/auth.ts` reads it.
+    if (env.COOKIE_DOMAIN) {
+      const problem = cookieDomainProblem(env.COOKIE_DOMAIN, env.BETTER_AUTH_URL, { production });
+      if (problem) ctx.addIssue({ code: "custom", path: ["COOKIE_DOMAIN"], message: problem });
+    }
     // Client-IP source (F-17): a typo must fail at boot, not silently put every
     // request in one shared limiter bucket (the runtime read fails closed).
     const ipSource = parseClientIpSource(env.CLIENT_IP_SOURCE);
@@ -636,9 +728,15 @@ export function getServerEnv(): ServerEnv {
       // placeholder values.
       return buildPhasePlaceholders();
     }
-    // Do not echo secrets back; only emit which keys were invalid.
-    const invalidKeys = parsed.error.issues.map((issue) => issue.path.join(".")).join(", ");
-    throw new Error(`Invalid server environment variables: ${invalidKeys}`);
+    // Name each invalid key with its rule, never its value: no message in the
+    // schema quotes a secret (zod's own messages name the expected type, not
+    // the input), while the rule is what an operator needs when the value
+    // itself sits in write-only storage — the week-long `httsp://` issuer was
+    // a Vercel "sensitive" variable nobody could read back (F-22).
+    const invalid = parsed.error.issues
+      .map((issue) => `${issue.path.join(".")} (${issue.message})`)
+      .join("; ");
+    throw new Error(`Invalid server environment variables: ${invalid}`);
   }
   cached = parsed.data;
   warnIfOriginAllowListUnset(cached);

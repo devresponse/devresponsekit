@@ -7,6 +7,7 @@
  * See docs/design-mcp-agent-gateway.md §10.
  */
 import { z } from "zod";
+import { USER_NAME_MAX_LENGTH, userNameSchema } from "@/lib/user-name";
 
 export type McpRegistrationMode = "approval" | "open";
 export type McpRegistrationStatus = "active" | "pending_approval";
@@ -26,10 +27,14 @@ export function statusForMode(mode: McpRegistrationMode): McpRegistrationStatus 
  * ignore any requested `scope` (agents always start scopeless) and only ever
  * issue a client-credentials client. `organization` is a DevResponseKit
  * extension naming the target tenant; extra RFC 7591 fields are tolerated.
+ *
+ * `client_name` becomes the agent's service account `display_name`, so it
+ * follows the shared name rule (F-21, `user-name.ts`): an unauthenticated
+ * registration cannot plant a line break or bidi control in a user name.
  */
 export const registrationRequestSchema = z
   .object({
-    client_name: z.string().trim().min(1).max(200),
+    client_name: userNameSchema,
     organization: z.string().trim().min(1).max(255).optional(),
     grant_types: z.array(z.string()).optional(),
     token_endpoint_auth_method: z.string().optional(),
@@ -39,6 +44,25 @@ export const registrationRequestSchema = z
   .passthrough();
 
 export type RegistrationRequest = z.infer<typeof registrationRequestSchema>;
+
+/**
+ * The `error_description` for a request {@link registrationRequestSchema}
+ * refused, taken from its first issue. A `client_name` refused by the name
+ * rule says which part of the rule it broke (F-21); any other field is named.
+ */
+export function registrationRequestErrorDescription(error: z.ZodError): string {
+  const issue = error.issues[0];
+  const field = issue?.path[0];
+  if (field === undefined) return "Request body must be a JSON object.";
+  if (field !== "client_name") return `Invalid \`${String(field)}\`.`;
+  if (issue?.message === "max") {
+    return `\`client_name\` must be at most ${USER_NAME_MAX_LENGTH} characters.`;
+  }
+  if (issue?.message === "nameCharacters") {
+    return "`client_name` must not contain control, line-break or invisible formatting characters.";
+  }
+  return "A non-empty `client_name` is required.";
+}
 
 /**
  * Parses `MCP_REGISTRATION_ALLOWED_ORGS` (comma-separated slugs/ids) into a

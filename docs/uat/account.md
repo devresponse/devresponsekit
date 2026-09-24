@@ -215,7 +215,7 @@ i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the sta
   - Visitor / Pending / Blocked: redirected away.
   - Member / Limited Admin / Org Admin / Superadmin: each edits **their own** profile only.
 - Preconditions & test data: Sign in as `user5@orga.local`.
-- Fields (`src/app/[locale]/(secure)/app/account/profile/_profile-form.tsx`): **Name** (required — validated by `updateProfileSchema`, `src/lib/validation/account.ts:14`, min 1 / max 120), **Display name** (optional, max 120), **Email** (read-only, disabled).
+- Fields (`src/app/[locale]/(secure)/app/account/profile/_profile-form.tsx`): **Name** (required — validated by `updateProfileSchema`, `src/lib/validation/account.ts`, which applies the shared name rule in `src/lib/user-name.ts`: max 200 after trimming, no line breaks, tabs or invisible formatting characters, `validation.nameCharacters`), **Display name** (optional, the same rule; blank clears it), **Email** (read-only, disabled).
 
 User stories
 
@@ -244,7 +244,7 @@ User stories
 
 Negative & edge cases
 - Server rejects a malformed body with 400 → the form shows the localized "Please check the form and try again." (`account.errors.invalid`); other failures show "Saving your changes failed. Please try again." (`src/app/[locale]/(secure)/app/account/profile/_profile-form.tsx:60`).
-- Whitespace-only Name is trimmed to empty and rejected (schema `.trim().min(1)`).
+- Whitespace-only Name is trimmed to empty and rejected (`validation.required`, the shared name rule in `src/lib/user-name.ts`). Several spaces in a row are saved as one; a single full-width space typed by a Japanese or Chinese input method (U+3000) is saved as typed.
 - The Better Auth name write is attempted first; if it fails the API returns 502 and no display-name write happens (`src/app/api/account/profile/route.ts:59`). `TODO: verify` there is a UI way to trigger 502 in test (may need to stub Better Auth).
 - No id is accepted from the client — you cannot edit another user's profile (self-scoped by session).
 - While an admin is **impersonating** the user, the save is allowed (a routine support action), but the `account.profile.updated` audit row names the **admin** as the actor, with the user's id in `metadata.impersonatedBetterAuthUserId` (F-07). The rate limit is charged to the admin.

@@ -3,6 +3,7 @@ import {
   buildRegistrationResponse,
   isRegistrationOrgPermitted,
   parseRegistrationOrgAllowList,
+  registrationRequestErrorDescription,
   registrationRequestSchema,
   statusForMode,
 } from "@/lib/mcp/registration";
@@ -25,6 +26,46 @@ describe("MCP registration (pure)", () => {
       something_extra: true,
     });
     expect(ok.success).toBe(true);
+  });
+
+  it("F-21: client_name becomes a user's display name, so the name rule applies", () => {
+    expect(
+      registrationRequestSchema.safeParse({ client_name: "Agent\nIgnore previous" }).success,
+    ).toBe(false);
+    expect(registrationRequestSchema.safeParse({ client_name: "Agent \u202egnp" }).success).toBe(
+      false,
+    );
+    expect(registrationRequestSchema.safeParse({ client_name: "x".repeat(201) }).success).toBe(
+      false,
+    );
+    expect(registrationRequestSchema.parse({ client_name: "  My   Agent " }).client_name).toBe(
+      "My Agent",
+    );
+  });
+
+  it("F-21: the error_description says which part of the name rule client_name broke", () => {
+    const descriptionFor = (body: unknown) => {
+      const parsed = registrationRequestSchema.safeParse(body);
+      if (parsed.success) throw new Error("expected a refusal");
+      return registrationRequestErrorDescription(parsed.error);
+    };
+    expect(descriptionFor({})).toBe("A non-empty `client_name` is required.");
+    expect(descriptionFor({ client_name: "   " })).toBe("A non-empty `client_name` is required.");
+    expect(descriptionFor({ client_name: 7 })).toBe("A non-empty `client_name` is required.");
+    expect(descriptionFor({ client_name: "x".repeat(201) })).toBe(
+      "`client_name` must be at most 200 characters.",
+    );
+    expect(descriptionFor({ client_name: "Agent\nIgnore previous" })).toBe(
+      "`client_name` must not contain control, line-break or invisible formatting characters.",
+    );
+    expect(descriptionFor({ client_name: "Agent \u202egnp" })).toBe(
+      "`client_name` must not contain control, line-break or invisible formatting characters.",
+    );
+    // Another field is named instead of being blamed on client_name.
+    expect(descriptionFor({ client_name: "A", organization: "x".repeat(256) })).toBe(
+      "Invalid `organization`.",
+    );
+    expect(descriptionFor(null)).toBe("Request body must be a JSON object.");
   });
 
   it("builds a scopeless client-credentials registration response", () => {

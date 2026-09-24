@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 
 /**
  * Integration tests for representative `/api/v1` route handlers. The auth
@@ -443,6 +444,49 @@ describe("/api/v1/users", () => {
       req("/api/v1/users", { method: "POST", body: { email: "not-an-email" } }),
     );
     expect(res.status).toBe(400);
+  });
+
+  // F-21: the v1 create shares the name rule (`user-name.ts`) with every other
+  // writer, so a caller's line break, bidi control or oversized name is a 400
+  // before anything is written, not a changed name.
+  it.each([
+    ["a line break", "Ann\nLee"],
+    ["a bidi override", "Ann \u202egnp.exe"],
+    ["a name over the bound", "x".repeat(USER_NAME_MAX_LENGTH + 1)],
+    ["a blank name", "   "],
+  ])("F-21: POST 400 on %s, before any write", async (_label, name) => {
+    requireApiPermission.mockResolvedValue(grant);
+    const { POST } = await import("@/app/api/v1/users/route");
+    const res = await POST(
+      req("/api/v1/users", {
+        method: "POST",
+        body: { email: "new@x.com", password: "password123", name },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(createBetterAuthUser).not.toHaveBeenCalled();
+  });
+
+  it("F-21: POST creates the user under the canonical spelling of its name", async () => {
+    requireApiPermission.mockResolvedValue(grant);
+    dbState.takeFirst = undefined;
+    createBetterAuthUser.mockResolvedValue({ user: { id: "ba-new" } });
+    dbState.takeFirstOrThrow = {
+      id: "u-new",
+      primary_email: "new@x.com",
+      status: "pending_approval",
+    };
+    const { POST } = await import("@/app/api/v1/users/route");
+    const res = await POST(
+      req("/api/v1/users", {
+        method: "POST",
+        body: { email: "new@x.com", password: "password123", name: "  Ada \u00a0 Lovelace " },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(createBetterAuthUser).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Ada Lovelace" }),
+    );
   });
 
   it("POST 409 when the email already exists", async () => {

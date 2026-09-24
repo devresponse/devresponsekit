@@ -560,6 +560,61 @@ describe("DELETE /api/administrator/users/[id]/sessions (revoke all)", () => {
   });
 });
 
+/**
+ * F-21: the admin create and the display-name edit share the name rule
+ * (`user-name.ts`). A line break or bidi control is a 400 `invalid_body`
+ * before anything is written; an accepted name is mirrored to Better Auth in
+ * its canonical spelling.
+ */
+describe("F-21: the admin user writes refuse a name that breaks the rule", () => {
+  it.each([
+    ["a line break", "Ann\nLee"],
+    ["a bidi override", "Ann \u202egnp.exe"],
+  ])("POST /users refuses a name with %s, before creating anything", async (_label, name) => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.create"));
+    const { POST } = await import("@/app/api/administrator/users/route");
+    const res = await POST(
+      makeRequest("http://test.local/api/administrator/users", {
+        method: "POST",
+        body: JSON.stringify({ email: "new@x.com", password: "Password#123", name }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(authCreateUser).not.toHaveBeenCalled();
+  });
+
+  async function patch(body: object) {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.update"));
+    dbMock.mockResolvedValue(targetRow);
+    authUpdateUser.mockResolvedValue({});
+    const { PATCH } = await import("@/app/api/administrator/users/[id]/route");
+    return PATCH(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+  }
+
+  it("PATCH /users/[id] refuses a displayName with a tab, before any write", async () => {
+    const res = await patch({ displayName: "Ann\tLee" });
+    expect(res.status).toBe(400);
+    expect(authUpdateUser).not.toHaveBeenCalled();
+  });
+
+  it("PATCH /users/[id] mirrors the canonical spelling to Better Auth", async () => {
+    const res = await patch({ displayName: "  Ada \u00a0 Lovelace " });
+    expect(res.status).toBe(200);
+    expect(authUpdateUser).toHaveBeenCalledWith({
+      userId: "ba-target",
+      data: { name: "Ada Lovelace" },
+    });
+  });
+});
+
 describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
   it("requires admin.users.delete (403 + audit otherwise)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });

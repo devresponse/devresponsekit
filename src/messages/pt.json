@@ -1537,6 +1537,7 @@
     "passwordMin": "A palavra-passe tem de ter, pelo menos, 8 caracteres.",
     "passwordMax": "A palavra-passe não pode ter mais de 128 caracteres.",
     "max": "Este valor é demasiado longo.",
+    "nameCharacters": "Remova quebras de linha, tabulações e caracteres de formatação invisíveis.",
     "requiredLegend": "indica um campo obrigatório",
     "key": "Utilize apenas letras, números e os caracteres . _ - :",
     "slug": "Utilize letras minúsculas, números e hífenes.",

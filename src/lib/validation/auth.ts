@@ -1,9 +1,12 @@
 import { z } from "zod";
+import { userNameSchema } from "@/lib/user-name";
 
 /**
  * Shared validation schemas for the auth forms (docs/form-validation.md).
  * These forms call the Better Auth client directly (no app route), so the
- * schemas are form-only. Error messages are stable `validation.*` i18n keys.
+ * schemas are form-only, except for the sign-up name: Better Auth applies the
+ * same `user-name.ts` rule server-side (F-21). Error messages are stable
+ * `validation.*` i18n keys.
  */
 
 /** Sign-in: any non-empty password (Better Auth verifies it). */
@@ -13,9 +16,13 @@ export const signInSchema = z.object({
 });
 export type SignInInput = z.input<typeof signInSchema>;
 
-/** Sign-up: a real new password (min length applies). */
+/**
+ * Sign-up: a real new password (min length applies). The name follows the
+ * shared rule (F-21, `user-name.ts`), which the server now enforces too: the
+ * `userNameGuard` hook refuses the same names this schema does.
+ */
 export const signUpSchema = z.object({
-  name: z.string().trim().min(1, "required").max(200, "max"),
+  name: userNameSchema,
   email: z.email("email"),
   password: z.string().min(8, "passwordMin").max(128, "passwordMax"),
 });

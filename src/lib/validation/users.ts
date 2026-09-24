@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isSupportedLocale } from "@/config/i18n-config";
+import { optionalUserNameSchema } from "@/lib/user-name";
 
 /**
  * The ONE schema every `preferredLocale` WRITE path must use (review #71/#80).
@@ -44,7 +45,8 @@ export const createUserSchema = z
     email: z.email("email"),
     password: z.string().min(8, "passwordMin").max(128, "passwordMax"),
     // Display name is optional; an empty value is treated as "no name".
-    name: z.string().max(200, "max").optional(),
+    // Otherwise the shared name rule applies (F-21, `user-name.ts`).
+    name: optionalUserNameSchema.optional(),
     role: z.enum(["admin", "user"]).optional(),
     initialAppStatus: z.enum(["active", "pending_approval"]).optional().default("pending_approval"),
     preferredLocale: preferredLocaleSchema.optional(),

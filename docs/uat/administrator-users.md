@@ -279,7 +279,7 @@ i18n: run `en` + `uk`; column headers, status badges, filter labels, and toasts 
 - Access matrix:
   - Member / Limited Admin → **404** at the page (the `admin` role lacks `admin.users.create`). Because the CTA is hidden on the list, they reach this only by typing the URL.
   - Org Admin / Superadmin → form renders.
-- Preconditions & test data: fields — email (required), display name (optional), password (required; hint shown), Better Auth role (`user`; `admin` is offered to a Superadmin only, F-13), initial app status (`pending_approval`/`active`), preferred locale (`en`/`es`/`fr`/`uk`). Required markers derive from the schema (`RequiredLegend`, `_new-user-form.tsx:104`).
+- Preconditions & test data: fields — email (required), display name (optional; max 200, and a line break, tab or invisible formatting character is refused with `validation.nameCharacters`, F-21), password (required; hint shown), Better Auth role (`user`; `admin` is offered to a Superadmin only, F-13), initial app status (`pending_approval`/`active`), preferred locale (`en`/`es`/`fr`/`uk`). Required markers derive from the schema (`RequiredLegend`, `_new-user-form.tsx:104`).
 
 User stories
 

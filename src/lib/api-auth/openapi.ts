@@ -14,6 +14,7 @@
  */
 import { locales } from "@/config/i18n-config";
 import { ACCOUNT_SCOPES, API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
+import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 
 type Obj = Record<string, unknown>;
 
@@ -265,7 +266,7 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           properties: {
             email: { type: "string", format: "email" },
             password: { type: "string", minLength: 8, maxLength: 128 },
-            name: { type: "string", minLength: 1, maxLength: 200 },
+            name: { type: "string", minLength: 1, maxLength: USER_NAME_MAX_LENGTH },
             role: { type: "string", enum: ["admin", "user"] },
             initialAppStatus: { type: "string", enum: ["active", "pending_approval"] },
             preferredLocale: { type: "string", enum: [...locales] },

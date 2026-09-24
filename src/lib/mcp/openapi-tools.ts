@@ -140,6 +140,31 @@ function matchesType(value: unknown, type: string): boolean {
   }
 }
 
+/** The JSON-Schema `enum` a derived property declares, if any. */
+function declaredEnum(schema: unknown): readonly unknown[] | null {
+  if (typeof schema !== "object" || schema === null) return null;
+  const values = (schema as { enum?: unknown }).enum;
+  return Array.isArray(values) ? values : null;
+}
+
+/** `value` against one schema's declared `type` and `enum`: the problem, or null. */
+function schemaMismatch(value: unknown, schema: unknown): string | null {
+  const types = declaredTypes(schema);
+  if (types.length > 0 && !types.some((type) => matchesType(value, type))) {
+    return `must be of type ${types.join(" | ")}`;
+  }
+  const allowed = declaredEnum(schema);
+  if (allowed && !allowed.some((entry) => entry === value)) {
+    return `must be one of: ${allowed.map(String).join(", ")}`;
+  }
+  return null;
+}
+
+/** What a query string can carry: dispatch sends each as `String(value)`. */
+function isQueryScalar(value: unknown): boolean {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
 /**
  * Validates `tools/call` arguments against the tool's own `inputSchema`
  * BEFORE dispatch (review #54). Returns the first problem, or null.
@@ -148,10 +173,13 @@ function matchesType(value: unknown, type: string): boolean {
  * validation, so this only enforces what the gateway itself publishes and
  * what it must not get wrong — no unknown keys (`additionalProperties:
  * false` was advertised but never enforced), required arguments present,
- * declared primitive types, and the path-segment safety rules above.
+ * declared primitive types and `enum`s, the same for each item of an array
+ * (F-34: `filter[status]: ["bogus"]` used to pass, and v1 then dropped the
+ * filter), query values that are scalars or arrays of scalars (the only thing
+ * a query string can carry), and the path-segment safety rules above.
  */
 export function validateToolArguments(
-  tool: Pick<GeneratedTool, "inputSchema" | "pathParams">,
+  tool: Pick<GeneratedTool, "inputSchema" | "pathParams" | "queryParams">,
   args: Record<string, unknown>,
 ): string | null {
   const { properties, required = [] } = tool.inputSchema;
@@ -163,9 +191,24 @@ export function validateToolArguments(
   }
   for (const [key, value] of Object.entries(args)) {
     if (value === undefined) continue;
-    const types = declaredTypes(properties[key]);
-    if (types.length > 0 && !types.some((type) => matchesType(value, type))) {
-      return `Argument \`${key}\` must be of type ${types.join(" | ")}.`;
+    const schema = properties[key];
+    const mismatch = schemaMismatch(value, schema);
+    if (mismatch) return `Argument \`${key}\` ${mismatch}.`;
+    const isQuery = tool.queryParams.includes(key);
+    if (Array.isArray(value)) {
+      const items =
+        typeof schema === "object" && schema !== null
+          ? (schema as { items?: unknown }).items
+          : undefined;
+      for (const item of value) {
+        if (isQuery && !isQueryScalar(item)) {
+          return `Each item of argument \`${key}\` must be a string, number or boolean.`;
+        }
+        const itemMismatch = schemaMismatch(item, items);
+        if (itemMismatch) return `Each item of argument \`${key}\` ${itemMismatch}.`;
+      }
+    } else if (isQuery && !isQueryScalar(value)) {
+      return `Argument \`${key}\` must be a string, number, boolean or an array of them.`;
     }
   }
   for (const name of tool.pathParams) {
@@ -207,6 +250,7 @@ function buildTool(
   const required = new Set<string>();
   const pathParams: string[] = [];
   const queryParams: string[] = [];
+  const headerParams: string[] = [];
   const bodyProps: string[] = [];
 
   // Path params come straight from the `{…}` segments in the template.
@@ -217,9 +261,11 @@ function buildTool(
     required.add(name);
   }
 
-  // Query params (path/header params are handled above / ignored).
+  // Query params (path params are handled above; header params are not
+  // mapped — see the description note below).
   for (const raw of op.parameters ?? []) {
     const param = raw.$ref ? doc.components?.parameters?.[refName(raw.$ref)] : raw;
+    if (param?.name && param.in === "header") headerParams.push(param.name);
     if (!param?.name || param.in !== "query") continue;
     queryParams.push(param.name);
     properties[param.name] = {
@@ -261,7 +307,18 @@ function buildTool(
 
   const scope = op.security?.[0]?.bearerAuth?.[0];
   const summary = op.summary ?? op.operationId!;
-  const description = scope ? `${summary} (requires the \`${scope}\` scope).` : `${summary}.`;
+  // Header parameters are NOT tool arguments (F-34): `If-Match` on
+  // `setUserStatus` needs the ETag `getUser` returns as a response HEADER,
+  // which a tool result does not carry, so an agent could never supply a
+  // current one. Say so rather than leave the summary ("supports `If-Match`")
+  // promising a precondition the tool cannot send; the call runs without it.
+  const headerNote =
+    headerParams.length > 0
+      ? ` The ${headerParams.map((name) => `\`${name}\``).join(", ")} header cannot be sent ` +
+        `through this tool; the call is made without it.`
+      : "";
+  const description =
+    (scope ? `${summary} (requires the \`${scope}\` scope).` : `${summary}.`) + headerNote;
 
   const inputSchema: McpInputSchema = { type: "object", properties, additionalProperties: false };
   if (required.size > 0) inputSchema.required = [...required];

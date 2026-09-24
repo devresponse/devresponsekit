@@ -6,6 +6,8 @@ import {
   likeContains,
   offsetFor,
   parseListQuery,
+  parseListQueryStrict,
+  type ParseListQueryStrictOptions,
 } from "@/lib/admin/list-query.server";
 
 /**
@@ -99,6 +101,172 @@ describe("parseListQuery", () => {
   it("trims and nulls the q param", () => {
     expect(parseListQuery(p("q=  hello  "), { allowedSortFields: [] }).q).toBe("hello");
     expect(parseListQuery(p("q=   "), { allowedSortFields: [] }).q).toBeNull();
+  });
+
+  it("drops a malformed sort direction instead of reading it as asc (F-34)", () => {
+    // One comma-joined value, the form the MCP gateway used to send for two
+    // directives: the direction parsed as "desc,status" and fell back to asc,
+    // so a DESCENDING request came back ascending with its second key gone.
+    const opts = {
+      allowedSortFields: ["created_at", "status"],
+      defaultSort: [{ field: "created_at", direction: "desc" as const }],
+    };
+    expect(parseListQuery(p("sort=created_at.desc,status.asc"), opts).sort).toEqual([
+      { field: "created_at", direction: "desc" },
+    ]);
+    expect(parseListQuery(p("sort=status.desc.extra&sort=status.up"), opts).sort).toEqual([
+      { field: "created_at", direction: "desc" },
+    ]);
+    // A bare field still sorts ascending; repeated values still apply in order.
+    expect(parseListQuery(p("sort=status&sort=created_at.desc"), opts).sort).toEqual([
+      { field: "status", direction: "asc" },
+      { field: "created_at", direction: "desc" },
+    ]);
+  });
+});
+
+/**
+ * The `/api/v1` parser (F-34). The lenient contract above drops what it
+ * cannot apply; on v1 a dropped filter answered "which users are blocked?"
+ * with EVERY user, so each of those inputs is a failure the route returns as
+ * a 400 — and a comma is never a value separator.
+ */
+describe("parseListQueryStrict", () => {
+  const OPTS: ParseListQueryStrictOptions = {
+    allowedSortFields: ["created_at", "status"],
+    search: true,
+    filters: { status: { values: ["active", "blocked", "suspended"] }, event_type: {} },
+    defaultSort: [{ field: "created_at", direction: "desc" }],
+  };
+  const strict = (qs: string) => parseListQueryStrict(p(qs), OPTS);
+  const detail = (qs: string) => {
+    const result = strict(qs);
+    if (result.ok) throw new Error(`expected ${qs} to be refused`);
+    return result.detail;
+  };
+
+  it("collects every repeated filter value (deduplicated) and every sort directive in order", () => {
+    const result = strict(
+      "filter[status]=blocked&filter[status]=suspended&filter[status]=blocked" +
+        "&sort=created_at.desc&sort=status.asc&page=2&pageSize=10&q=ada",
+    );
+    expect(result).toEqual({
+      ok: true,
+      query: {
+        page: 2,
+        pageSize: 10,
+        q: "ada",
+        sort: [
+          { field: "created_at", direction: "desc" },
+          { field: "status", direction: "asc" },
+        ],
+        filters: { status: ["blocked", "suspended"] },
+      },
+    });
+  });
+
+  it("is a one-element list for a single value, and applies the default sort", () => {
+    expect(strict("filter[status]=active")).toMatchObject({
+      ok: true,
+      query: {
+        filters: { status: ["active"] },
+        sort: [{ field: "created_at", direction: "desc" }],
+      },
+    });
+  });
+
+  it("keeps a free-text filter's value whole, commas included", () => {
+    expect(strict("filter[event_type]=a,b&filter[event_type]=c")).toMatchObject({
+      ok: true,
+      query: { filters: { event_type: ["a,b", "c"] } },
+    });
+  });
+
+  it("refuses an enum value outside the vocabulary — never drops the filter", () => {
+    expect(detail("filter[status]=bogus")).toBe(
+      "Each `filter[status]` value is one of: active, blocked, suspended.",
+    );
+  });
+
+  it("refuses a comma-joined list instead of splitting it, and says to repeat", () => {
+    expect(detail("filter[status]=blocked,suspended")).toMatch(
+      /one of: active, blocked, suspended\. A comma does not separate values: repeat the parameter/,
+    );
+  });
+
+  it("refuses an empty value, an undeclared filter and the range form", () => {
+    expect(detail("filter[event_type]=")).toBe("`filter[event_type]` must not be empty.");
+    for (const qs of ["filter[nope]=x", "filter[status][from]=active", "filter[]=x"]) {
+      expect(detail(qs), qs).toBe(
+        "Unsupported filter parameter. This endpoint filters on: filter[status], filter[event_type].",
+      );
+    }
+    // A key that is not in the `filter[…]` namespace is not a filter at all.
+    expect(strict("status=bogus").ok).toBe(true);
+    // Nor does an inherited property name pass as a declared filter.
+    expect(strict("filter[constructor]=x").ok).toBe(false);
+  });
+
+  it("refuses a malformed sort direction and an unknown sort field", () => {
+    for (const qs of [
+      "sort=created_at.desc,status.asc",
+      "sort=created_at.DESC",
+      "sort=created_at.",
+      "sort=created_at.desc.x",
+      "sort=nope.asc",
+      "sort=",
+    ]) {
+      expect(detail(qs), qs).toMatch(
+        /^Each `sort` value is `<field>\.asc` or `<field>\.desc`, where `<field>` is one of: created_at, status\./,
+      );
+    }
+    expect(detail("sort=created_at.desc,status.asc")).toMatch(/repeat the parameter/);
+  });
+
+  it("keeps a repeated sort column at its first occurrence, and a bare field sorts asc", () => {
+    expect(strict("sort=status&sort=created_at.desc&sort=status.desc")).toMatchObject({
+      ok: true,
+      query: {
+        sort: [
+          { field: "status", direction: "asc" },
+          { field: "created_at", direction: "desc" },
+        ],
+      },
+    });
+  });
+
+  it("refuses `q` on a list that does not search, empty or not", () => {
+    const noSearch = { ...OPTS, search: false };
+    for (const qs of ["q=ada", "q=", "q=%20%20"]) {
+      const result = parseListQueryStrict(p(qs), noSearch);
+      expect(result, qs).toEqual({ ok: false, detail: "This endpoint does not accept `q`." });
+    }
+    expect(parseListQueryStrict(p("page=2"), noSearch).ok).toBe(true);
+  });
+
+  it("refuses a repeated page, pageSize or q instead of keeping the first", () => {
+    for (const name of ["page", "pageSize", "q"]) {
+      expect(detail(`${name}=1&${name}=2`), name).toBe(
+        `\`${name}\` is a single value and cannot be repeated.`,
+      );
+    }
+  });
+
+  it("says so when the list takes no sort or filter at all", () => {
+    const bare: ParseListQueryStrictOptions = { allowedSortFields: [], search: false };
+    const refused = (qs: string) => {
+      const result = parseListQueryStrict(p(qs), bare);
+      return result.ok ? null : result.detail;
+    };
+    expect(refused("sort=created_at.desc")).toBe("This endpoint does not accept `sort`.");
+    expect(refused("sort=")).toBe("This endpoint does not accept `sort`.");
+    expect(refused("filter[status]=active")).toBe(
+      "This endpoint does not accept `filter[…]` parameters.",
+    );
+    expect(parseListQueryStrict(p("page=2&pageSize=10&status=x"), bare)).toEqual({
+      ok: true,
+      query: { page: 2, pageSize: 10, q: null, sort: [], filters: {} },
+    });
   });
 });
 

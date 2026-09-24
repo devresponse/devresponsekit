@@ -135,3 +135,95 @@ describe("GET /api/v1/admin/oauth-clients — query validation (#47)", () => {
     },
   );
 });
+
+/**
+ * F-34: the credential listings' `status` is a single enum value. An unknown
+ * one (`status=bogus`, or the comma-joined `active,revoked`) was ignored and
+ * listed EVERY credential under a filter the caller believed applied, and a
+ * repeated one silently kept only the first.
+ */
+describe.each([
+  ["/api/v1/admin/api-keys", () => listApiKeysAdmin],
+  ["/api/v1/admin/oauth-clients", () => listOauthClients],
+] as const)("GET %s — status validation (F-34)", (path, repo) => {
+  const load = async () =>
+    path === "/api/v1/admin/api-keys"
+      ? (await import("@/app/api/v1/admin/api-keys/route")).GET
+      : (await import("@/app/api/v1/admin/oauth-clients/route")).GET;
+
+  it.each([
+    ["status=bogus"],
+    ["status=active,revoked"],
+    ["status=active&status=revoked"],
+    ["status="],
+  ])("%s is a 400 problem and never reaches the repo", async (query) => {
+    const res = await (await load())(req(path, query));
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect((await res.json()) as { code: string; detail: string }).toMatchObject({
+      code: "invalid_request",
+      detail: "`status` is a single value, one of: active, revoked.",
+    });
+    expect(repo()).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["status=revoked", "revoked"],
+    ["", undefined],
+  ])("%s filters on %s", async (query, status) => {
+    const res = await (await load())(req(path, query));
+    expect(res.status).toBe(200);
+    expect(repo().mock.calls[0]?.[0]).toMatchObject({ status });
+  });
+
+  /**
+   * The shared list parameters these listings do NOT take. The lenient
+   * parser dropped them, so `filter[status]=revoked` — the form `/users` and
+   * `/audit-events` use — listed every credential, active ones included, and
+   * `sort` / `q` were ignored the same way. The v1 docs promise a 400.
+   */
+  it.each([
+    ["filter[status]=revoked", "This endpoint does not accept `filter[…]` parameters."],
+    [
+      "status=active&filter[status]=revoked",
+      "This endpoint does not accept `filter[…]` parameters.",
+    ],
+    ["sort=created_at.desc", "This endpoint does not accept `sort`."],
+    ["q=ci-bot", "This endpoint does not accept `q`."],
+    ["page=1&page=2", "`page` is a single value and cannot be repeated."],
+    ["pageSize=10&pageSize=20", "`pageSize` is a single value and cannot be repeated."],
+  ])("%s is a 400 problem, not an unfiltered list", async (query, detail) => {
+    const res = await (await load())(req(path, query));
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { code: string; detail: string }).toMatchObject({
+      code: "invalid_request",
+      detail,
+    });
+    expect(repo()).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/v1/admin/api-keys — appUserId is a single UUID (F-34)", () => {
+  const A = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+  const B = "9b2d4c1e-0a57-4f3b-8e6f-2c1d0b9a8e7f";
+
+  it("refuses a repeated appUserId instead of silently keeping the first", async () => {
+    const { GET } = await import("@/app/api/v1/admin/api-keys/route");
+    const res = await GET(req("/api/v1/admin/api-keys", `appUserId=${A}&appUserId=${B}`));
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { detail: string }).toMatchObject({
+      detail: "`appUserId` is a single UUID and cannot be repeated.",
+    });
+    expect(listApiKeysAdmin).not.toHaveBeenCalled();
+  });
+
+  it('refuses an empty appUserId (what an MCP `appUserId: ""` now sends)', async () => {
+    const { GET } = await import("@/app/api/v1/admin/api-keys/route");
+    const res = await GET(req("/api/v1/admin/api-keys", "appUserId="));
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { detail: string }).toMatchObject({
+      detail: "`appUserId` must be a UUID.",
+    });
+    expect(listApiKeysAdmin).not.toHaveBeenCalled();
+  });
+});

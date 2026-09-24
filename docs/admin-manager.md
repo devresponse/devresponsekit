@@ -372,13 +372,27 @@ string for every list endpoint into `{ page, pageSize, sort, q, filters }`:
 - **`pageSize`** — per-endpoint default (commonly 25; audit 50), clamped to
   `[1, maxPageSize]` (commonly 200).
 - **`sort`** — repeated `field.dir` values (the separator is `.`, not `:`, to
-  keep bookmarked URLs readable). **Unknown sort fields are dropped**; an invalid
-  direction falls back to `asc`. A per-endpoint `defaultSort` applies otherwise.
+  keep bookmarked URLs readable); a bare `field` sorts ascending. **Unknown sort
+  fields are dropped**, and so is a value whose direction is not exactly `asc` /
+  `desc` — it is never read as `asc`, which turned a comma-joined
+  `created_at.desc,status.asc` into an ascending sort (F-34). A per-endpoint
+  `defaultSort` applies otherwise.
 - **`q`** — trimmed global search; empty becomes `null`. Bound via Kysely
   parameters (never string-concatenated) and matched case-insensitively against
   each endpoint's documented columns.
 - **`filter[name]=v`** → `filters.name`; repeated values become an array;
   `filter[name][from]` / `[to]` produce a range. **Unknown filters are dropped.**
+
+All four versioned `/api/v1` lists parse through `parseListQueryStrict`
+instead (F-34): each input above that would be dropped is a `400
+invalid_request`, and so is a `q` on a list that does not search and a `page`,
+`pageSize` or `q` given twice. A filter is always the list of its repeated
+values (matched with `in`), and a comma never separates values. A dropped
+filter widens the answer to every row, which the console's grid shows a human
+but an integration or MCP agent acts on. The v1 sort fields, search flag and
+filter vocabularies are declared once, in `src/lib/api-auth/v1-list-contract.ts`,
+which both the route and the OpenAPI document read; the credential listings
+declare none of them, so a `sort`, `q` or `filter[…]` there is a 400.
 
 Allow-listing sort fields and filters is a security property, not just hygiene:
 an attacker cannot pivot a query onto an unindexed or unexposed column.

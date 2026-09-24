@@ -5,12 +5,13 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
-  parseListQuery,
+  parseListQueryStrict,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { requireApiPermission } from "@/lib/api-auth/v1-guard.server";
+import { V1_AUDIT_EVENTS_LIST } from "@/lib/api-auth/v1-list-contract";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
-import { v1JsonResponse } from "@/lib/api-auth/problem";
+import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -19,19 +20,32 @@ export const dynamic = "force-dynamic";
  * GET /api/v1/audit-events
  *
  * Paginated read of the structured audit log (`admin.audit.read`). Reuses
- * the shared list-query contract; filters on `event_type` and `outcome`.
+ * the shared list-query contract, parsed strictly (F-34): `event_type` and
+ * `outcome` may each repeat and match any of their values, and an unknown
+ * outcome, filter or sort is a 400, as is a `q` (this list does not search,
+ * and never did: it was ignored). Only a single value used to be honoured:
+ * a repeated filter was dropped (every row), and the comma-joined form the
+ * MCP gateway sent matched nothing, so "any denials or errors?" read as no.
  */
 export const GET = withV1Route(async function GET(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.audit.read");
   if (!guard.ok) return guard.response;
 
-  const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["created_at", "event_type", "outcome"],
-    allowedFilters: ["event_type", "outcome"],
+  const parsed = parseListQueryStrict(request.nextUrl.searchParams, {
+    allowedSortFields: V1_AUDIT_EVENTS_LIST.sortFields,
+    search: V1_AUDIT_EVENTS_LIST.search,
+    filters: V1_AUDIT_EVENTS_LIST.filters,
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,
     maxPageSize: 200,
   });
+  if (!parsed.ok) {
+    return problemResponse("invalid_request", 400, request, {
+      detail: parsed.detail,
+      requestId: guard.grant.requestId,
+    });
+  }
+  const { query } = parsed;
 
   // Org boundary (ADR-0001): an org admin sees only their org's audit
   // events (platform events with a null org are SUPERADMIN-only). A null
@@ -43,10 +57,10 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
 
   let base = db.selectFrom("app_audit_events");
   if (scope.kind === "org") base = base.where("organization_id", "=", scope.organizationId);
-  const eventType = query.filters.event_type;
-  if (typeof eventType === "string") base = base.where("event_type", "=", eventType);
-  const outcome = query.filters.outcome;
-  if (typeof outcome === "string") base = base.where("outcome", "=", outcome);
+  const eventTypes = query.filters.event_type;
+  if (eventTypes) base = base.where("event_type", "in", eventTypes);
+  const outcomes = query.filters.outcome;
+  if (outcomes) base = base.where("outcome", "in", outcomes);
 
   const itemsQuery = applySortAndPagination(
     base.select([

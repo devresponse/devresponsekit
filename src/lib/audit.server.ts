@@ -7,6 +7,7 @@ import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
 import { attributeAuditActor } from "@/lib/impersonation-attribution.server";
 import { logServerError } from "@/lib/observability/logger.server";
+import type { AUDIT_OUTCOME_VALUES } from "@/lib/status-values";
 import { boundedUserAgent } from "@/lib/user-agent";
 
 /**
@@ -18,8 +19,11 @@ import { boundedUserAgent } from "@/lib/user-agent";
  *   - `failure` — DEPRECATED legacy alias kept for back-compat with
  *                 historical SSO and pre-spec audit rows. New call
  *                 sites MUST use `error`.
+ *
+ * Derived from `AUDIT_OUTCOME_VALUES`, the list the v1 `filter[outcome]`
+ * validates against (F-34), so a filter can name every outcome a row can hold.
  */
-export type AuditOutcome = "success" | "denied" | "error" | "failure";
+export type AuditOutcome = (typeof AUDIT_OUTCOME_VALUES)[number];
 
 export interface AuditEventInput {
   eventType: string;

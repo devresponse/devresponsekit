@@ -129,20 +129,6 @@
         },
         "description": "Rows per page (clamped to 1–200)."
       },
-      "Sort": {
-        "name": "sort",
-        "in": "query",
-        "required": false,
-        "explode": true,
-        "style": "form",
-        "schema": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "description": "Sort directives as `field.asc` / `field.desc`, applied in order."
-      },
       "Q": {
         "name": "q",
         "in": "query",
@@ -1540,7 +1526,28 @@
             "$ref": "#/components/parameters/PageSize"
           },
           {
-            "$ref": "#/components/parameters/Sort"
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "created_at.asc",
+                  "created_at.desc",
+                  "primary_email.asc",
+                  "primary_email.desc",
+                  "display_name.asc",
+                  "display_name.desc",
+                  "status.asc",
+                  "status.desc"
+                ]
+              }
+            },
+            "description": "Sort directives, applied in order; repeat the parameter for each one (a comma is not a separator). An unlisted field, or a direction other than `asc` / `desc`, is a `400`."
           },
           {
             "$ref": "#/components/parameters/Q"
@@ -1564,7 +1571,7 @@
                 ]
               }
             },
-            "description": "Exact-match filter; repeat the parameter for multiple values."
+            "description": "Exact-match filter; repeat the parameter for multiple values (a row matching any of them is returned). A comma is part of the value, not a separator. An empty value, a value outside the `enum`, or a `filter[…]` this operation does not list is a `400`."
           }
         ],
         "responses": {
@@ -1577,6 +1584,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1786,7 +1796,26 @@
             "$ref": "#/components/parameters/PageSize"
           },
           {
-            "$ref": "#/components/parameters/Sort"
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "explode": true,
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "created_at.asc",
+                  "created_at.desc",
+                  "event_type.asc",
+                  "event_type.desc",
+                  "outcome.asc",
+                  "outcome.desc"
+                ]
+              }
+            },
+            "description": "Sort directives, applied in order; repeat the parameter for each one (a comma is not a separator). An unlisted field, or a direction other than `asc` / `desc`, is a `400`."
           },
           {
             "name": "filter[event_type]",
@@ -1800,7 +1829,7 @@
                 "type": "string"
               }
             },
-            "description": "Exact-match filter; repeat the parameter for multiple values."
+            "description": "Exact-match filter; repeat the parameter for multiple values (a row matching any of them is returned). A comma is part of the value, not a separator. An empty value or a `filter[…]` this operation does not list is a `400`."
           },
           {
             "name": "filter[outcome]",
@@ -1811,10 +1840,16 @@
             "schema": {
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "success",
+                  "denied",
+                  "error",
+                  "failure"
+                ]
               }
             },
-            "description": "Exact-match filter; repeat the parameter for multiple values."
+            "description": "Exact-match filter; repeat the parameter for multiple values (a row matching any of them is returned). A comma is part of the value, not a separator. An empty value, a value outside the `enum`, or a `filter[…]` this operation does not list is a `400`."
           }
         ],
         "responses": {
@@ -1827,6 +1862,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1995,6 +2033,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

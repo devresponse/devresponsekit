@@ -12,9 +12,10 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
-  parseListQuery,
+  parseListQueryStrict,
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
+import { V1_USERS_LIST } from "@/lib/api-auth/v1-list-contract";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import {
   actingOrganizationId,
@@ -26,33 +27,36 @@ import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_STATUS = new Set([
-  "active",
-  "pending_approval",
-  "blocked",
-  "suspended",
-  "deactivated",
-]);
-
 /**
  * GET /api/v1/users
  *
  * Versioned REST adapter over the same `app_users` listing the admin
  * surface serves (design §8.2). Requires `admin.users.read`. Reuses the
- * shared list-query helpers so the pagination/sort/filter contract is
- * identical to `/api/administrator/users`.
+ * shared list-query helpers for pagination and sorting, but parses strictly
+ * (F-34): `filter[status]` may repeat and matches any of its values, and an
+ * unknown status, filter or sort is a 400 rather than silently dropped — a
+ * dropped status filter listed EVERY user as the answer to "which are
+ * blocked?".
  */
 export const GET = withV1Route(async function GET(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.users.read");
   if (!guard.ok) return guard.response;
 
-  const query = parseListQuery(request.nextUrl.searchParams, {
-    allowedSortFields: ["created_at", "primary_email", "display_name", "status"],
-    allowedFilters: ["status"],
+  const parsed = parseListQueryStrict(request.nextUrl.searchParams, {
+    allowedSortFields: V1_USERS_LIST.sortFields,
+    search: V1_USERS_LIST.search,
+    filters: V1_USERS_LIST.filters,
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,
     maxPageSize: 200,
   });
+  if (!parsed.ok) {
+    return problemResponse("invalid_request", 400, request, {
+      detail: parsed.detail,
+      requestId: guard.grant.requestId,
+    });
+  }
+  const { query } = parsed;
 
   // Org boundary (ADR-0001): a user's tenant is its membership, so an org
   // admin sees only users who hold a membership in their org. SUPERADMIN
@@ -75,13 +79,9 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
       ),
     );
   }
-  const statusFilter = query.filters.status;
-  if (typeof statusFilter === "string" && ALLOWED_STATUS.has(statusFilter)) {
-    base = base.where("status", "=", statusFilter);
-  } else if (Array.isArray(statusFilter)) {
-    const cleaned = statusFilter.filter((v) => ALLOWED_STATUS.has(v));
-    if (cleaned.length > 0) base = base.where("status", "in", cleaned);
-  }
+  // Every value was checked against the published vocabulary by the parser.
+  const statuses = query.filters.status;
+  if (statuses) base = base.where("status", "in", statuses);
   if (query.q) {
     const like = likeContains(query.q);
     base = base.where((eb) =>

@@ -61,7 +61,7 @@ sequenceDiagram
 - **Age ceiling on the receiver** (review #61): the verifier enforces `maxTokenAge: 60s` (5s clock tolerance) in addition to `exp`, so the 60-second bound holds even against a signer that failed to clamp.
 - **Application-id binding:** the consumer also requires `targetApplicationId` to equal its own `SSO_HANDOFF_APPLICATION_ID` and burns the nonce only where the row's `target_application_id` matches. `aud` alone is not trusted — `sso_audience` is an admin-typed column, so this holds even if two registered apps were to carry the same audience (the catalog refuses that with `409 audience_taken`).
 - **No launch while impersonating:** an impersonated primary session gets `403 forbidden_while_impersonating` from `/api/sso/launch`; a satellite session would carry no impersonation marker and be attributed to the target.
-- **Rate limits:** launch is throttled per principal, consume GET/POST per trusted client IP (30-burst, 1/s); denials are `429` with `Retry-After` and write no audit row.
+- **Rate limits:** launch is throttled per principal, consume GET/POST per trusted client IP (30-burst, 1/s); denials are `429` with `Retry-After` and write no `sso.*` audit row. The per-IP budgets (consume, and a signed-out launch) are shared across instances, with no deployment-wide floor behind them, so traffic from other client IPs cannot refuse a handoff (F-19).
 - TTL: the signer **hard-clamps to ≤60 seconds** regardless of `SSO_HANDOFF_TTL_SECONDS`.
 - Single use: the `jti` is burned on the consume POST; replays are rejected.
 

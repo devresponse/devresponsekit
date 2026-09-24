@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ConsumeRouteModule from "@/app/api/sso/consume/route";
+import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
 import type { NextRequest } from "next/server";
 import type { BetterAuthOptions } from "better-auth";
 import { getIP } from "better-auth/api";
@@ -49,6 +50,38 @@ vi.mock("@/lib/observability/logger.server", () => ({
 vi.mock("@/lib/observability/server", () => ({
   captureServerError: (...args: unknown[]) => captureMock(...args),
 }));
+// F-19: both methods take their per-IP bucket from the SHARED Postgres bucket.
+// There is no database here, so the shared primitives run on the real
+// in-memory limiter of ONE module instance, held for the whole test. It
+// survives `vi.resetModules()`, which hands a reloaded route a fresh
+// per-process limiter the way a second warm lambda has one, so a test can load
+// the route twice to stand in for two instances and still see one shared
+// budget. Every key either primitive consumes is recorded, in order, so a
+// deployment-wide key taken through `consumeSharedToken` (the tiered helper's
+// route) would be seen too.
+const shared = vi.hoisted(() => ({
+  keys: [] as string[],
+  limiter: undefined as undefined | typeof InMemoryLimiter,
+}));
+vi.mock("@/lib/admin/rate-limit-shared.server", () => {
+  const limiter = async () => (shared.limiter ??= await import("@/lib/admin/rate-limit.server"));
+  return {
+    consumeSharedToken: async (
+      key: string,
+      options: InMemoryLimiter.RateLimitOptions,
+      nowMs?: number,
+    ) => {
+      shared.keys.push(key);
+      return (await limiter()).consumeToken(key, options, nowMs);
+    },
+    enforceSharedRateLimit: async (
+      ...args: Parameters<typeof InMemoryLimiter.enforceRateLimit>
+    ) => {
+      shared.keys.push(`${args[0]}:${args[1]}`);
+      return (await limiter()).enforceRateLimit(...args);
+    },
+  };
+});
 // Review #66: the origin guard short-circuits under NODE_ENV=test, so the
 // POST's origin-denied branch (403 + `denied` audit) was dead under the whole
 // suite. Mock it (default: allow) so the deny path can be driven explicitly.
@@ -106,6 +139,8 @@ beforeEach(async () => {
   ])
     m.mockReset();
   originCheck.mockReset().mockReturnValue({ ok: true });
+  shared.keys.length = 0;
+  shared.limiter = undefined;
   createSsoSessionMock.mockResolvedValue({
     headers: new Headers([["set-cookie", "better-auth.session_token=tok.sig; Path=/; HttpOnly"]]),
     response: { ok: true },
@@ -115,6 +150,7 @@ beforeEach(async () => {
   ({ GET, POST } = await import("@/app/api/sso/consume/route"));
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.resetModules();
   vi.unstubAllEnvs();
   delete process.env.SSO_HANDOFF_APPLICATION_ID;
@@ -523,5 +559,100 @@ describe("per-IP rate limit (review #16)", () => {
       307,
     );
     expect((await POST(postRequest("abc", ipB))).status).toBe(303);
+  });
+});
+
+/**
+ * F-19: the per-IP budget lived in the per-process bucket, so a garbage-token
+ * flood spread over N warm instances got N times it per IP. Both methods now
+ * take the IP's bucket from the SHARED store, and nothing else: there is
+ * deliberately no deployment-wide floor, because it would answer 429 before
+ * the token is verified and so refuse genuine handoffs exactly like garbage
+ * ones, and a few dozen sources could hold it at zero for every user.
+ */
+describe("F-19: consume is limited per IP from the shared bucket, with no global floor", () => {
+  const ipA = { "x-forwarded-for": "203.0.113.9" };
+  const KEY_A = "sso.consume:ip:203.0.113.9";
+  const garbage = (headers: Record<string, string>) =>
+    getRequest("http://localhost/api/sso/consume?token=zz", headers);
+  /** The i-th of a run of distinct client IPs. */
+  const freshIp = (i: number) => `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+
+  /** Freeze the clock at the real time, so no bucket refills mid-flood. */
+  function freezeClock(): void {
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+  }
+
+  it("GET and POST consult the shared limiter, keyed on the client IP alone", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    expect((await GET(getRequest("http://localhost/api/sso/consume?token=abc", ipA))).status).toBe(
+      307,
+    );
+    expect(shared.keys).toEqual([KEY_A]);
+
+    shared.keys.length = 0;
+    expect((await POST(postRequest("abc", ipA))).status).toBe(303);
+    expect(shared.keys).toEqual([KEY_A]);
+  });
+
+  it("a flood spread over two warm instances gets ONE per-IP budget, not one each", async () => {
+    freezeClock();
+    verifyMock.mockRejectedValue(new Error("signature_invalid"));
+    // A second instance: a fresh module graph, so a fresh per-process limiter.
+    const instanceA = GET;
+    vi.resetModules();
+    const { GET: instanceB } = await import("@/app/api/sso/consume/route");
+
+    // DEFAULT_SSO_CONSUME_LIMIT: 30-token burst, 15 through each instance.
+    for (let i = 0; i < 30; i += 1) {
+      const get = i % 2 === 0 ? instanceA : instanceB;
+      expect((await get(garbage(ipA))).status).toBe(401);
+    }
+    // Kept per process, each instance had spent 15 of its own 30 and would
+    // admit both of these.
+    for (const get of [instanceA, instanceB]) {
+      const denied = await get(garbage(ipA));
+      expect(denied.status).toBe(429);
+      expect(Number(denied.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+      expect(await denied.json()).toMatchObject({ error: "rate_limited" });
+      expect(denied.headers.get("x-request-id")).toBeTruthy();
+    }
+    expect(verifyMock).toHaveBeenCalledTimes(30);
+    expect(new Set(shared.keys)).toEqual(new Set([KEY_A]));
+  });
+
+  it("many sources flooding at their full per-IP rate never lock out a genuine handoff from another IP", async () => {
+    freezeClock();
+    verifyMock.mockRejectedValue(new Error("signature_invalid"));
+    // 45 sources each spend their whole burst in the same instant (1,350
+    // admitted garbage tokens), then are refused. A deployment-wide floor
+    // sized anywhere near real handoff volume would now be at zero.
+    const SOURCES = 45;
+    for (let s = 0; s < SOURCES; s += 1) {
+      const from = { "x-forwarded-for": freshIp(s) };
+      for (let i = 0; i < 30; i += 1) expect((await GET(garbage(from))).status).toBe(401);
+      expect((await GET(garbage(from))).status).toBe(429);
+    }
+
+    // A real user on a different IP completes the handoff: GET, then POST.
+    verifyMock.mockReset().mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue(true);
+    const victim = { "x-forwarded-for": "198.51.100.4" };
+    expect(
+      (await GET(getRequest("http://localhost/api/sso/consume?token=abc", victim))).status,
+    ).toBe(307);
+    expect((await POST(postRequest("abc", victim))).status).toBe(303);
+    expect(createSsoSessionMock).toHaveBeenCalledTimes(1);
+
+    // No deployment-wide key was consulted at all: only the per-IP buckets.
+    expect(shared.keys.filter((k) => k.includes("__global__"))).toEqual([]);
+    const perIp = [
+      ...Array.from({ length: SOURCES }, (_, s) => `sso.consume:ip:${freshIp(s)}`),
+      "sso.consume:ip:198.51.100.4",
+    ];
+    expect(new Set(shared.keys)).toEqual(new Set(perIp));
   });
 });

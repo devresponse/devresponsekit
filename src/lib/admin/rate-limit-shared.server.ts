@@ -29,15 +29,18 @@ import { rateLimitSharedFallbacksTotal } from "@/lib/observability/metrics.serve
  * every instance shares: one row per key in `app_rate_limits` (migration
  * 0006). Authenticated per-actor limits stay in memory: an actor first has
  * to hold a credential, so the fan-out is bounded by what they hold, and a
- * DB round trip on every admin mutation would buy little.
+ * DB round trip on every admin mutation would buy little. The SSO consume
+ * endpoint and the signed-out SSO launch were left behind in memory, keyed on
+ * the client IP, until F-19; both now take a per-IP bucket from here, through
+ * `enforceSharedRateLimit`.
  *
  * Same contract as `consumeToken` — `(key, options, nowMs?) → RateLimitResult`
  * — but async, because the bucket lives in the database. Call sites that
  * previously called `consumeToken` for a pre-auth floor now `await` this
- * instead; an invariant test greps them to keep it that way. A floor that
- * pairs a per-IP bucket with a deployment-wide one takes both through
- * `consumeSourceThenGlobal` (rate-limit-tiered.server.ts), which owns their
- * order (F-18).
+ * instead; an invariant test scans every in-memory limiter call under `src/`
+ * and fails on one keyed on the client IP. A floor that pairs a per-IP bucket
+ * with a deployment-wide one takes both through `consumeSourceThenGlobal`
+ * (rate-limit-tiered.server.ts), which owns their order (F-18).
  *
  * Atomicity: refill-and-consume is ONE statement,
  * `INSERT … ON CONFLICT DO UPDATE … WHERE refilled >= 1 RETURNING`, with the
@@ -270,9 +273,9 @@ export async function consumeSharedToken(
 
 /**
  * Async twin of `enforceRateLimit` for a pre-auth floor that speaks the
- * AdminError envelope (invitation acceptance): consumes from the SHARED
- * bucket and, on deny, answers exactly as the in-memory helper does (metric,
- * flood-gated audit, 429 + `Retry-After`).
+ * AdminError envelope (invitation acceptance, SSO consume, a signed-out SSO
+ * launch): consumes from the SHARED bucket and, on deny, answers exactly as
+ * the in-memory helper does (metric, flood-gated audit, 429 + `Retry-After`).
  */
 export async function enforceSharedRateLimit(
   scope: string,

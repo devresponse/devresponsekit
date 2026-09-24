@@ -6,11 +6,9 @@ import { createSsoHandoffRedirect } from "@/lib/sso.server";
 import { isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
 import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
-import {
-  DEFAULT_SSO_LAUNCH_LIMIT,
-  actorIdFromRequest,
-  enforceRateLimit,
-} from "@/lib/admin/rate-limit.server";
+import { DEFAULT_SSO_LAUNCH_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { clientIpKey } from "@/lib/client-ip";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { logServerError } from "@/lib/observability/logger.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
@@ -34,9 +32,11 @@ export const dynamic = "force-dynamic";
  *      SameSite=Lax-reachable GET, and an unauthenticated flood must not be
  *      able to write attacker-chosen strings into the append-only audit
  *      table.
- *   2. Per-principal rate limit (session user id, or trusted client IP while
- *      signed out) — bounds the audit/nonce/purge writes below. The
- *      signed-out redirect writes no audit row at all (F-15).
+ *   2. Per-principal rate limit — bounds the audit/nonce/purge writes below.
+ *      Signed in, it is keyed on the session user id in the per-process
+ *      bucket. Signed out, it is keyed on the trusted client IP and taken
+ *      from the SHARED bucket (F-19), because there the caller chooses the
+ *      fan-out. The signed-out redirect writes no audit row at all (F-15).
  *   3. Session, then impersonation: an impersonated session is REFUSED. The
  *      satellite session the consumer would mint carries no `impersonatedBy`,
  *      outlives the impersonation cap, and is attributed to the target — it
@@ -76,12 +76,23 @@ export async function GET(request: NextRequest) {
   // the per-principal bucket below then charges the human behind the session.
   noteSessionImpersonation(request, session);
 
-  const limited = enforceRateLimit(
-    "sso.launch",
-    session ? session.user.id : actorIdFromRequest(request),
-    DEFAULT_SSO_LAUNCH_LIMIT,
-    request,
-  );
+  // F-19: the two branches are different limits, so they are two calls. A
+  // signed-in caller is a principal that holds a session, and its fan-out is
+  // bounded by the sessions it holds, so its bucket can live in this process.
+  // A signed-out caller is only an IP, and one bucket per process multiplied
+  // its budget by the number of warm instances a flood reached, so its bucket
+  // is shared. Its own scope keeps it, and the denial counter, apart from
+  // signed-in traffic. There is no deployment-wide floor behind it: that would
+  // turn away real users on their way to sign-in, and a signed-out launch costs
+  // only a redirect and a log line (F-15).
+  const limited = session
+    ? enforceRateLimit("sso.launch", session.user.id, DEFAULT_SSO_LAUNCH_LIMIT, request)
+    : await enforceSharedRateLimit(
+        "sso.launch.signed_out",
+        clientIpKey(request.headers),
+        DEFAULT_SSO_LAUNCH_LIMIT,
+        request,
+      );
   if (limited) return limited;
 
   if (!session) {

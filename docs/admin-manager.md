@@ -75,8 +75,9 @@ per-actor in-memory **token bucket** (`src/lib/admin/rate-limit.server.ts`).
 Read endpoints are unbounded — paging through a grid must never be throttled.
 (The in-memory store is per process; that is deliberate for these
 authenticated per-actor limits. The unauthenticated **pre-auth floors** —
-token endpoint, MCP registration, CSP sink, invitation acceptance — use the
-Postgres-backed bucket instead; see [Architecture → Rate limiting](./architecture.md#rate-limiting).)
+token endpoint, MCP registration, CSP sink, SSO consume and a signed-out SSO
+launch, invitation acceptance — use the Postgres-backed bucket instead; see
+[Architecture → Rate limiting](./architecture.md#rate-limiting).)
 
 - The limiter is a **UX / abuse guard layered on top of** authorization, never a
   substitute for it (`requireAdminPermission` runs first).
@@ -95,12 +96,18 @@ Default budgets (capacity = burst, refill = steady requests/sec):
 | `DEFAULT_ADMIN_MUTATION_LIMIT` | 30 | 1 | Per-row mutations (create, status, ban, …) |
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 (≈1 / 5s) | Bulk actions (a single call touches ≤500 rows) |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 (≈1 / 20s) | CSV export (heavy; ≤100k rows) |
-| `DEFAULT_SSO_LAUNCH_LIMIT` | 30 | 1 | `GET /api/sso/launch` — keyed per principal (session user id; trusted client IP while signed out) |
-| `DEFAULT_SSO_CONSUME_LIMIT` | 30 | 1 | `GET`/`POST /api/sso/consume` — keyed per trusted client IP (no principal exists before the token verifies) |
+| `DEFAULT_SSO_LAUNCH_LIMIT` | 30 | 1 | `GET /api/sso/launch` — keyed per principal: the session user id (in-memory); while signed out, the trusted client IP (shared — F-19) |
+| `DEFAULT_SSO_CONSUME_LIMIT` | 30 | 1 | `GET`/`POST /api/sso/consume` — keyed per trusted client IP (no principal exists before the token verifies); shared (F-19) |
 
-The bucket is in-memory and process-local: a restart resets it and budgets are
-not shared across instances. The supported 1.0 topology is therefore a single
-application instance; a shared (Redis) backend is post-1.0 work.
+The two SSO pre-auth budgets (consume, and a signed-out launch) are taken per IP
+from the shared Postgres bucket (F-19). There is deliberately no deployment-wide
+floor behind them: it would answer before the handoff token is checked, so it
+would turn away real users along with a flood. Every other bucket in this table,
+including a signed-in launch, is in-memory and process-local: a restart resets
+it and budgets are not shared across instances. That is acceptable for per-actor
+limits layered on authorization, so multi-instance is supported and only these
+UX limits are best-effort there (see
+[Deployment §5](./deployment.md#5-operations--gotchas)).
 
 ---
 

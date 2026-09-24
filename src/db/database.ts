@@ -21,7 +21,7 @@ export const pgPool = createAppPool({
   // NaN-safe coercion (P2-12): `Number(x ?? N)` returned NaN for a non-numeric
   // value (`??` only catches null/undefined), and `pg` accepts NaN silently.
   // intFromEnv falls back to the default instead, and the same vars are
-  // validated at boot by serverEnvSchema.
+  // validated at boot by serverEnvSchema (`register()` parses it, F-26).
   max: intFromEnv("PGPOOL_MAX", 10),
   idleTimeoutMillis: 30_000,
   // Fail fast instead of blocking forever when every connection is checked

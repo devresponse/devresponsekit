@@ -276,7 +276,27 @@ jobs:
 
       # 1) Migrations FIRST, against the DIRECT (non-pooled) production endpoint.
       #    Idempotent + ledgered, so re-running a no-op deploy is safe.
-      - name: Apply database migrations (production)
+      #    F-26: Better Auth's tables first, as `pnpm db:provision` and CI do.
+      #    This step used to run only db:app:migrate, so a release that
+      #    changed better-auth-schema.sql (#199 added `rateLimit`) went live
+      #    with every auth call answering 500 until someone migrated by hand.
+      #    The auth migrator imports @/lib/auth for its OPTIONS (tables,
+      #    plugins, fields), which do not depend on the secret or the URLs, so
+      #    the step gets the same CI placeholders the `auth-schema-drift` job
+      #    generates the committed snapshot with: no production secret reaches
+      #    this step, and none of these values reaches the database.
+      - name: Apply Better Auth migrations (production)
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
+          DB_SCHEMA: ${{ vars.DB_SCHEMA || 'auth' }}
+          BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
+          BETTER_AUTH_URL: http://localhost:3000
+          SSO_HANDOFF_ISSUER: http://localhost:3000
+          SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
+          SSO_HANDOFF_APPLICATION_ID: portal
+        run: pnpm db:auth:migrate
+
+      - name: Apply application migrations (production)
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
           DB_SCHEMA: ${{ vars.DB_SCHEMA || 'auth' }}

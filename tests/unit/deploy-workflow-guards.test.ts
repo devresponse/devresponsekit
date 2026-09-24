@@ -169,3 +169,40 @@ describe("deploy workflow: the fork guard is restated where the credentials are 
     expect(promote).toBeGreaterThan(migrate);
   });
 });
+
+describe("deploy workflow: both migrators run before anything is built (F-26)", () => {
+  const steps = code(deployJob);
+  /** One step, from its `- name:` line to the next step. */
+  const step = (name: string): string => {
+    const start = steps.indexOf(`- name: ${name}\n`);
+    if (start === -1) throw new Error(`deploy.yml has no step named ${JSON.stringify(name)}`);
+    const next = steps.indexOf("\n      - ", start + 1);
+    return next === -1 ? steps.slice(start) : steps.slice(start, next);
+  };
+
+  it("applies the Better Auth migrations, then the app's, then builds", () => {
+    // The step used to run only db:app:migrate, so a release that changed
+    // better-auth-schema.sql (#199's `rateLimit`) went live with every auth
+    // call answering 500 until someone migrated by hand.
+    const auth = steps.indexOf("run: pnpm db:auth:migrate");
+    const app = steps.indexOf("run: pnpm db:app:migrate");
+    const build = steps.indexOf("run: vercel build --prod");
+    expect(auth).toBeGreaterThan(-1);
+    expect(app).toBeGreaterThan(auth);
+    expect(build).toBeGreaterThan(app);
+  });
+
+  it("points the auth migrator at the same direct endpoint and schema, with no other production secret", () => {
+    const authStep = step("Apply Better Auth migrations (production)");
+    expect(authStep).toContain("run: pnpm db:auth:migrate");
+    expect(authStep).toContain("DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}");
+    expect(authStep).toContain("DB_SCHEMA: ${{ vars.DB_SCHEMA || 'auth' }}");
+    // It loads @/lib/auth only for the schema-shaping options, so the values
+    // the env schema demands are CI placeholders: the database URL is the
+    // only secret this step may read, and the Vercel token never reaches it.
+    expect(authStep.match(/\$\{\{\s*secrets\.\w+/g)).toEqual([
+      "${{ secrets.PRODUCTION_DIRECT_DATABASE_URL",
+    ]);
+    expect(authStep).toMatch(/BETTER_AUTH_SECRET: ci-only-[a-z0-9-]+-not-for-production\n/);
+  });
+});

@@ -32,11 +32,14 @@ warrant a comms channel and an owner before deep debugging.
 ## 2. First five minutes
 
 1. **Liveness / readiness.** `GET /api/health` → `200 {"status":"ok"}` means the
-   process is up. `GET /api/health/ready` → `200` means it can reach the
-   database **and** the schema carries every core migration this build needs;
-   `503` carries a `reason`: `database_unreachable` or `schema_behind` (a
-   build went live ahead of its migration — see §4). Both are unauthenticated
-   and `no-store`, so a curl from anywhere works.
+   process is up. `GET /api/health/ready` → `200` means its environment is
+   valid, it can reach the database, the schema carries every core migration
+   this build needs **and** Better Auth's own schema check passes; `503`
+   carries a `reason`: `config_invalid`, `database_unreachable` or
+   `schema_behind` (a build went live ahead of its migration — see §4). A
+   500 from both probes on a fresh deployment is an invalid environment: the
+   boot hook refused it (§4, Config invalid). Both are unauthenticated and
+   `no-store`, so a curl from anywhere works.
 2. **Get a correlation id.** Reproduce the failure (or take one from a user
    report) and capture the `x-request-id` response header. It is the join key
    across logs, audit rows, and Sentry — see [observability.md §4](./observability.md#4-correlating-an-incident).
@@ -93,21 +96,48 @@ warrant a comms channel and an owner before deep debugging.
   query plan (§5).
 
 ### Schema behind (`/api/health/ready` → 503 `schema_behind`)
-- The running build depends on a core migration the database has not
-  recorded in `app_schema_migrations` (the ids are in the server log under
-  `kind: "schema-behind"`; the response deliberately does not list them).
-  Symptoms before anyone looks at the probe: 500s confined to the routes that
-  touch the new column/table — e.g. every `/api/v1` call bearing an
-  OAuth-client JWT and admin secret rotation when `0004-oauth-client-secret-rotated-at.sql`
-  is missing (review #43).
-- Fix forward, not back: run `pnpm db:app:migrate` against the production
+- The server log says which half is behind; the response deliberately says
+  neither.
+- **`kind: "schema-behind"`** — the running build depends on a core migration
+  the database has not recorded in `app_schema_migrations` (the log lists the
+  ids). Symptoms before anyone looks at the probe: 500s confined to the
+  routes that touch the new column/table — e.g. every `/api/v1` call bearing
+  an OAuth-client JWT and admin secret rotation when
+  `0004-oauth-client-secret-rotated-at.sql` is missing (review #43). Fix
+  forward, not back: run `pnpm db:app:migrate` against the production
   `DATABASE_URL` (migrations are additive and idempotent), then re-curl
   `/api/health/ready` for `200`. Rolling the app back also works (the older
   build does not read the column) but leaves the gap for the next deploy.
+- **`kind: "auth-schema-behind"`** (F-26) — Better Auth's own schema check
+  found a table or column its configuration writes missing (the log's
+  `findings` list them, e.g. `{"kind":"missing-table","table":"rateLimit"}`).
+  Symptoms: a 500 on **every**
+  `/api/auth/*` call and every page or route that reads the session, because
+  Better Auth refuses all of them until the schema matches. Run
+  `pnpm db:auth:migrate` against the production `DATABASE_URL`, then
+  **redeploy or restart**: Better Auth keeps its "mismatch" verdict for the
+  life of the process, so an instance that already saw the gap keeps failing
+  auth, and keeps answering `schema_behind`, after the database is fixed. New
+  instances start clean. Re-curl `/api/health/ready` for `200`.
 - Root cause is the deploy path: see [deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)
   — Vercel's git integration promotes every push to `main` and cannot migrate,
   so a migration must be applied to production **before** its branch merges.
-  That is the operator gate, and skipping it is how this 503 happens.
+  That includes a change to `src/db/migrations/better-auth-schema.sql`. That
+  is the operator gate, and skipping it is how this 503 happens.
+
+### Config invalid (`/api/health/ready` → 503 `config_invalid`, or 500 everywhere)
+- F-26: the environment is validated when the server starts. On `next start`
+  and the Docker image the process exits with code 1 and the log reads
+  `An error occurred while loading instrumentation hook: Invalid server
+  environment variables: NAME (rule); …`. On Vercel the same line is in the
+  function log and every server-rendered page and API route answers 500,
+  both health probes included.
+- Where the server did start, readiness answers `503 config_invalid` and
+  logs only the variable names (`kind: "config-invalid"`). The same reason
+  covers a Better Auth that refused its configuration at initialisation
+  (logged with its error).
+- Fix the named variables (rules: [Configuration §1](./configuration.md#1-how-configuration-is-loaded)),
+  then redeploy — on Vercel a changed variable reaches only new deployments.
 
 ### Elevated 5xx
 - Every uncaught 5xx is logged (`onRequestError` → `logServerError`) and, if
@@ -115,13 +145,15 @@ warrant a comms channel and an owner before deep debugging.
   find the common stack.
 - If it started at a deploy, **roll back first, debug second** (§5).
 - **Every** route 5xx-ing at once, with `Invalid server environment variables:`
-  in the log, is a variable `getServerEnv()` refuses. Each one is listed with
-  the rule it broke. An origin rule, such as a scheme typo or `http://` in
+  in the log, is a variable `getServerEnv()` refuses. Since F-26 the boot hook
+  refuses it at startup, so the line is prefixed with `An error occurred while
+  loading instrumentation hook:` (see Config invalid above). Each variable is
+  listed with the rule it broke. An origin rule, such as a scheme typo or `http://` in
   production, is covered under "Boot fails on an origin-valued variable" in
   Part 2 (Setup & install). `Invalid server environment variables:
   API_JWT_ISSUER (must be unset or identical to BETTER_AUTH_URL …)` is the MCP discovery gate (review #57):
   `MCP_ENABLED` is on and `API_JWT_ISSUER` is not the same identifier as
-  `BETTER_AUTH_URL`, so `getServerEnv()` throws for every request. Unset
+  `BETTER_AUTH_URL`, so the deployment fails at startup. Unset
   `API_JWT_ISSUER` (or set it equal to `BETTER_AUTH_URL`), or clear
   `MCP_ENABLED` if the gateway is not in use, then redeploy. See
   [Deployment §3](./deployment.md#3-vercel-project--environment) for the
@@ -414,7 +446,10 @@ serverless concurrency.
 db:app:migrate` against the target **before** routing traffic. The migrate step
 **creates the `auth` schema** (or whatever `DB_SCHEMA` is) automatically and
 provisions every table — you don't create the schema by hand. Migrations are
-idempotent (ledgered in `app_schema_migrations`) and safe to re-run. Always use
+idempotent (ledgered in `app_schema_migrations`) and safe to re-run. An
+instance that started while a Better Auth table was missing keeps refusing
+auth until it restarts, so restart or redeploy after `db:auth:migrate` (§4,
+Schema behind). Always use
 the **direct** (non-pooled) endpoint — by hand before the merge on the live path
 ([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)),
 or via the tooling paths, which apply them before promoting (deployment.md

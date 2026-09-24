@@ -2,14 +2,15 @@
  * Post-deploy verification against the running deployment.
  *
  * The kit exposes two probes: `/api/health` (no database) and
- * `/api/health/ready`, which checks that the migration ledger contains every
- * core migration THIS build depends on. That second one is the whole reason a
- * deploy can be verified from outside: a build promoted ahead of its schema
- * answers 503 `schema_behind` instead of 500ing on the first authenticated
- * request, which is how it used to surface.
+ * `/api/health/ready`, which checks the env, that the migration ledger contains
+ * every core migration THIS build depends on, and (F-26) Better Auth's own
+ * schema check. That second one is the whole reason a deploy can be verified
+ * from outside: a build promoted ahead of its schema answers 503
+ * `schema_behind` instead of 500ing on the first authenticated request, which
+ * is how it used to surface.
  */
 
-export type ReadyStatus = "ready" | "schema_behind" | "database_unreachable" | "unknown";
+export type ReadyStatus = "ready" | "schema_behind" | "database_unreachable" | "config_invalid" | "unknown";
 
 export interface HealthReport {
   health: number;
@@ -93,6 +94,7 @@ export async function probe(origin: string): Promise<HealthReport> {
   if (ready.code === 200) readyStatus = "ready";
   else if (ready.body.includes("schema_behind")) readyStatus = "schema_behind";
   else if (ready.body.includes("database_unreachable")) readyStatus = "database_unreachable";
+  else if (ready.body.includes("config_invalid")) readyStatus = "config_invalid";
 
   return { health: health.code, ready: ready.code, readyStatus, signIn: signIn.code };
 }
@@ -217,6 +219,15 @@ export function describe(report: HealthReport): string[] {
     lines.push("");
     lines.push(
       "The build is live but its schema is behind: run `drk-deploy migrate` against the direct endpoint.",
+    );
+    lines.push(
+      "If the log says auth-schema-behind, redeploy afterwards: Better Auth keeps refusing until it restarts.",
+    );
+  }
+  if (report.readyStatus === "config_invalid") {
+    lines.push("");
+    lines.push(
+      "An environment variable fails the kit's schema: the runtime log names it (kind config-invalid).",
     );
   }
   if (report.signIn === 500) {

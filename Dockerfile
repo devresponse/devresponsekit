@@ -101,8 +101,9 @@ USER nextjs
 EXPOSE 3000
 
 # Wire the readiness endpoint to the container health status. /api/health/ready
-# reads the app_schema_migrations ledger and returns 503 when the DB is
-# unreachable OR when a core migration this image needs is missing, so this
+# returns 503 when the env fails its schema, the DB is unreachable, a core
+# migration this image needs is missing from app_schema_migrations, OR Better
+# Auth's own schema check finds a table or column missing (F-26), so this
 # reports the container healthy only when it can actually serve — not the
 # instant the process starts, and not before the migrate init step has run
 # (Compose `service_healthy`, Swarm, and `docker run` all read this). Node 24 ships a global `fetch`; Docker's `--timeout` bounds the probe,

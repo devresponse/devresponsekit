@@ -9,8 +9,9 @@ import { timingSafeEqual } from "node:crypto";
  *
  *   - `expected` is the validated `CRON_SECRET` (`src/lib/env.ts`: optional,
  *     ≥32 chars when set, empty = unset — review #92). Pass it from
- *     `getServerEnv()` at request time so a weak value fails at boot instead
- *     of quietly enabling the endpoint.
+ *     `getServerEnv()`, whose schema `register()` parses at boot (F-26), so a
+ *     weak value stops the server from starting instead of quietly enabling
+ *     the endpoint.
  *   - FAILS CLOSED: with no secret configured nothing is ever authorized, so a
  *     deployment that forgets the secret never exposes an unauthenticated
  *     trigger (Vercel Cron would otherwise call the route with no header).

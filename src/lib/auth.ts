@@ -36,8 +36,9 @@ import { getTrustedOrigins } from "@/lib/trusted-origins";
  * Note: account linking, session lifetime, and social providers are
  * configured here. All env access goes through `getServerEnv()` so a
  * misconfigured deployment fails at boot instead of registering broken
- * providers — a social provider is only enabled when BOTH its client id
- * and secret are present.
+ * providers (the Node boot hook parses the schema before the first request,
+ * F-26) — a social provider is only enabled when BOTH its client id and
+ * secret are present.
  */
 const env = getServerEnv();
 
@@ -104,7 +105,9 @@ export const auth = betterAuth({
   // entirely (no DB access), so AUTH_RATE_LIMIT_DISABLED means what it did.
   // LANDING ORDER: Better Auth does not catch storage errors, so the table
   // must exist BEFORE this build serves sign-ins — run `pnpm db:auth:migrate`
-  // against production first (docs/deployment.md §2).
+  // against production first (docs/deployment.md §2). Better Auth's own schema
+  // check refuses every auth call while it is missing, and F-26's readiness
+  // probe reports that as `schema_behind` (auth-schema-check.server.ts).
   rateLimit: {
     storage: "database",
     ...(env.AUTH_RATE_LIMIT_DISABLED ? { enabled: false } : {}),

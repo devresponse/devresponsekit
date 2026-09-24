@@ -1,4 +1,5 @@
-import { intFromEnv } from "@/lib/env";
+import { SocketAddress, isIP } from "node:net";
+import { trustedProxyCount } from "@/lib/forwarded-hops";
 
 /**
  * Trustworthy client-IP extraction for rate-limit keys (P2-4).
@@ -14,48 +15,118 @@ import { intFromEnv } from "@/lib/env";
  * your own trusted edge proxy/CDN recorded. With the default of one proxy
  * in front (Vercel / a single LB), that is the rightmost entry — the IP
  * the proxy actually observed connecting to it.
+ *
+ * This module imports `node:net` (F-16), so only Node code may import it.
+ * Every importer today runs on Node, `proxy.ts` included (a Next 16 proxy
+ * always uses the Node runtime). The EDGE instrumentation bundle must not
+ * reach it: the hop counter `request-id.ts` needs lives in
+ * `src/lib/forwarded-hops.ts` instead, and `tests/unit/edge-import-graph.test.ts`
+ * fails if a Node built-in enters that graph.
  */
-function trustedProxyCount(): number {
-  // NaN-safe read shared with the pool config (P2-12); also declared in
-  // serverEnvSchema for boot-time validation.
-  return intFromEnv("TRUSTED_PROXY_COUNT", 1);
+
+/**
+ * An IPv4 hop carrying the source port a load balancer appended
+ * (`203.0.113.5:51234`, the Azure App Service / Application Gateway shape).
+ * `isIP` checks the octets afterwards, so this pattern only has to find the split.
+ */
+const IPV4_WITH_PORT = /^(\d{1,3}(?:\.\d{1,3}){3}):\d{1,5}$/;
+/** `[v6]` or `[v6]:port`: brackets are the only unambiguous way to put a port on an IPv6 hop. */
+const BRACKETED = /^\[([^\]]*)\](?::\d{1,5})?$/;
+/** An IPv4-mapped IPv6 address as {@link SocketAddress} prints it (`::ffff:192.0.2.1`). */
+const IPV4_MAPPED = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/;
+
+/**
+ * Reduces one forwarded-header value to a canonical IP address, or `null` when
+ * it is not one (F-16). Every consumer of the client IP stores or keys on the
+ * result, and each of them needs a real address:
+ *
+ *   - `app_audit_events.ip_address` and `app_api_keys.last_used_ip` are `inet`.
+ *     `203.0.113.5:51234` or `x` failed the INSERT with 22P02 — for an audit
+ *     row, AFTER the mutation it records had committed, so the caller got a 500
+ *     and the action went unaudited (a login row was lost silently);
+ *   - the limiters key one bucket per distinct string, so a port suffix minted
+ *     a fresh bucket per ephemeral port;
+ *   - Better Auth validates what it reads from {@link CLIENT_IP_HEADER} and
+ *     drops an invalid value, which put that client in its deployment-wide
+ *     `no-trusted-ip` bucket with an empty `session.ipAddress`.
+ *
+ * So: trim; strip the port from `a.b.c.d:port` and `[v6]:port` (a bare IPv6
+ * address cannot carry one: `2001:db8::1:80` IS an address); validate with
+ * `isIP`; canonicalize IPv6 (lower case, zero-compressed) and map an
+ * IPv4-mapped address (`::ffff:a.b.c.d`, hex form included) to its IPv4, as
+ * Better Auth does. Anything else (garbage, `unknown`, a zone id) is `null`,
+ * so the request is handled exactly like one with no trustworthy IP: shared
+ * bucket, no header, `null` column. It is never passed through.
+ */
+export function normalizeClientIp(raw: string): string | null {
+  const value = raw.trim();
+  const bracketed = BRACKETED.exec(value)?.[1];
+  if (bracketed !== undefined) return isIP(bracketed) === 6 ? canonicalIpv6(bracketed) : null;
+  const address = IPV4_WITH_PORT.exec(value)?.[1] ?? value;
+  switch (isIP(address)) {
+    case 4:
+      // `isIP` refuses leading zeros and out-of-range octets, so an IPv4
+      // address that passes is already canonical.
+      return address;
+    case 6:
+      return canonicalIpv6(address);
+    default:
+      return null;
+  }
+}
+
+function canonicalIpv6(address: string): string | null {
+  // `isIP` accepts a zone id (`fe80::1%eth0`), but it names an interface on the
+  // proxy's host rather than a client, and `inet` rejects it.
+  if (address.includes("%")) return null;
+  try {
+    const canonical = new SocketAddress({ address, family: "ipv6" }).address;
+    return IPV4_MAPPED.exec(canonical)?.[1] ?? canonical;
+  } catch {
+    // Not expected for an address `isIP` accepted. Fail closed rather than
+    // throw from the proxy on every request.
+    return null;
+  }
 }
 
 /**
- * Whether the forwarded chain is at least `TRUSTED_PROXY_COUNT` entries long.
- *
- * READ THE NAME LITERALLY: this counts entries in `X-Forwarded-For`, a header
- * the CLIENT sends. It is **not** a provenance proof and must never be treated
- * as one (review #224):
- *
- *   - any direct caller satisfies it by adding one header
- *     (`x-forwarded-for: 1.2.3.4`), because nothing here distinguishes an
- *     entry a proxy appended from one the client typed;
- *   - behind a real edge (Vercel, any LB that sets the header) it is
- *     unconditionally TRUE, so it stops discriminating at all.
- *
- * What it therefore rules out is exactly one population: callers that send no
- * forwarded chain — i.e. an unmodified direct request to a non-proxied origin
- * or local development. That is all. The only caller is the request-id
- * normaliser ({@link import("@/lib/request-id").normalizeInboundRequestId}),
- * where the load-bearing check is the UUID format one and this is a weak
- * secondary bar over a value that is a correlation aid only. Nothing may make
- * a security decision on it, and no new caller should adopt it as one.
- *
- * (Contrast {@link getClientIp}, which uses `TRUSTED_PROXY_COUNT` the sound
- * way: it counts hops from the RIGHT to pick the entry the app's own edge
- * wrote, which a client cannot displace.)
+ * The limiter subject for a normalized client IP (F-16): an IPv4 address as
+ * is, an IPv6 address as its /64 (`2001:db8:1:2::/64`). One IPv6 subscriber is
+ * routinely handed a whole /64 and can source each request from a fresh
+ * address in it, so a per-address bucket never fills. /64 is also Better
+ * Auth's default `ipv6Subnet`, so both limiters group the same clients. Only
+ * the limiter keys use it: the audit row, the API-key stamp and the header
+ * Better Auth reads keep the full address.
  */
-export function hasForwardedHops(xForwardedFor: string | null | undefined): boolean {
-  const hops = (xForwardedFor ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean).length;
-  return hops >= trustedProxyCount();
+function rateLimitSubject(ip: string): string {
+  if (isIP(ip) !== 6) return ip;
+  // `ip` is canonical (canonicalIpv6): at most one `::`, and a dotted IPv4
+  // only as the last 32 bits. Those never reach the first four groups, so a
+  // dotted tail only has to count as its two groups.
+  const [head = "", tail] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":").flatMap((g) => (g.includes(".") ? ["0", "0"] : [g])) : [];
+  const groups =
+    tail === undefined
+      ? left
+      : [...left, ...Array<string>(8 - left.length - right.length).fill("0"), ...right];
+  const prefix = `${groups.slice(0, 4).join(":")}::`;
+  return `${new SocketAddress({ address: prefix, family: "ipv6" }).address}/64`;
 }
 
-/** Returns the best-effort real client IP, or null when none can be trusted. */
+/**
+ * Returns the real client IP, normalized by {@link normalizeClientIp} (F-16),
+ * or null when none can be trusted — including when the trusted hop holds
+ * something that is not an IP address. A non-null result is always a valid,
+ * canonical IPv4 or IPv6 address that an `inet` column accepts.
+ */
 export function getClientIp(headers: Headers): string | null {
+  const hop = trustedHop(headers);
+  return hop === null ? null : normalizeClientIp(hop);
+}
+
+/** The raw value of the hop `TRUSTED_PROXY_COUNT` selects (P2-4), before F-16 normalization. */
+function trustedHop(headers: Headers): string | null {
   const xff = headers.get("x-forwarded-for");
   const ips = xff
     ? xff
@@ -108,6 +179,11 @@ export const CLIENT_IP_HEADER = "x-drk-client-ip";
  * none does, so it can never reach Better Auth unless this app set it.
  * Absent ⇒ Better Auth keys the request to its shared bucket, mirroring
  * {@link clientIpKey}'s `"anon"` — fail closed, never fail open.
+ *
+ * The value is the NORMALIZED full address (F-16): a port-suffixed hop now
+ * reaches Better Auth as a valid IP instead of being dropped into
+ * `no-trusted-ip`. It is not the /64: Better Auth masks an IPv6 address to its
+ * `ipv6Subnet` (default 64) itself, for its limiter and `session.ipAddress`.
  */
 export function applyClientIpHeader(headers: Headers): void {
   const ip = getClientIp(headers);
@@ -141,9 +217,13 @@ export function withTrustedClientIp(headers: Headers): Headers {
 /**
  * A rate-limit actor key derived from the client IP, or `"anon"` when no
  * trustworthy IP is available (so requests still share one bounded bucket
- * rather than each getting a fresh one).
+ * rather than each getting a fresh one). An IPv6 client is keyed by its /64
+ * (F-16, {@link rateLimitSubject}), so rotating addresses inside the prefix
+ * does not mint new buckets. Every per-IP limiter goes through here: the token
+ * endpoint, MCP registration, the CSP sink and, through `actorIdFromRequest`,
+ * the SSO launch/consume throttles.
  */
 export function clientIpKey(headers: Headers): string {
   const ip = getClientIp(headers);
-  return ip ? `ip:${ip}` : "anon";
+  return ip ? `ip:${rateLimitSubject(ip)}` : "anon";
 }

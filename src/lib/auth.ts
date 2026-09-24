@@ -325,6 +325,9 @@ export const auth = betterAuth({
     // Better Auth's default `x-forwarded-for` read trusts a single-value
     // header only, so multi-hop chains collapsed into one deployment-wide
     // `no-trusted-ip` bucket and a bare client-supplied value was trusted.
+    // The header holds a validated, port-stripped address (F-16); Better Auth
+    // masks IPv6 to its default /64 `ipv6Subnet`, the grouping the app's own
+    // limiter keys use, so `session.ipAddress` holds that /64 for IPv6.
     ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
 
     // Shared-session (Option C) support: with COOKIE_DOMAIN set, the session

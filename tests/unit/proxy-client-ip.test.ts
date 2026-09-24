@@ -122,6 +122,22 @@ describe("proxy — trusted client-IP header on the Better Auth catch-all", () =
     expect(forwardedHeader(res, CLIENT_IP_HEADER)).toBe("203.0.113.9");
   });
 
+  it("stamps the NORMALIZED hop: port stripped, IPv4-mapped IPv6 mapped (F-16)", () => {
+    const ported = proxy(req(AUTH_PATH, { "x-forwarded-for": "spoof, 203.0.113.9:51234" }));
+    expect(forwardedHeader(ported, CLIENT_IP_HEADER)).toBe("203.0.113.9");
+    const mapped = proxy(req(AUTH_PATH, { "x-forwarded-for": "[::ffff:203.0.113.9]:443" }));
+    expect(forwardedHeader(mapped, CLIENT_IP_HEADER)).toBe("203.0.113.9");
+  });
+
+  it("REMOVES the header when the trusted hop is not an IP address (F-16)", () => {
+    const res = proxy(
+      req(AUTH_PATH, { [CLIENT_IP_HEADER]: "198.51.100.77", "x-forwarded-for": "garbage" }),
+    );
+    const overridden = res.headers.get("x-middleware-override-headers") ?? "";
+    expect(overridden.split(",").map((s) => s.trim())).not.toContain(CLIENT_IP_HEADER);
+    expect(res.headers.get(`x-middleware-request-${CLIENT_IP_HEADER}`)).toBeNull();
+  });
+
   it("keeps the enforcing CSP on the API branch", () => {
     const res = proxy(req(AUTH_PATH, { "x-forwarded-for": "203.0.113.9" }));
     expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
@@ -159,8 +175,16 @@ describe("Better Auth's resolver agrees with getClientIp for the same inputs", (
     },
     { name: "x-real-ip fallback", headers: { "x-real-ip": "203.0.113.9" } },
     {
-      name: "IPv4-mapped IPv6 (Better Auth normalizes to the IPv4)",
+      name: "IPv4-mapped IPv6 (both sides map it to the IPv4, F-16)",
       headers: { "x-forwarded-for": "::ffff:203.0.113.9" },
+    },
+    {
+      name: "IPv4 hop with the port a load balancer appended (F-16)",
+      headers: { "x-forwarded-for": "198.51.100.77, 203.0.113.9:51234" },
+    },
+    {
+      name: "port-suffixed x-real-ip fallback (F-16)",
+      headers: { "x-real-ip": "203.0.113.9:8080" },
     },
   ];
 
@@ -169,18 +193,28 @@ describe("Better Auth's resolver agrees with getClientIp for the same inputs", (
       if (v.proxies) vi.stubEnv("TRUSTED_PROXY_COUNT", v.proxies);
       const headers = new Headers(v.headers);
       const expected = getClientIp(headers);
-      expect(expected).not.toBeNull();
+      expect(expected).toBe("203.0.113.9");
 
       // What the proxy forwards…
       applyClientIpHeader(headers);
       // …resolves, through Better Auth's own resolver + the app's option
-      // block, to the same client the app's limiter keys on. (IPv4-mapped
-      // IPv6 is the one shape Better Auth canonicalizes; the bucket is still
-      // that client's.)
+      // block, to the same client the app's limiter keys on. Before F-16 a
+      // port-suffixed hop was forwarded raw, failed Better Auth's validation
+      // and landed in its shared `no-trusted-ip` bucket (under NODE_ENV=test,
+      // the localhost fallback).
       const resolved = getIP(headers, betterAuthIpOptions);
-      expect(resolved).toBe(expected === "::ffff:203.0.113.9" ? "203.0.113.9" : expected);
+      expect(resolved).toBe(expected);
     });
   }
+
+  it("a bracketed IPv6 hop with a port reaches Better Auth as that client's /64, not no-trusted-ip (F-16)", () => {
+    const headers = new Headers({ "x-forwarded-for": "[2001:db8:1:2::abcd]:443" });
+    applyClientIpHeader(headers);
+    // The header carries the full address; Better Auth masks it to its
+    // default /64 `ipv6Subnet` for its limiter and `session.ipAddress`.
+    expect(headers.get(CLIENT_IP_HEADER)).toBe("2001:db8:1:2::abcd");
+    expect(getIP(headers, betterAuthIpOptions)).toBe("2001:0db8:0001:0002:0000:0000:0000:0000");
+  });
 
   it("Better Auth's DEFAULT x-forwarded-for read does NOT reach the trusted hop of a multi-hop chain", () => {
     // The pre-fix behaviour: with >1 token and no trustedProxies, Better Auth

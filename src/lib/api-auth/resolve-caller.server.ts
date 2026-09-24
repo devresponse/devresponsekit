@@ -139,6 +139,9 @@ export function hasBearerCredential(headers: Headers): boolean {
 
 function clientIp(headers: Headers): string | null {
   // P2-4: derive from a trusted proxy hop, not the spoofable leftmost XFF.
+  // F-16: normalized to a valid address or null, because `last_used_ip` is
+  // `inet` and the best-effort stamp swallows a failed UPDATE, which left
+  // `last_used_at` frozen for every request that arrived as `ip:port`.
   return getClientIp(headers);
 }
 

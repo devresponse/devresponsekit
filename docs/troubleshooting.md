@@ -161,8 +161,9 @@ warrant a comms channel and an owner before deep debugging.
   and 3 req / 60 s per client IP) on `/api/auth/*`. It keys on the same client IP
   as the app's limiters — the app-derived `x-drk-client-ip`, `TRUSTED_PROXY_COUNT`
   hops from the right of `X-Forwarded-For`, stamped by the proxy and re-derived in
-  the route handler (review #35) — so one abuser cannot exhaust everyone's bucket
-  by spoofing headers. **If every user is rate-limited at once**, your edge is
+  the route handler (review #35), with an IPv6 client grouped by its /64 in both
+  (F-16) — so one abuser cannot exhaust everyone's bucket by spoofing headers.
+  **If every user is rate-limited at once**, your edge is
   misconfigured: `TRUSTED_PROXY_COUNT` is too shallow (one inner-proxy IP for
   everyone) or the edge sets no `X-Forwarded-For` / `X-Real-IP` at all (shared
   `no-trusted-ip` bucket) — see [Deployment issues](#deployment-issues); do not
@@ -425,12 +426,17 @@ Better Auth reads (review #35), so a wrong depth is visible on session rows:
 - **Too deep** (more than the chain length): the selection runs off the left
   end and the **leftmost, client-supplied** entry is taken — a spoofable IP, so a
   client can rotate buckets and forge the recorded address.
-- **`no-trusted-ip` / empty `ip_address`** means no forwarded chain reached the
-  app at all: the proxy in front sets neither `X-Forwarded-For` nor `X-Real-IP`.
+- **`no-trusted-ip` / empty `ip_address`** means no usable address reached the
+  app: either the proxy in front sets neither `X-Forwarded-For` nor `X-Real-IP`,
+  or the hop `TRUSTED_PROXY_COUNT` selects is not an IP address (a hostname,
+  `unknown`, garbage). A port suffix (`203.0.113.5:51234`, `[2001:db8::1]:443`) is
+  stripped, not rejected (F-16).
 
-Check the `ip_address` on a fresh session row against the real client address,
+Check the `ipAddress` on a fresh session row against the real client address,
 and compare it with the `ip_address` of the matching `sso.consume.success` /
-`auth` audit row — both derive from the same rule and must agree.
+`auth` audit row. Both derive from the same rule and must agree: identical for
+IPv4, while for IPv6 the session holds the client's /64 (the prefix Better Auth
+keys on, written out in full) and the audit row the full address.
 
 **Rate limits behave inconsistently across instances.** The **per-actor** admin
 guard (mutations, bulk, export, SSO handoff) is in-process per instance, so under

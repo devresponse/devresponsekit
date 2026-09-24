@@ -87,6 +87,29 @@ describe("auditEvent", () => {
     expect(valuesArg.mock.calls[0]![0].ip_address).toBe("198.51.100.7");
   });
 
+  it("writes an inet-valid ip_address or null, never the raw hop (F-16)", async () => {
+    // `ip_address` is inet: a raw `ip:port` or garbage hop made the INSERT
+    // fail with 22P02 after the caller's mutation had committed.
+    const cases: Array<[string, string | null]> = [
+      ["1.2.3.4, 203.0.113.9:51234", "203.0.113.9"],
+      ["[2001:db8::1]:443", "2001:db8::1"],
+      ["::ffff:203.0.113.9", "203.0.113.9"],
+      ["x", null],
+      ["[fe80::1%eth0]:80", null],
+    ];
+    for (const [xff, expected] of cases) {
+      valuesArg.mockClear();
+      await auditEvent({
+        eventType: "admin.user.deleted",
+        outcome: "success",
+        actorBetterAuthUserId: "ba-1",
+        request: { headers: new Headers({ "x-forwarded-for": xff }) },
+      });
+      expect(valuesArg.mock.calls[0]![0].ip_address, xff).toBe(expected);
+    }
+    expect(insertExecute).toHaveBeenCalledTimes(cases.length);
+  });
+
   it("caps user_agent at USER_AGENT_MAX_LENGTH so no caller can park kilobytes in the append-only table (F-15)", async () => {
     // The finding's payload: an 8 KB User-Agent. The row is permanent, so the
     // cap applies to EVERY row, authenticated or not.

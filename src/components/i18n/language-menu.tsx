@@ -1,12 +1,11 @@
 "use client";
 
-import { useTransition } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Globe } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { usePathname, useRouter } from "@/i18n/navigation";
 import { locales, LOCALE_LABELS, type SupportedLocale } from "@/config/i18n-config";
+import { useSwitchLocale } from "./use-switch-locale";
 
 export interface LanguageMenuProps {
   current: SupportedLocale;
@@ -19,10 +18,13 @@ export interface LanguageMenuProps {
  * LanguageMenu
  *
  * Client Component. Menu-style sibling of `LocaleSwitcher` for toolbars
- * and footers where a dropdown menu reads better than a select. Like
- * `LocaleSwitcher`, it only swaps the locale segment of the current URL
- * via `next-intl`'s `useRouter().replace`, preserving the path and query
- * — never accidentally rewriting an `/api/*` route.
+ * and footers where a dropdown menu reads better than a select. It shares
+ * `useSwitchLocale` with `LocaleSwitcher`, so it too swaps only the locale
+ * segment of the current URL via `next-intl`'s `useRouter().replace`,
+ * preserving the path, query and fragment (F-35) — never accidentally
+ * rewriting an `/api/*` route. Not mounted by the app today; it is kept as
+ * a ready-made picker for adopters, which is why it must not keep a private
+ * copy of the switch logic.
  *
  * For authenticated users, the chosen locale is persisted via
  * `/api/preferences/locale` (fire-and-forget; the server validates the
@@ -39,23 +41,11 @@ export function LanguageMenu({
   className,
 }: LanguageMenuProps) {
   const t = useTranslations("common");
-  const router = useRouter();
-  const pathname = usePathname();
-  const [isPending, startTransition] = useTransition();
+  const { switchLocale, isPending } = useSwitchLocale({ persistAuthenticated });
 
   const select = (next: SupportedLocale) => {
     if (next === current) return;
-    startTransition(() => {
-      router.replace(pathname, { locale: next });
-      if (persistAuthenticated) {
-        void fetch("/api/preferences/locale", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ locale: next }),
-        });
-      }
-    });
+    switchLocale(next);
   };
 
   const triggerLabel = `${t("language")}: ${LOCALE_LABELS[current]}`;

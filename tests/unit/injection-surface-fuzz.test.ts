@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { getSafeReturnTo } from "@/lib/safe-return-to";
+import { getSafeReturnTo, getSafeReturnToInLocale } from "@/lib/safe-return-to";
 import { likeContains } from "@/lib/admin/list-query.server";
 
 /**
@@ -70,6 +70,52 @@ describe("getSafeReturnTo — open-redirect fuzzing", () => {
           expect(AUTH.has(seg[2] ?? "")).toBe(false);
         }
       }),
+    );
+  });
+});
+
+/**
+ * F-35: the auth pages re-point a sanitized returnTo at their own locale. The
+ * `attackish` strings almost never start with a supported locale, so they would
+ * leave the swap itself unexercised; `localizedPath` samples values that do, in
+ * every locale and on the page segments the sanitizer judges.
+ */
+const localizedPath = fc
+  .tuple(
+    fc.constantFrom(...SUPPORTED),
+    fc.constantFrom("app", "sso", "sign-in", "sign-up", "api", "", "en", "fr"),
+    fc.string(),
+  )
+  .map(([locale, segment, rest]) => `/${locale}/${segment}${rest}`);
+
+describe("getSafeReturnToInLocale — re-pointing never changes the sanitizer's verdict", () => {
+  it("returns a value the sanitizer accepts UNCHANGED, in the page's locale, for ANY input", () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(attackish, localizedPath),
+        fc.constantFrom(...SUPPORTED, "xx", ""),
+        (input, locale) => {
+          const pageLocale = SUPPORTED.includes(locale) ? locale : "en";
+          const r = getSafeReturnToInLocale(input, locale);
+          expect(getSafeReturnTo(r, pageLocale)).toBe(r);
+          expect(r.split("/")[1]).toBe(pageLocale);
+        },
+      ),
+    );
+  });
+
+  it("differs from the bare sanitizer's answer in the locale segment ONLY", () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(attackish, localizedPath),
+        fc.constantFrom(...SUPPORTED),
+        (input, locale) => {
+          const sanitized = getSafeReturnTo(input, locale).split("/");
+          const repointed = getSafeReturnToInLocale(input, locale).split("/");
+          expect(repointed.length).toBe(sanitized.length);
+          expect(repointed.slice(2)).toEqual(sanitized.slice(2));
+        },
+      ),
     );
   });
 });

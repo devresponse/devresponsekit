@@ -4,7 +4,7 @@ import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { enabledSocialProviders } from "@/lib/auth";
 import { findValidInvitationByToken } from "@/lib/invitations.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
-import { getSafeReturnTo } from "@/lib/safe-return-to";
+import { getSafeReturnToInLocale } from "@/lib/safe-return-to";
 
 export default async function SignUpPage({
   params,
@@ -17,7 +17,7 @@ export default async function SignUpPage({
   const sp = await searchParams;
   const safeLocale: SupportedLocale = isSupportedLocale(locale) ? locale : "en";
   const rawReturn = typeof sp.returnTo === "string" ? sp.returnTo : null;
-  const returnTo = getSafeReturnTo(rawReturn, safeLocale);
+  const returnTo = getSafeReturnToInLocale(rawReturn, safeLocale);
 
   // Invitation-backed sign-up (0008): `?invite=<token>` pre-fills and locks
   // the invited email and threads the token through the sign-up body so the

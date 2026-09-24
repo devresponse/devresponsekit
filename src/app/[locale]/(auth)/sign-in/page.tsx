@@ -3,13 +3,13 @@ import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { enabledSocialProviders } from "@/lib/auth";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
-import { getSafeReturnTo } from "@/lib/safe-return-to";
+import { getSafeReturnToInLocale } from "@/lib/safe-return-to";
 
 /**
  * Localized sign-in page.
  *
- * Sanitizes `returnTo` server-side via `getSafeReturnTo` so the value
- * passed to Better Auth's `callbackURL` cannot trigger an open redirect.
+ * Sanitizes `returnTo` server-side and re-points it at this page's locale
+ * (`getSafeReturnToInLocale`, F-35) before it becomes Better Auth's `callbackURL`.
  * The page belongs to the (auth) group so it never renders the secure
  * navigation shell.
  */
@@ -24,7 +24,7 @@ export default async function SignInPage({
   const sp = await searchParams;
   const safeLocale: SupportedLocale = isSupportedLocale(locale) ? locale : "en";
   const rawReturn = typeof sp.returnTo === "string" ? sp.returnTo : null;
-  const returnTo = getSafeReturnTo(rawReturn, safeLocale);
+  const returnTo = getSafeReturnToInLocale(rawReturn, safeLocale);
 
   // Organization-scoped sign-in via `?org=<slug|id>`. Unknown → null, which
   // renders the plain shared screen (no error, no org-existence leak).

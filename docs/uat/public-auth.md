@@ -315,8 +315,9 @@ to confirm both localize.
 
 - Route: `/sign-in`  ·  Example URL: `/en/sign-in`  ·  Code: `src/app/[locale]/(auth)/sign-in/page.tsx:14`
 - Purpose: Email/password + social sign-in. Sanitizes the `returnTo` query
-  server-side (`getSafeReturnTo`, `src/app/[locale]/(auth)/sign-in/page.tsx:25`)
-  so it cannot drive an open redirect, then passes it to Better Auth as
+  server-side and re-points it at the page's locale (`getSafeReturnToInLocale`,
+  `src/app/[locale]/(auth)/sign-in/page.tsx:27`), so it cannot drive an open
+  redirect or undo a language switch, then passes it to Better Auth as
   `callbackURL`.
 - Guard / who can access: None. Unauthenticated deep-links into secure routes are
   bounced here by the proxy with a `returnTo` param (`src/proxy.ts:106-112`) and
@@ -405,6 +406,16 @@ Negative & edge cases
   an `/api/*` path, or an auth/status page all fall back to
   `/<locale>/app/dashboard` (`src/lib/safe-return-to.ts:23-44`). Expected: no
   open redirect off-site.
+- Language switch keeps the query (F-35): on
+  `/en/sign-in?returnTo=%2Fen%2Fapp%2Fworkspace`, choose **Français** in the
+  switcher. Expected: the URL becomes `/fr/sign-in?returnTo=%2Fen%2Fapp%2Fworkspace`,
+  with the `returnTo` carried verbatim, including its own `/en`. After signing in
+  you land on `/fr/app/workspace`: the page re-points the `returnTo`'s locale
+  segment at its own and keeps the rest, so the language you picked holds
+  (`getSafeReturnToInLocale`, `src/lib/safe-return-to.ts`). The switcher keeps
+  every query on every page the same way, e.g. an invite `?token=`, an invited
+  sign-up `?invite=` or a grid's filters
+  (`src/components/i18n/use-switch-locale.ts`).
 - Blocked/pending user signing in: sign-in itself succeeds, then the secure
   layout's `requireSecureSession` redirects them to `/blocked` or
   `/pending-approval` (`src/lib/auth-guard.ts:67-73`). Assert they never see a

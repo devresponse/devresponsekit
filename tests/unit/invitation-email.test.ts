@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultLocale } from "@/config/i18n-config";
 import { sendInvitationEmail } from "@/lib/invitations.server";
 
 /**
@@ -84,6 +85,26 @@ describe("sendInvitationEmail", () => {
     // Nothing else may widen the attribution: the invitee has no account, so
     // there is no related user to resolve an org from.
     expect(arg.relatedBetterAuthUserId).toBeUndefined();
+  });
+
+  // F-35 review: the email is rendered in the locale it states explicitly, and
+  // the accept link is anchored to that same locale. Before, the body relied on
+  // `sendAppEmail`'s fallback while the link hard-coded `/en`. They matched only
+  // by coincidence, and the comment claiming they matched was not enforced.
+  it("renders the email in the locale its accept link is anchored to", async () => {
+    await sendInvitationEmail({
+      to: "invitee@example.com",
+      organizationId: "org-1",
+      organizationName: "Acme",
+      inviterAppUserId: null,
+      plaintextToken: "tok",
+    });
+    const arg = sendAppEmailMock.mock.calls[0]![0] as {
+      locale?: string;
+      variables: { acceptUrl: string };
+    };
+    expect(arg.locale).toBe(defaultLocale);
+    expect(new URL(arg.variables.acceptUrl).pathname).toBe(`/${arg.locale}/invite`);
   });
 
   it("falls back to the inviter email when there is no display name", async () => {

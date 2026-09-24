@@ -177,8 +177,34 @@ describe("listActiveOrganizationIdsForBetterAuthUser (IMP-1 confinement source)"
 
 describe("readActiveOrgId", () => {
   it("returns the trimmed cookie value", async () => {
-    cookieStore.mockResolvedValue({ get: () => ({ value: "  o-1  " }) });
-    await expect(mod.readActiveOrgId()).resolves.toBe("o-1");
+    cookieStore.mockResolvedValue({
+      get: () => ({ value: "  2b1c7a3e-9d4f-4e21-8a6b-0c5d7e9f1a2b  " }),
+    });
+    await expect(mod.readActiveOrgId()).resolves.toBe("2b1c7a3e-9d4f-4e21-8a6b-0c5d7e9f1a2b");
+  });
+
+  it("F-33: treats a value that is not a UUID as no active org", async () => {
+    // The resolver compares the value with a `uuid` column, and Postgres
+    // rejects a malformed operand (22P02) rather than matching nothing: before
+    // this, `active_org=x` 500'd every secure page of that browser.
+    for (const value of [
+      "o-1",
+      "not-a-uuid",
+      "2b1c7a3e-9d4f-4e21-8a6b-0c5d7e9f1a2",
+      "2b1c7a3e-9d4f-4e21-8a6b-0c5d7e9f1a2b0",
+      "2b1c7a3e9d4f4e218a6b0c5d7e9f1a2b",
+      "{2b1c7a3e-9d4f-4e21-8a6b-0c5d7e9f1a2b}",
+      "2b1c7a3e-9d4f-4e21-8a6b-0c5d7e9f1a2g",
+      "2b1c7a3e-9d4f-4e21-8a6b-0c5d7e9f1a2b'; drop table x;--",
+    ]) {
+      cookieStore.mockResolvedValue({ get: () => ({ value }) });
+      await expect(mod.readActiveOrgId(), value).resolves.toBeNull();
+    }
+    // Case does not matter to Postgres, so it does not matter here either.
+    cookieStore.mockResolvedValue({
+      get: () => ({ value: "2B1C7A3E-9D4F-4E21-8A6B-0C5D7E9F1A2B" }),
+    });
+    await expect(mod.readActiveOrgId()).resolves.toBe("2B1C7A3E-9D4F-4E21-8A6B-0C5D7E9F1A2B");
   });
 
   it("returns null when the cookie is missing or blank", async () => {

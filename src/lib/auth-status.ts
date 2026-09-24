@@ -99,7 +99,8 @@ export function decideSecureAccess(
  * and bypass the `active_org` cookie entirely, so a credential can never be
  * steered into a different tenant by a (spoofable) cookie — see MACHINE-1.
  * A `null` bound org (an org-less credential) falls back to the principal's
- * earliest membership: deterministic, and still cookie-independent.
+ * earliest membership that counts (`created_at`, then `id`): deterministic,
+ * and still cookie-independent.
  */
 export interface BoundOrg {
   organizationId: string | null;
@@ -209,10 +210,10 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
   // kept working.
   //
   // Filtering in SQL (rather than reading the org's status back and deciding
-  // here) keeps the cookie lookup and the fallback on ONE predicate, so a
-  // stale `active_org` cookie naming a suspended org falls through to the
-  // user's earliest membership in an org that still counts — a member of both
-  // a suspended and an active tenant keeps working in the active one.
+  // here) keeps every lookup below on ONE predicate, so a stale `active_org`
+  // cookie naming a suspended org falls through to the user's best-ranked
+  // membership in an org that still counts (F-33, below) — a member of both a
+  // suspended and an active tenant keeps working in the active one.
   const countingMemberships = () =>
     db
       .selectFrom("app_organization_memberships as m")
@@ -225,36 +226,80 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
   if (boundOrg !== undefined) {
     // Bearer-credential path: act in the org the credential is bound to, and
     // NEVER read the active_org cookie (MACHINE-1). A bound org the principal
-    // no longer holds an active membership in resolves to no membership, so
-    // the access context carries no permissions and the guard denies — the
+    // no longer holds an active membership in resolves to that non-active
+    // membership, or to none, and `decideSecureAccess` refuses either — the
     // credential fails closed rather than silently acting elsewhere. The same
     // holds while the bound org is not active (F-09): a key or token minted
     // for a suspended tenant stops authenticating, and works again only when
     // the tenant is reactivated. An ORG-LESS credential takes the earliest
-    // membership that still counts, i.e. a suspended org is skipped exactly as
-    // a deleted membership would be.
+    // membership that still counts (`created_at`, with `id` breaking a tie as
+    // on the session path below), i.e. a suspended org is skipped exactly as a
+    // deleted membership would be.
+    //
+    // F-33 deliberately does NOT rank this path by MEMBERSHIP status. A person
+    // at a browser can see which org they landed in and switch; a machine
+    // client cannot. So a non-active earliest membership resolves as it is and
+    // stops an org-less credential, as a non-active bound membership stops a
+    // bound one, rather than moving it into another tenant whose admins never
+    // saw it act. That is all this path promises: the earliest membership is
+    // not a binding. Suspending its ORGANIZATION (F-09) or deleting the
+    // membership row still moves an org-less credential on to the next
+    // membership that counts. Only a bound credential stays in one org.
     membership = boundOrg.organizationId
       ? await countingMemberships()
           .where("m.organization_id", "=", boundOrg.organizationId)
           .executeTakeFirst()
-      : await countingMemberships().orderBy("m.created_at", "asc").executeTakeFirst();
+      : await countingMemberships()
+          .orderBy("m.created_at", "asc")
+          .orderBy("m.id", "asc")
+          .executeTakeFirst();
   } else {
-    // Cookie/session path. Multi-org: the active org is selected by a cookie.
-    // Prefer the membership it names; if the cookie is unset, stale, or names
-    // an org the user is not a member of, fall back to their earliest
-    // membership (the historical single-org behavior). The `app_user_id`
-    // filter makes a forged cookie harmless — it can only ever select among
-    // the user's own memberships.
+    // Cookie/session path. Multi-org: the active org is selected by a cookie,
+    // among the user's memberships ranked in ONE statement (F-33):
+    //
+    //   1. an ACTIVE membership before one of any other status;
+    //   2. then the org the `active_org` cookie names, if any;
+    //   3. then the earliest (`created_at`, with `id` breaking a tie so that
+    //      rows written by one transaction cannot resolve differently between
+    //      requests).
+    //
+    // So the cookie picks among the user's active memberships, and an unset,
+    // stale or forged cookie lands them in their earliest active one (the
+    // historical single-org behavior). The `app_user_id` filter makes a forged
+    // cookie harmless — it can only ever select among the user's own
+    // memberships.
+    //
+    // F-33 — before this ranking the cookie lookup and the earliest-membership
+    // fallback each took whatever row matched, whatever its status. Suspending
+    // or blocking a user's membership in ONE org — an action an org admin may
+    // take in their own tenant only (AUTHZ-1) — then locked them out of EVERY
+    // org while their cookie named it: every request resolved the suspended
+    // row and `decideSecureAccess` sent them to /blocked, across sign-out and
+    // sign-in, for up to the cookie's one-year life. With no cookie, a user
+    // left `pending_approval` in the default org (their earliest row) who then
+    // accepted an invitation into another org landed on /pending-approval.
+    //
+    // A non-active membership is ranked LAST, not filtered out. A user with no
+    // active membership anywhere must still resolve to one, so the secure shell
+    // can tell a pending user (/pending-approval) from a suspended or blocked
+    // one (/blocked) — and among those rows the cookie and the earliest still
+    // decide, as before. The ranking chooses only among the rows the WHERE
+    // admits, the same set the old fallback chose from, so it changes WHICH of
+    // the user's memberships resolves and never widens the set that can.
+    //
+    // The stale cookie is left alone rather than rewritten. A Server Component
+    // render cannot set a cookie, and nothing needs it to: while the membership
+    // it names is not active it simply ranks below every active one, and if
+    // that org reinstates the user, their own last choice applies again.
     //
     // IMP-1 — …and during an IMPERSONATION "the user" is the TARGET, so that
     // filter alone lets the admin holding the browser rewrite the unsigned
     // `active_org` cookie and steer the borrowed session into any tenant the
     // target belongs to, including ones the impersonate route's escalation
-    // guard never evaluated. So when the session is an impersonation, both the
-    // cookie lookup AND the earliest-membership fallback are additionally
-    // confined to the organizations the IMPERSONATOR could reach AS THEMSELVES:
-    // the borrowed session reaches exactly that much, and nothing more. See
-    // {@link ImpersonatedBy}.
+    // guard never evaluated. So when the session is an impersonation, the
+    // ranked lookup is additionally confined to the organizations the
+    // IMPERSONATOR could reach AS THEMSELVES: the borrowed session reaches
+    // exactly that much, and nothing more. See {@link ImpersonatedBy}.
     //
     // IMP-2 — "could reach as themselves" is `listImpersonationReachableOrgIds`,
     // NOT a raw membership query: for an unbound global superuser reach is
@@ -276,25 +321,26 @@ export const getUserAccessContext = cache(async function getUserAccessContext(
       // Skipping the queries here also keeps an empty `in ()` out of the SQL.
       membership = undefined;
     } else {
-      // One builder shape for both lookups so the confinement can never be
-      // applied to the cookie hit but forgotten on the fallback — which would
-      // reopen the pivot for any target whose EARLIEST membership is outside
-      // the impersonator's tenancy. The F-09 organization-status predicate
-      // rides the same builder for the same reason.
-      const scopedMemberships = () => {
-        const base = countingMemberships();
-        return confinedOrgIds === null
-          ? base
-          : base.where("m.organization_id", "in", confinedOrgIds);
-      };
-
-      const activeOrgId = await readActiveOrgId();
-      membership = activeOrgId
-        ? await scopedMemberships().where("m.organization_id", "=", activeOrgId).executeTakeFirst()
-        : undefined;
-      if (!membership) {
-        membership = await scopedMemberships().orderBy("m.created_at", "asc").executeTakeFirst();
+      // ONE statement makes the choice (F-33), so the confinement and the
+      // F-09 organization-status predicate sit in the only WHERE there is:
+      // neither can be applied to the cookie's pick but forgotten on the
+      // fallback, which would reopen the pivot for any target whose EARLIEST
+      // membership is outside the impersonator's tenancy.
+      let candidates = countingMemberships();
+      if (confinedOrgIds !== null) {
+        candidates = candidates.where("m.organization_id", "in", confinedOrgIds);
       }
+
+      let ranked = candidates.orderBy((eb) => eb("m.status", "=", "active"), "desc");
+      const activeOrgId = await readActiveOrgId();
+      if (activeOrgId) {
+        ranked = ranked.orderBy((eb) => eb("m.organization_id", "=", activeOrgId), "desc");
+      }
+      membership = await ranked
+        .orderBy("m.created_at", "asc")
+        .orderBy("m.id", "asc")
+        .limit(1)
+        .executeTakeFirst();
     }
   }
 

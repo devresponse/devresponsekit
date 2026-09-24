@@ -765,6 +765,35 @@ search of `app_organization_memberships` joined to users and organizations,
 scoped to the actor's org. Membership **mutations** happen through the
 organization-members and user-memberships sub-routes (§8.2).
 
+**A membership's status affects only its own org (F-33).** Setting a member to
+`suspended`, `blocked` or `pending_approval` in one org is something an org
+admin may do in their own org only (AUTHZ-1), and its effect stays there too.
+`getUserAccessContext` picks a signed-in user's organization with one ranked
+query, in this order:
+
+1. an **active** membership (in an active org, F-09) before any other;
+2. then the org the `active_org` cookie names;
+3. then the earliest, with the membership id breaking a tie.
+
+A user who also belongs to another org is therefore resolved into it, even if
+their cookie still names the org that suspended them. Before F-33 the cookie
+lookup and the earliest-membership fallback took the matching row whatever its
+status, so a suspension in org B sent a member of A and B to the blocked
+screen in both, for up to the cookie's one-year life. A non-active membership
+is still resolved when the user has no active one anywhere, so they see the
+blocked or pending-approval screen as before. The cookie is not rewritten:
+when B restores the membership, the user is back in the org they last chose.
+Bearer credentials are not re-ranked. A key bound to B stops working while the
+membership is not active and does not move to A (MACHINE-1). An org-less
+credential resolves its earliest membership whatever that membership's status
+(with the membership id breaking a tie), so a suspended or blocked membership
+there stops it too. That is not a binding: suspending that membership's
+organization, or deleting the membership, still moves an org-less credential
+on to the next membership that counts (F-09). Only a bound credential stays in
+one org. Accepting an
+invitation sets `active_org` to the inviting org when the membership there is
+now active ([Sign-up Policy §6](./auth-signup-policy.md#6-invitations)).
+
 **A membership delete takes the member's grants in that org with it (F-12).**
 `DELETE /organizations/[id]/members` and `DELETE /users/[id]/memberships`
 delete, in the same transaction as the membership row, the user's
@@ -1380,8 +1409,11 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   Stop the current impersonation first.
 - **Tenant confinement (IMP-1/IMP-2).** An impersonated session may only
   resolve an organization the **impersonator could already reach as
-  themselves** — applied in `getUserAccessContext`, to both the `active_org`
-  cookie lookup and the earliest-membership fallback. An empty intersection
+  themselves** — applied in `getUserAccessContext`, in the WHERE of the one
+  ranked lookup that chooses the org (§8.3, F-33), so the `active_org` pick and
+  the earliest-membership fallback are both confined. Preferring an active
+  membership never reaches outside it: a target suspended in the only org the
+  impersonator shares resolves to that suspended row. An empty intersection
   resolves no membership at all (fail closed). Every cookie caller therefore
   resolves its context through `getSessionAccessContext`, which is enforced by
   a source scan (`tests/unit/session-access-context-invariant.test.ts`).

@@ -26,6 +26,7 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 | Delete of a default org | Blocked with **409** `organization_is_default` | `api/administrator/organizations/[id]/route.ts:188`, `lib/admin/orgs.server.ts:120` |
 | Organization status is enforced (F-09) | Only an `active` org confers membership: a `pending` / `suspended` / `archived` org's members, org admins, bound credentials, SSO launches and invitations stop working, and a `superuser` grant held there confers nothing, until it is reactivated | `lib/auth-status.ts` (`getUserAccessContext`), `lib/admin/access-scope.server.ts` (`userIsGlobalSuperuser`) |
 | Suspending the tenant that holds the last superuser grant | Blocked with **409** `last_superadmin` (REVOKE-2); reactivation is never blocked | `api/administrator/organizations/[id]/route.ts` (PATCH) |
+| A membership's status only affects its own org (F-33) | A signed-in user acts in an **active** membership whenever they have one: the `active_org` cookie picks among active memberships, else the earliest active one. A suspended, blocked or pending membership is used only when the user has no active membership anywhere, which is what shows the blocked or pending-approval screen. Accepting an invitation sets the user's active org to the inviting org | `lib/auth-status.ts` (`getUserAccessContext`), `api/invitations/accept/route.ts` |
 | Inviting into / resending for a non-active org | Blocked with **409** `organization_not_active`; revoke still works | `api/administrator/organizations/[id]/invitations/route.ts`, `…/[invitationId]/resend/route.ts` |
 | Delete of a non-empty org | Blocked with **409** `organization_not_empty` (any membership, any status) | `api/administrator/organizations/[id]/route.ts:189`, `lib/admin/orgs.server.ts:104` |
 | Delete of an org with other dependents (roles, bindings, apps, credentials) | FK violation translated to **409** `organization_in_use` | `api/administrator/organizations/[id]/route.ts:212` |
@@ -232,6 +233,19 @@ User stories
     | 6 | Add `user5` back to `org-a` (`POST .../members`), then re-open **Roles** and **Groups**. | Still nothing from `org-a`: the old roles and groups did not come back. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
+- UAT-ADMIN-ORG-DETAIL-S2b — As a member of several organizations, I want a suspension in one of them to leave my access to the others alone, so that one tenant's admin cannot lock me out of another (F-33).
+  - Acceptance criteria: Given `multi1@shared.local` has switched to ORG B, when ORG B's Org Admin suspends their ORG B membership, then their next page load opens in ORG A instead of the blocked screen, and the org switcher no longer lists ORG B. When the membership is made active again, the shell opens in ORG B again. A user whose only membership is suspended still sees the blocked screen.
+  - UAT script:
+    | # | Step (what to do) | Expected result |
+    |---|---|---|
+    | 1 | Sign in as `multi1@shared.local`, open the org switcher and choose **ORG B**. | The shell reloads in ORG B. |
+    | 2 | In a second browser, as `orgadmin@orgb.local`, open `org-b` → **Members**, note `multi1`'s membership id, and send `PATCH …/organizations/{org-b id}/members` with `{"membershipIds":["<id>"],"status":"suspended"}`. | **200**; `multi1`'s row shows a Suspended badge. |
+    | 3 | In `multi1`'s browser (its `active_org` cookie still names ORG B), reload `/en/app/dashboard`. | The dashboard renders in **ORG A**, not the blocked screen. The switcher lists ORG A and ORG C only. |
+    | 4 | Sign out, then sign in again as `multi1@shared.local`. | Still ORG A. Signing out never cleared the cookie; it simply no longer decides. |
+    | 5 | As `orgadmin@orgb.local`, send the same `PATCH` with `"status":"active"`, then reload `multi1`'s page. | The shell is back in **ORG B**, the org `multi1` last chose. |
+    | 6 | As `orgadmin@orgb.local`, suspend `user5@orgb.local`'s ORG B membership (their only one), then sign in as `user5@orgb.local`. Set it back to `active` afterwards. | The blocked screen: with no active membership anywhere, the suspended one is used. |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+
 - UAT-ADMIN-ORG-DETAIL-S3 — As an Org Admin, I want to see and remove my organization's provider bindings; as a Superadmin, I want to create them, so that SSO/provisioning maps to the right org.
   - Acceptance criteria: Given I am on the Providers tab, I see my org's bindings and can remove one. Creating a binding is refused to an Org Admin (a binding claims a domain or provider key across the whole platform, F-04) and succeeds for a Superadmin through `POST /api/administrator/organizations/{id}/provider-bindings`.
   - UAT script:
@@ -402,7 +416,7 @@ Legend: `see` = screen renders with data; `act` = at least one write action succ
 
 - [x] Organizations list — happy (Superadmin all-rows, Org Admin scoped), negative (Member/Limited Admin 404), filter/sort, empty/loading/error, a11y + i18n.
 - [x] New organization — happy (Superadmin create), negative (Org Admin 404, duplicate slug 409, required-field, SUPERADMIN-only 403), a11y + i18n.
-- [x] Org detail — Members happy + remove; Providers unbind (Org Admin) + bind (Superadmin, API); Settings edit (Superadmin) + save-403 (Org Admin); cross-tenant 404; a11y + i18n.
+- [x] Org detail — Members happy + remove, and a membership suspension that stays in its own org (S2b); Providers unbind (Org Admin) + bind (Superadmin, API); Settings edit (Superadmin) + save-403 (Org Admin); cross-tenant 404; a11y + i18n.
 - [x] Memberships — happy (Superadmin cross-org, Org Admin scoped), negative (Member/Limited Admin 404), read-only, a11y + i18n.
 - [x] Every gated screen has a can-see persona and a cannot-see persona asserting 404-not-403.
 - [x] SUPERADMIN vs ORG ADMIN access matrix + coverage matrix included.

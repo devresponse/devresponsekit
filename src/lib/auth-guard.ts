@@ -167,7 +167,14 @@ export function getImpersonatorId(
  * the real server-side authorization boundary. It validates:
  *   1. The session exists.
  *   2. The application user is provisioned and `active`.
- *   3. The user has at least one `active` organization membership.
+ *   3. The membership `getUserAccessContext` RESOLVED is `active`. The
+ *      decision reads that one membership, not the user's whole list; it
+ *      amounts to "has at least one active membership in an active org"
+ *      only because the resolver ranks an active membership above any other
+ *      (F-33). Before that ranking, a suspended membership the `active_org`
+ *      cookie still named was the one resolved, and redirected a user who
+ *      was active elsewhere to /blocked. An impersonated session counts only
+ *      the orgs the impersonator can reach (IMP-1).
  *
  * Any failure short-circuits with a redirect — never returns to the
  * caller — so calling code can rely on the returned access context.

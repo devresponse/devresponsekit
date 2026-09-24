@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
-import { ACTIVE_ORG_COOKIE, userHasActiveMembership } from "@/lib/active-org.server";
+import { userHasActiveMembership } from "@/lib/active-org.server";
+import { setActiveOrgCookie } from "@/lib/active-org-cookie";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { getSessionAccessContext } from "@/lib/session-access.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
@@ -80,12 +81,6 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     metadata: { organizationId: org.id, source: "scoped_sign_in" },
   });
 
-  redirect.cookies.set(ACTIVE_ORG_COOKIE, org.id, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
-  });
+  setActiveOrgCookie(redirect, org.id);
   return redirect;
 });

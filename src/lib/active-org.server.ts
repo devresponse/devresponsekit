@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { db } from "@/db/database";
+import { ACTIVE_ORG_COOKIE } from "@/lib/active-org-cookie";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
 
 /**
@@ -15,9 +16,23 @@ import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
  *
  * Security: the cookie only SELECTS among the caller's own memberships. The
  * membership filter in `getUserAccessContext` (and `userHasActiveMembership`
- * here) is the authority — a forged or stale cookie naming an org the user
- * is not an active member of simply falls back to their primary membership
- * and can never grant access. So the cookie does not need to be signed.
+ * here) is the authority, so a forged cookie can never grant access and the
+ * cookie does not need to be signed.
+ *
+ * F-33 — a cookie also cannot LOCK anyone OUT. `getUserAccessContext` ranks
+ * every ACTIVE membership (in an active org) above any membership of another
+ * status, and only then lets the cookie choose. A cookie that is stale, forged,
+ * names an org the user is not in, or names one whose membership has since been
+ * suspended, blocked or left pending therefore resolves to the user's earliest
+ * ACTIVE membership, exactly as no cookie would. Only a user with no active
+ * membership anywhere resolves to a non-active one, which is what sends them to
+ * /pending-approval or /blocked. Before F-33 the cookie lookup took the named
+ * membership whatever its status, so an admin of org B suspending a user's B
+ * membership locked that user out of every other org too, for the cookie's
+ * one-year life.
+ *
+ * The value must also be a UUID ({@link readActiveOrgId}), so a malformed
+ * one cannot fail the resolver's query either.
  *
  * IMP-1 — "the caller's own memberships" is the memberships of whoever the
  * SESSION NAMES, which during an impersonation is the TARGET, not the admin
@@ -28,7 +43,7 @@ import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
  * which is built on {@link listActiveOrganizationIdsForBetterAuthUser} and is
  * applied by `getUserAccessContext` on the cookie path.
  */
-export const ACTIVE_ORG_COOKIE = "active_org";
+export { ACTIVE_ORG_COOKIE };
 
 /** A switchable organization for the current user. */
 export interface UserOrganization {
@@ -37,16 +52,28 @@ export interface UserOrganization {
   name: string;
 }
 
+/** Canonical UUID text, the only shape the cookie's writers ever store. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * The active organization id from the request cookie, or `null` when unset.
  * Resilient to being called outside a request scope (e.g. in unit tests):
  * `cookies()` throws there, which we treat as "no active org".
+ *
+ * F-33 — a value that is not a UUID is also "no active org". The resolver
+ * compares it with `app_organization_memberships.organization_id`, a `uuid`
+ * column, and Postgres rejects a malformed operand (22P02) instead of matching
+ * nothing: `active_org=x` failed every secure render and API call of that
+ * browser with a 500, and signing out did not clear it. The browser's owner
+ * could do that only to themselves, but so could any sibling subdomain able to
+ * set a parent-domain `active_org` (cookie tossing), and a deployment using
+ * `COOKIE_DOMAIN` runs its satellites on exactly such subdomains.
  */
 export async function readActiveOrgId(): Promise<string | null> {
   try {
     const store = await cookies();
     const value = store.get(ACTIVE_ORG_COOKIE)?.value?.trim();
-    return value ? value : null;
+    return value && UUID_RE.test(value) ? value : null;
   } catch {
     return null;
   }

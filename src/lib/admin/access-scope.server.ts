@@ -25,7 +25,9 @@ import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
  * Design decision (ADR-0001): an org admin's scope is the ACTIVE
  * organization as resolved by `getUserAccessContext` — a user may hold
  * several memberships, and the active one is selected per request by the
- * `active_org` cookie (earliest membership as the fallback); bearer
+ * `active_org` cookie among the user's ACTIVE memberships (the earliest
+ * active one as the fallback; a non-active one only when there is no active
+ * one, F-33); bearer
  * credentials are pinned to the org they were minted for and never read the
  * cookie (MACHINE-1). Every tenant query derives from `access.organizationId`;
  * acting on any OTHER org requires switching the active org. Cross-org

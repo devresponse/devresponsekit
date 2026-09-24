@@ -10,7 +10,7 @@ order: 5
 
 This is the **user-acceptance-testing (UAT) story set**: screen-by-screen user stories, each with a plain-language, numbered **test script a real (non-technical) tester can run**, plus a per-screen access matrix, negative/edge cases, accessibility, and i18n notes. It doubles as **living documentation** of every screen.
 
-Generated from the reusable prompt in [`GENERATION-PROMPT.md`](./GENERATION-PROMPT.md), validated against the code (every claim cites `file:line`). **155 stories** across 40+ screens plus 10 end-to-end journeys.
+Generated from the reusable prompt in [`GENERATION-PROMPT.md`](./GENERATION-PROMPT.md), validated against the code (every claim cites `file:line`). **157 stories** across 40+ screens plus 10 end-to-end journeys.
 
 ## The story documents
 
@@ -20,7 +20,7 @@ Generated from the reusable prompt in [`GENERATION-PROMPT.md`](./GENERATION-PROM
 | [Account & secure shell](./account.md) | app entry, dashboard, workspace, account (+ profile/preferences/security/api-keys), docs viewer | 21 |
 | [Administrator: Users](./administrator-users.md) | console overview, users list/new/detail + its 6 tabs | 27 |
 | [Administrator: Roles, Groups & Permissions](./administrator-roles-groups-permissions.md) | roles, groups (+ tabs), the permission catalog | 28 |
-| [Administrator: Organizations & Memberships](./administrator-orgs-memberships.md) | orgs list/new/detail, cross-org memberships | 16 |
+| [Administrator: Organizations & Memberships](./administrator-orgs-memberships.md) | orgs list/new/detail, cross-org memberships | 18 |
 | [Administrator: Apps, Email, API Keys & Audit](./administrator-apps-email-apikeys-audit.md) | enterprise apps, email outbox/templates, API keys, audit log | 30 |
 | [End-to-end journeys](./journeys.md) | 10 multi-screen flows (onboarding, group-grant, impersonation, SSO, API-key lifecycle, …) | 10 |
 

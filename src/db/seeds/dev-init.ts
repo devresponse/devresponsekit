@@ -463,9 +463,11 @@ async function ensureMembership(
  * Drops every membership outside `keepOrganizationIds`. The sign-up flow's
  * `session.create.after` hook (src/lib/auth.ts) auto-provisions a
  * `pending_approval` membership in the fallback (`default`) org during the
- * auto sign-in. getUserAccessContext resolves the EARLIEST membership, so that
- * stray row — were it the earliest — would pin the account to `pending_approval`
- * and strip its assigned-org roles. These synthetic users belong only to their
+ * auto sign-in. Before F-33 getUserAccessContext resolved the EARLIEST
+ * membership whatever its status, so that stray row — were it the earliest —
+ * would pin the account to `pending_approval` and strip its assigned-org roles;
+ * an active membership now outranks it, but the row would still list the user
+ * as a pending member of `default`. These synthetic users belong only to their
  * assigned org(s) (one for single-org users, all three for cross-org members),
  * so any membership elsewhere is removed. The kept memberships are back-dated
  * (days ago) while the stray `default` one is `now`, so the earliest is always

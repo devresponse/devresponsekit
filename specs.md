@@ -3745,7 +3745,13 @@ Under `/[locale]/app/administrator/email`:
 | `MAILGUN_BASE_URL` | Override for the EU region (`https://api.eu.mailgun.net`) |
 
 `env.ts` `superRefine` fails at boot if a provider is selected without
-its credentials. With no provider set, every flow still works — emails
+its credentials, and in production if a provider is selected with an
+`EMAIL_FROM` no provider sends from: the `@localhost` default, another
+reserved domain, an IP address, a single-label host, or (Mailgun) a domain
+outside `MAILGUN_DOMAIN`'s (F-27). Each delivery outcome is logged
+(`kind: "email_delivery"`) and counted
+(`devresponsekit_outbox_delivery_total`); see docs/observability.md. With no
+provider set, every flow still works — emails
 are rendered and recorded as `logged`. Adding a provider = implement
 `EmailProvider`, wire the env, extend the `EMAIL_PROVIDER` enum. See
 [docs/configuration.md](docs/configuration.md) for the email environment

@@ -89,6 +89,11 @@ const TOUCHED_KEYS = [
   "SESSION_ABSOLUTE_LIFETIME_HOURS",
   "API_KEY_USAGE_TOUCH_INTERVAL_SECONDS",
   "CLIENT_IP_SOURCE",
+  "EMAIL_PROVIDER",
+  "EMAIL_FROM",
+  "RESEND_API_KEY",
+  "MAILGUN_API_KEY",
+  "MAILGUN_DOMAIN",
 ] as const;
 
 async function loadEnvWith(patch: Record<string, string | undefined>) {
@@ -946,6 +951,137 @@ describe("origin-valued variables (F-22)", () => {
       COOKIE_DOMAIN: ".devresponse.ca",
       SSO_ALLOWED_ORIGIN_SUFFIXES: "devresponse.ca",
     });
+  });
+});
+
+/**
+ * F-27: with a provider in production, the sender must be one a provider
+ * sends from. The default `DevResponse <no-reply@localhost>` booted with
+ * EMAIL_PROVIDER + RESEND_API_KEY set and failed every reset, verification and
+ * invitation email on attempt 1. Development, tests, the outbox-only mode,
+ * `next build`'s placeholders and CI's `next start` (no provider) are
+ * unaffected. The value rule's own vectors are in env-validators.test.ts.
+ */
+describe("EMAIL_FROM with a real provider in production (F-27)", () => {
+  const RESEND = { NODE_ENV: "production", EMAIL_PROVIDER: "resend", RESEND_API_KEY: "re_test" };
+  const MAILGUN = {
+    NODE_ENV: "production",
+    EMAIL_PROVIDER: "mailgun",
+    MAILGUN_API_KEY: "key-test",
+    MAILGUN_DOMAIN: "mg.devresponse.ca",
+  };
+
+  async function expectBoot(patch: Record<string, string | undefined>, error?: RegExp) {
+    const { mod, restore } = await loadEnvWith(patch);
+    try {
+      if (error) expect(() => mod.getServerEnv(), JSON.stringify(patch)).toThrow(error);
+      else expect(() => mod.getServerEnv(), JSON.stringify(patch)).not.toThrow();
+    } finally {
+      restore();
+    }
+  }
+
+  it("refuses to boot when EMAIL_FROM is left on its localhost default", async () => {
+    await expectBoot(
+      { ...RESEND, EMAIL_FROM: undefined },
+      /EMAIL_FROM \(must be set when EMAIL_PROVIDER is set in production: unset, it defaults to DevResponse <no-reply@localhost>/,
+    );
+  });
+
+  it.each([
+    "DevResponse <no-reply@devresponse.ca>",
+    "no-reply@devresponse.ca",
+    '"DevResponse, Inc." <no-reply@mail.devresponse.ca>',
+    "  DevResponse <No-Reply@DevResponse.CA>  ",
+    "onboarding@resend.dev",
+  ])("boots with a real sender, bare or in display-name form: %s", async (from) => {
+    await expectBoot({ ...RESEND, EMAIL_FROM: from });
+  });
+
+  it.each([
+    [
+      "App <no-reply@localhost>",
+      /EMAIL_FROM \(must be on a domain verified.*localhost is reserved/,
+    ],
+    ["no-reply@devresponse.local", /devresponse\.local is reserved/],
+    ["no-reply@app.localhost", /app\.localhost is reserved/],
+    ["App <no-reply@example.com>", /example\.com is reserved/],
+    ["no-reply@mail.example.org", /mail\.example\.org is reserved/],
+    ["no-reply@10.0.0.5", /not 10\.0\.0\.5 \(an IP address/],
+    ["no-reply@mailhost", /not mailhost \(an IP address, a single label/],
+    ["DevResponse no-reply@devresponse.ca", /EMAIL_FROM \(must be a sender address/],
+    ["", /EMAIL_FROM \(must be a sender address/],
+  ])("refuses %j in production with a provider", async (from, error) => {
+    await expectBoot({ ...RESEND, EMAIL_FROM: from }, error);
+  });
+
+  it("leaves development and tests alone, even with a provider set", async () => {
+    for (const NODE_ENV of ["development", "test"]) {
+      await expectBoot({ ...RESEND, NODE_ENV, EMAIL_FROM: undefined });
+      await expectBoot({ ...RESEND, NODE_ENV, EMAIL_FROM: "no-reply@devresponse.local" });
+    }
+  });
+
+  it("leaves the outbox-only mode alone in production (no provider, nothing is sent)", async () => {
+    await expectBoot({ NODE_ENV: "production", EMAIL_PROVIDER: undefined, EMAIL_FROM: undefined });
+    await expectBoot({
+      NODE_ENV: "production",
+      EMAIL_PROVIDER: undefined,
+      EMAIL_FROM: "no-reply@localhost",
+    });
+  });
+
+  it("still boots the build-phase placeholders when the runtime sender is refused", async () => {
+    const { mod, restore } = await loadEnvWith({
+      ...RESEND,
+      NEXT_PHASE: "phase-production-build",
+      EMAIL_FROM: undefined,
+    });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.EMAIL_PROVIDER).toBeUndefined();
+      expect(env.NODE_ENV).toBe("production");
+    } finally {
+      restore();
+    }
+  });
+
+  it("names EMAIL_FROM, and only its name, for the readiness log", async () => {
+    const { mod, restore } = await loadEnvWith({ ...RESEND, EMAIL_FROM: undefined });
+    try {
+      expect(mod.invalidServerEnvKeys()).toEqual(["EMAIL_FROM"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("with Mailgun, accepts a sender on MAILGUN_DOMAIN's registrable domain (relaxed DMARC alignment)", async () => {
+    for (const from of [
+      "App <no-reply@mg.devresponse.ca>",
+      "App <no-reply@devresponse.ca>",
+      "no-reply@news.devresponse.ca",
+    ]) {
+      await expectBoot({ ...MAILGUN, EMAIL_FROM: from });
+    }
+    await expectBoot({
+      ...MAILGUN,
+      MAILGUN_DOMAIN: "mg.example-shop.co.uk",
+      EMAIL_FROM: "no-reply@example-shop.co.uk",
+    });
+  });
+
+  it("with Mailgun, refuses a sender on another domain (Mailgun accepts it, receivers reject it)", async () => {
+    await expectBoot(
+      { ...MAILGUN, EMAIL_FROM: "App <no-reply@other.ca>" },
+      /EMAIL_FROM \(must be on MAILGUN_DOMAIN's domain \(devresponse\.ca or a subdomain of it\): Mailgun signs as mg\.devresponse\.ca, so mail from other\.ca fails DMARC alignment/,
+    );
+    // A registrable domain, not a string suffix: co.uk is a public suffix.
+    await expectBoot(
+      { ...MAILGUN, MAILGUN_DOMAIN: "mg.example-shop.co.uk", EMAIL_FROM: "no-reply@other.co.uk" },
+      /MAILGUN_DOMAIN's domain \(example-shop\.co\.uk/,
+    );
+    // The reserved-domain rule still comes first.
+    await expectBoot({ ...MAILGUN, EMAIL_FROM: undefined }, /must be set when EMAIL_PROVIDER/);
   });
 });
 

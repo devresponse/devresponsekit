@@ -22,9 +22,10 @@ correlate them during an incident, and what is deliberately still on the roadmap
 | **Audit events** | `src/lib/audit.server.ts` → `app_audit_events` | Durable record of security-relevant actions (auth, admin mutations, SSO, token mint/revoke, exports), each stamped with the request id. Append-only; retention is an ops concern — see the note below. Written only for a caller something has verified (session, credential, signed SSO token); `user_agent` is capped at 512 characters. |
 | **Pre-auth refusals** | `logPreAuthRefusal` (`src/lib/observability/pre-auth-refusal.server.ts`) | A request refused **before** its caller is authenticated — the CSRF origin guard on every cookie surface, an SSO consume without a verifiable token, a signed-out SSO launch — writes **no audit row** (an anonymous loop must not grow the append-only table, F-15). It logs one `kind: "pre_auth_refusal"` line (event type, reason, request id, capped `User-Agent`, method, path — no client IP, which the log stream never carries; `warn` for `denied`, `error` for `failure`) and increments `devresponsekit_pre_auth_refusals_total` ([§5](#5-metrics)). The full list is in [admin-manager.md §12](./admin-manager.md#12-audit-model). |
 | **CSP violation sink** | `POST /api/security/csp-report` | The enforcing CSP (`src/proxy.ts`) reports blocks here; rate-limited + aggregated per directive. |
-| **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}` and `…_pre_auth_refusals_total{event_type}` business counters. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
+| **Email delivery** | `recordOutboxDelivery` (`src/lib/email/delivery-telemetry.server.ts`) | Every delivery outcome written to an `app_outbox` row, by the inline attempt (which the administrator test send also uses) and by the drain worker, increments `devresponsekit_outbox_delivery_total` ([§5](#5-metrics)) in the process that wrote the row. The inline attempt and the `/api/internal/outbox-drain` cron route run in the server, so their outcomes reach `/api/metrics`. A `pnpm outbox:drain` run is its own short-lived process, so its outcomes do not: they show only in its log lines, its summary line and the rows themselves (see §5). A failure also logs one `kind: "email_delivery"` line: `error` for a terminal one (`failed`, `expired`), `warn` for a transient one the worker will retry (F-27). The line carries the outcome, a `reason` (`provider_rejected`, `attempts_exhausted`, `token_expired`, `transient`), the outbox id, template, provider, attempt count, the provider's HTTP status (`providerStatus`), the error class and a system error code. It never carries the recipient, subject, body, template variables or the provider's response text; the row's sanitized `error` column holds that text, found by `outboxId`. |
+| **Metrics (opt-in)** | `GET /api/metrics`, `src/lib/observability/metrics.server.ts` | Prometheus text exposition: Node process defaults (heap, RSS, event-loop lag, GC, CPU) + the `…_rate_limit_denials_total{scope}`, `…_pre_auth_refusals_total{event_type}` and `…_outbox_delivery_total{outcome,template}` business counters. Token-guarded (`METRICS_TOKEN`), **fails closed**. First increment — see [§5 Metrics](#5-metrics). |
 | **Error monitoring (opt-in)** | `src/sentry.{server,edge}.config.ts`, `src/instrumentation-client.ts` (browser init), `src/lib/observability/sentry-shared.ts` | Sentry engages only when `NEXT_PUBLIC_SENTRY_DSN` is set. Errors, transactions, spans, breadcrumbs and Session Replay are all scrubbed (cookies, query strings, emails, tokens, secret-like values) before they leave the process — see [§3](#3-redaction--scrubbing-policy). |
-| **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the environment passes its schema, the database is reachable, the ledger holds every core migration the build needs **and** Better Auth's own schema check finds every table and column it writes (F-26); `503` with `reason: config_invalid`, `database_unreachable` or `schema_behind` otherwise (invalid variable names, missing ids and missing Better Auth tables go to the log under `kind: "config-invalid"`, `"schema-behind"` and `"auth-schema-behind"`, never the body). Wire both to your orchestrator probes (see [deployment.md §4](./deployment.md#4-deploy--post-deploy-verification) and [docker.md §7](./docker.md)). |
+| **Liveness / readiness** | `GET /api/health`, `GET /api/health/ready` | Unauthenticated, `no-store`. `/ready` returns `200` when the environment passes its schema, the database is reachable, the ledger holds every core migration the build needs **and** Better Auth's own schema check finds every table and column it writes (F-26); `503` with `reason: config_invalid`, `database_unreachable` or `schema_behind` otherwise (invalid variable names, missing ids and missing Better Auth tables go to the log under `kind: "config-invalid"`, `"schema-behind"` and `"auth-schema-behind"`, never the body). The email provider is deliberately not probed: a provider outage or a rejected sender would take every instance out of rotation, and sign-in with it, over mail the outbox retries anyway; the sender's shape is checked at boot and each delivery's outcome is in the email delivery signal above (F-27). Wire both to your orchestrator probes (see [deployment.md §4](./deployment.md#4-deploy--post-deploy-verification) and [docker.md §7](./docker.md)). |
 | **Process-fault handlers** | `src/lib/process-errors.server.ts` | `unhandledRejection` / `uncaughtException` are logged + captured to Sentry (not swallowed) so a fault that escaped every request boundary is visible in the log stream. They do **not** exit — Next 16 treats both as non-fatal — unless `PROCESS_FATAL_ON_UNCAUGHT=1` opts uncaught exceptions into `exit(1)` (review #23; see [configuration.md](./configuration.md)). |
 
 > **Retention is an ops concern.** `app_audit_events` and `app_outbox` grow
@@ -177,6 +178,35 @@ business counter — not the full target set.
   confirm, `sso.launch.failure` for a signed-out launch. These refusals are not in
   `app_audit_events`, so a spike here (with the paired `pre_auth_refusal` log lines) is where a
   cross-origin probe or a garbage-token flood shows up.
+- **`devresponsekit_outbox_delivery_total{outcome,template}`** — incremented once per delivery
+  outcome written to an `app_outbox` row (F-27). `outcome` is `sent`, `retry` (a transient failure,
+  rescheduled), `failed` (terminal: the provider rejected the mail, or the worker ran out of
+  attempts), `expired` (the drain worker failed a row whose one-time link had already died,
+  without sending it) or `logged` (no `EMAIL_PROVIDER`, so nothing was sent). `template` is one of
+  the built-in keys (`password_reset`, `email_verification`, `organization_invitation`,
+  `test_email`) or `other`. The alert worth having: any `failed` for `password_reset`,
+  `email_verification` or `organization_invitation` means users are being told to check an inbox
+  that will stay empty; the paired `email_delivery` log line (§1) has the provider status. A
+  sustained `expired` means token-bearing mail is queued faster than the cron drains it, and any
+  `logged` in production means `EMAIL_PROVIDER` is unset. The admin Email workspace shows the same
+  rows one at a time; this counter is what makes a misconfigured sender visible without opening
+  it.
+
+  **The worker's outcomes are counted only when the drain runs in the server.** A worker `retry`,
+  a `failed` with reason `attempts_exhausted` and every `expired` come only from the drain worker.
+  Counters are per-process (see the topology note below), so these reach `/api/metrics` only when
+  the drain runs in the server process you scrape: that server's `/api/internal/outbox-drain`
+  route, called by a scheduler that sends `Authorization: Bearer <CRON_SECRET>`. The
+  `pnpm outbox:drain` script ([docker.md](./docker.md)'s cron / K8s CronJob setup) is a separate
+  process that exits after one pass, and its increments exit with it. With that setup, `expired`
+  and `attempts_exhausted` stay at zero in this counter whatever happens. Alert on the script's
+  output instead: the per-row `email_delivery` lines (`reason` `token_expired` or
+  `attempts_exhausted`) and its summary line, `[outbox] claimed=… sent=… retried=… failed=…
+  expired=…`. Or query `app_outbox`: an expired row is `failed` with an `error` starting
+  `token_expired:`. Or have the scheduler call the route instead of the script. The inline
+  outcomes (`sent`, `logged`, and a first attempt's `failed` or `retry`) always come from the
+  server. A sender the provider refuses fails on that first, inline attempt, so the `failed`
+  alert above catches it with either setup.
 
 **Security model:**
 
@@ -202,7 +232,9 @@ scrape_configs:
 
 **Topology note:** counters are **per-process** (like the in-memory rate limiter). Under the
 single-instance 1.0 topology that is the whole picture; a multi-instance deployment scrapes each
-target independently and aggregates at the Prometheus layer.
+target independently and aggregates at the Prometheus layer. A CLI process (`pnpm outbox:drain`)
+has its own registry and serves no `/api/metrics`, so anything it counts is lost when it exits;
+see the outbox delivery counter above.
 
 ## 6. Roadmap — not yet shipped
 
@@ -211,8 +243,8 @@ following are deliberately **not** implemented in 1.0 and are tracked as a post-
 observability epic:
 
 - **Metrics — remaining surface.** The endpoint exists (§5) but still lacks the application
-  signals: request latency + status by route, database latency, auth failures, outbox
-  delivery, and audit-write failures.
+  signals: request latency + status by route, database latency, auth failures, and
+  audit-write failures. Outbox delivery shipped with F-27 (§5).
 - **Distributed tracing** — no OpenTelemetry spans / trace propagation across request → DB →
   external provider.
 - **Dashboards & alerting** — no shipped dashboards or alert rules; wire your platform's

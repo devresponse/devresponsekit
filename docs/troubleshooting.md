@@ -168,6 +168,22 @@ warrant a comms channel and an owner before deep debugging.
   after rotation), or the DB being unreachable.
 
 ### Email not delivering
+- Search the log stream for `kind: "email_delivery"` (F-27). Every failed
+  delivery, inline or retried, logs one line with its `outcome`, `reason`,
+  `template`, `provider`, `providerStatus` and `outboxId`: `error` level when
+  it will never be delivered, `warn` when the worker will retry it. The
+  line has the status, not the provider's reason: look the row up by
+  `outboxId` and read its sanitized `error`, which holds the provider's
+  own response and tells the causes below apart. With Resend, a
+  `provider_rejected` 403 on every template is either `EMAIL_FROM` on a
+  domain Resend has not verified or an invalid API key; 401 is a missing or
+  restricted key; 422 is a request Resend refused as malformed (a malformed
+  `EMAIL_FROM` is one).
+  `devresponsekit_outbox_delivery_total` counts the same outcomes if you
+  scrape `/api/metrics`, except the drain worker's when it runs as
+  `pnpm outbox:drain`: that is a separate process, so read its log lines and
+  its `[outbox] … expired=…` summary instead (see
+  [observability.md §5](./observability.md#5-metrics)).
 - `select status, count(*) from app_outbox group by status;` — `failed` rows
   carry a short sanitized `error`. `logged` means no `EMAIL_PROVIDER` is set
   (expected in dev).
@@ -321,7 +337,12 @@ role default (`ALTER ROLE <app> SET search_path = auth, public;`).
   quote (`x` and `d` must each be 43 unpadded base64url characters), and the
   Node boot hook imports the key and rejects an `x` that is not `d`'s public
   half, failing startup with `Invalid Ed25519 signing keys at boot: …`.
-- If `EMAIL_PROVIDER` is set, its credentials must be present.
+- If `EMAIL_PROVIDER` is set, its credentials must be present. In production it
+  also needs a real `EMAIL_FROM`: the `no-reply@localhost` default, another
+  reserved domain (`*.local`, `example.com`, …), an IP address or a single-label
+  host fails boot with `EMAIL_FROM (must …)`, and with Mailgun the sender must
+  share `MAILGUN_DOMAIN`'s registrable domain (F-27, see
+  [configuration.md](./configuration.md#email)).
 
 **Boot fails on an origin-valued variable** (F-22). The error names the
 variable and the rule, e.g. `SSO_HANDOFF_ISSUER (must use the http: or https:
@@ -387,9 +408,10 @@ and resets on restart; across multiple instances it's best-effort.
 eight locale files. Add the key to `en.json` first, then `fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`.
 
 **Email not being delivered.** With no `EMAIL_PROVIDER`, messages are recorded as
-`logged` and never sent — expected in dev. Set a provider and its credentials to
-deliver; check `app_outbox` for `failed` rows and the recorded error (see the
-incident playbook in Part 1 §4 for the serverless drain cron).
+`logged` and never sent — expected in dev. Set a provider, its credentials and an
+`EMAIL_FROM` on a domain the provider has verified to deliver; check the
+`email_delivery` log lines and `app_outbox` for `failed` rows and the recorded
+error (see the incident playbook in Part 1 §4 for the serverless drain cron).
 
 **The reset / invite link in the outbox reads `[redacted]`.** By design (review
 #21): the administrator outbox stores a redacted body so an org admin can never

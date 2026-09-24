@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import { db } from "@/db/database";
 import { logServerError } from "@/lib/observability/logger.server";
 import { getConfiguredEmailProvider, isRetryableDeliveryError } from "./providers.server";
+import { recordOutboxDelivery, type OutboxDeliveryRecord } from "./delivery-telemetry.server";
 import { parseOutboxDeliveryPayload } from "./outbox-secrets";
 
 /**
@@ -143,6 +144,12 @@ export interface DrainOutboxResult {
   expired: number;
 }
 
+/** One claimed row's result: its bucket in {@link DrainOutboxResult}, and what to report (F-27). */
+interface DrainStep {
+  outcome: "sent" | "retried" | "failed" | "expired";
+  delivery: OutboxDeliveryRecord;
+}
+
 /**
  * Process up to `limit` due rows (`status='pending'` AND `next_attempt_at`
  * null-or-past) for the CURRENTLY configured provider. Returns a per-outcome
@@ -154,7 +161,7 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
   if (!provider) return result;
 
   for (let i = 0; i < limit; i++) {
-    const outcome = await db.transaction().execute(async (trx) => {
+    const step = await db.transaction().execute(async (trx): Promise<DrainStep | null> => {
       const row = await trx
         .selectFrom("app_outbox")
         .select([
@@ -186,10 +193,16 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
         .forUpdate()
         .skipLocked()
         .executeTakeFirst();
-      if (!row) return "empty" as const;
+      if (!row) return null;
 
       const attempts = row.attempts + 1;
       const now = new Date();
+      const delivery = {
+        path: "worker",
+        outboxId: row.id,
+        templateKey: row.template_key,
+        provider: provider.id,
+      } as const;
 
       // review #90: never deliver a dead credential. A `password_reset` /
       // `email_verification` row re-attempted by the daily cron carries a
@@ -217,7 +230,10 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
           })
           .where("id", "=", row.id)
           .execute();
-        return "expired" as const;
+        return {
+          outcome: "expired",
+          delivery: { ...delivery, outcome: "expired", attempts: row.attempts },
+        };
       }
 
       // The deliverable is the unredacted payload when the row carries one;
@@ -253,7 +269,7 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
           })
           .where("id", "=", row.id)
           .execute();
-        return "sent" as const;
+        return { outcome: "sent", delivery: { ...delivery, outcome: "sent", attempts } };
       } catch (err) {
         const reason = summarizeDeliveryError(err);
         // review #219: a permanent 4xx (invalid recipient, unverified sending
@@ -275,11 +291,19 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
           })
           .where("id", "=", row.id)
           .execute();
-        return terminal ? ("failed" as const) : ("retried" as const);
+        return {
+          outcome: terminal ? "failed" : "retried",
+          delivery: { ...delivery, outcome: terminal ? "failed" : "retry", attempts, error: err },
+        };
       }
     });
 
-    if (outcome === "empty") break;
+    if (step === null) break;
+    // F-27: reported only once the claim transaction has COMMITTED, so an
+    // outcome whose row write rolled back is neither counted nor logged (the
+    // row is still `pending` and will be claimed again).
+    recordOutboxDelivery(step.delivery);
+    const { outcome } = step;
     result.claimed++;
     if (outcome === "expired") {
       // An expired row is a failure too — it will never be delivered — so it
@@ -291,6 +315,8 @@ export async function drainOutbox(limit = 50): Promise<DrainOutboxResult> {
     }
   }
 
+  // The per-drain summary. Each of these rows already has its own
+  // `email_delivery` line with the template, provider and status (F-27).
   if (result.failed > 0) {
     logServerError("email outbox: rows will never be delivered", {
       failedCount: result.failed,

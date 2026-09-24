@@ -17,9 +17,13 @@ import { Counter, Registry, collectDefaultMetrics } from "prom-client";
  *     the limiter's deny path.
  *   - `…_pre_auth_refusals_total{event_type}` — refusals decided before the
  *     caller authenticated, which are logged instead of audited (F-15).
+ *   - `…_outbox_delivery_total{outcome,template}` — every email delivery
+ *     outcome, inline and from the drain worker, that happens in THIS process
+ *     (F-27): a `pnpm outbox:drain` run counts into its own copy of this
+ *     registry, which nothing scrapes and which dies with it.
  *
  * Next increments (tracked in docs/observability.md §6): request latency/status
- * by route, DB latency, auth failures, and outbox delivery.
+ * by route, DB latency and auth failures.
  *
  * Per-instance, like the limiter: each process keeps its own counters, scraped
  * independently. That matches the single-instance 1.0 topology; a multi-instance
@@ -76,6 +80,28 @@ export const preAuthRefusalsTotal = new Counter({
   name: "devresponsekit_pre_auth_refusals_total",
   help: "Requests refused before authentication (logged, not audited), by event type.",
   labelNames: ["event_type"],
+  registers: [registry],
+});
+
+/**
+ * Email delivery outcomes (F-27), one increment per outcome written to an
+ * `app_outbox` row: `sent`, `retry` (a transient failure, rescheduled),
+ * `failed` (terminal: a permanent provider rejection or the attempt cap),
+ * `expired` (the drain worker failed a row whose one-time link had died,
+ * without calling the provider) and `logged` (no provider configured, so
+ * nothing was sent). Before this an inline failure left no trace outside the
+ * row itself, so a sender the provider refuses failed every reset,
+ * verification and invitation email without anything alerting. The only
+ * writer is `recordOutboxDelivery` (src/lib/email/delivery-telemetry.server.ts),
+ * which maps any template key outside the built-in set to `other`, so both
+ * labels have a fixed cardinality. The worker's outcomes land here only when
+ * the drain runs in the server (the `/api/internal/outbox-drain` route), not
+ * from the `pnpm outbox:drain` CLI; see docs/observability.md §5.
+ */
+export const outboxDeliveryTotal = new Counter({
+  name: "devresponsekit_outbox_delivery_total",
+  help: "Email outbox delivery outcomes (sent, retry, failed, expired, logged), by template.",
+  labelNames: ["outcome", "template"],
   registers: [registry],
 });
 

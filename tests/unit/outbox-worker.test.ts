@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as WorkerModule from "@/lib/email/outbox-worker.server";
 import type * as ProvidersModule from "@/lib/email/providers.server";
+import type * as MetricsModule from "@/lib/observability/metrics.server";
 
 /**
  * Outbox retry worker (review D1). DB + provider are stubbed; these pin the
@@ -21,6 +22,8 @@ const state = vi.hoisted(() => ({
   },
   updateSets: [] as Record<string, unknown>[],
   selectCount: 0,
+  /** Simulates the claim transaction's COMMIT failing after the callback ran. */
+  commitFails: false,
 }));
 
 // Only the provider LOOKUP is stubbed: the failure classification
@@ -30,7 +33,11 @@ vi.mock("@/lib/email/providers.server", async () => {
   const actual = await vi.importActual<typeof ProvidersModule>("@/lib/email/providers.server");
   return { ...actual, getConfiguredEmailProvider: () => state.provider };
 });
-vi.mock("@/lib/observability/logger.server", () => ({ logServerError: vi.fn() }));
+const log = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
+vi.mock("@/lib/observability/logger.server", () => ({
+  logServerError: log.error,
+  logger: { warn: log.warn, error: vi.fn(), info: vi.fn() },
+}));
 
 function makeTrx() {
   return {
@@ -58,7 +65,11 @@ function makeTrx() {
 vi.mock("@/db/database", () => ({
   db: {
     transaction: () => ({
-      execute: async (cb: (trx: unknown) => Promise<unknown>) => cb(makeTrx()),
+      execute: async (cb: (trx: unknown) => Promise<unknown>) => {
+        const value = await cb(makeTrx());
+        if (state.commitFails) throw new Error("commit failed: connection reset");
+        return value;
+      },
     }),
   },
 }));
@@ -68,6 +79,7 @@ let backoffDelayMs: typeof WorkerModule.backoffDelayMs;
 let summarizeDeliveryError: typeof WorkerModule.summarizeDeliveryError;
 let outboxTokenExpired: typeof WorkerModule.outboxTokenExpired;
 let OUTBOX_MAX_ATTEMPTS: number;
+let metrics: typeof MetricsModule;
 
 const row = (attempts: number) => ({
   id: "o1",
@@ -105,6 +117,11 @@ beforeEach(async () => {
   state.provider = null;
   state.updateSets = [];
   state.selectCount = 0;
+  state.commitFails = false;
+  log.error.mockReset();
+  log.warn.mockReset();
+  metrics = await import("@/lib/observability/metrics.server");
+  metrics.__resetMetricsForTests();
   ({
     drainOutbox,
     backoffDelayMs,
@@ -351,5 +368,123 @@ describe("drainOutbox — permanent provider rejections fail fast (review #219)"
     const r = await drainOutbox(10);
     expect(r).toMatchObject({ claimed: 1, retried: 1, failed: 0 });
     expect(state.updateSets[0]).toMatchObject({ status: "pending", attempts: 1 });
+  });
+});
+
+/**
+ * F-27: the worker reports each row it writes through the same chokepoint as
+ * the inline attempt, once its claim transaction has committed. Before, a
+ * drain logged only a count of dead rows, with no template, provider or
+ * status, and a transient failure left no trace at all.
+ */
+describe("drainOutbox — each outcome is logged and counted (F-27)", () => {
+  async function counter(outcome: string, template: string): Promise<number> {
+    const metric = await metrics.outboxDeliveryTotal.get();
+    return (
+      metric.values.find((v) => v.labels.outcome === outcome && v.labels.template === template)
+        ?.value ?? 0
+    );
+  }
+
+  /** The per-row `email_delivery` lines, without the per-drain summary. */
+  const rowErrors = () =>
+    log.error.mock.calls.filter(
+      ([, fields]) => (fields as { kind?: string }).kind === "email_delivery",
+    );
+
+  it("logs a permanent rejection per row, without the recipient or the link", async () => {
+    const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+    state.provider = {
+      id: "resend",
+      deliver: vi
+        .fn()
+        .mockRejectedValue(new EmailDeliveryError("resend", 422, "invalid `to`: a@b.c LiveTok")),
+    };
+    state.dueRow = secretRow(0);
+
+    await drainOutbox(10);
+
+    expect(rowErrors()).toHaveLength(1);
+    expect(rowErrors()[0]![1]).toMatchObject({
+      outcome: "failed",
+      reason: "provider_rejected",
+      path: "worker",
+      outboxId: "o1",
+      template: "password_reset",
+      provider: "resend",
+      attempts: 1,
+      providerStatus: 422,
+    });
+    const logged = JSON.stringify(log.error.mock.calls);
+    expect(logged).not.toContain("a@b.c");
+    expect(logged).not.toContain("LiveTok");
+    expect(await counter("failed", "password_reset")).toBe(1);
+  });
+
+  it("logs a transient failure at warn level and counts it as a retry", async () => {
+    state.provider = { id: "resend", deliver: vi.fn().mockRejectedValue(new Error("boom")) };
+    state.dueRow = row(1);
+
+    await drainOutbox(10);
+
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0]![0]).toMatchObject({
+      outcome: "retry",
+      path: "worker",
+      template: "test_email",
+      attempts: 2,
+    });
+    expect(await counter("retry", "test_email")).toBe(1);
+  });
+
+  it("reports the attempt cap as exhausted, not as a provider rejection", async () => {
+    state.provider = { id: "resend", deliver: vi.fn().mockRejectedValue(new Error("boom")) };
+    state.dueRow = row(OUTBOX_MAX_ATTEMPTS - 1);
+    await drainOutbox(10);
+    expect(rowErrors()[0]![1]).toMatchObject({
+      outcome: "failed",
+      reason: "attempts_exhausted",
+      attempts: OUTBOX_MAX_ATTEMPTS,
+    });
+  });
+
+  it("logs and counts an expired row as its own terminal outcome", async () => {
+    state.provider = { id: "resend", deliver: vi.fn() };
+    state.dueRow = { ...secretRow(1), created_at: new Date(Date.now() - 24 * 60 * 60_000) };
+    await drainOutbox(10);
+    expect(rowErrors()[0]![1]).toMatchObject({
+      outcome: "expired",
+      reason: "token_expired",
+      attempts: 1,
+    });
+    expect(await counter("expired", "password_reset")).toBe(1);
+  });
+
+  it("counts a delivered row as `sent` without logging it", async () => {
+    state.provider = {
+      id: "resend",
+      deliver: vi.fn().mockResolvedValue({ providerMessageId: "m" }),
+    };
+    state.dueRow = row(0);
+    await drainOutbox(10);
+    expect(await counter("sent", "test_email")).toBe(1);
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("reports nothing for a row whose write rolled back (it stays pending and is claimed again)", async () => {
+    const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+    state.provider = {
+      id: "resend",
+      deliver: vi.fn().mockRejectedValue(new EmailDeliveryError("resend", 403, "nope")),
+    };
+    state.dueRow = row(0);
+    state.commitFails = true;
+
+    await expect(drainOutbox(10)).rejects.toThrow(/commit failed/);
+
+    expect(rowErrors()).toHaveLength(0);
+    expect(await counter("failed", "test_email")).toBe(0);
   });
 });

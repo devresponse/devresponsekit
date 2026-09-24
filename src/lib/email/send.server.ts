@@ -4,6 +4,7 @@ import { getServerEnv } from "@/lib/env";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { getConfiguredEmailProvider, isRetryableDeliveryError } from "./providers.server";
 import { backoffDelayMs, summarizeDeliveryError } from "./outbox-worker.server";
+import { recordOutboxDelivery } from "./delivery-telemetry.server";
 import { redactRenderedEmail } from "./outbox-secrets";
 import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
 
@@ -26,7 +27,9 @@ import { getDefaultEmailTemplate, renderEmailTemplate } from "./templates";
  * Delivery failures are recorded, never thrown: a password-reset
  * request must not 500 because a third-party API hiccuped — the inline
  * attempt is best-effort and the outbox worker (`pnpm outbox:drain`)
- * guarantees eventual delivery. Template resolution
+ * guarantees eventual delivery. Recorded means on the row AND in the log
+ * stream and metrics (`recordOutboxDelivery`, F-27): a returned `failed` is
+ * not an exception anyone upstream sees. Template resolution
  * prefers the editable `app_email_templates` row for the recipient's
  * locale, falls back to the `en` row, then to the code-level default
  * in `templates.ts`.
@@ -222,7 +225,17 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
     .returning(["id"])
     .executeTakeFirstOrThrow();
 
+  // F-27: every outcome below is counted (and a failure logged) once its row
+  // is written, the same way the drain worker reports its attempts.
+  const delivery = {
+    path: "inline",
+    outboxId: inserted.id,
+    templateKey: input.templateKey,
+    provider: provider?.id ?? null,
+  } as const;
+
   if (!provider) {
+    recordOutboxDelivery({ ...delivery, outcome: "logged", attempts: 0 });
     return { outboxId: inserted.id, status: "logged" };
   }
 
@@ -252,6 +265,7 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
       })
       .where("id", "=", inserted.id)
       .execute();
+    recordOutboxDelivery({ ...delivery, outcome: "sent", attempts: 1 });
     return { outboxId: inserted.id, status: "sent" };
   } catch (err) {
     // Attempt #1 failed. A TRANSIENT failure leaves the row RETRYABLE (still
@@ -281,6 +295,16 @@ export async function sendAppEmail(input: SendAppEmailInput): Promise<SendAppEma
       })
       .where("id", "=", inserted.id)
       .execute();
+    // The caller gets a status, not an exception, so this is the only place
+    // the failure can surface (F-27): `error` for a terminal rejection, which
+    // is how a sender the provider refuses shows up on attempt 1, `warn` for
+    // a transient one the worker will retry.
+    recordOutboxDelivery({
+      ...delivery,
+      outcome: terminal ? "failed" : "retry",
+      attempts: 1,
+      error: err,
+    });
     return { outboxId: inserted.id, status: terminal ? "failed" : "pending" };
   }
 }

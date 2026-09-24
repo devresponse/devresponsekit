@@ -1,4 +1,8 @@
-import { checkOriginSuffix, normalizeOriginSuffix } from "@/lib/admin/origin-suffixes";
+import {
+  checkOriginSuffix,
+  normalizeOriginSuffix,
+  registrableDomainOf,
+} from "@/lib/admin/origin-suffixes";
 
 /**
  * Value checks for the env schema (`src/lib/env.ts`) that need more than a
@@ -15,10 +19,10 @@ import { checkOriginSuffix, normalizeOriginSuffix } from "@/lib/admin/origin-suf
  * Like `env.ts`, this module stays free of `server-only` so `tsx` scripts can
  * import it. `drk-deploy` (`vercel-cli/src/lib/env-spec.ts` and `secrets.ts`)
  * cannot import it across its package boundary and mirrors
- * {@link httpOriginProblem} and {@link ed25519PrivateJwkProblem} instead;
- * `tests/unit/env-validators.test.ts` (origins) and
- * `tests/unit/env-signing-keys.test.ts` (keys) run each pair over the same
- * vectors.
+ * {@link httpOriginProblem}, {@link emailFromProblem} and
+ * {@link ed25519PrivateJwkProblem} instead; `tests/unit/env-validators.test.ts`
+ * (origins, senders) and `tests/unit/env-signing-keys.test.ts` (keys) run each
+ * pair over the same vectors.
  *
  * It must also stay pure and free of Node APIs: `env.ts` is in the Edge
  * instrumentation bundle's import graph, where Turbopack swaps a Node
@@ -152,6 +156,115 @@ export function cookieDomainProblem(
     return `must be BETTER_AUTH_URL's host (${host}) or a parent domain of it: a browser drops a cookie for ${domain} set from that host, so every sign-in would silently not stick`;
   }
   return null;
+}
+
+/**
+ * Top-level names no email provider sends from (F-27): the special-use
+ * `localhost`, `test`, `invalid` and `example` (RFC 6761), mDNS `local`
+ * (RFC 6762), and `internal`, which ICANN set aside for private networks.
+ */
+const RESERVED_MAIL_TLDS: ReadonlySet<string> = new Set([
+  "localhost",
+  "local",
+  "test",
+  "invalid",
+  "example",
+  "internal",
+]);
+
+/** The RFC 2606 documentation domains; their subdomains are reserved too. */
+const RESERVED_MAIL_DOMAINS: readonly string[] = ["example.com", "example.net", "example.org"];
+
+/**
+ * A domain a provider can verify: two or more LDH labels, the last alphabetic
+ * (or punycode), so never an IP address, an address literal or a single
+ * label such as `mailhost`.
+ */
+const MAIL_DOMAIN_RE =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
+
+/**
+ * The lowercased domain of the address in an `EMAIL_FROM` value, which is
+ * either a bare `local@domain` or a display-name form, `Name <local@domain>`
+ * or `"Name, Inc." <local@domain>` (the address is inside the LAST angle
+ * brackets, so a `<` inside a quoted name does not confuse it). `null` when
+ * there is no address of that shape: no `@`, more than one, an empty local
+ * part or domain, or whitespace, quotes or brackets inside the address.
+ */
+function emailFromDomain(value: string): string | null {
+  const trimmed = value.trim();
+  const open = trimmed.lastIndexOf("<");
+  const address =
+    open !== -1 && trimmed.endsWith(">") ? trimmed.slice(open + 1, -1).trim() : trimmed;
+  const at = address.indexOf("@");
+  if (at <= 0 || at !== address.lastIndexOf("@") || at === address.length - 1) return null;
+  if (/[\s<>"]/.test(address)) return null;
+  return address.slice(at + 1).toLowerCase();
+}
+
+/**
+ * Checks `EMAIL_FROM` for a deployment that really sends mail (F-27). The
+ * schema applies it in production when `EMAIL_PROVIDER` is set, where a
+ * sender the provider refuses fails EVERY reset, verification and invitation
+ * email on its first attempt. The schema default, `no-reply@localhost`, is
+ * the case that motivated it: an operator who set the provider and its key
+ * but not the sender booted cleanly and delivered nothing.
+ *
+ * It accepts both forms providers take, `no-reply@example.org` and
+ * `App <no-reply@example.org>`, and refuses a value with no address, a
+ * reserved domain (`localhost`, `*.local`, `*.test`, `example.com`, …), an IP
+ * address and a single-label host. It cannot tell whether the domain is
+ * verified with the provider; the provider's own answer to that is logged and
+ * counted per delivery (`recordOutboxDelivery`).
+ *
+ * Pure and free of the Public Suffix List on purpose: drk-deploy carries an
+ * identical copy (`vercel-cli/src/lib/env-spec.ts`), and the parity suite in
+ * `tests/unit/env-validators.test.ts` compares the two sentence for sentence.
+ */
+export function emailFromProblem(value: string): string | null {
+  const domain = emailFromDomain(value);
+  if (domain === null) {
+    return 'must be a sender address, written as no-reply@your-domain or "Name <no-reply@your-domain>"';
+  }
+  const tld = domain.slice(domain.lastIndexOf(".") + 1);
+  if (
+    RESERVED_MAIL_TLDS.has(tld) ||
+    RESERVED_MAIL_DOMAINS.some((reserved) => domain === reserved || domain.endsWith(`.${reserved}`))
+  ) {
+    return `must be on a domain verified with the email provider: ${domain} is reserved for local, test or documentation use, so no provider sends mail from it`;
+  }
+  if (!MAIL_DOMAIN_RE.test(domain)) {
+    return `must be on a public domain name verified with the email provider, not ${domain} (an IP address, a single label or a malformed name)`;
+  }
+  return null;
+}
+
+/**
+ * With Mailgun, `EMAIL_FROM` must share MAILGUN_DOMAIN's organizational
+ * domain (F-27). Mailgun signs every message as the sending domain
+ * (`d=MAILGUN_DOMAIN`) and accepts any From at its API, so a From on another
+ * domain is not refused where it could be logged: the message is accepted
+ * and then rejected or junked by receivers, because it fails DMARC alignment.
+ *
+ * The rule is DMARC's default relaxed alignment: both domains must have the
+ * same registrable domain. So `no-reply@example.org` and
+ * `no-reply@mg.example.org` are both fine with `MAILGUN_DOMAIN=mg.example.org`,
+ * the usual setup, and `no-reply@other.org` is not. Kept apart from
+ * {@link emailFromProblem} because it needs the Public Suffix List, which
+ * drk-deploy does not ship. `null` when the From has no address at all:
+ * `emailFromProblem` reports that.
+ */
+export function mailgunFromAlignmentProblem(
+  emailFrom: string,
+  mailgunDomain: string,
+): string | null {
+  const from = emailFromDomain(emailFrom);
+  if (from === null) return null;
+  const sending = normalizeOriginSuffix(mailgunDomain);
+  const fromOrg = registrableDomainOf(from) ?? from;
+  const sendingOrg = registrableDomainOf(sending) ?? sending;
+  if (fromOrg === sendingOrg) return null;
+  return `must be on MAILGUN_DOMAIN's domain (${sendingOrg} or a subdomain of it): Mailgun signs as ${sending}, so mail from ${from} fails DMARC alignment and receivers reject or junk it after Mailgun has accepted it`;
 }
 
 /**

@@ -96,6 +96,12 @@ describe("GET /api/metrics", () => {
       const body = await res.text();
       expect(body).toContain("# TYPE devresponsekit_rate_limit_denials_total counter");
     });
+
+    it("registers the outbox delivery counter (F-27), so a dashboard sees it before any mail", async () => {
+      const res = await GET(scrapeRequest(`Bearer ${TOKEN}`));
+      const body = await res.text();
+      expect(body).toContain("# TYPE devresponsekit_outbox_delivery_total counter");
+    });
   });
 
   describe("rate-limit denial counter wiring", () => {

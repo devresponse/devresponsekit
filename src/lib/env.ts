@@ -5,7 +5,9 @@ import { parseClientIpSource } from "@/lib/client-ip-source";
 import {
   cookieDomainProblem,
   ed25519PrivateJwkProblem,
+  emailFromProblem,
   httpOriginProblem,
+  mailgunFromAlignmentProblem,
   splitEnvList,
 } from "@/lib/env-validators";
 
@@ -39,6 +41,12 @@ if (typeof window !== "undefined") {
 const EXAMPLE_SECRET_PLACEHOLDERS: ReadonlySet<string> = new Set([
   "replace-with-strong-random-secret",
 ]);
+
+/**
+ * `EMAIL_FROM` when unset: fine for the outbox-only mode (no `EMAIL_PROVIDER`),
+ * a sender no provider accepts otherwise, which production refuses (F-27).
+ */
+const DEFAULT_EMAIL_FROM = "DevResponse <no-reply@localhost>";
 
 /**
  * An OPTIONAL Ed25519 private JWK (JSON string). Unset or empty ⇒ `undefined`;
@@ -272,8 +280,14 @@ const serverEnvSchema = z
      * (specs.md §35), which is the right mode for local dev and CI.
      */
     EMAIL_PROVIDER: z.enum(["resend", "mailgun"]).optional(),
-    /** From header for outbound email, e.g. `App <no-reply@example.com>`. */
-    EMAIL_FROM: z.string().default("DevResponse <no-reply@localhost>"),
+    /**
+     * From header for outbound email, e.g. `App <no-reply@example.com>`. The
+     * `@localhost` default only suits the outbox-only mode: in production with
+     * `EMAIL_PROVIDER` set it must be a real sender on a public domain (and,
+     * for Mailgun, on MAILGUN_DOMAIN's domain), checked in `superRefine`
+     * below (F-27).
+     */
+    EMAIL_FROM: z.string().default(DEFAULT_EMAIL_FROM),
     RESEND_API_KEY: z.string().optional(),
     MAILGUN_API_KEY: z.string().optional(),
     MAILGUN_DOMAIN: z.string().optional(),
@@ -622,6 +636,23 @@ const serverEnvSchema = z
         path: ["ADMIN_TRUSTED_ORIGINS"],
         message: `every entry must be an http(s) origin; ${badTrustedOrigins.join("; ")}`,
       });
+    }
+    // The sender, when this deployment really sends mail (F-27). A From the
+    // provider refuses fails every reset, verification and invitation email
+    // on attempt 1 while sign-up still says "check your inbox", and the
+    // default is exactly such a From. Production only, and only with a
+    // provider: the outbox-only mode never hands the From to anyone, and
+    // neither do `next build`'s placeholders or CI's `next start`, which set
+    // no provider.
+    if (production && env.EMAIL_PROVIDER) {
+      const problem =
+        env.EMAIL_FROM === DEFAULT_EMAIL_FROM
+          ? `must be set when EMAIL_PROVIDER is set in production: unset, it defaults to ${DEFAULT_EMAIL_FROM}, which no provider sends from, so every password-reset, verification and invitation email would fail`
+          : (emailFromProblem(env.EMAIL_FROM) ??
+            (env.EMAIL_PROVIDER === "mailgun" && env.MAILGUN_DOMAIN
+              ? mailgunFromAlignmentProblem(env.EMAIL_FROM, env.MAILGUN_DOMAIN)
+              : null));
+      if (problem) ctx.addIssue({ code: "custom", path: ["EMAIL_FROM"], message: problem });
     }
     // COOKIE_DOMAIN must cover the deployment's own host, must not be a public
     // suffix, and must be spelt the way a browser reads it (F-22) — otherwise

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  API_SCOPE_CATALOG,
   isAccountScope,
   isScopeNameable,
   normalizeScopes,
@@ -107,5 +108,32 @@ describe("scope-nameable permission keys", () => {
     }
     // No issuable wildcard reaches them either: the one that would is refused.
     expect(ungrantableScopes(["crm.deals.write"], ["crm.*"])).toEqual(["crm.*"]);
+  });
+
+  it("every catalog key is nameable, because each has an interior dot", () => {
+    for (const key of API_SCOPE_CATALOG) {
+      expect(key.indexOf("."), key).toBeGreaterThan(0);
+      expect(isScopeNameable(key), key).toBe(true);
+    }
+  });
+
+  it("matches the whole first segment, dot included, not a shorter prefix of it", () => {
+    // `admin` and `account` start catalog scopes; these roots only share letters.
+    for (const key of ["adminx.reports.view", "accounts.read", "a.b", ".admin.users.read"]) {
+      expect(isScopeNameable(key), key).toBe(false);
+    }
+  });
+});
+
+describe("scope algebra edges", () => {
+  it("a non-wildcard grant never matches by prefix", () => {
+    expect(scopeMatches("admin.users.read", "admin.users.reax")).toBe(false);
+  });
+
+  it("an unknown scope is ungrantable even when the creator holds that key", () => {
+    // A custom app permission is outside the catalog, so no credential can carry it.
+    expect(ungrantableScopes(["crm.deals.write"], ["crm.deals.write"])).toEqual([
+      "crm.deals.write",
+    ]);
   });
 });

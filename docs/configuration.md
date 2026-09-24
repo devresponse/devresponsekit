@@ -150,7 +150,7 @@ Paste the printed JSON as `SSO_HANDOFF_PRIVATE_KEY`. Only the public half is eve
 
 | Variable | Default | Controls |
 | --- | --- | --- |
-| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. It is also read (weakly — see below) when deciding whether to reuse an inbound `x-request-id` (review #99/#224). |
+| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain), then normalized (see below). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. It is also read (weakly — see below) when deciding whether to reuse an inbound `x-request-id` (review #99/#224). |
 | `ADMIN_EXPORT_MAX_ROWS` | 100000 | Hard row cap for a single CSV export; the file is marked truncated past the cap. |
 
 **One client-IP derivation.** The app computes the trusted client IP with the
@@ -171,8 +171,33 @@ Auth reads it, so no route depends on the proxy matcher covering it:
   its headers through `withTrustedClientIp` (`src/lib/client-ip.ts`), which returns a
   stamped **copy** rather than trusting `request.headers` or `next/headers()`.
 
-The session's `ipAddress` and the audit row for the same event therefore hold the
-same address. Do **not** add `x-forwarded-for` back to `ipAddressHeaders`: Better
+**The selected hop is normalized once, in `getClientIp` (F-16).** Every consumer
+(the audit row's `ip_address`, an API key's `last_used_ip`, the limiter keys, the
+`x-drk-client-ip` header and the IP the MCP gateway forwards) starts from the same value:
+
+- a port is stripped from `a.b.c.d:port` and `[v6]:port`, the shapes a load
+  balancer that appends the source port produces (Azure App Service and
+  Application Gateway, for example). A bare IPv6 address cannot carry a port, so
+  `2001:db8::1:80` is read as an address;
+- the value must pass Node's `net.isIP`. IPv6 is written in canonical form and an
+  IPv4-mapped address (`::ffff:203.0.113.5`) becomes the IPv4 address;
+- anything else, such as `x`, `unknown`, a hostname or an IPv6 zone id, counts as
+  **no trustworthy IP**: the audit column stores `NULL`, the request lands in the
+  shared `anon` / `no-trusted-ip` bucket, and the header is removed. Before this,
+  the raw value reached the `inet` columns, and the audit INSERT failed with
+  `22P02` after the audited change had committed (a 500 and no audit row);
+- the app's limiter keys an **IPv6 client by its /64** (`ip:2001:db8:1:2::/64`), so
+  rotating addresses inside the prefix a subscriber was given does not create new
+  buckets. That is also Better Auth's default `ipv6Subnet`, so both limiters group
+  the same clients. Only the limiter keys use the /64. The audit row, the API-key
+  stamp and the header keep the full address.
+
+For an IPv4 client, the session's `ipAddress` and the audit row for the same
+event therefore hold the same address. For an IPv6 client, the audit row holds
+the full address and the session holds the /64 Better Auth keys on, written out
+in full (`2001:0db8:0001:0002:0000:0000:0000:0000`).
+
+Do **not** add `x-forwarded-for` back to `ipAddressHeaders`: Better
 Auth trusts a single-value header verbatim, which lets a client rotate buckets
 where the edge sets no chain. When no IP can be trusted, requests share one
 bounded bucket (`anon` in the app, `no-trusted-ip` in Better Auth) — fail closed,

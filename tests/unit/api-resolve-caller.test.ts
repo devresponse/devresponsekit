@@ -14,6 +14,7 @@ const isSourceCredentialActive = vi.fn();
 const getCurrentSession = vi.fn();
 const getUserAccessContext = vi.fn();
 const isBetterAuthUserBanned = vi.fn();
+const touchApiKeyUsage = vi.fn();
 
 /** Mirrors the typed audience failure jwt.server throws (review #50/#53). */
 class AccessTokenAudienceError extends Error {
@@ -23,10 +24,14 @@ class AccessTokenAudienceError extends Error {
   }
 }
 
-vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
+// `intFromEnv` is what client-ip reads TRUSTED_PROXY_COUNT through: the default (1).
+vi.mock("@/lib/env", () => ({
+  getServerEnv: () => env,
+  intFromEnv: (_name: string, fallback: number) => fallback,
+}));
 vi.mock("@/lib/api-auth/api-keys.server", () => ({
   verifyApiKey: (...a: unknown[]) => verifyApiKey(...a),
-  touchApiKeyUsage: vi.fn(),
+  touchApiKeyUsage: (...a: unknown[]) => touchApiKeyUsage(...a),
 }));
 vi.mock("@/lib/api-auth/ban-status.server", () => ({
   isBetterAuthUserBanned: (...a: unknown[]) => isBetterAuthUserBanned(...a),
@@ -76,6 +81,7 @@ beforeEach(async () => {
     getCurrentSession,
     getUserAccessContext,
     isBetterAuthUserBanned,
+    touchApiKeyUsage,
   ])
     m.mockReset();
   getUserAccessContext.mockResolvedValue(ACCESS);
@@ -243,6 +249,25 @@ describe("resolveCaller — API key path", () => {
     });
     await mod.resolveCaller(req("Bearer drk_live_abc"));
     expect(getUserAccessContext).toHaveBeenCalledWith("ba1", { organizationId: "org-a" });
+  });
+
+  it("stamps last_used_ip with the normalized client IP, never the raw hop (F-16)", async () => {
+    // `last_used_ip` is inet and the stamp swallows a failed UPDATE, so a raw
+    // `ip:port` hop left `last_used_at` frozen without a trace.
+    env.API_KEYS_ENABLED = true;
+    verifyApiKey.mockResolvedValue({
+      id: "k1",
+      betterAuthUserId: "ba1",
+      organizationId: "org-a",
+      scopes: ["admin.users.read"],
+    });
+    const withHop = (xff: string) => ({
+      headers: new Headers({ authorization: "Bearer drk_live_abc", "x-forwarded-for": xff }),
+    });
+    await mod.resolveCaller(withHop("198.51.100.7, 203.0.113.9:51234"));
+    expect(touchApiKeyUsage).toHaveBeenLastCalledWith("k1", "203.0.113.9");
+    await mod.resolveCaller(withHop("garbage"));
+    expect(touchApiKeyUsage).toHaveBeenLastCalledWith("k1", null);
   });
 
   it("returns null when the key fails verification", async () => {

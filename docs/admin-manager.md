@@ -1062,6 +1062,9 @@ acting admin — for impersonation this is the **original** admin, never the
 impersonated user), `app_user_id`, `organization_id`, `target_application_id`,
 `provider`, `email`, `reason`, `request_id` (the §5.1 correlation id), the
 trusted-hop `ip_address` and `user_agent`, and a JSON `metadata` blob.
+`ip_address` is the normalized client IP (port stripped, IPv4-mapped IPv6
+recorded as IPv4) or `NULL` when the trusted hop is not an IP address, so a
+malformed forwarded header can never make the row fail to insert (F-16).
 `user_agent` is cut to its first **512** characters (`USER_AGENT_MAX_LENGTH`,
 `src/lib/user-agent.ts`): the header is client-chosen and the row can never be
 edited (F-15).

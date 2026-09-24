@@ -117,7 +117,10 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;
   // Trusted-hop client IP (the P2-4 helper), NOT the attacker-controlled
   // leftmost X-Forwarded-For — so audit rows hold a forensically reliable
-  // address even when a client spoofs the header.
+  // address even when a client spoofs the header. F-16: it is a valid address
+  // or null, never the raw hop. `ip_address` is `inet`, and a raw `ip:port` or
+  // garbage value failed this INSERT with 22P02 after the caller's mutation
+  // had committed: a 500, and an action with no audit row.
   const ipAddress = reqHeaders ? getClientIp(reqHeaders) : null;
   // F-15: capped, because the header is client-chosen and this row can never
   // be edited — an authenticated caller must not be able to park kilobytes in

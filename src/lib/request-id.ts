@@ -1,4 +1,4 @@
-import { hasForwardedHops } from "@/lib/client-ip";
+import { hasForwardedHops } from "@/lib/forwarded-hops";
 
 /**
  * The correlation id every sink agrees on (review #99, #224).
@@ -25,9 +25,13 @@ import { hasForwardedHops } from "@/lib/client-ip";
  * request id as a correlation aid rather than an identity.
  *
  * This module is deliberately framework-free — no `server-only`, no DB, no
- * `next/*` — so both the App Router helper (`lib/admin/request-id.server.ts`)
- * and `instrumentation.ts` (which also runs on the EDGE runtime) use one
- * implementation, and there is exactly one answer to "is this id trustworthy".
+ * `next/*`, no Node built-ins — so both the App Router helper
+ * (`lib/admin/request-id.server.ts`) and `instrumentation.ts` (which also runs
+ * on the EDGE runtime) use one implementation, and there is exactly one answer
+ * to "is this id trustworthy". Its imports must stay Edge-safe too: it takes
+ * the hop counter from `src/lib/forwarded-hops.ts`, not from `client-ip.ts`
+ * (which imports `node:net`), and `tests/unit/edge-import-graph.test.ts` fails
+ * if a Node built-in enters this graph.
  */
 
 /** The inbound / outbound correlation header. */

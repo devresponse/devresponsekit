@@ -312,7 +312,14 @@ volumes:
   hit the cap. Like migrations, it needs the dev toolchain (`tsx`, `src/db`),
   so run it from a source checkout or a "tools" image — not the runtime
   container. `OUTBOX_DRAIN_LIMIT` (default 100) bounds rows per run; concurrent
-  runs are safe (`FOR UPDATE SKIP LOCKED`).
+  runs are safe (`FOR UPDATE SKIP LOCKED`). Because the drainer is its own
+  process, its outcomes never reach the server's `/api/metrics`: they are in
+  its `email_delivery` log lines and its `[outbox] … expired=…` summary line.
+  To have them counted in `devresponsekit_outbox_delivery_total`, have the
+  scheduler call `GET /api/internal/outbox-drain` on the app instead, with
+  `CRON_SECRET` set on the app and sent as `Authorization: Bearer …` (50 rows
+  per call, no dev toolchain needed). See
+  [observability.md §5](observability.md#5-metrics).
 - **MCP self-registration needs a scheduled reaper** (only if
   `MCP_REGISTRATION_ENABLED`). Run **`pnpm mcp:reap`** periodically the same
   way to expire registrations still pending after

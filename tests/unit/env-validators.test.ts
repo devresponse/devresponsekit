@@ -3,16 +3,19 @@ import { describe, expect, it } from "vitest";
 import {
   cookieDomainProblem,
   ed25519PrivateJwkProblem,
+  emailFromProblem,
   httpOriginProblem,
   isLoopbackHost,
+  mailgunFromAlignmentProblem,
   splitEnvList,
 } from "@/lib/env-validators";
 // drk-deploy cannot import the kit across its package boundary (its tsconfig
-// `rootDir` is its own `src`), so it carries a copy of the origin rule and of
-// the key rule. This suite runs the origin pair over the same vectors, and
-// tests/unit/env-signing-keys.test.ts the key pair: a change to one without
-// the other fails (F-22).
+// `rootDir` is its own `src`), so it carries a copy of the origin rule, the
+// sender rule (F-27) and the key rule. This suite runs the origin and sender
+// pairs over the same vectors, and tests/unit/env-signing-keys.test.ts the key
+// pair: a change to one without the other fails (F-22).
 import {
+  emailFromProblem as cliEmailFromProblem,
   httpOriginProblem as cliHttpOriginProblem,
   specFor as cliSpecFor,
 } from "../../vercel-cli/src/lib/env-spec";
@@ -196,6 +199,176 @@ describe("drk-deploy's copy of the origin rule stays in step with the kit's (F-2
         httpOriginProblem(value, { production: true, exact: true }),
       );
     }
+  });
+});
+
+/**
+ * The sender rule behind the F-27 boot check. Accepted: the two forms
+ * providers take. Refused: whatever no provider sends from, starting with the
+ * schema default that failed every auth email on attempt 1.
+ */
+const SENDERS_ACCEPTED = [
+  "no-reply@devresponse.ca",
+  "DevResponse <no-reply@devresponse.ca>",
+  "DevResponse<no-reply@devresponse.ca>",
+  "<no-reply@devresponse.ca>",
+  '"DevResponse, Inc." <no-reply@mail.devresponse.ca>',
+  '"A <weird> name" <no-reply@devresponse.ca>',
+  "  DevResponse <No-Reply@DevResponse.CA>  ",
+  "onboarding@resend.dev",
+  "no-reply@xn--80ak6aa92e.com",
+  "no-reply@example-shop.co.uk",
+  "no-reply@examples.com",
+  "no-reply@example.com.au",
+];
+const SENDERS_NO_ADDRESS = [
+  "",
+  "   ",
+  "DevResponse",
+  "DevResponse no-reply@devresponse.ca",
+  "@devresponse.ca",
+  "no-reply@",
+  "a@b@devresponse.ca",
+  "DevResponse <no-reply@devresponse.ca",
+  "DevResponse <>",
+  '"no reply"@devresponse.ca',
+  "no reply@devresponse.ca",
+];
+const SENDERS_RESERVED = [
+  "DevResponse <no-reply@localhost>",
+  "no-reply@LOCALHOST",
+  "no-reply@app.localhost",
+  "no-reply@devresponse.local",
+  "no-reply@devresponse.test",
+  "no-reply@devresponse.invalid",
+  "no-reply@devresponse.example",
+  "no-reply@corp.internal",
+  "no-reply@example.com",
+  "no-reply@mail.example.org",
+  "App <no-reply@EXAMPLE.NET>",
+];
+const SENDERS_NOT_A_DOMAIN = [
+  "no-reply@mailhost",
+  "no-reply@10.0.0.5",
+  "no-reply@[127.0.0.1]",
+  "no-reply@devresponse.ca.",
+  "no-reply@-bad.ca",
+  "no-reply@under_score.ca",
+  "no-reply@devresponse.c",
+];
+const ALL_SENDERS = [
+  ...SENDERS_ACCEPTED,
+  ...SENDERS_NO_ADDRESS,
+  ...SENDERS_RESERVED,
+  ...SENDERS_NOT_A_DOMAIN,
+];
+
+describe("emailFromProblem (F-27)", () => {
+  it("accepts a bare address and the display-name forms providers take", () => {
+    for (const value of SENDERS_ACCEPTED) {
+      expect(emailFromProblem(value), JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  it("refuses a value with no single, well-formed address", () => {
+    for (const value of SENDERS_NO_ADDRESS) {
+      expect(emailFromProblem(value), JSON.stringify(value)).toMatch(/^must be a sender address/);
+    }
+  });
+
+  it("refuses the localhost default and every other reserved domain", () => {
+    for (const value of SENDERS_RESERVED) {
+      expect(emailFromProblem(value), value).toMatch(
+        /^must be on a domain verified with the email provider: \S+ is reserved/,
+      );
+    }
+    expect(emailFromProblem("DevResponse <no-reply@localhost>")).toContain("localhost is reserved");
+  });
+
+  it("refuses an IP address, a single label and a malformed name", () => {
+    for (const value of SENDERS_NOT_A_DOMAIN) {
+      expect(emailFromProblem(value), value).toMatch(/^must be on a public domain name/);
+    }
+  });
+
+  it("never echoes the local part, only the domain", () => {
+    const problem = emailFromProblem("secret-local-part@devresponse.local");
+    expect(problem).not.toContain("secret-local-part");
+    expect(problem).toContain("devresponse.local");
+  });
+});
+
+describe("drk-deploy's copy of the sender rule stays in step with the kit's (F-27)", () => {
+  it("returns the same verdict AND sentence for every vector", () => {
+    for (const value of ALL_SENDERS) {
+      expect(cliEmailFromProblem(value), JSON.stringify(value)).toBe(emailFromProblem(value));
+    }
+  });
+
+  it("exercises every rejection branch (completeness guard for the vectors above)", () => {
+    const branches = [
+      /^must be a sender address/,
+      /^must be on a domain verified with the email provider/,
+      /^must be on a public domain name/,
+    ];
+    const sentences = new Set(ALL_SENDERS.map(emailFromProblem).filter((s) => s !== null));
+    for (const branch of branches) {
+      expect(
+        [...sentences].some((s) => branch.test(s)),
+        String(branch),
+      ).toBe(true);
+    }
+    for (const sentence of sentences) {
+      expect(
+        branches.some((b) => b.test(sentence)),
+        `unlisted branch: ${sentence}`,
+      ).toBe(true);
+    }
+  });
+
+  it("validates every EMAIL_FROM drk-deploy writes for the kit", () => {
+    const validate = cliSpecFor("EMAIL_FROM")?.validate;
+    expect(validate).toBeDefined();
+    for (const value of ALL_SENDERS) {
+      expect(validate!(value), JSON.stringify(value)).toBe(emailFromProblem(value));
+    }
+  });
+});
+
+describe("mailgunFromAlignmentProblem (F-27)", () => {
+  it("accepts a sender on MAILGUN_DOMAIN's registrable domain, parent or sibling included", () => {
+    for (const from of [
+      "no-reply@mg.devresponse.ca",
+      "App <no-reply@devresponse.ca>",
+      "no-reply@news.devresponse.ca",
+      "no-reply@a.mg.devresponse.ca",
+    ]) {
+      expect(mailgunFromAlignmentProblem(from, "mg.devresponse.ca"), from).toBeNull();
+    }
+    expect(
+      mailgunFromAlignmentProblem("no-reply@devresponse.ca", " MG.DevResponse.CA. "),
+    ).toBeNull();
+    expect(
+      mailgunFromAlignmentProblem("no-reply@example-shop.co.uk", "mg.example-shop.co.uk"),
+    ).toBeNull();
+  });
+
+  it("refuses a sender on another organizational domain", () => {
+    expect(mailgunFromAlignmentProblem("no-reply@other.ca", "mg.devresponse.ca")).toMatch(
+      /^must be on MAILGUN_DOMAIN's domain \(devresponse\.ca or a subdomain of it\): Mailgun signs as mg\.devresponse\.ca, so mail from other\.ca fails DMARC alignment/,
+    );
+    // Registrable, not a string suffix: both sit under the public suffix co.uk.
+    expect(
+      mailgunFromAlignmentProblem("no-reply@other.co.uk", "mg.example-shop.co.uk"),
+    ).not.toBeNull();
+    // Nor a lookalike that merely ends with the same characters.
+    expect(
+      mailgunFromAlignmentProblem("no-reply@evildevresponse.ca", "mg.devresponse.ca"),
+    ).not.toBeNull();
+  });
+
+  it("leaves a value with no address to emailFromProblem", () => {
+    expect(mailgunFromAlignmentProblem("DevResponse", "mg.devresponse.ca")).toBeNull();
   });
 });
 

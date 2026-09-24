@@ -282,7 +282,7 @@ and a forged IP on every audit row and session (F-17).
 | Variable | Controls |
 | --- | --- |
 | `EMAIL_PROVIDER` | `resend` \| `mailgun` \| unset. **Unset = outbox-only** (recorded, never sent) — the default for dev/CI. |
-| `EMAIL_FROM` | From address/name. |
+| `EMAIL_FROM` | From address/name: `no-reply@your-domain` or `App <no-reply@your-domain>`. The default, `DevResponse <no-reply@localhost>`, suits the outbox-only mode only. **In production with `EMAIL_PROVIDER` set the server refuses to boot** unless it is set to a sender on a public domain: not `localhost`, `*.local`, `*.localhost`, `*.test`, `*.internal`, `example.com`/`.net`/`.org`, an IP address or a single-label host. With Mailgun it must also share `MAILGUN_DOMAIN`'s registrable domain (`no-reply@example.org` or `no-reply@mg.example.org` with `MAILGUN_DOMAIN=mg.example.org`), since Mailgun signs as that domain and a From elsewhere fails DMARC. A sender that passes but is not verified with the provider still fails at the provider; that shows up per delivery in the log and metrics ([observability.md §5](./observability.md#5-metrics)). Development, tests, `next build` and a production deployment with no provider are unaffected (F-27). |
 | `RESEND_API_KEY` | Resend API key (when provider = resend). |
 | `MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_BASE_URL` | Mailgun config (use `https://api.eu.mailgun.net` for EU). `MAILGUN_BASE_URL` must be an http(s) origin with no path (the client appends `/v3/…` itself), `https://` in production (§1); a trailing slash is tolerated. |
 | `CRON_SECRET` | Shared secret the scheduler presents (as `Authorization: Bearer …`) to the `/api/internal/*` cron entrypoints: `outbox-drain` (retries `pending` outbox rows on a serverless host with no long-running `pnpm outbox:drain` process) and `mcp-registration-reap` (expires stale pending MCP self-registrations; see the MCP section). The route **fails closed** when unset (an empty value counts as unset). Validated by the env schema: when set it must be **at least 32 chars** or the server refuses to boot — a short guessable value can never silently enable the endpoint. Vercel Cron attaches it automatically when the env var is set; see `vercel.json` + [deployment.md](./deployment.md#7-ci). |
@@ -497,7 +497,7 @@ SEED_DEFAULT_ORGANIZATION_SLUG=default
 - [ ] `SSO_HANDOFF_PRIVATE_KEY` — Ed25519 JWK, **issuer only**, never on a satellite; **different** from `API_JWT_PRIVATE_KEY`.
 - [ ] `API_JWT_PRIVATE_KEY` — Ed25519 JWK, only if JWT enabled.
 - [ ] OAuth client secrets — per provider, only if social login enabled.
-- [ ] `RESEND_API_KEY` / `MAILGUN_API_KEY` — only if email enabled.
+- [ ] `RESEND_API_KEY` / `MAILGUN_API_KEY` — only if email enabled, together with an `EMAIL_FROM` on a domain the provider has verified (production refuses the `@localhost` default once a provider is set).
 - [ ] `SENTRY_AUTH_TOKEN` — build/CI only, never client-exposed.
 - [ ] `METRICS_TOKEN` — only if scraping `/api/metrics`; long random secret (≥32 chars, enforced at boot), scraper-side only.
 - [ ] `CRON_SECRET` — only if a scheduler calls `/api/internal/outbox-drain` or `/api/internal/mcp-registration-reap`; ≥32 chars, enforced at boot.

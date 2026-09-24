@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as SendModule from "@/lib/email/send.server";
 import type * as ProvidersModule from "@/lib/email/providers.server";
+import type * as MetricsModule from "@/lib/observability/metrics.server";
 
 /**
  * Unit tests for the outbox-first sender (specs.md §35). The DB and
@@ -74,7 +75,16 @@ vi.mock("@/lib/env", () => ({
   getServerEnv: () => ({ EMAIL_FROM: "Test <no-reply@test.local>" }),
 }));
 
+// F-27: the delivery chokepoint logs through these; the real metrics registry
+// is used so the counter is asserted as it would be scraped.
+const log = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
+vi.mock("@/lib/observability/logger.server", () => ({
+  logServerError: log.error,
+  logger: { warn: log.warn, error: vi.fn(), info: vi.fn() },
+}));
+
 let sendAppEmail: typeof SendModule.sendAppEmail;
+let metrics: typeof MetricsModule;
 
 beforeEach(async () => {
   state.templateRows = [];
@@ -83,7 +93,11 @@ beforeEach(async () => {
   state.insertedValues = [];
   state.updateSets = [];
   state.provider = null;
+  log.error.mockReset();
+  log.warn.mockReset();
   ({ sendAppEmail } = await import("@/lib/email/send.server"));
+  metrics = await import("@/lib/observability/metrics.server");
+  metrics.__resetMetricsForTests();
 });
 afterEach(() => vi.resetModules());
 
@@ -520,5 +534,151 @@ describe("sendAppEmail — permanent rejections are terminal (review #219 / #235
     expect(result.status).toBe("pending");
     expect(state.updateSets[0]!.status).toBeUndefined();
     expect(state.updateSets[0]!.next_attempt_at).toBeInstanceOf(Date);
+  });
+});
+
+/**
+ * F-27: `sendAppEmail` returns a failed delivery as a status, never throws it,
+ * so nothing upstream saw it. A sender the provider refuses (the `@localhost`
+ * default, an unverified domain) failed every reset, verification and
+ * invitation email on attempt 1 with no log line and no metric. Each outcome
+ * is now logged and counted where the row is written; the log line carries
+ * no recipient and no one-time link.
+ */
+describe("sendAppEmail — delivery outcomes are logged and counted (F-27)", () => {
+  const RECIPIENT = "victim@example.org";
+  const RESET_URL = "http://x/reset-password/LiveTok789?callbackURL=%2F";
+
+  async function counter(outcome: string, template: string): Promise<number> {
+    const metric = await metrics.outboxDeliveryTotal.get();
+    return (
+      metric.values.find((v) => v.labels.outcome === outcome && v.labels.template === template)
+        ?.value ?? 0
+    );
+  }
+
+  it("logs a terminal rejection at error level without the recipient or the link", async () => {
+    const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+    state.provider = {
+      id: "resend",
+      // The vendor body echoes the request, as a validation error can.
+      deliver: vi
+        .fn()
+        .mockRejectedValue(
+          new EmailDeliveryError(
+            "resend",
+            403,
+            `domain not verified for ${RECIPIENT} ${RESET_URL}`,
+          ),
+        ),
+    };
+
+    const result = await sendAppEmail({
+      to: RECIPIENT,
+      templateKey: "password_reset",
+      variables: { name: "Ada", resetUrl: RESET_URL },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.error.mock.calls[0]![0]).toBe("email will not be delivered");
+    expect(log.error.mock.calls[0]![1]).toMatchObject({
+      kind: "email_delivery",
+      outcome: "failed",
+      reason: "provider_rejected",
+      path: "inline",
+      outboxId: "outbox-1",
+      template: "password_reset",
+      provider: "resend",
+      attempts: 1,
+      providerStatus: 403,
+    });
+    const logged = JSON.stringify(log.error.mock.calls);
+    expect(logged).not.toContain(RECIPIENT);
+    expect(logged).not.toContain("LiveTok789");
+    expect(logged).not.toContain("Reset your password");
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(await counter("failed", "password_reset")).toBe(1);
+  });
+
+  it("logs a transient failure at warn level and counts it as a retry", async () => {
+    state.provider = {
+      id: "mailgun",
+      deliver: vi.fn().mockRejectedValue(new Error(`mailgun 500: ${RECIPIENT}`)),
+    };
+
+    const result = await sendAppEmail({
+      to: RECIPIENT,
+      templateKey: "email_verification",
+      variables: { name: RECIPIENT, verifyUrl: "http://x/verify-email?token=LiveTok456" },
+    });
+
+    expect(result.status).toBe("pending");
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn.mock.calls[0]![0]).toMatchObject({
+      outcome: "retry",
+      reason: "transient",
+      template: "email_verification",
+      provider: "mailgun",
+      attempts: 1,
+    });
+    const logged = JSON.stringify(log.warn.mock.calls);
+    expect(logged).not.toContain(RECIPIENT);
+    expect(logged).not.toContain("LiveTok456");
+    expect(await counter("retry", "email_verification")).toBe(1);
+  });
+
+  it("covers the administrator test send, which is this same inline attempt", async () => {
+    // POST /api/administrator/email/test calls sendAppEmail exactly like this
+    // (test_email, the sender's org); its audit row mirrors only the outcome.
+    const { EmailDeliveryError } = await import("@/lib/email/providers.server");
+    state.provider = {
+      id: "resend",
+      deliver: vi.fn().mockRejectedValue(new EmailDeliveryError("resend", 401, "bad key")),
+    };
+    const result = await sendAppEmail({
+      to: RECIPIENT,
+      templateKey: "test_email",
+      organizationId: "org-a",
+      variables: { appName: "App", sentBy: "ba-1" },
+    });
+    expect(result.status).toBe("failed");
+    expect(log.error.mock.calls[0]![1]).toMatchObject({
+      template: "test_email",
+      providerStatus: 401,
+      reason: "provider_rejected",
+    });
+    expect(await counter("failed", "test_email")).toBe(1);
+  });
+
+  it("counts a delivered email as `sent` and an outbox-only one as `logged`, without logging", async () => {
+    state.provider = {
+      id: "resend",
+      deliver: vi.fn().mockResolvedValue({ providerMessageId: "m" }),
+    };
+    await sendAppEmail({
+      to: RECIPIENT,
+      templateKey: "organization_invitation",
+      variables: {
+        inviterName: "Ada",
+        organizationName: "Org",
+        acceptUrl: "http://x/invite?token=t",
+      },
+    });
+    state.provider = null;
+    await sendAppEmail({
+      to: RECIPIENT,
+      templateKey: "organization_invitation",
+      variables: {
+        inviterName: "Ada",
+        organizationName: "Org",
+        acceptUrl: "http://x/invite?token=t",
+      },
+    });
+    expect(await counter("sent", "organization_invitation")).toBe(1);
+    expect(await counter("logged", "organization_invitation")).toBe(1);
+    expect(log.error).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
   });
 });

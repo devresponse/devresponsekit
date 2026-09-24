@@ -66,6 +66,14 @@ test("the env spec validators mirror the kit's rules", () => {
   const suffixes = specFor("SSO_ALLOWED_ORIGIN_SUFFIXES");
   assert.equal(suffixes?.validate!("example.com,example.ca"), null);
   assert.notEqual(suffixes?.validate!("com"), null, "a bare public suffix must be rejected");
+
+  // F-27: the kit refuses this sender at boot once EMAIL_PROVIDER is set, and
+  // it is what `.env.example` ships, so `env:sync --force` must not write it.
+  const from = specFor("EMAIL_FROM");
+  assert.ok(from?.validate);
+  assert.match(from.validate!("DevResponse <no-reply@localhost>") ?? "", /localhost is reserved/);
+  assert.equal(from.validate!("DevResponse <no-reply@devresponse.ca>"), null);
+  assert.equal(from.validate!("no-reply@devresponse.ca"), null);
 });
 
 test("every required key is one the kit refuses to boot without", () => {

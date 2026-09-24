@@ -135,6 +135,64 @@ export function httpOriginProblem(
   return null;
 }
 
+/** Top-level names no email provider sends from. Copied from the kit, see {@link emailFromProblem}. */
+const RESERVED_MAIL_TLDS: ReadonlySet<string> = new Set([
+  "localhost",
+  "local",
+  "test",
+  "invalid",
+  "example",
+  "internal",
+]);
+const RESERVED_MAIL_DOMAINS: readonly string[] = ["example.com", "example.net", "example.org"];
+const MAIL_DOMAIN_RE =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
+
+/** The lowercased domain of the address in `local@domain` or `Name <local@domain>`, or `null`. */
+function emailFromDomain(value: string): string | null {
+  const trimmed = value.trim();
+  const open = trimmed.lastIndexOf("<");
+  const address = open !== -1 && trimmed.endsWith(">") ? trimmed.slice(open + 1, -1).trim() : trimmed;
+  const at = address.indexOf("@");
+  if (at <= 0 || at !== address.lastIndexOf("@") || at === address.length - 1) return null;
+  if (/[\s<>"]/.test(address)) return null;
+  return address.slice(at + 1).toLowerCase();
+}
+
+/**
+ * The kit's sender rule, `emailFromProblem` in `src/lib/env-validators.ts`
+ * (F-27), copied because this package cannot import across its `rootDir`. The
+ * kit's `tests/unit/env-validators.test.ts` runs both over the same vectors.
+ *
+ * The kit applies it in production when `EMAIL_PROVIDER` is set: a sender with
+ * no address, on a reserved domain (the `no-reply@localhost` default,
+ * `*.local`, `example.com`, …), an IP address or a single label fails boot,
+ * because every reset, verification and invitation email would fail. This CLI
+ * applies it to every EMAIL_FROM it writes, provider or not: every Vercel
+ * deployment runs production, and a sender that stops the kit booting the
+ * moment a provider is added is not worth storing. That also stops
+ * `env:sync --force` from overwriting a working sender with the `.env.example`
+ * default. The kit's Mailgun alignment rule needs a public-suffix list and is
+ * not copied.
+ */
+export function emailFromProblem(value: string): string | null {
+  const domain = emailFromDomain(value);
+  if (domain === null) {
+    return 'must be a sender address, written as no-reply@your-domain or "Name <no-reply@your-domain>"';
+  }
+  const tld = domain.slice(domain.lastIndexOf(".") + 1);
+  if (
+    RESERVED_MAIL_TLDS.has(tld) ||
+    RESERVED_MAIL_DOMAINS.some((reserved) => domain === reserved || domain.endsWith(`.${reserved}`))
+  ) {
+    return `must be on a domain verified with the email provider: ${domain} is reserved for local, test or documentation use, so no provider sends mail from it`;
+  }
+  if (!MAIL_DOMAIN_RE.test(domain)) {
+    return `must be on a public domain name verified with the email provider, not ${domain} (an IP address, a single label or a malformed name)`;
+  }
+  return null;
+}
+
 /**
  * Every Vercel deployment, preview included, runs NODE_ENV=production, so the
  * kit applies its production rule to whatever this CLI stores.
@@ -280,8 +338,11 @@ export const ENV_SPECS: readonly EnvVarSpec[] = [
     level: "optional",
     secret: false,
     source: "supplied",
-    comment: "From header for outbound email.",
-    consequence: "Mail is sent from a localhost address (the default), which most providers reject.",
+    comment:
+      "From header for outbound email, e.g. App <no-reply@your-domain>, on a domain the provider has verified.",
+    consequence:
+      "Defaults to a localhost sender: harmless with no EMAIL_PROVIDER, but with one set the kit refuses to boot (F-27).",
+    validate: emailFromProblem,
   },
 ] as const;
 

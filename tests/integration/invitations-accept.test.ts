@@ -11,11 +11,18 @@ import type * as AcceptRoute from "@/app/api/invitations/accept/route";
  * every dead-token shape, `invitation_email_mismatch` against the SESSION
  * email, and consume-refusals mapping (blocked users → forbidden). The
  * invitations lib is stubbed (its own behavior is unit/DB-tested).
+ *
+ * F-33: a successful accept pins `active_org` to the inviting org, under the
+ * same rules as the switcher — only for an ACTIVE membership, never for an
+ * impersonated session, audited, and with the switcher's cookie attributes.
+ * The live-row version is tests/db/active-org-resolution.db.test.ts.
  */
 const sessionGetter = vi.fn();
 const findInvitationMock = vi.fn();
 const consumeMock = vi.fn();
 const selectFirst = vi.fn();
+const userHasActiveMembership = vi.fn();
+const auditEvent = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -33,6 +40,12 @@ vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
 vi.mock("@/lib/invitations.server", () => ({
   findValidInvitationByToken: (...a: unknown[]) => findInvitationMock(...a),
   consumeInvitation: (...a: unknown[]) => consumeMock(...a),
+}));
+vi.mock("@/lib/active-org.server", () => ({
+  userHasActiveMembership: (...a: unknown[]) => userHasActiveMembership(...a),
+}));
+vi.mock("@/lib/audit.server", () => ({
+  auditEvent: (...a: unknown[]) => auditEvent(...a),
 }));
 vi.mock("@/db/database", () => {
   function makeChain(): unknown {
@@ -68,13 +81,24 @@ function req(body: unknown): NextRequest {
 let POST: typeof AcceptRoute.POST;
 
 beforeEach(async () => {
-  for (const m of [sessionGetter, findInvitationMock, consumeMock, selectFirst]) m.mockReset();
+  for (const m of [
+    sessionGetter,
+    findInvitationMock,
+    consumeMock,
+    selectFirst,
+    userHasActiveMembership,
+    auditEvent,
+  ]) {
+    m.mockReset();
+  }
   sessionGetter.mockResolvedValue({
     user: { id: "ba-1", email: "ada@example.com" },
   });
   findInvitationMock.mockResolvedValue(INVITATION);
   consumeMock.mockResolvedValue({ consumed: true, roleGranted: false });
   selectFirst.mockResolvedValue({ id: "user-1", status: "pending_approval" });
+  userHasActiveMembership.mockResolvedValue(true);
+  auditEvent.mockResolvedValue(undefined);
   ({ POST } = await import("@/app/api/invitations/accept/route"));
 });
 afterEach(() => vi.resetModules());
@@ -140,5 +164,72 @@ describe("POST /api/invitations/accept", () => {
     const res = await POST(req({ token: "t" }));
     expect(res.status).toBe(403);
     expect(consumeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/invitations/accept — F-33 pins the active org to the org just joined", () => {
+  it("sets active_org to the inviting org, with the switcher's attributes, and audits the change", async () => {
+    const res = await POST(req({ token: "t" }));
+
+    expect(res.status).toBe(200);
+    // The gate is the one the switcher uses, asked about THIS user and org.
+    expect(userHasActiveMembership).toHaveBeenCalledWith("user-1", "org-1");
+    const cookie = res.cookies.get("active_org");
+    expect(cookie?.value).toBe("org-1");
+    expect(cookie).toMatchObject({
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 365,
+    });
+    // Host-only, like the other two writers: the org selector never follows
+    // COOKIE_DOMAIN to the satellites.
+    expect(cookie?.domain).toBeUndefined();
+    expect(auditEvent).toHaveBeenCalledTimes(1);
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "account.active_organization.changed",
+        outcome: "success",
+        actorBetterAuthUserId: "ba-1",
+        appUserId: "user-1",
+        organizationId: "org-1",
+        metadata: { organizationId: "org-1", source: "invitation_accepted" },
+      }),
+    );
+  });
+
+  it("does not pin when the membership did not end up ACTIVE (an admin's block or suspension stands)", async () => {
+    // consumeInvitation leaves a blocked/suspended membership as it was; the
+    // cookie must never name an org the caller cannot enter.
+    userHasActiveMembership.mockResolvedValue(false);
+    const res = await POST(req({ token: "t" }));
+
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("active_org")).toBeUndefined();
+    expect(auditEvent).not.toHaveBeenCalled();
+  });
+
+  it("never pins for an impersonated session (P0-1: switching tenant is the user's own act)", async () => {
+    sessionGetter.mockResolvedValue({
+      user: { id: "ba-1", email: "ada@example.com" },
+      session: { impersonatedBy: "ba-admin" },
+    });
+    const res = await POST(req({ token: "t" }));
+
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("active_org")).toBeUndefined();
+    expect(userHasActiveMembership).not.toHaveBeenCalled();
+    expect(auditEvent).not.toHaveBeenCalled();
+  });
+
+  it("never pins when the accept itself is refused", async () => {
+    for (const reason of ["user_not_eligible", "email_mismatch", "already_consumed"]) {
+      consumeMock.mockResolvedValue({ consumed: false, reason });
+      const res = await POST(req({ token: "t" }));
+      expect(res.status, reason).not.toBe(200);
+      expect(res.cookies.get("active_org"), reason).toBeUndefined();
+    }
+    expect(userHasActiveMembership).not.toHaveBeenCalled();
+    expect(auditEvent).not.toHaveBeenCalled();
   });
 });

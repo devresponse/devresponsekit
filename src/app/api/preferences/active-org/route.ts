@@ -5,7 +5,8 @@ import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { auditEvent } from "@/lib/audit.server";
-import { ACTIVE_ORG_COOKIE, userHasActiveMembership } from "@/lib/active-org.server";
+import { userHasActiveMembership } from "@/lib/active-org.server";
+import { setActiveOrgCookie } from "@/lib/active-org-cookie";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -16,9 +17,11 @@ const bodySchema = z.object({ organizationId: z.string().uuid() });
  * POST /api/preferences/active-org
  *
  * Sets the caller's active organization (multi-org switcher). The target
- * MUST be an org the caller is an ACTIVE member of — otherwise switching
- * would just bounce them to pending/blocked. The value is stored in the
- * `active_org` cookie that `getUserAccessContext` reads each request.
+ * MUST be an org the caller is an ACTIVE member of — otherwise the switch
+ * would be accepted, audited and then ignored, since `getUserAccessContext`
+ * ranks every active membership above a non-active one (F-33). The value is
+ * stored in the `active_org` cookie that `getUserAccessContext` reads each
+ * request.
  *
  * Authority lives in the membership check here AND in
  * `getUserAccessContext` (which only resolves the caller's own
@@ -115,12 +118,6 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   });
 
   const response = NextResponse.json({ ok: true, organizationId });
-  response.cookies.set(ACTIVE_ORG_COOKIE, organizationId, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
-  });
+  setActiveOrgCookie(response, organizationId);
   return response;
 });

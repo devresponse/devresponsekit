@@ -14,9 +14,10 @@ import type * as InvitationsModule from "@/lib/invitations.server";
  * Postgres compiler, on a scripted driver that answers each statement, and
  * reads back the SQL and its bound parameters:
  *
- *   - the cookie path (`active_org` lookup AND the earliest-membership
- *     fallback) and the bearer path (bound org, and an org-less credential)
- *     of `getUserAccessContext` — the one resolver the shell, the admin and v1
+ *   - the cookie path (one ranked lookup since F-33: the `active_org` pick
+ *     and the earliest-membership fallback are ranks of the same statement)
+ *     and the bearer path (bound org, and an org-less credential) of
+ *     `getUserAccessContext` — the one resolver the shell, the admin and v1
  *     guards, the token endpoint and SSO launch all go through;
  *   - the invitation lookup every acceptance path uses, and the guarded flip
  *     that consumes one.
@@ -80,8 +81,9 @@ vi.mock("@/lib/active-org.server", () => ({
 vi.mock("@/lib/admin/access-scope.server", () => ({
   userIsGlobalSuperuser: async () => false,
 }));
+const reach = vi.hoisted(() => ({ orgIds: null as string[] | null }));
 vi.mock("@/lib/impersonation-reach.server", () => ({
-  listImpersonationReachableOrgIds: async () => null,
+  listImpersonationReachableOrgIds: async () => reach.orgIds,
 }));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: async () => {} }));
 
@@ -124,6 +126,7 @@ beforeEach(() => {
     sql.includes('from "app_users"') ? { rows: [USER_ROW] } : { rows: [] };
   readActiveOrgId.mockReset();
   readActiveOrgId.mockResolvedValue(null);
+  reach.orgIds = null;
 });
 afterEach(() => vi.resetModules());
 
@@ -135,18 +138,17 @@ describe("getUserAccessContext — every membership lookup requires an ACTIVE or
     ({ getUserAccessContext, decideSecureAccess } = await import("@/lib/auth-status"));
   });
 
-  it("cookie path: the active_org lookup AND the earliest-membership fallback both carry it", async () => {
+  it("cookie path: the one ranked lookup — the cookie's pick and the earliest fallback alike — carries it", async () => {
     readActiveOrgId.mockResolvedValue("22222222-2222-4222-8222-222222222222");
 
     const ctx = await getUserAccessContext("ba-member");
 
+    // F-33: the cookie's org and the earliest-membership fallback are ranks
+    // of ONE statement, so the predicate below covers both.
     const lookups = membershipLookups();
-    expect(lookups).toHaveLength(2);
-    // 1st: the org the cookie names.
-    expect(lookups[0]!.sql).toContain('"m"."organization_id" = $');
+    expect(lookups).toHaveLength(1);
     expect(lookups[0]!.parameters).toContain("22222222-2222-4222-8222-222222222222");
-    // 2nd: the fallback, earliest first.
-    expect(lookups[1]!.sql).toContain('order by "m"."created_at" asc');
+    expect(lookups[0]!.sql).toContain('order by "m"."status" = $');
     for (const q of lookups) expectActiveOrgPredicate(q);
 
     // Nothing counted (the scripted DB answered no rows), so: no org, no
@@ -199,6 +201,83 @@ describe("getUserAccessContext — every membership lookup requires an ACTIVE or
     expect(ctx.organizationId).toBe("o-active");
     expect(ctx.membershipStatus).toBe("active");
     expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
+  });
+});
+
+describe("getUserAccessContext — the session path ranks memberships in ONE statement (F-33)", () => {
+  let getUserAccessContext: typeof AuthStatusModule.getUserAccessContext;
+  const COOKIE_ORG = "55555555-5555-4555-8555-555555555555";
+  const RANKED =
+    /order by "m"\."status" = \$(\d+) desc, "m"\."organization_id" = \$(\d+) desc, "m"\."created_at" asc, "m"\."id" asc limit \$(\d+)$/;
+
+  beforeEach(async () => {
+    ({ getUserAccessContext } = await import("@/lib/auth-status"));
+  });
+
+  /** The statement's WHERE clause alone (between `where` and `order by`). */
+  function whereClause(q: Captured): string {
+    return q.sql.slice(q.sql.indexOf(" where "), q.sql.indexOf(" order by "));
+  }
+
+  it("orders an ACTIVE membership first, the cookie's org second, then the earliest — and reads one row", async () => {
+    readActiveOrgId.mockResolvedValue(COOKIE_ORG);
+
+    await getUserAccessContext("ba-member");
+
+    const lookups = membershipLookups();
+    expect(lookups).toHaveLength(1);
+    const q = lookups[0]!;
+    const match = RANKED.exec(q.sql);
+    expect(match, q.sql).not.toBeNull();
+    // Read by position: each rank compares against the value it must.
+    expect(q.parameters[Number(match![1]) - 1]).toBe("active");
+    expect(q.parameters[Number(match![2]) - 1]).toBe(COOKIE_ORG);
+    expect(q.parameters[Number(match![3]) - 1]).toBe(1);
+    // A RANKING, not a filter: neither the membership status nor the cookie's
+    // org narrows the WHERE, so a user whose only memberships are non-active
+    // still resolves one and reaches /pending-approval or /blocked.
+    expect(whereClause(q)).not.toContain('"m"."status"');
+    expect(whereClause(q)).not.toContain('"m"."organization_id" =');
+  });
+
+  it("with no cookie the cookie rank is simply absent", async () => {
+    await getUserAccessContext("ba-member");
+
+    const [q] = membershipLookups();
+    expect(q!.sql).toMatch(
+      /order by "m"\."status" = \$\d+ desc, "m"\."created_at" asc, "m"\."id" asc limit \$\d+$/,
+    );
+  });
+
+  it("an impersonated session's confinement sits in the WHERE of that one statement", async () => {
+    reach.orgIds = ["66666666-6666-4666-8666-666666666666"];
+    readActiveOrgId.mockResolvedValue(COOKIE_ORG);
+
+    await getUserAccessContext("ba-member", undefined, { betterAuthUserId: "ba-admin" });
+
+    const lookups = membershipLookups();
+    expect(lookups).toHaveLength(1);
+    const q = lookups[0]!;
+    expect(whereClause(q)).toMatch(/"m"\."organization_id" in \(\$(\d+)\)/);
+    const inParam = /"m"\."organization_id" in \(\$(\d+)\)/.exec(q.sql)!;
+    expect(q.parameters[Number(inParam[1]) - 1]).toBe("66666666-6666-4666-8666-666666666666");
+    expect(q.sql).toMatch(RANKED);
+  });
+
+  it("the bound-org and org-less credential lookups are NOT ranked by membership status", async () => {
+    await getUserAccessContext("ba-member", { organizationId: COOKIE_ORG });
+    await getUserAccessContext("ba-member", { organizationId: null });
+
+    const [bound, orgLess] = membershipLookups();
+    // A bound credential reads its own org's row, whatever its status, and
+    // fails closed on a non-active one (MACHINE-1).
+    expect(bound!.sql).not.toContain("order by");
+    // An org-less credential takes the earliest row whatever its status, so a
+    // suspended MEMBERSHIP there stops it rather than moving it to another
+    // tenant. The earliest is decided exactly as on the session path, id
+    // breaking a created_at tie, so it cannot differ from one request to the
+    // next.
+    expect(orgLess!.sql).toMatch(/order by "m"\."created_at" asc, "m"\."id" asc$/);
   });
 });
 

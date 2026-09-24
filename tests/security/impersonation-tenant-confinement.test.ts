@@ -50,7 +50,7 @@ interface MembershipRow extends Record<string, unknown> {
   better_auth_user_id: string;
   organization_id: string;
   status: string;
-  /** Stands in for `created_at asc` (the earliest-membership fallback). */
+  /** Stands in for `created_at` (and the `id` tiebreak) in an ORDER BY. */
   seq: number;
 }
 
@@ -96,6 +96,11 @@ vi.mock("@/lib/auth-guard", () => ({
 /** Applies the recorded `where` tuples to a fixture row (`=` and `in` only). */
 function matches(row: Record<string, unknown>, wheres: unknown[][]): boolean {
   return wheres.every(([rawCol, op, value]) => {
+    // Every fixture ORGANIZATION (`o.status`, F-09) and ACCOUNT (`u.status`)
+    // is active. Those predicates must not be read off the membership row's
+    // own `status`, or a suspended membership would vanish as if its org had
+    // been suspended.
+    if (rawCol === "o.status" || rawCol === "u.status") return value === "active";
     const col = String(rawCol).split(".").pop()!;
     const actual = row[col];
     if (op === "in") return Array.isArray(value) && value.includes(actual);
@@ -103,8 +108,32 @@ function matches(row: Record<string, unknown>, wheres: unknown[][]): boolean {
   });
 }
 
+/**
+ * One recorded `orderBy` term, reduced to a sort key per fixture row. The
+ * resolver ranks with comparisons (`eb => eb("m.status", "=", "active")`,
+ * F-33), so a callback is evaluated against a recording `eb` and scores 1 for
+ * a row the comparison holds for; a plain column (`created_at`, `id`) reads
+ * `seq`.
+ */
+interface OrderTerm {
+  key: (row: Record<string, unknown>) => number;
+  desc: boolean;
+}
+
+function orderTerm(expr: unknown, direction: unknown): OrderTerm {
+  const desc = direction === "desc";
+  if (typeof expr === "function") {
+    const [rawCol, op, value] = expr((...args: unknown[]) => args) as unknown[];
+    if (op !== "=") throw new Error(`unmodelled orderBy comparison ${String(op)}`);
+    const col = String(rawCol).split(".").pop()!;
+    return { key: (row) => (row[col] === value ? 1 : 0), desc };
+  }
+  return { key: (row) => Number(row.seq), desc };
+}
+
 function builderFor(table: string): unknown {
   const wheres: unknown[][] = [];
+  const orders: OrderTerm[] = [];
 
   const rows = (): Record<string, unknown>[] => {
     if (table === "app_users") {
@@ -112,7 +141,15 @@ function builderFor(table: string): unknown {
     }
     if (table.startsWith("app_organization_memberships")) {
       const found = memberships.filter((m) => matches(m, wheres));
-      return [...found].sort((a, b) => a.seq - b.seq);
+      // The recorded ORDER BY, applied in order; `seq` settles what is left,
+      // as an unordered read would return rows in some fixed order too.
+      return [...found].sort((a, b) => {
+        for (const { key, desc } of orders) {
+          const diff = key(a) - key(b);
+          if (diff !== 0) return desc ? -diff : diff;
+        }
+        return a.seq - b.seq;
+      });
     }
     return [];
   };
@@ -128,7 +165,12 @@ function builderFor(table: string): unknown {
             return proxy;
           };
         }
-        // `orderBy("created_at")` is modelled by the `seq` sort in `rows()`.
+        if (prop === "orderBy") {
+          return (expr: unknown, direction?: unknown) => {
+            orders.push(orderTerm(expr, direction));
+            return proxy;
+          };
+        }
         if (prop === "execute") {
           return async () => {
             // The effective-permission UNION (`app_user_roles as ur` ∪ groups),
@@ -156,9 +198,8 @@ function builderFor(table: string): unknown {
                 ? { id: "p-superuser" }
                 : undefined;
             }
-            // `rows()` already returns memberships in `seq` order, which stands
-            // in for `created_at asc`, so the first row is what both the
-            // cookie lookup and the earliest-membership fallback would get.
+            // `rows()` already applies the recorded ORDER BY, so the first row
+            // is what the resolver's `limit 1` would get.
             return rows()[0];
           };
         }
@@ -266,6 +307,29 @@ describe("IMP-1: the active_org cookie cannot steer an impersonated session out 
 
     expect(me.organizationId).toBe(ORG_A);
     expect(me.permissions).not.toContain("admin.roles.update");
+  });
+
+  it("F-33: ranking ACTIVE memberships first never reaches outside the confinement", async () => {
+    // The resolver now prefers an active membership over the one the cookie
+    // names. Here the only org the admin shares with the target is A, and the
+    // target's A membership is SUSPENDED while their B membership (outside
+    // the admin's tenancy) is active. The ranking must choose among the rows
+    // the confinement admits — A alone — and resolve the suspended row, which
+    // every guard refuses; it must never go looking for the active row in B.
+    memberships = memberships.map((m) =>
+      m.app_user_id === TARGET.id && m.organization_id === ORG_A
+        ? { ...m, status: "suspended" }
+        : m,
+    );
+    getCurrentSession.mockResolvedValue(impersonatedSession);
+    cookieValue.mockImplementation((name: string) => (name === "active_org" ? ORG_A : undefined));
+    const { GET } = await import("@/app/api/v1/me/route");
+
+    expect((await GET(meRequest())).status).toBe(403);
+
+    // The control: the target's OWN session, same rows, lands in B (F-33).
+    const own = await resolveMe(ownSession, ORG_A);
+    expect(own.organizationId).toBe(ORG_B);
   });
 
   it("resolves NOTHING when the impersonator shares no tenant with the target", async () => {

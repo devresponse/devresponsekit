@@ -300,11 +300,20 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // is why they use the grant predicate alone; the residual gap there is a
   // group-conferred marker.
   //
-  // `ownerAccess` resolves via the cookie path, so WHICH org the owner resolves
-  // in follows the actor's `active_org`. That is sound only because the
-  // `owner_inactive` 409 above guarantees an active membership resolved at all
-  // (an empty context would make `isSuperadmin` vacuously false) — keep that
-  // check before this one.
+  // `ownerAccess` resolves via the cookie path, ranked as for a session (F-33):
+  // the owner's own ACTIVE membership in the org the actor's `active_org`
+  // names when there is one, otherwise the owner's earliest active membership
+  // (so it is also the org the key is minted in, below). That is sound only
+  // because the `owner_inactive` 409 above guarantees an active membership
+  // resolved at all (an empty context would make `isSuperadmin` vacuously
+  // false) — keep that check before this one. Because the ranking prefers any
+  // active membership, that 409 now means the owner's account is not active or
+  // they are active in no (active) org at all. An owner whose membership in
+  // the actor's org is suspended, blocked or pending but who is active
+  // elsewhere resolves to that other org instead: `canAccessOrg` turns that
+  // into the 404 above for an org admin, and for a superadmin the key is
+  // minted in that other org, as it already was for an owner with no
+  // membership in the actor's org (the audit row names it).
   const ownerRanksAsSuperuser =
     isSuperadmin(ownerAccess) || (await userHoldsSuperuserGrant(owner.id));
   if (ownerOutranksActor(ownerRanksAsSuperuser, guard.access, guard.grantedScopes)) {

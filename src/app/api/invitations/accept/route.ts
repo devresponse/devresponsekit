@@ -1,11 +1,15 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
+import { userHasActiveMembership } from "@/lib/active-org.server";
+import { setActiveOrgCookie } from "@/lib/active-org-cookie";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
 import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession } from "@/lib/auth-guard";
+import { readImpersonatorId } from "@/lib/impersonation";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { consumeInvitation, findValidInvitationByToken } from "@/lib/invitations.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
@@ -40,6 +44,9 @@ export const dynamic = "force-dynamic";
  *     signed-in account, including a self-registered `pending_approval` one,
  *     so this is a token-guessing floor, not an authenticated-actor UX
  *     limit, and an in-memory bucket was per lambda.
+ *   - On success the `active_org` cookie is pinned to the inviting org when
+ *     the caller is now an active member there (F-33, below), so the page's
+ *     navigation to /app lands in the org just joined.
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const origin = checkTrustedOrigin(request);
@@ -130,5 +137,38 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     return adminErrorResponse("invitation_invalid", 404, request);
   }
 
-  return NextResponse.json({ ok: true, organizationId: invitation.organizationId });
+  const response = NextResponse.json({ ok: true, organizationId: invitation.organizationId });
+
+  // F-33 — land the invitee IN the org they just joined. The invite page
+  // navigates to /app on this 200, and without a pin the resolver picks
+  // whatever it would have picked before: the org an existing `active_org`
+  // cookie names, or the user's earliest active membership. A member of org A
+  // accepting an invitation into X would find themselves back in A, with
+  // nothing on screen saying that X was joined or how to get there.
+  //
+  // Pinned under the SAME rules as the two routes that already write the
+  // cookie (`/api/preferences/active-org` and its `/apply` twin):
+  //   - only when the caller now holds an ACTIVE membership in the org
+  //     (`userHasActiveMembership`). A consumed invitation leaves a `blocked`
+  //     or `suspended` membership as it was (an administrator's denial wins),
+  //     and the cookie must never name an org the caller cannot enter;
+  //   - never for an impersonated session: switching tenant is the user's
+  //     own affordance, and the user is not the one at the browser (P0-1);
+  //   - audited as `account.active_organization.changed`, with its source.
+  if (
+    !readImpersonatorId(session) &&
+    (await userHasActiveMembership(appUser.id, invitation.organizationId))
+  ) {
+    await auditEvent({
+      eventType: "account.active_organization.changed",
+      outcome: "success",
+      actorBetterAuthUserId: session.user.id,
+      appUserId: appUser.id,
+      organizationId: invitation.organizationId,
+      request,
+      metadata: { organizationId: invitation.organizationId, source: "invitation_accepted" },
+    });
+    setActiveOrgCookie(response, invitation.organizationId);
+  }
+  return response;
 });

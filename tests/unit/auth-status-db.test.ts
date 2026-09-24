@@ -7,13 +7,19 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  *   - user not provisioned → synthetic pending_approval context
  *   - provisioned with no membership → permissions empty, status preserved
  *   - provisioned with membership + roles → permissions populated
- *   - multi-org: the `active_org` cookie selects the membership, and a stale
- *     cookie falls back to the earliest membership.
+ *   - multi-org (F-33): the session path resolves its membership in ONE ranked
+ *     lookup — an active membership first, then the org the `active_org`
+ *     cookie names, then the earliest — so a stale cookie, or one naming a
+ *     suspended membership, can only lose to an active membership, never
+ *     lock the user out. Which row wins is the database's job: that is pinned
+ *     on live rows in tests/db/active-org-resolution.db.test.ts, and the SQL
+ *     in tests/unit/organization-status-sql.test.ts; here the ranking TERMS
+ *     and their order are pinned.
  */
 
 const userTakeFirst = vi.fn();
-const membershipTakeFirst = vi.fn(); // fallback: …orderBy("created_at").executeTakeFirst()
-const membershipByOrgTakeFirst = vi.fn(); // active-org: …where(org).executeTakeFirst()
+const membershipTakeFirst = vi.fn(); // ranked/earliest: …orderBy(…).executeTakeFirst()
+const membershipByOrgTakeFirst = vi.fn(); // bound org: …where(org).executeTakeFirst()
 const rolesExecute = vi.fn();
 const readActiveOrgId = vi.fn();
 const userIsGlobalSuperuser = vi.fn();
@@ -28,11 +34,34 @@ const betterAuthUserIsGlobalSuperuser = vi.fn();
 const membershipWheres: unknown[][] = [];
 /**
  * One entry per membership LOOKUP (per `selectFrom`), recording its joins and
- * predicates separately, so a test can assert that EACH lookup — the cookie
- * hit, the fallback, the bound-org read — carries the F-09 organization-status
- * predicate, not merely that one of them did.
+ * predicates separately, so a test can assert that EACH lookup — the session
+ * path's ranked lookup, the bound-org read, the org-less credential's — carries
+ * the F-09 organization-status predicate, not merely that one of them did.
  */
-const membershipLookups: { table: string; joins: unknown[][]; wheres: unknown[][] }[] = [];
+const membershipLookups: {
+  table: string;
+  joins: unknown[][];
+  wheres: unknown[][];
+  /**
+   * The ORDER BY terms, in order (F-33). A comparison callback
+   * (`eb => eb("m.status", "=", "active")`) is recorded as the `[col, op,
+   * value]` it builds; a plain column as its name. Each is paired with its
+   * direction.
+   */
+  orders: [unknown, unknown][];
+  limit: unknown;
+}[] = [];
+
+/** The F-33 ranking terms, exactly as the session path must emit them. */
+const ACTIVE_FIRST: [unknown, unknown] = [["m.status", "=", "active"], "desc"];
+const cookieOrgFirst = (orgId: string): [unknown, unknown] => [
+  ["m.organization_id", "=", orgId],
+  "desc",
+];
+const EARLIEST: [unknown, unknown][] = [
+  ["m.created_at", "asc"],
+  ["m.id", "asc"],
+];
 
 vi.mock("@/lib/active-org.server", () => ({
   readActiveOrgId: () => readActiveOrgId(),
@@ -67,8 +96,16 @@ vi.mock("@/db/database", () => ({
         // ran — that is exactly what distinguishes the earliest-membership
         // fallback from the active-org lookup. (Matched by prefix: since F-09
         // the lookup is aliased `as m` to join `app_organizations as o`.)
+        // Since F-33 the session path is ONE ranked lookup, so it always takes
+        // the ordered fake; the unordered one is the bound-org read.
         let ordered = false;
-        const lookup = { table, joins: [] as unknown[][], wheres: [] as unknown[][] };
+        const lookup = {
+          table,
+          joins: [] as unknown[][],
+          wheres: [] as unknown[][],
+          orders: [] as [unknown, unknown][],
+          limit: undefined as unknown,
+        };
         membershipLookups.push(lookup);
         const chain: unknown = new Proxy(
           {},
@@ -78,8 +115,18 @@ vi.mock("@/db/database", () => ({
                 return ordered ? membershipTakeFirst : membershipByOrgTakeFirst;
               }
               if (prop === "orderBy") {
-                return () => {
+                return (expr: unknown, direction: unknown) => {
                   ordered = true;
+                  lookup.orders.push([
+                    typeof expr === "function" ? expr((...a: unknown[]) => a) : expr,
+                    direction,
+                  ]);
+                  return chain;
+                };
+              }
+              if (prop === "limit") {
+                return (n: unknown) => {
+                  lookup.limit = n;
                   return chain;
                 };
               }
@@ -269,7 +316,7 @@ describe("getUserAccessContext (DB-backed)", () => {
       preferred_locale: "en",
     });
     readActiveOrgId.mockResolvedValue("o-cookie");
-    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-cookie", status: "active" });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-cookie", status: "active" });
     rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
 
     const ctx = await getUserAccessContext("ba-1");
@@ -280,25 +327,84 @@ describe("getUserAccessContext (DB-backed)", () => {
     // An active member always carries the baseline `shell.view` (implied by
     // membership), in addition to whatever their roles grant.
     expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
-    // The fallback (earliest-membership) query must NOT run when the cookie hits.
-    expect(membershipTakeFirst).not.toHaveBeenCalled();
+    // ONE lookup makes the choice (F-33); nothing reads a membership by org id.
+    expect(membershipLookups).toHaveLength(1);
+    expect(membershipByOrgTakeFirst).not.toHaveBeenCalled();
   });
 
-  it("falls back to the earliest membership when the cookie names an org the user is not in", async () => {
+  it("F-33: ranks an ACTIVE membership first, the cookie's org second, then the earliest", async () => {
+    // The order of the terms IS the fix. With the cookie term first (or the
+    // status term missing) a cookie naming a suspended membership would win
+    // over the user's active one elsewhere, and every request would resolve
+    // the suspended row: /blocked in every org, for the cookie's one-year life.
     userTakeFirst.mockResolvedValue({
       id: "u-1",
       primary_email: "u@x.com",
       status: "active",
       preferred_locale: "en",
     });
-    readActiveOrgId.mockResolvedValue("o-stale");
-    membershipByOrgTakeFirst.mockResolvedValue(undefined); // not an active member there
+    readActiveOrgId.mockResolvedValue("o-cookie");
     membershipTakeFirst.mockResolvedValue({ organization_id: "o-earliest", status: "active" });
     rolesExecute.mockResolvedValue([]);
 
     const ctx = await getUserAccessContext("ba-1");
-    expect(membershipByOrgTakeFirst).toHaveBeenCalled();
+
+    expect(membershipLookups).toHaveLength(1);
+    expect(membershipLookups[0]!.orders).toEqual([
+      ACTIVE_FIRST,
+      cookieOrgFirst("o-cookie"),
+      ...EARLIEST,
+    ]);
+    expect(membershipLookups[0]!.limit).toBe(1);
+    // A ranking, not a filter: the cookie's org and the membership status are
+    // ORDER BY terms only, so a user whose only memberships are non-active
+    // still resolves one (and is sent to /pending-approval or /blocked).
+    expect(membershipWheres).not.toContainEqual(["m.organization_id", "=", "o-cookie"]);
+    expect(membershipWheres.some((w) => w[0] === "m.status")).toBe(false);
     expect(ctx.organizationId).toBe("o-earliest");
+  });
+
+  it("F-33: with no cookie, ranks an ACTIVE membership first, then the earliest", async () => {
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-active", status: "active" });
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-1");
+
+    expect(membershipLookups).toHaveLength(1);
+    expect(membershipLookups[0]!.orders).toEqual([ACTIVE_FIRST, ...EARLIEST]);
+    expect(ctx.organizationId).toBe("o-active");
+  });
+
+  it("F-33: a non-active membership still resolves when it is the best there is — and is refused", async () => {
+    // The last resort. The ranked lookup returned a suspended row, so the user
+    // holds no active membership in any active org: the context carries it,
+    // and `decideSecureAccess` answers `blocked` (not `pending_approval`, which
+    // is what an empty context would say).
+    userTakeFirst.mockResolvedValue({
+      id: "u-1",
+      primary_email: "u@x.com",
+      status: "active",
+      preferred_locale: "en",
+    });
+    readActiveOrgId.mockResolvedValue("o-suspended-member");
+    membershipTakeFirst.mockResolvedValue({
+      organization_id: "o-suspended-member",
+      status: "suspended",
+    });
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-1");
+
+    expect(ctx.organizationId).toBe("o-suspended-member");
+    expect(ctx.membershipStatus).toBe("suspended");
+    const { decideSecureAccess } = await import("@/lib/auth-status");
+    expect(decideSecureAccess(ctx.status, ctx.membershipStatus)).toBe("blocked");
   });
 
   it("grants the full superuser set to a global superuser even when the active org grants none", async () => {
@@ -455,7 +561,6 @@ describe("getUserAccessContext (DB-backed)", () => {
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-b");
     listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue(["o-a"]);
-    membershipByOrgTakeFirst.mockResolvedValue(undefined); // no row inside the intersection
     membershipTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
     rolesExecute.mockResolvedValue([]);
 
@@ -464,16 +569,15 @@ describe("getUserAccessContext (DB-backed)", () => {
     });
 
     expect(listActiveOrganizationIdsForBetterAuthUser).toHaveBeenCalledWith("ba-admin");
-    // The confinement predicate reached BOTH the cookie lookup and the
-    // earliest-membership fallback — a fallback that skipped it would still
+    // The confinement predicate is in the WHERE of the ONE lookup that makes
+    // the choice (F-33) — there is no second lookup that could skip it and
     // land the session in a foreign tenant.
+    expect(membershipLookups).toHaveLength(1);
     const confinements = membershipWheres.filter((w) => w[1] === "in");
-    expect(confinements).toHaveLength(2);
-    expect(confinements[0]).toEqual(["m.organization_id", "in", ["o-a"]]);
-    expect(confinements[1]).toEqual(["m.organization_id", "in", ["o-a"]]);
-    // …and the cookie's org was still asked for, so this is the confinement
-    // biting rather than the cookie being ignored.
-    expect(membershipWheres).toContainEqual(["m.organization_id", "=", "o-b"]);
+    expect(confinements).toEqual([["m.organization_id", "in", ["o-a"]]]);
+    // …and the cookie's org was still asked for (as a ranking term), so this
+    // is the confinement biting rather than the cookie being ignored.
+    expect(membershipLookups[0]!.orders).toContainEqual(cookieOrgFirst("o-b"));
     expect(ctx.organizationId).toBe("o-a");
   });
 
@@ -484,7 +588,7 @@ describe("getUserAccessContext (DB-backed)", () => {
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-a");
     listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue(["o-a", "o-c"]);
-    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-a", status: "active" });
     rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
 
     const ctx = await getUserAccessContext("ba-target", undefined, {
@@ -493,7 +597,8 @@ describe("getUserAccessContext (DB-backed)", () => {
 
     expect(ctx.organizationId).toBe("o-a");
     expect(ctx.permissions).toEqual(["admin.users.read", "shell.view"]);
-    expect(membershipTakeFirst).not.toHaveBeenCalled();
+    expect(membershipLookups).toHaveLength(1);
+    expect(membershipLookups[0]!.orders).toContainEqual(cookieOrgFirst("o-a"));
     // A borrowed cookie session is NOT a bearer credential, so it keeps the
     // unbound marker — the confinement is a membership rule, not MACHINE-2.
     expect(ctx.orgBound).toBe(false);
@@ -531,7 +636,7 @@ describe("getUserAccessContext (DB-backed)", () => {
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-customer");
     betterAuthUserIsGlobalSuperuser.mockResolvedValue(true);
-    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-customer", status: "active" });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-customer", status: "active" });
     rolesExecute.mockResolvedValue([{ key: "admin.users.read" }]);
 
     const ctx = await getUserAccessContext("ba-target", undefined, {
@@ -567,7 +672,7 @@ describe("getUserAccessContext (DB-backed)", () => {
   it("IMP-1: a NON-impersonated session is untouched — no confinement lookup, no predicate", async () => {
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-b");
-    membershipByOrgTakeFirst.mockResolvedValue({ organization_id: "o-b", status: "active" });
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-b", status: "active" });
     rolesExecute.mockResolvedValue([]);
 
     const ctx = await getUserAccessContext("ba-target");
@@ -597,33 +702,33 @@ describe("getUserAccessContext (DB-backed)", () => {
     }
   }
 
-  it("F-09 cookie path: a cookie naming a SUSPENDED org falls through to the earliest ACTIVE-org membership — both lookups require o.status = 'active'", async () => {
+  it("F-09 cookie path: a cookie naming a SUSPENDED org falls through to an ACTIVE-org membership — the lookup requires o.status = 'active'", async () => {
     // A member of a suspended tenant and an active one, with the cookie still
-    // pointing at the suspended tenant. The cookie lookup finds nothing because
-    // its query requires an active org; the fallback lands in the active one.
+    // pointing at the suspended tenant. The suspended tenant's row is not a
+    // candidate at all, because the lookup's WHERE requires an active org —
+    // the cookie only ranks what the WHERE admits — so it lands in the
+    // active one.
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-suspended");
-    membershipByOrgTakeFirst.mockResolvedValue(undefined);
     membershipTakeFirst.mockResolvedValue({ organization_id: "o-active", status: "active" });
     rolesExecute.mockResolvedValue([]);
 
     const ctx = await getUserAccessContext("ba-target");
 
-    expectEveryLookupRequiresAnActiveOrg(2);
-    expect(membershipWheres).toContainEqual(["m.organization_id", "=", "o-suspended"]);
+    expectEveryLookupRequiresAnActiveOrg(1);
+    expect(membershipLookups[0]!.orders).toContainEqual(cookieOrgFirst("o-suspended"));
     expect(ctx.organizationId).toBe("o-active");
   });
 
   it("F-09 cookie path: a member of ONLY non-active orgs resolves to no membership and is refused — and no superuser grant can promote that context", async () => {
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-suspended");
-    membershipByOrgTakeFirst.mockResolvedValue(undefined);
     membershipTakeFirst.mockResolvedValue(undefined);
     userIsGlobalSuperuser.mockResolvedValue(true);
 
     const ctx = await getUserAccessContext("ba-target");
 
-    expectEveryLookupRequiresAnActiveOrg(2);
+    expectEveryLookupRequiresAnActiveOrg(1);
     expect(ctx.organizationId).toBeNull();
     expect(ctx.membershipStatus).toBeNull();
     expect(ctx.permissions).toEqual([]);
@@ -662,16 +767,33 @@ describe("getUserAccessContext (DB-backed)", () => {
     expect(ctx.organizationId).toBe("o-active");
   });
 
+  it("F-33 key/JWT path: an ORG-LESS credential is NOT re-ranked onto an active membership", async () => {
+    // Deliberate. A non-active earliest MEMBERSHIP must stop the credential (as
+    // a non-active bound one does), not move it into another tenant that never
+    // saw it act. Only the status ranking is withheld: the earliest still
+    // breaks a created_at tie by id, exactly as the session path does.
+    userTakeFirst.mockResolvedValue(ACTIVE_USER);
+    membershipTakeFirst.mockResolvedValue({ organization_id: "o-earliest", status: "suspended" });
+    rolesExecute.mockResolvedValue([]);
+
+    const ctx = await getUserAccessContext("ba-target", { organizationId: null });
+
+    expect(membershipLookups).toHaveLength(1);
+    expect(membershipLookups[0]!.orders).toEqual(EARLIEST);
+    expect(ctx.organizationId).toBe("o-earliest");
+    const { decideSecureAccess } = await import("@/lib/auth-status");
+    expect(decideSecureAccess(ctx.status, ctx.membershipStatus)).toBe("blocked");
+  });
+
   it("F-09 impersonation: the confined lookups carry the organization predicate alongside the confinement", async () => {
     userTakeFirst.mockResolvedValue(ACTIVE_USER);
     readActiveOrgId.mockResolvedValue("o-a");
     listActiveOrganizationIdsForBetterAuthUser.mockResolvedValue(["o-a"]);
-    membershipByOrgTakeFirst.mockResolvedValue(undefined);
     membershipTakeFirst.mockResolvedValue(undefined);
 
     await getUserAccessContext("ba-target", undefined, { betterAuthUserId: "ba-admin" });
 
-    expectEveryLookupRequiresAnActiveOrg(2);
+    expectEveryLookupRequiresAnActiveOrg(1);
     for (const lookup of membershipLookups) {
       expect(lookup.wheres).toContainEqual(["m.organization_id", "in", ["o-a"]]);
     }

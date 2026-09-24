@@ -139,3 +139,125 @@ describe("validateToolArguments (review #54)", () => {
     expect(pathParamRejection("id", "key_abc-123")).toBeNull();
   });
 });
+
+/**
+ * Array (repeatable) query parameters and `enum`s (F-34). The gateway sent
+ * `["blocked", "suspended"]` as ONE comma-joined value, and validated only
+ * that the argument was an array: `["bogus"]` passed, v1 dropped the unknown
+ * status, and the agent got every user back as "the blocked ones".
+ */
+describe("validateToolArguments — arrays and enums (F-34)", () => {
+  const listUsers = byName("listUsers")!;
+  const listAuditEvents = byName("listAuditEvents")!;
+  const listApiKeys = byName("listApiKeys")!;
+  const createUser = byName("createUser")!;
+
+  it("publishes each list's sort directives and filter vocabulary from the route contract", () => {
+    const props = listUsers.inputSchema.properties as Record<
+      string,
+      { items?: { enum?: string[] } }
+    >;
+    expect(props["filter[status]"]?.items?.enum).toEqual([
+      "active",
+      "pending_approval",
+      "blocked",
+      "suspended",
+      "deactivated",
+    ]);
+    expect(props.sort?.items?.enum).toEqual(
+      expect.arrayContaining(["created_at.desc", "status.asc", "primary_email.desc"]),
+    );
+    const audit = listAuditEvents.inputSchema.properties as Record<
+      string,
+      { items?: { enum?: string[] } }
+    >;
+    expect(audit["filter[outcome]"]?.items?.enum).toEqual([
+      "success",
+      "denied",
+      "error",
+      "failure",
+    ]);
+    expect(audit["filter[event_type]"]?.items?.enum).toBeUndefined();
+  });
+
+  it("accepts several valid values for a repeatable parameter", () => {
+    expect(
+      validateToolArguments(listUsers, {
+        "filter[status]": ["blocked", "suspended"],
+        sort: ["created_at.desc", "status.asc"],
+      }),
+    ).toBeNull();
+    expect(
+      validateToolArguments(listAuditEvents, {
+        "filter[outcome]": ["denied", "error"],
+        "filter[event_type]": ["admin.user.created", "anything, with a comma"],
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses an array item outside the enum, or of the wrong type", () => {
+    expect(validateToolArguments(listUsers, { "filter[status]": ["bogus"] })).toBe(
+      "Each item of argument `filter[status]` must be one of: active, pending_approval, blocked, suspended, deactivated.",
+    );
+    // The comma-joined form an agent might try is not a status either.
+    expect(validateToolArguments(listUsers, { "filter[status]": ["blocked,suspended"] })).toMatch(
+      /must be one of/,
+    );
+    expect(validateToolArguments(listUsers, { sort: ["created_at.down"] })).toMatch(
+      /Each item of argument `sort` must be one of: created_at\.asc, created_at\.desc/,
+    );
+    expect(validateToolArguments(listAuditEvents, { "filter[event_type]": [5] })).toBe(
+      "Each item of argument `filter[event_type]` must be of type string.",
+    );
+    expect(validateToolArguments(listAuditEvents, { "filter[event_type]": [{ a: 1 }] })).toBe(
+      "Each item of argument `filter[event_type]` must be a string, number or boolean.",
+    );
+  });
+
+  it("refuses a scalar outside its enum (query and body alike)", () => {
+    expect(validateToolArguments(listApiKeys, { status: "bogus" })).toBe(
+      "Argument `status` must be one of: active, revoked.",
+    );
+    expect(validateToolArguments(listApiKeys, { status: "revoked" })).toBeNull();
+    expect(
+      validateToolArguments(createUser, { email: "a@b.test", password: "x", role: "root" }),
+    ).toBe("Argument `role` must be one of: admin, user.");
+  });
+
+  it("offers only explicit sort directions, and its description does not invite a bare field", () => {
+    // The description used to say "A bare field name sorts ascending" next to
+    // an enum without bare names, so an agent following it got -32602.
+    for (const tool of [listUsers, listAuditEvents]) {
+      const sort = (
+        tool.inputSchema.properties as Record<
+          string,
+          { description?: string; items?: { enum?: string[] } }
+        >
+      ).sort!;
+      expect(sort.description, tool.name).not.toMatch(/bare/i);
+      expect(
+        sort.items?.enum?.every((v) => /\.(asc|desc)$/.test(v)),
+        tool.name,
+      ).toBe(true);
+    }
+    expect(validateToolArguments(listUsers, { sort: ["status"] })).toMatch(/must be one of/);
+  });
+
+  it("refuses an empty string for an enum argument instead of reading it as absent", () => {
+    // Pinned choice: "" is a value like any other. Dispatch sends it as-is, so
+    // a non-enum one (`appUserId: ""`) reaches v1, which answers 400 exactly
+    // as it would a raw `?appUserId=` (see mcp-route.test.ts).
+    expect(validateToolArguments(listApiKeys, { status: "" })).toBe(
+      "Argument `status` must be one of: active, revoked.",
+    );
+  });
+
+  it("says in the description when a header parameter cannot be sent", () => {
+    const setUserStatus = byName("setUserStatus")!;
+    expect(setUserStatus.description).toContain(
+      "The `If-Match` header cannot be sent through this tool; the call is made without it.",
+    );
+    expect(setUserStatus.inputSchema.properties).not.toHaveProperty("If-Match");
+    expect(listUsers.description).not.toContain("header");
+  });
+});

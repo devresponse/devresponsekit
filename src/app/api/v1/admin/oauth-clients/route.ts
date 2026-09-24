@@ -13,9 +13,10 @@ import {
   userHasMembershipInOrg,
   userHoldsSuperuserGrant,
 } from "@/lib/admin/access-scope.server";
-import { offsetFor, parseListQuery } from "@/lib/admin/list-query.server";
+import { offsetFor, parseListQueryStrict } from "@/lib/admin/list-query.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { parseCredentialStatusParam, V1_CREDENTIAL_LIST } from "@/lib/api-auth/v1-list-contract";
 import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -31,13 +32,32 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
   // review #47 (sibling of the api-keys listing): same shared list-query
   // parser, so `page`/`pageSize` are integer-parsed and clamped instead of
   // reaching the SQL LIMIT/OFFSET as a fraction or an overflowed float.
-  const query = parseListQuery(sp, {
-    allowedSortFields: [],
+  //
+  // F-34: parsed strictly, as on the api-keys listing. A `sort`, `q` or
+  // `filter[…]` (none of which this listing takes) and an unknown or repeated
+  // `status` are 400s instead of being ignored, which listed every client.
+  const parsed = parseListQueryStrict(sp, {
+    allowedSortFields: V1_CREDENTIAL_LIST.sortFields,
+    search: V1_CREDENTIAL_LIST.search,
+    filters: V1_CREDENTIAL_LIST.filters,
     maxPageSize: 200,
     defaultPageSize: 25,
   });
+  if (!parsed.ok) {
+    return problemResponse("invalid_request", 400, request, {
+      requestId: guard.grant.requestId,
+      detail: parsed.detail,
+    });
+  }
+  const { query } = parsed;
   const { page, pageSize } = query;
-  const status = sp.get("status");
+  const status = parseCredentialStatusParam(sp);
+  if (!status.ok) {
+    return problemResponse("invalid_request", 400, request, {
+      requestId: guard.grant.requestId,
+      detail: status.detail,
+    });
+  }
 
   // Org boundary (ADR-0001): org admin → their org only; superadmin → all.
   const scope = resolveOrgScope(guard.grant.caller.access);
@@ -46,7 +66,7 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
   const { items, total } = await listOauthClients({
     limit: pageSize,
     offset: offsetFor(query),
-    status: status === "active" || status === "revoked" ? status : undefined,
+    status: status.status,
     organizationId: scope.kind === "org" ? scope.organizationId : undefined,
   });
 

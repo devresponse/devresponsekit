@@ -84,7 +84,23 @@ async function dispatch(
   }
   for (const name of tool.queryParams) {
     const value = args[name];
-    if (value !== undefined && value !== "") url.searchParams.set(name, String(value));
+    // An empty string is a value, sent as `name=`, so v1 answers it exactly
+    // as it would a raw call (F-34). It used to be skipped, which read
+    // `listApiKeys {appUserId: ""}` as "no filter" and listed every key, while
+    // `{status: ""}` is refused by the enum check: v1 400s both.
+    if (value === undefined) continue;
+    // An array is ONE PARAMETER PER VALUE: the `explode: true` form the spec
+    // declares for `sort` and every `filter[…]` (F-34). `String(array)` joined
+    // the values with commas into a single one, which v1 read as one literal:
+    // `filter[status]=blocked,suspended` was dropped and listed EVERY user,
+    // `filter[outcome]=denied,error` matched no row, and
+    // `sort=created_at.desc,status.asc` came back ascending with the second
+    // key gone. Validation has already held each item to a scalar.
+    if (Array.isArray(value)) {
+      for (const item of value) url.searchParams.append(name, String(item));
+    } else {
+      url.searchParams.set(name, String(value));
+    }
   }
 
   const headers: Record<string, string> = {};

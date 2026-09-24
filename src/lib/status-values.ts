@@ -35,3 +35,13 @@ export const MEMBERSHIP_STATUS_VALUES = [
 
 /** `app_api_keys.status` and `app_oauth_clients.status`. */
 export const CREDENTIAL_STATUS_VALUES = ["active", "revoked"] as const;
+
+/**
+ * `app_audit_events.outcome` — the one vocabulary here with NO CHECK
+ * constraint (the column is free text, so it is not in the 0005 sync test).
+ * The writer's `AuditOutcome` type (`audit.server.ts`) is derived from it,
+ * so every row the app writes carries one of these; `GET /api/v1/audit-events`
+ * validates `filter[outcome]` against the same list (F-34). Meanings:
+ * docs/admin-manager.md §12.
+ */
+export const AUDIT_OUTCOME_VALUES = ["success", "denied", "error", "failure"] as const;

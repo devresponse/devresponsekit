@@ -14,6 +14,13 @@
  */
 import { locales } from "@/config/i18n-config";
 import { ACCOUNT_SCOPES, API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
+import {
+  V1_AUDIT_EVENTS_LIST,
+  V1_CREDENTIAL_LIST,
+  V1_USERS_LIST,
+  type V1ListContract,
+} from "@/lib/api-auth/v1-list-contract";
+import { APP_USER_STATUS_VALUES, CREDENTIAL_STATUS_VALUES } from "@/lib/status-values";
 import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 
 type Obj = Record<string, unknown>;
@@ -49,8 +56,8 @@ const uuid = (): Obj => ({ type: "string", format: "uuid" });
 const nullableString = (): Obj => ({ type: ["string", "null"] });
 const stringArray = (): Obj => ({ type: "array", items: { type: "string" } });
 
-const USER_STATUS = ["active", "pending_approval", "blocked", "suspended", "deactivated"];
-const CREDENTIAL_STATUS = ["active", "revoked"];
+const USER_STATUS = [...APP_USER_STATUS_VALUES];
+const CREDENTIAL_STATUS = [...CREDENTIAL_STATUS_VALUES];
 
 export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
   const scopeMap = Object.fromEntries(API_SCOPE_CATALOG.map((s) => [s, s]));
@@ -110,15 +117,6 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           required: false,
           schema: { type: "integer", minimum: 1, maximum: 200, default: 25 },
           description: "Rows per page (clamped to 1–200).",
-        },
-        Sort: {
-          name: "sort",
-          in: "query",
-          required: false,
-          explode: true,
-          style: "form",
-          schema: { type: "array", items: { type: "string" } },
-          description: "Sort directives as `field.asc` / `field.desc`, applied in order.",
         },
         Q: {
           name: "q",
@@ -559,15 +557,11 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           tags: ["Users"],
           summary: "List users",
           security: [{ bearerAuth: ["admin.users.read"] }],
-          parameters: [
-            paramRef("Page"),
-            paramRef("PageSize"),
-            paramRef("Sort"),
-            paramRef("Q"),
-            filterParam("filter[status]", USER_STATUS),
-          ],
+          parameters: [paramRef("Page"), paramRef("PageSize"), ...listParams(V1_USERS_LIST)],
           responses: {
             "200": { description: "OK", ...json(ref("UserList")) },
+            // F-34: an unknown sort, filter or filter value is refused, not dropped.
+            "400": errRef("BadRequest"),
             "401": errRef("Unauthorized"),
             "403": errRef("Forbidden"),
           },
@@ -641,15 +635,10 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           tags: ["Audit"],
           summary: "Read the audit log",
           security: [{ bearerAuth: ["admin.audit.read"] }],
-          parameters: [
-            paramRef("Page"),
-            paramRef("PageSize"),
-            paramRef("Sort"),
-            filterParam("filter[event_type]"),
-            filterParam("filter[outcome]"),
-          ],
+          parameters: [paramRef("Page"), paramRef("PageSize"), ...listParams(V1_AUDIT_EVENTS_LIST)],
           responses: {
             "200": { description: "OK", ...json(ref("AuditEventList")) },
+            "400": errRef("BadRequest"),
             "401": errRef("Unauthorized"),
             "403": errRef("Forbidden"),
           },
@@ -664,6 +653,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           parameters: [
             paramRef("Page"),
             paramRef("PageSize"),
+            // No `sort`, `q` or `filter[…]`: the contract is empty, and the
+            // route refuses each one (F-34).
+            ...listParams(V1_CREDENTIAL_LIST),
             {
               name: "status",
               in: "query",
@@ -675,7 +667,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           responses: {
             "200": { description: "OK", ...json(ref("ApiKeyAdminList")) },
             // review #47: a non-UUID `appUserId` is now a 400 problem instead
-            // of a Postgres 22P02 surfacing as a 500.
+            // of a Postgres 22P02 surfacing as a 500. F-34: so is an unknown or
+            // repeated `status`, a repeated `appUserId`, and any `sort`, `q` or
+            // `filter[…]`.
             "400": errRef("BadRequest"),
             "401": errRef("Unauthorized"),
             "403": errRef("Forbidden"),
@@ -706,6 +700,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           parameters: [
             paramRef("Page"),
             paramRef("PageSize"),
+            // No `sort`, `q` or `filter[…]`: the contract is empty, and the
+            // route refuses each one (F-34).
+            ...listParams(V1_CREDENTIAL_LIST),
             {
               name: "status",
               in: "query",
@@ -715,6 +712,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           ],
           responses: {
             "200": { description: "OK", ...json(ref("OAuthClientList")) },
+            // F-34: an unknown or repeated `status`, and any `sort`, `q` or
+            // `filter[…]`, is refused, not ignored.
+            "400": errRef("BadRequest"),
             "401": errRef("Unauthorized"),
             "403": errRef("Forbidden"),
           },
@@ -825,17 +825,65 @@ function pathId(): Obj {
   return { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } };
 }
 
-/** A `filter[…]` query parameter; repeatable so a generated client can pass
- * one or many values. */
-function filterParam(name: string, enumValues?: string[]): Obj {
-  const itemSchema: Obj = enumValues ? { type: "string", enum: enumValues } : { type: "string" };
+/**
+ * The `sort`, `q` and `filter[…]` parameters a list declares, in that order,
+ * from the route's own contract (F-34): exactly what `parseListQueryStrict`
+ * accepts, and nothing it would refuse.
+ */
+function listParams(contract: V1ListContract): Obj[] {
+  return [
+    ...(contract.sortFields.length > 0 ? [sortParam(contract)] : []),
+    ...(contract.search ? [paramRef("Q")] : []),
+    ...filterParams(contract),
+  ];
+}
+
+/**
+ * A list's `sort` parameter, its directives enumerated from the route's own
+ * contract (F-34). Declared per operation rather than as one shared component
+ * so the `enum` names the fields THIS list sorts on: a generated client and
+ * the MCP tool derived from it can then only offer what the route accepts.
+ */
+function sortParam(contract: V1ListContract): Obj {
   return {
-    name,
+    name: "sort",
     in: "query",
     required: false,
     explode: true,
     style: "form",
-    schema: { type: "array", items: itemSchema },
-    description: "Exact-match filter; repeat the parameter for multiple values.",
+    schema: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: contract.sortFields.flatMap((field) => [`${field}.asc`, `${field}.desc`]),
+      },
+    },
+    description:
+      "Sort directives, applied in order; repeat the parameter for each one (a comma is not a " +
+      "separator). An unlisted field, or a direction other than `asc` / `desc`, is a `400`.",
   };
+}
+
+/**
+ * A list's `filter[…]` query parameters, from the route's own contract. Each
+ * is repeatable (`explode: true`): the route matches rows holding ANY of the
+ * values, and refuses what it cannot apply rather than dropping it (F-34).
+ */
+function filterParams(contract: V1ListContract): Obj[] {
+  return Object.entries(contract.filters).map(([name, { values }]) => ({
+    name: `filter[${name}]`,
+    in: "query",
+    required: false,
+    explode: true,
+    style: "form",
+    schema: {
+      type: "array",
+      items: values ? { type: "string", enum: [...values] } : { type: "string" },
+    },
+    description:
+      "Exact-match filter; repeat the parameter for multiple values (a row matching any of them " +
+      "is returned). A comma is part of the value, not a separator. An empty value" +
+      `${values ? ", a value outside the `enum`," : ""} or a \`filter[…]\` this operation does ` +
+      "not list is a `400`.",
+  }));
 }

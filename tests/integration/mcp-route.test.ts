@@ -507,6 +507,71 @@ describe("/api/mcp", () => {
     });
   });
 
+  /**
+   * Array (repeatable) query arguments (F-34). They were sent as ONE
+   * comma-joined value — `?filter%5Bstatus%5D=blocked%2Csuspended` — which
+   * v1 cannot read as two statuses: it dropped the filter and listed every
+   * user. The spec declares `explode: true`, i.e. one parameter per value.
+   */
+  describe("tools/call array arguments (F-34)", () => {
+    const callTool = (name: string, args: Record<string, unknown>) =>
+      POST(
+        post({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name, arguments: args } }),
+      );
+
+    it("sends one query parameter per array value, in order", async () => {
+      const body = await (
+        await callTool("listUsers", {
+          "filter[status]": ["blocked", "suspended"],
+          sort: ["created_at.desc", "status.asc"],
+          page: 2,
+        })
+      ).json();
+      expect(body.error).toBeUndefined();
+      const url = new URL(String(fetchMock.mock.calls[0]![0]));
+      expect(url.pathname).toBe("/api/v1/users");
+      expect(url.searchParams.getAll("filter[status]")).toEqual(["blocked", "suspended"]);
+      expect(url.searchParams.getAll("sort")).toEqual(["created_at.desc", "status.asc"]);
+      expect(url.searchParams.get("page")).toBe("2");
+      expect(url.search).not.toContain("%2C");
+    });
+
+    it("sends nothing for an empty array", async () => {
+      await callTool("listAuditEvents", { "filter[outcome]": [] });
+      const url = new URL(String(fetchMock.mock.calls[0]![0]));
+      expect(url.searchParams.has("filter[outcome]")).toBe(false);
+    });
+
+    it("sends an empty string as an empty value, so v1 answers it as it would a raw call", async () => {
+      // It used to be skipped: `listApiKeys {appUserId: ""}` listed EVERY key,
+      // while `{status: ""}` is refused by the enum check. v1 refuses both
+      // `?appUserId=` and `?status=` with a 400, and now so does the tool.
+      const body = await (await callTool("listApiKeys", { appUserId: "" })).json();
+      expect(body.error).toBeUndefined();
+      const url = new URL(String(fetchMock.mock.calls[0]![0]));
+      expect(url.pathname).toBe("/api/v1/admin/api-keys");
+      expect(url.searchParams.getAll("appUserId")).toEqual([""]);
+
+      fetchMock.mockClear();
+      const refused = await (await callTool("listApiKeys", { status: "" })).json();
+      expect(refused.error?.code).toBe(-32602);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses a value outside the published enum with -32602, before any API call", async () => {
+      for (const args of [
+        { "filter[status]": ["bogus"] },
+        { "filter[status]": ["blocked,suspended"] },
+        { sort: ["created_at.desc,status.asc"] },
+      ]) {
+        const body = await (await callTool("listUsers", args)).json();
+        expect(body.error?.code, JSON.stringify(args)).toBe(-32602);
+        expect(body.error.message).toContain("must be one of");
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   /** JSON-RPC + Streamable-HTTP conformance (review #205). */
   describe("protocol conformance (review #205)", () => {
     it("400s a body whose `jsonrpc` is missing or wrong, answering with id null", async () => {

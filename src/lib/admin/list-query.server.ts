@@ -17,6 +17,12 @@ import { sql, type SelectQueryBuilder, type SqlBool } from "kysely";
  *     columns gets a safe empty result, not an ORDER-BY/WHERE injection or an
  *     error oracle. (audit #7 — the prior "reject" wording overstated this;
  *     the behavior is a silent allow-list drop, as each option's doc notes.)
+ *   - The versioned `/api/v1` surface cannot drop silently: a dropped filter
+ *     widens the answer to every row, and its callers (integrations, MCP
+ *     agents) act on the result without a human looking at the grid. It
+ *     parses through {@link parseListQueryStrict}, which answers the same
+ *     inputs with a 400 instead (F-34). The allow-lists are published in the
+ *     OpenAPI document, so naming them is no oracle.
  */
 
 export interface SortSpec {
@@ -79,8 +85,9 @@ export function likeContains(term: string): string {
  *   - `pageSize` defaults to {@link ParseListQueryOptions.defaultPageSize}
  *     (or 25), clamped to `[1, maxPageSize]`.
  *   - `sort` accepts repeated `field.dir` values (e.g. `created_at.desc`
- *     — dot, not colon; see the separator note below); unknown fields are
- *     dropped, invalid directions fall back to `asc`.
+ *     — dot, not colon; see the separator note below); a bare `field` sorts
+ *     ascending. Unknown fields are dropped, and so is a value whose
+ *     direction is not exactly `asc` / `desc` ({@link parseSortDirective}).
  *   - `q` is trimmed; empty becomes `null`.
  *   - `filter[<name>]=v` becomes `filters[name]=v`. Repeated values
  *     become an array. `filter[name][from]` / `[to]` produce a range.
@@ -102,13 +109,12 @@ export function parseListQuery(params: URLSearchParams, options: ParseListQueryO
 
   const sort: SortSpec[] = [];
   for (const raw of params.getAll("sort")) {
-    // Separator MUST stay in sync with the client (`use-grid-state.ts`).
-    // We use "." instead of ":" because URLSearchParams encodes colons
-    // to `%3A`, which makes bookmarked URLs hard to read.
-    const [field, dirRaw] = raw.split(".");
-    if (!field || !allowedSort.has(field)) continue;
-    const direction: "asc" | "desc" = dirRaw === "desc" ? "desc" : "asc";
-    sort.push({ field, direction });
+    const directive = parseSortDirective(raw);
+    // A malformed directive is dropped like an unknown field, never read as
+    // `asc`: that turned a comma-joined `created_at.desc,status.asc` into an
+    // ASCENDING sort with the second key gone (F-34).
+    if (!directive || !allowedSort.has(directive.field)) continue;
+    sort.push(directive);
   }
   const finalSort = sort.length > 0 ? sort : (options.defaultSort ?? []);
 
@@ -147,6 +153,164 @@ export function parseListQuery(params: URLSearchParams, options: ParseListQueryO
   }
 
   return { page, pageSize, sort: finalSort, q, filters };
+}
+
+/**
+ * One `sort` value as a {@link SortSpec}: `field`, `field.asc` or
+ * `field.desc`, else null.
+ *
+ * The separator MUST stay in sync with the client (`use-grid-state.ts`). We
+ * use "." instead of ":" because URLSearchParams encodes colons to `%3A`,
+ * which makes bookmarked URLs hard to read.
+ *
+ * The direction is everything after the FIRST dot and must be exactly `asc`
+ * or `desc` (F-34). It used to be the second `.`-segment with anything but
+ * `desc` read as `asc`, so `created_at.desc,status.asc` (one value, the form
+ * the MCP gateway sent for two directives) parsed as `created_at` ascending.
+ */
+function parseSortDirective(raw: string): SortSpec | null {
+  const dot = raw.indexOf(".");
+  const field = dot === -1 ? raw : raw.slice(0, dot);
+  const direction = dot === -1 ? "asc" : raw.slice(dot + 1);
+  if (field.length === 0 || (direction !== "asc" && direction !== "desc")) return null;
+  return { field, direction };
+}
+
+/** How {@link parseListQueryStrict} checks one `filter[<name>]` parameter. */
+export interface StrictFilterSpec {
+  /** The closed vocabulary (the OpenAPI `enum`). Omit for a free-text exact match. */
+  values?: ReadonlyArray<string>;
+}
+
+export interface ParseListQueryStrictOptions extends Omit<ParseListQueryOptions, "allowedFilters"> {
+  /** The supported `filter[<name>]` parameters, by name. Any other one is a 400. */
+  filters?: Readonly<Record<string, StrictFilterSpec>>;
+  /** Whether the endpoint applies `q`. Required: on `false`, any `q` is a 400. */
+  search: boolean;
+}
+
+/** A strictly parsed query: each filter is the list of values it matches (`in`). */
+export interface StrictListQuery extends ListQuery {
+  filters: Record<string, string[]>;
+}
+
+export type StrictListQueryResult =
+  { ok: true; query: StrictListQuery } | { ok: false; detail: string };
+
+/**
+ * The `/api/v1` list-query parser (F-34): {@link parseListQuery}'s contract,
+ * except that nothing the caller asked for is dropped. Each of these is a
+ * failure whose `detail` the route returns as a `400 invalid_request`:
+ *
+ *   - a `sort` value that is not `field`, `field.asc` or `field.desc`, or
+ *     names a field outside `allowedSortFields` (so ANY `sort`, when the
+ *     list declares no sort field);
+ *   - a `filter[<name>]` not declared in `filters` (including the
+ *     `[from]` / `[to]` range form, which no v1 filter supports);
+ *   - an empty filter value, or one outside the filter's `values`;
+ *   - a `q` on a list that does not search (`search: false`), even empty;
+ *   - a `page`, `pageSize` or `q` given more than once.
+ *
+ * The lenient parser drops every one of these (a repeated scalar keeps its
+ * first value), and for a filter or `q` that widens the answer:
+ * `filter[status]=bogus` listed ALL users, and `filter[status]=revoked` on
+ * the credential listings, which filter on nothing, listed every credential.
+ * An integration or an MCP agent acts on that result as if it were the one it
+ * asked for.
+ *
+ * A bare `field` still sorts ascending, as it always has on v1, but the
+ * OpenAPI `enum` publishes only `field.asc` / `field.desc` and the 400 detail
+ * names only those: the explicit form is the contract.
+ *
+ * Multiple values are repeated parameters, as the OpenAPI document declares
+ * (`explode: true`). A comma is part of a value, never a separator:
+ * `filter[status]=blocked,suspended` names no status and is a 400, not two
+ * statuses. Splitting would guess at a form v1 never documented, and a
+ * free-text filter (`event_type`) cannot tell a separator from a comma in
+ * the value it matches. The detail says to repeat the parameter.
+ *
+ * `page`, `pageSize` and `q` keep the shared clamping (review #47). A column
+ * repeated in `sort` is kept at its first occurrence: a later key on a column
+ * already ordered by cannot change the order.
+ */
+export function parseListQueryStrict(
+  params: URLSearchParams,
+  options: ParseListQueryStrictOptions,
+): StrictListQueryResult {
+  const specs = options.filters ?? {};
+  const filterNames = Object.keys(specs);
+  const base = parseListQuery(params, { ...options, allowedFilters: filterNames });
+
+  for (const name of ["page", "pageSize", "q"]) {
+    if (params.getAll(name).length > 1) {
+      return { ok: false, detail: `\`${name}\` is a single value and cannot be repeated.` };
+    }
+  }
+  if (!options.search && params.has("q")) {
+    return { ok: false, detail: "This endpoint does not accept `q`." };
+  }
+
+  const allowedSort = new Set(options.allowedSortFields);
+  const sort: SortSpec[] = [];
+  const sortedFields = new Set<string>();
+  for (const raw of params.getAll("sort")) {
+    if (allowedSort.size === 0) {
+      return { ok: false, detail: "This endpoint does not accept `sort`." };
+    }
+    const directive = parseSortDirective(raw);
+    if (!directive || !allowedSort.has(directive.field)) {
+      return {
+        ok: false,
+        detail:
+          `Each \`sort\` value is \`<field>.asc\` or \`<field>.desc\`, where \`<field>\` is one of: ` +
+          `${options.allowedSortFields.join(", ")}.${commaHint(raw)}`,
+      };
+    }
+    if (sortedFields.has(directive.field)) continue;
+    sortedFields.add(directive.field);
+    sort.push(directive);
+  }
+
+  const filters: Record<string, string[]> = {};
+  for (const [key, value] of params.entries()) {
+    if (!key.startsWith("filter[")) continue;
+    const name = /^filter\[([^\]]+)\]$/.exec(key)?.[1];
+    const spec = name !== undefined && Object.hasOwn(specs, name) ? specs[name] : undefined;
+    if (name === undefined || spec === undefined) {
+      if (filterNames.length === 0) {
+        return { ok: false, detail: "This endpoint does not accept `filter[…]` parameters." };
+      }
+      const supported = filterNames.map((n) => `filter[${n}]`).join(", ");
+      return {
+        ok: false,
+        detail: `Unsupported filter parameter. This endpoint filters on: ${supported}.`,
+      };
+    }
+    if (value.length === 0) {
+      return { ok: false, detail: `\`filter[${name}]\` must not be empty.` };
+    }
+    if (spec.values && !spec.values.includes(value)) {
+      return {
+        ok: false,
+        detail:
+          `Each \`filter[${name}]\` value is one of: ${spec.values.join(", ")}.` + commaHint(value),
+      };
+    }
+    const values = (filters[name] ??= []);
+    if (!values.includes(value)) values.push(value);
+  }
+
+  return {
+    ok: true,
+    query: { ...base, sort: sort.length > 0 ? sort : (options.defaultSort ?? []), filters },
+  };
+}
+
+/** The 400 hint for the one mistake F-34 was about: a comma-joined list. */
+function commaHint(value: string): string {
+  return value.includes(",")
+    ? " A comma does not separate values: repeat the parameter once per value."
+    : "";
 }
 
 /**

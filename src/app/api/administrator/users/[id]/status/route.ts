@@ -15,6 +15,7 @@ import {
   refuseOutrankingTarget,
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +67,7 @@ const ACTION_TO_STATUS: Record<
   },
 };
 
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -133,4 +134,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });
   }
   return NextResponse.json({ ok: true, status: result.status });
-}
+});

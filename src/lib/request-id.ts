@@ -3,9 +3,12 @@ import { hasForwardedHops } from "@/lib/forwarded-hops";
 /**
  * The correlation id every sink agrees on (review #99, #224).
  *
- * A request id ties together: the user-facing "Support ID" rendered by the
- * error boundaries, the `x-request-id` response header, the Sentry issue tag,
- * the stdout log line, and `app_audit_events.request_id`. Because those sinks
+ * A request id ties together: the `x-request-id` response header (stamped on
+ * every admin, first-party and v1 route response by
+ * `lib/route-handler.server.ts`, F-29), the `requestId` of an error envelope,
+ * the Sentry issue tag, the stdout log line, and `app_audit_events.request_id`.
+ * (The "Support ID" a page error boundary shows is the Sentry event id or
+ * Next's digest, not this id.) Because those sinks
  * are read by operators AND because the audit column is not unique, honouring
  * a client-supplied id lets a client:
  *
@@ -132,10 +135,12 @@ export function isValidRequestId(value: unknown): value is string {
  * **What condition 2 does NOT do.** It is not a provenance proof and does not
  * close review #224. `X-Forwarded-For` is client-supplied, so ANY caller
  * satisfies it by sending one extra header, and behind a real edge (Vercel,
- * any LB) it is unconditionally true. It rejects exactly one population:
- * callers that send no chain at all — an unmodified direct request to a
- * non-proxied origin, and local development. A deliberate forger is not
- * affected in any deployment.
+ * any LB) it is unconditionally true. It does not even reject a direct
+ * request: Next.js fills a missing `X-Forwarded-For` from the socket before a
+ * route handler or `onRequestError` reads it, so at the default
+ * `TRUSTED_PROXY_COUNT=1` it rejects nothing, local development included, and
+ * at a higher count only a chain shorter than the count (F-17). A deliberate
+ * forger is not affected in any deployment.
  *
  * **So #224's threat stands, by design.** A determined client can still pin
  * one UUID across many requests, or reuse an id it saw elsewhere, and that

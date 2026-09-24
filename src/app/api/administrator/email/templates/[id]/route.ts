@@ -9,6 +9,7 @@ import { updateEmailTemplateSchema } from "@/lib/validation/email-templates";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ const idSchema = z.uuid();
  *
  * Single template for the editor. Caller MUST hold `admin.email.read`.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
   // The template catalog is platform-global config (no tenant column), so
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("not_found", 404, request);
   }
   return NextResponse.json(template);
-}
+});
 
 /**
  * PUT /api/administrator/email/templates/[id]
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * audit metadata — the template row itself is the record).
  */
 
-export async function PUT(request: NextRequest, ctx: RouteContext) {
+export const PUT = withAdminRoute(async function PUT(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.email.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
   // ADR-0001: editing a platform-global template is SUPERADMIN-only — it is
@@ -130,4 +131,4 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, id: updated.id });
-}
+});

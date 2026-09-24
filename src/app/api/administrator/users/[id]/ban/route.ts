@@ -15,6 +15,7 @@ import {
   refuseOutrankingTarget,
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ const banSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.ban");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -115,4 +116,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

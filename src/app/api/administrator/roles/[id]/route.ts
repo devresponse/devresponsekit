@@ -9,6 +9,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { AdminError, assertRoleNotInUse, loadRoleOrThrow } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Fetches a single role plus its permission keys and member count.
  * Caller MUST hold `admin.roles.read`.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     }
     throw err;
   }
-}
+});
 
 /**
  * PATCH /api/administrator/roles/[id]
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * read-only after creation (mirrors §8.4 — "Settings" tab) so audit
  * trails referencing it stay valid.
  */
-export async function PATCH(request: NextRequest, ctx: RouteContext) {
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -112,7 +113,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});
 
 /**
  * DELETE /api/administrator/roles/[id]
@@ -123,7 +124,10 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
  * `app_role_permissions` and the `app_roles` row in one transaction so
  * the constraint cannot leave orphan permission rows behind.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.roles.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -186,4 +190,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   // All reads/writes above used the imported `db` symbol; no extra
   // bookkeeping needed before returning.
   return NextResponse.json({ ok: true });
-}
+});

@@ -269,11 +269,16 @@ describe("GET /api/sso/launch — no signing key configured (review #5)", () => 
         targetApplicationId: "portal",
       }),
     );
+    // F-29: the log line and the Sentry event carry the id the 503 is stamped
+    // with, so an operator holding the response can find both.
+    const requestId = res.headers.get("x-request-id");
+    expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
     expect(logErrMock).toHaveBeenCalledWith(
       "sso.launch.config_error",
-      expect.objectContaining({ reason: "signing_key_not_configured" }),
+      expect.objectContaining({ reason: "signing_key_not_configured", requestId }),
     );
     expect(captureMock).toHaveBeenCalledTimes(1);
+    expect(captureMock).toHaveBeenCalledWith(expect.any(Error), { requestId, status: 503 });
   });
 
   it("is checked AFTER authentication so an anonymous probe learns nothing about the config", async () => {

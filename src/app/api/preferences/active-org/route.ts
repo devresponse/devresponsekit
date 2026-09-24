@@ -6,6 +6,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { auditEvent } from "@/lib/audit.server";
 import { ACTIVE_ORG_COOKIE, userHasActiveMembership } from "@/lib/active-org.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ const bodySchema = z.object({ organizationId: z.string().uuid() });
  *     cookie), so refusing them preserves that contract exactly.
  *   - An impersonated session is refused (P0-1, below).
  */
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // IMP-1: opted in at the GUARD so this route keeps applying its OWN,
   // older refusal below (P0-1) — same 403, but a distinct
   // `forbidden_while_impersonating` body that clients and the e2e suite pin.
@@ -122,4 +123,4 @@ export async function POST(request: NextRequest) {
     maxAge: 60 * 60 * 24 * 365, // 1 year
   });
   return response;
-}
+});

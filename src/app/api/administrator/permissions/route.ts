@@ -16,6 +16,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export const dynamic = "force-dynamic";
  * for any admin role-reader; mutations require the stronger
  * `admin.permissions.manage`).
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
   }));
 
   return NextResponse.json(buildListResponse(normalised, total, query));
-}
+});
 
 /**
  * POST /api/administrator/permissions
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
  * no power — it must subsequently be attached to a role.
  */
 
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.permissions.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -142,4 +143,4 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true, id: inserted.id, key: inserted.key }, { status: 201 });
-}
+});

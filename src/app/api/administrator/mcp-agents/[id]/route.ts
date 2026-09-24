@@ -10,6 +10,7 @@ import { revokeOauthClient, updateOauthClient } from "@/lib/api-auth/oauth-clien
 import { normalizeScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getMcpAgent } from "@/lib/mcp/agents.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,10 @@ const patchSchema = z.object({ scopes: z.array(z.string()).max(64) }).strict();
  * permission) — grant the service user a role via the Users console to make
  * a granted scope usable.
  */
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export const PATCH = withAdminRoute(async function PATCH(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.clients.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -113,7 +117,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     metadata: { clientId: id, scopes },
   });
   return NextResponse.json({ ok: true, scopes });
-}
+});
 
 /**
  * DELETE /api/administrator/mcp-agents/:id
@@ -122,7 +126,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
  * `admin.clients.manage`. The service account is left intact for the audit
  * trail; revoking the client immediately stops it minting or using tokens.
  */
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.clients.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -164,4 +171,4 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     metadata: { clientId: id },
   });
   return NextResponse.json({ ok: true });
-}
+});

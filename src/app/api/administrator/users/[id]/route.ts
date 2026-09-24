@@ -30,6 +30,7 @@ import {
   refuseOutrankingTarget,
   resolveTargetUser,
 } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * dedicated `/ban` and `/role` endpoints and never read back here
  * (docs/admin-manager.md §8.1).
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     .executeTakeFirstOrThrow();
 
   return NextResponse.json({ user: row });
-}
+});
 
 /**
  * PATCH /api/administrator/users/[id]
@@ -102,7 +103,7 @@ const patchSchema = z
   })
   .strict();
 
-export async function PATCH(request: NextRequest, ctx: RouteContext) {
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -174,7 +175,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});
 
 /**
  * DELETE /api/administrator/users/[id]
@@ -192,7 +193,10 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
  */
 const deleteSchema = z.object({ reason: z.string().min(1).max(500).optional() }).strict();
 
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.users.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -382,4 +386,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

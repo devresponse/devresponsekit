@@ -20,6 +20,7 @@ import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +60,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  *     ORIGINAL admin (never the impersonated user) so the audit row
  *     attributes the action correctly.
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.impersonate");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -344,7 +345,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   // plugin during the call above (see src/lib/auth.ts), so a plain JSON body
   // is sufficient.
   return NextResponse.json({ ok: true });
-}
+});
 
 /**
  * DELETE /api/administrator/users/[id]/impersonate
@@ -368,7 +369,7 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
  * actor. The `[id]` segment is ignored — the impersonated identity (and the
  * audit target) come from the live session, not the URL.
  */
-export async function DELETE(request: NextRequest) {
+export const DELETE = withAdminRoute(async function DELETE(request: NextRequest) {
   const requestId = getOrCreateRequestId(request);
 
   // §4 Origin/Referer defence on this cookie-authed mutation (the admin guard
@@ -455,4 +456,4 @@ export async function DELETE(request: NextRequest) {
   // As with the start endpoint, the restored actor cookies are delivered by
   // Better Auth's nextCookies plugin during the call above.
   return NextResponse.json({ ok: true });
-}
+});

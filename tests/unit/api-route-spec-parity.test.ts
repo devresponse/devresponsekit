@@ -71,8 +71,10 @@ function fileToApiPath(root: string, file: string): string {
 
 function methodsOf(file: string): string[] {
   const src = readFileSync(file, "utf8");
+  // Both export styles: `export async function GET(` and the F-29 wrapped
+  // `export const GET = withAdminRoute(async function GET(`.
   return HTTP_METHODS.filter((m) =>
-    new RegExp(`export\\s+(?:async\\s+)?function\\s+${m}\\b`).test(src),
+    new RegExp(`export\\s+(?:(?:async\\s+)?function|const)\\s+${m}\\b`).test(src),
   );
 }
 

@@ -10,6 +10,7 @@ import {
 } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  *     credential ({@link unissuableScopes}), so a narrow key cannot rotate its
  *     owner's broad one and receive it.
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withV1Route(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiAccount(request, "account.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
@@ -140,4 +141,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
     request,
     { status: 201 },
   );
-}
+});

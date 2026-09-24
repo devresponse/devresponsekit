@@ -1315,7 +1315,8 @@
     "insufficient_scope": "Esta credencial não está autorizada para essa ação.",
     "forbidden_while_impersonating": "Esta ação não está disponível enquanto você personifica outro usuário.",
     "last_superadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la.",
-    "organization_not_active": "Esta organização não está ativa. Reative-a primeiro."
+    "organization_not_active": "Esta organização não está ativa. Reative-a primeiro.",
+    "internal_error": "Ocorreu um erro no servidor. Indique o ID do pedido ao contactar o suporte."
   },
   "account": {
     "appTitle": "Conta",

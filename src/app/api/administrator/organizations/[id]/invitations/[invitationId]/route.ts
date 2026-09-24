@@ -8,6 +8,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { isUuid } from "@/lib/admin/user-target.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { revokeInvitation } from "@/lib/invitations.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,10 @@ interface RouteContext {
  *
  * Caller MUST hold `admin.orgs.update`.
  */
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -63,4 +67,4 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

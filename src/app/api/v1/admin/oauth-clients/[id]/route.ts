@@ -12,13 +12,14 @@ import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 /** GET /api/v1/admin/oauth-clients/[id] — read one (`admin.clients.read`). */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withV1Route(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.clients.read");
   if (!guard.ok) return guard.response;
 
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return problemResponse("not_found", 404, request);
   }
   return v1JsonResponse({ client }, request);
-}
+});
 
 /**
  * PATCH /api/v1/admin/oauth-clients/[id] — edit name/scopes (`admin.clients.manage`).
@@ -45,7 +46,7 @@ const patchSchema = z
   })
   .strict();
 
-export async function PATCH(request: NextRequest, ctx: RouteContext) {
+export const PATCH = withV1Route(async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.clients.manage");
   if (!guard.ok) return guard.response;
   const { grant } = guard;
@@ -110,10 +111,10 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   });
 
   return v1JsonResponse({ ok: true, id }, request, { requestId: grant.requestId });
-}
+});
 
 /** DELETE /api/v1/admin/oauth-clients/[id] — revoke (`admin.clients.manage`). */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withV1Route(async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.clients.manage");
   if (!guard.ok) return guard.response;
   const { grant } = guard;
@@ -142,4 +143,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return v1JsonResponse({ ok: true, id, revoked }, request, { requestId: grant.requestId });
-}
+});

@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ export const dynamic = "force-dynamic";
  * tokens are replaced by `[redacted]` before the row is stored, and the
  * unredacted `delivery_payload` column is never selected by any admin route.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -117,4 +118,4 @@ export async function GET(request: NextRequest) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});

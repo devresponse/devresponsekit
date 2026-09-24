@@ -14,6 +14,7 @@ import { hasDisplayName, updateProfileSchema } from "@/lib/validation/account";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +48,7 @@ export const dynamic = "force-dynamic";
  * scripted loop must hit the same ceiling the administrator mutations do.
  */
 
-export async function PATCH(request: NextRequest) {
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest) {
   // IMP-1: opted in. Display name / Better Auth name are ordinary profile
   // fields — no credential is issued or revoked — and editing them on a user's
   // behalf is a routine support action. On an impersonated session both audit
@@ -155,4 +156,4 @@ export async function PATCH(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

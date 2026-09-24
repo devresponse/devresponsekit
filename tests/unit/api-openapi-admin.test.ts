@@ -185,7 +185,10 @@ describe("documented security schemes ⇔ the credential kinds resolveCaller acc
       ),
       "utf8",
     );
-    const del = route.slice(route.indexOf("export async function DELETE"));
+    // F-29: handlers are exported as `export const DELETE = withAdminRoute(…)`.
+    const start = route.search(/export\s+const\s+DELETE\b/);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const del = route.slice(start);
     expect(del).not.toMatch(/requireAdminPermission/);
     expect(del).toMatch(/checkTrustedOrigin\(request\)/);
     expect(del).toMatch(/getCurrentSession\(\)/);
@@ -300,7 +303,9 @@ function fileToApiPath(file: string): string {
  * whose POST is rate-limited says nothing about its GET).
  */
 function handlerBodies(src: string): Array<{ method: string; body: string }> {
-  const re = /export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\b/g;
+  // Both export styles: `export async function GET(` and the F-29 wrapped
+  // `export const GET = withAdminRoute(async function GET(`.
+  const re = /export\s+(?:(?:async\s+)?function|const)\s+(GET|POST|PUT|PATCH|DELETE)\b/g;
   const starts = [...src.matchAll(re)].map((m) => ({ method: m[1]!, index: m.index! }));
   return starts.map((s, i) => ({
     method: s.method.toLowerCase(),

@@ -14,6 +14,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { canAccessOrg, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `display_name` so the role-detail Members tab can search a large
  * member set without round-tripping to the parent grid.
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -100,4 +101,4 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});

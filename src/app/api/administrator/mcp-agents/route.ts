@@ -4,6 +4,7 @@ import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { buildListResponse } from "@/lib/admin/list-query.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { listMcpAgents, parseMcpAgentListQuery } from "@/lib/mcp/agents.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export const dynamic = "force-dynamic";
  * Pending agents always sort first. Response: `{ items, page, pageSize,
  * total, sort, pendingCount }` — `pendingCount` is scope-wide, not per page.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.clients.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
   const query = parseMcpAgentListQuery(request.nextUrl.searchParams);
@@ -34,4 +35,4 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ...buildListResponse([], 0, query), pendingCount: 0 });
   }
   return NextResponse.json(await listMcpAgents(guard.access, query));
-}
+});

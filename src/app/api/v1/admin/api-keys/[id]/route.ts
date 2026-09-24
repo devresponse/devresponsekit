@@ -5,6 +5,7 @@ import { getApiKeyById, revokeApiKey } from "@/lib/api-auth/api-keys.server";
 import { canAccessOrg } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `admin.apikeys.manage`. The acting admin's app-user id is recorded as
  * the revoker. Idempotent; rate-limited per credential.
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withV1Route(async function DELETE(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { grant } = guard;
@@ -49,4 +50,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return v1JsonResponse({ ok: true, id, revoked }, request, { requestId: grant.requestId });
-}
+});

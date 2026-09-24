@@ -17,6 +17,7 @@ import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.serv
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,7 @@ const ALLOWED_STATUS = new Set([
   "deactivated",
 ]);
 
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -146,7 +147,7 @@ export async function GET(request: NextRequest) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});
 
 /**
  * POST /api/administrator/users
@@ -172,7 +173,7 @@ export async function GET(request: NextRequest) {
  * client and server enforce identical rules.
  */
 
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -321,7 +322,7 @@ export async function POST(request: NextRequest) {
     },
     { status: 201 },
   );
-}
+});
 
 /**
  * Postgres unique-constraint violation detector. The `pg` driver

@@ -6,6 +6,7 @@ import { getSessionAccessContext } from "@/lib/session-access.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
 import { ORG_SIGNUP_HINT_COOKIE } from "@/lib/scoped-auth";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export const dynamic = "force-dynamic";
  * unknown org, or a non-membership never errors and never leaks whether an org
  * exists.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const nextParam = request.nextUrl.searchParams.get("next");
   const orgParam = request.nextUrl.searchParams.get("org");
   // `next` is re-sanitized here (never trust the query): only a same-origin
@@ -87,4 +88,4 @@ export async function GET(request: NextRequest) {
     maxAge: 60 * 60 * 24 * 365, // 1 year
   });
   return redirect;
-}
+});

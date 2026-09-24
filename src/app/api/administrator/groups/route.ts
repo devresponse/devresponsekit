@@ -14,6 +14,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { canAccessOrg, hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * ADR-0001: an org admin sees only their org's groups; a null scope yields
  * an empty page (groups are always tenant-scoped, so there is no global set).
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.groups.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest) {
   }));
 
   return NextResponse.json(buildListResponse(normalised, total, query));
-}
+});
 
 /**
  * POST /api/administrator/groups
@@ -110,7 +111,7 @@ export async function GET(request: NextRequest) {
  * SUPERADMIN must name the target org. `(organization_id, key)` is unique.
  */
 
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.groups.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -197,4 +198,4 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true, id: inserted.id, key: inserted.key }, { status: 201 });
-}
+});

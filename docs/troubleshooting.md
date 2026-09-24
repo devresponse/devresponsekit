@@ -43,6 +43,12 @@ warrant a comms channel and an owner before deep debugging.
 2. **Get a correlation id.** Reproduce the failure (or take one from a user
    report) and capture the `x-request-id` response header. It is the join key
    across logs, audit rows, and Sentry — see [observability.md §4](./observability.md#4-correlating-an-incident).
+   Every admin, `/api/v1` and first-party API response carries it: successes,
+   error envelopes, and the `500 internal_error` a failing handler answers
+   (the body's `requestId` is the same value). A page render does not; for a
+   page error the user can quote the Support ID instead, which is the Sentry
+   event id when Sentry is enabled (otherwise Next's error digest), not a
+   request id.
 3. **Scope the blast radius.** One route, one tenant, one actor — or everything?
    The audit table and the log stream answer this fast (queries below).
 4. **Recent change?** Check the last deploy and the last migration. Most SEV1/2
@@ -140,8 +146,13 @@ warrant a comms channel and an owner before deep debugging.
   then redeploy — on Vercel a changed variable reaches only new deployments.
 
 ### Elevated 5xx
-- Every uncaught 5xx is logged (`onRequestError` → `logServerError`) and, if
-  enabled, sent to Sentry — both stamped with the `x-request-id`. Pull a few and
+- Server faults are logged and, if enabled, sent to Sentry. On the admin, `/api/v1`
+  and first-party API routes a handler that throws is logged as
+  `admin.internal_error` / `v1.internal_error` under the `x-request-id` its
+  `500` response carries (F-29). A fault outside them (a page render, a server
+  action, an exempt route) goes through `onRequestError` → `logServerError`,
+  tagged with a request id only when the caller sent one that was honoured.
+  Pull a few and
   find the common stack.
 - If it started at a deploy, **roll back first, debug second** (§5).
 - **Every** route 5xx-ing at once, with `Invalid server environment variables:`

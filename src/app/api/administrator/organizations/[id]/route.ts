@@ -25,6 +25,7 @@ import {
   ACTIVE_ORGANIZATION_STATUS,
   updateOrganizationSchema,
 } from "@/lib/validation/organizations";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ interface RouteContext {
  * Returns detailed view of an organization with associated counts.
  * Caller MUST hold `admin.orgs.read`.
  */
-export async function GET(request: NextRequest, context: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.orgs.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     throw err;
   }
-}
+});
 
 /**
  * PATCH /api/administrator/organizations/:id
@@ -80,7 +81,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
  * with 409 `last_superadmin` (REVOKE-2).
  */
 
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export const PATCH = withAdminRoute(async function PATCH(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -199,7 +203,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});
 
 /**
  * DELETE /api/administrator/organizations/:id
@@ -207,7 +211,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
  * Deletes an organization if empty and not the default.
  * Caller MUST hold `admin.orgs.delete`.
  */
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.orgs.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -349,4 +356,4 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   return NextResponse.json({ ok: true });
-}
+});

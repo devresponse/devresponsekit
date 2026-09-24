@@ -135,6 +135,7 @@ These encode project rules and will fail the build if violated:
 | --- | --- |
 | `tests/unit/admin-route-scope-invariant.test.ts` | Every `/api/administrator/**` route references a tenant-scope primitive. |
 | Admin rate-limit invariant | Every admin mutation calls `enforceRateLimit`. |
+| `tests/unit/route-request-id-invariant.test.ts` | Every `src/app/api/**` route handler is exported through `withAdminRoute` (or `withV1Route` under `/api/v1`), so every response carries `x-request-id` and a thrown handler answers an id-stamped `500 internal_error` (F-29). A route that must not be wrapped is named in its `EXEMPT` map with a reason. |
 | `tests/unit/rate-limit-shared-floors-invariant.test.ts` | Every pre-auth floor consumes from the shared Postgres bucket (review #98). Derived, not listed (F-19): it walks the TypeScript AST of every file under `src/` and fails on an in-memory `consumeToken` / `enforceRateLimit` whose key comes from the client IP (`clientIpKey`, `getClientIp`, the removed `actorIdFromRequest`) — directly, in a ternary arm, or through a same-file const or helper — with a negative control that plants each shape. Invitation acceptance, keyed on a principal anyone can self-register, is named. A deployment-wide floor is charged only through `consumeSourceThenGlobal`, after the request's per-IP bucket admitted it, so `__global__` is spelled nowhere else under `src/` (F-18). |
 | Locale message parity | Every text key exists in **all eight** locales (`en`/`fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`). |
 | Permission catalog count | The `ADMIN_PERMISSION_CATALOG` has the expected number of keys (currently **35**). |
@@ -172,7 +173,7 @@ When automated coverage isn't enough (e.g. a visual or flow change), walk these:
 - [ ] Create org, user, role (assign permissions), group (bundle roles, add members).
 - [ ] Bulk action on users (approve/block) behaves and is audited.
 - [ ] CSV export downloads and respects the row cap.
-- [ ] Each admin action appears in the audit log with a matching `x-request-id`.
+- [ ] Each admin action appears in the audit log with the `x-request-id` its response carried (successes included).
 
 **Platform**
 - [ ] SSO launch→consume into a registered app.

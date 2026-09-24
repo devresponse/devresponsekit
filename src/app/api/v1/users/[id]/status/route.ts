@@ -18,6 +18,7 @@ import {
 } from "@/lib/admin/user-target.server";
 import { ifMatchPinsVersion, ifMatchSatisfied, userEtag } from "@/lib/api-auth/etag";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +70,7 @@ const schema = z
   })
   .strict();
 
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withV1Route(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireApiPermission(request, "admin.users.manage");
   if (!guard.ok) return guard.response;
   const { grant } = guard;
@@ -187,4 +188,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   return v1JsonResponse({ ok: true, status: result.status }, request, {
     requestId: grant.requestId,
   });
-}
+});

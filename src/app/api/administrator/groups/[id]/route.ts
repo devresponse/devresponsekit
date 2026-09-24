@@ -14,6 +14,7 @@ import {
 } from "@/lib/admin/grantable-permissions.server";
 import { loadGroupDetail } from "@/lib/admin/groups.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Group detail + role/member counts. Caller MUST hold `admin.groups.read`.
  * ADR-0001: an org admin reaches only their org's groups (404 otherwise).
  */
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
     return adminErrorResponse("not_found", 404, request);
   }
   return NextResponse.json({ group });
-}
+});
 
 /**
  * PATCH /api/administrator/groups/[id]
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  * Partial update of name / description. `key` is read-only after creation.
  * Caller MUST hold `admin.groups.update`.
  */
-export async function PATCH(request: NextRequest, ctx: RouteContext) {
+export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -99,7 +100,7 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});
 
 /**
  * DELETE /api/administrator/groups/[id]
@@ -112,7 +113,10 @@ export async function PATCH(request: NextRequest, ctx: RouteContext) {
  * everything the group confers (REVOKE-1, F-11 — 403 `forbidden` and an
  * `admin.group.delete_denied` audit row).
  */
-export async function DELETE(request: NextRequest, ctx: RouteContext) {
+export const DELETE = withAdminRoute(async function DELETE(
+  request: NextRequest,
+  ctx: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.groups.delete");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -182,4 +186,4 @@ export async function DELETE(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

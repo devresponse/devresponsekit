@@ -218,7 +218,7 @@ A typical admin feature (mirror an existing one such as Roles or Groups):
 
 - **Server logs** print to the `pnpm dev` terminal — server component and route-handler errors land here.
 - **Liveness/readiness:** `GET /api/health` (process up) and `GET /api/health/ready` (env valid, database reachable, both schemas migrated). A `503` names its `reason`: `database_unreachable` means check Postgres before anything else, `schema_behind` means run `pnpm db:auth:migrate && pnpm db:app:migrate` and restart `pnpm dev`, and `config_invalid` means a variable in `.env` (the terminal names it).
-- **Request correlation:** every admin and v1 response carries `x-request-id`; grep `app_audit_events` (and Sentry, if enabled) for that id. The audit trail is often the fastest answer to "what did the app actually do?"
+- **Request correlation:** every admin and v1 response carries `x-request-id`, a thrown `500 internal_error` included (bar the public, cacheable `/api/v1/jwks.json` and `/api/v1/openapi.json`); grep the terminal log, `app_audit_events` (and Sentry, if enabled) for that id. A new route handler must be exported through `withAdminRoute` / `withV1Route` (`src/lib/route-handler.server.ts`), or `tests/unit/route-request-id-invariant.test.ts` fails. The audit trail is often the fastest answer to "what did the app actually do?"
 
 ### 9.2 Database inspection
 

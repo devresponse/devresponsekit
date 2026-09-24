@@ -14,6 +14,7 @@ import { mintAccessToken, type TokenCredentialRef } from "@/lib/api-auth/jwt.ser
 import { audienceForResource, resolveRequestedResource } from "@/lib/api-auth/resources";
 import { normalizeScopes, scopesAuthorize } from "@/lib/api-auth/scopes";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +89,7 @@ async function parseBody(request: NextRequest): Promise<Record<string, string>> 
   return Object.fromEntries(params.entries());
 }
 
-export async function POST(request: NextRequest) {
+export const POST = withV1Route(async function POST(request: NextRequest) {
   const env = getServerEnv();
   if (!env.API_JWT_ENABLED) {
     return problemResponse("unsupported_grant_type", 400, request, {
@@ -303,4 +304,4 @@ export async function POST(request: NextRequest) {
     request,
     { headers: NO_STORE },
   );
-}
+});

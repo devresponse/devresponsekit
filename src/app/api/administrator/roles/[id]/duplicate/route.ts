@@ -13,6 +13,7 @@ import {
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
 import { isUuid } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `admin.role.duplicated` with the `sourceRoleId` in metadata so ops
  * can distinguish manual creates from duplicates.
  */
-export async function POST(request: NextRequest, ctx: RouteContext) {
+export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.roles.create");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -139,4 +140,4 @@ export async function POST(request: NextRequest, ctx: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, id: created.id, key: created.key }, { status: 201 });
-}
+});

@@ -12,6 +12,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ interface RouteContext {
  *
  * Caller MUST hold `admin.users.read`.
  */
-export async function GET(request: NextRequest, context: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, context: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -94,4 +95,4 @@ export async function GET(request: NextRequest, context: RouteContext) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});

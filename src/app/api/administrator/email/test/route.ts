@@ -9,6 +9,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { sendAppEmail } from "@/lib/email/send.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { getBrand } from "@/config/brand";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ const testSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
   // ADR-0001: attribute the test email to the sender's tenant so it lands in
@@ -88,4 +89,4 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: result.status !== "failed", ...result });
-}
+});

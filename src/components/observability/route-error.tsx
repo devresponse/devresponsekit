@@ -10,9 +10,11 @@ import { Button } from "@/components/ui/button";
  *
  * Captures the render error to Sentry (a no-op when Sentry is disabled)
  * and surfaces a **Support ID** the user can quote — the Sentry event id
- * when available, otherwise Next.js's server `digest`. That id is the
- * same correlation thread carried by `x-request-id` and the audit log, so
- * support can pivot straight to the issue and the audit row.
+ * when available, otherwise Next.js's server `digest`. It is NOT an
+ * `x-request-id`: a page render mints none (F-29), and this browser-side
+ * event carries no `request_id` tag. The server-side capture of the same
+ * error (`onRequestError` in `instrumentation.ts`) is tagged with a request id,
+ * the key to the audit rows, only when the request brought one it honoured.
  */
 export function RouteError({
   error,

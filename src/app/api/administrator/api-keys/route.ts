@@ -28,6 +28,7 @@ import { IssuingCredentialRevokedError } from "@/lib/api-auth/issuance-fence.ser
 import { normalizeScopes, ungrantableScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { getServerEnv } from "@/lib/env";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ const SORT_COLUMNS: Record<string, string> = {
  * case-insensitively against the key name, display prefix, and owner
  * email.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apikeys.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -144,7 +145,7 @@ export async function GET(request: NextRequest) {
   );
 
   return NextResponse.json(buildListResponse(items, total, query));
-}
+});
 
 /**
  * POST /api/administrator/api-keys
@@ -170,7 +171,7 @@ export async function GET(request: NextRequest) {
  *   - Unknown scopes are rejected.
  */
 
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.apikeys.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -384,4 +385,4 @@ export async function POST(request: NextRequest) {
     },
     { status: 201 },
   );
-}
+});

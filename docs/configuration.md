@@ -223,10 +223,10 @@ that second condition is worth, because it is **not** a provenance check:
   higher count it rejects only a chain shorter than the count, such as a request
   that went around one of the proxies. It stops nobody who is trying;
 - consequently a **request id is a correlation aid, never an identity**: a client
-  can pin or collide the "Support ID" that appears in logs, Sentry and
-  `app_audit_events.request_id` (a non-unique column). Never authorize,
-  rate-limit, or de-duplicate on one, and when investigating treat two rows
-  sharing an id as a hint, not a fact;
+  can pin or collide the request id that appears in the `x-request-id` header,
+  logs, Sentry and `app_audit_events.request_id` (a non-unique column). Never
+  authorize, rate-limit, or de-duplicate on one, and when investigating treat
+  two rows sharing an id as a hint, not a fact;
 - a front door that tags requests does keep end-to-end correlation, as long as it
   also sets `X-Forwarded-For`. Where forged ids would be unacceptable, the id must
   be authenticated at the edge (a signed/secret header the origin verifies) or

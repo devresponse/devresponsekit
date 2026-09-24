@@ -5,6 +5,7 @@ import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
 import { isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
+import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
 import { DEFAULT_SSO_LAUNCH_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
@@ -13,6 +14,7 @@ import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { logServerError } from "@/lib/observability/logger.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { captureServerError } from "@/lib/observability/server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +61,7 @@ export const dynamic = "force-dynamic";
  * `/api/` returnTo values on purpose, and that rule stays intact. See
  * `@/lib/sso-launch-return`.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const applicationId = request.nextUrl.searchParams.get("applicationId");
   const localeParam = request.nextUrl.searchParams.get("locale");
   const locale = localeParam && isSupportedLocale(localeParam) ? localeParam : defaultLocale;
@@ -135,11 +137,15 @@ export async function GET(request: NextRequest) {
 
   if (!isSsoHandoffSignerConfigured()) {
     const err = new Error("SSO_HANDOFF_PRIVATE_KEY is not configured");
+    // The id `withAdminRoute` memoised and stamps on this 503, so the log line,
+    // the Sentry event and the audit row below join to the response.
+    const requestId = getOrCreateRequestId(request);
     logServerError("sso.launch.config_error", {
+      requestId,
       reason: "signing_key_not_configured",
       err,
     });
-    captureServerError(err, { status: 503 });
+    captureServerError(err, { requestId, status: 503 });
     await auditEvent({
       eventType: "sso.launch.failure",
       outcome: "error",
@@ -180,4 +186,4 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json({ error: "sso_launch_failed" }, { status: 403 });
   }
-}
+});

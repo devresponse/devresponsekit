@@ -227,13 +227,21 @@ describe("POST /api/v1/me/api-keys — the issuance fence (F-10)", () => {
     );
   });
 
-  it("any other repository failure still propagates", async () => {
+  it("any other repository failure is not mistaken for a revocation: a generic id-stamped 500", async () => {
     createApiKey.mockRejectedValue(new Error("db down"));
     requireApiAccount.mockResolvedValue(
       actor({ permissions: ["account.apikeys.manage"], grantedScopes: null }),
     );
 
-    await expect(mint()).rejects.toThrow("db down");
+    // The route re-throws it; `withV1Route` (F-29) renders the throw as a
+    // problem+json 500 carrying the request id instead of Next's bare 500.
+    const res = await mint();
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ code: "internal_error", status: 500 });
+    expect(body.requestId).toBe(res.headers.get("x-request-id"));
+    expect(JSON.stringify(body)).not.toContain("db down");
     expect(auditEvent).not.toHaveBeenCalled();
   });
 });

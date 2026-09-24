@@ -10,6 +10,7 @@ import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server
 import { consumeInvitation, findValidInvitationByToken } from "@/lib/invitations.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { acceptInvitationSchema } from "@/lib/validation/invitations";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export const dynamic = "force-dynamic";
  *     so this is a token-guessing floor, not an authenticated-actor UX
  *     limit, and an in-memory bucket was per lambda.
  */
-export async function POST(request: NextRequest) {
+export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const origin = checkTrustedOrigin(request);
   if (!origin.ok) {
     // Collapse both origin-guard reasons (`missing_origin` / `untrusted_origin`)
@@ -130,4 +131,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, organizationId: invitation.organizationId });
-}
+});

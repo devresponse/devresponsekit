@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { selectDashboardMetrics } from "@/lib/admin/dashboard-metrics.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,9 @@ export const dynamic = "force-dynamic";
  * scoping/visibility decision lives in {@link selectDashboardMetrics}, shared
  * with the server-rendered dashboard so API and UI cannot diverge.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
   return NextResponse.json(await selectDashboardMetrics(guard.access));
-}
+});

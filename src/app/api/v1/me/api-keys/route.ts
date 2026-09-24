@@ -13,6 +13,7 @@ import { normalizeScopes } from "@/lib/api-auth/scopes";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
 import { IssuingCredentialRevokedError } from "@/lib/api-auth/issuance-fence.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
+import { withV1Route } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export const dynamic = "force-dynamic";
  * owner's keys in every org, which was the enumeration step of the
  * cross-tenant rotate takeover.
  */
-export async function GET(request: NextRequest) {
+export const GET = withV1Route(async function GET(request: NextRequest) {
   const guard = await requireApiAccount(request, "account.read", { allowImpersonation: true });
   if (!guard.ok) return guard.response;
   const { actor } = guard;
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
     ? await listApiKeysForUser(actor.appUserId, confinement)
     : await listApiKeysForUser(actor.appUserId);
   return v1JsonResponse({ items }, request);
-}
+});
 
 /**
  * POST /api/v1/me/api-keys
@@ -80,7 +81,7 @@ const createSchema = z
   })
   .strict();
 
-export async function POST(request: NextRequest) {
+export const POST = withV1Route(async function POST(request: NextRequest) {
   const guard = await requireApiAccount(request, "account.apikeys.manage");
   if (!guard.ok) return guard.response;
   const { actor } = guard;
@@ -186,4 +187,4 @@ export async function POST(request: NextRequest) {
     request,
     { status: 201 },
   );
-}
+});

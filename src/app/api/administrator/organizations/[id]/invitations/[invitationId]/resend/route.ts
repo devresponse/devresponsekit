@@ -9,6 +9,7 @@ import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate
 import { isUuid } from "@/lib/admin/user-target.server";
 import { regenerateInvitationToken, sendInvitationEmail } from "@/lib/invitations.server";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,10 @@ interface RouteContext {
  *
  * Caller MUST hold `admin.orgs.update`.
  */
-export async function POST(request: NextRequest, context: RouteContext) {
+export const POST = withAdminRoute(async function POST(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -90,4 +94,4 @@ export async function POST(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true, expiresAt: rotated.expiresAt.toISOString() });
-}
+});

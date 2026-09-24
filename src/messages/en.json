@@ -1315,7 +1315,8 @@
     "insufficient_scope": "This credential isn't authorized for that action.",
     "forbidden_while_impersonating": "This action isn't available while impersonating another user.",
     "last_superadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform.",
-    "organization_not_active": "This organization is not active. Reactivate it first."
+    "organization_not_active": "This organization is not active. Reactivate it first.",
+    "internal_error": "Something went wrong on the server. Quote the request ID when you contact support."
   },
   "account": {
     "appTitle": "Account",

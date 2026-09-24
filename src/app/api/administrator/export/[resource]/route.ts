@@ -17,6 +17,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { resolveOrgScope, type OrgScope } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ interface RouteContext {
   params: Promise<{ resource: string }>;
 }
 
-export async function GET(request: NextRequest, ctx: RouteContext) {
+export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: RouteContext) {
   const { resource } = await ctx.params;
   if (!isValidResource(resource)) {
     return adminErrorResponse("unknown_resource", 404, request);
@@ -269,7 +270,7 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
       "x-request-id": guard.requestId,
     },
   });
-}
+});
 
 /* -------------------------------------------------------------------------- */
 /*  Per-resource exporters                                                    */

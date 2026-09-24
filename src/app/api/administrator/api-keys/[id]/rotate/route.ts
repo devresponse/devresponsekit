@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin/access-scope.server";
 import { rotateApiKey } from "@/lib/api-auth/api-keys.server";
 import { unissuableScopes } from "@/lib/api-auth/issuance";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * `admin.apikeys.manage` could rotate a co-member's `admin.users.*` key — or
  * any key carrying an account-writing scope — and receive it.
  */
-export async function POST(request: NextRequest, context: RouteContext) {
+export const POST = withAdminRoute(async function POST(
+  request: NextRequest,
+  context: RouteContext,
+) {
   const guard = await requireAdminPermission(request, "admin.apikeys.manage");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -175,4 +179,4 @@ export async function POST(request: NextRequest, context: RouteContext) {
     },
     { status: 201 },
   );
-}
+});

@@ -122,9 +122,16 @@ ready-to-return `NextResponse`). Callers branch with `isAdminPermissionDenial`.
 The pipeline, in order:
 
 1. **Mint / adopt a request id.** `getOrCreateRequestId` honours an inbound
-   `x-request-id` only when it came through a trusted proxy hop and is a UUID
-   (review #99/#224); otherwise it generates one. It flows onto the response
-   header and every audit row this request writes (§5.1, §12).
+   `x-request-id` only when it is a UUID and `X-Forwarded-For` has at least
+   `TRUSTED_PROXY_COUNT` entries (review #99/#224); otherwise it generates one.
+   The second condition is not a provenance check: a client can supply the
+   chain, and Next fills a missing one from the socket (see
+   [observability.md §4](./observability.md#4-correlating-an-incident)). The
+   route's `withAdminRoute` wrapper has already called it by this step, so the
+   guard reads the same memoised id. It flows onto the response header and
+   every audit row the route writes (§5.1, §12). A row a Better Auth database
+   hook writes is not one of them (see
+   [observability.md §1](./observability.md#1-what-ships-today)).
 2. **Origin / CSRF guard.** For unsafe methods on **ambient (cookie)**
    credentials, `checkTrustedOrigin` requires a trusted `Origin`/`Referer`.
    Bearer callers skip this (a token cannot be attached by an attacker's page).
@@ -190,8 +197,17 @@ Every admin route returns errors through `adminErrorResponse`
 `extra` fields (e.g. `retryAfter`, `ungrantableScopes`) are merged into the body
 when present. For a `status >= 500` with a `cause`, the originating exception is
 captured to Sentry tagged with the request id; 4xx responses are not — they are
-expected client errors, not incidents. Successful responses echo the request-id
-header via `adminJsonResponse`.
+expected client errors, not incidents.
+
+Every exported handler is wrapped with `withAdminRoute`
+(`src/lib/route-handler.server.ts`, F-29), which mints the request id before the
+handler runs, stamps `x-request-id` on whatever the handler returns, and turns
+a throw into `adminErrorResponse("internal_error", 500, …, { cause })` carrying
+that same id. So a successful response carries the header even when the
+handler built it with a plain `NextResponse.json` (`adminJsonResponse` remains
+available), and an unexpected fault is a logged `internal_error` envelope,
+never a bare 500. `tests/unit/route-request-id-invariant.test.ts` fails a new
+route file whose handler is not wrapped.
 
 Common statuses: `400` invalid body, `401` unauthenticated, `403` forbidden,
 `404` not found / out of scope (§6.2), `409` conflict (duplicate key),

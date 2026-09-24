@@ -1315,7 +1315,8 @@
     "insufficient_scope": "此凭证无权执行该操作。",
     "forbidden_while_impersonating": "在模拟其他用户期间无法执行此操作。",
     "last_superadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。",
-    "organization_not_active": "此组织未处于活跃状态。请先重新激活该组织。"
+    "organization_not_active": "此组织未处于活跃状态。请先重新激活该组织。",
+    "internal_error": "服务器出现问题。联系支持团队时请提供请求 ID。"
   },
   "account": {
     "appTitle": "账户",

@@ -1315,7 +1315,8 @@
     "insufficient_scope": "この資格情報はその操作を許可されていません。",
     "forbidden_while_impersonating": "他のユーザーになりすましている間は、この操作は利用できません。",
     "last_superadmin": "これはプラットフォーム最後のスーパー管理者です。この変更ではプラットフォームを管理できる人がいなくなります。",
-    "organization_not_active": "この組織はアクティブではありません。先に再度アクティブにしてください。"
+    "organization_not_active": "この組織はアクティブではありません。先に再度アクティブにしてください。",
+    "internal_error": "サーバーで問題が発生しました。サポートに連絡する際はリクエスト ID をお伝えください。"
   },
   "account": {
     "appTitle": "アカウント",

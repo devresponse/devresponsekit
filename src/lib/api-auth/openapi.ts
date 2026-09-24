@@ -64,7 +64,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
         "Machine-facing REST surface (`/api/v1`). Authenticate with an API key (`drk_…`) or a JWT " +
         "access token as `Authorization: Bearer …`. Scopes are the application permission keys; a " +
         "credential can never exceed its owner's authority. Errors use RFC 7807 " +
-        "`application/problem+json`. Every response carries an `x-request-id` correlation header.",
+        "`application/problem+json`; an unexpected server fault is a `500` with code " +
+        "`internal_error`. Every response carries an `x-request-id` correlation header, except " +
+        "the public, cacheable `/jwks.json` and `/openapi.json` documents.",
     },
     servers: [{ url: `${baseUrl}/api/v1` }],
     tags: [

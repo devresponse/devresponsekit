@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
+import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
  * so reading it is not a cross-tenant leak — any admin reader may view it.
  * Editing a template (PUT [id]) affects every tenant and is SUPERADMIN-only.
  */
-export async function GET(request: NextRequest) {
+export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.email.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
@@ -40,4 +41,4 @@ export async function GET(request: NextRequest) {
     .execute();
 
   return NextResponse.json({ items });
-}
+});

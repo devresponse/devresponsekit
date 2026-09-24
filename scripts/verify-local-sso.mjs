@@ -6,7 +6,7 @@
 //   2. handoff to A + replay-reject    http://app1.devresponse.local:3001
 //   3. handoff to B + replay-reject    http://app2.devresponse.local:3002
 //   4. shared session on C (no SSO)    http://app3.devresponse.local:3003
-//   5. session-cookie isolation report
+//   5. session-cookie scope report
 //
 // Prereqs: the four dev servers running (§6.6 step 5), the dev fixture seeded
 // (`pnpm db:seed:dev`), and the hosts entries (scripts/setup-local-subdomains.ps1)
@@ -77,7 +77,8 @@ try {
   }
   log("C (shared): dashboard rendered with the primary's session — zero redirects");
 
-  // 5. Cookie isolation: A/B own their host; primary + C share .devresponse.local.
+  // 5. Cookie scope: A/B hold a host-only cookie; primary + C share
+  //    .devresponse.local, which reaches A/B too (not contained, guide §1.1).
   const sessions = (await ctx.cookies())
     .filter((c) => c.name.includes("session_token"))
     .map((c) => `${c.domain} → ${c.name}=${c.value.slice(0, 8)}…`);

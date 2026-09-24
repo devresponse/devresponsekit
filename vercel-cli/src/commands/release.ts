@@ -14,7 +14,7 @@ import {
 import { applyMigrations, coreMigrations, ensureKitDependencies } from "../lib/kit.js";
 import { CliError, bold, dim, field, green, heading, info, ok, red, step, warn, yellow } from "../lib/log.js";
 import { type DeploymentProfile, describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
-import { envCheck, envSync } from "./env.js";
+import { envCheck, envSync, reportContainment } from "./env.js";
 
 /**
  * The pinned Vercel CLI, as a JavaScript entry point rather than its `.cmd`
@@ -168,6 +168,10 @@ export async function deploy(
   field("checkout", root);
   if (options.skipChecks) {
     warn("--skip-checks: the environment contract was not verified.");
+    // `env:check` is what prints the containment warning (F-24), and `up`
+    // always lands here with it skipped. Skipping the contract must not skip
+    // the one warning that is about the topology rather than a variable.
+    reportContainment(profile, config.origin);
   } else {
     const problems = await envCheck(cliRoot);
     if (problems > 0 && !options.yes) {

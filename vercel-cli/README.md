@@ -64,6 +64,17 @@ distinction is recorded in the config rather than left to the operator to rememb
 | `handoff` (B)    | own session; handoff, **no** local profile table                | own or kit's |
 | `shared` (C)     | **no handoff** — shares the kit's database, secret and cookie   | the kit's    |
 
+"Own or kit's" is a security decision as well as a deployment one. An A or B satellite on the kit's
+database is **not contained**: a compromise of its server reaches the primary's auth tables, which
+makes it security-equivalent to C. So is one on an "own" database that it reaches as the kit's
+Postgres role: roles are cluster-wide, so a compromised satellite changes the database name in
+its URL back to the kit's. "Own" has to mean its own role too, and on Neon one created with SQL:
+a role made in the console joins `neon_superuser`, which writes every table in the project. The
+same goes for one whose host sits under the kit's `COOKIE_DOMAIN`. The kit's database is also
+this CLI's default, so see
+[When A or B is actually contained](../docs/integration-satellite-apps.md#11-when-a-or-b-is-actually-contained)
+before choosing it for anything but a first-party app.
+
 ---
 
 ## First deployment
@@ -174,8 +185,9 @@ empty key set means no satellite can verify a handoff, which is invisible from t
 twin) are refused on a satellite, not merely omitted. A satellite ships the same
 `/api/sso/launch` route the kit does, so a key set there turns a consumer into an issuer the whole
 fleet trusts — and the point of the EdDSA + JWKS design is that compromising a satellite lets an
-attacker forge nothing. `env:check` reports one, `env:sync` refuses to run while one is present,
-`env:prune` removes it, and the post-deploy probe checks the running app publishes **no** keys.
+attacker forge no handoff token. `env:check` reports one, `env:sync` refuses to run while one is
+present, `env:prune` removes it, and the post-deploy probe checks the running app publishes **no**
+keys.
 
 **A satellite that does not own its schema cannot migrate.** The satellites disable their own
 `db:*` scripts for exactly this reason: they point at the primary's database and carry a truncated
@@ -185,6 +197,19 @@ after which `migrate` demands an explicit `--database-url` (or `SATELLITE_DIRECT
 rather than inheriting the kit's `PRODUCTION_DIRECT_DATABASE_URL` from your shell. `db:provision`
 refuses on the same policy, and so does the advice `env:sync` prints when `DATABASE_URL` is
 missing: on a shared database the answer is the kit's connection string, not a new store.
+
+**A handoff satellite that is not contained is told so.** Forging no token is not containment. An A
+or B satellite on the kit's database can write the primary's auth tables, and one whose host shares a
+parent domain with the kit receives the kit's session cookie as soon as the kit sets
+`COOKIE_DOMAIN` there (which Option C requires). Either way a compromise of the satellite is a
+compromise of the kit. `init`, `doctor`, `env:check` and `deploy` (including `up`) print a warning
+naming which of the two applies and linking the doc section. It is a warning, not a counted problem:
+satellites on the kit's database are what this CLI deploys by default, and they keep deploying. The
+CLI cannot read the kit's actual `COOKIE_DOMAIN` or the value of `DATABASE_URL`, so it goes by the
+recorded `database` setting and by the parent domain this host shares with `--issuer` (or the host
+itself, when the two differ only by port: cookies are not scoped by port). A recorded `own` gets no
+database warning, so record it only when `DATABASE_URL` signs in as the satellite's own role, not
+the kit's under another database name.
 
 **An Option C secret is never generated.** Option C validates the kit's session cookie directly,
 which works only when both hold the identical `BETTER_AUTH_SECRET`. Generating a fresh one would
@@ -245,9 +270,11 @@ deliberately quieter than the kit's:
 
 - `DB_SCHEMA` is **recommended whenever the deployment runs on the kit's database** — which is the
   default for every option, not just C. An A or B satellite on the primary's Postgres reads the
-  primary's tables, so a schema mismatch is an empty read, not an error. `DATABASE_URL` says the
-  same thing: on a shared database it is **the kit's** connection string, and `db:provision` is
-  refused rather than handing the app an empty database that `migrate` would then refuse to fill.
+  primary's tables, so a schema mismatch is an empty read, not an error. It is also not a boundary:
+  `DB_SCHEMA` only sets the `search_path`, and a satellite on the kit's database is not contained
+  whatever its value. `DATABASE_URL` says the same thing: on a shared database it is **the kit's**
+  connection string, and `db:provision` is refused rather than handing the app an empty database
+  that `migrate` would then refuse to fill.
 - `CRON_SECRET` is **optional and never generated** for a satellite on the kit's database. No
   satellite ships a `crons` entry — all three `vercel.json` files carry only `$schema` and
   `regions`; the kit's is the one with the schedule. `app_outbox` has no originating-app column, so

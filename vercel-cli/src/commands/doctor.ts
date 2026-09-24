@@ -12,6 +12,7 @@ import {
   satelliteConfigProblems,
 } from "../lib/target.js";
 import { VercelClient } from "../lib/vercel-client.js";
+import { reportContainment } from "./env.js";
 
 const PASS = green("ok");
 const FAIL = red("missing");
@@ -151,6 +152,11 @@ export async function doctor(cliRoot: string): Promise<number> {
       const deps = existsSync(join(config.kitRoot, "node_modules", "tsx"));
       field("kit deps", deps ? PASS : `${yellow("not installed")} ${dim("(installed on demand)")}`);
     }
+
+    // Printed, never passed to `bad`: an uncontained satellite is a topology
+    // the operator chose, not a broken one, and `doctor` exiting 1 for it
+    // would train people to ignore this command (F-24).
+    if (profile) reportContainment(profile, config.origin);
   }
 
   info("");

@@ -696,3 +696,226 @@ test("a refused variable exported in the SHELL is seen, as the refusal hint prom
     else process.env.SSO_HANDOFF_PRIVATE_KEY = previous;
   }
 });
+
+/* ================================================================== */
+/*  F-24: an A/B satellite is contained only off the kit's database    */
+/*  and outside its cookie domain, and the CLI says so                 */
+/* ================================================================== */
+
+import { readFileSync } from "node:fs";
+
+import { reportContainment } from "../dist/commands/env.js";
+import { setQuiet } from "../dist/lib/log.js";
+import {
+  CONTAINMENT_DOC,
+  SATELLITE_OPTION_SUMMARIES,
+  containmentWarnings,
+  sharedParentDomain,
+} from "../dist/lib/target.js";
+
+/** A satellite on a registrable domain the kit (demo.example.com) does not share. */
+const OFF_DOMAIN = "https://app1.example.net";
+
+function warningsFor(overrides: Record<string, unknown>, origin: string) {
+  const profile = resolveProfile(satelliteConfig({ satellite: overrides }) as never);
+  return containmentWarnings({ profile, origin } as never);
+}
+
+test("an A or B satellite on the kit's database is warned it is NOT contained", () => {
+  for (const option of ["standalone", "handoff"]) {
+    // The default: no `database` recorded means the kit's.
+    const warnings = warningsFor({ option }, OFF_DOMAIN);
+    assert.deepEqual(
+      warnings.map((w) => w.what),
+      ["database"],
+      `${option} on the kit's database must be told, whatever its host`,
+    );
+    assert.match(warnings[0].why, /KIT's database/);
+    assert.match(warnings[0].why, /auth tables/, "the consequence is named, not just the fact");
+    assert.match(warnings[0].why, /Option C/, "same-DB A/B is security-equivalent to C, and says so");
+    assert.match(warnings[0].why, /not contained/);
+    // The boundary is the credential. Roles are cluster-wide and CONNECT is
+    // PUBLIC by default, so "a separate database" reached as the kit's role
+    // is the kit's database one URL edit away.
+    assert.match(warnings[0].hint, /ROLE with no privileges on the kit's schema/);
+    assert.match(
+      warnings[0].hint,
+      /new database under the kit's role is no boundary/,
+      "a separate database alone is not the fix",
+    );
+    assert.match(
+      warnings[0].hint,
+      /role made in the Neon console .*neon_superuser/,
+      "on Neon a console-made role writes every table in the project, so a dedicated role must be made with SQL",
+    );
+    assert.match(warnings[0].hint, /search_path, not a boundary/, "DB_SCHEMA alone is not the fix");
+    assert.match(warnings[0].hint, /--own-database/);
+  }
+});
+
+test("a satellite recorded as `database: own`, off the kit's domain, gets no warning: `own` is taken at its word", () => {
+  // The CLI never sees the value of DATABASE_URL, so it cannot tell its own
+  // role from the kit's under another database name. It warns about neither,
+  // and says where the answer is given that `own` must mean the role too.
+  assert.deepEqual(warningsFor({ option: "standalone", database: "own" }, OFF_DOMAIN), []);
+  assert.deepEqual(warningsFor({ option: "handoff", database: "own" }, OFF_DOMAIN), []);
+
+  const ownDb = contextFor(satelliteConfig({ satellite: { option: "standalone", database: "own" } }));
+  const comment = envSpecsFor(ownDb as never).find((s) => s.key === "DATABASE_URL")?.comment ?? "";
+  assert.match(
+    comment,
+    /OWN role/,
+    "the own-database DATABASE_URL comment asks for the role, not only the database",
+  );
+  assert.match(comment, /kit's role with another database name/, "and names the trap");
+  assert.ok(comment.length <= 500, "Vercel keeps 500 characters of a comment");
+});
+
+test("an A or B satellite that shares a parent domain with the kit is warned about the cookie", () => {
+  // Own database, so the cookie is the only thing left to warn about. The kit
+  // is demo.example.com; app1.example.com sits under the `.example.com` an
+  // Option C fleet would set as COOKIE_DOMAIN.
+  const warnings = warningsFor({ option: "standalone", database: "own" }, "https://app1.example.com");
+  assert.deepEqual(
+    warnings.map((w) => w.what),
+    ["cookie domain"],
+  );
+  assert.match(warnings[0].why, /`example\.com`/, "names the domain the kit's cookie would be scoped to");
+  assert.match(warnings[0].why, /demo\.example\.com/, "and the kit it would come from");
+  assert.match(warnings[0].why, /replay it on the kit/, "the consequence is named");
+  assert.match(warnings[0].why, /prefix stops shadowing, not theft/, "a cookie prefix is not the fix");
+  assert.match(warnings[0].hint, /different registrable domain/);
+
+  // Both facts at once: the live demo fleet's shape (the kit's database, and a
+  // subdomain of the kit's own parent domain).
+  const both = containmentWarnings({
+    profile: resolveProfile(
+      satelliteConfig({ satellite: { issuerOrigin: "https://demo.devresponse.ca" } }) as never,
+    ),
+    origin: "https://demo-standalone.devresponse.ca",
+  } as never);
+  assert.deepEqual(
+    both.map((w) => w.what),
+    ["database", "cookie domain"],
+  );
+});
+
+test("Option C is never warned: it shares the kit's security domain by definition", () => {
+  assert.deepEqual(
+    warningsFor({ option: "shared", cookieDomain: ".example.com" }, "https://app3.example.com"),
+    [],
+  );
+});
+
+test("the containment warnings are warnings: a healthy config still has no problems", () => {
+  // `deploy` refuses on problems. Every satellite deployed so far runs on the
+  // kit's database; it must keep deploying while being told it is not
+  // contained.
+  // app1.example.com on the kit's database, beside demo.example.com: both warnings.
+  const context = contextFor(satelliteConfig({ satellite: { option: "standalone" } }));
+  assert.deepEqual(satelliteConfigProblems(context as never), []);
+  assert.deepEqual(
+    containmentWarnings(context as never).map((w) => w.what),
+    ["database", "cookie domain"],
+  );
+  assert.equal(migrationPolicy(context.profile).allowed, false, "and the migration refusal is unchanged");
+});
+
+test("sharedParentDomain finds the domain a cookie could span, and nothing a cookie cannot", () => {
+  assert.equal(sharedParentDomain("app1.example.com", "demo.example.com"), "example.com");
+  assert.equal(
+    sharedParentDomain("demo-handoff.devresponse.ca:443", "demo.devresponse.ca"),
+    "devresponse.ca",
+  );
+  assert.equal(sharedParentDomain("app.demo.example.com", "demo.example.com"), "demo.example.com");
+  assert.equal(
+    sharedParentDomain("App1.Example.com", "demo.example.com."),
+    "example.com",
+    "case and a trailing dot",
+  );
+  assert.equal(sharedParentDomain("app.example.co.uk", "demo.example.co.uk"), "example.co.uk");
+  assert.equal(sharedParentDomain("example.com", "example.net"), null, "nothing but a TLD in common");
+  assert.equal(sharedParentDomain("app1.example.net", "demo.example.com"), null);
+  assert.equal(sharedParentDomain("evil-example.com", "example.com"), null, "labels, not substrings");
+  assert.equal(
+    sharedParentDomain("devresponse-standalone.vercel.app", "demo.vercel.app"),
+    null,
+    "vercel.app is a public suffix: no cookie spans two projects on it",
+  );
+  assert.equal(sharedParentDomain("10.0.0.1", "11.0.0.1"), null, "an IP literal has no parent domain");
+  assert.equal(sharedParentDomain("[::1]:3000", "[::2]:3000"), null, "nor does an IPv6 one");
+
+  // Cookies are not scoped by port: one host on two ports shares every
+  // cookie, host-only ones included, even where there is no parent domain.
+  assert.equal(sharedParentDomain("[::1]:3000", "[::1]:3001"), "[::1]");
+  assert.equal(sharedParentDomain("localhost:3001", "localhost:3000"), "localhost");
+  assert.equal(sharedParentDomain("127.0.0.1:3001", "127.0.0.1:3000"), "127.0.0.1");
+  assert.equal(sharedParentDomain("Demo.Example.com:8443", "demo.example.com."), "demo.example.com");
+});
+
+test("an A or B satellite on the kit's own host is warned even without a COOKIE_DOMAIN", () => {
+  // One host, two ports: the kit's default host-only cookie arrives here too,
+  // so the warning must not hinge on COOKIE_DOMAIN the way the parent-domain
+  // one does.
+  const warnings = containmentWarnings({
+    profile: resolveProfile(
+      satelliteConfig({ satellite: { database: "own", issuerOrigin: "http://localhost:3000" } }) as never,
+    ),
+    origin: "http://localhost:3001",
+  } as never);
+  assert.deepEqual(
+    warnings.map((w) => w.what),
+    ["cookie domain"],
+  );
+  assert.match(warnings[0].why, /share one host \(`localhost`\)/);
+  assert.match(warnings[0].why, /not scoped by port/);
+  assert.match(warnings[0].why, /whether or not the kit sets COOKIE_DOMAIN/);
+  assert.doesNotMatch(warnings[0].why, /If the kit's COOKIE_DOMAIN is/, "not conditional on the setting");
+  assert.match(warnings[0].hint, /host of its own/);
+});
+
+test("init's option list no longer promises A a database the default does not give it", () => {
+  for (const option of ["standalone", "handoff"] as const) {
+    const profile = resolveProfile(satelliteConfig({ satellite: { option } }) as never);
+    assert.equal(profile.kind === "satellite" && profile.database, "shared-with-kit", "the default");
+    assert.ok(
+      !/own database/i.test(SATELLITE_OPTION_SUMMARIES[option]),
+      `${option}'s summary must not claim its own database while init defaults it to the kit's`,
+    );
+  }
+  assert.match(SATELLITE_OPTION_SUMMARIES.shared, /KIT's database/);
+});
+
+test("the containment warning survives --quiet and points at a heading that exists", () => {
+  const profile = resolveProfile(satelliteConfig() as never);
+  const written: string[] = [];
+  const original = process.stderr.write;
+  setQuiet(true);
+  process.stderr.write = ((chunk: unknown) => {
+    written.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    assert.equal(reportContainment(profile, OFF_DOMAIN), 1);
+    assert.equal(reportContainment(resolveProfile(LEGACY_KIT_CONFIG as never), OFF_DOMAIN), 0, "the kit");
+  } finally {
+    process.stderr.write = original;
+    setQuiet(false);
+  }
+  const output = written.join("");
+  assert.match(output, /Not contained \(database\)/, "a warning, on stderr, even under --quiet");
+  assert.ok(output.includes(CONTAINMENT_DOC), "and it links the doc section");
+
+  // The link is only worth printing if the section is there: the GitHub-style
+  // slug of every heading in the real document, as lychee resolves it.
+  const [file, anchor] = CONTAINMENT_DOC.split("#");
+  const doc = readFileSync(join(KIT_ROOT, file!), "utf8");
+  const slugs = [...doc.matchAll(/^#{1,6}\s+(.+)$/gm)].map((m) =>
+    m[1]!
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s_-]/gu, "")
+      .replace(/\s/g, "-"),
+  );
+  assert.ok(slugs.includes(anchor!), `${file} has no heading for #${anchor}`);
+});

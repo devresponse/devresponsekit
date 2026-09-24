@@ -87,7 +87,9 @@ flowchart LR
 
 Register once is not required — the handoff is per-request. The satellite holds
 its **own** session cookie scoped to its **own** subdomain; the handoff is the
-bridge, so there is no shared-cookie coupling in this model.
+bridge, so the model itself needs no shared cookie. That is not the same as
+isolation: a satellite whose credentials reach the primary's database, or on a
+host under the primary's `COOKIE_DOMAIN`, is not contained (§3.2).
 
 ### 2.1 Three code facts (verified in source) that shape the rewrite
 
@@ -127,10 +129,14 @@ identity is read straight off the session's `user` object.
 **Option C — shared `auth` schema (no handoff).** The satellite validates the
 main app's *own* session instead of minting its own. Two facets:
 
-- **C1 (infra, low-stakes):** share one Postgres **instance**, one **schema per
-  app** — already supported by `DB_SCHEMA`. Purely a cost/ops consolidation; it
-  can host A or B unchanged (each app still owns its `user`/`session`, still
-  bridged by the handoff). Sharing the *instance* does **not** share auth.
+- **C1 (infra, low-stakes only with a role per app):** share one Postgres
+  **instance**, one **schema per app** — already supported by `DB_SCHEMA`. A
+  cost/ops consolidation; it can host A or B (each app still owns its
+  `user`/`session`, still bridged by the handoff). Sharing the *instance* does
+  **not** share auth **provided each app connects as its own role with no
+  privileges on the others' schemas**. `DB_SCHEMA` sets the connection's
+  `search_path` and nothing else: under one role, the primary's `auth` schema
+  is a qualified name away, and the satellite can write it (§3.2).
 - **C2 (auth model, high-stakes):** the satellite **directly reads the `auth`
   schema**. It runs Better Auth in **validate-only** mode with the **same
   `BETTER_AUTH_SECRET`**, the **same `DATABASE_URL` + `DB_SCHEMA=auth`**, and a
@@ -145,19 +151,19 @@ main app's *own* session instead of minting its own. Two facets:
 |---|---|---|---|
 | Auth model | own session store, SSO handoff | own session store, SSO handoff | **shared** session backend, no handoff |
 | New auth tables in satellite | `app_users` + nonces (+audit) | nonces (+audit) | **none** — reads `auth.*` (app tables optional, own schema) |
-| Database | separate DB *or* shared instance/own schema | same | **same instance, reads primary's `auth` schema** |
+| Database | separate DB *or* shared instance/own schema, either way **under its own role** (a new DB under the primary's role is no boundary) | same | **same instance, reads primary's `auth` schema** |
 | Auth code to build/maintain | consume + confirm + nonce + provision | same | **least** — Better Auth validate-only |
 | Login provisioning | upsert BA `user` + `app_users` | upsert BA `user` | none |
-| Session cookie | per-subdomain (isolated) | per-subdomain (isolated) | **shared parent-domain cookie** (`.root`) |
+| Session cookie | per-subdomain (own host-only cookie; the primary's parent-domain cookie still arrives under its `COOKIE_DOMAIN`, §3.2) | same as A | **shared parent-domain cookie** (`.root`) |
 | Shared secret | **none** — verifies EdDSA tokens (≤60s) against the primary's public JWKS | same | **full `BETTER_AUTH_SECRET`** (long-lived sessions) |
-| Blast radius if a satellite is compromised | contained to that app | contained | **platform-wide** (cookie + secret + sessions) |
+| Blast radius if a satellite is compromised | contained to that app **only** under its own DB role and on a host outside the primary's `COOKIE_DOMAIN` (§3.2); otherwise **platform-wide**, as C | same as A | **platform-wide** (cookie + secret + sessions) |
 | Coupling to the main app | stable JWT claim contract | JWT contract | **tight** — `auth` schema shape + Better Auth version |
 | Revocation | ≤8h lag (or instant via local `status`) | ≤8h lag | **instant, central** |
 | Multi-tenant exposure | only the token's claims | token's claims | **whole `auth` user/role graph** (must self-scope) |
-| Failure/resource domain | isolated (separate DB) | isolated | **shared instance** (pool/blast contention) |
+| Failure/resource domain | isolated (separate DB) | same as A | **shared instance** (pool/blast contention) |
 | Local kill-switch | yes (`status`) | no | central (revoke in primary) |
 | UX | one-time handoff bounce | one-time bounce | **seamless, zero redirect** |
-| Best when | isolated / mixed-trust deployable app | ultra-thin isolated viewer | **first-party, co-trusted fleet, same team** |
+| Best when | mixed-trust deployable app, under its own DB role and domain (§3.2) | ultra-thin viewer, same conditions | **first-party, co-trusted fleet, same team** |
 
 **A vs B nuance.** B isn't free of app fields — it just relocates them. The moment
 you want persisted locale or a local `status`, B forces either Better Auth
@@ -183,7 +189,7 @@ but **no display name**, so `name` is derived.)
 ```mermaid
 flowchart TD
   Q1{"Satellites first-party,<br/>same team, co-trusted?<br/>OK to treat the whole<br/>subdomain fleet as ONE<br/>security domain?"}
-  Q1 -->|"No / mixed / 3rd-party /<br/>want defense-in-depth"| H["Handoff model (A or B)<br/>per-app cookie + secret + session<br/>— compromise stays contained"]
+  Q1 -->|"No / mixed / 3rd-party /<br/>want defense-in-depth"| H["Handoff model (A or B)<br/>per-app cookie + secret + session<br/>— contained ONLY under its own DB role<br/>and outside the primary's COOKIE_DOMAIN"]
   Q1 -->|"Yes"| C["Option C2 — shared auth schema<br/>least code · best UX · instant central revoke<br/>(harden: validate-only, read-mostly grant,<br/>pinned BA version, trustedOrigins)"]
   H --> Q2{"Persist any<br/>per-user state?<br/>(locale, local status)"}
   Q2 -->|"Yes"| A["Option A — thin app_users<br/>(recommended default)"]
@@ -191,13 +197,45 @@ flowchart TD
 ```
 
 **Decide by trust boundary first, then storage, then infra.** The handoff (A) is
-the right **default** for a *generically deployable* satellite because it
-preserves per-app isolation. **C2** is genuinely the better choice **when the
-satellites are first-party and co-trusted** — it is the least code, best UX, and
-gives instant central revocation. **Infra (C1)** is orthogonal: run any model on a
-shared instance with a per-app schema to save cost, or a separate DB for hard
-isolation. Sharing the *instance* is low-risk; sharing the *auth schema* is the
-consequential call.
+the right **default** for a *generically deployable* satellite because it can
+preserve per-app isolation (under its own database role and domain, §3.2).
+**C2** is genuinely the better choice **when the satellites are first-party and
+co-trusted** — it is the least code, best UX, and gives instant central
+revocation. **Infra (C1)** is orthogonal: run any model on a shared instance
+with a per-app schema to save cost, or on a separate DB. Either is the database
+half of containment only under a role per app: roles are cluster-wide, so a
+separate DB reached as the primary's role is no boundary, and sharing the
+*instance* is low-risk on the same condition. Sharing the
+*auth schema* is the consequential call, and an A/B satellite that can reach
+the primary's schema, or sits under its `COOKIE_DOMAIN`, has made that call
+without meaning to (§3.2).
+
+### 3.2 What "contained" requires
+
+The handoff guarantees one thing in every topology: a compromised satellite
+holds no signing key, so it mints no handoff token. Containment, a compromise
+that stays inside the satellite, needs **both** of these as well:
+
+1. **No reach into the primary's tables** — the satellite signs in as a
+   Postgres role with no privileges on the primary's schema: on a separate
+   cluster or project, or a dedicated role (not the primary's owner or runtime
+   role, and not one that reads or writes all data, as every Neon Console-made
+   role does through `neon_superuser`) on its own database or schema. The
+   boundary is the credential. Roles are cluster-wide and `CONNECT` is granted
+   to `PUBLIC` by default, so a new database reached as the primary's role is
+   none, and a different `DB_SCHEMA` is a `search_path`, not a permission.
+   With write access to `user`, `account`, `session` or `app_*`, a compromised
+   satellite sets any password, grants any role, and reads live reset tokens.
+2. **A host outside the primary's `COOKIE_DOMAIN`**, ideally a different
+   registrable domain. Once the primary sets a parent-domain cookie (any fleet
+   with a C2 satellite), every browser sends it to every host under that
+   domain, and a compromised satellite server replays it on the primary. A
+   distinct cookie prefix prevents shadowing, not theft.
+
+Miss either and A or B is **security-equivalent to C2**, whatever its session
+model. The stock same-database forks, the local subdomain rig and the public
+demo fleet all are. The as-built detail is in the
+[Integration Guide §1.1](./integration-satellite-apps.md#11-when-a-or-b-is-actually-contained).
 
 ---
 
@@ -263,7 +301,12 @@ and keeps any app-only tables in its own schema.
 | `BETTER_AUTH_SECRET` / `DATABASE_URL` | its own | its own (separate) |
 
 Session cookies are **per-subdomain** (not shared on a parent domain) — the
-handoff is the bridge, so there is no shared-cookie-domain coupling.
+handoff is the bridge, so the model needs no shared cookie domain. That holds
+only while the primary's `COOKIE_DOMAIN` does not cover the satellite: once the
+primary sets a parent-domain cookie (any fleet with a C2 satellite), every
+satellite under that domain receives it. Keep a satellite that must be
+contained on a different registrable domain, and on a database it reaches as its
+own role (§3.2).
 
 > Under **Option C2** the contract is different: **no** handoff audience/secret and
 > **no** enterprise-app row; instead the satellite shares the **same
@@ -390,7 +433,11 @@ sign-in/up endpoints and uses a read-mostly DB role on `auth` (note rolling-
 session refresh writes to `session`); there is NO per-app provisioning and NO
 app_users. getUserAccessContext reads the shared auth.user/session via
 auth.api.getSession(). Do NOT take this path if apps must stay isolated or vary
-in trust — use the handoff model below instead.
+in trust — use the handoff model below instead, on its OWN database reached as
+its OWN Postgres role (never devresponsekit's role under another database
+name) and on a host outside devresponsekit's COOKIE_DOMAIN (a handoff app whose
+credentials reach the shared database, or under that domain, is no more
+isolated than this path).
 
 EXECUTE IN PHASES; validate after each.
 

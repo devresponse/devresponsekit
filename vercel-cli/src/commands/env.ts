@@ -12,7 +12,14 @@ import {
   refusedFor,
   vercelTypeFor,
 } from "../lib/env-spec.js";
-import { describeProfile, migrationPolicy, satelliteConfigProblems } from "../lib/target.js";
+import {
+  CONTAINMENT_DOC,
+  type DeploymentProfile,
+  containmentWarnings,
+  describeProfile,
+  migrationPolicy,
+  satelliteConfigProblems,
+} from "../lib/target.js";
 import {
   CliError,
   blue,
@@ -373,7 +380,35 @@ export async function envCheck(cliRoot: string): Promise<number> {
   if (problems === 0) ok("Environment satisfies the contract.");
   else warn(`${problems} item(s) need attention.`);
   info(dim("  Variables are checked for PRESENCE only — values are not read, so none is validated."));
+
+  // After the verdict, and not counted in it: a satellite on the kit's
+  // database satisfies the contract and still is not contained (F-24).
+  reportContainment(context.profile, context.origin);
   return problems;
+}
+
+/**
+ * Says when an A or B satellite is NOT contained (F-24), every time the
+ * deployment is checked or shipped.
+ *
+ * Returns how many warnings it printed, and never adds them to a problem
+ * count: `deploy` refuses on problems, and the satellites deployed so far all
+ * run on the kit's database. They must keep deploying. What must stop is an
+ * operator reading "handoff consumer" and concluding that a compromise of this
+ * app ends here. `warn` rather than `info`, so `--quiet` does not hide it.
+ */
+export function reportContainment(profile: DeploymentProfile, origin: string): number {
+  if (profile.kind !== "satellite") return 0;
+  const warnings = containmentWarnings({ profile, origin });
+  if (warnings.length === 0) return 0;
+
+  heading("Containment (a warning, not a failed check)");
+  for (const warning of warnings) {
+    warn(`Not contained (${warning.what}): ${warning.why}.`);
+    info(`    ${dim(warning.hint)}`);
+  }
+  warn(`What containment takes, and why: ${CONTAINMENT_DOC} (in the kit checkout)`);
+  return warnings.length;
 }
 
 /** `drk-deploy env:prune` — removes variables that must not exist on a deployment. */

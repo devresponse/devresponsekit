@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as EnvModule from "@/lib/env";
 import { getServerEnv, intFromEnv } from "@/lib/env";
@@ -68,7 +69,13 @@ const TOUCHED_KEYS = [
   "BETTER_AUTH_SECRET",
   "SSO_HANDOFF_PRIVATE_KEY",
   "SSO_HANDOFF_PREVIOUS_PRIVATE_KEY",
+  "SSO_HANDOFF_ISSUER",
+  "API_JWT_ENABLED",
   "API_JWT_PRIVATE_KEY",
+  "API_JWT_PREVIOUS_PRIVATE_KEY",
+  "MAILGUN_BASE_URL",
+  "ADMIN_TRUSTED_ORIGINS",
+  "COOKIE_DOMAIN",
   "PGPOOL_MAX",
   "CRON_SECRET",
   "METRICS_TOKEN",
@@ -155,8 +162,8 @@ describe("API_JWT_ISSUER / BETTER_AUTH_URL consistency when MCP_ENABLED (review 
     }
   });
 
-  it("accepts an unset issuer, or one that only differs by a trailing slash", async () => {
-    for (const issuer of [undefined, "https://app.example.com", "https://app.example.com/"]) {
+  it("accepts an unset (or empty) issuer, or an identical one", async () => {
+    for (const issuer of [undefined, "", "https://app.example.com"]) {
       const { mod, restore } = await loadEnvWith({
         MCP_ENABLED: "1",
         BETTER_AUTH_URL: "https://app.example.com",
@@ -167,6 +174,22 @@ describe("API_JWT_ISSUER / BETTER_AUTH_URL consistency when MCP_ENABLED (review 
       } finally {
         restore();
       }
+    }
+  });
+
+  it("refuses an issuer that differs only by a trailing slash since F-22 (iss is an exact string)", async () => {
+    // Review #57 tolerated it for the discovery check, but the value is
+    // stamped into every token as `iss` and verifiers compare it exactly;
+    // the discovery document advertises it trimmed, so the two disagreed.
+    const { mod, restore } = await loadEnvWith({
+      MCP_ENABLED: "1",
+      BETTER_AUTH_URL: "https://app.example.com",
+      API_JWT_ISSUER: "https://app.example.com/",
+    });
+    try {
+      expect(() => mod.getServerEnv()).toThrow(/API_JWT_ISSUER \(must not end with "\/"/);
+    } finally {
+      restore();
     }
   });
 
@@ -410,8 +433,8 @@ describe("SKIP_ENV_VALIDATION build-phase escape (OPS-6)", () => {
 describe("signing-secret hygiene (audit #12/#22)", () => {
   const VALID = "a".repeat(40);
   const VALID2 = "b".repeat(40);
-  // A syntactically valid Ed25519 private JWK shape (NOT a real key — the
-  // schema checks members, not the curve point).
+  // The RFC 8037 Appendix A Ed25519 private JWK: the shape the schema checks
+  // (32-byte x and d), and a real, consistent pair besides.
   const ED25519_JWK = JSON.stringify({
     kty: "OKP",
     crv: "Ed25519",
@@ -629,6 +652,300 @@ describe("CLIENT_IP_SOURCE boot validation (F-17)", () => {
         restore();
       }
     }
+  });
+});
+
+/**
+ * F-22: every origin-valued variable must be an http(s) origin (https in
+ * production unless loopback), COOKIE_DOMAIN must cover BETTER_AUTH_URL, and
+ * the signing keys' shape is checked at parse (the Node boot hook imports them:
+ * tests/unit/env-signing-keys.test.ts). The production outage behind it was
+ * SSO_HANDOFF_ISSUER=httsp://demo.devresponse.ca, which PARSES as a URL — so
+ * these vectors use the typo itself, not `not-a-url`.
+ */
+describe("origin-valued variables (F-22)", () => {
+  const ED25519 = () =>
+    JSON.stringify(generateKeyPairSync("ed25519").privateKey.export({ format: "jwk" }));
+
+  async function expectBoot(patch: Record<string, string | undefined>, error?: RegExp) {
+    const { mod, restore } = await loadEnvWith(patch);
+    try {
+      if (error) expect(() => mod.getServerEnv(), JSON.stringify(patch)).toThrow(error);
+      else expect(() => mod.getServerEnv(), JSON.stringify(patch)).not.toThrow();
+    } finally {
+      restore();
+    }
+  }
+
+  it.each([
+    "httsp://demo.devresponse.ca",
+    "ftp://demo.devresponse.ca",
+    "https:/demo.devresponse.ca",
+    "https://demo.devresponse.ca/",
+    "https://demo.devresponse.ca/path",
+    "https://Demo.devresponse.ca",
+    "devresponse",
+  ])("refuses SSO_HANDOFF_ISSUER=%s at boot", async (issuer) => {
+    await expectBoot({ SSO_HANDOFF_ISSUER: issuer }, /SSO_HANDOFF_ISSUER \(must/);
+  });
+
+  it("says WHY in the boot error, so a write-only variable can still be fixed", async () => {
+    await expectBoot(
+      { SSO_HANDOFF_ISSUER: "httsp://demo.devresponse.ca" },
+      /SSO_HANDOFF_ISSUER \(must use the http: or https: scheme, not "httsp:"\)/,
+    );
+    await expectBoot(
+      { SSO_HANDOFF_ISSUER: "https://demo.devresponse.ca/" },
+      /drop the trailing slash/,
+    );
+  });
+
+  it.each([
+    "httsp://app.example.com",
+    "ftp://app.example.com",
+    "https:/app.example.com",
+    "https://app.example.com/app",
+    "https://app.example.com?x=1",
+  ])("refuses BETTER_AUTH_URL=%s at boot", async (url) => {
+    await expectBoot({ BETTER_AUTH_URL: url }, /BETTER_AUTH_URL \(must/);
+  });
+
+  it("tolerates a trailing slash on BETTER_AUTH_URL (the URL builders trim it)", async () => {
+    await expectBoot({ BETTER_AUTH_URL: "https://app.example.com/" });
+  });
+
+  it("requires https in production, except on a loopback host", async () => {
+    await expectBoot(
+      { NODE_ENV: "production", BETTER_AUTH_URL: "http://example.com" },
+      /BETTER_AUTH_URL \(must use https: in production/,
+    );
+    await expectBoot(
+      { NODE_ENV: "production", SSO_HANDOFF_ISSUER: "http://example.com" },
+      /SSO_HANDOFF_ISSUER \(must use https: in production/,
+    );
+    for (const url of ["http://localhost:3000", "http://127.0.0.1:3000"]) {
+      await expectBoot({ NODE_ENV: "production", BETTER_AUTH_URL: url, SSO_HANDOFF_ISSUER: url });
+    }
+    // Outside production any http host is fine (the local SSO rig's .local hosts).
+    await expectBoot({
+      NODE_ENV: "development",
+      BETTER_AUTH_URL: "http://devresponse.local:3000",
+      SSO_HANDOFF_ISSUER: "http://devresponse.local:3000",
+    });
+  });
+
+  it("refuses a bad API_JWT_ISSUER, MCP_DISPATCH_BASE_URL or MAILGUN_BASE_URL", async () => {
+    await expectBoot({ API_JWT_ISSUER: "httsp://app.example.com" }, /API_JWT_ISSUER \(must/);
+    await expectBoot({ API_JWT_ISSUER: "devresponse-api" }, /API_JWT_ISSUER \(must/);
+    await expectBoot({ MCP_DISPATCH_BASE_URL: "ftp://127.0.0.1:3000" }, /MCP_DISPATCH_BASE_URL/);
+    await expectBoot(
+      { NODE_ENV: "production", MCP_DISPATCH_BASE_URL: "http://10.0.0.5:3000" },
+      /MCP_DISPATCH_BASE_URL \(must use https: in production/,
+    );
+    await expectBoot({ NODE_ENV: "production", MCP_DISPATCH_BASE_URL: "http://127.0.0.1:3000" });
+    await expectBoot({ MAILGUN_BASE_URL: "httsp://api.eu.mailgun.net" }, /MAILGUN_BASE_URL/);
+    await expectBoot({ MAILGUN_BASE_URL: "https://api.eu.mailgun.net/v3" }, /MAILGUN_BASE_URL/);
+    await expectBoot({ MAILGUN_BASE_URL: "https://api.eu.mailgun.net" });
+    // Tolerated, because the Mailgun client trims it (email-providers.test.ts).
+    await expectBoot({ MAILGUN_BASE_URL: "https://api.eu.mailgun.net/" });
+  });
+
+  it("treats an empty API_JWT_ISSUER / MCP_DISPATCH_BASE_URL as unset", async () => {
+    const { mod, restore } = await loadEnvWith({ API_JWT_ISSUER: "", MCP_DISPATCH_BASE_URL: "" });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.API_JWT_ISSUER).toBeUndefined();
+      expect(env.MCP_DISPATCH_BASE_URL).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  it("checks every ADMIN_TRUSTED_ORIGINS entry", async () => {
+    await expectBoot({ ADMIN_TRUSTED_ORIGINS: " https://a.example.com , https://b.example.com " });
+    await expectBoot(
+      { ADMIN_TRUSTED_ORIGINS: "https://a.example.com,httsp://b.example.com" },
+      /ADMIN_TRUSTED_ORIGINS \(every entry must be an http\(s\) origin; entry 2 must use the http: or https: scheme, not "httsp:"\)/,
+    );
+    await expectBoot(
+      { ADMIN_TRUSTED_ORIGINS: "https://a.example.com/path" },
+      /ADMIN_TRUSTED_ORIGINS/,
+    );
+    await expectBoot(
+      { NODE_ENV: "production", ADMIN_TRUSTED_ORIGINS: "http://preview.example.com" },
+      /ADMIN_TRUSTED_ORIGINS/,
+    );
+  });
+
+  it("names a bad ADMIN_TRUSTED_ORIGINS entry by position, never echoing its credentials", async () => {
+    const { mod, restore } = await loadEnvWith({
+      ADMIN_TRUSTED_ORIGINS: "https://a.example.com,https://ops:hunter2-secret@b.example.com",
+    });
+    try {
+      let message = "";
+      try {
+        mod.getServerEnv();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toMatch(/ADMIN_TRUSTED_ORIGINS \(.*entry 2 must be an origin/);
+      expect(message).toContain("(https://b.example.com)");
+      expect(message).not.toContain("hunter2-secret");
+      expect(message).not.toContain("ops:");
+    } finally {
+      restore();
+    }
+  });
+
+  it("requires COOKIE_DOMAIN to cover BETTER_AUTH_URL and not be a public suffix", async () => {
+    const prod = { NODE_ENV: "production", BETTER_AUTH_URL: "https://demo.devresponse.ca" };
+    // The live Option C shape: the kit on demo.devresponse.ca under .devresponse.ca.
+    await expectBoot({ ...prod, COOKIE_DOMAIN: ".devresponse.ca" });
+    await expectBoot({ ...prod, COOKIE_DOMAIN: "" });
+    await expectBoot(
+      { ...prod, COOKIE_DOMAIN: ".devresponse.com" },
+      /COOKIE_DOMAIN \(must be BETTER_AUTH_URL's host \(demo\.devresponse\.ca\) or a parent domain/,
+    );
+    await expectBoot({ ...prod, COOKIE_DOMAIN: ".ca" }, /COOKIE_DOMAIN \(.*public suffix/);
+    // auth.ts sends the RAW value as `Domain=`, and a browser drops the cookie
+    // for an FQDN trailing dot or a doubled leading dot, so those fail boot
+    // even though their normalised form covers the host.
+    for (const spelling of ["devresponse.ca.", ".devresponse.ca.", "..devresponse.ca"]) {
+      await expectBoot(
+        { ...prod, COOKIE_DOMAIN: spelling },
+        /COOKIE_DOMAIN \(must be written as devresponse\.ca or \.devresponse\.ca/,
+      );
+    }
+    await expectBoot({ ...prod, COOKIE_DOMAIN: ".DevResponse.CA" });
+    await expectBoot(
+      {
+        NODE_ENV: "production",
+        BETTER_AUTH_URL: "https://app.example.co.uk",
+        COOKIE_DOMAIN: ".co.uk",
+      },
+      /COOKIE_DOMAIN \(.*public suffix/,
+    );
+    await expectBoot(
+      { NODE_ENV: "production", BETTER_AUTH_URL: "https://app.example.com", COOKIE_DOMAIN: ".com" },
+      /COOKIE_DOMAIN/,
+    );
+    // The local SSO rig (integration guide section 6.6).
+    await expectBoot({
+      NODE_ENV: "development",
+      BETTER_AUTH_URL: "http://devresponse.local:3000",
+      COOKIE_DOMAIN: ".devresponse.local",
+    });
+  });
+
+  it("checks the shape of both JWT signing keys at parse (review #50)", async () => {
+    const current = ED25519();
+    await expectBoot({ API_JWT_ENABLED: "1", API_JWT_PRIVATE_KEY: current });
+    await expectBoot({
+      API_JWT_ENABLED: "1",
+      API_JWT_PRIVATE_KEY: current,
+      API_JWT_PREVIOUS_PRIVATE_KEY: ED25519(),
+    });
+    const jwk = JSON.parse(current) as Record<string, string>;
+    for (const bad of [
+      `${current}"`, // a trailing quote
+      JSON.stringify({ ...jwk, d: jwk.d!.slice(0, -4) }), // a truncated d
+      JSON.stringify({ ...jwk, d: `${jwk.d}=` }), // a padded d
+      JSON.stringify({ ...jwk, x: `${jwk.x}"` }), // a stray quote inside x
+      JSON.stringify({ ...jwk, crv: "X25519" }), // the wrong curve
+    ]) {
+      await expectBoot(
+        { API_JWT_ENABLED: "1", API_JWT_PRIVATE_KEY: bad },
+        /API_JWT_PRIVATE_KEY \(/,
+      );
+      // The previous key is checked whether or not it is ever used to verify:
+      // a bad one breaks the whole key set, current-key tokens included.
+      await expectBoot(
+        { API_JWT_ENABLED: "1", API_JWT_PRIVATE_KEY: current, API_JWT_PREVIOUS_PRIVATE_KEY: bad },
+        /API_JWT_PREVIOUS_PRIVATE_KEY \(/,
+      );
+    }
+  });
+
+  it("checks the SSO handoff keys' shape too (a truncated d no longer parses)", async () => {
+    const jwk = JSON.parse(ED25519()) as Record<string, string>;
+    await expectBoot(
+      { SSO_HANDOFF_PRIVATE_KEY: JSON.stringify({ ...jwk, d: jwk.d!.slice(0, -1) }) },
+      /SSO_HANDOFF_PRIVATE_KEY \(has a d member that is not 43 unpadded base64url characters/,
+    );
+  });
+
+  it("leaves a mismatched x to the Node boot hook, which env.ts cannot run", async () => {
+    // Pairing x with d takes node:crypto, and env.ts is in the Edge graph, so
+    // the schema accepts this; assertSigningKeysImport refuses it at boot
+    // (tests/unit/env-signing-keys.test.ts).
+    const jwk = JSON.parse(ED25519()) as Record<string, string>;
+    const mismatched = JSON.stringify({ ...jwk, x: JSON.parse(ED25519()).x });
+    await expectBoot({ SSO_HANDOFF_PRIVATE_KEY: mismatched });
+    await expectBoot({
+      API_JWT_ENABLED: "1",
+      API_JWT_PREVIOUS_PRIVATE_KEY: mismatched,
+      API_JWT_PRIVATE_KEY: ED25519(),
+    });
+  });
+
+  it("never echoes a secret in the boot error", async () => {
+    const secret = ED25519();
+    const { mod, restore } = await loadEnvWith({ API_JWT_PRIVATE_KEY: `${secret}"` });
+    try {
+      let message = "";
+      try {
+        mod.getServerEnv();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toMatch(/API_JWT_PRIVATE_KEY/);
+      expect(message).not.toContain((JSON.parse(secret) as { d: string }).d);
+    } finally {
+      restore();
+    }
+  });
+
+  it("still boots the build-phase placeholders (NODE_ENV=production, http://localhost:3000)", async () => {
+    // `next build` falls back to these when the real env is invalid; they
+    // parse under NODE_ENV=production, so the loopback exemption is what
+    // keeps every build green.
+    const { mod, restore } = await loadEnvWith({
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+      SSO_HANDOFF_ISSUER: "httsp://demo.devresponse.ca",
+    });
+    try {
+      const env = mod.getServerEnv();
+      expect(env.NODE_ENV).toBe("production");
+      expect(env.BETTER_AUTH_URL).toBe("http://localhost:3000");
+      expect(env.SSO_HANDOFF_ISSUER).toBe("http://localhost:3000");
+    } finally {
+      restore();
+    }
+  });
+
+  it("boots the CI browser job's env (next start under NODE_ENV=production)", async () => {
+    await expectBoot({
+      NODE_ENV: "production",
+      CI: "true",
+      BETTER_AUTH_URL: "http://localhost:3000",
+      SSO_HANDOFF_ISSUER: "http://localhost:3000",
+      AUTH_RATE_LIMIT_DISABLED: "1",
+      API_JWT_ENABLED: "1",
+      API_JWT_PRIVATE_KEY: ED25519(),
+      MCP_ENABLED: "1",
+      SSO_ALLOWED_ORIGIN_SUFFIXES: "devresponse.com",
+    });
+  });
+
+  it("boots the live production shape (demo.devresponse.ca, Option C cookie)", async () => {
+    await expectBoot({
+      NODE_ENV: "production",
+      BETTER_AUTH_URL: "https://demo.devresponse.ca",
+      SSO_HANDOFF_ISSUER: "https://demo.devresponse.ca",
+      COOKIE_DOMAIN: ".devresponse.ca",
+      SSO_ALLOWED_ORIGIN_SUFFIXES: "devresponse.ca",
+    });
   });
 });
 

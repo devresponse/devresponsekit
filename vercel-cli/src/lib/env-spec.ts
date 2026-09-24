@@ -1,4 +1,4 @@
-import { isValidHandoffPrivateJwk } from "./secrets.js";
+import { ed25519PrivateJwkProblem } from "./secrets.js";
 import {
   type DeploymentProfile,
   type SatelliteProfile,
@@ -83,6 +83,66 @@ const isUrl = (value: string): string | null => {
   }
 };
 
+/** Loopback hosts, where plain http never leaves the machine. */
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+/**
+ * The kit's origin rule, `httpOriginProblem` in `src/lib/env-validators.ts`
+ * (F-22), copied because this package cannot import across its `rootDir`.
+ * The kit's `tests/unit/env-validators.test.ts` runs both over the same
+ * vectors, so a change to one that is not made to the other fails there.
+ *
+ * An http(s) origin and nothing more: another scheme (`httsp:`, the typo that
+ * sat in the kit's production issuer for a week), a value the URL parser
+ * repairs (`https:/host`), a path, query, fragment or credentials are refused,
+ * and so is plain http in production unless the host is loopback. `exact`
+ * (the issuers) also refuses a trailing slash and a capitalised host, because
+ * the value is stamped into tokens as `iss` and compared as an exact string.
+ */
+export function httpOriginProblem(
+  value: string,
+  options: { production: boolean; exact?: boolean },
+): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "must be an absolute http(s) origin such as https://app.example.com";
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return `must use the http: or https: scheme, not "${url.protocol}"`;
+  }
+  const canonical = url.origin;
+  if (options.exact) {
+    if (value === `${canonical}/`) {
+      return `must not end with "/": it is compared as an exact string, so drop the trailing slash (${canonical})`;
+    }
+    if (value !== canonical) {
+      return `must be written exactly as an origin, scheme://host[:port] in lowercase with no path, query, fragment or credentials (${canonical})`;
+    }
+  } else {
+    const lowered = value.toLowerCase();
+    if (lowered !== canonical && lowered !== `${canonical}/`) {
+      return `must be an origin, scheme://host[:port] with no path, query, fragment or credentials (${canonical})`;
+    }
+  }
+  if (options.production && url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+    return "must use https: in production (plain http is accepted only for localhost, 127.0.0.1 or [::1])";
+  }
+  return null;
+}
+
+/**
+ * Every Vercel deployment, preview included, runs NODE_ENV=production, so the
+ * kit applies its production rule to whatever this CLI stores.
+ */
+const kitOrigin = (value: string): string | null => httpOriginProblem(value, { production: true });
+const kitExactOrigin = (value: string): string | null =>
+  httpOriginProblem(value, { production: true, exact: true });
+
 /**
  * The six the kit refuses to boot without, plus the ones whose absence turns a
  * feature off silently. Ordered the way an operator reads them, not
@@ -105,7 +165,7 @@ export const ENV_SPECS: readonly EnvVarSpec[] = [
     source: "derived",
     comment: "The app's public origin. Callback URLs and OAuth discovery are built from it.",
     consequence: "The server will not boot.",
-    validate: isUrl,
+    validate: kitOrigin,
   },
   {
     key: "DATABASE_URL",
@@ -124,7 +184,7 @@ export const ENV_SPECS: readonly EnvVarSpec[] = [
     source: "derived",
     comment: "Origin that signs SSO handoffs. Satellites fetch its keys from ${this}/api/sso/jwks.json.",
     consequence: "The server will not boot.",
-    validate: isUrl,
+    validate: kitExactOrigin,
   },
   {
     key: "SSO_HANDOFF_AUDIENCE_PREFIX",
@@ -150,10 +210,8 @@ export const ENV_SPECS: readonly EnvVarSpec[] = [
     comment: "Ed25519 private JWK that signs handoffs. Issuer only — satellites hold no key.",
     consequence:
       "/api/sso/launch answers 503 and /api/sso/jwks.json serves an EMPTY key set, so no satellite can verify a handoff.",
-    validate: (v) =>
-      isValidHandoffPrivateJwk(v)
-        ? null
-        : "must be a JSON Ed25519 private JWK (kty OKP, crv Ed25519, with d)",
+    // The kit imports the key at boot (F-22); refuse here what it would refuse.
+    validate: ed25519PrivateJwkProblem,
   },
   {
     key: "SSO_ALLOWED_ORIGIN_SUFFIXES",

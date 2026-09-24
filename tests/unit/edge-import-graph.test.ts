@@ -26,6 +26,15 @@ import { describe, expect, it } from "vitest";
  * (type-only imports are erased; `import()` is the runtime-guarded path) of
  * every module under `src/` that the Edge build loads, and fails on a Node
  * built-in or a Node-only package.
+ *
+ * It also fails on `process.getBuiltinModule` in any of those modules (F-22
+ * follow-up). That call reaches a built-in without an import, so the import
+ * walk cannot see it, but Turbopack does: `env-validators.ts` once resolved
+ * `node:crypto` that way, and every `next build` printed "A Node.js API is
+ * used (process.getBuiltinModule …) which is not supported in the Edge
+ * Runtime" under the `[Edge Instrumentation]` trace. The key import now lives
+ * in `env-signing-keys.server.ts`, which only the Node branch of `register()`
+ * imports, dynamically.
  */
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -61,15 +70,47 @@ function importsValues(clause: ts.ImportClause | undefined): boolean {
   return bindings.elements.some((element) => !element.isTypeOnly);
 }
 
-/** The module specifiers a file imports or re-exports at runtime. */
-function staticValueImports(file: string): string[] {
-  const source = ts.createSourceFile(
+/** Reads a module's source; the negative controls substitute one file's text. */
+type ReadSource = (file: string) => string;
+const readSource: ReadSource = (file) => readFileSync(file, "utf8");
+
+function parse(file: string, text: string): ts.SourceFile {
+  return ts.createSourceFile(
     file,
-    readFileSync(file, "utf8"),
+    text,
     ts.ScriptTarget.Latest,
-    false,
+    true,
     file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
+}
+
+/**
+ * Node APIs reached WITHOUT an import, which Turbopack flags in an Edge bundle
+ * although no import names a built-in.
+ */
+const NODE_ONLY_GLOBAL_APIS = new Set(["getBuiltinModule"]);
+
+/**
+ * Every use of a {@link NODE_ONLY_GLOBAL_APIS} member in `source`, as
+ * `"<line>:<name>"`: `process.getBuiltinModule(…)`, `process["getBuiltinModule"]`
+ * and `const { getBuiltinModule } = process` all name it. Comments do not.
+ */
+function nodeGlobalApiUses(source: ts.SourceFile): string[] {
+  const uses: string[] = [];
+  const visit = (node: ts.Node) => {
+    const name = ts.isIdentifier(node) || ts.isStringLiteralLike(node) ? node.text : undefined;
+    if (name && NODE_ONLY_GLOBAL_APIS.has(name)) {
+      const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+      uses.push(`${line + 1}:${name}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return uses;
+}
+
+/** The module specifiers a file imports or re-exports at runtime. */
+function staticValueImports(source: ts.SourceFile): string[] {
   const specifiers: string[] = [];
   for (const statement of source.statements) {
     if (
@@ -107,17 +148,27 @@ const toRepoPath = (file: string) => relative(REPO_ROOT, file).replaceAll("\\", 
 
 /**
  * Walks the static graph from `roots` and returns every project module it
- * reaches, plus each Node-only import as `"<importer> -> <specifier>"`.
+ * reaches, each Node-only import as `"<importer> -> <specifier>"`, and each
+ * import-free Node API use as `"<file>:<line> -> <name>"`.
  */
-function walk(roots: readonly string[]): { modules: string[]; nodeImports: string[] } {
+function walk(
+  roots: readonly string[],
+  read: ReadSource = readSource,
+): { modules: string[]; nodeImports: string[]; nodeApis: string[] } {
   const seen = new Set<string>();
   const nodeImports: string[] = [];
+  const nodeApis: string[] = [];
   const queue = roots.map((root) => join(REPO_ROOT, root));
   while (queue.length > 0) {
     const file = queue.shift()!;
     if (seen.has(file)) continue;
     seen.add(file);
-    for (const specifier of staticValueImports(file)) {
+    const source = parse(file, read(file));
+    for (const use of nodeGlobalApiUses(source)) {
+      const [line, name] = use.split(":");
+      nodeApis.push(`${toRepoPath(file)}:${line} -> ${name}`);
+    }
+    for (const specifier of staticValueImports(source)) {
       if (isNodeOnly(specifier)) {
         nodeImports.push(`${toRepoPath(file)} -> ${specifier}`);
         continue;
@@ -126,17 +177,34 @@ function walk(roots: readonly string[]): { modules: string[]; nodeImports: strin
       if (next) queue.push(next);
     }
   }
-  return { modules: [...seen].map(toRepoPath).sort(), nodeImports };
+  return { modules: [...seen].map(toRepoPath).sort(), nodeImports, nodeApis };
 }
+
+/**
+ * How `env-validators.ts` reached `node:crypto` before this check existed:
+ * it passed the import walk and still broke the Edge build.
+ */
+const PRE_FIX_NODE_CRYPTO = `
+function nodeCrypto(): typeof NodeCrypto | undefined {
+  if (typeof process === "undefined" || typeof process.getBuiltinModule !== "function") {
+    return undefined;
+  }
+  return process.getBuiltinModule("node:crypto");
+}
+`;
 
 describe("Edge instrumentation import graph", () => {
   it("reaches no Node built-in or Node-only package", () => {
     expect(walk(EDGE_ROOTS).nodeImports).toEqual([]);
   });
 
+  it("uses no Node API that needs no import (process.getBuiltinModule)", () => {
+    expect(walk(EDGE_ROOTS).nodeApis).toEqual([]);
+  });
+
   it("walks the modules the Edge bundle actually contains", () => {
     // Guards against a vacuous pass: if resolution silently stopped at the
-    // root, the assertion above would hold for any graph.
+    // root, the assertions above would hold for any graph.
     expect(walk(EDGE_ROOTS).modules).toEqual(
       expect.arrayContaining([
         "src/instrumentation.ts",
@@ -145,6 +213,9 @@ describe("Edge instrumentation import graph", () => {
         "src/lib/env.ts",
         // F-17: env.ts validates CLIENT_IP_SOURCE with this module's parser.
         "src/lib/client-ip-source.ts",
+        // F-22: env.ts's origin and key-shape rules. Pure on purpose: the key
+        // IMPORT lives in env-signing-keys.server.ts (below).
+        "src/lib/env-validators.ts",
         "src/sentry.edge.config.ts",
       ]),
     );
@@ -157,5 +228,39 @@ describe("Edge instrumentation import graph", () => {
     expect(walk(["src/lib/client-ip.ts"]).nodeImports).toContain(
       "src/lib/client-ip.ts -> node:net",
     );
+  });
+
+  it("does not reach env-signing-keys.server.ts, which imports node:crypto", () => {
+    // register() imports it dynamically inside its Node branch; the walk
+    // follows static imports only, as the Edge bundle does.
+    expect(walk(EDGE_ROOTS).modules).not.toContain("src/lib/env-signing-keys.server.ts");
+    expect(walk(["src/lib/env-signing-keys.server.ts"]).nodeImports).toContain(
+      "src/lib/env-signing-keys.server.ts -> node:crypto",
+    );
+  });
+
+  it("reports process.getBuiltinModule in an Edge module (negative control)", () => {
+    // The Edge graph as it is, with env-validators.ts carrying its pre-fix
+    // nodeCrypto() again: the walk must report both uses in it.
+    const validators = join(SRC_DIR, "lib", "env-validators.ts");
+    const lines = readSource(validators).split("\n").length;
+    const { nodeApis, nodeImports } = walk(EDGE_ROOTS, (file) =>
+      file === validators ? readSource(file) + PRE_FIX_NODE_CRYPTO : readSource(file),
+    );
+    expect(nodeApis).toEqual([
+      `src/lib/env-validators.ts:${lines + 2} -> getBuiltinModule`,
+      `src/lib/env-validators.ts:${lines + 5} -> getBuiltinModule`,
+    ]);
+    expect(nodeImports).toEqual([]);
+  });
+
+  it("names the API however it is reached, and ignores comments", () => {
+    const uses = (text: string) => nodeGlobalApiUses(parse("probe.ts", text));
+    expect(uses('process["getBuiltinModule"]("node:fs");')).toEqual(["1:getBuiltinModule"]);
+    expect(uses("const { getBuiltinModule } = process;")).toEqual(["1:getBuiltinModule"]);
+    expect(uses("globalThis.process.getBuiltinModule?.('node:os');")).toEqual([
+      "1:getBuiltinModule",
+    ]);
+    expect(uses("// process.getBuiltinModule\n/* getBuiltinModule( */ const a = 1;")).toEqual([]);
   });
 });

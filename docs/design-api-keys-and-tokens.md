@@ -311,7 +311,7 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 | `API_JWT_AUDIENCE` | `devresponse-api` | JWT `aud` |
 | `API_JWT_ACCESS_TTL_SECONDS` | `900` | Token lifetime, capped ≤ 3600 |
 
-`src/lib/env.ts` fails **at boot** (not at first mint) if `API_JWT_ENABLED` is set without `API_JWT_PRIVATE_KEY`.
+`src/lib/env.ts` fails **at boot** (not at first mint) if `API_JWT_ENABLED` is set without `API_JWT_PRIVATE_KEY`, or if `API_JWT_PRIVATE_KEY` / `API_JWT_PREVIOUS_PRIVATE_KEY` is set but is not a well-formed Ed25519 private JWK; the Node boot hook (`src/lib/env-signing-keys.server.ts`) then imports both and refuses an `x` that is not `d`'s public half (F-22). If the keys still fail to load at runtime, `verifyAccessToken` throws a `JwtKeyMaterialError` and the request ends in a logged 500, not a 401 blaming the client's token. `POST /auth/token` and `GET /jwks.json` answer a problem+json 500 the same way. `API_JWT_ISSUER`, when set, must be an http(s) origin with no trailing slash.
 
 ### 10.2 Rate limiting
 

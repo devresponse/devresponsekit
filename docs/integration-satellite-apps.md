@@ -89,7 +89,7 @@ sequenceDiagram
 | `SSO_HANDOFF_APPLICATION_ID` | **unique per satellite** (e.g. `standalone`, `handoff`) | must equal the registered enterprise-app `id` (and therefore the `sso_audience` suffix) — the consumer binds every token's `targetApplicationId` to it |
 | `SSO_HANDOFF_PRIVATE_KEY` | **unset** | issuer-only; a satellite holds no signing key (its own `/api/sso/launch` answers 503, which is correct — it never launches) |
 
-The three `SSO_HANDOFF_*` values above (`ISSUER`, `AUDIENCE_PREFIX`, `APPLICATION_ID`) are validated **at boot** on every DevResponseKit-derived app — including Option C, which never uses them at runtime (set placeholders there). `SSO_HANDOFF_PRIVATE_KEY` is optional everywhere and set only on the primary.
+The three `SSO_HANDOFF_*` values above (`ISSUER`, `AUDIENCE_PREFIX`, `APPLICATION_ID`) are validated **at boot** on every DevResponseKit-derived app — including Option C, which never uses them at runtime (set placeholders there). Make the `ISSUER` placeholder an http(s) origin, such as the primary's own: since F-22 the kit's schema refuses anything else, and so does a fork that ports that rule. `SSO_HANDOFF_PRIVATE_KEY` is optional everywhere and set only on the primary.
 
 ## 4. Options A & B in detail
 
@@ -162,7 +162,7 @@ Combined with pointing `DATABASE_URL` + `DB_SCHEMA` + `BETTER_AUTH_SECRET` at th
 | `BETTER_AUTH_URL` | the satellite's own origin |
 | `COOKIE_DOMAIN` | the shared parent domain (e.g. `.example.com`) — set on the **primary too** (the kit supports the same env var — [Configuration](./configuration.md#authentication-better-auth)), so the session cookie spans the fleet |
 | `ADMIN_TRUSTED_ORIGINS` | the satellite **plus the primary** (and siblings) |
-| `SSO_HANDOFF_*` | placeholders (required at boot, unused at runtime) |
+| `SSO_HANDOFF_*` | placeholders (required at boot, unused at runtime; the `ISSUER` placeholder must still be an http(s) origin, e.g. the primary's) |
 
 **Do not run migrations from an Option C satellite** — it reuses the primary's schema; the primary owns it.
 
@@ -334,7 +334,8 @@ Why these steps look the way they do:
 | Sign-in on the primary stops sticking (local dev) | `COOKIE_DOMAIN` is set but you're browsing via `localhost` — a browser refuses a parent-domain cookie from a `localhost` page; use `http://devresponse.local:3000` (see §6.6) |
 | Handoff completes but the satellite immediately bounces to its own sign-in | The primary's parent-domain cookie (Option C fleet) is shadowing the satellite's session cookie under the default name — give each handoff satellite a distinct `advanced.cookiePrefix` (see §6.6) |
 | Boot fails on a C satellite | Missing `SSO_HANDOFF_*` placeholders — `ISSUER`, `AUDIENCE_PREFIX` and `APPLICATION_ID` are validated at boot on every fork |
-| Boot fails on the primary with `SSO_HANDOFF_PRIVATE_KEY` | The value is not a JSON Ed25519 private JWK (`kty: OKP`, `crv: Ed25519`, `d` present), or it equals `API_JWT_PRIVATE_KEY` |
+| Boot fails on the primary with `SSO_HANDOFF_PRIVATE_KEY` | The value is not a JSON Ed25519 private JWK (`kty: OKP`, `crv: Ed25519`, `d` present), it does not import (a truncated `d`, or an `x` that is not `d`'s public half), or it equals `API_JWT_PRIVATE_KEY` |
+| Boot fails on the primary with `SSO_HANDOFF_ISSUER` or `COOKIE_DOMAIN` | The issuer is not written exactly as an http(s) origin (`https://` in production, no trailing slash, as in `httsp://…` or `https://host/`), or `COOKIE_DOMAIN` does not cover the primary's `BETTER_AUTH_URL` host or is written with a trailing dot (F-22). Every satellite compares `iss` with its own `SSO_HANDOFF_ISSUER` character for character, so use the identical string on both sides |
 
 More: [Troubleshooting](./troubleshooting.md) covers the kit-wide failure modes.
 

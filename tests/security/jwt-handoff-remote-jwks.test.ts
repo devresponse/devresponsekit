@@ -187,12 +187,37 @@ describe("jwt handoff — consumer verifies against the issuer's remote JWKS (re
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("fails closed with a clear error when the issuer is not a URL (nowhere to fetch keys from)", async () => {
-    process.env.SSO_HANDOFF_ISSUER = "devresponse";
+  // `not-a-url` alone could never reproduce the production outage: the typo was
+  // `httsp://`, which PARSES — `new URL("httsp://x").origin` is the string
+  // "null", so a `=== null` guard let it through (F-22). Each scheme below
+  // parses as a URL and must still be refused before any fetch.
+  it.each([
+    "devresponse",
+    "httsp://primary.test",
+    "ftp://primary.test",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+  ])(
+    "fails closed with a clear error when the issuer is not an http(s) origin (%s)",
+    async (issuer) => {
+      process.env.SSO_HANDOFF_ISSUER = issuer;
+      __resetSsoHandoffKeyCacheForTests();
+      await expect(verifySsoHandoff({ token: "x.y.z", expectedAudience: AUD })).rejects.toThrow(
+        /SSO_HANDOFF_ISSUER must be the issuer's origin URL/,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("is not a self-issuer when BOTH issuer and own URL carry the same bad scheme (F-22)", async () => {
+    // Before F-22 both origins read as the string "null", compared equal, and
+    // a deployment holding a key took the SELF-issuer path for `httsp://`.
+    const { privateKey } = await generateKeyPair("EdDSA", { extractable: true });
+    process.env.SSO_HANDOFF_PRIVATE_KEY = JSON.stringify(await exportJWK(privateKey));
+    process.env.SSO_HANDOFF_ISSUER = "httsp://primary.test";
+    process.env.BETTER_AUTH_URL = "httsp://satellite.test";
     __resetSsoHandoffKeyCacheForTests();
-    await expect(verifySsoHandoff({ token: "x.y.z", expectedAudience: AUD })).rejects.toThrow(
-      /SSO_HANDOFF_ISSUER must be the issuer's origin URL/,
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(isSsoHandoffSignerConfigured()).toBe(true);
+    expect(isSsoHandoffSelfIssuer()).toBe(false);
   });
 });

@@ -24,6 +24,14 @@ class AccessTokenAudienceError extends Error {
   }
 }
 
+/** Mirrors jwt.server's "the server's own keys failed to load" error (F-22). */
+class JwtKeyMaterialError extends Error {
+  constructor(message = "API_JWT_PREVIOUS_PRIVATE_KEY: not importable") {
+    super(message);
+    this.name = "JwtKeyMaterialError";
+  }
+}
+
 // `intFromEnv` is what client-ip reads TRUSTED_PROXY_COUNT through: the default (1).
 vi.mock("@/lib/env", () => ({
   getServerEnv: () => env,
@@ -39,6 +47,7 @@ vi.mock("@/lib/api-auth/ban-status.server", () => ({
 vi.mock("@/lib/api-auth/jwt.server", () => ({
   verifyAccessToken: (...a: unknown[]) => verifyAccessToken(...a),
   AccessTokenAudienceError,
+  JwtKeyMaterialError,
 }));
 vi.mock("@/lib/api-auth/revocation.server", () => ({
   isSourceCredentialActive: (...a: unknown[]) => isSourceCredentialActive(...a),
@@ -444,6 +453,18 @@ describe("resolveCaller — JWT path", () => {
     env.API_JWT_ENABLED = true;
     verifyAccessToken.mockRejectedValue(new Error("expired"));
     expect(await mod.resolveCaller(req("Bearer eyJ.bad.sig"))).toBeNull();
+  });
+
+  it("rethrows a failure to load the SERVER's keys instead of blaming the token (F-22, review #50)", async () => {
+    // A bad API_JWT_PREVIOUS_PRIVATE_KEY breaks the whole key set, so every
+    // token failed — the valid ones too — and each was answered with the
+    // generic 401 while nothing was logged. It must surface as a 500 (the
+    // route throws; onRequestError logs it), never as invalid_credential.
+    env.API_JWT_ENABLED = true;
+    const failure = new JwtKeyMaterialError();
+    verifyAccessToken.mockRejectedValue(failure);
+    await expect(mod.resolveCallerDetailed(req("Bearer eyJ.token.sig"))).rejects.toBe(failure);
+    await expect(mod.resolveCaller(req("Bearer eyJ.token.sig"))).rejects.toBe(failure);
   });
 });
 

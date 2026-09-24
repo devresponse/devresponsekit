@@ -74,6 +74,29 @@ describe("email providers — idempotency wiring (#11)", () => {
 });
 
 /**
+ * F-22: the env schema tolerates a trailing slash on MAILGUN_BASE_URL, so the
+ * client must not turn `https://api.eu.mailgun.net/` into `…net//v3/…`, which
+ * is not the messages endpoint.
+ */
+describe("Mailgun endpoint (F-22)", () => {
+  it.each(["https://api.eu.mailgun.net", "https://api.eu.mailgun.net/"])(
+    "posts to <origin>/v3/<domain>/messages for MAILGUN_BASE_URL=%s",
+    async (baseUrl) => {
+      state.env = {
+        EMAIL_PROVIDER: "mailgun",
+        MAILGUN_API_KEY: "key",
+        MAILGUN_DOMAIN: "mail.example.com",
+        MAILGUN_BASE_URL: baseUrl,
+      };
+      await mod.getConfiguredEmailProvider()!.deliver(email);
+      expect(state.lastRequest!.url).toBe(
+        "https://api.eu.mailgun.net/v3/mail.example.com/messages",
+      );
+    },
+  );
+});
+
+/**
  * review #219: every failure used to be retried five times on a DAILY cron,
  * so "422 invalid recipient" or "403 unverified sending domain" burned four
  * more days against an answer that cannot change — and kept the row (and its

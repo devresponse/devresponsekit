@@ -88,6 +88,32 @@ describe("getKeyMaterial — key configuration errors", () => {
     await expect(M.getJwks()).rejects.toThrow(/JSON-encoded Ed25519 JWK/);
   });
 
+  it("labels every key-loading failure as the server's JwtKeyMaterialError (F-22, review #50)", async () => {
+    // The resolver tells this apart from a bad token (500, logged, not 401).
+    for (const overrides of [
+      { API_JWT_PRIVATE_KEY: "" },
+      { API_JWT_PRIVATE_KEY: "{not json" },
+      // A previous key with a trailing quote: the WHOLE key set fails, so a
+      // token signed by the valid current key cannot verify either.
+      { API_JWT_PREVIOUS_PRIVATE_KEY: `${jwkJson}"` },
+      // Parses, but has no `x` to thumbprint.
+      { API_JWT_PREVIOUS_PRIVATE_KEY: '{"kty":"OKP","crv":"Ed25519"}' },
+    ]) {
+      envState.value = baseEnv(overrides);
+      M.__resetJwtKeyCacheForTests();
+      await expect(M.getJwks(), JSON.stringify(overrides)).rejects.toBeInstanceOf(
+        M.JwtKeyMaterialError,
+      );
+    }
+  });
+
+  it("fails verification of a GOOD token with JwtKeyMaterialError when the previous key is bad", async () => {
+    const good = await signRaw({ scope: "account.read" });
+    envState.value = baseEnv({ API_JWT_PREVIOUS_PRIVATE_KEY: `${jwkJson}"` });
+    M.__resetJwtKeyCacheForTests();
+    await expect(M.verifyAccessToken(good)).rejects.toBeInstanceOf(M.JwtKeyMaterialError);
+  });
+
   it("uses an explicit API_JWT_KID when provided (instead of the thumbprint)", async () => {
     envState.value = baseEnv({ API_JWT_KID: "rotation-key-7" });
     const jwks = await M.getJwks();

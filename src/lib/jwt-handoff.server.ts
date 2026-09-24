@@ -240,10 +240,18 @@ function issuerEnv(): string {
   return issuer;
 }
 
+/**
+ * The http(s) origin of `value`, or `null`. The protocol is checked
+ * explicitly (F-22): for any other scheme `URL.origin` is the STRING
+ * `"null"`, not `null`, so `new URL("httsp://x").origin` sailed through the
+ * `=== null` guards below — the typo that sat in production for a week.
+ */
 function originOf(value: string | undefined): string | null {
   if (!value) return null;
   try {
-    return new URL(value).origin;
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.origin;
   } catch {
     return null;
   }
@@ -315,6 +323,17 @@ async function getVerificationKeys(): Promise<JWTVerifyGetKey> {
  */
 export async function signSsoHandoff(input: SignSsoHandoffInput): Promise<string> {
   const issuer = issuerEnv();
+  // The value becomes `iss` verbatim, and every consumer compares `iss` to its
+  // own SSO_HANDOFF_ISSUER as an exact string, so refuse to sign under
+  // anything but an exact http(s) origin (F-22). The kit's env schema already
+  // refuses such a value at boot; this file reads process.env itself (the
+  // satellite forks copy it verbatim), so it does not lean on that schema —
+  // and an unusable issuer here would otherwise mint tokens nobody accepts.
+  if (originOf(issuer) !== issuer) {
+    throw new Error(
+      "SSO_HANDOFF_ISSUER must be exactly an http(s) origin (scheme://host[:port], no trailing slash) to sign handoffs",
+    );
+  }
   const { privateKey, kid } = await getSignerMaterial();
   const ttl = clampSsoHandoffTtl(input.ttlSeconds);
 

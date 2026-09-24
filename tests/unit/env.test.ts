@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as EnvModule from "@/lib/env";
-import { getServerEnv, intFromEnv } from "@/lib/env";
+import { getServerEnv, intFromEnv, invalidServerEnvKeys } from "@/lib/env";
 
 /**
  * Unit tests for `env.ts`. The module caches the parsed env after the
@@ -1038,5 +1038,26 @@ describe("intFromEnv — NaN-safe numeric env read (P2-12)", () => {
     expect(intFromEnv(KEY, 7)).toBe(7);
     penv[KEY] = "1";
     expect(intFromEnv(KEY, 7)).toBe(1);
+  });
+});
+
+describe("invalidServerEnvKeys — names only, for the readiness log (F-26)", () => {
+  it("is empty for a valid environment", () => {
+    expect(invalidServerEnvKeys()).toEqual([]);
+  });
+
+  it("names each failing key once, sorted, and never a value or a rule", () => {
+    const keys = invalidServerEnvKeys({
+      ...process.env,
+      SSO_HANDOFF_ISSUER: "httsp://issuer.example.com",
+      BETTER_AUTH_SECRET: "short-secret-value",
+    });
+    expect(keys).toEqual(["BETTER_AUTH_SECRET", "SSO_HANDOFF_ISSUER"]);
+    expect(JSON.stringify(keys)).not.toMatch(/short-secret|httsp|chars/);
+    expect(invalidServerEnvKeys({ ...process.env, PGPOOL_MAX: "abc" })).toEqual(["PGPOOL_MAX"]);
+  });
+
+  it("reports an issue that names no key as (schema)", () => {
+    expect(invalidServerEnvKeys(null as unknown as NodeJS.ProcessEnv)).toEqual(["(schema)"]);
   });
 });

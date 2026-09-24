@@ -12,8 +12,14 @@ import {
 /**
  * Server-side environment variable schema.
  *
- * Validates required variables once at module load. Production builds will
- * fail loudly if a required variable is missing. Public (NEXT_PUBLIC_*)
+ * {@link getServerEnv} parses and caches it on first call. On a running Node
+ * server that first call is at boot: `register()` in `src/instrumentation.ts`
+ * calls it before anything else, so an invalid variable stops the server from
+ * starting, and `/api/health/ready` re-checks it (F-26). Before F-26 the first
+ * call was whichever module needed a value first (auth.ts on the first
+ * authenticated request), so a misconfigured instance started, passed its
+ * health checks and then answered 500. `next build` never fails here: it
+ * parses placeholders instead (`isBuildPhase` below). Public (NEXT_PUBLIC_*)
  * values are intentionally accessed via `process.env` directly elsewhere
  * because Next.js inlines them at build time.
  *
@@ -747,6 +753,24 @@ export function getServerEnv(): ServerEnv {
   cached = parsed.data;
   warnIfOriginAllowListUnset(cached);
   return cached;
+}
+
+/**
+ * The names of the server variables that fail {@link serverEnvSchema}, sorted
+ * and without duplicates; empty when the environment is valid. For the
+ * readiness probe's log line (F-26), which must name what to fix without
+ * repeating a value: the rule messages {@link getServerEnv} throws may quote a
+ * non-secret value back (an origin's canonical form), so only the key names
+ * leave this function. A cross-field issue that names no key is reported as
+ * `(schema)`.
+ */
+export function invalidServerEnvKeys(source: NodeJS.ProcessEnv = process.env): string[] {
+  const parsed = serverEnvSchema.safeParse(source);
+  if (parsed.success) return [];
+  const keys = parsed.error.issues.map((issue) =>
+    issue.path.length > 0 ? String(issue.path[0]) : "(schema)",
+  );
+  return [...new Set(keys)].sort();
 }
 
 /**

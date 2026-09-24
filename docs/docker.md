@@ -61,9 +61,14 @@ build arg — see [configuration.md](configuration.md).)
 
 ## 3. Configure (environment variables)
 
-The server validates its environment **at boot** (`src/lib/env.ts`) and
-exits if a required variable is missing or invalid — so a misconfigured
-container fails fast instead of serving broken auth.
+The server validates its environment **at boot** (`src/lib/env.ts`, parsed
+by `register()` in `src/instrumentation.ts` before the first request) and
+exits with code 1 if a required variable is missing or invalid, naming each
+variable and the rule it broke — so a misconfigured container fails fast
+instead of serving broken auth. Until F-26 that parse waited for the first
+request that needed a value, and a container with, say, a 20-character
+`BETTER_AUTH_SECRET` stayed up and reported healthy while every page that
+touched auth answered 500.
 
 **Minimum required to start:**
 
@@ -122,7 +127,14 @@ DATABASE_URL=... DB_SCHEMA=auth pnpm db:seed          # first deploy only: basel
 
 Apply migrations **before** routing traffic to a new image. In an
 orchestrator this is a pre-deploy job / init container that must succeed
-before the web Deployment rolls out.
+before the web Deployment rolls out. Run **both** migrators on every deploy,
+not only the first: a better-auth upgrade or a new plugin changes the Better
+Auth tables (`src/db/migrations/better-auth-schema.sql`), and the readiness
+probe answers `503 schema_behind` for a gap in either half (§7).
+`db:auth:migrate` loads the app's auth configuration, so it needs the
+required variables of §3 in the shell or the checkout's `.env`; the Better
+Auth schema does not depend on their values, which is why
+`.github/workflows/deploy.yml` runs it with CI placeholders.
 
 ---
 
@@ -234,13 +246,21 @@ volumes:
   or committed env files.
 - **Health probes:** wire the orchestrator's `livenessProbe` to
   `GET /api/health` (200, no DB) and its `readinessProbe` to
-  `GET /api/health/ready` (200 when the database is reachable **and** the
-  `app_schema_migrations` ledger holds every core migration the image was
-  built with; 503 `database_unreachable` or 503 `schema_behind` otherwise).
-  Because readiness covers the schema, a rolling update of an image whose
-  migration has not been applied **stalls** on unready pods instead of
-  routing traffic to code that would 500 — run the migrate init step and the
-  pods become ready. Both probes are unauthenticated and `no-store`.
+  `GET /api/health/ready` (200 when the environment passes its schema, the
+  database is reachable, the `app_schema_migrations` ledger holds every core
+  migration the image was built with **and** Better Auth's own schema check
+  finds every table and column its configuration writes; 503
+  `config_invalid`, `database_unreachable` or `schema_behind` otherwise,
+  with the detail in the log and never in the body). Because readiness covers
+  both schemas, a rolling update of an image whose migration has not been
+  applied **stalls** on unready pods instead of routing traffic to code that
+  would 500 — run the migrate init step and the pods become ready. One
+  exception, from Better Auth (F-26): a pod that started while a Better Auth
+  table or column was missing keeps that verdict, and keeps refusing every
+  auth request, until it restarts; migrating fixes new pods, so restart the
+  ones that already report `schema_behind`. The image's own `HEALTHCHECK`
+  uses the same readiness probe. Both probes are unauthenticated and
+  `no-store`.
 - **Graceful shutdown:** on `SIGTERM`/`SIGINT` two things run, in this order
   (review #24). **(1)** Next's own signal cleanup (`node server.js` →
   `start-server.js`) stops accepting connections, waits for every in-flight

@@ -22,6 +22,17 @@ export async function register() {
     // runtime — the shutdown module imports `pg`, which the edge runtime
     // cannot load. A no-op on Vercel (see the module).
     if (process.env.NEXT_PHASE !== "phase-production-build") {
+      // F-26: validate the whole env schema now, once per process. It used to
+      // be parsed lazily, at the first import of a module that reads it
+      // (auth.ts, on the first authenticated request), so an instance with an
+      // invalid variable started, passed liveness and readiness, and then
+      // answered 500 on every page that touched auth, while the docs said it
+      // "fails fast at boot". Allowed to throw, like the key import below:
+      // `next start` exits and a serverless function fails every request. The
+      // error names each key and its rule, never a value. Imported here, not
+      // statically, to keep the Edge graph as it is.
+      const { getServerEnv } = await import("@/lib/env");
+      getServerEnv();
       // F-22: import the Ed25519 signing keys and check each `x` against its
       // `d`, which the env schema cannot do (it is in the Edge graph, where
       // node:crypto is unavailable). Allowed to throw: Next fails startup

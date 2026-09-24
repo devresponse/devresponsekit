@@ -143,7 +143,10 @@ describe("dependency governance: lockfile floors from the 2026-09 sweep", () => 
 /**
  * The Node major every runtime must agree on. `.nvmrc` is the source of
  * truth; CI, the Docker image and `engines.node` (which is what Vercel reads
- * to pick production's runtime) are asserted against it. #397 shipped a bug
+ * to pick production's runtime) are asserted against it. `engines.node` must
+ * name the EXACT major (`24.x`): an open range such as `>=24` lets Vercel move
+ * production to the next major the day it offers one, while CI and the image
+ * stay behind (F-25). #397 shipped a bug
  * that fails only inside the Next runtime on Node >= 24 while CI ran 22 —
  * every check stayed green and production auth went down (#400/#401).
  */
@@ -164,9 +167,9 @@ describe("dependency governance: Node runtime major", () => {
     }
   });
 
-  it("engines.node is >= the same major (Vercel resolves this to production's runtime)", () => {
+  it("engines.node pins the same major exactly (Vercel runs production on what this names)", () => {
     const engines = (JSON.parse(read("package.json")) as { engines?: { node?: string } }).engines;
-    expect(engines?.node).toBe(`>=${nodeMajor}`);
+    expect(engines?.node).toBe(`${nodeMajor}.x`);
   });
 });
 

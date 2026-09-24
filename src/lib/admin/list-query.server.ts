@@ -263,8 +263,33 @@ export interface KeysetField {
   nullable: boolean;
 }
 
-/** A keyset cursor: the seek columns' values read from the last emitted row. */
-export type KeysetCursor = Record<string, unknown>;
+/**
+ * A keyset cursor: each seek column's value on the last emitted row, AS
+ * POSTGRES RENDERED IT (see {@link applyKeyset}), or `null` for a SQL NULL.
+ *
+ * Deliberately text, never the driver's typed value (F-31): `pg` parses a
+ * `timestamptz` into a JS `Date`, which holds milliseconds, while Postgres
+ * stores microseconds. A cursor of `12:00:00.123` for a row at
+ * `12:00:00.123456` made the next page's `created_at < $1` skip every
+ * remaining row of that millisecond (desc), and `created_at > $1` re-select
+ * them (asc) — with a page's worth of rows in one millisecond, one bulk
+ * transaction sharing `now()`, the ascending export looped to the row cap.
+ * Typing the cursor as text keeps a `Date` out of it at compile time.
+ */
+export type KeysetCursor = Readonly<Record<string, string | null>>;
+
+/**
+ * Alias of the column {@link applyKeyset} adds to the page's SELECT, carrying
+ * the seek columns' full-precision renderings. Read only by
+ * {@link keysetCursorFrom}; exporters map named columns, so it never reaches
+ * the output.
+ */
+const KEYSET_ALIAS = "__keyset" as const;
+
+/** The column {@link applyKeyset} adds to every row it selects. */
+export interface KeysetRenderedRow {
+  [KEYSET_ALIAS]: Array<string | null>;
+}
 
 /**
  * Derives the keyset sort key from a parsed {@link ListQuery.sort}: the
@@ -276,31 +301,92 @@ export type KeysetCursor = Record<string, unknown>;
  *
  * `nullableFields` names the sort columns that can be NULL so they can be
  * ordered and sought with explicit `NULLS LAST` semantics.
+ *
+ * A column repeated in `sort` is kept once, at its FIRST occurrence (and in
+ * that direction). {@link parseListQuery} keeps every repeated `sort=` that
+ * passes the allow-list, and a later term on a column already ordered by can
+ * only compare equal, so dropping it leaves the order unchanged. It does
+ * matter to the SQL: {@link applyKeyset} renders every seek column as one
+ * argument of a single `json_build_array(…)`, and Postgres rejects a call
+ * with more than 100 arguments, so a hand-built URL repeating one sort 100
+ * times failed the export (F-31 review). De-duplicated, the key is bounded by
+ * the resource's allow-list plus `id`, and the seek predicate, quadratic in
+ * the key length, stays small.
  */
 export function buildKeysetSort(
   sort: SortSpec[],
   nullableFields: ReadonlySet<string> = new Set(),
 ): KeysetField[] {
-  const fields: KeysetField[] = sort.map((s) => ({
-    field: s.field,
-    direction: s.direction,
-    nullable: nullableFields.has(s.field),
-  }));
-  if (!fields.some((f) => f.field === "id")) {
+  const fields: KeysetField[] = [];
+  const seen = new Set<string>();
+  for (const s of sort) {
+    if (seen.has(s.field)) continue;
+    seen.add(s.field);
+    fields.push({
+      field: s.field,
+      direction: s.direction,
+      nullable: nullableFields.has(s.field),
+    });
+  }
+  if (!seen.has("id")) {
     fields.push({ field: "id", direction: "asc", nullable: false });
   }
   return fields;
 }
 
-/** Reads a {@link KeysetCursor} (the seek-column values) from a result row. */
+/**
+ * Reads a {@link KeysetCursor} off a row selected through {@link applyKeyset}
+ * with the SAME `sort`: the seek columns' database renderings, never the typed
+ * fields (a `Date` has lost the microseconds — F-31).
+ *
+ * Throws if the row carries no matching rendering. Falling back to the typed
+ * fields would silently bring the millisecond truncation back; a loud failure
+ * surfaces as the export's preflight 502 instead.
+ */
 export function keysetCursorFrom(row: Record<string, unknown>, sort: KeysetField[]): KeysetCursor {
-  const cursor: KeysetCursor = {};
-  for (const f of sort) cursor[f.field] = row[f.field];
+  const rendered: unknown = row[KEYSET_ALIAS];
+  if (
+    !Array.isArray(rendered) ||
+    rendered.length !== sort.length ||
+    !rendered.every((v) => v === null || typeof v === "string")
+  ) {
+    throw new Error(
+      "keysetCursorFrom: the row has no keyset rendering for this sort; select it through applyKeyset with the same sort",
+    );
+  }
+  const cursor: Record<string, string | null> = {};
+  sort.forEach((f, i) => {
+    cursor[f.field] = rendered[i] as string | null;
+  });
   return cursor;
 }
 
-/** `row.col` ⋛ cursor at this level — the strictly-after half of the seek. */
-function levelAfter(f: KeysetField, value: unknown) {
+/**
+ * Full-precision text rendering of one seek column, for the cursor.
+ *
+ * `to_jsonb(x) #>> '{}'` rather than `x::text`: `to_jsonb` writes date/time
+ * values as ISO 8601 with a numeric UTC offset (`2026-09-24T12:00:00.123456
+ * +00:00`) whatever the session's DateStyle and TimeZone, so the literal names
+ * one instant exactly and parses back on any pooled connection; `::text`
+ * follows DateStyle (`24.09.2026 … +0545` under German, `… IST` under SQL)
+ * and does not parse back under another. Every other type renders through its
+ * ordinary text output (`#>> '{}'` unwraps the JSON scalar), which is already
+ * exact, so the helper needs no per-column type list a new exporter could
+ * forget.
+ */
+function renderSeekColumn(f: KeysetField) {
+  return sql<string | null>`to_jsonb(${sql.ref(f.field)}) #>> '{}'`;
+}
+
+/**
+ * `row.col` ⋛ cursor at this level — the strictly-after half of the seek.
+ *
+ * The cursor text is bound as an untyped parameter (`pg` declares no parameter
+ * types), so Postgres reads it as the column's own type — an `unknown` operand
+ * of a binary operator takes the other side's type. `created_at < $1` stays a
+ * plain, index-friendly comparison, now at the stored microsecond (F-31).
+ */
+function levelAfter(f: KeysetField, value: string | null | undefined) {
   // A NULL cursor value sits at the NULLS-LAST tail: nothing sorts strictly
   // after it here, so this level contributes nothing (deeper levels carry the
   // equal-NULL → id comparison).
@@ -315,7 +401,7 @@ function levelAfter(f: KeysetField, value: unknown) {
 }
 
 /** `row.col` = cursor at this level — NULL-safe (a NULL matches a NULL). */
-function levelEqual(f: KeysetField, value: unknown) {
+function levelEqual(f: KeysetField, value: string | null | undefined) {
   if (value === null || value === undefined) return sql<SqlBool>`${sql.ref(f.field)} is null`;
   return sql<SqlBool>`${sql.ref(f.field)} = ${value}`;
 }
@@ -337,14 +423,27 @@ function levelEqual(f: KeysetField, value: unknown) {
  * where `eqᵢ`/`afterᵢ` are NULL-safe per {@link levelEqual}/{@link levelAfter}
  * and NULLs are ordered last. Pass the SAME `sort` to {@link keysetCursorFrom}
  * so the cursor carries exactly the columns the predicate reads.
+ *
+ * It also adds one column, `__keyset`: a JSON array of every seek column's
+ * full-precision text ({@link renderSeekColumn}). The next page's cursor is
+ * read from that, so the value sought is exactly the value stored, not the
+ * driver's lossy copy of it (F-31).
  */
 export function applyKeyset<DB, TB extends keyof DB, O>(
   qb: SelectQueryBuilder<DB, TB, O>,
   sort: KeysetField[],
   cursor: KeysetCursor | null,
   limit: number,
-): SelectQueryBuilder<DB, TB, O> {
-  let next = qb;
+): SelectQueryBuilder<DB, TB, O & KeysetRenderedRow> {
+  // `$castTo` only restates the added column: Kysely cannot resolve
+  // `Selection<DB, TB, …>` while DB/TB are still generic.
+  let next = qb
+    .select(
+      sql<Array<string | null>>`json_build_array(${sql.join(sort.map(renderSeekColumn))})`.as(
+        KEYSET_ALIAS,
+      ),
+    )
+    .$castTo<O & KeysetRenderedRow>();
   if (cursor) {
     const orTerms = sort.map((after, p) => {
       // Levels 0..p-1 equal the cursor, level p is strictly after it.

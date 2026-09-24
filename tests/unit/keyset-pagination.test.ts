@@ -10,6 +10,7 @@ import {
   applyKeyset,
   buildKeysetSort,
   keysetCursorFrom,
+  type KeysetCursor,
   type KeysetField,
 } from "@/lib/admin/list-query.server";
 
@@ -18,6 +19,12 @@ import {
  * export's page walk; a wrong seek predicate would silently DROP or DUPLICATE
  * export rows, so the generated SQL is asserted directly. We compile against a
  * `DummyDriver` (no DB connection) and inspect `{ sql, parameters }`.
+ *
+ * F-31: the cursor is the database's own text rendering of each seek column
+ * (the `__keyset` column `applyKeyset` selects), never the driver's typed
+ * value — a `Date` keeps milliseconds while `timestamptz` stores microseconds.
+ * The real round trip through Postgres (and the drop / duplicate / loop it
+ * caused) is proved in tests/db/export-keyset-precision.db.test.ts.
  */
 
 interface TestDB {
@@ -39,7 +46,7 @@ const db = new Kysely<TestDB>({
 });
 
 /** Compile `select id from t` with the keyset applied; return normalized SQL. */
-function compile(sort: KeysetField[], cursor: Record<string, unknown> | null, limit = 100) {
+function compile(sort: KeysetField[], cursor: KeysetCursor | null, limit = 100) {
   const compiled = applyKeyset(db.selectFrom("t").select(["id"]), sort, cursor, limit).compile();
   return { sql: compiled.sql.replace(/\s+/g, " ").trim(), parameters: compiled.parameters };
 }
@@ -58,6 +65,37 @@ describe("buildKeysetSort", () => {
     expect(seek.filter((s) => s.field === "id")).toHaveLength(1);
   });
 
+  it("keeps a repeated column once, at its first occurrence and direction", () => {
+    // parseListQuery keeps every repeated `sort=`; a later term on a column
+    // already ordered by only ever compares equal, so the order is the same.
+    expect(
+      buildKeysetSort([
+        { field: "created_at", direction: "desc" },
+        { field: "created_at", direction: "desc" },
+      ]),
+    ).toEqual([
+      { field: "created_at", direction: "desc", nullable: false },
+      { field: "id", direction: "asc", nullable: false },
+    ]);
+    expect(
+      buildKeysetSort(
+        [
+          { field: "display_name", direction: "asc" },
+          { field: "created_at", direction: "desc" },
+          { field: "display_name", direction: "desc" },
+          { field: "id", direction: "desc" },
+          { field: "created_at", direction: "asc" },
+          { field: "id", direction: "asc" },
+        ],
+        new Set(["display_name"]),
+      ),
+    ).toEqual([
+      { field: "display_name", direction: "asc", nullable: true },
+      { field: "created_at", direction: "desc", nullable: false },
+      { field: "id", direction: "desc", nullable: false },
+    ]);
+  });
+
   it("annotates declared nullable columns", () => {
     const seek = buildKeysetSort(
       [
@@ -72,13 +110,58 @@ describe("buildKeysetSort", () => {
 });
 
 describe("keysetCursorFrom", () => {
-  it("reads exactly the seek columns off a row", () => {
+  /** A microsecond instant a JS `Date` cannot hold (it keeps `.123`). */
+  const MICRO = "2026-09-24T12:00:00.123456+00:00";
+
+  it("reads the seek columns from the `__keyset` rendering, in sort order", () => {
     const seek = buildKeysetSort([{ field: "created_at", direction: "desc" }]);
     const cursor = keysetCursorFrom(
-      { id: "u1", created_at: "2026-01-01", display_name: "x", extra: "ignored" },
+      {
+        id: "u1",
+        created_at: new Date(MICRO),
+        display_name: "x",
+        __keyset: [MICRO, "u1"],
+      },
       seek,
     );
-    expect(cursor).toEqual({ created_at: "2026-01-01", id: "u1" });
+    expect(cursor).toEqual({ created_at: MICRO, id: "u1" });
+  });
+
+  it("keeps the microseconds: the typed `Date` field is NOT what the cursor carries (F-31)", () => {
+    const seek = buildKeysetSort([{ field: "created_at", direction: "desc" }]);
+    const typed = new Date(MICRO);
+    // The pre-fix cursor: what `pg` hands back for a timestamptz.
+    expect(typed.toISOString()).toBe("2026-09-24T12:00:00.123Z");
+    const cursor = keysetCursorFrom({ id: "u1", created_at: typed, __keyset: [MICRO, "u1"] }, seek);
+    expect(cursor.created_at).toBe(MICRO);
+    expect(cursor.created_at).not.toBe(typed.toISOString());
+  });
+
+  it("carries a SQL NULL as null (the NULLS-LAST branch of a nullable column)", () => {
+    const seek = buildKeysetSort(
+      [{ field: "display_name", direction: "asc" }],
+      new Set(["display_name"]),
+    );
+    expect(keysetCursorFrom({ __keyset: [null, "u1"] }, seek)).toEqual({
+      display_name: null,
+      id: "u1",
+    });
+  });
+
+  it("throws instead of falling back to the typed fields when the rendering is missing or mismatched", () => {
+    const seek = buildKeysetSort([{ field: "created_at", direction: "desc" }]);
+    const row = { id: "u1", created_at: new Date(MICRO) };
+    // No `__keyset` at all: reading the typed fields would reintroduce F-31.
+    expect(() => keysetCursorFrom(row, seek)).toThrow(/applyKeyset/);
+    // Rendered for a different sort (wrong arity).
+    expect(() => keysetCursorFrom({ ...row, __keyset: [MICRO] }, seek)).toThrow(/applyKeyset/);
+    // A non-text element (e.g. a driver-parsed value) is not a rendering.
+    expect(() => keysetCursorFrom({ ...row, __keyset: [new Date(MICRO), "u1"] }, seek)).toThrow(
+      /applyKeyset/,
+    );
+    expect(() => keysetCursorFrom({ ...row, __keyset: "not-an-array" }, seek)).toThrow(
+      /applyKeyset/,
+    );
   });
 });
 
@@ -91,9 +174,57 @@ describe("applyKeyset — SQL generation", () => {
     expect(sql).toContain("limit");
   });
 
+  it("selects every seek column's full-precision rendering as `__keyset`, in sort order (F-31)", () => {
+    const seek = buildKeysetSort(
+      [
+        { field: "display_name", direction: "asc" },
+        { field: "created_at", direction: "desc" },
+      ],
+      new Set(["display_name"]),
+    );
+    const { sql } = compile(seek, null);
+    // `to_jsonb … #>> '{}'`, not `::text`: ISO 8601 with a numeric offset
+    // whatever DateStyle / TimeZone the pooled session has.
+    expect(sql).toContain(
+      `json_build_array(to_jsonb("display_name") #>> '{}', to_jsonb("created_at") #>> '{}', to_jsonb("id") #>> '{}') as "__keyset"`,
+    );
+    expect(sql).not.toContain("::text");
+    // The caller's own selection is kept.
+    expect(sql).toMatch(/^select "id", json_build_array\(/);
+  });
+
+  it("a sort repeated 100 times stays a two-column key: json_build_array has a 100-argument limit", () => {
+    // `?sort=created_at.desc` x100 reaches buildKeysetSort as 100 specs; one
+    // `json_build_array` argument per seek column would be 101 (with `id`),
+    // which Postgres rejects, failing the export at preflight.
+    const seek = buildKeysetSort(
+      Array.from({ length: 100 }, () => ({ field: "created_at", direction: "desc" as const })),
+    );
+    const cursor = keysetCursorFrom({ __keyset: ["2026-01-01T00:00:00+00:00", "u1"] }, seek);
+    const { sql, parameters } = compile(seek, cursor);
+    expect(sql).toContain(
+      `json_build_array(to_jsonb("created_at") #>> '{}', to_jsonb("id") #>> '{}') as "__keyset"`,
+    );
+    expect(sql).toMatch(/order by "created_at" desc, "id" asc limit \$\d+$/);
+    // after₀ OR (eq₀ AND after₁): three cursor binds plus the limit.
+    expect(parameters).toHaveLength(4);
+  });
+
+  it("binds the cursor text verbatim, microseconds intact (the round trip F-31 broke)", () => {
+    const seek = buildKeysetSort([{ field: "created_at", direction: "asc" }]);
+    const micro = "2026-09-24T12:00:00.123456+00:00";
+    const cursor = keysetCursorFrom({ __keyset: [micro, "u1"] }, seek);
+    const { sql, parameters } = compile(seek, cursor);
+    expect(parameters).toEqual([micro, micro, "u1", 100]);
+    // Still a plain comparison on the column (index-friendly): no cast or
+    // date_trunc wrapped around `created_at`.
+    expect(sql).toContain('("created_at" > $1) or ("created_at" = $2 and "id" > $3)');
+    expect(sql).not.toContain("date_trunc");
+  });
+
   it("seeks past the cursor for the common (created_at desc, id asc) key", () => {
     const seek = buildKeysetSort([{ field: "created_at", direction: "desc" }]);
-    const when = new Date("2026-01-01T00:00:00Z");
+    const when = "2026-01-01T00:00:00.000001+00:00";
     const { sql, parameters } = compile(seek, { created_at: when, id: "u1" });
     // after₀ OR (eq₀ AND after₁):
     expect(sql).toContain('"created_at" <');
@@ -149,7 +280,7 @@ describe("applyKeyset — SQL generation", () => {
     ]);
     const { sql } = compile(seek, {
       name: "m",
-      created_at: new Date("2026-01-01T00:00:00Z"),
+      created_at: "2026-01-01T00:00:00+00:00",
       id: "u1",
     });
     // Three OR terms: after on name; eq name + after on created_at; eq name + eq created_at + after on id.

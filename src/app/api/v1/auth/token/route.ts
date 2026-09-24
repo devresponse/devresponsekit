@@ -4,7 +4,7 @@ import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { getServerEnv } from "@/lib/env";
 import { consumeToken, rateLimitKey } from "@/lib/admin/rate-limit.server";
 import type { RateLimitResult } from "@/lib/admin/rate-limit.server";
-import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
+import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
 import { clientIpKey } from "@/lib/client-ip";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
@@ -49,9 +49,11 @@ const TOKEN_IP_LIMIT = { capacity: 10, refillPerSec: 0.5 };
 const TOKEN_CREDENTIAL_LIMIT = { capacity: 10, refillPerSec: 0.5 };
 // P2-4: a coarse GLOBAL floor independent of any client-supplied value, so
 // a distributed credential-stuffing run spoofing XFF still hits a
-// deployment-wide ceiling (~5 req/s sustained, 300 burst). Both pre-auth
-// buckets consume from the SHARED Postgres bucket (review #98): in memory
-// they were per lambda, so "deployment-wide" really meant "per invocation".
+// deployment-wide ceiling (~5 req/s sustained, 300 burst). It is charged
+// only for requests the per-IP bucket admitted (F-18), so one IP cannot hold
+// it at zero for every tenant. Both pre-auth buckets consume from the SHARED
+// Postgres bucket (review #98): in memory they were per lambda, so
+// "deployment-wide" really meant "per invocation".
 const TOKEN_GLOBAL_LIMIT = { capacity: 300, refillPerSec: 5 };
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -95,25 +97,23 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // Rate-limit before reading the body and before any crypto / DB work. Two
+  // pre-auth layers, in this order: a per-IP bucket keyed on the trusted
+  // proxy hop (P2-4), then a global floor that a spoofed XFF cannot escape,
+  // charged only for a request the IP bucket admitted (F-18). Nothing the
+  // client sends in the body reaches a limiter key before the credential
+  // verifies (review #11), so the limiter needs no body, and a throttled
+  // request is refused without its body being read. Both are shared across
+  // instances (review #98): one DB round trip each, before the credential
+  // lookup that would cost one anyway.
+  const preAuthCheck = await consumeSourceThenGlobal("api.token", clientIpKey(request.headers), {
+    source: TOKEN_IP_LIMIT,
+    global: TOKEN_GLOBAL_LIMIT,
+  });
+  if (!preAuthCheck.ok) return rateLimitedResponse(request, preAuthCheck);
+
   const body = await parseBody(request);
   const grantType = body.grant_type;
-
-  // Rate-limit before any crypto / DB work. Two pre-auth layers: a global
-  // floor that a spoofed XFF cannot escape, AND a per-IP bucket keyed on the
-  // trusted proxy hop (P2-4). Nothing the client sends in the body reaches a
-  // limiter key before the credential verifies (review #11). Both are shared
-  // across instances (review #98) — one DB round trip each, before the
-  // credential lookup that would cost one anyway.
-  const globalCheck = await consumeSharedToken(
-    rateLimitKey("api.token", "__global__"),
-    TOKEN_GLOBAL_LIMIT,
-  );
-  if (!globalCheck.ok) return rateLimitedResponse(request, globalCheck);
-  const ipCheck = await consumeSharedToken(
-    rateLimitKey("api.token", clientIpKey(request.headers)),
-    TOKEN_IP_LIMIT,
-  );
-  if (!ipCheck.ok) return rateLimitedResponse(request, ipCheck);
 
   let principalBetterAuthUserId: string;
   let credentialScopes: string[];

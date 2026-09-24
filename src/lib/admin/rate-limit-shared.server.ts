@@ -34,7 +34,10 @@ import { rateLimitSharedFallbacksTotal } from "@/lib/observability/metrics.serve
  * Same contract as `consumeToken` — `(key, options, nowMs?) → RateLimitResult`
  * — but async, because the bucket lives in the database. Call sites that
  * previously called `consumeToken` for a pre-auth floor now `await` this
- * instead; an invariant test greps them to keep it that way.
+ * instead; an invariant test greps them to keep it that way. A floor that
+ * pairs a per-IP bucket with a deployment-wide one takes both through
+ * `consumeSourceThenGlobal` (rate-limit-tiered.server.ts), which owns their
+ * order (F-18).
  *
  * Atomicity: refill-and-consume is ONE statement,
  * `INSERT … ON CONFLICT DO UPDATE … WHERE refilled >= 1 RETURNING`, with the

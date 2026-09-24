@@ -14,19 +14,26 @@ vi.mock("@/lib/observability/logger.server", () => ({
 // The flood floor consumes from the SHARED Postgres bucket (review #98); this
 // suite has no database, so the shared primitive is routed through the real
 // in-memory bucket — the per-IP exhaustion below still exercises real
-// token-bucket arithmetic, only the store differs.
+// token-bucket arithmetic, only the store differs. Every consumed key is
+// recorded, so the F-18 case can count what reached the global floor.
+const sharedKeys = vi.hoisted(() => [] as string[]);
 vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
   const { consumeToken } = await import("@/lib/admin/rate-limit.server");
   return {
-    consumeSharedToken: async (key: string, options: never, nowMs?: number) =>
-      consumeToken(key, options, nowMs),
+    consumeSharedToken: async (key: string, options: never, nowMs?: number) => {
+      sharedKeys.push(key);
+      return consumeToken(key, options, nowMs);
+    },
   };
 });
 
 const URL = "https://app.test/api/security/csp-report";
 
-function post(body: string, contentType: string): Request {
-  return new Request(URL, { method: "POST", headers: { "content-type": contentType }, body });
+function post(body: string, contentType: string, ip?: string): Request {
+  const headers: Record<string, string> = { "content-type": contentType };
+  // The default TRUSTED_PROXY_COUNT (1) reads the rightmost hop as the client.
+  if (ip) headers["x-forwarded-for"] = ip;
+  return new Request(URL, { method: "POST", headers, body });
 }
 
 let POST: typeof RouteModule.POST;
@@ -270,5 +277,38 @@ describe("POST /api/security/csp-report", () => {
     // The per-IP token bucket caps logged reports well below the 40 sent.
     expect(warnSpy.mock.calls.length).toBeGreaterThan(0);
     expect(warnSpy.mock.calls.length).toBeLessThan(40);
+  });
+
+  // F-18: the floor used to take the GLOBAL token first, so a flood from one
+  // IP, refused by its own bucket, still spent the deployment-wide budget and
+  // then silently dropped every real report, from every client.
+  it("a flood from one IP past the whole global burst never silences another IP's report (F-18)", async () => {
+    // Freeze the clock at the real time, so no bucket refills mid-flood and the
+    // budgets (30 per IP, 600 globally) are exact.
+    const realNow = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(realNow);
+    try {
+      const flood = JSON.stringify({ "csp-report": { "effective-directive": "img-src" } });
+      sharedKeys.length = 0;
+      for (let i = 0; i < 650; i += 1) {
+        const res = await POST(post(flood, "application/csp-report", "203.0.113.66"));
+        expect(res.status).toBe(204);
+      }
+      // The flooding IP's own burst is logged; nothing past it is.
+      expect(warnSpy).toHaveBeenCalledTimes(30);
+      const floodKeys = [...sharedKeys];
+
+      warnSpy.mockReset();
+      const real = JSON.stringify({ "csp-report": { "effective-directive": "script-src" } });
+      const res = await POST(post(real, "application/csp-report", "198.51.100.77"));
+      expect(res.status).toBe(204);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toMatchObject({ effectiveDirective: "script-src" });
+      // Because only the flood's admitted reports reached the global floor.
+      expect(floodKeys.filter((k) => k === "csp.report:__global__")).toHaveLength(30);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -46,9 +46,11 @@ const MUTATING_HANDLER = /export async function (?:POST|PATCH|PUT|DELETE)\b/g;
 // call WITHOUT a `requestId` arg is not counted and trips the gate below.
 const ADMIN_RATE_LIMIT_CALL = /enforceRateLimit\s*\([\s\S]*?\brequestId\b[\s\S]*?\)/g;
 // v1 wraps the bucket as enforceApiRateLimit; the token endpoint calls the
-// low-level primitives directly — consumeSharedToken for its pre-auth floors
-// (review #98) and consumeToken for the per-credential bucket.
-const V1_RATE_LIMIT_CALL = /(?:enforceApiRateLimit|consumeToken|consumeSharedToken)\s*\(/g;
+// lower-level primitives directly — consumeSourceThenGlobal for its shared
+// per-IP + global pre-auth floors (review #98, F-18) and consumeToken for the
+// per-credential bucket.
+const V1_RATE_LIMIT_CALL =
+  /(?:enforceApiRateLimit|consumeToken|consumeSharedToken|consumeSourceThenGlobal)\s*\(/g;
 
 const ADMIN_EXEMPT: Record<string, string> = {};
 const V1_EXEMPT: Record<string, string> = {};
@@ -60,12 +62,13 @@ const V1_EXEMPT: Record<string, string> = {};
 // `enforceRateLimit` with the request context; the public sinks call the
 // low-level `consumeToken` per IP + a global floor).
 // The pre-auth floors (register, the CSP sink, invitation acceptance) use the
-// SHARED-bucket twins — consumeSharedToken / enforceSharedRateLimit (review
-// #98); tests/unit/rate-limit-shared-floors-invariant.test.ts pins WHICH
-// primitive each of those must use, this scan only requires that one exists.
+// SHARED-bucket twins — consumeSourceThenGlobal (per-IP then global, F-18) /
+// enforceSharedRateLimit (review #98);
+// tests/unit/rate-limit-shared-floors-invariant.test.ts pins WHICH primitive
+// each of those must use, this scan only requires that one exists.
 const API_ROUTES_DIR = join(SRC_DIR, "app", "api");
 const ANY_RATE_LIMIT_CALL =
-  /(?:enforceRateLimit|enforceSharedRateLimit|enforceApiRateLimit|consumeToken|consumeSharedToken)\s*\(/g;
+  /(?:enforceRateLimit|enforceSharedRateLimit|enforceApiRateLimit|consumeToken|consumeSharedToken|consumeSourceThenGlobal)\s*\(/g;
 const OTHER_EXEMPT: Record<string, string> = {
   // Better Auth owns this catch-all end to end, including its own limiter
   // (sign-in 3 req / 10 s, password reset 3 / 60 s per client IP — see the

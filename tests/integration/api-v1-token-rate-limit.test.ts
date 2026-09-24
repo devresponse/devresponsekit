@@ -13,6 +13,9 @@ import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
  *
  * Contract pinned here:
  *   - pre-auth buckets are keyed on the trusted client IP + a global floor;
+ *   - the IP bucket is checked FIRST and the global floor is charged only for
+ *     a request it admitted, so one IP cannot drain the floor (F-18);
+ *   - a throttled request is refused before its body is read;
  *   - a per-credential bucket exists ONLY after the credential verified;
  *   - unknown / random ids never allocate a bucket;
  *   - legitimate bursts still 429 with problem+json + `Retry-After`;
@@ -23,7 +26,9 @@ import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
  * minting are mocked. The pre-auth floors consume from the SHARED Postgres
  * bucket in production (review #98); here `consumeSharedToken` is routed
  * through the same in-memory bucket + spy, so the KEYING contract this suite
- * pins is asserted across both primitives without a database.
+ * pins is asserted across both primitives without a database. The clock is
+ * frozen (`Date` only), so no bucket refills mid-test and the budgets below
+ * are exact.
  */
 const env = vi.hoisted(() => ({
   API_JWT_ENABLED: true,
@@ -78,6 +83,15 @@ const VICTIM_ID = "drkc_victim000000000000000";
 const VICTIM_SECRET = "drkcsec_correct";
 const IP_A = "203.0.113.10";
 const IP_B = "198.51.100.20";
+const IP_A_KEY = `api.token:ip:${IP_A}`;
+const GLOBAL_KEY = "api.token:__global__";
+/** The global floor's burst (TOKEN_GLOBAL_LIMIT.capacity in the route). */
+const GLOBAL_CAPACITY = 300;
+
+/** The i-th of a run of distinct client IPs. */
+function freshIp(i: number): string {
+  return `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
+}
 
 function req(ip: string, body: Record<string, string>): NextRequest {
   const url = new URL("http://test.local/api/v1/auth/token");
@@ -106,6 +120,8 @@ function consumedKeys(): string[] {
 let POST: (request: NextRequest) => Promise<Response>;
 
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-23T12:00:00Z"));
   for (const m of [
     auditEvent,
     verifyClientCredentials,
@@ -142,22 +158,28 @@ beforeEach(async () => {
   });
   POST = (await import("@/app/api/v1/auth/token/route")).POST;
 });
-afterEach(() => vi.resetModules());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.resetModules();
+});
 
 describe("POST /api/v1/auth/token limiter keying (review #11)", () => {
-  it("(a) wrong-secret spam on a victim's client_id from IP A never 429s the victim on IP B", async () => {
-    // Attacker: 30 wrong-secret attempts against the victim's PUBLIC id. The
-    // first 10 burn IP A's burst (401), the rest are throttled — on IP A.
+  it("(a) wrong-secret spam from IP A — past the GLOBAL burst — never 429s the victim on IP B", async () => {
+    // Attacker: more wrong-secret attempts against the victim's PUBLIC id
+    // than the global floor holds in total, all from one IP. The first 10
+    // burn IP A's burst (401), the rest are throttled — on IP A.
+    const attempts = GLOBAL_CAPACITY + 100;
     const attackerStatuses: number[] = [];
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < attempts; i++) {
       attackerStatuses.push((await mint(IP_A, VICTIM_ID, "wrong")).status);
     }
     expect(attackerStatuses.slice(0, 10)).toEqual(Array(10).fill(401));
-    expect(attackerStatuses.slice(10)).toEqual(Array(20).fill(429));
+    expect(attackerStatuses.slice(10)).toEqual(Array(attempts - 10).fill(429));
+    const attackerKeys = consumedKeys();
 
     // The attacker's requests never touched a credential-scoped bucket.
-    expect(consumedKeys().some((k) => k.startsWith("api.token.credential:"))).toBe(false);
-    expect(consumedKeys().some((k) => k.includes(VICTIM_ID))).toBe(false);
+    expect(attackerKeys.some((k) => k.startsWith("api.token.credential:"))).toBe(false);
+    expect(attackerKeys.some((k) => k.includes(VICTIM_ID))).toBe(false);
 
     // Victim, from its own network: a full 10-token burst still mints.
     for (let i = 0; i < 10; i++) {
@@ -165,6 +187,12 @@ describe("POST /api/v1/auth/token limiter keying (review #11)", () => {
       expect(res.status).toBe(200);
     }
     expect(mintAccessToken).toHaveBeenCalledTimes(10);
+
+    // F-18: because only the 10 requests IP A's own bucket admitted were
+    // charged to the deployment-wide floor. When the floor was taken first,
+    // every one of them was: 300 drained it, and from then on one IP at the
+    // refill rate held it at zero and 429'd every tenant's token mint.
+    expect(attackerKeys.filter((k) => k === GLOBAL_KEY)).toHaveLength(10);
   });
 
   it("(b) unknown / rotating client_ids never allocate a bucket and cannot escape the IP bucket", async () => {
@@ -243,16 +271,45 @@ describe("POST /api/v1/auth/token limiter keying (review #11)", () => {
     expect(consumedKeys().some((k) => k.includes("drk_live_good"))).toBe(false);
   });
 
-  it("(d) the deployment-wide global floor still applies across distinct IPs", async () => {
-    // 300 requests, each from a fresh IP, exhaust the global burst; the
-    // 301st is refused even though its own IP bucket is untouched.
-    let last: Response | undefined;
-    for (let i = 0; i < 301; i++) {
-      last = await mint(`10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`, "drkc_other", "x");
+  it("(d) the global floor still caps many IPs, and is charged only after an IP bucket admits (F-18)", async () => {
+    // IP A: 40 requests, 10 admitted by its bucket. Each admitted request
+    // consults its IP bucket and THEN the floor; each refused one consults
+    // its IP bucket alone.
+    for (let i = 0; i < 40; i++) await mint(IP_A, "drkc_other", "x");
+    expect(consumedKeys()).toEqual([
+      ...Array.from({ length: 10 }, () => [IP_A_KEY, GLOBAL_KEY]).flat(),
+      ...Array<string>(30).fill(IP_A_KEY),
+    ]);
+
+    // So the floor has 300 - 10 tokens left, not 300 - 40: that many
+    // requests, each from a fresh IP, all reach credential verification…
+    const remaining = GLOBAL_CAPACITY - 10;
+    const statuses: number[] = [];
+    for (let i = 0; i < remaining; i++) {
+      statuses.push((await mint(freshIp(i), "drkc_other", "x")).status);
     }
-    expect(last?.status).toBe(429);
-    // The floor tripped BEFORE the per-IP check: the 301st IP has no bucket.
-    expect(consumedKeys()).not.toContain("api.token:ip:10.0.1.44");
-    expect(consumedKeys().filter((k) => k === "api.token:__global__")).toHaveLength(301);
+    expect(statuses).toEqual(Array(remaining).fill(401));
+
+    // …and the next fresh IP is refused by the deployment-wide floor, which
+    // it reaches only AFTER its own bucket admitted it: that bucket spent a
+    // token (the accepted trade-off of checking the IP first).
+    consumeToken.mockClear();
+    const last = await mint(freshIp(remaining), "drkc_other", "x");
+    expect(last.status).toBe(429);
+    expect(last.headers.get("Retry-After")).toBe("1"); // the floor's own wait (5/s)
+    expect(consumedKeys()).toEqual([`api.token:ip:${freshIp(remaining)}`, GLOBAL_KEY]);
+    expect(verifyClientCredentials).toHaveBeenCalledTimes(10 + remaining);
+  });
+
+  it("(e) a throttled request is refused before its body is read", async () => {
+    for (let i = 0; i < 10; i++) expect((await mint(IP_A, "drkc_other", "x")).status).toBe(401);
+    // The limiter keys on nothing from the body (review #11), so it runs
+    // first: a request over its IP budget is refused unread.
+    const json = vi.fn(async () => ({ grant_type: "client_credentials" }));
+    const text = vi.fn(async () => "");
+    const throttled = { ...req(IP_A, {}), json, text } as unknown as NextRequest;
+    expect((await POST(throttled)).status).toBe(429);
+    expect(json).not.toHaveBeenCalled();
+    expect(text).not.toHaveBeenCalled();
   });
 });

@@ -398,3 +398,18 @@ path end to end.
 
 Re-check with `pnpm audit --audit-level low` from this directory. If a floor ever becomes
 unnecessary because the upstream pin moves, delete it rather than leaving it to rot.
+
+CI audits this lockfile too. The kit's `Dependency audit` workflow
+(`.github/workflows/dependency-audit.yml`, a required check) runs
+`pnpm --dir vercel-cli audit --audit-level high` on every pull request and weekly. Its weekly
+`Dependabot alerts` job reads GitHub's alerts for every manifest, including this one, which
+catches what `pnpm audit` misses (the `path-to-regexp@6` row above). Before F-28 neither check
+looked here, so this tree's advisories surfaced only as alerts in the Security tab.
+
+This lockfile has its own advisory allowlist: `pnpm --dir vercel-cli audit` reads
+`pnpm.auditConfig.ignoreGhsas` from this package's `package.json` and never the kit's root
+list, so muting a GHSA at the root does not mute it here. The list is empty. Prefer a floor
+above. A mute goes here only under the deploy-CLI rule in
+[SECURITY.md → Dependency advisory allowlist](../SECURITY.md#dependency-advisory-allowlist),
+with a row there that names `vercel-cli/pnpm-lock.yaml` and a review-by date. The kit's
+`tests/unit/dependency-governance.test.ts` fails on a mute without that row.

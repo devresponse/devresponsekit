@@ -12,6 +12,16 @@ name: Dependency audit
 # protection). Keep the job `name` and the pull_request trigger exactly as they
 # are — rename either and the check never reports, so merges stall (or, if the
 # required set is "fixed" by dropping it, stop being gated).
+#
+# Two lockfiles, one gate (F-28). The deploy CLI in `vercel-cli/` is its own
+# pnpm package with its own lockfile, so a root `pnpm audit` never saw it —
+# although it is the tree that handles VERCEL_TOKEN and the production direct
+# database URL. Its alerts accumulated in GitHub's Security tab with nothing
+# turning them into a red run. Every lockfile in the repository is now audited
+# here (tests/unit/dependency-governance.test.ts enumerates them), and the
+# weekly run also reads GitHub's Dependabot alerts, because `pnpm audit` and
+# GitHub's advisory database disagree: path-to-regexp@6 GHSA-9wv6-86v2-598j
+# sat in vercel-cli with `pnpm audit` reporting nothing.
 
 on:
   pull_request:
@@ -23,8 +33,12 @@ on:
     - cron: "13 5 * * 1"
   workflow_dispatch:
 
+# The event is part of the group, so a push to `main` cancels only an older
+# push run. Without it, a push landing during the Monday run cancelled the
+# scheduled run, and with it that week's `Dependabot alerts` check and any
+# tracking issue, because that job runs on the schedule alone (F-28).
 concurrency:
-  group: dependency-audit-${{ github.ref }}
+  group: dependency-audit-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 # Least privilege in-file (review 2026-09-04 #113): the audit only reads the
@@ -44,10 +58,21 @@ jobs:
     # explicit allowlist (package.json -> pnpm.auditConfig.ignoreGhsas), so a
     # NEW high+ that nobody has reviewed is what trips the gate — not the
     # existing, triaged backlog. Prune the allowlist as upstream fixes land.
+    # Each lockfile has its OWN allowlist: `pnpm --dir vercel-cli audit` reads
+    # vercel-cli/package.json -> pnpm.auditConfig.ignoreGhsas and never the
+    # root one (SECURITY.md -> Dependency advisory allowlist).
+    # Each audit step's outcome is exported so the notify job can say WHICH
+    # tree went red, and which one never ran (job outputs are evaluated when
+    # the job ends, failed or not).
+    outputs:
+      root_audit: ${{ steps.root_audit.outcome }}
+      cli_audit: ${{ steps.cli_audit.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        id: pnpm
         # Version comes from the packageManager field in package.json.
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -62,14 +87,83 @@ jobs:
       # pnpm.auditConfig.ignoreGhsas allowlist. Lower the threshold to
       # `moderate` once the moderate backlog is clear.
       - name: Audit dependencies (high and above)
+        id: root_audit
         run: pnpm audit --audit-level high
+
+      # The deploy CLI's own lockfile (F-28), at the same threshold. `pnpm
+      # audit` reads only the lockfile, so this needs no install — and none is
+      # wanted: nothing in CI runs that package, so nothing should install it.
+      # `!cancelled()` runs it even after the app's install or audit failed, so
+      # a red run reports both trees instead of hiding the second behind the
+      # first. It still needs the checkout and pnpm itself: without them it
+      # would fail with "command not found" or a missing directory, and the
+      # tracking issue would blame this lockfile for a setup fault.
+      - name: Audit the deploy CLI's dependencies (high and above)
+        id: cli_audit
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.pnpm.outcome == 'success' }}
+        run: pnpm --dir vercel-cli audit --audit-level high
+
+  dependabot-alerts:
+    name: Dependabot alerts
+    # GitHub's advisory database is the second opinion `pnpm audit` lacks
+    # (F-28): it covers every manifest in the repository and reports advisories
+    # the npm audit endpoint does not. Weekly and manual ONLY, and never a
+    # required check: alerts describe the default branch, so on a pull_request
+    # the PR that fixes an alert would stay red until after it merged.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # `vulnerability-alerts` is read-only by definition and granted to this
+    # job alone — never to `audit`, which runs `pnpm install` over PR code.
+    permissions:
+      vulnerability-alerts: read
+    outputs:
+      state: ${{ steps.alerts.outputs.state }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: alerts
+        with:
+          script: |
+            // An unreadable alerts API fails the job too: a check that cannot
+            // see is not a check that passed.
+            let alerts;
+            try {
+              alerts = await github.paginate(github.rest.dependabot.listAlertsForRepo, {
+                ...context.repo,
+                state: "open",
+                severity: "high,critical",
+                per_page: 100,
+              });
+            } catch (error) {
+              core.setOutput("state", "unreadable");
+              core.setFailed(
+                `Could not list Dependabot alerts (HTTP ${error.status ?? "?"}: ${error.message}). ` +
+                  "This job needs `permissions: vulnerability-alerts: read`, and Dependabot " +
+                  "alerts must be enabled for the repository.",
+              );
+              return;
+            }
+            if (alerts.length === 0) {
+              core.setOutput("state", "clean");
+              core.info("No open high or critical Dependabot alerts.");
+              return;
+            }
+            const lines = alerts.map(
+              (a) =>
+                `- #${a.number} ${a.security_advisory.severity} ${a.security_advisory.ghsa_id} ` +
+                `${a.dependency.package.name} in ${a.dependency.manifest_path}`,
+            );
+            core.setOutput("state", "alerts");
+            core.setFailed(
+              `${alerts.length} open high/critical Dependabot alert(s):\n${lines.join("\n")}`,
+            );
 
   notify:
     name: Open or bump the tracking issue
-    needs: audit
+    needs: [audit, dependabot-alerts]
     # Only a SCHEDULED failure is silent — a PR or push failure is already in
-    # front of whoever made the change. `failure()` covers the audit job above
-    # (a cancelled run is not a failure and must not raise an issue).
+    # front of whoever made the change. `failure()` covers both jobs above (a
+    # cancelled run is not a failure and must not raise an issue).
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -77,17 +171,89 @@ jobs:
       issues: write
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          AUDIT_RESULT: ${{ needs.audit.result }}
+          ROOT_AUDIT: ${{ needs.audit.outputs.root_audit }}
+          CLI_AUDIT: ${{ needs.audit.outputs.cli_audit }}
+          ALERTS_RESULT: ${{ needs.dependabot-alerts.result }}
+          ALERTS_STATE: ${{ needs.dependabot-alerts.outputs.state }}
         with:
           script: |
             const title = "Dependency audit failing on main";
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            // Name what failed (F-28). One issue covers every check in this
+            // workflow — the title stays the dedupe key — so its body has to
+            // say which tree went red, and which one was never checked.
+            const env = process.env;
+            // One row per audited lockfile, with its audit step's outcome:
+            // "success" or "failure" when the audit ran, "skipped" when an
+            // earlier step failed, "" when the job never reached it.
+            const lockfiles = [
+              ["the app's lockfile (`pnpm audit --audit-level high`)", env.ROOT_AUDIT],
+              [
+                "the deploy CLI's lockfile, `vercel-cli/` (`pnpm --dir vercel-cli audit --audit-level high`)",
+                env.CLI_AUDIT,
+              ],
+            ];
+            const advisories = lockfiles.filter(([, outcome]) => outcome === "failure");
+            // An audit that never ran is not a clean one. It gets its own line
+            // even when the other lockfile failed, so a setup fault is never
+            // read as an advisory and a red CLI audit never hides that the
+            // app's lockfile went unchecked.
+            const unaudited = lockfiles.filter(
+              ([, outcome]) => outcome !== "success" && outcome !== "failure",
+            );
+            const alertsFound = env.ALERTS_RESULT === "failure" && env.ALERTS_STATE === "alerts";
+            const alertsBroken = env.ALERTS_RESULT === "failure" && !alertsFound;
+            const failing = [
+              ...advisories.map(([what]) => what),
+              ...unaudited.map(([what]) => `NOT AUDITED: ${what}`),
+            ];
+            if (alertsFound) {
+              failing.push("GitHub's Dependabot alerts: an open high/critical alert (listed in the run log)");
+            }
+            if (alertsBroken) {
+              failing.push(
+                "the Dependabot alerts check, without a result — usually an unreadable alerts API (see the run log)",
+              );
+            }
+            if (failing.length === 0) {
+              // Both audits passed and the alerts job did not fail, yet a job
+              // did: a later step. Say so rather than post an empty list.
+              failing.push(`the audit job (result: ${env.AUDIT_RESULT || "none"}), after both audits passed — see the run log`);
+            }
             const body = [
-              `The weekly \`pnpm audit --audit-level high\` run failed on \`main\`: ${runUrl}`,
+              `The weekly dependency audit failed on \`main\`: ${runUrl}`,
               "",
-              "No commit changed the tree — a new high/critical advisory landed against a",
-              "dependency already on `main`. Bump (or floor via `pnpm.overrides`) the",
-              "affected package; see SECURITY.md → Dependency advisory allowlist.",
-            ].join("\n");
+              "Failing:",
+              ...failing.map((what) => `- ${what}`),
+            ];
+            if (advisories.length > 0 || alertsFound) {
+              body.push(
+                "",
+                "No commit changed the tree — a new high/critical advisory landed against a",
+                "dependency already on `main`. Bump (or floor via `pnpm.overrides`) the",
+                "affected package in the tree named above (for an alert, the run log names",
+                "the manifest); see SECURITY.md → Dependency advisory allowlist.",
+              );
+            }
+            if (unaudited.length > 0) {
+              body.push(
+                "",
+                "NOT AUDITED is a setup fault, not an advisory: an earlier step (checkout,",
+                "toolchain setup or `pnpm install`) failed, so that lockfile's audit never ran.",
+                "The run log names the step; re-run the workflow once it is fixed. A registry",
+                "outage fails `pnpm install` and `pnpm audit` alike, so read the log of any",
+                "audit listed as failing next to it before bumping anything.",
+              );
+            }
+            if (alertsBroken) {
+              body.push(
+                "",
+                "An unreadable alerts API is a configuration fault: the job log names the",
+                "HTTP status (SECURITY.md → Repository security settings).",
+              );
+            }
 
             // Dedupe on the exact title: one open issue per red streak, bumped
             // with a comment per failed run so the history is in one place.
@@ -102,14 +268,14 @@ jobs:
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: existing.number,
-                body: `Still failing: ${runUrl}`,
+                body: `Still failing (${failing.join("; ")}): ${runUrl}`,
               });
               core.info(`Commented on existing issue #${existing.number}`);
             } else {
               const { data: created } = await github.rest.issues.create({
                 ...context.repo,
                 title,
-                body,
+                body: body.join("\n"),
               });
               core.info(`Opened issue #${created.number}`);
             }

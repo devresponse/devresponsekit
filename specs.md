@@ -3676,7 +3676,10 @@ The initial schema `0001-initial-schema.sql` includes:
 
 - Password reset is wired through Better Auth's `sendResetPassword`
   callback in `src/lib/auth.ts`, which calls `sendAppEmail` with the
-  `password_reset` template. Public pages: `/[locale]/forgot-password`
+  `password_reset` template, after the response, through
+  `deferEmailSend` (`src/lib/email/defer-send.server.ts`, F-20). Awaiting
+  the send made an existing account answer slower than an unknown
+  address. Public pages: `/[locale]/forgot-password`
   (request) and `/[locale]/reset-password` (complete, token in the
   emailed link). The administrator "send reset email" action
   (`/api/administrator/users/[id]/password`, mode `reset_email`) uses the
@@ -3687,8 +3690,17 @@ The initial schema `0001-initial-schema.sql` includes:
   configuration.
 - Email verification (AUTH-4) is wired through Better Auth's
   `sendVerificationEmail` callback in `src/lib/auth.ts`, which calls
-  `sendAppEmail` with the `email_verification` template. Public page:
-  `/[locale]/verify-email`.
+  `sendAppEmail` with the `email_verification` template, after the
+  response, like the reset email. Public page:
+  `/[locale]/verify-email`. Sign-up, the reset request and the resend
+  request also hold every HTTP response to a minimum time
+  (`src/lib/auth-response-floor.ts`, F-20), so the database work that
+  differs between a new, an existing and an unknown address does not
+  show in response time. A sign-up for an address that already has an
+  account returns Better Auth's synthetic user, built by
+  `emailAndPassword.customSyntheticUser` with the fields a new row gets
+  (`role: "user"` from the admin plugin), so the body does not show it
+  either.
 - Organization invitations (0008) send the `organization_invitation`
   template from the administrator invite/resend actions
   (`/api/administrator/organizations/[id]/invitations` and `.../resend`);

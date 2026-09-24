@@ -8,6 +8,7 @@ import {
   AUTH_DISABLED_PATHS,
   rejectClosedAuthEndpoints,
 } from "@/lib/auth-admin-surface";
+import { authResponseFloor } from "@/lib/auth-response-floor";
 import { endBorrowedSessionsAfterOwnSweep } from "@/lib/auth-session-sweep";
 import { ssoSession } from "@/lib/auth-sso-session";
 import { getProvisioningProvider } from "@/lib/auth-provisioning-provider";
@@ -145,6 +146,26 @@ export const auth = betterAuth({
     // baseline; an org that waives verification gets its sign-ups pre-verified
     // by the `user.create.before` hook below, which satisfies this check.
     requireEmailVerification: true,
+    // F-20: with `requireEmailVerification` on, a sign-up for an address that
+    // already has an account returns 200 with a synthetic user instead of an
+    // error, so the answer must match a real sign-up's. Better Auth builds
+    // that user from the schema, and the admin plugin's `role` has no schema
+    // default: its `user.create.before` hook stamps it on real rows only. So
+    // by default a new address came back with `role: "user"` and an existing
+    // one with `role: null`, in every organization and in one request. This
+    // builds the synthetic user with the fields a new row gets. Better Auth
+    // orders the keys by its schema either way. Pinned against a real sign-up
+    // through `auth.handler` in
+    // tests/security/auth-email-enumeration-timing.test.ts.
+    customSyntheticUser: ({ coreFields, additionalFields, id }) => ({
+      ...coreFields,
+      role: ADMIN_PLUGIN_OPTIONS.defaultRole,
+      banned: false,
+      banReason: null,
+      banExpires: null,
+      ...additionalFields,
+      id,
+    }),
     // AUTH-2: revoke ALL of the user's sessions on a successful password
     // reset. A reset is the canonical "I think my account is compromised"
     // action, so it must also evict any attacker session — otherwise the
@@ -238,9 +259,17 @@ export const auth = betterAuth({
     // action are observable in every environment. Lazy import keeps the
     // email module out of the auth chain for tooling that only needs
     // the instance shape.
+    //
+    // F-20: the send runs AFTER the response (`deferEmailSend`). This
+    // callback runs only when the account exists, so awaiting the send made a
+    // real address answer 200-800 ms slower than an unknown one. The
+    // administrator's "send reset email" reports the same thing as before:
+    // Better Auth's `runInBackgroundOrAwait` already caught and logged a
+    // failed send, so that action never saw delivery errors. The row now
+    // lands just after its response.
     sendResetPassword: async ({ user, url }) => {
-      const { sendAppEmail } = await import("@/lib/email/send.server");
-      await sendAppEmail({
+      const { deferEmailSend } = await import("@/lib/email/defer-send.server");
+      deferEmailSend({
         to: user.email,
         templateKey: "password_reset",
         variables: { name: user.name || user.email, resetUrl: url },
@@ -263,6 +292,14 @@ export const auth = betterAuth({
   // which then offers an explicit "proceed to login" step. This keeps
   // verification and sign-in as distinct, legible steps instead of dropping a
   // freshly-verified user straight onto a secure page.
+  //
+  // F-20: the send is deferred past the response, like `sendResetPassword`.
+  // Sign-up calls this only for a NEW address, and `/send-verification-email`
+  // only for an unverified one. The deferral lives inside the callback because
+  // `/send-verification-email` calls it with a plain await, which Better
+  // Auth's `advanced.backgroundTasks` option would not have deferred. The rest
+  // of the sign-up gap (creating and provisioning the user) is bounded by
+  // `authResponseFloor` below.
   emailVerification: {
     sendOnSignUp: true,
     autoSignInAfterVerification: false,
@@ -274,8 +311,8 @@ export const auth = betterAuth({
       if (user.emailVerified) {
         return;
       }
-      const { sendAppEmail } = await import("@/lib/email/send.server");
-      await sendAppEmail({
+      const { deferEmailSend } = await import("@/lib/email/defer-send.server");
+      deferEmailSend({
         to: user.email,
         templateKey: "email_verification",
         variables: { name: user.name || user.email, verifyUrl: url },
@@ -593,6 +630,11 @@ export const auth = betterAuth({
     // `auth-admin-surface.ts` for the rationale.
     admin(ADMIN_PLUGIN_OPTIONS),
     ssoSession(),
+    // F-20: sign-up, password-reset and resend-verification responses over
+    // HTTP take at least a fixed minimum time, so the extra database work an
+    // existing (or a new) account causes does not show in response time. The
+    // paths, the size and the reasons are in `auth-response-floor.ts`.
+    authResponseFloor(),
     nextCookies(),
   ],
 });

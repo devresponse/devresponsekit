@@ -294,6 +294,119 @@ describe("POST /api/administrator/users (create)", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  /*
+   * F-30: every failure row names NO `app_users` row. `app_user_id` is a
+   * foreign key, and the nil UUID these rows used to name failed it, so the
+   * route answered 500 with no audit row. And the `app_users` check is only a
+   * courtesy (no unique key on the email): an address Better Auth already
+   * holds fails inside `createBetterAuthUser`, which is the documented 409.
+   * tests/db/user-create-failure-audit.db.test.ts runs these against Postgres.
+   */
+  describe("F-30: failure audits name no user; a held address is a 409", () => {
+    async function failingCreate(fail: { create?: unknown; insert?: unknown; returned?: unknown }) {
+      sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.create"));
+      dbMock.mockResolvedValueOnce(undefined); // the up-front email check passes
+      if (fail.insert !== undefined) dbMock.mockRejectedValueOnce(fail.insert);
+      if (fail.create !== undefined) authCreateUser.mockRejectedValue(fail.create);
+      else
+        authCreateUser.mockResolvedValue(
+          "returned" in fail ? fail.returned : { user: { id: "ba-new" } },
+        );
+      const { POST } = await import("@/app/api/administrator/users/route");
+      return POST(
+        makeRequest("http://test.local/api/administrator/users", {
+          method: "POST",
+          body: JSON.stringify({ email: "held@x.com", password: "Password#123" }),
+        }),
+      );
+    }
+    const createFailedRow = () =>
+      auditMock.mock.calls
+        .map(([row]) => row as Record<string, unknown>)
+        .filter((row) => row.eventType === "admin.user.create_failed");
+
+    it.each([
+      [
+        "the admin plugin's refusal",
+        Object.assign(new Error("User already exists. Use another email."), {
+          body: { code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" },
+        }),
+      ],
+      [
+        "a concurrent create's unique violation",
+        Object.assign(new Error("duplicate key"), { code: "23505", constraint: "user_email_key" }),
+      ],
+    ])("Better Auth holds the address (%s): 409 email_taken", async (_label, err) => {
+      const res = await failingCreate({ create: err });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ error: "email_taken" });
+      expect(createFailedRow()).toEqual([
+        expect.objectContaining({
+          outcome: "error",
+          appUserId: null,
+          email: "held@x.com",
+          reason: "auth_user_exists",
+        }),
+      ]);
+    });
+
+    it("any other Better Auth failure: 502 auth_create_failed", async () => {
+      const res = await failingCreate({ create: new Error("identity store unreachable") });
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ error: "auth_create_failed" });
+      expect(createFailedRow()).toEqual([
+        expect.objectContaining({ appUserId: null, reason: "auth_create_user_failed" }),
+      ]);
+    });
+
+    it.each([
+      ["a user with no id", { user: { email: "held@x.com" } }, ["user"]],
+      ["nothing", null, []],
+    ])(
+      "Better Auth returns %s: 502 auth_create_failed, audited with only the returned key names",
+      async (_l, returned, returnedKeys) => {
+        const res = await failingCreate({ returned });
+        expect(res.status).toBe(502);
+        expect(await res.json()).toMatchObject({ error: "auth_create_failed" });
+        expect(createFailedRow()).toEqual([
+          expect.objectContaining({
+            outcome: "error",
+            appUserId: null,
+            email: "held@x.com",
+            reason: "auth_create_no_id",
+            metadata: { returnedKeys },
+          }),
+        ]);
+        expect(dbMock).toHaveBeenCalledTimes(1); // the up-front check; no insert
+      },
+    );
+
+    it.each([
+      ["a connection failure", new Error("connection reset")],
+      // The one unique key on `app_users` is the id Better Auth just minted,
+      // so a 23505 here is no email race and is not mapped to 409 any more.
+      ["a unique violation", Object.assign(new Error("duplicate key"), { code: "23505" })],
+    ])(
+      "the app_users insert fails (%s): 500, audited with the orphaned Better Auth id",
+      async (_l, err) => {
+        const res = await failingCreate({ insert: err });
+        expect(res.status).toBe(500);
+        expect(await res.json()).toMatchObject({ error: "internal_error" });
+        expect(createFailedRow()).toEqual([
+          expect.objectContaining({
+            appUserId: null,
+            reason: "db_insert_failed",
+            metadata: { betterAuthUserId: "ba-new" },
+          }),
+        ]);
+        expect(auditMock).not.toHaveBeenCalledWith(
+          expect.objectContaining({ eventType: "admin.user.created" }),
+        );
+      },
+    );
+  });
 });
 
 describe("POST /api/administrator/users/[id]/ban", () => {

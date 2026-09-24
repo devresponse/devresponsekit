@@ -23,7 +23,14 @@ import { auditEvent, type AuditEventInput } from "@/lib/audit.server";
 export interface UserAuditContext {
   request: NextRequest | { headers: Headers };
   actorBetterAuthUserId: string;
-  appUserId: string;
+  /**
+   * The `app_users.id` the event is about — an FK, so it must name a row that
+   * exists. F-30: pass `null` when there is none (a create that failed before
+   * or while writing the row, a summary over many users) and carry what the
+   * caller asked for in `email` / `metadata` instead. Required, so the choice
+   * is explicit at every call site.
+   */
+  appUserId: string | null;
   email?: string | null;
   reason?: string | null;
   requestId?: string | null;

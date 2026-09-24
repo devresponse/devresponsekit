@@ -17,6 +17,7 @@ import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.serv
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { isAuthEmailTakenError } from "@/lib/admin/auth-email-taken";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -154,9 +155,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *
  * Creates a new Better Auth user (via the admin plugin), then inserts the
  * corresponding `app_users` row — two sequential writes, NOT one
- * transaction (review #136): a duplicate-email race maps to 409 and leaves
- * the orphan auth user for reconciliation (see the 23505 handling below).
- * Per docs/admin-manager.md §4 + §8.1:
+ * transaction (review #136). An address Better Auth already holds is a 409,
+ * whether a concurrent create won the race or an earlier identity has no
+ * `app_users` row (F-30). A failed `app_users` insert is a 500 that leaves the
+ * Better Auth user behind for reconciliation, its id in the
+ * `admin.user.create_failed` row. Per docs/admin-manager.md §4 + §8.1:
  *
  *   - Caller MUST hold `admin.users.create`.
  *   - Body validated with Zod (`.strict()` — unknown keys rejected).
@@ -214,10 +217,13 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // SSO/OAuth lookup paths that compare case-sensitively.
   const normalisedEmail = input.email.toLowerCase();
 
-  // Reject duplicate emails up-front with a clean error rather than
-  // letting Better Auth raise a generic constraint failure. This is a
-  // best-effort check — the unique index on `app_users.primary_email`
-  // is the source of truth.
+  // Reject duplicate emails up-front with a clean error. Best-effort only:
+  // `app_users` has NO unique index on the email (its one unique key is
+  // `better_auth_user_id`). The source of truth is Better Auth's `"user"`
+  // table, whose `email` is unique, so a concurrent create of the same
+  // address, or an address Better Auth holds without an `app_users` row,
+  // passes this check and is refused inside `createBetterAuthUser` below
+  // (F-30).
   const existing = await db
     .selectFrom("app_users")
     .select(["id"])
@@ -239,14 +245,23 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       emailUnproven: !hasCrossOrgReach(guard.access),
     });
   } catch (err) {
+    // F-30: no `app_users` row exists for this address, so the row names none
+    // (`app_user_id` is a foreign key: the nil UUID this used to pass failed
+    // it, and the route answered 500 with no audit row). The address is in
+    // `email`. An address Better Auth already holds is the documented 409,
+    // like the up-front check, and still audited: it means a concurrent create
+    // won, or an identity exists with no `app_users` row to find.
+    const emailTaken = isAuthEmailTakenError(err);
     await auditUserAction("admin.user.create_failed", "error", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
-      appUserId: "00000000-0000-0000-0000-000000000000",
+      appUserId: null,
       email: normalisedEmail,
-      reason: "auth_create_user_failed",
+      requestId: guard.requestId,
+      reason: emailTaken ? "auth_user_exists" : "auth_create_user_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
+    if (emailTaken) return adminErrorResponse("email_taken", 409, request);
     return adminErrorResponse("auth_create_failed", 502, request, { cause: err });
   }
 
@@ -256,6 +271,21 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     (created as { user?: { id?: string }; id?: string } | null | undefined)?.user?.id ??
     (created as { id?: string } | null | undefined)?.id;
   if (!betterAuthUserId) {
+    // F-30: a failure like the others past the up-front check, so audited like
+    // them, naming no `app_users` row. Better Auth may have created an identity
+    // it did not name; the key names (never the values) of what it returned
+    // are the only clue.
+    await auditUserAction("admin.user.create_failed", "error", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: null,
+      email: normalisedEmail,
+      requestId: guard.requestId,
+      reason: "auth_create_no_id",
+      metadata: {
+        returnedKeys: typeof created === "object" && created !== null ? Object.keys(created) : [],
+      },
+    });
     return adminErrorResponse("auth_create_failed", 502, request, {
       cause: new Error("identity provider returned no user id on create"),
     });
@@ -266,11 +296,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // endpoint (Phase 5), and admin-created users are explicitly approved
   // (or not) by an admin in a follow-up action.
   //
-  // The earlier `select` is best-effort — between the read and this
-  // write a concurrent `POST /users` with the same email could win
-  // the race. We catch Postgres' unique-violation (SQLSTATE 23505)
-  // here and translate it to the same `email_taken` 409 the up-front
-  // check returns, instead of bubbling a generic 500 (#B2).
+  // F-30: this insert cannot lose an email race. Better Auth refused the
+  // loser above, and the only unique key here is `better_auth_user_id`,
+  // which that call just minted; the 23505 → `email_taken` branch that used
+  // to sit here could not fire for an email. Any failure is a fault in our
+  // own store: the 500 a throw would give (docs/admin-manager.md §5.1), plus
+  // the audit row a throw would not write. The row names the new Better Auth
+  // id, which is left without an `app_users` row, so an operator can
+  // reconcile it; until then a retry of this address answers 409.
   let appUser;
   try {
     appUser = await db
@@ -285,19 +318,16 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       .returning(["id", "primary_email", "status"])
       .executeTakeFirstOrThrow();
   } catch (err) {
-    if (isUniqueViolation(err)) {
-      await auditUserAction("admin.user.create_failed", "error", {
-        request,
-        actorBetterAuthUserId: guard.betterAuthUserId,
-        appUserId: "00000000-0000-0000-0000-000000000000",
-        email: normalisedEmail,
-        requestId: guard.requestId,
-        reason: "email_taken_race",
-        metadata: { betterAuthUserId },
-      });
-      return adminErrorResponse("email_taken", 409, request);
-    }
-    throw err;
+    await auditUserAction("admin.user.create_failed", "error", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: null,
+      email: normalisedEmail,
+      requestId: guard.requestId,
+      reason: "db_insert_failed",
+      metadata: { betterAuthUserId },
+    });
+    return adminErrorResponse("internal_error", 500, request, { cause: err });
   }
 
   await auditUserAction("admin.user.created", "success", {
@@ -323,18 +353,3 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     { status: 201 },
   );
 });
-
-/**
- * Postgres unique-constraint violation detector. The `pg` driver
- * surfaces SQLSTATE on the error object as `code`. We use a structural
- * check rather than `instanceof DatabaseError` so this works whether
- * the error is wrapped by Kysely or surfaced raw.
- */
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: unknown }).code === "23505"
-  );
-}

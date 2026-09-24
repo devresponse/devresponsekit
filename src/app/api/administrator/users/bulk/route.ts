@@ -58,6 +58,11 @@ export const dynamic = "force-dynamic";
  *   - A summary "admin.users.bulk_action" audit row is written in
  *     addition to the per-row events so the audit explorer can show
  *     "X bulk-banned 247 users at Y" without scanning per-row events.
+ *     It names no user (F-30), so an id that matches no user is a
+ *     `not_found` row in the results, never a failed request.
+ *   - NOT idempotent: every row's action is applied when it is processed,
+ *     so re-sending a batch re-applies it (a second `ban` restarts the
+ *     expiry). Read the per-row `results` rather than retrying the batch.
  */
 const ALLOWED_STATUS = new Set([
   "active",
@@ -277,13 +282,20 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // Single summary audit row in addition to the per-row events written
   // by the helpers — the audit explorer surfaces this for the "what
   // big bulk action ran at 11:42?" lookup.
+  //
+  // F-30: it is about the batch, so it names no user (the per-row events do,
+  // and share its request id). It used to name the FIRST REQUESTED id, which
+  // the caller chooses: a well-formed UUID that matched no user failed the
+  // `app_user_id` foreign key AFTER every row's action had been applied, so the
+  // caller got a 500 for a batch that had run, and a retry ran it again.
   await auditUserAction(
     "admin.users.bulk_action",
     succeeded === results.length ? "success" : "failure",
     {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
-      appUserId: results[0]?.appUserId ?? "00000000-0000-0000-0000-000000000000",
+      appUserId: null,
+      requestId: guard.requestId,
       reason: parsed.data.reason ?? null,
       metadata: {
         action,

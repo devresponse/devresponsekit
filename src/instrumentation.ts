@@ -30,6 +30,13 @@ export async function register() {
       // PROCESS_FATAL_ON_UNCAUGHT=1 opts uncaught exceptions into exit(1).
       const { registerProcessErrorHandlers } = await import("@/lib/process-errors.server");
       registerProcessErrorHandlers();
+      // F-17: one warning when a self-hosted production deployment has not
+      // declared CLIENT_IP_SOURCE, because the default trusts X-Forwarded-For
+      // and only the operator knows whether the edge overwrites it. Imported
+      // here, not statically: it pulls in the pino logger.
+      const { warnIfClientIpSourceUndeclared } =
+        await import("@/lib/client-ip-source-warning.server");
+      warnIfClientIpSourceUndeclared();
     }
   }
   if (process.env.NEXT_RUNTIME === "edge") {

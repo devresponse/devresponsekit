@@ -81,6 +81,7 @@ const TOUCHED_KEYS = [
   "BETTER_AUTH_URL",
   "SESSION_ABSOLUTE_LIFETIME_HOURS",
   "API_KEY_USAGE_TOUCH_INTERVAL_SECONDS",
+  "CLIENT_IP_SOURCE",
 ] as const;
 
 async function loadEnvWith(patch: Record<string, string | undefined>) {
@@ -597,6 +598,36 @@ describe("pool/proxy env validation (P2-12)", () => {
       expect(() => mod.getServerEnv()).toThrow(/PGPOOL_MAX/);
     } finally {
       restore();
+    }
+  });
+});
+
+describe("CLIENT_IP_SOURCE boot validation (F-17)", () => {
+  it("defaults to unset (the `xff` model) and accepts xff, x-real-ip and a header name", async () => {
+    for (const value of [undefined, "", "xff", "x-real-ip", "X-Real-IP", "cf-connecting-ip"]) {
+      const { mod, restore } = await loadEnvWith({ CLIENT_IP_SOURCE: value });
+      try {
+        expect(mod.getServerEnv().CLIENT_IP_SOURCE, String(value)).toBe(value);
+      } finally {
+        restore();
+      }
+    }
+  });
+
+  it("refuses to boot on a value the runtime would read as no source at all", async () => {
+    for (const value of [
+      "x-forwarded-for",
+      "x-drk-client-ip",
+      "forwarded",
+      "x real ip",
+      "x-real-ip,cf-connecting-ip",
+    ]) {
+      const { mod, restore } = await loadEnvWith({ CLIENT_IP_SOURCE: value });
+      try {
+        expect(() => mod.getServerEnv(), value).toThrow(/CLIENT_IP_SOURCE/);
+      } finally {
+        restore();
+      }
     }
   });
 });

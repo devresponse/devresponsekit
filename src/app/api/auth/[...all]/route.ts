@@ -13,12 +13,16 @@ import { toNextJsHandler } from "better-auth/next-js";
  * The ONE thing done before handing off is header normalization (review
  * #35): Better Auth reads the trusted client IP — for its sign-in / reset
  * limiter and `session.ipAddress` — from `x-drk-client-ip` only, and that
- * header is (re)derived here from the forwarded chain with the app's
+ * header is (re)derived here with the app's `CLIENT_IP_SOURCE` /
  * `TRUSTED_PROXY_COUNT` model, overwriting or removing whatever arrived.
  * `src/proxy.ts` stamps the same header first, but this route does not rely
- * on the matcher covering it: Next also injects `x-forwarded-for` from the
- * socket address only AFTER the proxy has run, so re-deriving in the handler
- * is what keeps per-client buckets when nothing sits in front of the app.
+ * on the matcher covering it: Next injects `x-forwarded-for` from the socket
+ * address only AFTER the proxy has run, and only when the client sent none.
+ * That last part means a deployment with nothing in front of the app is NOT
+ * safe (F-17): a client that sends its own `x-forwarded-for` keeps it, and
+ * picks a fresh bucket per request. Only an edge that overwrites the header,
+ * or `CLIENT_IP_SOURCE` naming a header such an edge sets, keeps per-client
+ * buckets.
  *
  * Cache: never cache. Status codes are determined by Better Auth.
  */

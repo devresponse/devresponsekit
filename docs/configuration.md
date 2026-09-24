@@ -150,11 +150,12 @@ Paste the printed JSON as `SSO_HANDOFF_PRIVATE_KEY`. Only the public half is eve
 
 | Variable | Default | Controls |
 | --- | --- | --- |
-| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs; the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain), then normalized (see below). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. It is also read (weakly — see below) when deciding whether to reuse an inbound `x-request-id` (review #99/#224). |
+| `CLIENT_IP_SOURCE` | `xff` | Which request header the client IP is read from (F-17). `xff`: `TRUSTED_PROXY_COUNT` hops from the right of `X-Forwarded-For`, falling back to `X-Real-IP` only when no `X-Forwarded-For` arrived. `x-real-ip`: **only** `X-Real-IP`. Any other value names **one** header to read alone, such as `cf-connecting-ip`, `true-client-ip` or `fly-client-ip`. A header source ignores `X-Forwarded-For` and `TRUSTED_PROXY_COUNT` for the client IP (the request-id check below still counts `X-Forwarded-For` entries). Case-insensitive. A value that is not a single header name, or that names `x-forwarded-for` (use `xff`), `x-drk-client-ip` or `forwarded`, **fails boot**. Unset in production outside Vercel logs one warning at boot. The header you name must be one your edge **overwrites**, see [Choosing the client-IP source](#choosing-the-client-ip-source). |
+| `TRUSTED_PROXY_COUNT` | 1 | Number of trusted proxies/CDNs. For the client IP it is used only when `CLIENT_IP_SOURCE` is `xff` (the default): the client IP for rate-limit keys is taken this many hops from the right of `X-Forwarded-For` (falling back to `X-Real-IP` when there is no chain), then normalized (see below). Governs **both** the app's own limiters **and** Better Auth's built-in sign-in / password-reset limiter and `session.ipAddress` — see below. It is also read (weakly — see below), whatever `CLIENT_IP_SOURCE` says, when deciding whether to reuse an inbound `x-request-id` (review #99/#224). |
 | `ADMIN_EXPORT_MAX_ROWS` | 100000 | Hard row cap for a single CSV export; the file is marked truncated past the cap. |
 
 **One client-IP derivation.** The app computes the trusted client IP with the
-`TRUSTED_PROXY_COUNT` rule above and **always overwrites** the private request
+`CLIENT_IP_SOURCE` / `TRUSTED_PROXY_COUNT` rule above and **always overwrites** the private request
 header `x-drk-client-ip` (set when a trustworthy IP exists, removed otherwise)
 before Better Auth sees a request. Better Auth is configured to read **only** that
 header (`advanced.ipAddress.ipAddressHeaders` in `src/lib/auth.ts`), so its limiter
@@ -213,9 +214,13 @@ that second condition is worth, because it is **not** a provenance check:
   multi-kilobyte blobs out of log lines, Sentry tags and `app_audit_events`;
 - `X-Forwarded-For` is client-supplied, so **any caller satisfies the chain
   condition by sending one extra header**, and behind a real edge (Vercel, any LB)
-  it is true for 100% of requests. It rejects only callers that send no chain at
-  all — an unmodified direct request to a non-proxied origin, and local
-  development. It stops nobody who is trying;
+  it is true for 100% of requests. Next.js also fills the header from the socket
+  when a request arrives without one (`??=`, see
+  [Choosing the client-IP source](#choosing-the-client-ip-source)), so every
+  request that reaches a route handler carries at least one entry. At the default
+  `TRUSTED_PROXY_COUNT=1` the condition therefore rejects nothing there, and at a
+  higher count it rejects only a chain shorter than the count, such as a request
+  that went around one of the proxies. It stops nobody who is trying;
 - consequently a **request id is a correlation aid, never an identity**: a client
   can pin or collide the "Support ID" that appears in logs, Sentry and
   `app_audit_events.request_id` (a non-unique column). Never authorize,
@@ -224,20 +229,52 @@ that second condition is worth, because it is **not** a provenance check:
 - a front door that tags requests does keep end-to-end correlation, as long as it
   also sets `X-Forwarded-For`. Where forged ids would be unacceptable, the id must
   be authenticated at the edge (a signed/secret header the origin verifies) or
-  minted server-side unconditionally — neither is implemented here.
+  minted server-side unconditionally — neither is implemented here;
+- this check always counts `X-Forwarded-For` entries, whatever `CLIENT_IP_SOURCE`
+  says. Behind an edge that sets no chain (nginx that sets only `X-Real-IP`, for
+  one), the chain is still there: the edge's own address, which Next filled in, or
+  whatever the client sent. With the default `TRUSTED_PROXY_COUNT=1` an inbound
+  UUID is therefore still reused.
 
-Requirements on the edge in front of the app:
+#### Choosing the client-IP source
 
-- It must **set** `X-Forwarded-For` (appending the address it observed) or
-  `X-Real-IP`. Without either, every session and sign-in lands in the shared
-  bucket. Next.js fills `X-Forwarded-For` from the socket address only when the
-  header is absent, so a deployment with **no** proxy still gets per-client
-  buckets — but only through the in-handler stamping above; do not rely on it
-  behind a proxy that strips the header.
-- It must **overwrite or strip** `X-Real-IP` (the no-chain fallback) as well as
-  `x-drk-client-ip` — the app discards whatever arrives in the latter, but a
-  client-supplied `X-Real-IP` that reaches the app with no `X-Forwarded-For`
-  chain would be trusted as the client's address.
+The app never sees the TCP peer. Next.js gives route code no socket address,
+and it fills `X-Forwarded-For` from the socket only when the request arrived
+**without** that header (`??=`), so a value the client sent is kept as is. Every
+per-IP decision therefore trusts the header `CLIENT_IP_SOURCE` names: Better
+Auth's sign-in / reset limiter, the app's limiters, `session.ipAddress`, the audit
+`ip_address` and an API key's `last_used_ip`. That header must be one **your edge
+writes over whatever the client sent**. If it is not, a client picks its own
+address: a fresh sign-in bucket on every request (unlimited password guessing)
+and a forged IP on every audit row and session (F-17).
+
+| Topology | Set | The edge must |
+| --- | --- | --- |
+| Vercel | nothing (`xff`, `TRUSTED_PROXY_COUNT=1`) | nothing: Vercel's edge overwrites `X-Forwarded-For` |
+| One reverse proxy or load balancer that appends to or overwrites `X-Forwarded-For` (nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, most cloud load balancers) | `CLIENT_IP_SOURCE=xff` | also overwrite or strip `X-Real-IP` |
+| CDN + load balancer, both appending | `CLIENT_IP_SOURCE=xff`, `TRUSTED_PROXY_COUNT=2` | the same, and accept traffic only from the CDN |
+| nginx that sets only `X-Real-IP` (`proxy_set_header X-Real-IP $remote_addr;`) | `CLIENT_IP_SOURCE=x-real-ip` | nothing more: that directive overwrites the header, and `X-Forwarded-For` is ignored |
+| A CDN that sets its own header (`CF-Connecting-IP`, `True-Client-IP`, `Fly-Client-IP`) | `CLIENT_IP_SOURCE=cf-connecting-ip` (or the header your CDN sets) | be the only way in: where the origin is reachable around the CDN, a client sends that header itself |
+| **Nothing in front**: the app's port published straight to clients (`docker run -p 3000:3000` or compose `ports:` with no proxy before it) | no value makes this safe | **not supported** for per-client limits: every header the app could read is one the client sends. Put a reverse proxy from the rows above in front |
+
+- Under `xff`, `X-Real-IP` is read only when no `X-Forwarded-For` arrived, and a
+  client arranges that by omitting it. So the edge must also **overwrite or strip**
+  a client-sent `X-Real-IP`.
+- A header source is read alone. A missing, repeated or malformed value counts as
+  no trustworthy IP (the shared `anon` / `no-trusted-ip` bucket), never as a reason
+  to try another header.
+- A value that is not a single header name fails boot, and so do `x-forwarded-for`
+  (a list the client can extend, so use `xff`), `x-drk-client-ip` (the header the
+  app stamps **from** this setting) and `forwarded` (RFC 7239's structured list).
+  A misspelt but valid header name cannot be detected: it reads a header nobody
+  sets, and every client shares one bucket. After a deploy, check that a fresh
+  session's `ipAddress` is your own address.
+- `x-drk-client-ip` is always overwritten or removed by the app, so the edge does
+  not have to strip it.
+- **Boot warning.** With `NODE_ENV=production`, outside Vercel, an unset
+  `CLIENT_IP_SOURCE` logs one `warn` line at startup (`kind: "client-ip-source"`).
+  Any valid value, `xff` included, records that you checked the edge and silences
+  it.
 
 ### Email
 
@@ -339,7 +376,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | `MCP_ENABLED` | Enable the `/api/mcp` Model Context Protocol endpoint (`1`/`true`). **Dark by default.** It authenticates with the same bearer credential as the machine API, so it also needs `API_KEYS_ENABLED` / `API_JWT_ENABLED`. See [design-mcp-agent-gateway.md](./design-mcp-agent-gateway.md). |
 | `MCP_AUDIENCE_GRACE` | RFC 8707 rollout grace. **Off by default:** `/api/mcp` accepts only JWTs minted with `resource=<BETTER_AUTH_URL>/api/mcp` (an MCP audience). Set to `1`/`true` for a migration window so legacy tokens carrying the plain v1 audience (`API_JWT_AUDIENCE`) are also accepted; unset it once every agent requests the MCP resource. API keys are not audience-bound and are unaffected. |
 | `MCP_DISPATCH_BASE_URL` | Origin the gateway self-calls when a tool invokes `/api/v1`. Default: `BETTER_AUTH_URL`. Point it at an origin that reaches the app **without** the edge proxy (e.g. `http://127.0.0.1:3000`) so the forwarded client IP below survives the hop. |
-| `MCP_FORWARD_CLIENT_IP` | Whether that self-call carries the agent's resolved client IP as `x-forwarded-for` (so `/api/v1` audits and rate-limits the agent, not the gateway). **On by default.** It only holds where the hop bypasses a proxy that appends its own entry — behind such a proxy `/api/v1` picks the gateway's address anyway, so set `0`/`false` there rather than pretending the agent IP survives. |
+| `MCP_FORWARD_CLIENT_IP` | Whether that self-call carries the agent's resolved client IP as `x-forwarded-for`, or in the header `CLIENT_IP_SOURCE` names (so `/api/v1` audits and rate-limits the agent, not the gateway). **On by default.** It only holds where the hop bypasses the edge. An edge that appends to or overwrites the header the app reads the client IP from (`X-Forwarded-For` under `xff`, otherwise the one `CLIENT_IP_SOURCE` names) makes `/api/v1` read the gateway's own address instead, so set `0`/`false` there rather than pretending the agent IP survives. |
 | `API_JWT_ISSUER` (with MCP) | While `MCP_ENABLED` is on this must be unset or identical to `BETTER_AUTH_URL`: `/.well-known/oauth-authorization-server` is served from `BETTER_AUTH_URL` and RFC 8414 requires the advertised `issuer` to be the URL its metadata was retrieved from. A divergent value **fails at boot**. |
 | `MCP_REGISTRATION_ENABLED` | Enable `POST /api/mcp/register` — RFC 7591 agent self-registration (`1`/`true`). **Dark by default.** RFC 7592 registration *management* is deliberately not offered: the response carries no `registration_access_token` / `registration_client_uri`, and lifecycle (approve / scope / revoke / rotate) is admin-side. |
 | `MCP_REGISTRATION_MODE` | `approval` (default — new agents park pending admin activation) or `open` (active but scopeless). |
@@ -418,6 +455,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | Machine API | Usually off | Enabled per need with real signing key |
 | Observability | Off (no DSN) | Sentry DSN set; source-map upload in CI |
 | HTTPS/HSTS | HTTP (HSTS inert) | TLS terminated upstream; HSTS active |
+| Client IP | App reached directly (fine for one developer) | Behind a proxy that overwrites the header `CLIENT_IP_SOURCE` names; never exposed directly ([Choosing the client-IP source](#choosing-the-client-ip-source)) |
 | Migrations | `pnpm db:*` ad hoc | Run as a gated step **before** serving traffic |
 
 ## 5. Minimal `.env` template

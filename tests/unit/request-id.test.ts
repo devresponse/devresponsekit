@@ -41,11 +41,13 @@ beforeEach(async () => {
   sentry.tags = [];
   sentry.captured = [];
   delete process.env.TRUSTED_PROXY_COUNT;
+  delete process.env.CLIENT_IP_SOURCE;
   mod = await import("@/lib/request-id");
   adminMod = await import("@/lib/admin/request-id.server");
 });
 afterEach(() => {
   delete process.env.TRUSTED_PROXY_COUNT;
+  delete process.env.CLIENT_IP_SOURCE;
   vi.resetModules();
 });
 
@@ -136,6 +138,23 @@ describe("getOrCreateRequestId (review #224)", () => {
     // request's. Pinned so the residual risk is asserted, not assumed away.
     const h = headers({ "x-request-id": VALID, "x-forwarded-for": "1.2.3.4" });
     expect(adminMod.getOrCreateRequestId(h)).toBe(VALID);
+  });
+
+  it("counts X-Forwarded-For entries whatever CLIENT_IP_SOURCE says (F-17)", () => {
+    // docs/configuration.md: a header source does not change this check. Behind
+    // nginx that sets only X-Real-IP, Next fills X-Forwarded-For from the
+    // socket (the edge's own address) before any handler runs, so that
+    // one-entry chain meets the default count and the inbound id is reused.
+    process.env.CLIENT_IP_SOURCE = "x-real-ip";
+    const behindEdge = headers({
+      "x-request-id": VALID,
+      "x-forwarded-for": "10.0.0.5",
+      "x-real-ip": "203.0.113.9",
+    });
+    expect(adminMod.getOrCreateRequestId(behindEdge)).toBe(VALID);
+    // X-Real-IP is not a chain, even when it is the configured source.
+    const noChain = headers({ "x-request-id": VALID, "x-real-ip": "203.0.113.9" });
+    expect(adminMod.getOrCreateRequestId(noChain)).not.toBe(VALID);
   });
 
   it("MINTS its own id for a malformed inbound value", () => {

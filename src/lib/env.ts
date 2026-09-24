@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { invalidOriginSuffixes, splitOriginSuffixList } from "@/lib/admin/origin-suffixes";
 import { isSameIdentifier } from "@/lib/api-auth/resources";
+import { parseClientIpSource } from "@/lib/client-ip-source";
 
 /**
  * Server-side environment variable schema.
@@ -123,9 +124,23 @@ const serverEnvSchema = z
     /**
      * Trusted reverse-proxy hop count for client-IP extraction (P2-4): the
      * (count)-th `X-Forwarded-For` entry from the right is the IP the trusted
-     * edge observed. Must be >= 1. Read via {@link intFromEnv} in client-ip.ts.
+     * edge observed. Must be >= 1. Read via {@link intFromEnv} in
+     * forwarded-hops.ts. For the client IP it is used only when
+     * CLIENT_IP_SOURCE is `xff`; the request-id chain check reads it whatever
+     * the source.
      */
     TRUSTED_PROXY_COUNT: z.coerce.number().int().min(1).default(1),
+    /**
+     * Where the trusted client IP comes from (F-17): `xff` (default: the
+     * TRUSTED_PROXY_COUNT model above), `x-real-ip`, or one header name such as
+     * `cf-connecting-ip`. A header source is read ALONE — X-Forwarded-For is
+     * ignored — so a deployment whose edge only sets X-Real-IP (or a CDN
+     * header) no longer trusts the client's own X-Forwarded-For. Validated in
+     * `superRefine` below with the same parser the runtime uses
+     * (`src/lib/client-ip-source.ts`), which reads `process.env` directly and
+     * fails closed on a value this check would refuse.
+     */
+    CLIENT_IP_SOURCE: z.string().optional(),
     GOOGLE_CLIENT_ID: z.string().optional().default(""),
     GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
     MICROSOFT_CLIENT_ID: z.string().optional().default(""),
@@ -512,6 +527,12 @@ const serverEnvSchema = z
         path: ["SSO_HANDOFF_PRIVATE_KEY"],
         message: "must differ from API_JWT_PRIVATE_KEY (they sign distinct trust domains)",
       });
+    }
+    // Client-IP source (F-17): a typo must fail at boot, not silently put every
+    // request in one shared limiter bucket (the runtime read fails closed).
+    const ipSource = parseClientIpSource(env.CLIENT_IP_SOURCE);
+    if (!ipSource.ok) {
+      ctx.addIssue({ code: "custom", path: ["CLIENT_IP_SOURCE"], message: ipSource.reason });
     }
     // Origin allow-list hygiene (review #14): every configured suffix must be
     // a registrable domain. `localhost` is tolerated outside production for

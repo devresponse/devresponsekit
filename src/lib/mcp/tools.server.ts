@@ -1,6 +1,6 @@
 import "server-only";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
-import { getClientIp } from "@/lib/client-ip";
+import { clientIpForwardHeader, getClientIp } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { deriveMcpTools, validateToolArguments, type GeneratedTool } from "./openapi-tools";
 import {
@@ -93,20 +93,24 @@ async function dispatch(
 
   // Forward the AGENT's resolved client IP so the v1 route audits and
   // rate-limits against it, not the gateway's own address (audit #14). We
-  // resolve it here (honoring TRUSTED_PROXY_COUNT at the MCP boundary) and
-  // pass it as `x-forwarded-for` — the same trusted channel v1's getClientIp
-  // reads — rather than a bespoke header an external v1 caller could spoof.
+  // resolve it here (honoring CLIENT_IP_SOURCE / TRUSTED_PROXY_COUNT at the
+  // MCP boundary) and pass it in the header v1's getClientIp trusts —
+  // `x-forwarded-for`, or the one CLIENT_IP_SOURCE names (F-17), which v1
+  // would otherwise not read — rather than a bespoke header an external v1
+  // caller could spoof.
   //
   // This only works where the self-fetch reaches the app DIRECTLY. Behind a
-  // proxy that appends its own hop (Vercel's edge, for one), v1's getClientIp
-  // selects the gateway's address and the forwarded value is silently
-  // discarded — so the honest deployment options are: point
+  // proxy that appends to or overwrites X-Forwarded-For (Vercel's edge, for
+  // one) or overwrites the header CLIENT_IP_SOURCE names (nginx
+  // `proxy_set_header X-Real-IP $remote_addr`), v1's getClientIp reads the
+  // gateway's address and the forwarded value is silently discarded — so the
+  // honest deployment options are: point
   // `MCP_DISPATCH_BASE_URL` at an origin that bypasses the proxy, or set
   // `MCP_FORWARD_CLIENT_IP=0` and let v1 audit the gateway hop instead of
   // pretending an agent IP survives it (review #231, #55).
   if (getServerEnv().MCP_FORWARD_CLIENT_IP) {
     const clientIp = getClientIp(request.headers);
-    if (clientIp) headers["x-forwarded-for"] = clientIp;
+    if (clientIp) headers[clientIpForwardHeader()] = clientIp;
   }
 
   let body: string | undefined;

@@ -8,10 +8,14 @@ import { CLIENT_IP_HEADER, getClientIp } from "@/lib/client-ip";
  * `/api/auth/[...all]` re-derives the trusted client-IP header in the route
  * handler itself (review #35, follow-up). `src/proxy.ts` stamps it first, but
  * the route must not depend on the matcher: Next injects `x-forwarded-for`
- * from the socket address only AFTER the proxy has run, so with nothing in
- * front of the app the proxy sees no chain (and removes the header) while
- * the handler does — re-deriving here keeps per-client buckets, and a value
- * a client injected can never reach Better Auth's limiter / session row.
+ * from the socket address only AFTER the proxy has run, and a client-injected
+ * `x-drk-client-ip` can never reach Better Auth's limiter / session row.
+ *
+ * What re-deriving does NOT do is make direct exposure safe (F-17): Next fills
+ * `x-forwarded-for` with `??=`, so a client that sends its own keeps it, and
+ * under the default `CLIENT_IP_SOURCE` (`xff`) that value is the one stamped.
+ * Only an edge that overwrites the header, or a header source such an edge
+ * sets, keeps per-client buckets.
  */
 const handlerMock = vi.fn(async (_req: Request) => new Response(null, { status: 204 }));
 
@@ -64,15 +68,66 @@ describe("api/auth/[...all] — trusted client-IP header re-derived in the handl
     await expect(req.text()).resolves.toBe(body);
   });
 
-  it("stamps the header from a single-hop chain even when the proxy did not run (direct exposure)", async () => {
-    // What the handler sees with no edge in front: Next's own
-    // `x-forwarded-for ??= socket.remoteAddress` and no `x-drk-client-ip`.
+  it("stamps the header from a single-hop chain even when the proxy did not run", async () => {
+    // An edge that overwrites X-Forwarded-For hands the handler one entry and
+    // no `x-drk-client-ip`; so does Next's own `??= socket.remoteAddress` for
+    // a direct client that sent no header of its own.
     await GET(
       new Request("http://localhost:3000/api/auth/get-session", {
         headers: { "x-forwarded-for": "203.0.113.9" },
       }),
     );
     expect(received().headers.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+  });
+
+  it("direct exposure under the default source: a client-sent X-Forwarded-For picks the bucket (F-17)", async () => {
+    // With nothing in front of the app, Next's `??=` keeps the client's own
+    // header and never writes the socket address, so the handler sees exactly
+    // what the client typed. The default `xff` source cannot tell the two
+    // apart: each forged value is a fresh sign-in limiter bucket. This pins
+    // the documented reason direct exposure is unsafe without CLIENT_IP_SOURCE
+    // and an edge that sets the named header.
+    const buckets = new Set<string | null>();
+    for (const forged of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) {
+      handlerMock.mockClear();
+      await POST(
+        new Request("http://localhost:3000/api/auth/sign-in/email", {
+          method: "POST",
+          headers: { "x-forwarded-for": forged },
+        }),
+      );
+      buckets.add(getIP(received().headers, betterAuthIpOptions));
+    }
+    expect(buckets.size).toBe(3);
+  });
+
+  it("CLIENT_IP_SOURCE=x-real-ip ignores a client-sent X-Forwarded-For (F-17)", async () => {
+    vi.stubEnv("CLIENT_IP_SOURCE", "x-real-ip");
+    // Behind an nginx that sets X-Real-IP but passes X-Forwarded-For through.
+    const buckets = new Set<string | null>();
+    for (const forged of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) {
+      handlerMock.mockClear();
+      await POST(
+        new Request("http://localhost:3000/api/auth/sign-in/email", {
+          method: "POST",
+          headers: { "x-forwarded-for": forged, "x-real-ip": "203.0.113.9" },
+        }),
+      );
+      expect(received().headers.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
+      buckets.add(getIP(received().headers, betterAuthIpOptions));
+    }
+    expect([...buckets]).toEqual(["203.0.113.9"]);
+
+    // No X-Real-IP at all: the forged X-Forwarded-For still counts for
+    // nothing, and an injected x-drk-client-ip is removed.
+    handlerMock.mockClear();
+    await POST(
+      new Request("http://localhost:3000/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "x-forwarded-for": "198.51.100.4", [CLIENT_IP_HEADER]: "198.51.100.4" },
+      }),
+    );
+    expect(received().headers.has(CLIENT_IP_HEADER)).toBe(false);
   });
 
   it("removes an injected header when nothing trustworthy is present (fail closed)", async () => {

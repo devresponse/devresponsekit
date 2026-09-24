@@ -128,8 +128,8 @@ function generateNonce(): string {
  * proxy
  *
  * Combines four concerns:
- *   0. The trusted client IP (review #35): `x-drk-client-ip` is derived from
- *      `X-Forwarded-For` with the app's `TRUSTED_PROXY_COUNT` model and
+ *   0. The trusted client IP (review #35): `x-drk-client-ip` is derived with
+ *      the app's `CLIENT_IP_SOURCE` / `TRUSTED_PROXY_COUNT` model (F-17) and
  *      ALWAYS overwritten on the forwarded request — for page renders (whose
  *      server actions call `auth.api.*`) and for the Better Auth catch-all
  *      (`/api/auth/*`, matched explicitly below), which reads ONLY that

@@ -159,13 +159,21 @@ warrant a comms channel and an owner before deep debugging.
   is post-1.0 — see [deployment.md §5](./deployment.md#5-operations--gotchas).
 - Sign-in / password-reset floods hit Better Auth's built-in limiter (3 req / 10 s
   and 3 req / 60 s per client IP) on `/api/auth/*`. It keys on the same client IP
-  as the app's limiters — the app-derived `x-drk-client-ip`, `TRUSTED_PROXY_COUNT`
-  hops from the right of `X-Forwarded-For`, stamped by the proxy and re-derived in
-  the route handler (review #35), with an IPv6 client grouped by its /64 in both
-  (F-16) — so one abuser cannot exhaust everyone's bucket by spoofing headers.
+  as the app's limiters — the app-derived `x-drk-client-ip`, read from the header
+  `CLIENT_IP_SOURCE` names (by default `TRUSTED_PROXY_COUNT` hops from the right of
+  `X-Forwarded-For`), stamped by the proxy and re-derived in the route handler
+  (review #35), with an IPv6 client grouped by its /64 in both (F-16). A client
+  can neither inject that header nor pick another user's bucket, **provided the
+  edge overwrites the header the source names**. With no proxy in front, or behind
+  a proxy that only sets `X-Real-IP` while `CLIENT_IP_SOURCE` is still `xff`, a
+  client sends its own `X-Forwarded-For` and gets a fresh bucket per request, so
+  the sign-in limiter stops nothing (F-17). A flood of sign-ins whose sessions or
+  audit rows each show a different address is the sign; fix the edge as in
+  [Choosing the client-IP source](./configuration.md#choosing-the-client-ip-source).
   **If every user is rate-limited at once**, your edge is
   misconfigured: `TRUSTED_PROXY_COUNT` is too shallow (one inner-proxy IP for
-  everyone) or the edge sets no `X-Forwarded-For` / `X-Real-IP` at all (shared
+  everyone), the edge sets no `X-Forwarded-For` / `X-Real-IP` at all, or
+  `CLIENT_IP_SOURCE` names a header the edge does not set (shared
   `no-trusted-ip` bucket) — see [Deployment issues](#deployment-issues); do not
   disable the limiter (`AUTH_RATE_LIMIT_DISABLED` is refused in production).
 - CSP violations report to `POST /api/security/csp-report` (rate-limited +
@@ -412,8 +420,11 @@ another organization) and re-run `pnpm db:app:migrate`.
 HSTS is inert over plain HTTP. Confirm the proxy forwards the headers emitted by
 `next.config.mjs`.
 
-**Wrong client IP in rate limiting / logs behind a CDN.** Set
-`TRUSTED_PROXY_COUNT` to your actual proxy depth so the client IP is read
+**Wrong client IP in rate limiting / logs behind a CDN.** If your CDN or proxy
+sets a header of its own (`CF-Connecting-IP`, `X-Real-IP`) rather than appending
+to `X-Forwarded-For`, name it in `CLIENT_IP_SOURCE` and the rest of this entry does
+not apply ([Choosing the client-IP source](./configuration.md#choosing-the-client-ip-source)).
+Otherwise set `TRUSTED_PROXY_COUNT` to your actual proxy depth so the client IP is read
 correctly from `X-Forwarded-For`. The same setting drives Better Auth's sign-in /
 reset limiter and the `ipAddress` recorded on sessions: the app derives the IP
 once (`src/proxy.ts` and, at every server-side `auth.api.*` call site,
@@ -425,12 +436,20 @@ Better Auth reads (review #35), so a wrong depth is visible on session rows:
   every sign-in shares a single bucket — one real IP, not `no-trusted-ip`.
 - **Too deep** (more than the chain length): the selection runs off the left
   end and the **leftmost, client-supplied** entry is taken — a spoofable IP, so a
-  client can rotate buckets and forge the recorded address.
+  client can rotate buckets and forge the recorded address. Refusing a short chain
+  instead would not help: a client pads its header until the chain is long
+  enough, while every honest client would land in the one shared bucket. So the
+  leftmost entry is kept on purpose (F-17), and the fix is the right count.
+- **Addresses a client chose** (a burst of sign-ins from one source, each row
+  showing a different address): nothing in front of the app overwrites
+  `X-Forwarded-For` (the app is exposed directly, or the proxy only sets
+  `X-Real-IP`), so each client's own header is trusted. Put an overwriting proxy
+  in front, or set `CLIENT_IP_SOURCE` to the header your proxy sets (F-17).
 - **`no-trusted-ip` / empty `ip_address`** means no usable address reached the
   app: either the proxy in front sets neither `X-Forwarded-For` nor `X-Real-IP`,
-  or the hop `TRUSTED_PROXY_COUNT` selects is not an IP address (a hostname,
-  `unknown`, garbage). A port suffix (`203.0.113.5:51234`, `[2001:db8::1]:443`) is
-  stripped, not rejected (F-16).
+  `CLIENT_IP_SOURCE` names a header the proxy does not set, or the selected value
+  is not an IP address (a hostname, `unknown`, garbage). A port suffix
+  (`203.0.113.5:51234`, `[2001:db8::1]:443`) is stripped, not rejected (F-16).
 
 Check the `ipAddress` on a fresh session row against the real client address,
 and compare it with the `ip_address` of the matching `sso.consume.success` /

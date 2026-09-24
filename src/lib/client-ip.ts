@@ -1,4 +1,5 @@
 import { SocketAddress, isIP } from "node:net";
+import { clientIpSource } from "@/lib/client-ip-source";
 import { trustedProxyCount } from "@/lib/forwarded-hops";
 
 /**
@@ -15,6 +16,12 @@ import { trustedProxyCount } from "@/lib/forwarded-hops";
  * your own trusted edge proxy/CDN recorded. With the default of one proxy
  * in front (Vercel / a single LB), that is the rightmost entry — the IP
  * the proxy actually observed connecting to it.
+ *
+ * That model needs an edge that appends to `X-Forwarded-For`. Where nothing
+ * does (no proxy, or one that only sets `X-Real-IP` / `CF-Connecting-IP`),
+ * the rightmost entry is whatever the client sent, so `CLIENT_IP_SOURCE`
+ * (`src/lib/client-ip-source.ts`, F-17) names the one header that edge writes
+ * instead and `X-Forwarded-For` is then ignored.
  *
  * This module imports `node:net` (F-16), so only Node code may import it.
  * Every importer today runs on Node, `proxy.ts` included (a Next 16 proxy
@@ -125,8 +132,25 @@ export function getClientIp(headers: Headers): string | null {
   return hop === null ? null : normalizeClientIp(hop);
 }
 
-/** The raw value of the hop `TRUSTED_PROXY_COUNT` selects (P2-4), before F-16 normalization. */
+/**
+ * The raw value the configured source selects, before F-16 normalization:
+ * the one header `CLIENT_IP_SOURCE` names, or the hop `TRUSTED_PROXY_COUNT`
+ * selects (P2-4) under the default `xff`. Every consumer (audit rows, the
+ * API-key stamp, the header Better Auth reads, the limiter keys, the MCP
+ * forward) goes through here, so the source is chosen in exactly one place.
+ */
 function trustedHop(headers: Headers): string | null {
+  const source = clientIpSource();
+  // F-17: an invalid CLIENT_IP_SOURCE fails boot validation (env.ts). If it
+  // is read anyway, it names no header we can trust: fail closed rather than
+  // fall back to the X-Forwarded-For model the operator was opting out of.
+  if (source === null) return null;
+  // A named header is read alone. X-Forwarded-For is ignored even when it is
+  // present, because on these topologies the client's copy passes through the
+  // edge untouched. A repeated header arrives joined with ", ", which
+  // normalization rejects rather than picking one of the values.
+  if (source.kind === "header") return headers.get(source.header);
+
   const xff = headers.get("x-forwarded-for");
   const ips = xff
     ? xff
@@ -144,7 +168,27 @@ function trustedHop(headers: Headers): string | null {
 
   // The entry the (TRUSTED_PROXY_COUNT)-th proxy from the edge recorded.
   const idx = ips.length - trustedProxyCount();
+  // A chain SHORTER than the count takes its leftmost entry, and that is
+  // deliberate (F-17). A client can only lengthen the chain, so a short one
+  // means fewer proxies appended than configured (a count set too high, or a
+  // request that skipped the CDN), and its leftmost entry is usually the
+  // address the first real proxy saw. Failing closed to null would not stop an
+  // attacker, who pads the chain to exactly the count, but it would put every
+  // honest client in the one shared bucket: a sign-in lockout for everyone.
   return ips[idx >= 0 ? idx : 0] ?? null;
+}
+
+/**
+ * The request header a server-to-server self-call uses to hand
+ * {@link getClientIp} an address it already resolved (the MCP gateway's
+ * `/api/v1` dispatch, audit #14): the header `CLIENT_IP_SOURCE` names, or
+ * `x-forwarded-for` under the default `xff`. Sending `x-forwarded-for` under a
+ * header source would be ignored by the receiving route, and every agent call
+ * would land in the shared bucket with no audit IP (F-17).
+ */
+export function clientIpForwardHeader(): string {
+  const source = clientIpSource();
+  return source?.kind === "header" ? source.header : "x-forwarded-for";
 }
 
 /**
@@ -156,10 +200,11 @@ function trustedHop(headers: Headers): string | null {
  * bucket (3 sign-ins / 10 s for the whole deployment), and where the edge
  * sets no chain at all a client-supplied single value was trusted verbatim
  * (review #35). Instead, the proxy (`src/proxy.ts`) derives the IP with the
- * SAME `TRUSTED_PROXY_COUNT` model as {@link getClientIp} and writes it here
- * — always overwriting (or deleting) whatever the client sent — and Better
- * Auth is configured to read ONLY this header (`advanced.ipAddress.
- * ipAddressHeaders` in `src/lib/auth.ts`). One derivation, one trust model.
+ * SAME `CLIENT_IP_SOURCE` / `TRUSTED_PROXY_COUNT` model as {@link getClientIp}
+ * and writes it here — always overwriting (or deleting) whatever the client
+ * sent — and Better Auth is configured to read ONLY this header
+ * (`advanced.ipAddress.ipAddressHeaders` in `src/lib/auth.ts`). One
+ * derivation, one trust model.
  *
  * The proxy is NOT the only line: its matcher covers page renders and
  * `/api/auth/*`, but server-side `auth.api.*` calls happen on other routes

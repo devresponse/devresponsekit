@@ -122,6 +122,20 @@ describe("proxy — trusted client-IP header on the Better Auth catch-all", () =
     expect(forwardedHeader(res, CLIENT_IP_HEADER)).toBe("203.0.113.9");
   });
 
+  it("CLIENT_IP_SOURCE=x-real-ip: stamps X-Real-IP and ignores a client-sent X-Forwarded-For (F-17)", () => {
+    vi.stubEnv("CLIENT_IP_SOURCE", "x-real-ip");
+    const res = proxy(
+      req(AUTH_PATH, { "x-forwarded-for": "198.51.100.77", "x-real-ip": "203.0.113.9" }),
+    );
+    expect(forwardedHeader(res, CLIENT_IP_HEADER)).toBe("203.0.113.9");
+
+    // Without the header the source names, the forged chain counts for nothing.
+    const bare = proxy(
+      req(AUTH_PATH, { [CLIENT_IP_HEADER]: "198.51.100.77", "x-forwarded-for": "198.51.100.77" }),
+    );
+    expect(bare.headers.get(`x-middleware-request-${CLIENT_IP_HEADER}`)).toBeNull();
+  });
+
   it("stamps the NORMALIZED hop: port stripped, IPv4-mapped IPv6 mapped (F-16)", () => {
     const ported = proxy(req(AUTH_PATH, { "x-forwarded-for": "spoof, 203.0.113.9:51234" }));
     expect(forwardedHeader(ported, CLIENT_IP_HEADER)).toBe("203.0.113.9");
@@ -162,7 +176,12 @@ describe("proxy — trusted client-IP header on page renders", () => {
 });
 
 describe("Better Auth's resolver agrees with getClientIp for the same inputs", () => {
-  const vectors: Array<{ name: string; headers: Record<string, string>; proxies?: string }> = [
+  const vectors: Array<{
+    name: string;
+    headers: Record<string, string>;
+    proxies?: string;
+    source?: string;
+  }> = [
     { name: "single-hop chain", headers: { "x-forwarded-for": "203.0.113.9" } },
     {
       name: "spoofed leftmost + appending proxy",
@@ -186,11 +205,26 @@ describe("Better Auth's resolver agrees with getClientIp for the same inputs", (
       name: "port-suffixed x-real-ip fallback (F-16)",
       headers: { "x-real-ip": "203.0.113.9:8080" },
     },
+    {
+      name: "x-real-ip source beside a forged X-Forwarded-For (F-17)",
+      headers: { "x-forwarded-for": "198.51.100.77", "x-real-ip": "203.0.113.9" },
+      source: "x-real-ip",
+    },
+    {
+      name: "cf-connecting-ip source beside forged X-Forwarded-For / X-Real-IP (F-17)",
+      headers: {
+        "x-forwarded-for": "198.51.100.77",
+        "x-real-ip": "198.51.100.78",
+        "cf-connecting-ip": "203.0.113.9",
+      },
+      source: "cf-connecting-ip",
+    },
   ];
 
   for (const v of vectors) {
-    it(`${v.name} → ${v.proxies ?? "1"} trusted hop(s)`, () => {
+    it(`${v.name} → ${v.source ?? `${v.proxies ?? "1"} trusted hop(s)`}`, () => {
       if (v.proxies) vi.stubEnv("TRUSTED_PROXY_COUNT", v.proxies);
+      if (v.source) vi.stubEnv("CLIENT_IP_SOURCE", v.source);
       const headers = new Headers(v.headers);
       const expected = getClientIp(headers);
       expect(expected).toBe("203.0.113.9");

@@ -20,6 +20,18 @@
 # NOT covered here: the gitleaks and lychee container images are pinned by
 # digest inside `docker run` steps (not `uses:`), which no Dependabot ecosystem
 # tracks — bump those manually using the `# vX.Y.Z` comment next to each digest.
+#
+# NOT controlled here either: SECURITY-update PRs (the ones Dependabot opens
+# for an advisory, as opposed to the scheduled VERSION updates below). They
+# exist only while the repository setting "Dependabot security updates" is
+# enabled — Settings → Advanced Security → Enable, or `gh api -X PUT
+# repos/devresponse/devresponsekit/automated-security-fixes` — and nothing in
+# this file can turn it on. It was found OFF on 2026-09-24 (review F-28). Every
+# comment below that says a security update "still arrives" describes what
+# happens while the setting is on; with it off, an advisory produces an alert
+# and no PR. The weekly `Dependabot alerts` job in dependency-audit.yml turns
+# an open high/critical alert into a failed run either way, and SECURITY.md →
+# Repository security settings is the operator check for the setting itself.
 version: 2
 updates:
   - package-ecosystem: docker
@@ -56,15 +68,19 @@ updates:
     open-pull-requests-limit: 10
     # Supply-chain cooldown (review #226): never propose a version that has
     # been on the registry for less than a day — long enough for a hijacked
-    # publish to be pulled. Security advisories are exempt (Dependabot always
-    # opens those immediately), so this delays convenience bumps only. It also
-    # keeps Dependabot in step with `.npmrc`'s `minimum-release-age=1440`,
+    # publish to be pulled. Security updates are exempt (a cooldown never
+    # delays them — but they open only while the repository's "Dependabot
+    # security updates" setting is on, see the header), so this delays
+    # convenience bumps only. It also keeps Dependabot in step with
+    # `.npmrc`'s `minimum-release-age=1440`,
     # which would otherwise refuse to RE-RESOLVE a bump proposed inside the
     # cooldown window (e.g. when a maintainer regenerates the lockfile).
     cooldown:
       default-days: 1
-    # Group routine minor/patch bumps to keep PR volume sane; major updates and
-    # security advisories still open as individual PRs for closer review.
+    # Group routine minor/patch bumps to keep PR volume sane; major updates
+    # still open as individual PRs for closer review. The groups are
+    # `applies-to: version-updates`, so security updates (when the repository
+    # setting is on — see the header) are never grouped either.
     groups:
       dev-minor-patch:
         applies-to: version-updates
@@ -120,8 +136,9 @@ updates:
     #     peer range (react >=16.8) conflicts with nothing here.
     #
     # The hold is narrow on purpose. Only the MAJOR line is ignored, so 8.x
-    # minor/patch — and any SECURITY update, which `ignore` never suppresses —
-    # still arrive.
+    # minor/patch still arrive — and so would a SECURITY update, which an
+    # `update-types` ignore never suppresses, provided the repository's
+    # "Dependabot security updates" setting is on (see the header).
     # REVISIT when any of these fire, and do the port then rather than on a
     # calendar: (a) a React or Next major that v8 cannot follow; (b) any GHSA
     # against @tanstack/react-table or @tanstack/table-core; (c) a product need
@@ -158,8 +175,9 @@ updates:
     #     30.1.0 is still `latest`.
     #
     # The hold is narrow on purpose. Only the minor line is ignored, so 30.0.x
-    # patches — and any SECURITY update, which `ignore` never suppresses — still
-    # arrive, and a future jsdom major still opens a PR for normal review.
+    # patches still arrive (as would a SECURITY update, which an `update-types`
+    # ignore never suppresses, while the repository setting is on — see the
+    # header), and a future jsdom major still opens a PR for normal review.
     # REVISIT when jsdom/jsdom#4347 ships fixed: drop this entry, bump jsdom,
     # and confirm tests/component/locale-switcher.test.tsx and
     # administrator-top-header.test.tsx stay green (they are the regression
@@ -175,7 +193,10 @@ updates:
   # `/` block above never looked at it, so nothing ever proposed an upgrade there
   # — while security ALERTS, which scan every manifest regardless of this file,
   # quietly accumulated to 37 (one critical, seventeen high) before anyone looked.
-  # That gap is the reason this entry exists; do not remove it.
+  # That gap is the reason this entry exists; do not remove it. (Since F-28,
+  # dependency-audit.yml also audits this lockfile on every PR and reads the
+  # alerts weekly, so a new advisory here turns a check red rather than waiting
+  # for somebody to open the Security tab.)
   #
   # Almost everything in that tree is transitive under `vercel`, which is already
   # on its latest version, so most fixes there are override floors rather than

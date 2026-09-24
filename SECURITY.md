@@ -69,7 +69,7 @@ build (source review 2026-09-04, #226):
 | Control | Where | What it does |
 | --- | --- | --- |
 | **Release cooldown** | [`.npmrc`](.npmrc) → `minimum-release-age=1440` | pnpm refuses to **resolve** any version published less than 24 h ago. A hijacked publish is typically detected and yanked well inside that window. |
-| **Cooldown for proposals** | [`.github/dependabot.yml`](.github/dependabot.yml) → `cooldown.default-days: 1` | Dependabot does not open npm version-update PRs for releases younger than a day, so it never proposes a bump the `.npmrc` floor would refuse to re-resolve. **Security** advisories are exempt and still arrive immediately. |
+| **Cooldown for proposals** | [`.github/dependabot.yml`](.github/dependabot.yml) → `cooldown.default-days: 1` | Dependabot does not open npm version-update PRs for releases younger than a day, so it never proposes a bump the `.npmrc` floor would refuse to re-resolve. **Security** updates are exempt from the cooldown, but Dependabot opens them only while the repository's *Dependabot security updates* setting is on, and no file can turn that on. See [Repository security settings](#repository-security-settings). |
 | **Package-manager integrity** | [`package.json`](package.json) → `packageManager: pnpm@<version>+sha512.<hash>` | Corepack verifies the pnpm tarball against this hash before running it (`corepack use pnpm@<version>` regenerates the pair). A tampered pnpm release fails the check instead of executing in CI and in the Docker build. `pnpm/action-setup` ignores the `+sha512…` suffix and installs the pinned version. |
 
 The cooldown applies only where pnpm **resolves** a version. Every automated
@@ -89,25 +89,61 @@ pnpm install --config.minimum-release-age=0   # document why in the PR
 The `Dependency audit` workflow
 ([`.github/workflows/dependency-audit.yml`](.github/workflows/dependency-audit.yml),
 a required status check on `main`) fails the build on any **high or critical**
-advisory (`pnpm audit --audit-level high` — a BUILD-1 hard gate). It also
+advisory (`pnpm audit --audit-level high` — a BUILD-1 hard gate) in **either**
+lockfile: the app's, and the deploy CLI's in `vercel-cli/`
+(`pnpm --dir vercel-cli audit --audit-level high`). The CLI is its own pnpm
+package, and it handles `VERCEL_TOKEN` and the production direct database URL;
+until F-28 no check audited it, and its advisories piled up as alerts nobody
+read. Its override floors are documented in
+[`vercel-cli/README.md`](vercel-cli/README.md#dependency-override-floors). The workflow also
 runs weekly (Mondays 05:13 UTC) so an idle `main` is re-audited as new
-advisories are published, and a failed scheduled run opens — or comments on —
-a GitHub issue titled **"Dependency audit failing on main"** (review #227:
-the gate had been red for weeks with no commit to surface it). A small, explicit
-allowlist in `package.json` (`pnpm.auditConfig.ignoreGhsas`) mutes advisories
-that are confined to **dev/build/test tooling** and are not reachable in the
-shipped application. Each entry is justified below and carries a **review-by
-date** — when an upstream fix lands, drop the entry rather than let it linger.
+advisories are published. The weekly run also lists GitHub's open
+high/critical **Dependabot alerts** (the `Dependabot alerts` job, which is not
+a required check). GitHub's advisory database reports advisories the npm audit
+endpoint misses, such as `path-to-regexp@6` `GHSA-9wv6-86v2-598j` in
+`vercel-cli/`. A failed scheduled run opens — or comments on — a GitHub issue
+titled **"Dependency audit failing on main"** that names the failing tree,
+and marks **NOT AUDITED** any lockfile whose audit a setup or install failure
+skipped (review #227: the gate had been red for weeks with no commit to surface
+it). A
+Dependabot alert for an advisory you accept below must be **dismissed** in the
+Security tab, citing its row, or the weekly job stays red.
 
-| GHSA | Package | Severity | Why it is not reachable in production | Review by |
-| --- | --- | --- | --- | --- |
-| _none_ | — | — | The allowlist is **empty** as of 2026-09-04: every advisory is fixed by a version bump or an override floor (next section). Add a row here (and the id to `ignoreGhsas`) only for an advisory confined to dev/build/test tooling that has **no** fixed release — never for anything reachable at runtime. | — |
+A small, explicit allowlist mutes advisories that cannot be reached in what
+ships. **Each lockfile has its own**, because `pnpm audit` reads the
+`pnpm.auditConfig.ignoreGhsas` of the package it audits and no other:
 
-To re-verify reachability for a future entry: `pnpm why <pkg>` must show it
-arriving only via dev tooling, and the Next.js standalone trace
-(`output: "standalone"`) must exclude it from the runtime image. A **new**
-high/critical advisory that is *not* in this list fails CI by design, so the
-gate still catches anything unreviewed.
+- the app's lockfile (`pnpm-lock.yaml`): `package.json` →
+  `pnpm.auditConfig.ignoreGhsas`;
+- the deploy CLI's lockfile (`vercel-cli/pnpm-lock.yaml`):
+  `vercel-cli/package.json` → `pnpm.auditConfig.ignoreGhsas`. A GHSA added
+  to the root list does **not** mute it in the CLI's audit.
+
+Every entry in either list has a row below that names the lockfile it mutes
+and carries a **review-by date**. When an upstream fix lands, drop the entry
+rather than let it linger. `tests/unit/dependency-governance.test.ts` fails
+when any lockfile's list mutes a GHSA that has no row.
+
+| GHSA | Lockfile | Package | Severity | Why it is not reachable | Review by |
+| --- | --- | --- | --- | --- | --- |
+| _none_ | — | — | — | Both allowlists are **empty**: the app's since 2026-09-04, and the CLI's has never had an entry. Every advisory is fixed by a version bump or an override floor (next section, and [the CLI's floors](vercel-cli/README.md#dependency-override-floors)). Add a row here, and the id to **that lockfile's** `ignoreGhsas`, only for an advisory that has **no** fixed release and meets the reachability rule below — never for anything reachable at runtime. | — |
+
+To re-verify reachability for a future entry:
+
+- **App lockfile.** `pnpm why <pkg>` must show it arriving only via
+  dev/build/test tooling, and the Next.js standalone trace
+  (`output: "standalone"`) must exclude it from the runtime image.
+- **Deploy CLI lockfile.** The CLI never enters the runtime image, but it runs
+  with `VERCEL_TOKEN` and the production direct database URL, so "deploy-time
+  only" is not a reason by itself. Try a floor in `vercel-cli/package.json` →
+  `pnpm.overrides` first. Mute only when no fixed release exists and
+  `pnpm --dir vercel-cli why <pkg>` shows the package arriving only through
+  code `drk-deploy` never executes. The `@vercel/node` framework adapters under
+  `vercel` are the model case: a Next.js deployment installs them and never
+  runs them.
+
+A **new** high/critical advisory that is *not* in these lists fails CI by
+design, so the gate still catches anything unreviewed.
 
 ### Override floors (`pnpm.overrides`)
 
@@ -207,6 +243,26 @@ dependency tree (the source of every previous `.trivyignore` mute) is no longer
 in the image and `.trivyignore` currently carries **no** entries. The base
 image digest is tracked by Dependabot's `docker` ecosystem; a stale digest is
 the usual cause of a base-OS finding (see [docs/docker.md](docs/docker.md)).
+
+## Repository security settings
+
+Two supply-chain controls are repository **settings**, not files. The
+`GITHUB_TOKEN` a workflow runs with cannot read either of them: both endpoints
+need administration access, and no workflow `permissions:` key grants that. No
+check in this repository can pin them, so they are an **operator checklist**.
+Confirm both when you adopt the kit, and again after any change to the
+repository's owner or security configuration (review F-28).
+
+| Setting | Expected | Verify (read-only) | Turn on | When it is off |
+| --- | --- | --- | --- | --- |
+| **Dependabot alerts** | on | `gh api -i repos/devresponse/devresponsekit/vulnerability-alerts` answers `204` (`404` = off) | Settings → Advanced Security → Dependabot alerts → **Enable** | GitHub stops matching the lockfiles against its advisory database. The weekly `Dependabot alerts` job cannot read the alerts API and fails, so this one is detected after all. |
+| **Dependabot security updates** | on | `gh api repos/devresponse/devresponsekit/automated-security-fixes` returns `"enabled": true` | Settings → Advanced Security → Dependabot security updates → **Enable**, or `gh api -X PUT repos/devresponse/devresponsekit/automated-security-fixes` | An advisory raises an alert and **no PR**. Nothing proposes the fix: the next weekly run fails and opens the tracking issue, and someone bumps or floors the package by hand. Every comment in [`.github/dependabot.yml`](.github/dependabot.yml) that says a security update "still arrives" assumes this setting is on. |
+
+When F-28 was verified on 2026-09-24, Dependabot alerts were on and
+**Dependabot security updates were off**. Turning the setting on is an
+operator action; no code change can do it. Security-update PRs go through the
+same required checks as any other PR, and Dependabot's `cooldown` and
+`open-pull-requests-limit` do not apply to them.
 
 ## Secret scanning
 

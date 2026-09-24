@@ -53,7 +53,7 @@ A PR must pass all of these; run them locally before pushing:
 | Unit/component/integration/security | `pnpm test` |
 | Coverage thresholds | `pnpm test:coverage` |
 | E2E + accessibility (Playwright + axe) | `pnpm test:e2e` / `pnpm test:a11y` |
-| Dependency audit (hard gate) | `pnpm audit --audit-level high` |
+| Dependency audit (hard gate) | `pnpm audit --audit-level high` and `pnpm --dir vercel-cli audit --audit-level high` |
 
 CI additionally runs **CodeQL** and **gitleaks** secret scanning (a required
 check; rules, allowlist policy, and the local command are in

@@ -126,6 +126,9 @@ export const PUT = withAdminRoute(async function PUT(request: NextRequest, ctx: 
     eventType: "admin.email.template_updated",
     outcome: "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
+    // F-32: a platform row. Only an unbound superadmin edits these templates,
+    // which every tenant sends against, so no one org owns the change.
+    organizationId: null,
     request,
     metadata: { templateId: updated.id, key: updated.key, locale: updated.locale },
   });

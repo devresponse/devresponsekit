@@ -10,6 +10,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import {
+  actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
@@ -130,6 +131,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
+        organizationId: actingOrganizationId(guard.access),
         email: target.primaryEmail,
         reason: "auth_set_password_failed",
         metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -141,6 +143,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       // metadata intentionally excludes the password.
       metadata: { mode: "set" },
@@ -156,6 +159,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "auth_forgot_password_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -167,6 +171,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     metadata: { mode: "reset_email" },
   });

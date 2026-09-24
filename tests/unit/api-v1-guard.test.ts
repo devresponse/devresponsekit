@@ -154,6 +154,54 @@ describe("requireApiPermission", () => {
     );
   });
 
+  // F-32: the denial is filed under the org the caller is CONFINED to
+  // (`actingOrganizationId`), as on `administrator.access.denied`.
+  it("stamps an org-bound credential's denial with its bound org (F-32)", async () => {
+    resolveCaller.mockResolvedValue(
+      caller({
+        grantedScopes: [],
+        access: {
+          status: "active",
+          membershipStatus: "active",
+          permissions: ["superuser", "admin.users.read"],
+          organizationId: "o-bound",
+          orgBound: true,
+        },
+      }),
+    );
+    const res = await mod.requireApiPermission(makeReq(), "admin.users.read");
+    expect(res.ok).toBe(false);
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "api.access.denied", organizationId: "o-bound" }),
+    );
+  });
+
+  it("files an unbound superadmin's denial as a platform row, never under its active org (F-32)", async () => {
+    // This guard has no superadmin bypass: a cookie superadmin whose context
+    // lacks the key is refused like anyone else (`getUserAccessContext`
+    // expands the marker to the admin catalog, so in practice only for a key
+    // outside it). Its `organizationId` is the active-org cookie, which says
+    // nothing about the request.
+    resolveCaller.mockResolvedValue(
+      caller({
+        kind: "session",
+        credentialId: null,
+        grantedScopes: null,
+        access: {
+          status: "active",
+          membershipStatus: "active",
+          permissions: ["superuser"],
+          organizationId: "o-active",
+        },
+      }),
+    );
+    const res = await mod.requireApiPermission(makeReq(), "admin.users.read");
+    expect(res.ok).toBe(false);
+    expect(auditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "api.access.denied", organizationId: null }),
+    );
+  });
+
   it("grants when permission ∈ access AND scope authorizes it", async () => {
     resolveCaller.mockResolvedValue(caller());
     const res = await mod.requireApiPermission(makeReq(), "admin.users.read");

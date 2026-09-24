@@ -9,6 +9,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import {
+  actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
@@ -58,6 +59,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "auth_list_sessions_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -119,6 +121,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       reason: "auth_revoke_all_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -130,6 +133,7 @@ export const DELETE = withAdminRoute(async function DELETE(
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
   });
 

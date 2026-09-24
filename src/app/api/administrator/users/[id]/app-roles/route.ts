@@ -190,6 +190,9 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    // F-32: the assignment's own org (a role is granted IN one org), so that
+    // org's auditors see it whoever made it. The same on the revoke below.
+    organizationId: parsed.data.organizationId,
     email: target.primaryEmail,
     metadata: {
       roleId: role.id,
@@ -321,6 +324,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: parsed.data.organizationId,
       email: target.primaryEmail,
       requestId: guard.requestId,
       reason: LAST_SUPERADMIN_REASON,
@@ -340,6 +344,7 @@ export const DELETE = withAdminRoute(async function DELETE(
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: parsed.data.organizationId,
     email: target.primaryEmail,
     metadata: {
       roleId: parsed.data.roleId,

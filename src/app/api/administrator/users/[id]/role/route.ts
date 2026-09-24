@@ -78,6 +78,9 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     return adminErrorResponse("invalid_body", 400, request);
   }
 
+  // F-32: both rows below are platform rows (`organizationId: null`). The
+  // Better Auth role has no tenant, and only an unbound superadmin gets this
+  // far, so there is no org the action happened in.
   try {
     await setBetterAuthUserRole({ userId: target.betterAuthUserId, role: parsed.data.role });
   } catch (err) {
@@ -85,6 +88,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: null,
       email: target.primaryEmail,
       reason: "auth_set_role_failed",
       metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -96,6 +100,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: null,
     email: target.primaryEmail,
     reason: parsed.data.reason ?? null,
     metadata: { role: parsed.data.role },

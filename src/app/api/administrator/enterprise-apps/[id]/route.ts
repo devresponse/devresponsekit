@@ -177,7 +177,12 @@ export const PATCH = withAdminRoute(async function PATCH(
     eventType: "admin.app.updated",
     outcome: "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
-    organizationId: input.organization_id !== undefined ? (input.organization_id ?? null) : null,
+    // F-32: the org that owns the app after this update, so its tenant sees
+    // the change. This used to be null unless the update re-homed the app, so
+    // an org admin's edits to their own org's app were invisible to that org.
+    // A move to global (superadmin only) is filed under the org that lost the
+    // app; the row then names no other tenant.
+    organizationId: input.organization_id ?? existing.organization_id,
     targetApplicationId: id,
     request,
     metadata: { id, changes: input },
@@ -240,6 +245,7 @@ export const DELETE = withAdminRoute(async function DELETE(
         eventType: "admin.app.delete_blocked",
         outcome: "denied",
         actorBetterAuthUserId: guard.betterAuthUserId,
+        organizationId: existing.organization_id,
         targetApplicationId: id,
         request,
         metadata: { id, reason: "application_in_use" },
@@ -253,6 +259,7 @@ export const DELETE = withAdminRoute(async function DELETE(
     eventType: "admin.app.deleted",
     outcome: "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: existing.organization_id,
     targetApplicationId: id,
     request,
     metadata: { id, label: existing.label },

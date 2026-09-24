@@ -12,6 +12,7 @@ import {
   updateBetterAuthUser,
 } from "@/lib/admin/auth-admin.server";
 import {
+  actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
   membershipCascadeStripsLastGlobalSuperuser,
@@ -159,6 +160,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
+        organizationId: actingOrganizationId(guard.access),
         email: target.primaryEmail,
         reason: "auth_update_failed",
         metadata: { message: err instanceof Error ? err.message : "unknown" },
@@ -170,6 +172,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     metadata: { fields: Object.keys(parsed.data) },
   });
@@ -258,6 +261,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       requestId: guard.requestId,
       reason: "auth_ban_failed",
@@ -336,6 +340,7 @@ export const DELETE = withAdminRoute(async function DELETE(
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
+        organizationId: actingOrganizationId(guard.access),
         email: target.primaryEmail,
         requestId: guard.requestId,
         reason: "compensation_unban_failed",
@@ -353,6 +358,7 @@ export const DELETE = withAdminRoute(async function DELETE(
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
+        organizationId: actingOrganizationId(guard.access),
         email: target.primaryEmail,
         requestId: guard.requestId,
         reason: LAST_SUPERADMIN_REASON,
@@ -366,6 +372,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       requestId: guard.requestId,
       reason: "db_cascade_failed",
@@ -381,6 +388,7 @@ export const DELETE = withAdminRoute(async function DELETE(
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     reason,
   });

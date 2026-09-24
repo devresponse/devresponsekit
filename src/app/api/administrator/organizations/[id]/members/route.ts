@@ -327,6 +327,9 @@ export const POST = withAdminRoute(async function POST(
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: input.appUserId,
+      // F-32: this org, so the row shows on the member's Audit tab for its
+      // admins (the org twin above carries no user id). Same on PATCH/DELETE.
+      organizationId: id,
       metadata: {
         organizationId: id,
         slug: org.slug,
@@ -482,6 +485,7 @@ export const PATCH = withAdminRoute(async function PATCH(
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: m.app_user_id,
+        organizationId: id,
         metadata: { organizationId: id, slug: org.slug, membershipId: m.id, status: input.status },
       }),
     ),
@@ -714,6 +718,7 @@ export const DELETE = withAdminRoute(async function DELETE(
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: m.app_user_id,
+        organizationId: id,
         metadata: {
           organizationId: id,
           slug: org.slug,

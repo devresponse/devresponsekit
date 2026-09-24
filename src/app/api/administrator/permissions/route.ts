@@ -139,6 +139,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   await auditRoleAction("admin.permission.created", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: null,
     metadata: { permissionId: inserted.id, key: inserted.key },
   });
 

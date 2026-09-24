@@ -4,6 +4,7 @@ import { db } from "@/db/database";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
 import {
+  actingOrganizationId,
   canAccessUser,
   resolveOrgScope,
   LAST_SUPERADMIN_ERROR,
@@ -105,6 +106,7 @@ export const POST = withV1Route(async function POST(request: NextRequest, ctx: R
       request,
       actorBetterAuthUserId: grant.caller.betterAuthUserId,
       appUserId: current.id,
+      organizationId: actingOrganizationId(grant.caller.access),
       email: current.primary_email,
       requestId: grant.requestId,
       reason: TARGET_OUTRANKS_ACTOR_REASON,

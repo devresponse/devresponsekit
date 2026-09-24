@@ -295,6 +295,8 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: null,
+      // F-32: the org the batch was confined to, or none for a superadmin batch.
+      organizationId: orgId,
       requestId: guard.requestId,
       reason: parsed.data.reason ?? null,
       metadata: {

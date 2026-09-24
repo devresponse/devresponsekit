@@ -4,6 +4,7 @@ import { db } from "@/db/database";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
+  actingOrganizationId,
   canAccessUser,
   hasCrossOrgReach,
   isSuperadmin,
@@ -207,6 +208,7 @@ export async function refuseOutrankingTarget(
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     requestId: guard.requestId ?? null,
     reason: TARGET_OUTRANKS_ACTOR_REASON,

@@ -146,6 +146,7 @@ export const POST = withV1Route(async function POST(request: NextRequest, ctx: R
     outcome: "success",
     actorBetterAuthUserId: grant.caller.betterAuthUserId,
     appUserId: client.app_user_id,
+    organizationId: client.organization_id,
     request,
     requestId: grant.requestId,
     metadata: { clientRowId: id },

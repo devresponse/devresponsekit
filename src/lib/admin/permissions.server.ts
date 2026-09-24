@@ -17,7 +17,7 @@ import {
 } from "@/lib/api-auth/resolve-caller.server";
 import { scopesAuthorize } from "@/lib/api-auth/scopes";
 import type { CallerSource } from "@/lib/api-auth/issuance-fence.server";
-import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { actingOrganizationId, isSuperadmin } from "@/lib/admin/access-scope.server";
 
 /**
  * Result of a successful permission check. Callers receive the resolved
@@ -172,6 +172,11 @@ export async function requireAdminPermission(
       eventType: "administrator.access.denied",
       outcome: "denied",
       actorBetterAuthUserId: caller.betterAuthUserId,
+      // F-32: the org the caller was acting in (its active or bound org), so
+      // that tenant's auditors see its members probing the console. `null` for
+      // an unbound superadmin, never its active-org cookie. The RSC twin below
+      // and the `/api/v1` guard stamp theirs the same way.
+      organizationId: actingOrganizationId(caller.access),
       reason: "missing_admin_permission",
       request,
       requestId,
@@ -214,7 +219,7 @@ export async function checkAdminPermissionServer(
   const access = await getSessionAccessContext(session);
   const decision = decideSecureAccess(access.status, access.membershipStatus);
   if (decision !== "allow") {
-    await auditRscDenial(required, session.user.id, decision);
+    await auditRscDenial(required, session.user.id, decision, actingOrganizationId(access));
     return "denied";
   }
 
@@ -222,7 +227,12 @@ export async function checkAdminPermissionServer(
     (perm) => isSuperadmin(access) || access.permissions.includes(perm),
   );
   if (!granted) {
-    await auditRscDenial(required, session.user.id, "missing_admin_permission");
+    await auditRscDenial(
+      required,
+      session.user.id,
+      "missing_admin_permission",
+      actingOrganizationId(access),
+    );
     return "denied";
   }
 
@@ -259,6 +269,7 @@ async function auditRscDenial(
   required: string[],
   betterAuthUserId: string,
   reason: string,
+  organizationId: string | null,
 ): Promise<void> {
   const requestHeaders = await headers();
   const dedupeKey = `${reason}|${required.join(",")}`;
@@ -275,6 +286,7 @@ async function auditRscDenial(
     eventType: "administrator.access.denied",
     outcome: "denied",
     actorBetterAuthUserId: betterAuthUserId,
+    organizationId,
     reason,
     request,
     requestId: getOrCreateRequestId(request),

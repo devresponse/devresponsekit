@@ -16,7 +16,11 @@ import {
   windowTotalColumn,
 } from "@/lib/admin/list-query.server";
 import { requireApiPermission, enforceApiRateLimit } from "@/lib/api-auth/v1-guard.server";
-import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  actingOrganizationId,
+  hasCrossOrgReach,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 import { withV1Route } from "@/lib/route-handler.server";
 
@@ -203,6 +207,7 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: grant.caller.betterAuthUserId,
       appUserId: null,
+      organizationId: actingOrganizationId(grant.caller.access),
       email,
       requestId: grant.requestId,
       reason: emailTaken ? "auth_user_exists" : "auth_create_user_failed",
@@ -231,6 +236,7 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: grant.caller.betterAuthUserId,
       appUserId: null,
+      organizationId: actingOrganizationId(grant.caller.access),
       email,
       requestId: grant.requestId,
       reason: "auth_create_no_id",
@@ -274,6 +280,7 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
       request,
       actorBetterAuthUserId: grant.caller.betterAuthUserId,
       appUserId: null,
+      organizationId: actingOrganizationId(grant.caller.access),
       email,
       requestId: grant.requestId,
       reason: "db_insert_failed",
@@ -290,6 +297,7 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     request,
     actorBetterAuthUserId: grant.caller.betterAuthUserId,
     appUserId: appUser.id,
+    organizationId: actingOrganizationId(grant.caller.access),
     email: appUser.primary_email,
     requestId: grant.requestId,
     metadata: { betterAuthUserId, via: "api.v1", initialAppStatus: appUser.status },

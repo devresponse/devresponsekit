@@ -409,6 +409,13 @@ export function rateLimitDeniedResponse(
           eventType: "administrator.rate_limited",
           outcome: "denied",
           actorBetterAuthUserId: isUserId ? actorId : null,
+          // F-32: a platform row. The bucket and this sample are keyed on
+          // (scope, actor), not on a tenant: one actor's budget spans every org
+          // they act in, and the once-a-minute sample records whichever denial
+          // came first, so no single org's auditors could get a complete
+          // picture. The IP-keyed pre-auth floors that reach here have no
+          // verified caller at all (F-15).
+          organizationId: null,
           request,
           requestId,
           reason: scope,

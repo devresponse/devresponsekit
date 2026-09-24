@@ -202,6 +202,41 @@ export function resolveOrgScope(access: AccessLike): OrgScope | null {
 }
 
 /**
+ * F-32 — the organization an audit row is stamped with when the only thing
+ * that places the action in a tenant is WHO acted: the org the caller is
+ * confined to ({@link resolveOrgScope} → `kind: "org"`), else `null`.
+ *
+ * Every tenant-facing audit read (the explorer, the per-user Audit tab, the
+ * CSV export, `GET /api/v1/audit-events`) shows an org admin exactly the rows
+ * whose `organization_id` is their org. A delegated admin's actions were
+ * written with no org, so the tenant's own auditors could not see any of them.
+ * An org-confined caller can only have acted inside that one org (every target
+ * it reached was resolved through the same scope), so stamping it can show
+ * that org nothing from another tenant.
+ *
+ * An UNBOUND SUPERADMIN gets `null`, never `access.organizationId`. Its
+ * active-org cookie names the org the operator happens to have selected, which
+ * says nothing about the tenant the target lives in: stamping it would file an
+ * action on org B's user under org A and show it to org A's auditors. Where a
+ * superadmin's action does have a tenant, it is the RESOURCE'S org (a key's,
+ * an app's, a membership's), and the call site stamps that instead. What is
+ * left (acting on a user, who may belong to several orgs) stays a platform row,
+ * visible to platform auditors only.
+ */
+export function actingOrganizationId(access: AccessLike): string | null {
+  return scopeOrganizationId(resolveOrgScope(access));
+}
+
+/**
+ * {@link actingOrganizationId} for a caller that already holds the resolved
+ * scope (the status core, the bulk helpers, the CSV export): the confining org,
+ * or `null` for `kind: "all"` and for no scope at all.
+ */
+export function scopeOrganizationId(scope: OrgScope | null): string | null {
+  return scope?.kind === "org" ? scope.organizationId : null;
+}
+
+/**
  * Whether the caller may act on a single resource owned by
  * `resourceOrgId`. SUPERADMIN: always. ORG ADMIN: only an exact match to
  * their org. A `null` resource org (a global/platform-level resource) is

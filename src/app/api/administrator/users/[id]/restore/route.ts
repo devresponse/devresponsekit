@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { sql } from "kysely";
 import { db } from "@/db/database";
 import {
+  actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
@@ -85,6 +86,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
       email: target.primaryEmail,
       requestId: guard.requestId,
       reason: "auth_unban_failed",
@@ -126,6 +128,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     appUserId: target.appUserId,
+    organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     requestId: guard.requestId,
   });

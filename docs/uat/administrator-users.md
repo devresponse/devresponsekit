@@ -582,7 +582,7 @@ i18n: run `en` + `uk`; expiry/IP/user-agent labels and the empty message localiz
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **Audit tab present and working** (the `admin` role holds `admin.audit.read`), scoped to ORG A.
-  - Org Admin → Audit tab present, ORG A only. Superadmin → all orgs, including platform events with a null org for this user.
+  - Org Admin → Audit tab present, ORG A only: every action ORG A's admins took on the user, and every membership or role change in ORG A whoever made it (F-32), except a superadmin membership change spanning several orgs in one request: its user-level row is a platform row, and ORG A sees its own `admin.organization.member_*` row in the audit log instead, not on this tab. A superadmin's other actions on the user are platform rows too. Superadmin → all orgs, including platform events with a null org for this user.
 - Preconditions & test data: `dev-init.ts` back-dates audit rows (`:552`); performing an admin action on the user (approve/assign/etc.) also generates fresh rows.
 
 User stories

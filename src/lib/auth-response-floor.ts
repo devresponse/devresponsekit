@@ -52,7 +52,11 @@ import { createAuthMiddleware } from "better-auth/api";
  * reset email", seeds) are not slowed. They come from an authenticated admin
  * or from tooling and reveal nothing to an outsider. `ctx.path` is the
  * endpoint's route pattern, so the match does not depend on how the URL was
- * spelled.
+ * spelled. A request a `before` hook refuses is not held either: Better Auth
+ * skips every `after` hook once a `before` hook throws, whatever the plugin
+ * order. The name guard's 400 `INVALID_NAME` on sign-up (F-21,
+ * `auth-user-name.ts`) is such a refusal; it depends only on the name, never
+ * on the address, so answering it at once reveals nothing.
  *
  * The start time is keyed on the `Request` object. Better Auth passes the
  * same object to the before and after hooks, and a WeakMap lets an entry be

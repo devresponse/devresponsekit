@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { isDateFormatOption } from "@/lib/account/preferences";
+import { optionalUserNameSchema, userNameSchema } from "@/lib/user-name";
 
 /**
  * Shared validation schemas for the self-service Account forms
@@ -28,8 +29,14 @@ import { isDateFormatOption } from "@/lib/account/preferences";
  */
 export const updateProfileSchema = z
   .object({
-    name: z.string().trim().min(1, "required").max(120, "max"),
-    displayName: z.string().trim().max(120, "max").nullable().optional(),
+    // F-21: both follow the shared name rule (`user-name.ts`). `name` is the
+    // Better Auth name the sign-up form set, so it shares that form's bound
+    // (it was 120 here, which refused to re-save a 121-200 character name the
+    // sign-up had accepted). `displayName` is quoted by the invitation email
+    // (`inviterName`), so control and bidi characters are refused there too;
+    // blank still means "no display name".
+    name: userNameSchema,
+    displayName: optionalUserNameSchema.nullable().optional(),
   })
   .strict();
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;

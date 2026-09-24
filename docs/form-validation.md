@@ -81,7 +81,36 @@ Schemas are **message-agnostic**: each Zod issue carries a stable
 server only checks pass/fail, so those keys never reach an end user
 untranslated; the client localizes them at render time (see `FormMessage`
 below). Auth schemas are form-only — those forms call the Better Auth client
-directly rather than an app route.
+directly rather than an app route. The sign-up name is the exception: Better
+Auth applies the same rule on the server (next section).
+
+#### A person's name
+
+Every field that sets a person's name uses one of two shared fields from
+`src/lib/user-name.ts` instead of its own `z.string()` chain: `userNameSchema` (required) or
+`optionalUserNameSchema` (blank means "no name"). They are used by sign-up, the
+account profile (name and display name), the admin create-user form and
+`POST /api/administrator/users`, `PATCH /api/administrator/users/[id]`,
+`POST /api/v1/users` and the MCP client registration (`client_name`). The rule
+(F-21):
+
+- at most `USER_NAME_MAX_LENGTH` (200) characters after trimming, with every
+  run of whitespace collapsed to one space (`validation.max`). A single
+  ideographic space (U+3000, what a Japanese or Chinese input method types for
+  the space key) is kept as typed; a non-breaking space, the other width
+  variants and a run of two or more become one ordinary space;
+- no line breaks, tabs or other control characters, and no invisible
+  formatting or text-direction characters such as U+202E
+  (`validation.nameCharacters`);
+- stored in Unicode NFC. The fields parse to that stored spelling, so a route
+  writes exactly what it validated.
+
+The server enforces the same rule where the forms cannot reach. Better Auth's
+`/sign-up/email` and `/update-user` refuse a breaking name with 400
+`INVALID_NAME` (`src/lib/auth-user-name.ts`), and its `user.create.before` /
+`user.update.before` database hooks bound every other write (an OAuth
+provider's profile name is cleaned and truncated, never refused, so sign-in
+cannot break on it).
 
 ### The hook — `src/lib/forms/use-zod-form.ts`
 
@@ -131,7 +160,7 @@ through `FormControl` gets the red border for free.
 ### Localized messages — the `validation.*` namespace
 
 `src/messages/<locale>.json` carries a dedicated `validation` namespace
-(`required`, `email`, `passwordMin`, `passwordMax`, `max`, `passwordsMismatch`,
+(`required`, `email`, `passwordMin`, `passwordMax`, `max`, `nameCharacters`, `passwordsMismatch`,
 `slug`, `key`, `uuid`, `subdomain`, `appId`, `ssoAudience`, `number`, `locale`,
 `dateFormat`, `requiredLegend`, …) in all eight locales
 (`en`/`fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`). The locale-parity test keeps every key

@@ -3683,7 +3683,10 @@ The initial schema `0001-initial-schema.sql` includes:
   (request) and `/[locale]/reset-password` (complete, token in the
   emailed link). The administrator "send reset email" action
   (`/api/administrator/users/[id]/password`, mode `reset_email`) uses the
-  same Better Auth flow.
+  same Better Auth flow. Its `{{name}}` is the account's name only once
+  the owner has proven the address (`emailVerified` and not
+  `emailVerificationWaived`), otherwise the address (F-21,
+  `resetEmailGreetingName` in `src/lib/auth-user-name.ts`).
 - The administrator "send test email" action
   (`/api/administrator/email/test`) sends the `test_email` template
   through the full pipeline — the canonical way to verify provider
@@ -3696,11 +3699,20 @@ The initial schema `0001-initial-schema.sql` includes:
   request also hold every HTTP response to a minimum time
   (`src/lib/auth-response-floor.ts`, F-20), so the database work that
   differs between a new, an existing and an unknown address does not
-  show in response time. A sign-up for an address that already has an
+  show in response time. A rate-limited 429 and a sign-up name refused
+  with 400 `INVALID_NAME` (F-21) come back at once: neither depends on
+  the address. A sign-up for an address that already has an
   account returns Better Auth's synthetic user, built by
   `emailAndPassword.customSyntheticUser` with the fields a new row gets
   (`role: "user"` from the admin plugin), so the body does not show it
-  either.
+  either. The verification email's `{{name}}` is always the recipient's
+  address, never `user.name` (F-21): sign-up takes any address and any
+  name, so the name was the caller's text in a signed email to a
+  stranger. Names are bounded everywhere by one rule
+  (`src/lib/user-name.ts`: at most 200 characters, no control, line-break
+  or invisible formatting characters), refused with 400 `INVALID_NAME` on
+  `/sign-up/email` and `/update-user`, and cleaned by the `user` database
+  hooks on every other write.
 - Organization invitations (0008) send the `organization_invitation`
   template from the administrator invite/resend actions
   (`/api/administrator/organizations/[id]/invitations` and `.../resend`);

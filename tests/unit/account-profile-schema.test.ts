@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 import { hasDisplayName, updateProfileSchema } from "@/lib/validation/account";
 
 /**
@@ -38,8 +39,42 @@ describe("review #187: updateProfileSchema distinguishes absent from null", () =
 
   it("still rejects an unknown key and an over-long value", () => {
     expect(updateProfileSchema.safeParse({ name: "Ada", nope: 1 }).success).toBe(false);
+    const tooLong = "x".repeat(USER_NAME_MAX_LENGTH + 1);
+    expect(updateProfileSchema.safeParse({ name: "Ada", displayName: tooLong }).success).toBe(
+      false,
+    );
+    expect(updateProfileSchema.safeParse({ name: tooLong }).success).toBe(false);
+  });
+});
+
+/**
+ * F-21: both fields follow the shared name rule (`user-name.ts`). The route
+ * writes `name` to Better Auth and `displayName` to `app_users`, which the
+ * invitation email quotes, so a control or bidi character is refused with the
+ * `validation.nameCharacters` key rather than stored.
+ */
+describe("F-21: updateProfileSchema applies the shared name rule", () => {
+  it("shares the sign-up bound (a name the sign-up accepted can be re-saved)", () => {
+    const longest = "x".repeat(USER_NAME_MAX_LENGTH);
+    expect(updateProfileSchema.parse({ name: longest, displayName: longest })).toEqual({
+      name: longest,
+      displayName: longest,
+    });
+  });
+
+  it("refuses a control or bidi character in either field", () => {
+    const messages = (input: unknown) =>
+      updateProfileSchema.safeParse(input).error?.issues.map((issue) => issue.message);
+    expect(messages({ name: "Ada\nLovelace" })).toEqual(["nameCharacters"]);
+    expect(messages({ name: "Ada", displayName: "Ada \u202eL." })).toEqual(["nameCharacters"]);
+  });
+
+  it("stores the canonical spelling and keeps blank as no display name", () => {
     expect(
-      updateProfileSchema.safeParse({ name: "Ada", displayName: "x".repeat(121) }).success,
-    ).toBe(false);
+      updateProfileSchema.parse({ name: " Ada \u00a0 Lovelace ", displayName: "   " }),
+    ).toEqual({
+      name: "Ada Lovelace",
+      displayName: "",
+    });
   });
 });

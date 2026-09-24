@@ -12,6 +12,7 @@ import { authResponseFloor } from "@/lib/auth-response-floor";
 import { endBorrowedSessionsAfterOwnSweep } from "@/lib/auth-session-sweep";
 import { ssoSession } from "@/lib/auth-sso-session";
 import { getProvisioningProvider } from "@/lib/auth-provisioning-provider";
+import { boundedUserName, resetEmailGreetingName, userNameGuard } from "@/lib/auth-user-name";
 import {
   EMAIL_VERIFICATION_WAIVED_FIELD,
   EMAIL_VERIFICATION_WAIVED_USER_FIELD,
@@ -267,12 +268,16 @@ export const auth = betterAuth({
     // Better Auth's `runInBackgroundOrAwait` already caught and logged a
     // failed send, so that action never saw delivery errors. The row now
     // lands just after its response.
+    //
+    // F-21: the greeting uses the name only once the mailbox is proven;
+    // until then the name is whatever the account's creator typed, so the
+    // address stands in (`resetEmailGreetingName`).
     sendResetPassword: async ({ user, url }) => {
       const { deferEmailSend } = await import("@/lib/email/defer-send.server");
       deferEmailSend({
         to: user.email,
         templateKey: "password_reset",
-        variables: { name: user.name || user.email, resetUrl: url },
+        variables: { name: resetEmailGreetingName(user), resetUrl: url },
         relatedBetterAuthUserId: user.id,
       });
     },
@@ -300,6 +305,12 @@ export const auth = betterAuth({
   // Auth's `advanced.backgroundTasks` option would not have deferred. The rest
   // of the sign-up gap (creating and provisioning the user) is bounded by
   // `authResponseFloor` below.
+  //
+  // F-21: the email greets its recipient by ADDRESS, never by `user.name`.
+  // Sign-up takes any address and any name, so the name was the caller's own
+  // text in a signed email to a stranger (a phishing lure, repeatable through
+  // `/send-verification-email`), and the recipient has proven nothing yet.
+  // The template is unchanged; only the value of `{{name}}` is.
   emailVerification: {
     sendOnSignUp: true,
     autoSignInAfterVerification: false,
@@ -315,7 +326,7 @@ export const auth = betterAuth({
       deferEmailSend({
         to: user.email,
         templateKey: "email_verification",
-        variables: { name: user.name || user.email, verifyUrl: url },
+        variables: { name: user.email, verifyUrl: url },
         relatedBetterAuthUserId: user.id,
       });
     },
@@ -388,72 +399,18 @@ export const auth = betterAuth({
     // Auth, absent from `app_users`). This restores the pre-AUTH-4 behaviour.
     user: {
       create: {
-        // Per-org signup policy (0007): when the organization that will
-        // receive this sign-up waives email verification, pre-verify the
-        // identity AT CREATION. The global `requireEmailVerification: true`
-        // stays on (fail-closed) and passes naturally for these users; the
-        // client form then signs them in immediately (sign-up itself never
-        // starts a session while `requireEmailVerification` is set — see
-        // better-auth's sign-up route, which decides from static options).
-        // Scope: genuine email/password self-registrations only —
-        // `shouldProvisionSelfSignup` excludes OAuth callbacks (verification
-        // state belongs to the provider), admin/machine creation (which sets
-        // `emailVerified` explicitly), and suppressed seed runs.
-        //
-        // Review 2026-09-04 #2 — two invariants this hook upholds:
-        //   1. "The organization that will receive this sign-up" is resolved
-        //      with the SAME precedence the `after` hook's provisioning uses
-        //      (organization hint → provider metadata → email-domain routing
-        //      → default), so the org whose policy waives verification is
-        //      always the org the account lands in. Without the hint, a lax
-        //      default org could waive verification for an account that
-        //      `organizationHint` then placed in a strict org.
-        //   2. The waiver is stamped as `emailVerified: true` PLUS the
-        //      distinct `emailVerificationWaived: true` marker, so downstream
-        //      activation logic (domain auto-approval, sign-in re-evaluation)
-        //      can never mistake a policy waiver for a mailbox proof.
-        before: async (user, context) => {
-          const { shouldProvisionSelfSignup } = await import("@/lib/auth-signup-provisioning");
-          if (!shouldProvisionSelfSignup(context)) {
-            return;
-          }
-          // Invitation-backed sign-up (0008): presenting a live token for
-          // THIS email proves mailbox access — the token was delivered to
-          // that mailbox — so it carries the same weight as clicking a
-          // verification link. Pre-verify regardless of the org's
-          // verification policy. Any lookup failure falls through to the
-          // policy path below (fail closed to the normal flow).
-          const invitationToken = getInvitationToken(context);
-          if (invitationToken) {
-            try {
-              const { findValidInvitationByToken } = await import("@/lib/invitations.server");
-              const invitation = await findValidInvitationByToken(invitationToken);
-              if (invitation && invitation.email === user.email.trim().toLowerCase()) {
-                return { data: { emailVerified: true } };
-              }
-            } catch (error) {
-              const { logServerError } = await import("@/lib/observability/logger.server");
-              logServerError("invitation lookup failed in sign-up hook", { err: error });
-            }
-          }
-          const { resolveSignupPolicy } = await import("@/lib/auth-policy.server");
-          const policy = await resolveSignupPolicy(
-            {
-              provider: "email",
-              email: user.email,
-              emailVerified: false,
-            },
-            // Same hint, same channel, same precedence as the `after` hook's
-            // `provisionUserFromAuth` call — the two must resolve one org.
-            { organizationHint: getSignupOrganizationHint(context) },
-          );
-          if (policy.requireEmailVerification) {
-            return;
-          }
-          return {
-            data: { emailVerified: true, [EMAIL_VERIFICATION_WAIVED_FIELD]: true },
-          };
-        },
+        // F-21: every new user's name is bounded here, whoever creates it:
+        // sign-up, the admin wrappers, an OAuth sign-in. `boundedUserName`
+        // sanitizes and truncates and never refuses, so a provider's
+        // 5000-character or control-character display name cannot break the
+        // sign-in. A name the caller typed was already refused or
+        // canonicalized by `userNameGuard` (sign-up) or the route's zod schema
+        // (admin, API), so for those this changes nothing.
+        // Then the sign-up verification waiver (`selfSignupVerification`
+        // below), which only ever applies to `/sign-up/email`.
+        before: async (user, context) => ({
+          data: { ...boundedUserName(user), ...(await selfSignupVerification(user, context)) },
+        }),
         after: async (user, context) => {
           if (!context) {
             return;
@@ -494,6 +451,17 @@ export const auth = betterAuth({
               betterAuthUserId: user.id,
             });
           }
+        },
+      },
+      // F-21: the same bound on every UPDATE that sets a name: `/update-user`
+      // (the profile route's cookie branch), `internalAdapter.updateUser` (the
+      // profile route's bearer branch, the admin display-name mirror) and an
+      // OAuth sign-in that refreshes the stored profile. A write without a
+      // name (ban, role, `emailVerified`) passes untouched.
+      update: {
+        before: async (data) => {
+          const bounded = boundedUserName(data);
+          return bounded.name === undefined ? undefined : { data: bounded };
         },
       },
     },
@@ -630,6 +598,13 @@ export const auth = betterAuth({
     // `auth-admin-surface.ts` for the rationale.
     admin(ADMIN_PLUGIN_OPTIONS),
     ssoSession(),
+    // F-21: `/sign-up/email` and `/update-user` refuse a name that breaks the
+    // rule in `user-name.ts` with a 400 (`INVALID_NAME`), for a new and an
+    // existing address alike, and store an accepted one in its canonical
+    // spelling. The database hooks above bound every other writer. Its 400
+    // skips the response floor below (a before-hook throw skips every after
+    // hook, whatever the order), which is safe: it depends only on the name.
+    userNameGuard(),
     // F-20: sign-up, password-reset and resend-verification responses over
     // HTTP take at least a fixed minimum time, so the extra database work an
     // existing (or a new) account causes does not show in response time. The
@@ -641,6 +616,80 @@ export const auth = betterAuth({
 
 /** Convenience type for the resolved session shape. */
 export type AuthSession = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
+
+/**
+ * The sign-up verification waiver: the fields the `user.create.before` hook
+ * above adds to a new user, on top of its bounded name (F-21). Moved out of
+ * the hook so no early return can skip the name bound.
+ *
+ * Per-org signup policy (0007): when the organization that will
+ * receive this sign-up waives email verification, pre-verify the
+ * identity AT CREATION. The global `requireEmailVerification: true`
+ * stays on (fail-closed) and passes naturally for these users; the
+ * client form then signs them in immediately (sign-up itself never
+ * starts a session while `requireEmailVerification` is set — see
+ * better-auth's sign-up route, which decides from static options).
+ * Scope: genuine email/password self-registrations only —
+ * `shouldProvisionSelfSignup` excludes OAuth callbacks (verification
+ * state belongs to the provider), admin/machine creation (which sets
+ * `emailVerified` explicitly), and suppressed seed runs.
+ *
+ * Review 2026-09-04 #2 — two invariants this upholds:
+ *   1. "The organization that will receive this sign-up" is resolved
+ *      with the SAME precedence the `after` hook's provisioning uses
+ *      (organization hint → provider metadata → email-domain routing
+ *      → default), so the org whose policy waives verification is
+ *      always the org the account lands in. Without the hint, a lax
+ *      default org could waive verification for an account that
+ *      `organizationHint` then placed in a strict org.
+ *   2. The waiver is stamped as `emailVerified: true` PLUS the
+ *      distinct `emailVerificationWaived: true` marker, so downstream
+ *      activation logic (domain auto-approval, sign-in re-evaluation)
+ *      can never mistake a policy waiver for a mailbox proof.
+ */
+async function selfSignupVerification(
+  user: { email: string },
+  context: GenericEndpointContext | null | undefined,
+): Promise<Record<string, unknown> | undefined> {
+  const { shouldProvisionSelfSignup } = await import("@/lib/auth-signup-provisioning");
+  if (!shouldProvisionSelfSignup(context)) {
+    return undefined;
+  }
+  // Invitation-backed sign-up (0008): presenting a live token for
+  // THIS email proves mailbox access — the token was delivered to
+  // that mailbox — so it carries the same weight as clicking a
+  // verification link. Pre-verify regardless of the org's
+  // verification policy. Any lookup failure falls through to the
+  // policy path below (fail closed to the normal flow).
+  const invitationToken = getInvitationToken(context);
+  if (invitationToken) {
+    try {
+      const { findValidInvitationByToken } = await import("@/lib/invitations.server");
+      const invitation = await findValidInvitationByToken(invitationToken);
+      if (invitation && invitation.email === user.email.trim().toLowerCase()) {
+        return { emailVerified: true };
+      }
+    } catch (error) {
+      const { logServerError } = await import("@/lib/observability/logger.server");
+      logServerError("invitation lookup failed in sign-up hook", { err: error });
+    }
+  }
+  const { resolveSignupPolicy } = await import("@/lib/auth-policy.server");
+  const policy = await resolveSignupPolicy(
+    {
+      provider: "email",
+      email: user.email,
+      emailVerified: false,
+    },
+    // Same hint, same channel, same precedence as the `after` hook's
+    // `provisionUserFromAuth` call — the two must resolve one org.
+    { organizationHint: getSignupOrganizationHint(context) },
+  );
+  if (policy.requireEmailVerification) {
+    return undefined;
+  }
+  return { emailVerified: true, [EMAIL_VERIFICATION_WAIVED_FIELD]: true };
+}
 
 /**
  * Extracts the invitation secret riding a sign-up request body (0008). The

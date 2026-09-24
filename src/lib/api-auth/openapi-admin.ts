@@ -22,6 +22,7 @@
  */
 import { locales } from "@/config/i18n-config";
 import { MCP_AGENT_STATUSES } from "@/lib/mcp/agents";
+import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 import {
   AUTH_POLICY_APPROVAL_MODES as AUTH_POLICY_APPROVAL_MODE_VALUES,
   AUTH_POLICY_METHODS as AUTH_POLICY_METHOD_VALUES,
@@ -481,7 +482,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
           properties: {
             email: { type: "string", format: "email" },
             password: { type: "string", minLength: 8, maxLength: 128 },
-            name: { type: "string", minLength: 1, maxLength: 200 },
+            name: { type: "string", minLength: 1, maxLength: USER_NAME_MAX_LENGTH },
             role: { type: "string", enum: ["admin", "user"] },
             initialAppStatus: { type: "string", enum: ["active", "pending_approval"] },
             preferredLocale: { type: "string", enum: [...locales] },
@@ -502,7 +503,7 @@ export function buildAdminOpenApiDocument(baseUrl: string): Record<string, unkno
         UpdateUserRequest: {
           type: "object",
           properties: {
-            displayName: { type: "string", minLength: 1, maxLength: 200 },
+            displayName: { type: "string", minLength: 1, maxLength: USER_NAME_MAX_LENGTH },
             preferredLocale: { type: "string", enum: [...locales] },
           },
         },

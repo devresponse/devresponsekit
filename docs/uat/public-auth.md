@@ -439,15 +439,21 @@ namespaces; run in `uk`, confirm no raw keys and localized error text.
   `src/components/auth/email-password-sign-up-form.tsx` and
   `src/components/auth/sign-up-form.tsx`):
   - Name input (`type="text"`, `autoComplete="name"`, label `common.displayName`
-    = "Name") — required, trimmed, max 200.
+    = "Name") — required, trimmed, max 200, no line breaks, tabs or invisible
+    formatting characters (the shared name rule, `src/lib/user-name.ts`).
   - Email input — required, valid email.
   - Password input (`autoComplete="new-password"`) — required, **min 8**, max 128.
   - Submit button, label `auth.createAccount` ("Create account").
   - Three social buttons + a "Already have an account?" link to `/sign-in`.
   - Required-field legend.
-- Validation schema: `signUpSchema` — `name` min 1 / max 200; `email` valid;
-  `password` min 8 (`passwordMin`) / max 128 (`passwordMax`)
-  (`src/lib/validation/auth.ts:17-21`).
+- Validation schema: `signUpSchema` — `name` follows the shared name rule
+  (`userNameSchema`, `src/lib/user-name.ts`): required, at most 200 characters
+  after trimming, runs of spaces collapsed to one; `email` valid; `password`
+  min 8 (`passwordMin`) / max 128 (`passwordMax`)
+  (`src/lib/validation/auth.ts`). The server applies the same name rule
+  (F-21): `POST /api/auth/sign-up/email` answers **400** with
+  `"code": "INVALID_NAME"` for a name the form would refuse, whether or not
+  the address already has an account (`src/lib/auth-user-name.ts`).
 - Preconditions & test data: an email address not already registered.
 
 User stories
@@ -499,9 +505,21 @@ Negative & edge cases
   `POST /api/auth/sign-up/email` request takes about half a second (500-550 ms
   plus network) for a new address and for an existing one alike. The server
   holds these responses to a minimum time so that creating an account does not
-  show up as a slower answer (`src/lib/auth-response-floor.ts`).
+  show up as a slower answer (`src/lib/auth-response-floor.ts`). A name refused
+  with 400 `INVALID_NAME` (below) comes back at once, for any address: that
+  refusal depends only on the name.
 - Max-length: name over 200 chars -> `validation.max`; password over 128 ->
   `validation.passwordMax`.
+- Name characters (F-21): a name with a tab, or with an invisible formatting
+  or text-direction character pasted in (for example U+202E, which makes the
+  rest of the line render reversed), shows "Remove line breaks, tabs and
+  invisible formatting characters." (`validation.nameCharacters`) and the form
+  does not submit. Sending such a name straight to
+  `POST /api/auth/sign-up/email` (DevTools or curl) returns 400 with
+  `"code": "INVALID_NAME"`; no account is created and no email is sent.
+  Several spaces in a row are accepted and stored as one. In `ja` or `zh`, a
+  name typed with the input method's full-width space between family and
+  given name (U+3000) is stored with that space as typed, not a half-width one.
 - Rate-limit: `TODO: verify` — no client handling of a sign-up rate-limit is
   present.
 
@@ -536,7 +554,10 @@ i18n: card title from `auth.signUpTitle`, labels from `common`, errors from
   - Required-field legend.
 - Preconditions & test data: a just-signed-up (unverified) account. In dev there
   is no live mail provider, so read the emailed link from the administrator Email
-  outbox — the row uses the `email_verification` template.
+  outbox — the row uses the `email_verification` template. The email greets the
+  recipient by their **email address**, never by the name typed at sign-up:
+  whoever signs up can type any name for any address, and the recipient has
+  proven nothing yet (F-21).
 
 User stories
 
@@ -640,6 +661,12 @@ User stories
 
 Negative & edge cases
 
+- Greeting (F-21): the reset email says `Hi <name>,` only when the account's
+  address has been verified by its owner. For an unverified account, or one
+  whose verification was waived by an organization's sign-up policy or set by
+  an organization administrator, it says `Hi <email address>,` instead, because
+  the name was typed by whoever created the account
+  (`resetEmailGreetingName`, `src/lib/auth-user-name.ts`).
 - Invalid email format: submitting `not-an-email` shows "Enter a valid email
   address." (`validation.email`); the `*` marker is on the Email label.
 - Empty email: "Enter a valid email address." (the schema rejects an empty string

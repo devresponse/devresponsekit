@@ -162,6 +162,44 @@ describe("review #185: Better Auth failures are mapped, not blanket-502'd", () =
   });
 });
 
+/**
+ * F-21: both fields follow the shared name rule. A refused value is a 400
+ * `invalid_body` BEFORE any write, for a cookie and a bearer caller alike (the
+ * bearer branch writes through the internal adapter, which Better Auth's
+ * `userNameGuard` hook never sees); an accepted one is written canonically.
+ */
+describe("F-21: the profile route refuses a name that breaks the rule", () => {
+  const BEARER = {
+    ...ACTOR,
+    callerKind: "api_key" as const,
+    credentialId: "k1",
+    grantedScopes: ["account.profile.write"],
+  };
+
+  it.each([
+    ["a line break in name (cookie)", ACTOR, { name: "Ada\nLovelace" }],
+    ["a bidi override in name (bearer)", BEARER, { name: "Ada \u202eL." }],
+    ["a tab in displayName (cookie)", ACTOR, { name: "Ada", displayName: "Ada\tL." }],
+    ["an over-long name (bearer)", BEARER, { name: "x".repeat(201) }],
+  ])("%s -> 400 invalid_body, nothing written", async (_label, actor, body) => {
+    requireAccountUser.mockResolvedValue({ ok: true, actor });
+    const res = await PATCH(makeReq(body));
+    expect(res.status).toBe(400);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_body" });
+    expect(updateUserMock).not.toHaveBeenCalled();
+    expect(adapterUpdateUserMock).not.toHaveBeenCalled();
+    expect(updateSets).toHaveLength(0);
+  });
+
+  it("writes the canonical spelling to Better Auth and app_users", async () => {
+    requireAccountUser.mockResolvedValue({ ok: true, actor: BEARER });
+    const res = await PATCH(makeReq({ name: " Ada \u00a0 Lovelace ", displayName: " Ada   L. " }));
+    expect(res.status).toBe(200);
+    expect(adapterUpdateUserMock).toHaveBeenCalledWith("ba-self", { name: "Ada Lovelace" });
+    expect(updateSets[0]).toMatchObject({ display_name: "Ada L." });
+  });
+});
+
 describe("review #185: bearer callers do not go through the session endpoint", () => {
   it("writes the Better Auth name via the internal adapter", async () => {
     requireAccountUser.mockResolvedValue({

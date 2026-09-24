@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { z } from "zod";
 import { preferredLocaleSchema } from "@/lib/validation/users";
+import { userNameSchema } from "@/lib/user-name";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
@@ -91,7 +92,10 @@ export async function GET(request: NextRequest, ctx: RouteContext) {
  */
 const patchSchema = z
   .object({
-    displayName: z.string().min(1).max(200).optional(),
+    // F-21: the shared name rule (`user-name.ts`). The value is mirrored to
+    // Better Auth `name` and quoted by the invitation email, so a line break
+    // or bidi control is refused here, not stored.
+    displayName: userNameSchema.optional(),
     // Review #71/#80: constrained to the app's supported locales via the ONE
     // shared schema — a free-form 2-10 char string used to be stored verbatim.
     preferredLocale: preferredLocaleSchema.optional(),

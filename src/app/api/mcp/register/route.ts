@@ -7,6 +7,7 @@ import {
   buildRegistrationResponse,
   isRegistrationOrgPermitted,
   parseRegistrationOrgAllowList,
+  registrationRequestErrorDescription,
   registrationRequestSchema,
   statusForMode,
 } from "@/lib/mcp/registration";
@@ -66,7 +67,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
   const parsed = registrationRequestSchema.safeParse(json);
   if (!parsed.success) {
-    return oauthError("invalid_client_metadata", "A non-empty `client_name` is required.", 400);
+    return oauthError(
+      "invalid_client_metadata",
+      registrationRequestErrorDescription(parsed.error),
+      400,
+    );
   }
   const body = parsed.data;
 

@@ -6,6 +6,7 @@ import { userNameSchema } from "@/lib/user-name";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { isAuthEmailTakenError } from "@/lib/admin/auth-email-taken";
 import {
   likeContains,
   applySortAndPagination,
@@ -117,7 +118,10 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
  * which only a superadmin's cookie session has: every API key and JWT is
  * bound to one org (MACHINE-2), so a bearer caller always gets 403 for it.
  * Defaults to `pending_approval`. The password is
- * forwarded to Better Auth and never logged or echoed.
+ * forwarded to Better Auth and never logged or echoed. An address that already
+ * has an account is a 409, including one Better Auth holds with no `app_users`
+ * row and the loser of a concurrent create (F-30); a failure to store the new
+ * user is a 502.
  */
 const createSchema = z
   .object({
@@ -132,6 +136,8 @@ const createSchema = z
     preferredLocale: preferredLocaleSchema.optional(),
   })
   .strict();
+
+const EMAIL_TAKEN_DETAIL = "A user with this email already exists.";
 
 export const POST = withV1Route(async function POST(request: NextRequest) {
   const guard = await requireApiPermission(request, "admin.users.create");
@@ -162,6 +168,9 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     return problemResponse("forbidden", 403, request, { requestId: grant.requestId });
   }
 
+  // Best-effort, as on the admin twin: `app_users` has no unique key on the
+  // email, so Better Auth's unique `"user".email` refuses whatever passes this
+  // (F-30, below).
   const existing = await db
     .selectFrom("app_users")
     .select(["id"])
@@ -169,7 +178,7 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     .executeTakeFirst();
   if (existing) {
     return problemResponse("conflict", 409, request, {
-      detail: "A user with this email already exists.",
+      detail: EMAIL_TAKEN_DETAIL,
       requestId: grant.requestId,
     });
   }
@@ -185,6 +194,26 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
       emailUnproven: !hasCrossOrgReach(grant.caller.access),
     });
   } catch (err) {
+    // F-30: an address Better Auth already holds (a concurrent create won, or
+    // an identity has no `app_users` row to find) is the 409 this route
+    // documents, not an identity-provider failure. Both are audited as on the
+    // admin twin, naming no `app_users` row: none exists for this address.
+    const emailTaken = isAuthEmailTakenError(err);
+    await auditUserAction("admin.user.create_failed", "error", {
+      request,
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: null,
+      email,
+      requestId: grant.requestId,
+      reason: emailTaken ? "auth_user_exists" : "auth_create_user_failed",
+      metadata: { message: err instanceof Error ? err.message : "unknown", via: "api.v1" },
+    });
+    if (emailTaken) {
+      return problemResponse("conflict", 409, request, {
+        detail: EMAIL_TAKEN_DETAIL,
+        requestId: grant.requestId,
+      });
+    }
     return problemResponse("internal_error", 502, request, {
       cause: err,
       detail: "Identity provider rejected the user creation.",
@@ -195,6 +224,21 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     (created as { user?: { id?: string }; id?: string })?.user?.id ??
     (created as { id?: string })?.id;
   if (!betterAuthUserId) {
+    // F-30: audited like every other failure past the up-front check (see the
+    // admin twin): no `app_users` row, and only the key names of what Better
+    // Auth returned, never the values.
+    await auditUserAction("admin.user.create_failed", "error", {
+      request,
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: null,
+      email,
+      requestId: grant.requestId,
+      reason: "auth_create_no_id",
+      metadata: {
+        returnedKeys: typeof created === "object" && created !== null ? Object.keys(created) : [],
+        via: "api.v1",
+      },
+    });
     return problemResponse("internal_error", 502, request, {
       cause: new Error("identity provider returned no user id on create"),
       requestId: grant.requestId,
@@ -215,26 +259,26 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
       .returning(["id", "primary_email", "status"])
       .executeTakeFirstOrThrow();
   } catch (err) {
-    // OPS-OBS-1: the up-front email check is best-effort; a concurrent create
-    // can still lose the unique race, and any other insert failure here would
-    // otherwise surface as a generic 500 with no audit row (unlike the admin
-    // twin). Audit the failure and return a typed problem — which now logs the
-    // 5xx to stdout regardless of Sentry.
+    // OPS-OBS-1: an insert failure here would otherwise surface as a generic
+    // 500 with no audit row. Audit it and return a typed problem, which logs
+    // the 5xx to stdout regardless of Sentry.
+    //
+    // F-30: the row names NO `app_users` row, because this insert is what
+    // failed to create one; the nil UUID it used to name failed the audit's
+    // foreign key, so this branch answered 500 with no audit row after all.
+    // The new Better Auth id, now without an `app_users` row, is in metadata.
+    // Nor can this insert lose an email race: Better Auth refused the loser
+    // above, and the one unique key here is the `better_auth_user_id` that call
+    // just minted, so the 23505 → 409 branch that used to sit here is gone.
     await auditUserAction("admin.user.create_failed", "error", {
       request,
       actorBetterAuthUserId: grant.caller.betterAuthUserId,
-      appUserId: "00000000-0000-0000-0000-000000000000",
+      appUserId: null,
       email,
       requestId: grant.requestId,
-      reason: isUniqueViolation(err) ? "email_taken_race" : "db_insert_failed",
+      reason: "db_insert_failed",
       metadata: { betterAuthUserId, via: "api.v1" },
     });
-    if (isUniqueViolation(err)) {
-      return problemResponse("conflict", 409, request, {
-        detail: "A user with this email already exists.",
-        requestId: grant.requestId,
-      });
-    }
     return problemResponse("internal_error", 502, request, {
       cause: err,
       detail: "Failed to persist the user.",
@@ -262,13 +306,3 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     { status: 201, requestId: grant.requestId },
   );
 });
-
-/** Postgres unique-violation (SQLSTATE 23505) detector — mirrors the admin twin. */
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: unknown }).code === "23505"
-  );
-}

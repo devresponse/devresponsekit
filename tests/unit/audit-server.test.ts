@@ -282,3 +282,113 @@ describe("auditEvent — impersonation attribution (F-07)", () => {
     expect(row.metadata).toBe("{}");
   });
 });
+
+/**
+ * F-30 — a reference that names no row. `app_user_id` and `organization_id`
+ * are foreign keys, and most audits run after the mutation they record, so a
+ * 23503 there turned a finished action into a 500 with no audit row. On the
+ * pool the row is re-written with the dangling column null and the id kept in
+ * metadata; through a caller's transaction it is not retried (a failed
+ * statement has already aborted that transaction). The real FK behaviour is
+ * pinned in tests/db/user-create-failure-audit.db.test.ts.
+ */
+describe("auditEvent — a reference to a row that does not exist (F-30)", () => {
+  // These queue one-shot rejections; start each from an empty queue so one
+  // that a failing test left unconsumed cannot leak into the next.
+  beforeEach(() => {
+    insertExecute.mockReset();
+    insertExecute.mockResolvedValue(undefined);
+  });
+
+  const fkViolation = (constraint: string) =>
+    Object.assign(new Error(`violates foreign key constraint "${constraint}"`), {
+      code: "23503",
+      constraint,
+    });
+
+  it("re-writes the row with app_user_id null and the id in metadata.unresolvedAppUserId", async () => {
+    insertExecute.mockRejectedValueOnce(fkViolation("app_audit_events_app_user_id_fkey"));
+
+    await auditEvent({
+      eventType: "admin.users.bulk_action",
+      outcome: "success",
+      requestId: "req-f30",
+      appUserId: "u-gone",
+      organizationId: "o-1",
+      metadata: { action: "approve" },
+    });
+
+    expect(insertExecute).toHaveBeenCalledTimes(2);
+    const retried = valuesArg.mock.calls[1]![0];
+    expect(retried).toMatchObject({ app_user_id: null, organization_id: "o-1" });
+    expect(JSON.parse(retried.metadata as string)).toEqual({
+      action: "approve",
+      unresolvedAppUserId: "u-gone",
+    });
+    // Everything else is the row the caller asked for.
+    const { app_user_id: _a, metadata: _m, ...rest } = valuesArg.mock.calls[0]![0];
+    expect(retried).toMatchObject(rest);
+    // A caller named something that is not there: that is logged.
+    expect(logServerError).toHaveBeenCalledWith(
+      "audit.unresolved_reference",
+      expect.objectContaining({
+        requestId: "req-f30",
+        eventType: "admin.users.bulk_action",
+        column: "app_user_id",
+        unresolvedId: "u-gone",
+      }),
+    );
+  });
+
+  it("clears organization_id the same way, and both when both dangle", async () => {
+    insertExecute
+      .mockRejectedValueOnce(fkViolation("app_audit_events_organization_id_fkey"))
+      .mockRejectedValueOnce(fkViolation("app_audit_events_app_user_id_fkey"));
+
+    await auditEvent({
+      eventType: "x",
+      outcome: "denied",
+      appUserId: "u-gone",
+      organizationId: "o-gone",
+    });
+
+    expect(insertExecute).toHaveBeenCalledTimes(3);
+    const last = valuesArg.mock.calls[2]![0];
+    expect(last).toMatchObject({ app_user_id: null, organization_id: null });
+    expect(JSON.parse(last.metadata as string)).toEqual({
+      unresolvedOrganizationId: "o-gone",
+      unresolvedAppUserId: "u-gone",
+    });
+  });
+
+  it("propagates a foreign-key violation on any other constraint", async () => {
+    insertExecute.mockRejectedValueOnce(fkViolation("some_other_fkey"));
+    await expect(
+      auditEvent({ eventType: "x", outcome: "success", appUserId: "u-1" }),
+    ).rejects.toMatchObject({ code: "23503", constraint: "some_other_fkey" });
+    expect(insertExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a repeat violation on a column it already cleared instead of looping", async () => {
+    insertExecute
+      .mockRejectedValueOnce(fkViolation("app_audit_events_app_user_id_fkey"))
+      .mockRejectedValueOnce(fkViolation("app_audit_events_app_user_id_fkey"));
+    await expect(
+      auditEvent({ eventType: "x", outcome: "success", appUserId: "u-1" }),
+    ).rejects.toMatchObject({ code: "23503" });
+    expect(insertExecute).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry through a caller's transaction: that statement already aborted it", async () => {
+    const trxExecute = vi.fn().mockRejectedValue(fkViolation("app_audit_events_app_user_id_fkey"));
+    const trx = {
+      insertInto: () => ({ values: () => ({ execute: trxExecute }) }),
+    } as unknown as AuditServerModule.AuditEventInput["executor"];
+
+    await expect(
+      auditEvent({ eventType: "x", outcome: "success", appUserId: "u-gone", executor: trx }),
+    ).rejects.toMatchObject({ code: "23503" });
+    expect(trxExecute).toHaveBeenCalledTimes(1);
+    expect(insertExecute).not.toHaveBeenCalled();
+  });
+});

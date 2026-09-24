@@ -1,8 +1,8 @@
 import "server-only";
-import type { Kysely } from "kysely";
+import type { Insertable, Kysely } from "kysely";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
-import type { AppDatabase } from "@/db/schema/app-schema";
+import type { AppAuditEventsTable, AppDatabase } from "@/db/schema/app-schema";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
 import { attributeAuditActor } from "@/lib/impersonation-attribution.server";
@@ -112,6 +112,13 @@ export interface AuditEventInput {
  *     audit naming a row the same transaction deletes, and FORBIDDEN for a
  *     `denied`/`error` audit, which must outlive the rollback for the reason
  *     in the bullet above. See the field's doc for the full rule.
+ *   - F-30: `appUserId` and `organizationId` are foreign keys. Pass `null`
+ *     when no row exists (a failed create, a summary over many users) and keep
+ *     what was asked for in `email` / `metadata`. On the pool, an id that names
+ *     no row no longer fails the write: the column is stored `null` and the id
+ *     kept in `metadata.unresolvedAppUserId` / `unresolvedOrganizationId`
+ *     ({@link insertResolvingReferences}). Through an `executor` it still
+ *     throws.
  */
 export async function auditEvent(input: AuditEventInput): Promise<void> {
   const reqHeaders = input.request?.headers;
@@ -153,22 +160,117 @@ export async function auditEvent(input: AuditEventInput): Promise<void> {
     });
   }
 
-  await (input.executor ?? db)
-    .insertInto("app_audit_events")
-    .values({
-      event_type: input.eventType,
-      outcome: input.outcome,
-      actor_better_auth_user_id: actorBetterAuthUserId,
-      app_user_id: input.appUserId ?? null,
-      organization_id: input.organizationId ?? null,
-      target_application_id: input.targetApplicationId ?? null,
-      provider: input.provider ?? null,
-      email: input.email ?? null,
-      ip_address: ipAddress,
-      user_agent: userAgent,
-      reason: input.reason ?? null,
-      request_id: requestId,
-      metadata: JSON.stringify(metadata ?? {}),
-    })
-    .execute();
+  const row = {
+    event_type: input.eventType,
+    outcome: input.outcome,
+    actor_better_auth_user_id: actorBetterAuthUserId,
+    app_user_id: input.appUserId ?? null,
+    organization_id: input.organizationId ?? null,
+    target_application_id: input.targetApplicationId ?? null,
+    provider: input.provider ?? null,
+    email: input.email ?? null,
+    ip_address: ipAddress,
+    user_agent: userAgent,
+    reason: input.reason ?? null,
+    request_id: requestId,
+    metadata: JSON.stringify(metadata ?? {}),
+  };
+
+  // DB-3/DB-4: inside the caller's transaction, written once and never
+  // retried (see `insertResolvingReferences` for why a retry cannot work there).
+  if (input.executor) {
+    await input.executor.insertInto("app_audit_events").values(row).execute();
+    return;
+  }
+  await insertResolvingReferences(row, metadata ?? {}, input.eventType, requestId);
+}
+
+type AuditRow = Insertable<AppAuditEventsTable> & {
+  app_user_id: string | null;
+  organization_id: string | null;
+};
+
+/**
+ * The two foreign keys on `app_audit_events`, by the constraint names 0001
+ * gives them, with the metadata key that keeps an id that named no row.
+ */
+const AUDIT_REFERENCES = {
+  app_audit_events_app_user_id_fkey: {
+    column: "app_user_id",
+    metadataKey: "unresolvedAppUserId",
+  },
+  app_audit_events_organization_id_fkey: {
+    column: "organization_id",
+    metadataKey: "unresolvedOrganizationId",
+  },
+} as const;
+
+type AuditReference = (typeof AUDIT_REFERENCES)[keyof typeof AUDIT_REFERENCES];
+
+function unresolvedReference(err: unknown): AuditReference | null {
+  if (typeof err !== "object" || err === null) return null;
+  const { code, constraint } = err as { code?: unknown; constraint?: unknown };
+  if (code !== "23503" || typeof constraint !== "string") return null;
+  return Object.hasOwn(AUDIT_REFERENCES, constraint)
+    ? AUDIT_REFERENCES[constraint as keyof typeof AUDIT_REFERENCES]
+    : null;
+}
+
+/**
+ * F-30 — an audit that names a row which does not exist must still be written.
+ *
+ * `app_user_id` and `organization_id` are real foreign keys, so a row naming an
+ * id with no parent fails with 23503. Most audits run AFTER the mutation they
+ * record, so that failure turned a finished action into a 500 with no audit
+ * row: a user create whose Better Auth half failed named a nil UUID and
+ * answered 500 instead of its 409/502, and a bulk batch whose summary named a
+ * caller-supplied id that matched no user applied every action, then answered
+ * 500, so a retry applied them all again. Those call sites now pass `null`
+ * where no row exists. This is the backstop for a subject that disappears
+ * between the read and the audit, and for the next call site that gets it
+ * wrong: the row is written with that column `null` and the id kept in
+ * `metadata.unresolvedAppUserId` / `metadata.unresolvedOrganizationId`, and the
+ * miss is logged, because it means a caller named something that is not there.
+ * Nothing is lost, since the id is still in the row.
+ *
+ * Only on the shared pool, where each INSERT is its own statement and a failed
+ * one can simply be re-issued. Inside a caller's transaction (`executor`) a
+ * failed statement aborts the whole transaction, so every later statement,
+ * the retry included, fails with 25P02 unless a SAVEPOINT wraps the insert.
+ * The one caller that passes a handle, the tenant DELETE (DB-3), writes its row
+ * BEFORE the delete precisely so that the FK holds; there the error propagates
+ * unchanged. Each retry clears one more non-null reference, so this ends after
+ * at most three attempts, and any other error propagates as before.
+ */
+async function insertResolvingReferences(
+  initial: AuditRow,
+  metadata: Record<string, unknown>,
+  eventType: string,
+  requestId: string | null,
+): Promise<void> {
+  let row = initial;
+  let kept = metadata;
+  for (;;) {
+    try {
+      await db.insertInto("app_audit_events").values(row).execute();
+      return;
+    } catch (err) {
+      const reference = unresolvedReference(err);
+      const id = reference ? row[reference.column] : null;
+      if (!reference || id === null) throw err;
+      logServerError("audit.unresolved_reference", {
+        requestId,
+        eventType,
+        column: reference.column,
+        unresolvedId: id,
+      });
+      kept = { ...kept, [reference.metadataKey]: id };
+      row = {
+        ...row,
+        app_user_id: reference.column === "app_user_id" ? null : row.app_user_id,
+        organization_id: reference.column === "organization_id" ? null : row.organization_id,
+        metadata: JSON.stringify(kept),
+      };
+    }
+  }
 }

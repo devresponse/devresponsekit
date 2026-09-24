@@ -14,6 +14,7 @@ import type * as Route from "@/app/api/administrator/users/bulk/route";
 const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
 const bulkExecMock = vi.fn();
+const auditUserActionMock = vi.fn();
 
 const state: {
   targets: Array<{
@@ -31,7 +32,9 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
 });
-vi.mock("@/lib/admin/audit-helpers.server", () => ({ auditUserAction: () => {} }));
+vi.mock("@/lib/admin/audit-helpers.server", () => ({
+  auditUserAction: (...a: unknown[]) => auditUserActionMock(...a),
+}));
 vi.mock("@/lib/audit.server", () => ({ auditEvent: () => {} }));
 // Fully mocked (NOT importActual) so we don't pull in the Better Auth /
 // pgPool chain. The permission map mirrors the real module.
@@ -104,7 +107,7 @@ function jsonReq(body: unknown): NextRequest {
 let POST: typeof Route.POST;
 
 beforeEach(async () => {
-  for (const m of [sessionGetter, accessGetter, bulkExecMock]) m.mockReset();
+  for (const m of [sessionGetter, accessGetter, bulkExecMock, auditUserActionMock]) m.mockReset();
   bulkExecMock.mockImplementation((_a, t: { appUserId: string }) => ({
     ok: true,
     appUserId: t.appUserId,
@@ -171,5 +174,24 @@ describe("POST /users/bulk — org-scoped batch", () => {
   it("403 when the caller lacks the action's permission", async () => {
     accessGetter.mockResolvedValue(access(["admin.users.read"], ORG_A));
     expect((await POST(jsonReq({ action: "suspend", ids: [U1] }))).status).toBe(403);
+  });
+
+  // F-30: the summary used to name `results[0].appUserId`, the first id the
+  // CALLER sent. One that matched no user failed the `app_user_id` foreign key
+  // after the batch had run, so the caller got a 500 and a retry re-applied it.
+  it("writes its summary naming no user, even when the first id matched nobody (F-30)", async () => {
+    accessGetter.mockResolvedValue(access(ADMIN_PERMS, null, true));
+    const res = await POST(jsonReq({ action: "suspend", ids: [U2, U1] })); // U2 resolves to no one
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { results: Array<{ appUserId: string; error?: string }> };
+    expect(body.results[0]).toEqual({ ok: false, appUserId: U2, error: "not_found" });
+    const summaries = auditUserActionMock.mock.calls.filter(
+      ([eventType]) => eventType === "admin.users.bulk_action",
+    );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.[2]).toMatchObject({
+      appUserId: null,
+      metadata: { action: "suspend", attempted: 2, succeeded: 1, failed: 1 },
+    });
   });
 });

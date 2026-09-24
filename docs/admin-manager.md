@@ -484,7 +484,7 @@ Manages the application user lifecycle and per-user administration.
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
-| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13); `admin.user.created` |
+| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself); `admin.user.banned` |
@@ -1147,6 +1147,19 @@ the admin as the actor, and filtering the explorer by an admin's id finds what
 they did while impersonating as well; the borrowed identity is in the row's
 metadata (shown in the explorer's detail pane).
 
+**References to rows that do not exist (F-30).** `app_user_id` and
+`organization_id` are foreign keys. A row about something with no `app_users`
+row names none: `admin.user.create_failed` keeps the address in `email` (and a
+Better Auth id that was created but never stored in `metadata.betterAuthUserId`,
+for reconciliation), and the `admin.users.bulk_action` summary leaves the users
+to its per-row events. If a row still names an id that does not exist, such as
+a subject deleted between the read and the audit, `auditEvent` writes it anyway,
+with that column null and the id in `metadata.unresolvedAppUserId` /
+`metadata.unresolvedOrganizationId`, and logs `audit.unresolved_reference`. The
+insert used to fail instead, turning a finished action into a 500 with no audit
+row. A row written inside a caller's transaction (the tenant DELETE, DB-3) is
+not retried: the failed statement has already aborted that transaction.
+
 **Metadata contract:** callers MUST NOT pass tokens, refresh tokens, plaintext
 keys, or raw passwords. Internal exception detail may go in `metadata` (e.g.
 `message`) but never secrets.
@@ -1236,8 +1249,15 @@ restore`, and `ids` is either an explicit UUID array **or** the literal `"*"`
   carries the same guard) can be used to bypass the `[id]` route guard. The
   AUTHZ-2 `forbidden_shared_target` refusal follows it.
 - **Partial failure.** Each row's outcome is captured; one row failing does not
-  abort the batch. A summary `admin.users.bulk_action` row is written alongside
-  the per-row events. The bulk budget (§2.5) throttles the whole call.
+  abort the batch, and an id that matches no user in scope is a `not_found` row.
+  A summary `admin.users.bulk_action` row is written alongside the per-row
+  events. It names no user (F-30): the per-row events do, and share its request
+  id. It used to name the first id the caller sent, so an id that matched no one
+  failed the audit's foreign key after the whole batch had been applied, and the
+  call answered 500. The bulk budget (§2.5) throttles the whole call.
+- **Not idempotent.** Each row's action is applied as it is processed, so
+  re-sending a batch applies it again (a second `ban` restarts its expiry). Read
+  the per-row `results` instead of retrying the call.
 
 ---
 

@@ -686,43 +686,106 @@ describe("/api/v1/users", () => {
     });
   });
 
-  it("POST 409 + create_failed audit when the insert loses the unique race (OPS-OBS-1)", async () => {
+  /*
+   * F-30: the `app_users` check is a courtesy (no unique key on the email), so
+   * an address Better Auth already holds, with no `app_users` row or through a
+   * concurrent create, fails INSIDE `createBetterAuthUser`. That is the 409
+   * this route documents, not a 502. Every failure row names NO `app_users` row
+   * (`app_user_id` is a foreign key; the nil UUID it used to name failed it).
+   */
+  const postNew = async (email: string) => {
     requireApiPermission.mockResolvedValue(grant);
-    dbState.takeFirst = undefined; // up-front email check passes
-    createBetterAuthUser.mockResolvedValue({ user: { id: "ba-race" } });
-    dbState.takeFirstOrThrow = Object.assign(new Error("duplicate key"), { code: "23505" });
+    dbState.takeFirst = undefined; // the up-front email check passes
     const { POST } = await import("@/app/api/v1/users/route");
-    const res = await POST(
-      req("/api/v1/users", {
-        method: "POST",
-        body: { email: "race@x.com", password: "password123" },
-      }),
-    );
-    expect(res.status).toBe(409);
-    expect(auditUserAction).toHaveBeenCalledWith(
-      "admin.user.create_failed",
-      "error",
-      expect.objectContaining({ reason: "email_taken_race" }),
-    );
-  });
+    return POST(req("/api/v1/users", { method: "POST", body: { email, password: "password123" } }));
+  };
 
-  it("POST 502 + create_failed audit when the insert fails for another reason (OPS-OBS-1)", async () => {
-    requireApiPermission.mockResolvedValue(grant);
-    dbState.takeFirst = undefined;
-    createBetterAuthUser.mockResolvedValue({ user: { id: "ba-x" } });
-    dbState.takeFirstOrThrow = new Error("connection reset");
-    const { POST } = await import("@/app/api/v1/users/route");
-    const res = await POST(
-      req("/api/v1/users", {
-        method: "POST",
-        body: { email: "x@x.com", password: "password123" },
+  it.each([
+    [
+      "the admin plugin's refusal",
+      Object.assign(new Error("User already exists. Use another email."), {
+        body: { code: "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL" },
       }),
-    );
+    ],
+    [
+      "the unique violation a concurrent create's loser gets",
+      Object.assign(new Error("duplicate key"), { code: "23505", constraint: "user_email_key" }),
+    ],
+  ])(
+    "POST 409 + create_failed naming no user when Better Auth holds the address: %s (F-30)",
+    async (_l, err) => {
+      createBetterAuthUser.mockRejectedValue(err);
+      const res = await postNew("held@x.com");
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: "conflict" });
+      expect(auditUserAction).toHaveBeenCalledWith(
+        "admin.user.create_failed",
+        "error",
+        expect.objectContaining({
+          appUserId: null,
+          email: "held@x.com",
+          reason: "auth_user_exists",
+          metadata: expect.objectContaining({ via: "api.v1" }),
+        }),
+      );
+    },
+  );
+
+  it("POST 502 + create_failed naming no user when Better Auth fails for another reason (F-30)", async () => {
+    createBetterAuthUser.mockRejectedValue(new Error("identity store unreachable"));
+    const res = await postNew("x@x.com");
     expect(res.status).toBe(502);
     expect(auditUserAction).toHaveBeenCalledWith(
       "admin.user.create_failed",
       "error",
-      expect.objectContaining({ reason: "db_insert_failed" }),
+      expect.objectContaining({ appUserId: null, reason: "auth_create_user_failed" }),
     );
   });
+
+  it.each([
+    ["a user with no id", { user: { email: "x@x.com" } }, ["user"]],
+    ["nothing", null, []],
+  ])(
+    "POST 502 + create_failed naming no user when Better Auth returns %s (F-30)",
+    async (_l, returned, returnedKeys) => {
+      createBetterAuthUser.mockResolvedValue(returned);
+      const res = await postNew("x@x.com");
+      expect(res.status).toBe(502);
+      expect(auditUserAction).toHaveBeenCalledTimes(1);
+      expect(auditUserAction).toHaveBeenCalledWith(
+        "admin.user.create_failed",
+        "error",
+        expect.objectContaining({
+          appUserId: null,
+          email: "x@x.com",
+          reason: "auth_create_no_id",
+          metadata: { returnedKeys, via: "api.v1" },
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ["a connection failure", new Error("connection reset")],
+    // The one unique key on `app_users` is the id Better Auth just minted, so
+    // a 23505 here is not an email race: it is no longer mapped to 409.
+    ["a unique violation", Object.assign(new Error("duplicate key"), { code: "23505" })],
+  ])(
+    "POST 502 + create_failed naming no user when the insert fails: %s (OPS-OBS-1, F-30)",
+    async (_l, err) => {
+      createBetterAuthUser.mockResolvedValue({ user: { id: "ba-x" } });
+      dbState.takeFirstOrThrow = err;
+      const res = await postNew("x@x.com");
+      expect(res.status).toBe(502);
+      expect(auditUserAction).toHaveBeenCalledWith(
+        "admin.user.create_failed",
+        "error",
+        expect.objectContaining({
+          appUserId: null,
+          reason: "db_insert_failed",
+          metadata: { betterAuthUserId: "ba-x", via: "api.v1" },
+        }),
+      );
+    },
+  );
 });

@@ -12,6 +12,11 @@ import { RoleSettingsForm } from "./_role-settings-form";
  * Each tab owns its own data fetch except for the Permissions tab,
  * which is hydrated from the server-rendered initial set so the dual-
  * list editor renders the assigned column immediately.
+ *
+ * Radix unmounts an inactive panel, so the Permissions editor and the Settings
+ * form remount from these props on every tab switch. Both refresh the page
+ * after a save and follow the refreshed props (F-39); a new panel seeded from
+ * props must do the same.
  */
 export interface RoleDetailJson {
   id: string;

@@ -14,13 +14,26 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RequiredLegend } from "@/components/ui/required-legend";
-import { useZodForm } from "@/lib/forms/use-zod-form";
+import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 import { groupSettingsSchema, type GroupSettingsInput } from "@/lib/validation/groups";
+
+/** The PATCH wire shape of the form, normalized the way the route stores it. */
+function toGroupPatch(values: GroupSettingsInput) {
+  return {
+    name: values.name.trim(),
+    description: values.description?.trim() ? values.description.trim() : null,
+  };
+}
 
 /**
  * Settings tab for the group detail (ADR-0002; docs/form-validation.md).
  * React Hook Form + the shared `groupSettingsSchema`. Edits name + description;
  * the `key` is read-only (referenced by audit metadata).
+ *
+ * F-39: saves through `useSavedFormBaseline`, exactly as the role Settings tab
+ * does: only the changed fields are sent (an empty PATCH is a 400
+ * `no_changes`, so nothing is sent), and a successful save moves the baseline
+ * and refreshes the page.
  */
 export function GroupSettingsForm({
   groupId,
@@ -40,24 +53,33 @@ export function GroupSettingsForm({
   const tErr = useTranslations("administrator.errors");
 
   const [saved, setSaved] = useState(false);
-  const form = useZodForm<GroupSettingsInput>(groupSettingsSchema, {
-    defaultValues: { name: initialName, description: initialDescription ?? "" },
-  });
+  const { form, changedBody, commitSaved } = useSavedFormBaseline<
+    GroupSettingsInput,
+    ReturnType<typeof toGroupPatch>
+  >(
+    groupSettingsSchema,
+    { name: initialName, description: initialDescription ?? "" },
+    toGroupPatch,
+  );
 
   const onValid = async (values: GroupSettingsInput) => {
     form.clearErrors("root");
     setSaved(false);
+    const changes = changedBody(values);
+    if (!changes) {
+      commitSaved(values);
+      setSaved(true);
+      return;
+    }
     try {
       const res = await fetch(`/api/administrator/groups/${groupId}`, {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: values.name.trim(),
-          description: values.description?.trim() ? values.description.trim() : null,
-        }),
+        body: JSON.stringify(changes),
       });
       if (res.ok) {
+        commitSaved(values);
         setSaved(true);
         return;
       }

@@ -260,7 +260,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-ORG-DETAIL-S4 — As a Superadmin, I want to rename an organization and suspend it, so that I can correct tenant records and actually cut a tenant off.
-  - Acceptance criteria: Given I am a Superadmin on the Settings tab, when I change the name and status and save, then a success message appears and the header reflects the change on reload. A suspended org's members, org admin and superuser lose access to it (F-09) until it is set back to Active, and I keep managing it throughout.
+  - Acceptance criteria: Given I am a Superadmin on the Settings tab, when I change the name and status and save, then a success message appears, the header reflects the change without a reload, and leaving the tab and coming back shows the saved values (F-39). A suspended org's members, org admin and superuser lose access to it (F-09) until it is set back to Active, and I keep managing it throughout.
   - Note: suspend **`org-c`**, not `org-a`. Organization status is enforced, so suspending `org-a` would also suspend the `superuser` grant `superuser@orga.local` holds there, and you would be signed in as someone who is no longer a superadmin.
   - UAT script:
     | # | Step (what to do) | Expected result |
@@ -268,7 +268,7 @@ User stories
     | 1 | Sign in as `superuser@orga.local` and open `org-c` → **Settings**. | The Settings form shows editable Slug, Name, Status (a select), and a "default" checkbox, with a required legend. |
     | 2 | Change **Name** to `ORG C (renamed)`. | The field accepts the edit. |
     | 3 | Change **Status** to `suspended`. | The select shows the localized "Suspended" option selected. |
-    | 4 | Click **Save**. | A success message `role="status"` ("saved") appears. |
+    | 4 | Click **Save**. | A success message `role="status"` ("saved") appears, and the header updates to the new name and a Suspended badge without a reload. Open **Members**, then **Settings** again: the form shows `ORG C (renamed)` and Suspended, not the values from before the save (F-39). |
     | 5 | Reload the page. | The header shows the new name and a Suspended status badge. You can still open every tab of the suspended org. |
     | 6 | In a private window, sign in as `user1@orgc.local`. | The pending-approval screen, not the dashboard: the only membership is in a suspended org. |
     | 7 | Sign in as `orgadmin@orgc.local`, then as `superuser@orgc.local`. | Both see the pending-approval screen. The ORG C superuser is no superadmin while ORG C is suspended. |
@@ -293,7 +293,7 @@ User stories
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `orgadmin@orga.local` and open `org-a` → **Settings**. | The Settings form renders. Because this persona holds `admin.orgs.update`, the fields are editable. |
-    | 2 | Change **Name** to anything and click **Save**. | The save is rejected: a root inline error `role="alert"` shows the localized "forbidden" message (mapped from the 403 at `_organization-settings-form.tsx:92`). |
+    | 2 | Change **Name** to anything and click **Save**. | The save is rejected: a root inline error `role="alert"` shows the localized "forbidden" message (mapped from the 403 at `_organization-settings-form.tsx:123`). |
     | 3 | Reload the page. | The name is unchanged — the edit did not persist. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
@@ -313,9 +313,9 @@ Negative & edge cases
 1. Cross-tenant 404 (not 403): a foreign `orgId` returns Not Found for the page and a 404 envelope for the members/providers endpoints (`members/route.ts:54`, `provider-bindings/route.ts:53`).
 2. Invalid id: a non-UUID `orgId` returns 404 on the page and `invalid_id` (400) on the API.
 3. Settings required validation: clearing Slug or Name shows the `*` marker, a red border, and a localized "required" message; Slug also enforces the lowercase slug pattern.
-4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:84`).
+4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:108`).
 5. Member add errors: adding a non-existent `appUserId` returns `user_not_found` (404); adding an existing membership returns `membership_exists` (409).
-6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:107,195`).
+6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:138,226`).
 7. Rate-limit: rapid member/binding mutations hit the admin mutation limit and return a friendly rate-limited response (`members/route.ts:126`).
 8. Removing a member whose roles or groups in the org confer a permission the caller cannot confer is refused with **403** `forbidden` and an `admin.membership.revocation_denied` audit row, and nothing is removed (REVOKE-1, F-12). An Org Admin at a browser is normally stopped earlier by the rank guard; the case to try is a bearer key scoped only to `admin.orgs.update`, removing a member who holds an `admin.*` role. The same key removes a plain member (`user1..5`, the `member` role) with **200**: `shell.view` goes with the membership and is not measured.
 

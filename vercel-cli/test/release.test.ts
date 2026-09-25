@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -14,6 +15,25 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 import { Command } from "commander";
+
+/** One read, no separate existence check: the file's bytes, or null when absent. */
+function readIfPresent(file: string): Buffer | null {
+  try {
+    return readFileSync(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+/** Creates `file` with `data` unless it already exists (exclusive create). */
+function writeIfAbsent(file: string, data: string): void {
+  try {
+    writeFileSync(file, data, { flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+  }
+}
 
 // Tests run against the BUILT output, so they exercise exactly what ships.
 import { doctor } from "../dist/commands/doctor.js";
@@ -347,9 +367,11 @@ function recordingRunner(
         const paired = Boolean(vercel?.env?.VERCEL_ORG_ID && vercel.env.VERCEL_PROJECT_ID);
         if (name === "link" && !paired) {
           const file = linkFile(vercel.root);
-          if (!existsSync(file) && options.linked !== null) {
+          if (options.linked !== null) {
             mkdirSync(join(file, ".."), { recursive: true });
-            writeFileSync(
+            // `wx`: create only when absent (an existing link stays as it is),
+            // in one call rather than a check followed by a write.
+            writeIfAbsent(
               file,
               JSON.stringify({ projectId: options.linked ?? vercel.config.projectId, orgId: "x" }),
             );
@@ -364,7 +386,7 @@ function recordingRunner(
         }
         if (name === "pull") {
           const file = pulledFile((received[0] as { root: string }).root);
-          seen.staleAtPull = existsSync(file);
+          seen.staleAtPull = readIfPresent(file) !== null;
           const production =
             options.production === undefined ? { DATABASE_URL: PRODUCTION_POOLED } : options.production;
           if (production) {
@@ -1839,7 +1861,7 @@ function gitFixture(cwd: string, ...args: string[]): string {
     Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith("GIT_")),
   );
   const emptyConfig = join(workspace, "empty.gitconfig");
-  if (!existsSync(emptyConfig)) writeFileSync(emptyConfig, "");
+  appendFileSync(emptyConfig, ""); // creates it when absent, a no-op otherwise
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",

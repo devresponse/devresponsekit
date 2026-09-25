@@ -157,6 +157,10 @@ jobs:
       # e2e to register a destination app under devresponse.com. The signing
       # key is generated per run in the step below (never committed).
       API_JWT_ENABLED: "1"
+      # F-43: the API-key journey in tests/e2e/machine-credentials.spec.ts
+      # mints a `drk_` key and calls /api/v1 with it. The key path is off by
+      # default, and with it off every key is refused as `path_disabled` (401).
+      API_KEYS_ENABLED: "1"
       # Review #29: the MCP gateway e2e (tests/e2e/mcp-bearer-only.spec.ts)
       # drives /api/mcp with a real bearer + a real session cookie; the
       # endpoint is dark (404) unless enabled. Registration stays dark.

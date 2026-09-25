@@ -171,8 +171,8 @@ Tabs: **Permissions** (default), **Members**, **Settings** (`_role-detail-tabs.t
 User stories
 
 - UAT-ADMIN-RGP-ROLES-DETAIL-S1 — As an Org Admin, I want to add and remove permissions on a role using the dual-list editor, so that I can shape what the role grants.
-  - Acceptance criteria: Given the editor, when I move keys between Available and Assigned and click Save, then the server persists the diff (one POST for additions, one DELETE for removals) and the Saved confirmation appears; the Save button is disabled until there is a change.
-  - Escalation note: a non-Superadmin may only **add** permission keys they themselves hold; requesting an unheld key returns **403** (`src/app/api/administrator/roles/[id]/permissions/route.ts:136`). This blocks granting `superuser` (never in a non-superadmin's held set).
+  - Acceptance criteria: Given the editor, when I move keys between Available and Assigned and click Save, then the server persists the diff (one POST for additions, **then** one DELETE for removals) and the Saved confirmation appears; the Save button is disabled until there is a change. Add, Remove, Save and both lists are disabled while the save is in flight. After any failed save the lists are reloaded from the server, so they always show what is actually saved (F-38; see [admin-manager §8.4](../admin-manager.md#84-roles)).
+  - Escalation note: a non-Superadmin may only **add or remove** permission keys they themselves hold; naming an unheld key returns **403** in either direction (AUTHZ-3 / REVOKE-1, `src/app/api/administrator/roles/[id]/permissions/route.ts`). This blocks granting `superuser` (never in a non-superadmin's held set).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -181,7 +181,9 @@ User stories
     | 3 | Type into the Available search box | The left list filters; the count updates |
     | 4 | Select an Assigned key, click **Remove** | It moves back to Available |
     | 5 | Click **Save** | A green "saved" status appears; reload the page and the Assigned set matches |
-    | 6 | (Org Admin only) Try to add a permission you do not hold, then Save | The save is refused with the localized error (server 403); the assigned set is unchanged after reload |
+    | 6 | (Org Admin only) Try to add a permission you do not hold, then Save | The save is refused with "You can only add or remove permissions you hold yourself." (server 403); the lists snap back to the saved set, and a reload shows the same set |
+    | 7 | (Org Admin only) On a role that carries a permission you do not hold, move a key you hold into Assigned **and** move the unheld key out, then Save | The addition is sent first and lands; the removal is then refused (403) and the same message appears. The lists reload to what is saved: the added key **and** the unheld key are both Assigned, and Save is disabled (nothing pending). Moving the added key back out and saving removes it again (you hold it) |
+    | 8 | (Superadmin) On the only role that carries `superuser` for the last superadmin, move `superuser` out and Save | The last-superadmin message appears (409 `last_superadmin`); `superuser` stays in Assigned |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-ROLES-DETAIL-S2 — As an Org Admin, I want to see who holds a role, so that I understand its blast radius before editing.
@@ -338,7 +340,7 @@ Tabs default to **Roles** (`_group-detail-tabs.tsx:32`).
 User stories
 
 - UAT-ADMIN-RGP-GROUPS-DETAIL-ROLES-S1 — As an Org Admin, I want to bundle and unbundle roles on a group, so that its members gain or lose those roles.
-  - Acceptance criteria: Given `admin.groups.assign`, when I move roles between columns and Save, then the diff persists (one POST, one DELETE) and a Saved status appears; only roles in the group's own org are offered (a foreign/global role would 404 on save, so the list excludes them).
+  - Acceptance criteria: Given `admin.groups.assign`, when I move roles between columns and Save, then the diff persists (one POST, **then** one DELETE) and a Saved status appears; only roles in the group's own org are offered (a foreign/global role would 404 on save, so the list excludes them). After any failed save the lists are reloaded from the server (F-38).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -346,22 +348,24 @@ User stories
     | 2 | Select a role in Available, click **Add**, then **Save** | A "saved" status appears; the role is now bundled |
     | 3 | Select a bundled role, click **Remove**, **Save** | The role is unbundled; reload confirms the set |
     | 4 | Confirm the Available column shows only ORG A roles | No other org's or Global roles appear |
+    | 5 | (Org Admin whose `admin.groups.*` come **only** from this group's role *R1*; as Superadmin, first create *R2* in ORG A with the same permissions) Move *R2* into Assigned and *R1* out, **Save** | A "saved" status appears and *R2* is bundled in place of *R1*; you keep access to the group. The addition is sent first, so removing *R1* never strips the `admin.groups.assign` the save still needs (F-38) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-GROUPS-DETAIL-ROLES-S2 — As an Org Admin, I must not be able to bundle a role that out-authorizes me, so that I cannot escalate via a group.
-  - Acceptance criteria: Given a role whose conferred permissions include a key I do not hold (e.g. a `superuser`-granting role), when I try to bundle it and Save, then the server returns **403** and the editor shows the localized "forbidden" message. (Guard: `src/app/api/administrator/groups/[id]/roles/route.ts:125`, using `permissionKeysForRoles` + `unheldPermissionKeys`.)
+  - Acceptance criteria: Given a role whose conferred permissions include a key I do not hold (e.g. a `superuser`-granting role), when I try to bundle or unbundle it and Save, then the server returns **403** and the editor shows "You can only add or remove roles whose permissions you hold yourself.", with the lists reloaded to the saved set. (Guard: `src/app/api/administrator/groups/[id]/roles/route.ts`, using `permissionKeysForRoles` + `unheldPermissionKeys`.)
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
     | 1 | As Superadmin, ensure ORG A has a role carrying `superuser` (or a permission the org admin lacks) | Such a role exists in ORG A |
-    | 2 | Sign in as `orgadmin@orga.local`, open a group, add that role, **Save** | The save fails with the localized **forbidden** message (HTTP 403); the bundle is unchanged |
+    | 2 | Sign in as `orgadmin@orga.local`, open a group, add that role, **Save** | The save fails with the localized "only roles whose permissions you hold" message (HTTP 403); the lists snap back and the bundle is unchanged |
     | 3 | As Superadmin, repeat the bundle on the same group | The Save succeeds (Superadmin bypasses the subset check) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
 - Initial load failure → inline `role="alert"` error instead of a stuck skeleton (`_group-roles-editor.tsx:216`).
 - Save with no change: Save button disabled until dirty.
-- 403 on add → localized forbidden; other failures → generic error toast.
+- 403 on either write → the localized "only roles whose permissions you hold" message; other failures → the generic error. Additions are sent before removals, so a refused addition removes nothing, and a refused removal leaves the addition in place, visible in the lists; after any failure the lists are reloaded from the server (F-38).
+- A failed save whose reload also fails → the error plus "Reload the page before making more changes.", and the editor stays locked until the page is reloaded.
 
 Accessibility: labelled multi-selects, keyboard operable, status/alert regions.
 i18n: labels + statuses localize; the role label uses a `key — Organization` format (contains an em dash in the UI label only, not a linked heading).

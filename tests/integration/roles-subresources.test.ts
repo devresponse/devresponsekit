@@ -38,11 +38,20 @@ const state: {
    * returning an empty item list.
    */
   superuserGrants: { app_user_id: string; organization_id: string; role_id: string }[];
+  /**
+   * What the permissions write's `RETURNING` reports (F-38): the rows the
+   * insert actually created / the delete actually removed. The audit must
+   * record these, not the keys the body named.
+   */
+  insertReturning: { permission_id: string }[];
+  deleteReturning: { permission_id: string }[];
 } = {
   role: undefined,
   whereCols: [],
   catalogPerms: [{ id: "p1", key: "admin.users.read" }],
   superuserGrants: [],
+  insertReturning: [],
+  deleteReturning: [],
 };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
@@ -65,6 +74,8 @@ function firstFor(table: string) {
   return undefined;
 }
 function execFor(table: string): unknown[] {
+  if (table === "trx:insert") return state.insertReturning;
+  if (table === "trx:delete") return state.deleteReturning;
   if (table === "app_role_permissions") return [{ key: "admin.users.read" }];
   if (table === "app_permissions") return state.catalogPerms;
   if (table === "app_user_roles") return state.superuserGrants;
@@ -100,8 +111,8 @@ vi.mock("@/db/database", () => ({
     transaction: () => ({
       execute: async (cb: (trx: unknown) => Promise<unknown>) =>
         cb({
-          insertInto: () => makeChain("trx"),
-          deleteFrom: () => makeChain("trx"),
+          insertInto: () => makeChain("trx:insert"),
+          deleteFrom: () => makeChain("trx:delete"),
           // REVOKE-2 reads the surviving grants on the ENCLOSING transaction.
           selectFrom: (t: unknown) => makeChain(tableKey(t)),
         }),
@@ -150,6 +161,8 @@ beforeEach(async () => {
   state.whereCols = [];
   state.catalogPerms = [{ id: "p1", key: "admin.users.read" }];
   state.superuserGrants = [];
+  state.insertReturning = [];
+  state.deleteReturning = [];
   state.role = {
     id: ROLE,
     organization_id: ORG_A,
@@ -330,6 +343,68 @@ describe("DELETE roles/[id]/permissions — revocation guards", () => {
     state.superuserGrants = [{ app_user_id: "u-1", organization_id: ORG_A, role_id: ROLE }];
     accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
     expect((await del(["admin.users.read"])).status).toBe(200);
+  });
+});
+
+/**
+ * F-38: the `admin.role.permissions_changed` row records the delta the write
+ * APPLIED, as its `RETURNING` reported it. It used to record the requested
+ * keys: a re-POST of an attached key was logged as added again, and a DELETE
+ * naming a never-attached key was logged as removed although it is a no-op.
+ * (The real `ON CONFLICT DO NOTHING ... RETURNING` semantics are pinned against
+ * Postgres in tests/db/dual-list-audit-delta.db.test.ts.)
+ */
+describe("roles/[id]/permissions — audit records the applied delta (F-38)", () => {
+  const READ = { id: "p1", key: "admin.users.read" };
+  const UPDATE = { id: "p2", key: "admin.users.update" };
+
+  function changedMetadata(): Record<string, unknown> {
+    const call = auditMock.mock.calls.find((c) => c[0] === "admin.role.permissions_changed");
+    expect(call, "an admin.role.permissions_changed row").toBeDefined();
+    return (call![2] as { metadata: Record<string, unknown> }).metadata;
+  }
+
+  it("POST audits only the keys the insert created, not an already-attached one", async () => {
+    state.catalogPerms = [READ, UPDATE];
+    state.insertReturning = [{ permission_id: UPDATE.id }]; // READ was already attached
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    const res = await permsPOST(
+      req("permissions", { method: "POST", body: { ids: [READ.key, UPDATE.key] } }),
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(changedMetadata()).toMatchObject({ added: [UPDATE.key], removed: [] });
+  });
+
+  it("DELETE audits only the keys the delete removed, not a never-attached one", async () => {
+    state.catalogPerms = [READ, UPDATE];
+    state.deleteReturning = [{ permission_id: READ.id }]; // UPDATE was never attached
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    const res = await permsDELETE(
+      req("permissions", { method: "DELETE", body: { ids: [READ.key, UPDATE.key] } }),
+      ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(changedMetadata()).toMatchObject({ added: [], removed: [READ.key] });
+  });
+
+  it("a request that changes nothing is still audited, with empty deltas", async () => {
+    state.catalogPerms = [READ];
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.update"]));
+    const post = await permsPOST(
+      req("permissions", { method: "POST", body: { ids: [READ.key] } }),
+      ctx,
+    );
+    expect(post.status).toBe(200);
+    expect(changedMetadata()).toMatchObject({ added: [], removed: [] });
+
+    auditMock.mockReset();
+    const del = await permsDELETE(
+      req("permissions", { method: "DELETE", body: { ids: [READ.key] } }),
+      ctx,
+    );
+    expect(del.status).toBe(200);
+    expect(changedMetadata()).toMatchObject({ added: [], removed: [] });
   });
 });
 

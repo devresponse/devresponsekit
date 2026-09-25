@@ -6,6 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  useDualListSave,
+  type DualListEndpoint,
+  type DualListSaveError,
+} from "@/lib/admin/dual-list-save.client";
 import { diffPermissions } from "@/lib/admin/roles.client";
 
 /**
@@ -15,12 +20,14 @@ import { diffPermissions } from "@/lib/admin/roles.client";
  * Right column = currently assigned. Multi-select on either side; the
  * `Add` / `Remove` buttons move the selected keys between columns.
  *
- * `Save` computes a diff against the server's known set and dispatches
- * one POST `{ ids: toAdd }` and one DELETE `{ ids: toRemove }` against
- * `/api/administrator/roles/[id]/permissions`. We keep both calls
- * sequential (POST then DELETE) so the audit metadata reflects the
- * editor's logical sequence; either failing surfaces an inline error
- * and aborts further work.
+ * `Save` diffs against the server's known set and goes through the shared
+ * dual-list save (`useDualListSave`, F-38): one POST `{ ids: toAdd }`,
+ * THEN one DELETE `{ ids: toRemove }` against
+ * `/api/administrator/roles/[id]/permissions` (additions first, so a swap on a
+ * role the admin's own authority comes through cannot strand it half-done),
+ * then a re-read of the role's set that resets both the baseline and the
+ * lists — after a failure too, so a half-applied save is shown as it landed
+ * and a committed grant can never hide behind a stale baseline.
  *
  * Search inputs filter each column independently. Results show a count
  * indicator so the operator knows the filter is active.
@@ -55,7 +62,19 @@ export function RolePermissionsEditor({
 
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+
+  const endpoint = useMemo<DualListEndpoint>(
+    () => ({
+      url: `/api/administrator/roles/${roleId}/permissions`,
+      bodyKey: "ids",
+      readAssigned: (body) => (body as { permissions: string[] }).permissions,
+    }),
+    [roleId],
+  );
+  const { saving, stale, save } = useDualListSave(endpoint);
+  // Nothing may move while a save is in flight (its re-read would overwrite
+  // the move) or once the server's set is unknown.
+  const locked = !canUpdate || saving || stale;
 
   // Initial catalog load. We page through everything (capped at 200 by
   // the server). The catalog is small enough that doing this once is
@@ -119,57 +138,25 @@ export function RolePermissionsEditor({
   const onSave = useCallback(async () => {
     setError(null);
     setInfo(null);
-    setSaving(true);
-    try {
-      const { toAdd, toRemove } = diffPermissions(serverAssigned, assigned);
-      if (toAdd.length === 0 && toRemove.length === 0) {
-        setSaving(false);
-        return;
-      }
-      if (toAdd.length > 0) {
-        const res = await fetch(`/api/administrator/roles/${roleId}/permissions`, {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ids: toAdd }),
-        });
-        if (!res.ok) {
-          setError(t("errorToast"));
-          return;
-        }
-      }
-      if (toRemove.length > 0) {
-        const res = await fetch(`/api/administrator/roles/${roleId}/permissions`, {
-          method: "DELETE",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ids: toRemove }),
-        });
-        if (!res.ok) {
-          setError(t("errorToast"));
-          return;
-        }
-      }
-      // Re-sync against the server's reported set (the POST/DELETE
-      // responses both echo the resulting permission list).
-      const fresh = await fetch(`/api/administrator/roles/${roleId}/permissions`, {
-        credentials: "same-origin",
-      });
-      if (fresh.ok) {
-        const body = (await fresh.json()) as { permissions: string[] };
-        const sorted = [...body.permissions].sort();
-        setAssigned(sorted);
-        setServerAssigned(sorted);
-      } else {
-        setServerAssigned([...assigned].sort());
-      }
-      setInfo(t("saved"));
-    } catch {
-      setError(t("errorToast"));
-    } finally {
-      setSaving(false);
+    const result = await save(serverAssigned, assigned);
+    if (!result) return;
+    if (result.synced) {
+      setAssigned(result.synced);
+      setServerAssigned(result.synced);
+      setAvailableSelected([]);
+      setAssignedSelected([]);
     }
-  }, [roleId, serverAssigned, assigned, t]);
+    if (result.error === null) {
+      setInfo(t("saved"));
+      return;
+    }
+    const messages: Record<DualListSaveError, string> = {
+      forbidden: t("forbidden"),
+      lastSuperadmin: tErr("lastSuperadmin"),
+      failed: t("errorToast"),
+    };
+    setError(messages[result.error]);
+  }, [save, serverAssigned, assigned, t, tErr]);
 
   if (!catalog) {
     return (
@@ -183,9 +170,10 @@ export function RolePermissionsEditor({
   return (
     <div className="space-y-3">
       {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
+        <div className="text-destructive space-y-1 text-sm" role="alert">
+          <p>{error}</p>
+          {stale ? <p>{tErr("saveStateUnknown")}</p> : null}
+        </div>
       ) : null}
       {info ? (
         <p className="text-success text-sm" role="status">
@@ -202,7 +190,7 @@ export function RolePermissionsEditor({
           onSelectedChange={setAvailableSelected}
           q={availableQ}
           onQChange={setAvailableQ}
-          disabled={!canUpdate}
+          disabled={locked}
         />
         <DualListColumn
           titleKey="assigned"
@@ -212,7 +200,7 @@ export function RolePermissionsEditor({
           onSelectedChange={setAssignedSelected}
           q={assignedQ}
           onQChange={setAssignedQ}
-          disabled={!canUpdate}
+          disabled={locked}
         />
       </div>
 
@@ -222,7 +210,7 @@ export function RolePermissionsEditor({
           variant="outline"
           size="sm"
           onClick={moveToAssigned}
-          disabled={!canUpdate || availableSelected.length === 0}
+          disabled={locked || availableSelected.length === 0}
         >
           {t("add")}
         </Button>
@@ -231,12 +219,12 @@ export function RolePermissionsEditor({
           variant="outline"
           size="sm"
           onClick={moveToAvailable}
-          disabled={!canUpdate || assignedSelected.length === 0}
+          disabled={locked || assignedSelected.length === 0}
         >
           {t("remove")}
         </Button>
         <div className="flex-1" />
-        <Button type="button" size="sm" onClick={onSave} disabled={!canUpdate || saving || !dirty}>
+        <Button type="button" size="sm" onClick={onSave} disabled={locked || !dirty}>
           {saving ? t("saving") : t("save")}
         </Button>
       </div>

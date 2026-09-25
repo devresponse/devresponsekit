@@ -333,7 +333,8 @@
         "saving": "正在保存…",
         "saved": "角色已更新。",
         "noResults": "没有匹配的角色。",
-        "errorToast": "无法更新角色。"
+        "errorToast": "无法更新角色。",
+        "forbidden": "您只能添加或移除您自己拥有其全部权限的角色。"
       },
       "members": {
         "columns": {
@@ -673,7 +674,8 @@
       "memberExists": "该地址已属于一名活跃成员。",
       "invitationExists": "该地址已有待处理的邀请。",
       "lastSuperadmin": "这是平台最后一位超级管理员；此更改将使平台无人可管理。",
-      "organizationNotActive": "此组织未处于活跃状态。请先重新激活该组织，再发送邀请。"
+      "organizationNotActive": "此组织未处于活跃状态。请先重新激活该组织，再发送邀请。",
+      "saveStateUnknown": "无法重新加载已保存的状态。请先重新加载页面，再进行其他更改。"
     },
     "roles": {
       "title": "角色",
@@ -739,7 +741,8 @@
         "saved": "权限已更新。",
         "noResults": "没有匹配的权限。",
         "empty": "尚未分配任何权限。",
-        "errorToast": "无法更新权限。"
+        "errorToast": "无法更新权限。",
+        "forbidden": "您只能添加或移除您自己拥有的权限。"
       },
       "members": {
         "empty": "目前还没有成员持有此角色。",

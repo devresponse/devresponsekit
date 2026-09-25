@@ -907,6 +907,66 @@ nullable; `NULL` = a global/platform role, superadmin-only).
 | `GET /roles/[id]/members` | `admin.roles.read` | Users carrying the role |
 | `POST /roles/[id]/duplicate` | `admin.roles.create` | Clone a role |
 
+**Dual-list saves are two writes, not one (F-38).** The role's **Permissions**
+editor and the group's **Roles** editor (§8.6) both save through a POST of
+the added items and a DELETE of the removed ones on the same collection
+(`/roles/[id]/permissions`, `/groups/[id]/roles`). Each write is atomic; the
+pair is not, so a save can land half-way. Both editors go through one shared
+client path (`src/lib/admin/dual-list-save.client.ts`) that keeps a partial
+save visible:
+
+- **Additions go first, then removals.** The actor's permissions are
+  recomputed on every request from their direct and group-conferred roles, so
+  each committed write changes what the next one is checked against. An
+  addition can only widen the actor's authority. A removal can take away the
+  very permission the next write needs when the actor's own authority comes
+  through the role or group being edited: an org admin whose
+  `admin.groups.assign` comes from role *v1* in group *Org Admins*, swapping
+  *v1* for an identical *v2*, would lose `admin.groups.assign` the moment *v1*
+  is removed, have the POST of *v2* refused, and leave every member of the
+  group without that authority, which they could not restore (AUTHZ-3 forbids
+  conferring what you lack). Sent POST first, that swap succeeds. A refused
+  POST (403 `forbidden` from the AUTHZ-3 subset test) stops the save before
+  the DELETE is sent. The only partial outcome left is "added, not removed"
+  (the DELETE refused by REVOKE-1's 403 or REVOKE-2's 409 `last_superadmin`),
+  and every addition a POST can commit is one AUTHZ-3 lets this actor make on
+  its own, so it is an authorized grant, shown in the editor, which the actor
+  may remove again.
+- **The server's set is re-read after every save, success or failure,** and
+  both the lists and the editor's baseline are reset to it before the error is
+  shown. A failed response is not proof that nothing committed, so only a fresh
+  GET is trusted. This is the F-38 fix proper: before it, when the DELETE was
+  refused after the POST had landed, the editor kept its old baseline, the
+  admin moved the keys back, and the grant the POST had committed stayed live
+  and hidden until a reload.
+- **The refusal is named:** 403 says the actor can only add or remove what they
+  hold themselves, 409 `last_superadmin` gives the last-superadmin message the
+  user roles and memberships panels use, and anything else keeps the generic
+  error. The route's own permission guard answers 403 `forbidden` too; with
+  additions first a save cannot take that permission away between its own
+  writes, so that 403 only appears when another admin revoked it while the
+  editor was open.
+- Add, Remove, Save and both lists are disabled while a save is in flight. If
+  a save fails **and** the re-read fails too, the editor stays locked and asks
+  for a page reload rather than letting the admin edit against a guessed
+  baseline.
+
+The `admin.role.permissions_changed` and `admin.group.roles_changed` rows
+record the delta each write **applied**, read from `RETURNING` on the insert
+and the delete: an item already attached is not reported as `added`, one that
+was never attached is not reported as `removed`, and an item named twice
+appears once. A request that changes nothing still writes its row, with an
+empty delta, so every successful call leaves exactly one row.
+
+Known limitation: the two writes can still interleave with another admin's
+edit, and a DELETE refused after its POST succeeded leaves the addition in
+place (the editor shows it). A single atomic `PATCH { add, remove }` per
+collection is a follow-up. It would run AUTHZ-3 and REVOKE-2 on both sets
+before writing either, and must judge them against the actor's authority
+**before** the save, so that the swap above (replacing the role or permission
+the actor's own authority comes through) still succeeds. It changes the admin
+API and the generated admin SDK, so it is not part of F-38.
+
 ### 8.5 Permissions
 
 The permission **catalog** (`app_permissions`) is platform-global config,
@@ -930,7 +990,7 @@ permissions directly, so they add zero new authority primitives.
 | `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped) |
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
 | `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted`. DELETE carries the AUTHZ-3 subset test against everything the group confers (REVOKE-1, F-11): 403 `forbidden` and an `admin.group.delete_denied` row |
-| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed`. A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
+| `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed` (records the applied delta, F-38). A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1). The Roles editor saves POST-then-DELETE, as described in §8.4 |
 | `GET/POST/DELETE /groups/[id]/members` | `.read` / `admin.groups.assign` | A user may be added only with an active membership in the group's org; `admin.group.members_added` / `.members_removed`. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1) |
 
 **Group revocation is bounded by the same guard as the grant (REVOKE-1).** The

@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { useSwitchLocale } from "@/components/i18n/use-switch-locale";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -25,6 +26,12 @@ import { updatePreferencesSchema, type UpdatePreferencesInput } from "@/lib/vali
  */
 export interface PreferencesFormProps {
   locales: string[];
+  /**
+   * The deployment's zone, which "System default" means (F-37): with no saved
+   * zone every page shows times in it, on the server and in the browser alike.
+   * Named in the option so "System default" is not mistaken for the browser's.
+   */
+  systemTimeZone: string;
   initial: {
     preferredLocale: string;
     timeZone: string;
@@ -53,10 +60,13 @@ function listTimeZones(): string[] {
   }
 }
 
-export function PreferencesForm({ locales, initial }: PreferencesFormProps) {
+export function PreferencesForm({ locales, systemTimeZone, initial }: PreferencesFormProps) {
   const t = useTranslations("account");
   const tCommon = useTranslations("common");
   const router = useRouter();
+  const locale = useLocale();
+  // The server already stored the language, so the switch must not persist it again.
+  const { switchLocale } = useSwitchLocale();
 
   const hydrated = useHydrated();
   /**
@@ -122,6 +132,19 @@ export function PreferencesForm({ locales, initial }: PreferencesFormProps) {
       });
       if (res.ok) {
         setSaved(true);
+        // F-37: saving a new language used to leave the whole UI in the old
+        // one, because the URL segment, not the stored preference, picks the
+        // request locale. Move to the saved language, on this same page with
+        // its query and fragment (the F-35 switch). Only when the user changed
+        // the field: a save that only touched the time zone keeps a language
+        // chosen in the URL.
+        const language = values.preferredLocale;
+        if (language !== initialValues.preferredLocale && language !== locale) {
+          switchLocale(language);
+          return;
+        }
+        // A new zone or format re-renders every server component and, through
+        // the providers the layout feeds, every client one.
         router.refresh();
         return;
       }
@@ -169,7 +192,7 @@ export function PreferencesForm({ locales, initial }: PreferencesFormProps) {
               <FormLabel>{t("fields.timeZone")}</FormLabel>
               <FormControl>
                 <select className={SELECT_CLASS} {...field} value={field.value ?? ""}>
-                  <option value="">{t("fields.system")}</option>
+                  <option value="">{t("fields.systemTimeZone", { zone: systemTimeZone })}</option>
                   {timeZones.map((tz) => (
                     <option key={tz} value={tz}>
                       {tz}

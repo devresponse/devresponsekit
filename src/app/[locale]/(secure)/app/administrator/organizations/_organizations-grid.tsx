@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 
@@ -45,13 +46,9 @@ export function AdministratorOrganizationsGrid({
   const t = useTranslations("administrator.orgs");
   const tErr = useTranslations("administrator.errors");
   const tGrid = useTranslations("administrator.grid");
-  const intlLocale = useLocale();
   const dialogs = useDialogs();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
-    [intlLocale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   // Reload key — bumped after every successful delete so the grid
   // re-fetches without a full page reload.
@@ -138,7 +135,7 @@ export function AdministratorOrganizationsGrid({
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.createdAt"),
-        cell: ({ row }) => formatDate(row.original.created_at, dateFormatter),
+        cell: ({ row }) => format.date(row.original.created_at),
       },
       ...(canDelete
         ? [
@@ -162,7 +159,7 @@ export function AdministratorOrganizationsGrid({
           ]
         : []),
     ],
-    [t, locale, dateFormatter, canDelete, onDelete],
+    [t, locale, format, canDelete, onDelete],
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(
@@ -199,9 +196,4 @@ export function AdministratorOrganizationsGrid({
       />
     </div>
   );
-}
-
-function formatDate(value: string, formatter: Intl.DateTimeFormat): string {
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : formatter.format(d);
 }

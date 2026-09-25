@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,16 +69,8 @@ export function AdministratorAuditGrid({
   showToolbar = true,
 }: AdministratorAuditGridProps = {}) {
   const t = useTranslations("administrator.audit");
-  const intlLocale = useLocale();
-
-  const dateFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(intlLocale, {
-        dateStyle: "medium",
-        timeStyle: "medium",
-      }),
-    [intlLocale],
-  );
+  // F-37: the viewer's zone and date format, to the second.
+  const format = useAppFormatter();
 
   const [openRow, setOpenRow] = useState<AuditRow | null>(null);
 
@@ -87,14 +80,11 @@ export function AdministratorAuditGrid({
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.createdAt"),
-        cell: ({ row }) => {
-          const d = new Date(row.original.created_at);
-          return (
-            <span className="text-xs whitespace-nowrap">
-              {Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d)}
-            </span>
-          );
-        },
+        cell: ({ row }) => (
+          <span className="text-xs whitespace-nowrap">
+            {format.dateTime(row.original.created_at, { seconds: true })}
+          </span>
+        ),
       },
       {
         id: "event_type",
@@ -162,7 +152,7 @@ export function AdministratorAuditGrid({
         ),
       },
     ],
-    [t, dateFormatter],
+    [t, format],
   );
 
   return (

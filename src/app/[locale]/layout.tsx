@@ -8,6 +8,8 @@ import { routing } from "@/i18n/routing";
 import { getBrand } from "@/config/brand";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { ThemeScript } from "@/components/theme/theme-script";
+import { FormatPreferencesProvider } from "@/components/i18n/format-preferences";
+import { getViewerFormatPreferences } from "@/lib/format/viewer-format.server";
 import type { ReactNode } from "react";
 
 const brand = getBrand();
@@ -45,10 +47,16 @@ export const viewport: Viewport = {
  * has its own minimal root layout in `(root)/`.
  *
  * Minimal per §28.1: HTML scaffold, theme + locale providers only — no
- * secure-menu fetches, no user-specific data. Validates the locale
- * segment and provides translated messages to all descendants (public,
- * auth, and secure routes). Unknown locales 404 instead of falling back
- * so URLs remain unambiguous.
+ * secure-menu fetches. Validates the locale segment and provides translated
+ * messages to all descendants (public, auth, and secure routes). Unknown
+ * locales 404 instead of falling back so URLs remain unambiguous.
+ *
+ * The one per-user input is the viewer's display format (F-37): the saved
+ * time zone, date format and number format, which the locale providers carry
+ * to every client component. `getViewerFormatPreferences` reads no session
+ * and no DB for a signed-out request, is shared with next-intl's request
+ * config (one lookup per request), and falls back to the defaults rather
+ * than fail the page.
  */
 export default async function LocaleLayout({
   children,
@@ -68,6 +76,7 @@ export default async function LocaleLayout({
   setRequestLocale(locale);
 
   const messages = await getMessages({ locale });
+  const formatPreferences = await getViewerFormatPreferences();
 
   // Per-request CSP nonce minted in `proxy.ts`. The server `ThemeScript` renders
   // an inline anti-flash <script>; under the enforcing (production) policy that
@@ -82,8 +91,19 @@ export default async function LocaleLayout({
       <body>
         <ThemeScript nonce={nonce} />
         <ThemeProvider>
-          <NextIntlClientProvider locale={locale} messages={messages}>
-            <div data-locale={locale}>{children}</div>
+          {/* F-37: the same zone next-intl's request config returns, passed
+              explicitly so the client formats in the zone the server used. */}
+          <NextIntlClientProvider
+            locale={locale}
+            messages={messages}
+            timeZone={formatPreferences.timeZone}
+          >
+            <FormatPreferencesProvider
+              dateFormat={formatPreferences.dateFormat}
+              numberLocale={formatPreferences.numberLocale}
+            >
+              <div data-locale={locale}>{children}</div>
+            </FormatPreferencesProvider>
           </NextIntlClientProvider>
         </ThemeProvider>
       </body>

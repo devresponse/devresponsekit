@@ -70,10 +70,11 @@ describe("GET /api/administrator/metrics", () => {
     expect(body.registrationsDaily).toBeDefined();
     expect(body.loginsDaily).toBeDefined();
     expect(body.auditEventsDaily).toBeDefined();
-    // System-wide → called with NO org id.
-    expect(dailyRegistrations).toHaveBeenCalledWith();
-    expect(dailyLogins).toHaveBeenCalledWith();
-    expect(dailyAuditEvents).toHaveBeenCalledWith();
+    // System-wide → called with NO org id. The API counts UTC days (F-37:
+    // only the dashboard asks for the viewer's zone).
+    expect(dailyRegistrations).toHaveBeenCalledWith(undefined, { timeZone: "UTC" });
+    expect(dailyLogins).toHaveBeenCalledWith(undefined, { timeZone: "UTC" });
+    expect(dailyAuditEvents).toHaveBeenCalledWith({ timeZone: "UTC" });
   });
 
   it("ORG ADMIN gets only their org's series — never system data or most-active-orgs", async () => {
@@ -85,9 +86,9 @@ describe("GET /api/administrator/metrics", () => {
     expect(body.scope).toBe("organization");
     expect(body.organizationId).toBe("org-7");
     expect(body.mostActiveOrgs).toBeUndefined();
-    // Org-scoped → called WITH their org id, not the system (no-arg) form.
-    expect(dailyRegistrations).toHaveBeenCalledWith("org-7");
-    expect(dailyLogins).toHaveBeenCalledWith("org-7");
+    // Org-scoped → called WITH their org id, not the system (no-org) form.
+    expect(dailyRegistrations).toHaveBeenCalledWith("org-7", { timeZone: "UTC" });
+    expect(dailyLogins).toHaveBeenCalledWith("org-7", { timeZone: "UTC" });
     expect(signupsPerOrg).not.toHaveBeenCalled();
     // Total audit volume is SUPERADMIN-only — never served to an org admin.
     expect(body.auditEventsDaily).toBeUndefined();

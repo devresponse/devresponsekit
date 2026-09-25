@@ -22,7 +22,7 @@ The admin console's landing page: headline counts for every managed entity plus 
 ## Key elements
 - Admin console chrome: a nested sidebar grouped into **Overview / Identity / Access / Tenancy / Apps / APIs / Communication / Activity**, mirrored by a horizontal tab bar.
 - Stat cards: Users (4, with active/pending split), Organizations (1), Roles (4), Permissions (38), Enterprise applications (3).
-- **Insights** (last 7 days, scoped to the viewer's access): most active organizations, daily registrations, daily logins, daily audit events — each as a small bar chart with an accompanying data table.
+- **Insights** (last 7 days, scoped to the viewer's access): most active organizations, daily registrations, daily logins, daily audit events — each as a small bar chart with an accompanying data table. A day is a calendar day in the time zone saved in Account → Preferences (the deployment's zone when none is saved), so the last bar is your today and each bar agrees with the times in the **Latest** tables.
 - **Latest** tables: registrations, sign-ins (with IP), audit events, organizations, with "View all" links into the corresponding list pages.
 
 ## Actions available

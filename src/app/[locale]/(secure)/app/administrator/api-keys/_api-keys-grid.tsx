@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useDialogs } from "@/components/ui/dialog-manager";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
+import type { AppFormatter } from "@/lib/format/app-format";
 import {
   Sheet,
   SheetContent,
@@ -62,13 +64,9 @@ export function AdministratorApiKeysGrid({
 }) {
   const t = useTranslations("administrator.apiKeys");
   const tGrid = useTranslations("administrator.grid");
-  const intlLocale = useLocale();
   const dialogs = useDialogs();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium", timeStyle: "short" }),
-    [intlLocale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [reloadKey, setReloadKey] = useState(0);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -183,19 +181,19 @@ export function AdministratorApiKeysGrid({
         id: "last_used_at",
         accessorKey: "last_used_at",
         header: () => t("columns.lastUsed"),
-        cell: ({ row }) => formatDate(row.original.last_used_at, dateFormatter, t("never")),
+        cell: ({ row }) => formatWhen(row.original.last_used_at, format, t("never")),
       },
       {
         id: "expires_at",
         accessorKey: "expires_at",
         header: () => t("columns.expires"),
-        cell: ({ row }) => formatDate(row.original.expires_at, dateFormatter, t("noExpiry")),
+        cell: ({ row }) => formatWhen(row.original.expires_at, format, t("noExpiry")),
       },
       {
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.created"),
-        cell: ({ row }) => formatDate(row.original.created_at, dateFormatter, "—"),
+        cell: ({ row }) => formatWhen(row.original.created_at, format, "—"),
       },
       {
         id: "actions",
@@ -235,7 +233,7 @@ export function AdministratorApiKeysGrid({
         ),
       },
     ],
-    [t, locale, dateFormatter, canManage, onRotate, onRevoke],
+    [t, locale, format, canManage, onRotate, onRevoke],
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(
@@ -272,9 +270,7 @@ export function AdministratorApiKeysGrid({
       />
       <Sheet open={detailId !== null} onOpenChange={(open) => !open && setDetailId(null)}>
         <SheetContent side="right" className="w-full sm:max-w-xl">
-          {detailId ? (
-            <ApiKeyDetail key={detailId} id={detailId} t={t} dateFormatter={dateFormatter} />
-          ) : null}
+          {detailId ? <ApiKeyDetail key={detailId} id={detailId} t={t} /> : null}
         </SheetContent>
       </Sheet>
       <ApiKeyRevealDialog
@@ -309,12 +305,11 @@ interface ApiKeyDetailData {
 function ApiKeyDetail({
   id,
   t,
-  dateFormatter,
 }: {
   id: string;
   t: ReturnType<typeof useTranslations<"administrator.apiKeys">>;
-  dateFormatter: Intl.DateTimeFormat;
 }) {
+  const format = useAppFormatter();
   // Fresh instance per key id (the caller passes `key={id}`), so initial
   // state is already null/false — the effect only writes from its async
   // callbacks, never synchronously.
@@ -371,20 +366,18 @@ function ApiKeyDetail({
         </Field>
         <Field label={t("detail.owner")}>{data.owner_email ?? data.app_user_id}</Field>
         <Field label={t("detail.organization")}>{data.organization_id ?? "—"}</Field>
-        <Field label={t("detail.created")}>{formatDate(data.created_at, dateFormatter, "—")}</Field>
+        <Field label={t("detail.created")}>{formatWhen(data.created_at, format, "—")}</Field>
         <Field label={t("detail.createdBy")}>{data.created_by_email ?? "—"}</Field>
         <Field label={t("detail.lastUsed")}>
-          {formatDate(data.last_used_at, dateFormatter, t("never"))}
+          {formatWhen(data.last_used_at, format, t("never"))}
         </Field>
         <Field label={t("detail.lastUsedIp")}>{data.last_used_ip ?? "—"}</Field>
         <Field label={t("detail.expires")}>
-          {formatDate(data.expires_at, dateFormatter, t("noExpiry"))}
+          {formatWhen(data.expires_at, format, t("noExpiry"))}
         </Field>
         {data.status !== "active" ? (
           <>
-            <Field label={t("detail.revoked")}>
-              {formatDate(data.revoked_at, dateFormatter, "—")}
-            </Field>
+            <Field label={t("detail.revoked")}>{formatWhen(data.revoked_at, format, "—")}</Field>
             <Field label={t("detail.revokedBy")}>{data.revoked_by_email ?? "—"}</Field>
             <Field label={t("detail.revokedReason")}>{data.revoked_reason ?? "—"}</Field>
           </>
@@ -421,12 +414,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function formatDate(
-  value: string | null,
-  formatter: Intl.DateTimeFormat,
-  fallback: string,
-): string {
-  if (!value) return fallback;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : formatter.format(d);
+/** A nullable timestamp: `fallback` when absent ("Never", "No expiry", "—"). */
+function formatWhen(value: string | null, format: AppFormatter, fallback: string): string {
+  return value ? format.dateTime(value) : fallback;
 }

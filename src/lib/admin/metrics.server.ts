@@ -8,9 +8,16 @@ import { LOGIN_EVENT_TYPE } from "@/lib/auth-login-audit.server";
  *
  * Every query is bounded (a `days`-day window, top-N orgs), parameterized,
  * and runs against existing indexes (`app_users.created_at`,
- * `app_audit_events (event_type, created_at)`). Day buckets are UTC. The
- * per-day grouped counts are zero-filled onto a complete day spine in JS so a
- * 7-day chart always has 7 bars even when some days have no data.
+ * `app_audit_events (event_type, created_at)`). The per-day grouped counts are
+ * zero-filled onto a complete day spine in JS so a 7-day chart always has 7
+ * bars even when some days have no data.
+ *
+ * A "day" is a calendar day in the window's time zone ({@link DayWindow}):
+ * UTC unless the caller names one. The Administrator overview passes the
+ * viewer's saved zone (F-37), so its daily charts count the same days, and
+ * put "today" at the same moment, as the activity lists beside them, which
+ * the app formatter shows in that zone. The JSON API
+ * (`GET /api/administrator/metrics`) keeps UTC days.
  *
  * Authorization is the caller's responsibility (the route/page): system-wide
  * series are SUPERADMIN-only; org-scoped series take the org admin's
@@ -18,7 +25,7 @@ import { LOGIN_EVENT_TYPE } from "@/lib/auth-login-audit.server";
  */
 
 export interface DailyCount {
-  /** `YYYY-MM-DD` (UTC). */
+  /** `YYYY-MM-DD`: a calendar day in the window's zone (UTC by default). */
   date: string;
   count: number;
 }
@@ -29,49 +36,112 @@ export interface OrgSignupCount {
   count: number;
 }
 
+/** The reporting window: how many days, and whose calendar they are. */
+export interface DayWindow {
+  /** Days in the window, today included. Default {@link DEFAULT_WINDOW_DAYS}. */
+  days?: number;
+  /** IANA zone whose calendar days are counted. Default `"UTC"`. */
+  timeZone?: string;
+}
+
 export const DEFAULT_WINDOW_DAYS = 7;
 export const DEFAULT_TOP_ORGS = 10;
 
 /* ----------------------------- date helpers ----------------------------- */
 
-function utcMidnight(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+/** An ISO-8601 offset zone as ICU spells it (`"+05:45"`). */
+const OFFSET_ZONE = /^[+-]\d{2}:\d{2}$/;
+
+/**
+ * `timeZone`, checked against this runtime's ICU: an offset zone gets its one
+ * spelling (`"+0545"` → `"+05:45"`, see {@link zoneSql}); a named zone is kept
+ * as given, since Postgres knows current and legacy names alike (ICU would
+ * rename `Asia/Kathmandu` to `Asia/Katmandu`). A zone ICU does not know
+ * becomes UTC; callers pass zones `resolveFormatPreferences` already
+ * validated, so that is only a guard.
+ */
+export function canonicalTimeZone(timeZone: string): string {
+  try {
+    const resolved = new Intl.DateTimeFormat("en-US", { timeZone }).resolvedOptions().timeZone;
+    return OFFSET_ZONE.test(resolved) ? resolved : timeZone;
+  } catch {
+    return "UTC";
+  }
 }
 
-/** Inclusive start of the window: midnight UTC, `days - 1` days before today. */
-export function windowStart(days: number, now: Date = new Date()): Date {
-  const start = utcMidnight(now);
-  start.setUTCDate(start.getUTCDate() - (days - 1));
-  return start;
+/** `YYYY-MM-DD`: the calendar day `now` falls on in `timeZone`. */
+export function calendarDayIn(now: Date, timeZone: string): string {
+  const parts: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  const format = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  for (const part of format.formatToParts(now)) parts[part.type] = part.value;
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-/** `YYYY-MM-DD` (UTC) for each day in the window, oldest → today. */
-export function daySpine(days: number, now: Date = new Date()): string[] {
-  const start = windowStart(days, now);
+/** `YYYY-MM-DD` for each day in the window, oldest → today, in `timeZone`. */
+export function daySpine(days: number, now: Date = new Date(), timeZone = "UTC"): string[] {
+  // Calendar arithmetic on the DATE: the zone only decides which day "today" is.
+  const today = new Date(`${calendarDayIn(now, timeZone)}T00:00:00Z`);
   return Array.from({ length: days }, (_, i) => {
-    const d = new Date(start);
-    d.setUTCDate(d.getUTCDate() + i);
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - (days - 1 - i));
     return d.toISOString().slice(0, 10);
   });
 }
 
 /** Maps grouped `{ day, count }` rows onto the full spine, filling gaps with 0. */
 export function fillSpine(
-  days: number,
-  rows: ReadonlyArray<{ day: string; count: number }>,
-  now?: Date,
+  spine: readonly string[],
+  rows: ReadonlyArray<{ day: string; count: number | string }>,
 ): DailyCount[] {
-  const byDay = new Map(rows.map((r) => [r.day, r.count]));
-  return daySpine(days, now).map((date) => ({ date, count: byDay.get(date) ?? 0 }));
+  const byDay = new Map(rows.map((r) => [r.day, Number(r.count)]));
+  return spine.map((date) => ({ date, count: byDay.get(date) ?? 0 }));
 }
 
-/** SQL day bucket for a `timestamptz` column, normalized to a UTC `YYYY-MM-DD`. */
-function dayBucket(column: string) {
-  return sql<string>`to_char(date_trunc('day', ${sql.ref(column)} at time zone 'UTC'), 'YYYY-MM-DD')`;
+/**
+ * The zone as Postgres must read it. Postgres takes a numeric zone string
+ * POSIX-style, positive WEST of Greenwich, so `'+05:45'` would count Nepal's
+ * days as UTC-5:45; ICU, and the app formatter, read it ISO-style. As an
+ * INTERVAL Postgres uses the ISO sign, so an offset zone goes as one. A named
+ * zone goes as text (Postgres matches names case-insensitively, links
+ * included).
+ */
+function zoneSql(timeZone: string) {
+  return OFFSET_ZONE.test(timeZone) ? sql`${timeZone}::interval` : sql`${timeZone}::text`;
 }
+
+/** SQL day bucket for a `timestamptz` column: its calendar day in `timeZone`, `YYYY-MM-DD`. */
+function dayBucket(column: string, timeZone: string) {
+  return sql<string>`to_char(${sql.ref(column)} at time zone ${zoneSql(timeZone)}, 'YYYY-MM-DD')`;
+}
+
+/**
+ * The window for one query: its spine and the SQL instant it opens at
+ * (midnight of the first day in the zone, computed by Postgres, which also
+ * resolves a DST change at midnight). The instant is a constant, so the `created_at`
+ * index still serves the range. One `now` feeds both, so the rows and the
+ * spine cannot straddle a midnight between them.
+ */
+function openWindow(range: DayWindow = {}) {
+  const days = range.days ?? DEFAULT_WINDOW_DAYS;
+  const timeZone = canonicalTimeZone(range.timeZone ?? "UTC");
+  const spine = daySpine(days, new Date(), timeZone);
+  const since = sql<Date>`(${spine[0]}::timestamp at time zone ${zoneSql(timeZone)})`;
+  return { timeZone, spine, since };
+}
+
 const COUNT = sql<number>`count(*)::int`;
 
 /* -------------------------------- metrics ------------------------------- */
+
+// Every daily query GROUPs BY the output column `day`, not by repeating the
+// bucket expression: the zone is a bind parameter, and Postgres cannot tell
+// that `$1` in SELECT and `$4` in GROUP BY are the same value, so a repeated
+// expression fails with 42803 ("must appear in the GROUP BY clause").
 
 /**
  * Daily user registrations over the window. System-wide (new `app_users`)
@@ -79,27 +149,24 @@ const COUNT = sql<number>`count(*)::int`;
  */
 export async function dailyRegistrations(
   organizationId?: string,
-  days: number = DEFAULT_WINDOW_DAYS,
+  range?: DayWindow,
 ): Promise<DailyCount[]> {
-  const since = windowStart(days);
+  const { timeZone, spine, since } = openWindow(range);
   const rows = organizationId
     ? await db
         .selectFrom("app_organization_memberships")
-        .select([dayBucket("created_at").as("day"), COUNT.as("count")])
+        .select([dayBucket("created_at", timeZone).as("day"), COUNT.as("count")])
         .where("organization_id", "=", organizationId)
         .where(sql<boolean>`created_at >= ${since}`)
-        .groupBy(dayBucket("created_at"))
+        .groupBy("day")
         .execute()
     : await db
         .selectFrom("app_users")
-        .select([dayBucket("created_at").as("day"), COUNT.as("count")])
+        .select([dayBucket("created_at", timeZone).as("day"), COUNT.as("count")])
         .where(sql<boolean>`created_at >= ${since}`)
-        .groupBy(dayBucket("created_at"))
+        .groupBy("day")
         .execute();
-  return fillSpine(
-    days,
-    rows.map((r) => ({ day: r.day, count: Number(r.count) })),
-  );
+  return fillSpine(spine, rows);
 }
 
 /**
@@ -110,9 +177,9 @@ export async function dailyRegistrations(
  */
 export async function dailyLogins(
   organizationId?: string,
-  days: number = DEFAULT_WINDOW_DAYS,
+  range?: DayWindow,
 ): Promise<DailyCount[]> {
-  const since = windowStart(days);
+  const { timeZone, spine, since } = openWindow(range);
   const rows = organizationId
     ? await db
         .selectFrom("app_audit_events as ae")
@@ -120,22 +187,19 @@ export async function dailyLogins(
         .innerJoin("app_organization_memberships as m", (join) =>
           join.onRef("m.app_user_id", "=", "u.id").on("m.organization_id", "=", organizationId),
         )
-        .select([dayBucket("ae.created_at").as("day"), COUNT.as("count")])
+        .select([dayBucket("ae.created_at", timeZone).as("day"), COUNT.as("count")])
         .where("ae.event_type", "=", LOGIN_EVENT_TYPE)
         .where(sql<boolean>`ae.created_at >= ${since}`)
-        .groupBy(dayBucket("ae.created_at"))
+        .groupBy("day")
         .execute()
     : await db
         .selectFrom("app_audit_events")
-        .select([dayBucket("created_at").as("day"), COUNT.as("count")])
+        .select([dayBucket("created_at", timeZone).as("day"), COUNT.as("count")])
         .where("event_type", "=", LOGIN_EVENT_TYPE)
         .where(sql<boolean>`created_at >= ${since}`)
-        .groupBy(dayBucket("created_at"))
+        .groupBy("day")
         .execute();
-  return fillSpine(
-    days,
-    rows.map((r) => ({ day: r.day, count: Number(r.count) })),
-  );
+  return fillSpine(spine, rows);
 }
 
 /**
@@ -144,18 +208,15 @@ export async function dailyLogins(
  * System-wide only: there is no org-scoped variant, so the call site must keep
  * this SUPERADMIN-only. Runs on the `app_audit_events (created_at)` index.
  */
-export async function dailyAuditEvents(days: number = DEFAULT_WINDOW_DAYS): Promise<DailyCount[]> {
-  const since = windowStart(days);
+export async function dailyAuditEvents(range?: DayWindow): Promise<DailyCount[]> {
+  const { timeZone, spine, since } = openWindow(range);
   const rows = await db
     .selectFrom("app_audit_events")
-    .select([dayBucket("created_at").as("day"), COUNT.as("count")])
+    .select([dayBucket("created_at", timeZone).as("day"), COUNT.as("count")])
     .where(sql<boolean>`created_at >= ${since}`)
-    .groupBy(dayBucket("created_at"))
+    .groupBy("day")
     .execute();
-  return fillSpine(
-    days,
-    rows.map((r) => ({ day: r.day, count: Number(r.count) })),
-  );
+  return fillSpine(spine, rows);
 }
 
 /**
@@ -164,10 +225,10 @@ export async function dailyAuditEvents(days: number = DEFAULT_WINDOW_DAYS): Prom
  * name for a stable order.
  */
 export async function signupsPerOrg(
-  days: number = DEFAULT_WINDOW_DAYS,
+  range?: DayWindow,
   limit: number = DEFAULT_TOP_ORGS,
 ): Promise<OrgSignupCount[]> {
-  const since = windowStart(days);
+  const { since } = openWindow(range);
   const rows = await db
     .selectFrom("app_organization_memberships as m")
     .innerJoin("app_organizations as o", "o.id", "m.organization_id")

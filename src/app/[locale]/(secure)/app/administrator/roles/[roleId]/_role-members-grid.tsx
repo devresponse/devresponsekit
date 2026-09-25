@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
 
 /**
@@ -26,12 +27,8 @@ interface MemberRow {
 export function RoleMembersGrid({ roleId }: { roleId: string }) {
   const t = useTranslations("administrator.roles.members");
   const locale = useLocale();
-  const intlLocale = useLocale();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
-    [intlLocale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const columns = useMemo<GridColumnDef<MemberRow>[]>(
     () => [
@@ -65,13 +62,10 @@ export function RoleMembersGrid({ roleId }: { roleId: string }) {
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.assignedAt"),
-        cell: ({ row }) => {
-          const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
-        },
+        cell: ({ row }) => format.date(row.original.created_at),
       },
     ],
-    [t, locale, dateFormatter],
+    [t, locale, format],
   );
 
   return (

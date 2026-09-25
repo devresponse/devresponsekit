@@ -22,6 +22,10 @@ export const dynamic = "force-dynamic";
  * `admin.audit.read` since logins derive from audit events. The actual
  * scoping/visibility decision lives in {@link selectDashboardMetrics}, shared
  * with the server-rendered dashboard so API and UI cannot diverge.
+ *
+ * The daily series are UTC calendar days. The dashboard asks for the same
+ * series in the viewer's saved zone instead (F-37). This route keeps UTC, so
+ * a script reads the same days whoever's credential it runs under.
  */
 export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.users.read");

@@ -8,7 +8,7 @@ import { getMenuIcon } from "@/components/navigation/menu-icons";
  *
  * Presentational KPI card for the Administrator overview
  * (docs/admin-manager.md §8.0). Pure display — receives an already
- * formatted-ready value and localized strings; data access lives in
+ * formatted value and localized strings; data access lives in
  * `src/lib/admin/overview.server.ts`.
  *
  * Server-compatible. When `href` is given the whole card links to the
@@ -18,8 +18,13 @@ import { getMenuIcon } from "@/components/navigation/menu-icons";
 export interface MetricCardProps {
   /** Localized metric label, e.g. "Users". */
   label: string;
-  /** The headline number. Formatted with the active locale. */
-  value: number;
+  /**
+   * The headline number, already formatted by the caller's app formatter
+   * (`format.number`), so it follows the viewer's number-format preference
+   * (F-37). The card used to build its own `Intl.NumberFormat(locale)`,
+   * which ignored that preference.
+   */
+  value: string;
   /** Optional localized secondary line, e.g. "12 active · 3 pending". */
   hint?: string;
   /** Icon NAME from the menu-icons allow-list (decorative). */
@@ -53,9 +58,7 @@ export function MetricCard({ label, value, hint, icon, href, locale }: MetricCar
         {iconElement}
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-semibold tabular-nums">
-          {new Intl.NumberFormat(locale).format(value)}
-        </div>
+        <div className="text-2xl font-semibold tabular-nums">{value}</div>
         {hint ? <p className="text-muted-foreground mt-1 text-xs">{hint}</p> : null}
       </CardContent>
     </Card>

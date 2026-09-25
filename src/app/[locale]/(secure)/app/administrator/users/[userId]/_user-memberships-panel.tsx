@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
 
@@ -34,11 +35,8 @@ export function UserMembershipsPanel({
   const tErr = useTranslations("administrator.errors");
   const locale = useLocale();
   const dialogs = useDialogs();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
-    [locale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [reloadKey, setReloadKey] = useState(0);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -112,10 +110,7 @@ export function UserMembershipsPanel({
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.joinedAt"),
-        cell: ({ row }) => {
-          const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
-        },
+        cell: ({ row }) => format.date(row.original.created_at),
       },
       ...(canUpdate
         ? [
@@ -139,7 +134,7 @@ export function UserMembershipsPanel({
           ]
         : []),
     ],
-    [t, locale, dateFormatter, canUpdate, onRemove],
+    [t, locale, format, canUpdate, onRemove],
   );
 
   return (

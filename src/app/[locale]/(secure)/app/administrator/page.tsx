@@ -13,6 +13,8 @@ import {
 } from "@/lib/admin/dashboard-metrics.server";
 import { resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { ANY_ADMIN_PERMISSION, checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import type { AppFormatter } from "@/lib/format/app-format";
+import { getAppFormatter, getViewerFormatPreferences } from "@/lib/format/viewer-format.server";
 import { MetricBarChart, type MetricBarDatum } from "./_components/metric-bar-chart";
 import { MetricCard, type MetricCardProps } from "./_components/metric-card";
 import { OverviewListCard, type OverviewListCardProps } from "./_components/overview-list-card";
@@ -74,6 +76,11 @@ export default async function AdministratorPage({
 }) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "administrator.overview" });
+  // F-37: the viewer's zone and formats, the same ones the client grids use.
+  // The daily charts count calendar days in that same zone, so "today" and
+  // each bar's day agree with the activity times listed beside them.
+  const format = await getAppFormatter(locale);
+  const { timeZone } = await getViewerFormatPreferences();
 
   // The layout already guarantees *some* admin permission; this re-read
   // is request-cached (React cache on the access context) and gives the
@@ -120,15 +127,15 @@ export default async function AdministratorPage({
     // RBAC scoping (system vs. own-org, per-series visibility) is decided
     // server-side — shared with GET /api/administrator/metrics so the charts
     // and the API can never show different things to the same caller.
-    access ? selectDashboardMetrics(access) : Promise.resolve(null),
+    access ? selectDashboardMetrics(access, { timeZone }) : Promise.resolve(null),
   ]);
 
   const cards = visible
-    .map((d) => toCard(d, metrics, t, locale))
+    .map((d) => toCard(d, metrics, t, locale, format))
     .filter((c): c is MetricCardProps => c !== null);
 
-  const lists = buildActivityLists(activity, t, locale);
-  const insights = dashboardMetrics ? buildInsights(dashboardMetrics, t, locale) : [];
+  const lists = buildActivityLists(activity, t, locale, format);
+  const insights = dashboardMetrics ? buildInsights(dashboardMetrics, t, format) : [];
 
   return (
     <section className="space-y-6 p-6">
@@ -210,12 +217,12 @@ interface InsightChart {
 function buildInsights(
   dashboardMetrics: DashboardMetrics,
   t: Awaited<ReturnType<typeof getTranslations>>,
-  locale: string,
+  format: AppFormatter,
 ): InsightChart[] {
-  const dayLabel = (iso: string) =>
-    new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" }).format(
-      new Date(`${iso}T00:00:00Z`),
-    );
+  // The series are calendar days in the viewer's zone ("2026-06-13"; see
+  // selectDashboardMetrics above). The formatter shows a bare date as the day
+  // it names, never shifted by a zone, so each bar keeps the day it counted.
+  const dayLabel = (day: string) => format.date(day, { style: "monthDay" });
   const daySeries = (series: { date: string; count: number }[]): MetricBarDatum[] =>
     series.map((d) => ({ label: dayLabel(d.date), value: d.count }));
 
@@ -280,13 +287,12 @@ function buildActivityLists(
   activity: OverviewActivity,
   t: Awaited<ReturnType<typeof getTranslations>>,
   locale: string,
+  format: AppFormatter,
 ): OverviewListCardProps[] {
-  const formatTime = (iso: string) =>
-    new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
-      new Date(iso),
-    );
+  // F-37: these rows used to render in the SERVER's zone (UTC in production)
+  // while the Users grid showed the same registration in the browser's.
   const time = (iso: string) => (
-    <span className="text-muted-foreground whitespace-nowrap">{formatTime(iso)}</span>
+    <span className="text-muted-foreground whitespace-nowrap">{format.dateTime(iso)}</span>
   );
 
   const lists: OverviewListCardProps[] = [];
@@ -390,6 +396,7 @@ function toCard(
   metrics: OverviewMetrics,
   t: Awaited<ReturnType<typeof getTranslations>>,
   locale: string,
+  format: AppFormatter,
 ): MetricCardProps | null {
   const base = {
     icon: descriptor.icon,
@@ -403,7 +410,7 @@ function toCard(
         ? {
             ...base,
             label: t("metrics.users"),
-            value: metrics.users.total,
+            value: format.number(metrics.users.total),
             hint: t("metrics.usersHint", {
               active: metrics.users.active,
               pending: metrics.users.pendingApproval,
@@ -412,22 +419,30 @@ function toCard(
         : null;
     case "organizations":
       return metrics.organizations
-        ? { ...base, label: t("metrics.organizations"), value: metrics.organizations.total }
+        ? {
+            ...base,
+            label: t("metrics.organizations"),
+            value: format.number(metrics.organizations.total),
+          }
         : null;
     case "roles":
       return metrics.roles
-        ? { ...base, label: t("metrics.roles"), value: metrics.roles.total }
+        ? { ...base, label: t("metrics.roles"), value: format.number(metrics.roles.total) }
         : null;
     case "permissions":
       return metrics.permissions
-        ? { ...base, label: t("metrics.permissions"), value: metrics.permissions.total }
+        ? {
+            ...base,
+            label: t("metrics.permissions"),
+            value: format.number(metrics.permissions.total),
+          }
         : null;
     case "enterpriseApps":
       return metrics.enterpriseApps
         ? {
             ...base,
             label: t("metrics.enterpriseApps"),
-            value: metrics.enterpriseApps.total,
+            value: format.number(metrics.enterpriseApps.total),
             hint: t("metrics.enterpriseAppsHint", {
               available: metrics.enterpriseApps.available,
             }),

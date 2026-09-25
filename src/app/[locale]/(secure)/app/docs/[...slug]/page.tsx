@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
+import { getAppFormatter } from "@/lib/format/viewer-format.server";
 import { canViewDoc } from "@/lib/docs/catalog.server";
 import { getDocumentSource } from "@/lib/docs/source/index.server";
 import { renderDocument } from "@/lib/docs/render/pipeline.server";
@@ -46,12 +47,10 @@ export default async function DocPage({
   });
 
   const t = await getTranslations({ locale, namespace: "docs" });
+  // F-37: the file's mtime, in the viewer's zone and date format.
+  const format = await getAppFormatter(locale);
   const updatedLabel = doc.entry.updatedAt
-    ? t("lastUpdated", {
-        date: new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(
-          new Date(doc.entry.updatedAt),
-        ),
-      })
+    ? t("lastUpdated", { date: format.date(doc.entry.updatedAt, { style: "long" }) })
     : null;
 
   return (

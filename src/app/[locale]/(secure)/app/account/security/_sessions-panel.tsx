@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { authClient } from "@/lib/auth-client";
@@ -45,7 +46,8 @@ interface ClientSession {
 
 export function AccountSessionsPanel() {
   const t = useTranslations("account");
-  const locale = useLocale();
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [sessions, setSessions] = useState<ClientSession[] | null>(null);
   const [currentToken, setCurrentToken] = useState<string | null>(null);
@@ -54,14 +56,8 @@ export function AccountSessionsPanel() {
   const [reloadToken, setReloadToken] = useState(0);
 
   const formatExpires = useCallback(
-    (value: string | Date | null | undefined): string => {
-      if (!value) return "—";
-      const d = new Date(value);
-      return Number.isNaN(d.getTime())
-        ? String(value)
-        : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(d);
-    },
-    [locale],
+    (value: string | Date | null | undefined): string => (value ? format.dateTime(value) : "—"),
+    [format],
   );
 
   useEffect(() => {

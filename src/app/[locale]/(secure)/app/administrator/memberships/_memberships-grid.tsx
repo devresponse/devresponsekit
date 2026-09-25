@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
 
@@ -30,12 +31,8 @@ interface MembershipRow {
 export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
   const t = useTranslations("administrator.memberships");
   const tGrid = useTranslations("administrator.grid");
-  const intlLocale = useLocale();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
-    [intlLocale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const columns = useMemo<GridColumnDef<MembershipRow>[]>(
     () => [
@@ -83,13 +80,10 @@ export function AdministratorMembershipsGrid({ locale }: { locale: string }) {
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.createdAt"),
-        cell: ({ row }) => {
-          const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
-        },
+        cell: ({ row }) => format.date(row.original.created_at),
       },
     ],
-    [t, locale, dateFormatter],
+    [t, locale, format],
   );
 
   const filters = useMemo<GridFilterDescriptor[]>(

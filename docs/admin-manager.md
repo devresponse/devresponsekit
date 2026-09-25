@@ -481,7 +481,9 @@ permission-gated summary in three tiers:
    volume. Series visibility and scoping are decided server-side by
    `selectDashboardMetrics` (`src/lib/admin/dashboard-metrics.server.ts`),
    shared with `GET /api/administrator/metrics` so the charts and the API
-   can never show different data to the same caller.
+   can never show different data to the same caller. The dashboard counts
+   calendar days in the viewer's saved time zone (F-37), so its bars agree
+   with the activity times beside them; the API counts UTC days.
 3. **Recent activity** (`_components/overview-list-card.tsx`) — the latest
    10 registrations, sign-in sessions, audit events, and organizations,
    each gated on its area's read permission. Sessions carry IP addresses,

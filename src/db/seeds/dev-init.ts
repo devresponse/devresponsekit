@@ -190,8 +190,9 @@ function usersForOrg(org: DevOrg): DevUser[] {
 /* ----------------------------- date spreading ---------------------------- */
 
 // Mirrors DEFAULT_WINDOW_DAYS in src/lib/admin/metrics.server.ts — the dashboard
-// charts bucket by UTC day and only look back this many days, so every seeded
-// date is placed inside one of these UTC day buckets to stay in-window.
+// charts bucket by calendar day (UTC unless the viewer saved a time zone) and
+// only look back this many days, so every seeded date is placed inside one of
+// these UTC day buckets to stay in-window.
 const REGISTRATION_WINDOW_DAYS = 7;
 
 /** Midnight UTC of the day `daysAgo` days before `now`'s UTC date. */

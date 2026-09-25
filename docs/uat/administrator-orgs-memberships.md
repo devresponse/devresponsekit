@@ -89,7 +89,7 @@ Seed data you can rely on: default org has `slug` `default` and `is_default = tr
 - Purpose: Paginated table of organizations with member counts. The entry point into per-org administration; the "New organization" call-to-action lives here for a Superadmin.
 - Guard / who can access: `admin.orgs.read` (server-revalidated on top of the layout's any-admin gate). `resolveOrgScope` then bounds the rows: Superadmin sees every org, Org Admin sees only their one org, a null scope yields an empty list.
 - Access matrix: Visitor / Pending / Member / Limited Admin -> cannot see (404 / redirect). Org Admin -> sees their row only, no "New" button. Superadmin -> sees all rows plus "New organization" and per-row "Delete".
-- Preconditions & test data: seeded via `pnpm db:seed:dev` (orgs `org-a/b/c`). Columns rendered: slug (link), name, status, default flag, member count, created date (`_organizations-grid.tsx:97`).
+- Preconditions & test data: seeded via `pnpm db:seed:dev` (orgs `org-a/b/c`). Columns rendered: slug (link), name, status, default flag, member count, created date (`_organizations-grid.tsx:94`).
 
 User stories
 
@@ -145,8 +145,8 @@ Negative & edge cases (each a short numbered check)
 1. Out-of-scope: as `orgadmin@orgb.local`, the list shows only `org-b`; no way to surface `org-a` via search or filter (server scope, `route.ts:49`).
 2. Empty state: an Org Admin whose org has no rows to match a filter sees the grid's empty-state message, not an error.
 3. Loading: on a slow network, a loading skeleton renders before rows appear.
-4. Inline error: if the list endpoint fails, an inline error with `role="alert"` appears; the delete-row error path shows the same alert region (`_organizations-grid.tsx:183`).
-5. Pagination: default page size is 25 (`_organizations-grid.tsx:195`); with fewer rows, no pager controls are needed.
+4. Inline error: if the list endpoint fails, an inline error with `role="alert"` appears; the delete-row error path shows the same alert region (`_organizations-grid.tsx:180`).
+5. Pagination: default page size is 25 (`_organizations-grid.tsx:192`); with fewer rows, no pager controls are needed.
 
 Accessibility: reach and operate the table (search, filters, sort, the slug link, the Delete button) by keyboard only; focus is visible; the inline error region is announced (`role="alert"`).
 i18n: run in `en` and `uk`/`ja`; column headers, status badges, the "New organization" and "Delete" labels, and dates localize; no raw message keys (e.g. no literal `administrator.orgs.columns.slug`) appear.
@@ -228,7 +228,7 @@ User stories
     | 1 | As `orgadmin@orga.local`, open `org-a` → **Members**. | Members are listed, each with a **Remove** button (because you hold `admin.orgs.update`). |
     | 2 | Click **Remove** on a `user5@orga.local` row. | A destructive confirm dialog appears naming the user. |
     | 3 | Confirm the removal. | The dialog closes, the grid refreshes, and the `user5` row is gone. |
-    | 4 | If the remove fails server-side, observe the alert. | An inline error `role="alert"` with the localized "remove error" message is shown (`_organization-members-grid.tsx:136`). |
+    | 4 | If the remove fails server-side, observe the alert. | An inline error `role="alert"` with the localized "remove error" message is shown (`_organization-members-grid.tsx:131`). |
     | 5 | As the Superadmin, open `user5`'s detail → **Roles** and **Groups**. | Nothing from `org-a` is listed (F-12). Any role or group `user5` holds in another org is still there. |
     | 6 | Add `user5` back to `org-a` (`POST .../members`), then re-open **Roles** and **Groups**. | Still nothing from `org-a`: the old roles and groups did not come back. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -330,7 +330,7 @@ i18n: in `uk`/`ja`, tab labels (Members / Providers / Settings), status options,
 - Purpose: A read/search surface across all memberships (org × user), so an operator can answer "which orgs is this user in?" and "who is in this org?" from one place, pivoting to either the org or the user detail.
 - Guard / who can access: `admin.orgs.read`. Rows are org-scoped by `resolveOrgScope`: Superadmin sees every membership; Org Admin sees only their org's memberships; a null scope returns an empty list (`api/administrator/memberships/route.ts:32,50`). This screen is **read-only** — there are no mutation actions on it.
 - Access matrix: Visitor / Pending / Member / Limited Admin -> 404. Org Admin -> their org's memberships only. Superadmin -> all memberships across orgs.
-- Preconditions & test data: `pnpm db:seed:dev`. Cross-org members `multi1..3@shared.local` each appear three times (once per org) for a Superadmin. Columns: organization (link), user (link), status, source, created date (`_memberships-grid.tsx:41`).
+- Preconditions & test data: `pnpm db:seed:dev`. Cross-org members `multi1..3@shared.local` each appear three times (once per org) for a Superadmin. Columns: organization (link), user (link), status, source, created date (`_memberships-grid.tsx:38`).
 
 User stories
 
@@ -372,7 +372,7 @@ Negative & edge cases
 1. Out-of-scope: as `orgadmin@orgb.local`, no `org-a`/`org-c` rows appear regardless of search or the org filter (server scope, `route.ts:50`).
 2. Empty state: a search with no matches shows the grid's empty-state message.
 3. Loading: a skeleton renders before rows load.
-4. Filters: the Status filter offers active / pending_approval / blocked / suspended (`_memberships-grid.tsx:12`); an unmatched filter yields the empty state, not an error.
+4. Filters: the Status filter offers active / pending_approval / blocked / suspended (`_memberships-grid.tsx:13`); an unmatched filter yields the empty state, not an error.
 5. Read-only: there are no Add/Remove/Edit controls on this screen; membership changes happen on the org detail Members tab.
 
 Accessibility: operate search, the status filter, sorting, and the org/user links by keyboard; focus is visible; the empty state and any error are announced.
@@ -425,6 +425,6 @@ Legend: `see` = screen renders with data; `act` = at least one write action succ
 ## TODO: verify
 
 1. `admin.orgs.manage` is defined in the catalog (`lib/admin/permissions.ts:49`, `admin-manager.md:232`, migration `0001-initial-schema.sql:456`) but is referenced by **no page guard or API route**. Members/bindings mutations gate on `admin.orgs.update`. Confirm whether `.manage` is intended to gate those writes (currently dead) or is reserved for future use — a holder of only `.manage` can read but not mutate today.
-2. UI/permission edge: the per-row **Delete** button on the list is shown to any holder of `admin.orgs.delete` (which `admin.platform` / Org Admin holds), yet the `DELETE` is SUPERADMIN-only and returns 403. Confirm intended behaviour — the button arguably should be hidden for non-superadmins, or the 403 should surface a clearer inline message (currently the grid falls through to the generic delete-error text; there is no dedicated `forbidden` mapping in `_organizations-grid.tsx:75-91`).
+2. UI/permission edge: the per-row **Delete** button on the list is shown to any holder of `admin.orgs.delete` (which `admin.platform` / Org Admin holds), yet the `DELETE` is SUPERADMIN-only and returns 403. Confirm intended behaviour — the button arguably should be hidden for non-superadmins, or the 403 should surface a clearer inline message (currently the grid falls through to the generic delete-error text; there is no dedicated `forbidden` mapping in `_organizations-grid.tsx:72-88`).
 3. There is no dedicated "add member" / "bind provider" **dialog** described in the UI components read; the Members/Providers grids expose Remove and rely on the `POST` endpoints for create. Verify how a tester triggers an add in the running app (dedicated add form vs. API), and update steps UAT-ADMIN-ORG-DETAIL-S1 / S3 accordingly.
 4. Confirm the exact create-form submit button label rendered by `t("new.submit")` and the Members "add" affordance labels in the running app, in case the message catalog differs from the assumed "Create" / "Add member".

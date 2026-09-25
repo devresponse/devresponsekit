@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as EditPageModule from "@/app/[locale]/(secure)/app/administrator/email/templates/[templateId]/page";
 import type * as ListPageModule from "@/app/[locale]/(secure)/app/administrator/email/templates/page";
+import { systemFormatPreferences, type FormatPreferences } from "@/lib/format/app-format";
 
 /**
  * Review #73 — the email-template EDIT page gated on `admin.email.manage`
@@ -61,6 +62,15 @@ vi.mock(
 vi.mock("@/app/[locale]/(secure)/app/administrator/email/templates/_template-filters", () => ({
   EmailTemplateFilters: () => null,
 }));
+// The list page formats "Updated" with the viewer's formatter (F-37). The real
+// one reads the request's session cookie; there is no request here.
+let viewerPrefs: FormatPreferences;
+vi.mock("@/lib/format/viewer-format.server", async () => {
+  const { createAppFormatter } = await import("@/lib/format/app-format");
+  return {
+    getAppFormatter: async (locale: string) => createAppFormatter(locale, viewerPrefs),
+  };
+});
 
 const TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
 const ACCESS = {
@@ -90,6 +100,7 @@ beforeEach(async () => {
   for (const m of [checkAdminPermissionServer, isSuperadmin, executeTakeFirst, listExecute])
     m.mockReset();
   notFoundMock.mockClear();
+  viewerPrefs = systemFormatPreferences("UTC");
   checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-admin", access: ACCESS });
   executeTakeFirst.mockResolvedValue(TEMPLATE_ROW);
   listExecute.mockResolvedValue([TEMPLATE_ROW]);
@@ -151,5 +162,40 @@ describe("email template list — the Edit link matches the page guard (review #
   it("shows the Edit link to a SUPERADMIN", async () => {
     isSuperadmin.mockReturnValue(true);
     expect(hasEditLink(await ListPage(listParams))).toBe(true);
+  });
+});
+
+/**
+ * F-37: "Updated" was `updated_at.toISOString().slice(0, 16)`, a UTC time
+ * with no zone marker that read as local. It must follow the viewer's saved
+ * zone and date format like every other timestamp in the app.
+ */
+describe("email template list — Updated follows the viewer's formats (F-37)", () => {
+  /** All the text in the rendered tree, each text node followed by a `|`. */
+  function textOf(node: unknown): string {
+    if (typeof node === "string" || typeof node === "number") return `${node}|`;
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (!node || typeof node !== "object") return "";
+    return textOf((node as { props?: { children?: unknown } }).props?.children);
+  }
+
+  it("shows the saved zone and date format", async () => {
+    isSuperadmin.mockReturnValue(false);
+    // 00:00 UTC on Jan 1 is 05:45 in Kathmandu (UTC+5:45).
+    viewerPrefs = { timeZone: "Asia/Kathmandu", dateFormat: "iso8601", numberLocale: null };
+    const text = textOf(await ListPage(listParams));
+    expect(text).toContain("|2026-01-01 05:45|");
+    expect(text).not.toContain("2026-01-01T00:00");
+  });
+
+  it("shows the locale's own style in the deployment zone when nothing is saved", async () => {
+    isSuperadmin.mockReturnValue(false);
+    const text = textOf(await ListPage(listParams));
+    const expected = new Intl.DateTimeFormat("en", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "UTC",
+    }).format(TEMPLATE_ROW.updated_at);
+    expect(text).toContain(`|${expected}|`);
   });
 });

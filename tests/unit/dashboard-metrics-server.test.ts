@@ -33,6 +33,8 @@ vi.mock("@/lib/admin/metrics.server", async (orig) => {
 
 let selectDashboardMetrics: typeof DashboardModule.selectDashboardMetrics;
 
+const UTC = { timeZone: "UTC" };
+
 const access = (permissions: string[], organizationId: string | null) => ({
   permissions,
   organizationId,
@@ -60,9 +62,11 @@ describe("selectDashboardMetrics", () => {
     // volume appear even without an explicit admin.audit.read entry.
     expect(result.loginsDaily).toBeDefined();
     expect(result.auditEventsDaily).toBeDefined();
-    expect(dailyRegistrations).toHaveBeenCalledWith();
-    expect(dailyLogins).toHaveBeenCalledWith();
-    expect(dailyAuditEvents).toHaveBeenCalledWith();
+    // No zone asked for → UTC days (what the JSON API reports).
+    expect(dailyRegistrations).toHaveBeenCalledWith(undefined, UTC);
+    expect(dailyLogins).toHaveBeenCalledWith(undefined, UTC);
+    expect(dailyAuditEvents).toHaveBeenCalledWith(UTC);
+    expect(signupsPerOrg).toHaveBeenCalledWith(UTC);
   });
 
   it("ORG ADMIN is confined to their org — never cross-org data", async () => {
@@ -73,8 +77,8 @@ describe("selectDashboardMetrics", () => {
     expect(result.scope).toBe("organization");
     expect(result.organizationId).toBe("org-7");
     expect(result.mostActiveOrgs).toBeUndefined();
-    expect(dailyRegistrations).toHaveBeenCalledWith("org-7");
-    expect(dailyLogins).toHaveBeenCalledWith("org-7");
+    expect(dailyRegistrations).toHaveBeenCalledWith("org-7", UTC);
+    expect(dailyLogins).toHaveBeenCalledWith("org-7", UTC);
     expect(signupsPerOrg).not.toHaveBeenCalled();
     // Total audit volume is SUPERADMIN-only — an org admin never gets it, even
     // holding admin.audit.read (which grants them the org-scoped logins series).
@@ -134,8 +138,8 @@ describe("selectDashboardMetrics", () => {
     expect(signupsPerOrg).not.toHaveBeenCalled();
     // The per-series CAPABILITY questions still resolve via the marker, so the
     // credential does see its own tenant's numbers — scoped, never system-wide.
-    expect(dailyRegistrations).toHaveBeenCalledWith("org-bound");
-    expect(dailyLogins).toHaveBeenCalledWith("org-bound");
+    expect(dailyRegistrations).toHaveBeenCalledWith("org-bound", UTC);
+    expect(dailyLogins).toHaveBeenCalledWith("org-bound", UTC);
     // Total audit volume has no org-scoped variant: a bound credential, like an
     // org admin, never receives it.
     expect(result.auditEventsDaily).toBeUndefined();
@@ -154,5 +158,69 @@ describe("selectDashboardMetrics", () => {
     expect(signupsPerOrg).not.toHaveBeenCalled();
     expect(dailyRegistrations).not.toHaveBeenCalled();
     expect(dailyLogins).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-37: the Administrator overview asks for the viewer's zone, so its daily
+ * charts count the same calendar days its activity lists show. Every series
+ * of one payload must use that ONE zone, and a zone the database does not know
+ * must cost the viewer UTC days, not the page.
+ */
+describe("selectDashboardMetrics — the days' time zone (F-37)", () => {
+  const KATHMANDU = { timeZone: "Asia/Kathmandu" };
+
+  it("hands the requested zone to every system series", async () => {
+    await selectDashboardMetrics(access(["superuser"], "o-self"), KATHMANDU);
+
+    expect(signupsPerOrg).toHaveBeenCalledWith(KATHMANDU);
+    expect(dailyRegistrations).toHaveBeenCalledWith(undefined, KATHMANDU);
+    expect(dailyLogins).toHaveBeenCalledWith(undefined, KATHMANDU);
+    expect(dailyAuditEvents).toHaveBeenCalledWith(KATHMANDU);
+  });
+
+  it("hands the requested zone to an org admin's series", async () => {
+    await selectDashboardMetrics(
+      access(["admin.users.read", "admin.audit.read"], "org-7"),
+      KATHMANDU,
+    );
+
+    expect(dailyRegistrations).toHaveBeenCalledWith("org-7", KATHMANDU);
+    expect(dailyLogins).toHaveBeenCalledWith("org-7", KATHMANDU);
+  });
+
+  it("falls back to UTC days when Postgres does not know the zone (22023)", async () => {
+    const unknownZone = Object.assign(new Error('time zone "Asia/Kathmandu" not recognized'), {
+      code: "22023",
+    });
+    dailyRegistrations.mockImplementation(async (_org: unknown, range: { timeZone: string }) => {
+      if (range.timeZone !== "UTC") throw unknownZone;
+      return [{ date: "2026-06-17", count: 1 }];
+    });
+
+    const result = await selectDashboardMetrics(access(["superuser"], "o-self"), KATHMANDU);
+
+    expect(result.registrationsDaily).toEqual([{ date: "2026-06-17", count: 1 }]);
+    // The retry asks for UTC for EVERY series, so one payload is one calendar.
+    expect(dailyRegistrations).toHaveBeenLastCalledWith(undefined, UTC);
+    expect(dailyLogins).toHaveBeenLastCalledWith(undefined, UTC);
+    expect(dailyAuditEvents).toHaveBeenLastCalledWith(UTC);
+    expect(signupsPerOrg).toHaveBeenLastCalledWith(UTC);
+  });
+
+  it("does not swallow any other database failure", async () => {
+    dailyRegistrations.mockRejectedValue(Object.assign(new Error("boom"), { code: "57P01" }));
+
+    await expect(
+      selectDashboardMetrics(access(["superuser"], "o-self"), KATHMANDU),
+    ).rejects.toThrow("boom");
+    expect(dailyRegistrations).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a UTC request that fails", async () => {
+    dailyRegistrations.mockRejectedValue(Object.assign(new Error("bad"), { code: "22023" }));
+
+    await expect(selectDashboardMetrics(access(["superuser"], "o-self"))).rejects.toThrow("bad");
+    expect(dailyRegistrations).toHaveBeenCalledTimes(1);
   });
 });

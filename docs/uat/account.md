@@ -168,9 +168,9 @@ All Account pages live under `/[locale]/app/account/**`, each guarded by `requir
 
 ### UAT-ACCOUNT-OVERVIEW — Account overview
 
-- Route: `/app/account`  ·  Example URL: `/en/app/account`  ·  Code: `src/app/[locale]/(secure)/app/account/page.tsx:29`
-- Purpose: A read-only summary of the caller's account: identity (display name, email, status, member-since), organization memberships, roles, and the full effective permission list. Editable areas live in the sub-sections; status/memberships/roles are admin-controlled and display-only here (`src/app/[locale]/(secure)/app/account/page.tsx:12`).
-- Guard / who can access: `requireSecureSession(locale, "/{locale}/app/account")`. Additionally `notFound()` if the session has no provisioned `appUserId` or the overview row is missing (`src/app/[locale]/(secure)/app/account/page.tsx:38`).
+- Route: `/app/account`  ·  Example URL: `/en/app/account`  ·  Code: `src/app/[locale]/(secure)/app/account/page.tsx:30`
+- Purpose: A read-only summary of the caller's account: identity (display name, email, status, member-since), organization memberships, roles, and the full effective permission list. Editable areas live in the sub-sections; status/memberships/roles are admin-controlled and display-only here (`src/app/[locale]/(secure)/app/account/page.tsx:13`).
+- Guard / who can access: `requireSecureSession(locale, "/{locale}/app/account")`. Additionally `notFound()` if the session has no provisioned `appUserId` or the overview row is missing (`src/app/[locale]/(secure)/app/account/page.tsx:39`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away — cannot see.
   - Member / Limited Admin / Org Admin / Superadmin: each sees **their own** overview only (data is keyed on `access.appUserId`). No cross-account view exists.
@@ -202,12 +202,12 @@ User stories
 
 Negative & edge cases
 - Out-of-scope access: there is no id in the URL, so cross-account viewing is impossible by construction; the page is always the caller's own record.
-- Not-provisioned session (no `appUserId`) → `notFound()` (404), not an error page (`src/app/[locale]/(secure)/app/account/page.tsx:38`).
-- The status badge color varies: `active` is neutral; `blocked`/`suspended`/`deactivated` are destructive (`src/app/[locale]/(secure)/app/account/page.tsx:21`) — though a blocked user cannot reach this page, so this mainly affects a per-org membership status.
+- Not-provisioned session (no `appUserId`) → `notFound()` (404), not an error page (`src/app/[locale]/(secure)/app/account/page.tsx:39`).
+- The status badge color varies: `active` is neutral; `blocked`/`suspended`/`deactivated` are destructive (`src/app/[locale]/(secure)/app/account/page.tsx:22`) — though a blocked user cannot reach this page, so this mainly affects a per-org membership status.
 - No loading skeleton (server-rendered); no inline error (read-only).
 
 Accessibility: Content is a set of definition lists (`<dl>`/`<dt>`/`<dd>`) and cards; status is conveyed by badge text, not color alone. Keyboard users can read top-to-bottom; no interactive controls to trap.
-i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the status badge, the "Member since" date (formatted with `Intl.DateTimeFormat(locale, { dateStyle: "long" })`, `src/app/[locale]/(secure)/app/account/page.tsx:43`), and every card title localize; no raw keys.
+i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the status badge, the "Member since" date (the app formatter's long date, `src/app/[locale]/(secure)/app/account/page.tsx:69`; a date format saved in Preferences replaces it, see UAT-ACCOUNT-PREFERENCES-S2), and every card title localize; no raw keys.
 
 ### UAT-ACCOUNT-PROFILE — Profile
 
@@ -257,52 +257,57 @@ i18n: Field labels (`account.fields.*`), the required legend, and validation mes
 
 ### UAT-ACCOUNT-PREFERENCES — Preferences (locale switch)
 
-- Route: `/app/account/preferences`  ·  Example URL: `/en/app/account/preferences`  ·  Code: `src/app/[locale]/(secure)/app/account/preferences/page.tsx:16`
-- Purpose: Edit the caller's **Language**, **Time zone**, **Date format**, and **Number format**. The preferred language is mirrored onto `app_users.preferred_locale`, which drives the request locale — so this is the in-app locale switch (`src/app/api/account/preferences/route.ts:14`).
-- Guard / who can access: `requireSecureSession`; `notFound()` if no `appUserId` (`src/app/[locale]/(secure)/app/account/preferences/page.tsx:25`). Write endpoint `PUT /api/account/preferences`, self-scoped (`src/app/api/account/preferences/route.ts:29`).
+- Route: `/app/account/preferences`  ·  Example URL: `/en/app/account/preferences`  ·  Code: `src/app/[locale]/(secure)/app/account/preferences/page.tsx:19`
+- Purpose: Edit the caller's **Language**, **Time zone**, **Date format**, and **Number format**, and apply them at once (F-37). The request locale is the URL's `/<locale>` segment, so a saved new language moves the page to it (the F-35 switch, query and fragment kept; `_preferences-form.tsx:143`). The stored `app_users.preferred_locale` picks the language of transactional emails and SSO claims. The time zone and the two formats are read on every signed-in request (`getViewerFormatPreferences`, `src/lib/format/viewer-format.server.ts:50`) and applied by the one app formatter on the server and in the browser (`src/app/api/account/preferences/route.ts:26`).
+- Guard / who can access: `requireSecureSession`; `notFound()` if no `appUserId` (`src/app/[locale]/(secure)/app/account/preferences/page.tsx:28`). Write endpoint `PUT /api/account/preferences`, self-scoped (`src/app/api/account/preferences/route.ts:55`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away.
   - Member / Limited Admin / Org Admin / Superadmin: each edits **their own** preferences.
 - Preconditions & test data: Sign in as `user5@orga.local`.
 - Controls (`_preferences-form.tsx`, validated by `updatePreferencesSchema`, `src/lib/validation/account.ts:23`):
   - **Language** — select of the 8 supported locales (`preferredLocale`, must be supported).
-  - **Time zone** — select including **System default** (empty) plus IANA zones from the runtime; validated by the engine (`isValidTimeZone`).
+  - **Time zone** — select including **System default (zone)** (empty; the option names the deployment's zone, `deploymentTimeZone`) plus IANA zones from the runtime; validated by the engine (`isValidTimeZone`).
   - **Date format** — one of System default / ISO 8601 / US / European / Long (`DATE_FORMAT_OPTIONS`, `src/lib/account/preferences.ts:15`).
   - **Number format** — **System default** or one of the supported locales.
 
 User stories
 
 - UAT-ACCOUNT-PREFERENCES-S1 — As a Member, I want to change my language in Preferences, so that the app renders in my language.
-  - Acceptance criteria: Given I choose a different language and save, then a success line appears and the UI re-renders in that language.
+  - Acceptance criteria: Given I choose a different language and save, then the page moves to that language at once and the rest of the shell follows.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `user5@orga.local` and open `/en/app/account/preferences`. | Heading **Preferences**; the four selects show current values. |
     | 2 | Change **Language** to **Ukrainian**. | The select shows Ukrainian selected. |
-    | 3 | Click **Save changes**. | A success line appears ("Your changes have been saved."); the page refreshes and its labels are now in Ukrainian. |
-    | 4 | Navigate to another shell page (e.g. Dashboard). | The UI stays in Ukrainian (the preference drives the request locale). |
-    | 5 | Change **Language** back to **English** and save. | The UI returns to English. |
+    | 3 | Click **Save changes**. | The address changes to `/uk/app/account/preferences` and the heading and labels are now in Ukrainian (**Налаштування**). The page reloads in the new language, so no "saved" line is shown. |
+    | 4 | Navigate to another shell page (e.g. Dashboard) from the sidebar. | The UI stays in Ukrainian: the sidebar links carry the `/uk/` prefix. |
+    | 5 | Change **Мова** (Language) back to **English** and save. | The address returns to `/en/…` and the UI to English. |
+    | 6 | Open `/fr/app/account/preferences` by URL (English is stored), change only **Time zone**, and save. | The page stays on `/fr/…`: a save that leaves the Language field alone keeps the language chosen in the address. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ACCOUNT-PREFERENCES-S2 — As a Member, I want date/number/time-zone formatting to follow my choices, so that values display the way I expect.
-  - Acceptance criteria: Given I pick a date format and time zone, when I save, then the choices persist across reloads.
+  - Acceptance criteria: Given I pick a date format, time zone and number format and save, then the choices persist across reloads, and every date and time in the app is shown in that zone and format, identically on server-rendered and browser-rendered pages.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | On Preferences, set **Date format** to **ISO 8601 (2026-06-13)**. | The select shows ISO 8601. |
-    | 2 | Set **Time zone** to a specific zone (e.g. `Europe/Kyiv`) and **Number format** to a specific locale. | Both accept the value. |
+    | 2 | Set **Time zone** to `Australia/Eucla` (UTC+8:45, easy to recognise) and **Number format** to **Français**. | Both accept the value. |
     | 3 | Click **Save changes**. | Success line appears. |
     | 4 | Reload the page. | Date format, Time zone, and Number format retain your choices. |
-    | 5 | Set **Time zone** back to **System default** and save. | It persists as the system default (stored as no override). |
+    | 5 | Open **Account → Overview**. | **Member since** reads `YYYY-MM-DD` (e.g. `2026-07-10`). |
+    | 6 | Open **Account → Security**. | Each session's "Expires …" reads `YYYY-MM-DD HH:MM` in 24-hour time, in Eucla time (45 minutes off from any whole-hour zone). |
+    | 7 | As an admin persona (e.g. `orgadmin@orga.local`) with the same settings, open **Administrator → Overview**, then **Users**. | A row in "Latest registrations" (server-rendered) shows the same date and time as that user's **Created** cell in the Users grid (browser-rendered). The **Daily registrations** chart counts Eucla days: its last bar is today's date in Eucla (`MM-DD`), and a registration listed as `YYYY-MM-DD HH:MM` is counted in the bar for that `MM-DD`. The number format groups digits only from 1,000 up (French shows `1 234`), so the seeded counts look the same in every number format. |
+    | 8 | Set **Time zone** back to **System default** and save. | It persists as the system default (stored as no override), and times now show in the zone the option names (e.g. UTC), on every page alike. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-- The four choices are constrained selects, so invalid values are hard to submit via the UI; a tampered body is rejected server-side with 400 → the form shows "Please check the form and try again." (`_preferences-form.tsx:84`).
-- An unrecognized time zone returns 400 `invalid_time_zone` (`src/app/api/account/preferences/route.ts:47`).
+- The four choices are constrained selects, so invalid values are hard to submit via the UI; a tampered body is rejected server-side with 400 → the form shows "Please check the form and try again." (`_preferences-form.tsx:153`). A failed save switches no language.
+- An unrecognized time zone returns 400 `invalid_time_zone` (`src/app/api/account/preferences/route.ts:84`). A stored zone the server's runtime no longer knows is shown as the deployment's zone instead of failing the page.
+- Signing in does not apply the stored language: the sign-in page's own locale (the address, or the language picked on the sign-in page) decides where you land. Save the language here, or use the brand-bar picker, to switch.
 - **System default** for time zone / number format is stored as NULL (`normalizeOptional`, `src/lib/account/preferences.ts:45`); confirm re-opening shows **System default**, not an empty control.
 
 Accessibility: Selects are native `<select>` with `<label>` via `FormLabel`; the required legend is shown; invalid state uses `aria-invalid` styling. Keyboard: Tab to each select, choose with arrows, submit with Enter.
-i18n: Language option labels use `account.locales.*`; date-format labels use `account.dateFormats.*`. This is the locale-switch screen — verify that after switching to `uk`/`ja` there are no raw keys and the option labels themselves localize.
+i18n: Language option labels use `account.locales.*`; date-format labels use `account.dateFormats.*`; the time-zone default uses `account.fields.systemTimeZone`. This is the locale-switch screen — verify that after switching to `uk`/`ja` there are no raw keys and the option labels themselves localize.
 
 ### UAT-ACCOUNT-SECURITY — Security (password + sessions)
 
@@ -345,14 +350,14 @@ Negative & edge cases
 - New password shorter than 8 → inline **Password must be at least 8 characters.** (`validation.passwordMin`).
 - Confirm not matching New → inline **Passwords do not match.** on the confirm field (`validation.passwordsMismatch`).
 - All three password fields show a required asterisk (the unrefined `passwordFieldsSchema` drives the markers; `_password-form.tsx:65`).
-- Sessions panel: first render shows two skeleton bars; a load failure shows "Could not load your sessions." in `role="alert"` in place of the list, with no "No active sessions." line; a failed revoke shows "Could not revoke the session." Better Auth returns `{ error }` rather than throwing, so the panel reads `result.error` on the load and on each revoke (`_sessions-panel.tsx:93`, `:121`).
-- **Sign out other sessions** is disabled when only one session exists (`_sessions-panel.tsx:148`).
+- Sessions panel: first render shows two skeleton bars; a load failure shows "Could not load your sessions." in `role="alert"` in place of the list, with no "No active sessions." line; a failed revoke shows "Could not revoke the session." Better Auth returns `{ error }` rather than throwing, so the panel reads `result.error` on the load and on each revoke (`_sessions-panel.tsx:89`, `:117`).
+- **Sign out other sessions** is disabled when only one session exists (`_sessions-panel.tsx:144`).
 - While an admin is **impersonating** the user, both panels are refused: the endpoints they call (`/list-sessions`, `/revoke-session`, `/revoke-other-sessions`, `/change-password`) answer 403 to an impersonated session, which may only read the session and sign out (IMP-3 / F-06, `src/lib/auth-admin-surface.ts`). The sessions panel shows "Could not load your sessions." and no session rows, and a password change shows "Could not change your password. Check your current password." Each of those refusals is audited as `account.impersonated_access.denied` against the **admin**, not the user.
 - An admin's own sweep also ends the session they are impersonating from (F-10) → as `orgadmin@orga.local`, impersonate `user1@orga.local` in browser A, then sign in as `orgadmin` in browser B and click **Sign out other sessions** (or change the password there). Reloading browser A lands on sign-in: the borrowed session belongs to `user1`, so Better Auth's own sweep missed it, and the app's after-hook ends it (`src/lib/auth-session-sweep.ts`). A **wrong** current password ends nothing.
 - A password change does **not** revoke API keys (F-10) → keys on **Account → API keys** keep working after the change, because changing the password requires the current one. A user who suspects a compromise should use **Forgot password?** (a completed reset signs out every session and revokes every API key on the account) or revoke the keys on that page.
 
 Accessibility: Password fields are typed `password` with correct `autoComplete` (`current-password` / `new-password`); errors are in alert/`FormMessage` regions. The sessions list is a keyboard-navigable list of buttons; the skeleton conveys loading.
-i18n: Section titles (`account.security.*`), the confirmation, and validation messages localize in `uk`/`ja`; the expiry/IP/Device labels come from `account.security.*`; dates use `Intl.DateTimeFormat(locale, …)` (`_sessions-panel.tsx:62`).
+i18n: Section titles (`account.security.*`), the confirmation, and validation messages localize in `uk`/`ja`; the expiry/IP/Device labels come from `account.security.*`; dates go through the app formatter (`useAppFormatter`, `_sessions-panel.tsx:59`), so they follow the saved time zone and date format.
 
 ### UAT-ACCOUNT-APIKEYS — API keys
 
@@ -403,14 +408,14 @@ User stories
 
 Negative & edge cases
 - Out-of-scope access: revoking/rotating a key that is not yours returns **404, not 403** (so other users' key ids are not leaked; `src/app/api/v1/me/api-keys/[id]/route.ts:44`). A non-UUID id returns 400.
-- Empty name → the form blocks submit with "Enter a name." (`_api-keys-panel.tsx:276`).
+- Empty name → the form blocks submit with "Enter a name." (`_api-keys-panel.tsx:270`).
 - Empty list → **You don't have any API keys yet.** First load shows two skeleton bars.
 - Load / create / rotate / revoke failures each show their localized error in `role="alert"` (`loadError` / `create.error` / `rotateError` / `revokeError`).
 - Rotating a non-active key returns 409 "Key is not active and cannot be rotated." (`src/app/api/v1/me/api-keys/[id]/rotate/route.ts:51`); the panel only offers Rotate on active keys, so this is an edge/tamper case.
 - Rate limit: create / rotate / revoke share a per-principal token bucket; exceeding it returns 429 with `Retry-After` (`src/app/api/v1/me/api-keys/route.ts:64`). `TODO: verify` the exact UI message on a client-side 429 (the panel maps non-OK create to the generic `create.error`).
 
 Accessibility: The create form has labelled inputs and a `<fieldset>`/`<legend>` for scopes; the reveal and confirm dialogs are managed by the dialog manager (focus-trap + Esc — `TODO: verify` Esc closes each). Status is a labelled badge, not color alone.
-i18n: All labels/messages are under `account.apiKeys.*`; run in `uk`/`ja` and confirm the create form, list metadata (Created/Last used/Expires, Never/No expiry), status badges, and both dialogs localize; dates use `Intl.DateTimeFormat(locale, …)`.
+i18n: All labels/messages are under `account.apiKeys.*`; run in `uk`/`ja` and confirm the create form, list metadata (Created/Last used/Expires, Never/No expiry), status badges, and both dialogs localize; dates go through the app formatter (`useAppFormatter`, `_api-keys-panel.tsx:53`), so they follow the saved time zone and date format.
 
 ---
 
@@ -465,9 +470,9 @@ i18n: The landing title/description use `docs.index.*`; the empty line uses `doc
 
 ### UAT-ACCOUNT-DOCS-ARTICLE — Documentation article
 
-- Route: `/app/docs/[...slug]`  ·  Example URL: `/en/app/docs/architecture`  ·  Code: `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:27`
-- Purpose: Renders a single document: breadcrumbs, the sanitized article body, an "On this page" table of contents, and a "Last updated" line. The body is rendered server-side through the sanitizing pipeline; document JavaScript is never evaluated (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:26`).
-- Guard / who can access: Layered — (1) `requireSecureSession`; (2) `canViewDoc(slug, access.permissions)` → `notFound()` if the doc is hidden (internal-with-flag-off, or unmet `requires`), so a hidden doc 404s even if its URL is known; (3) the slug resolves through a path-safe resolver, and a traversal/missing slug returns null → `notFound()` (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:34`).
+- Route: `/app/docs/[...slug]`  ·  Example URL: `/en/app/docs/architecture`  ·  Code: `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:28`
+- Purpose: Renders a single document: breadcrumbs, the sanitized article body, an "On this page" table of contents, and a "Last updated" line. The body is rendered server-side through the sanitizing pipeline; document JavaScript is never evaluated (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:27`).
+- Guard / who can access: Layered — (1) `requireSecureSession`; (2) `canViewDoc(slug, access.permissions)` → `notFound()` if the doc is hidden (internal-with-flag-off, or unmet `requires`), so a hidden doc 404s even if its URL is known; (3) the slug resolves through a path-safe resolver, and a traversal/missing slug returns null → `notFound()` (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:35`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away.
   - Member: can open any doc `canViewDoc` allows (non-internal, no unmet `requires`); a hidden/unknown slug → 404.
@@ -500,13 +505,13 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-- Out-of-scope / hidden doc → **404, not 403** (existence is never leaked; `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:38`).
-- Traversal/missing slug → 404 via the path-safe resolver (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:40`).
+- Out-of-scope / hidden doc → **404, not 403** (existence is never leaked; `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:39`).
+- Traversal/missing slug → 404 via the path-safe resolver (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:41`).
 - A doc with no headings shows an empty/absent table of contents; a doc with no updated date omits the "Last updated" line.
 - Rendered HTML is sanitized — embedded scripts do not execute. `TODO: verify` a fixture doc containing a `<script>` renders inert (relates to the Mermaid/DOMPurify handling noted in project memory).
 
 Accessibility: Breadcrumbs are a labelled navigation; the ToC is a list of in-page anchors with visible focus; headings give the article a logical outline. `TODO: verify` no axe violations on a representative article (tables/code blocks/diagrams).
-i18n: Page chrome (breadcrumb home `docs.breadcrumbHome`, "On this page" `docs.onThisPage`, "Last updated {date}" `docs.lastUpdated`) localizes; the updated date uses `Intl.DateTimeFormat(locale, { dateStyle: "long" })` (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:51`). Document body text is the source-language Markdown — same `TODO: verify` on per-locale content as the landing.
+i18n: Page chrome (breadcrumb home `docs.breadcrumbHome`, "On this page" `docs.onThisPage`, "Last updated {date}" `docs.lastUpdated`) localizes; the updated date is the app formatter's long date (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:53`), or the date format saved in Preferences. Document body text is the source-language Markdown — same `TODO: verify` on per-locale content as the landing.
 
 ---
 

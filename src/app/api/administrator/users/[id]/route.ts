@@ -85,7 +85,9 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
  * Partial update of safe profile fields:
  *   - `displayName` — mirrored to Better Auth `name` so both layers
  *     stay in sync.
- *   - `preferredLocale` — application-only, used by next-intl.
+ *   - `preferredLocale` — application-only. It picks the language of the
+ *     user's transactional emails and SSO claims; it does NOT pick the UI
+ *     language, which is the URL's locale segment (F-37).
  *
  * Status changes go through `/status`; ban/role/password each have
  * their own dedicated endpoints (docs/admin-manager.md §8.1). We

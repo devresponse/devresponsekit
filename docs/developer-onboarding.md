@@ -195,6 +195,7 @@ docker/postgres/init/              # Postgres init SQL (extensions)
 - **Rate-limit every admin mutation.** Each `POST`/`PATCH`/`DELETE` admin handler calls `enforceRateLimit(...)` right after the permission check (also enforced by an invariant test).
 - **Audit every mutation.** Use the `audit*Action` helpers; pass the request so the `x-request-id` is correlated.
 - **Internationalize all user-facing text.** Every leaf key must exist in **all 8 locale files (en, fr, es, uk, pt, zh, hi, ja)** — a parity test enforces it. Add keys to `en.json` first, then the rest.
+- **Format dates and numbers through the app formatter.** `const format = useAppFormatter()` in a client component, `const format = await getAppFormatter(locale)` in a server one, then `format.date` / `format.dateTime` / `format.number`. It applies the viewer's saved time zone, date format and number format, and renders the same text on the server and in the browser. A new `Intl.DateTimeFormat`, `toLocaleString()` or next-intl `useFormatter` under `src/app` or `src/components` fails an invariant test (F-37).
 - **Formatting & linting** are enforced by Prettier (with the Tailwind plugin) and ESLint (`eslint-config-next` + `typescript-eslint`). Run `pnpm format` before committing.
 - **Commit & PR hygiene** (from project memory): land each logically-complete change as its own PR; PRs auto-merge on green; don't pipe `pnpm build` through `head`/`Select -First` (it truncates and breaks the build log) — redirect to a file instead.
 

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { isSuperadmin } from "@/lib/admin/access-scope.server";
+import { getAppFormatter } from "@/lib/format/viewer-format.server";
 import { EmailTemplateFilters } from "./_template-filters";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +59,9 @@ export default async function AdministratorEmailTemplatesPage({
 
   const t = await getTranslations({ locale, namespace: "administrator.email.templates" });
   const tGrid = await getTranslations({ locale, namespace: "administrator.grid" });
+  // F-37: "Updated" was the UTC ISO string cut to minutes, with no zone
+  // marker, so it read as local time. It now shows the viewer's zone and format.
+  const format = await getAppFormatter(locale);
 
   // Filter-option lists come from the templates that actually exist, so the
   // dropdowns never offer a value that yields nothing (and never omit one
@@ -135,10 +139,7 @@ export default async function AdministratorEmailTemplatesPage({
                   <TableCell className="text-xs uppercase">{template.locale}</TableCell>
                   <TableCell className="text-sm">{template.subject}</TableCell>
                   <TableCell className="text-xs whitespace-nowrap">
-                    {new Date(template.updated_at as unknown as string | Date)
-                      .toISOString()
-                      .slice(0, 16)
-                      .replace("T", " ")}
+                    {format.dateTime(template.updated_at as unknown as string | Date)}
                   </TableCell>
                   <TableCell className="text-right">
                     {canManage ? (

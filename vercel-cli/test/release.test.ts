@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -27,6 +28,15 @@ import {
 import { applyMigrations, migrationEnv } from "../dist/lib/kit.js";
 import { CliError, setQuiet } from "../dist/lib/log.js";
 import { verifyMigrationTarget } from "../dist/lib/migration-target.js";
+import {
+  describeCommit,
+  gitEnv,
+  inspectTree,
+  productionAutoDeploy,
+  readStatus,
+  treeProblems,
+} from "../dist/lib/release-tree.js";
+import { projectGit } from "../dist/lib/vercel-client.js";
 import { assertCheckoutLink, vercelEnvFor } from "../dist/lib/vercel-project.js";
 
 /* ================================================================== */
@@ -39,18 +49,38 @@ import { assertCheckoutLink, vercelEnvFor } from "../dist/lib/vercel-project.js"
  * without a fake fails the first test below instead of reaching Vercel or a
  * database from a test.
  */
-const STEPS = ["envSync", "envCheck", "link", "pull", "migrate", "build", "promote", "verify"];
+const STEPS = [
+  "tree",
+  "gitIntegration",
+  "envSync",
+  "envCheck",
+  "link",
+  "pull",
+  "migrate",
+  "build",
+  "promote",
+  "verify",
+];
+
+/**
+ * The F-49 checks of a run that promotes: the checkout's commit, then whether
+ * Vercel deploys production by itself. Both only read, and both come before
+ * anything writes.
+ */
+const GATE = ["tree", "gitIntegration"];
 
 /**
  * `deploy` with a preflight, on a target that owns its schema. `pull` comes
  * before `migrate` (F-47): production's variables are what the migration
  * target is checked against.
  */
-const KIT_ORDER = ["envCheck", "link", "pull", "migrate", "build", "promote", "verify"];
-/** `up`: env:sync replaces the preflight (it would only repeat itself). */
-const UP_ORDER = ["envSync", "link", "pull", "migrate", "build", "promote", "verify"];
-/** `drk-deploy migrate`: the first half of `deploy`. */
-const MIGRATE_ORDER = ["link", "pull", "migrate"];
+const KIT_ORDER = ["envCheck", ...GATE, "link", "pull", "migrate", "build", "promote", "verify"];
+/** `up`: env:sync replaces the preflight (it would only repeat itself), after the F-49 checks. */
+const UP_ORDER = [...GATE, "envSync", "link", "pull", "migrate", "build", "promote", "verify"];
+/** `drk-deploy migrate`: the first half of `deploy`. It promotes nothing, so it reads the tree alone. */
+const MIGRATE_ORDER = ["tree", "link", "pull", "migrate"];
+/** Where `deploy` stops when the migration target is refused: after the pull, before anything migrates. */
+const DEPLOY_TO_PULL = ["envCheck", ...GATE, "link", "pull"];
 
 const TOKEN = "test-token-that-never-leaves-this-process";
 /** A personal account's own id, which is what a personal project's `accountId` is. */
@@ -218,6 +248,12 @@ function vercelEnvFile(values: Record<string, string>): string {
  * writes `.vercel/project.json` naming the configured project, or with
  * `linked` another project's id, or (`null`) nothing at all. Its `pull`, like
  * the real one, writes that file for the project the pair names.
+ *
+ * Its `tree` answers what `inspectTree` would for each checkout (F-49): by
+ * default a clean one on main, pushed, at origin/main, and `trees` describes
+ * any other, by root. Each call is recorded in `inspected`, with the
+ * `--allow-ref` it was handed. Its `gitIntegration` answers `git`, by default
+ * a project with no repository connected, so nothing else deploys it.
  */
 function recordingRunner(
   options: {
@@ -225,10 +261,13 @@ function recordingRunner(
     envProblems?: number;
     production?: Record<string, string> | null;
     linked?: string | null;
+    trees?: Record<string, FakeTree>;
+    git?: ProjectGit;
   } = {},
 ) {
   const calls: string[] = [];
   const args: Record<string, unknown[]> = {};
+  const inspected: { root: string; allowRef: string | undefined }[] = [];
   const seen: { staleAtPull: boolean; pulledAtBuild: boolean | null } = {
     staleAtPull: false,
     pulledAtBuild: null,
@@ -239,6 +278,16 @@ function recordingRunner(
       async (...received: unknown[]) => {
         calls.push(name);
         args[name] = received;
+        if (name === "tree") {
+          const [root, allowRef] = received as [string, string | undefined];
+          inspected.push({ root, allowRef });
+          if (options.failAt === name) throw new Error(`${name} failed`);
+          return fakeTree(root, allowRef, options.trees?.[root]);
+        }
+        if (name === "gitIntegration") {
+          if (options.failAt === name) throw new Error(`${name} failed`);
+          return options.git ?? NO_GIT;
+        }
         if (name === "build") {
           seen.pulledAtBuild = existsSync(pulledFile((received[0] as { root: string }).root));
         }
@@ -282,8 +331,60 @@ function recordingRunner(
       },
     ]),
   );
-  return { runner: runner as never, calls, args, seen };
+  return { runner: runner as never, calls, args, seen, inspected };
 }
+
+/** The commits the fake `tree` step reports. */
+const MAIN_SHA = "1111111111111111111111111111111111111111";
+const PR_SHA = "2222222222222222222222222222222222222222";
+
+/**
+ * A checkout as the fake `tree` step reports it (F-49). Every field defaults
+ * to what a release may be made from: HEAD at MAIN_SHA on main, a clean tree,
+ * pushed as origin/main. `refs` is what each ref resolves to (origin/main is
+ * MAIN_SHA), and the release ref is `--allow-ref` or else origin/main, which
+ * is how `inspectTree` resolves it.
+ */
+interface FakeTree {
+  notRepository?: string;
+  head?: string | null;
+  branch?: string | null;
+  changes?: string[];
+  generated?: string[];
+  pushedAs?: string[];
+  refs?: Record<string, string>;
+}
+
+function fakeTree(root: string, allowRef: string | undefined, tree: FakeTree = {}) {
+  const refs = tree.refs ?? { "origin/main": MAIN_SHA };
+  const ref = allowRef ?? "origin/main";
+  return {
+    root,
+    notRepository: tree.notRepository ?? null,
+    head: tree.head === undefined ? MAIN_SHA : tree.head,
+    branch: tree.branch === undefined ? "main" : tree.branch,
+    changes: tree.changes ?? [],
+    generated: tree.generated ?? [],
+    pushedAs: tree.pushedAs ?? ["origin/main"],
+    release: { ref, commit: refs[ref] ?? null },
+  };
+}
+
+/** `ProjectGit` (lib/vercel-client.ts): what decides whether Vercel deploys production by itself. */
+type ProjectGit = {
+  repository: string | null;
+  productionBranch: string | null;
+  ignoreCommand: string | null;
+};
+
+/** What the Vercel API answers for a project with no repository connected. */
+const NO_GIT: ProjectGit = { repository: null, productionBranch: null, ignoreCommand: null };
+/** The kit's own production today: a GitHub repository whose pushes to main Vercel promotes. */
+const GIT_CONNECTED: ProjectGit = {
+  repository: "github:devresponse/devresponsekit",
+  productionBranch: "main",
+  ignoreCommand: null,
+};
 
 /** A rejection that is this CliError, by message and hint. */
 const refusal =
@@ -359,9 +460,11 @@ test("deploy: the flags that drop a step drop only that step", async () => {
   const cases: [string, Record<string, unknown>, string[]][] = [
     ["--skip-checks", { ...url, skipChecks: true }, KIT_ORDER.filter((s) => s !== "envCheck")],
     ["--skip-migrations", { skipMigrations: true }, KIT_ORDER.filter((s) => s !== "migrate")],
-    // A dry run still walks the migration step (in dry-run mode) and stops
-    // before anything reaches Vercel, so nothing is pulled or checked.
-    ["--dry-run", { ...url, dryRun: true }, ["envCheck", "migrate"]],
+    // A dry run reads the checkout and the project's git connection (F-49,
+    // both read-only), walks the migration step in dry-run mode, and stops
+    // before anything is linked, pulled or built, so nothing is checked
+    // against production.
+    ["--dry-run", { ...url, dryRun: true }, ["envCheck", ...GATE, "migrate"]],
   ];
   for (const [flag, options, expected] of cases) {
     const { runner, calls, args } = recordingRunner();
@@ -453,7 +556,7 @@ test("migrate (the command): link → pull → migrate, and nothing after a fail
   // A dry run pulls nothing, so it checks nothing, and says so.
   const dry = recordingRunner();
   await migrateCommand(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, dry.runner);
-  assert.deepEqual(dry.calls, ["migrate"]);
+  assert.deepEqual(dry.calls, ["tree", "migrate"], "the tree is read and reported, not refused");
   assert.deepEqual(dry.args.migrate?.[1], { databaseUrl: PRODUCTION_DIRECT, dryRun: true });
 });
 
@@ -747,20 +850,20 @@ test("F-47: a migration URL that is not production's database is refused before 
     const { cliRoot, kitRoot } = fixture("kit");
     const { runner, calls } = recordingRunner();
     await assert.rejects(deploy(cliRoot, { databaseUrl: url }, runner), refused, name);
-    assert.deepEqual(calls, ["envCheck", "link", "pull"], `${name}: nothing migrated, built or promoted`);
+    assert.deepEqual(calls, DEPLOY_TO_PULL, `${name}: nothing migrated, built or promoted`);
     assert.equal(existsSync(pulledFile(kitRoot)), false, `${name}: the pulled file is removed`);
   }
 
   // up and the migrate command stop at the same place.
   const upped = recordingRunner();
   await assert.rejects(up(fixture("kit").cliRoot, { databaseUrl: LOCAL }, upped.runner), refused);
-  assert.deepEqual(upped.calls, ["envSync", "link", "pull"]);
+  assert.deepEqual(upped.calls, [...GATE, "envSync", "link", "pull"]);
   const migrated = recordingRunner();
   await assert.rejects(
     migrateCommand(fixture("kit").cliRoot, { databaseUrl: LOCAL }, migrated.runner),
     refused,
   );
-  assert.deepEqual(migrated.calls, ["link", "pull"]);
+  assert.deepEqual(migrated.calls, ["tree", "link", "pull"]);
 
   // No override takes a mismatch through: the fix is the right URL.
   const overridden = recordingRunner();
@@ -772,7 +875,7 @@ test("F-47: a migration URL that is not production's database is refused before 
     ),
     refused,
   );
-  assert.deepEqual(overridden.calls, ["envCheck", "link", "pull"]);
+  assert.deepEqual(overridden.calls, DEPLOY_TO_PULL);
 });
 
 test("F-47: a satellite that owns its database is checked against ITS production the same way", async () => {
@@ -780,12 +883,14 @@ test("F-47: a satellite that owns its database is checked against ITS production
   const { cliRoot, appRoot } = fixture("satellite", owned);
   const { runner, calls, args } = recordingRunner();
   await assert.rejects(deploy(cliRoot, { databaseUrl: LOCAL }, runner), refusal(/not production's database/));
-  assert.deepEqual(calls, ["envCheck", "link", "pull"]);
+  // Two checkouts are read (F-49): the satellite's, which is built, and the
+  // kit's, which the migrations come from.
+  assert.deepEqual(calls, ["envCheck", "tree", "tree", "gitIntegration", "link", "pull"]);
   assert.equal((args.pull as [{ root: string }])[0].root, appRoot, "its own checkout's pull");
 
   const matched = recordingRunner();
   await deploy(fixture("satellite", owned).cliRoot, { databaseUrl: PRODUCTION_DIRECT }, matched.runner);
-  assert.deepEqual(matched.calls, KIT_ORDER);
+  assert.deepEqual(matched.calls, ["envCheck", "tree", ...KIT_ORDER.filter((s) => s !== "envCheck")]);
 });
 
 test("F-47: verifyMigrationTarget matches Neon's pooled host to its direct twin, and nothing looser", () => {
@@ -1002,7 +1107,7 @@ test("F-47: the schema defaults to production's DB_SCHEMA, and a --schema it doe
     deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, schema: "auth" }, mismatched.runner),
     refusal(/^Refusing to migrate schema `auth`: production reads `tenant_a`\.$/, /--force-schema/, 2),
   );
-  assert.deepEqual(mismatched.calls, ["envCheck", "link", "pull"]);
+  assert.deepEqual(mismatched.calls, DEPLOY_TO_PULL);
   assert.equal(existsSync(pulledFile(kitRoot)), false);
 
   // --allow-unverified-target is not a schema override: tenant_a was READ.
@@ -1036,7 +1141,7 @@ test("F-47: production values that cannot be read are refused, unless --allow-un
 
   const refused = recordingRunner({ production: sensitive });
   await assert.rejects(deploy(fixture("kit").cliRoot, { databaseUrl: LOCAL }, refused.runner), cannotRead);
-  assert.deepEqual(refused.calls, ["envCheck", "link", "pull"]);
+  assert.deepEqual(refused.calls, DEPLOY_TO_PULL);
 
   const allowed = recordingRunner({ production: sensitive });
   await deploy(
@@ -1057,7 +1162,7 @@ test("F-47: production values that cannot be read are refused, unless --allow-un
       schemaUnknown,
       JSON.stringify(options),
     );
-    assert.deepEqual(calls, ["envCheck", "link", "pull"]);
+    assert.deepEqual(calls, DEPLOY_TO_PULL);
   }
   const named = recordingRunner({ production: unknownSchema });
   await deploy(
@@ -1097,7 +1202,7 @@ test("F-47: a stale pulled file never vouches for production, and a missing one 
       2,
     ),
   );
-  assert.deepEqual(nothing.calls, ["envCheck", "link", "pull"]);
+  assert.deepEqual(nothing.calls, DEPLOY_TO_PULL);
 });
 
 /* ================================================================== */
@@ -1392,7 +1497,11 @@ test("F-48: with no owner recorded, what `vercel link` wrote is checked before a
       refused,
       name,
     );
-    assert.deepEqual(calls, ["envCheck", "link"], `${name}: nothing pulled, migrated, built or promoted`);
+    assert.deepEqual(
+      calls,
+      ["envCheck", ...GATE, "link"],
+      `${name}: nothing pulled, migrated, built or promoted`,
+    );
   }
 
   // With an owner recorded the pair names the project, and `vercel link`
@@ -1626,4 +1735,993 @@ test("migrate: the guards let the kit use its named URL and a satellite use its 
     migrate(fixture("satellite", owned).cliRoot, { dryRun: true }),
   );
   await migrate(fixture("satellite", owned).cliRoot, { databaseUrl: FLAG, dryRun: true });
+});
+
+/* ================================================================== */
+/*  F-49: a release is a clean, pushed commit, and names it            */
+/* ================================================================== */
+
+/**
+ * Runs `fn` with this CLI's output captured and quiet mode off, and hands it
+ * the output so far. Only strings are taken, as in the doctor test above: the
+ * test runner flushes its own binary frames on stdout meanwhile.
+ */
+async function captureOutput<T>(
+  fn: (soFar: () => string) => Promise<T>,
+): Promise<{ result: T | undefined; error: unknown; out: string }> {
+  const chunks: string[] = [];
+  const { write: stdout } = process.stdout;
+  const { write: stderr } = process.stderr;
+  const sink = (original: typeof process.stdout.write, stream: NodeJS.WriteStream) =>
+    ((chunk: unknown, ...rest: unknown[]) => {
+      if (typeof chunk !== "string")
+        return (original as (...args: unknown[]) => boolean).call(stream, chunk, ...rest);
+      chunks.push(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+  process.stdout.write = sink(stdout, process.stdout);
+  process.stderr.write = sink(stderr, process.stderr);
+  setQuiet(false);
+  try {
+    const result = await fn(() => chunks.join(""));
+    return { result, error: undefined, out: chunks.join("") };
+  } catch (error) {
+    return { result: undefined, error, out: chunks.join("") };
+  } finally {
+    setQuiet(true);
+    process.stdout.write = stdout;
+    process.stderr.write = stderr;
+  }
+}
+
+/**
+ * `git` for building FIXTURE repositories, never the one under test, and
+ * never the repository these tests run in. The user's global and system
+ * configuration is left out (hooks, signing, templates, a default branch),
+ * and so is every GIT_* variable of the shell: inside a git hook GIT_DIR is
+ * set, and a fixture command would otherwise write to that repository.
+ */
+function gitFixture(cwd: string, ...args: string[]): string {
+  const shell = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith("GIT_")),
+  );
+  const emptyConfig = join(workspace, "empty.gitconfig");
+  if (!existsSync(emptyConfig)) writeFileSync(emptyConfig, "");
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...shell,
+      GIT_CONFIG_GLOBAL: emptyConfig,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_AUTHOR_NAME: "drk-deploy test",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "drk-deploy test",
+      GIT_COMMITTER_EMAIL: "test@example.com",
+    },
+  }).trim();
+}
+
+/**
+ * A checkout as a release is made from one: `work` (a new directory, or the
+ * one given) with a first migration committed on main and pushed to a bare
+ * `remote`, and origin/HEAD recorded the way a clone records it.
+ */
+function pushedCheckout(work = join(workspace, `git-${++fixtures}`, "work")): {
+  work: string;
+  remote: string;
+  main: string;
+} {
+  const remote = `${work}-remote.git`;
+  mkdirSync(join(work, "src", "db", "migrations"), { recursive: true });
+  gitFixture(work, "init", "--quiet", "--bare", "--initial-branch=main", remote);
+  gitFixture(work, "init", "--quiet", "--initial-branch=main");
+  writeFileSync(join(work, "src", "db", "migrations", "0001-initial-schema.sql"), "select 1;\n");
+  gitFixture(work, "add", "-A");
+  gitFixture(work, "commit", "--quiet", "-m", "initial");
+  gitFixture(work, "remote", "add", "origin", remote);
+  gitFixture(work, "push", "--quiet", "-u", "origin", "main");
+  gitFixture(work, "remote", "set-head", "origin", "main");
+  return { work, remote, main: gitFixture(work, "rev-parse", "HEAD") };
+}
+
+/** Commits one file, and returns the new HEAD. */
+function commitFile(work: string, file: string, content: string): string {
+  mkdirSync(join(work, file, ".."), { recursive: true });
+  writeFileSync(join(work, file), content);
+  gitFixture(work, "add", "-A");
+  gitFixture(work, "commit", "--quiet", "-m", `add ${file}`);
+  return gitFixture(work, "rev-parse", "HEAD");
+}
+
+const MIGRATION_0007 = "src/db/migrations/0007-foo.sql";
+
+test("F-49: inspectTree reads a real checkout, untracked files included, and fetches nothing", async () => {
+  const { work, remote, main } = pushedCheckout();
+  assert.deepEqual(await inspectTree(work), {
+    root: work,
+    notRepository: null,
+    head: main,
+    branch: "main",
+    changes: [],
+    generated: [],
+    pushedAs: ["origin/main"],
+    release: { ref: "origin/main", commit: main },
+  });
+
+  // The recorded scenario's file: an untracked migration. A config that hides
+  // untracked files from `git status` does not hide it here.
+  gitFixture(work, "config", "status.showUntrackedFiles", "no");
+  writeFileSync(join(work, MIGRATION_0007), "create table foo ();\n");
+  writeFileSync(join(work, "src", "db", "migrations", "0001-initial-schema.sql"), "select 2;\n");
+  const dirty = await inspectTree(work);
+  assert.deepEqual(
+    [...dirty.changes].sort(),
+    [" M src/db/migrations/0001-initial-schema.sql", `?? ${MIGRATION_0007}`].sort(),
+  );
+  assert.equal(dirty.head, main, "reading changed nothing");
+
+  // Committed but not pushed: no remote branch points at HEAD.
+  const ahead = pushedCheckout();
+  const aheadHead = commitFile(ahead.work, MIGRATION_0007, "create table foo ();\n");
+  const unpushed = await inspectTree(ahead.work);
+  assert.equal(unpushed.head, aheadHead);
+  assert.deepEqual(unpushed.pushedAs, []);
+  assert.equal(unpushed.release.commit, ahead.main, "origin/main is still the pushed commit");
+
+  // A pull request's branch, pushed: its own remote branch points at HEAD.
+  const pr = pushedCheckout();
+  gitFixture(pr.work, "switch", "--quiet", "-c", "feature/0007");
+  const prHead = commitFile(pr.work, MIGRATION_0007, "create table foo ();\n");
+  gitFixture(pr.work, "push", "--quiet", "-u", "origin", "feature/0007");
+  const onBranch = await inspectTree(pr.work);
+  assert.equal(onBranch.branch, "feature/0007");
+  assert.deepEqual(onBranch.pushedAs, ["origin/feature/0007"]);
+  assert.deepEqual(onBranch.release, { ref: "origin/main", commit: pr.main });
+  assert.deepEqual((await inspectTree(pr.work, "origin/feature/0007")).release, {
+    ref: "origin/feature/0007",
+    commit: prHead,
+  });
+  assert.deepEqual((await inspectTree(pr.work, "origin/nope")).release, { ref: "origin/nope", commit: null });
+
+  // Detached at origin/main, as a CI checkout often is.
+  gitFixture(pr.work, "checkout", "--quiet", "--detach", "origin/main");
+  const detached = await inspectTree(pr.work);
+  assert.equal(detached.branch, null);
+  assert.equal(detached.head, pr.main);
+  assert.deepEqual(detached.pushedAs, ["origin/main"]);
+
+  // Another clone pushes to main. Nothing is fetched, so origin/main is still
+  // what this checkout last fetched, and its refs are untouched.
+  const other = join(workspace, `git-${++fixtures}`, "other");
+  mkdirSync(join(other, ".."), { recursive: true });
+  gitFixture(join(other, ".."), "clone", "--quiet", remote, other);
+  const pushedElsewhere = commitFile(other, "elsewhere.txt", "x\n");
+  gitFixture(other, "push", "--quiet", "origin", "main");
+  const stale = await inspectTree(work);
+  assert.equal(stale.release.commit, main, "origin/main as last fetched");
+  assert.notEqual(stale.release.commit, pushedElsewhere);
+  assert.equal(gitFixture(work, "rev-parse", "refs/remotes/origin/main"), main, "no ref was written");
+
+  // A shell with GIT_DIR set (inside a git hook, say) does not redirect it,
+  // however the name is spelled.
+  const redirected = await withEnv({ GIT_DIR: join(other, ".git") }, () => inspectTree(work));
+  assert.equal(redirected.head, main, "the checkout's own HEAD, not GIT_DIR's");
+  const env = gitEnv({ git_dir: "x", GIT_WORK_TREE: "y", PATH: "/bin" });
+  for (const key of ["git_dir", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) {
+    assert.ok(key in env && env[key] === undefined, `${key} is removed from git's environment`);
+  }
+  assert.equal("PATH" in env, false);
+
+  // Not a checkout at all.
+  const plain = join(workspace, `plain-${++fixtures}`);
+  mkdirSync(plain);
+  const outside = await inspectTree(plain);
+  assert.equal(typeof outside.notRepository, "string");
+  assert.equal(outside.head, null);
+  assert.match((await inspectTree(join(plain, "missing"))).notRepository ?? "", /does not exist/);
+});
+
+test("F-49: treeProblems: clean and pushed, and for a promotion the release ref, or it names what is wrong", () => {
+  const state = (overrides: Record<string, unknown> = {}) => ({
+    root: "/kit",
+    notRepository: null,
+    head: MAIN_SHA,
+    branch: "main",
+    changes: [] as string[],
+    generated: [] as string[],
+    pushedAs: ["origin/main"],
+    release: { ref: "origin/main", commit: MAIN_SHA as string | null },
+    ...overrides,
+  });
+  const onPr = { head: PR_SHA, branch: "feature/0007", pushedAs: ["origin/feature/0007"] };
+  const kit = { label: "kit checkout", rule: "release" as const };
+  const migrateOnly = { label: "kit checkout", rule: "any-pushed" as const };
+  const forSatellite = { label: "kit checkout", rule: "default-branch" as const };
+
+  assert.deepEqual(treeProblems(state(), kit), []);
+  assert.deepEqual(treeProblems(state(), forSatellite), []);
+  // A pushed pull request's branch: the kit's migrate may run from it, deploy
+  // may not, and neither may a satellite's own database be migrated from it.
+  assert.deepEqual(treeProblems(state(onPr), migrateOnly), []);
+  // A next-env.d.ts that a build rewrote is set aside, so it stops nothing.
+  assert.deepEqual(treeProblems(state({ generated: ["next-env.d.ts"] }), kit), []);
+
+  const cases: [string, Record<string, unknown>, { label: string; rule: string }, RegExp, RegExp][] = [
+    [
+      "untracked migration",
+      { changes: [`?? ${MIGRATION_0007}`] },
+      migrateOnly,
+      /^the kit checkout has 1 uncommitted change\(s\), untracked files included: \?\? src\/db\/migrations\/0007-foo\.sql$/,
+      /git stash --include-untracked[\s\S]*ledgered under its checksum/,
+    ],
+    [
+      "many changes, previewed",
+      { changes: ["?? a", " M b", "A  c", "?? d", "?? e", "?? f", "?? g"] },
+      migrateOnly,
+      /7 uncommitted change\(s\), untracked files included: \?\? a, M b, A {2}c, \?\? d, \?\? e, and 2 more$/,
+      /./,
+    ],
+    [
+      "not pushed",
+      { head: PR_SHA, branch: "feature/0007", pushedAs: [] },
+      migrateOnly,
+      /^the kit checkout's HEAD 222222222222 \(feature\/0007\) is not pushed: no remote-tracking branch points at it$/,
+      /git push[\s\S]*nothing here fetches/,
+    ],
+    [
+      "a promotion off origin/main",
+      onPr,
+      kit,
+      /^the kit checkout's HEAD 222222222222 is not origin\/main \(111111111111\)$/,
+      /--allow-ref <ref>[\s\S]*drk-deploy migrate/,
+    ],
+    [
+      "no origin/main to compare with",
+      { release: { ref: "origin/main", commit: null } },
+      kit,
+      /^the kit checkout has no origin\/main to compare HEAD with$/,
+      /git fetch origin[\s\S]*--allow-ref/,
+    ],
+    [
+      "a satellite's own database migrated from a pushed kit branch",
+      onPr,
+      forSatellite,
+      /^the kit checkout's HEAD 222222222222 is not origin\/main \(111111111111\)$/,
+      /^Check out what origin\/main holds in \/kit[\s\S]*ledgered under its checksum[\s\S]*No flag changes this\. --allow-ref names the satellite's ref, never the kit's\.$/,
+    ],
+    [
+      "a satellite's own database, no origin/main in the kit checkout",
+      { release: { ref: "origin/main", commit: null } },
+      forSatellite,
+      /^the kit checkout has no origin\/main to compare HEAD with$/,
+      /^Fetch it in \/kit \(`git fetch origin`\)\. A satellite's own database/,
+    ],
+    [
+      "not a git checkout",
+      { notRepository: "fatal: not a git repository", head: null, branch: null, pushedAs: [] },
+      kit,
+      /^the kit checkout \(\/kit\) is not a git checkout$/,
+      /git says: fatal: not a git repository/,
+    ],
+    [
+      "no commit yet",
+      { head: null, branch: "main", pushedAs: [] },
+      kit,
+      /^the kit checkout has no commit yet$/,
+      /./,
+    ],
+  ];
+  for (const [name, overrides, check, what, fix] of cases) {
+    const problems = treeProblems(state(overrides), check);
+    assert.ok(
+      problems.some(
+        (problem: { what: string; fix: string }) => what.test(problem.what) && fix.test(problem.fix),
+      ),
+      `${name}: ${JSON.stringify(problems)}`,
+    );
+  }
+  // Every problem is reported, not just the first.
+  assert.equal(treeProblems(state({ ...onPr, changes: ["?? x"], pushedAs: [] }), kit).length, 3);
+});
+
+/** The refusal for a checkout that is not releasable: exit 2, "Nothing was changed." */
+const unreleasable = (action: string, what: RegExp, hint: RegExp = /./) =>
+  refusal(new RegExp(`^Refusing to ${action}: ${what.source}\\. Nothing was changed\\.$`), hint, 2);
+
+test("F-49: a dirty tree, untracked files included, is refused before anything writes, for deploy, up and migrate", async () => {
+  const dirt: [string, string][] = [
+    ["an untracked migration", `?? ${MIGRATION_0007}`],
+    ["an edited tracked file", " M src/lib/env.ts"],
+    ["a staged file", "A  src/db/migrations/0007-foo.sql"],
+  ];
+  const stopsAt: Record<string, string[]> = {
+    deploy: ["envCheck", "tree"],
+    up: ["tree"],
+    migrate: ["tree"],
+  };
+  for (const [name, line] of dirt) {
+    for (const [command, run] of Object.entries(COMMANDS)) {
+      const { cliRoot, kitRoot } = fixture("kit");
+      const { runner, calls } = recordingRunner({ trees: { [kitRoot]: { changes: [line] } } });
+      await assert.rejects(
+        run(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner),
+        unreleasable(
+          command === "migrate" ? "migrate" : "deploy",
+          /the kit checkout has 1 uncommitted change\(s\), untracked files included: .+/,
+          /Commit and push them/,
+        ),
+        `${name}, ${command}`,
+      );
+      assert.deepEqual(
+        calls,
+        stopsAt[command],
+        `${name}, ${command}: nothing synced, linked, pulled or migrated`,
+      );
+    }
+  }
+});
+
+test("F-49: a satellite's own checkout is checked when it is built, and the kit's only when it supplies migrations", async () => {
+  const dirty = { changes: ["?? scratch.txt"] };
+
+  // Built and promoted: the satellite checkout must be clean.
+  for (const run of [deploy, up]) {
+    const { cliRoot, appRoot } = fixture("satellite");
+    const { runner, inspected } = recordingRunner({ trees: { [appRoot]: dirty } });
+    await assert.rejects(run(cliRoot, {}, runner), unreleasable("deploy", /the satellite checkout has 1 .+/));
+    assert.deepEqual(
+      inspected.map((i) => i.root),
+      [appRoot],
+    );
+  }
+
+  // A satellite on the kit's database reads nothing from the kit checkout.
+  const shared = fixture("satellite");
+  const unread = recordingRunner({ trees: { [shared.kitRoot]: dirty } });
+  await deploy(shared.cliRoot, {}, unread.runner);
+  assert.deepEqual(
+    unread.inspected.map((i) => i.root),
+    [shared.appRoot],
+  );
+
+  // One that owns its database migrates from the kit checkout: both are read.
+  const owned = fixture("satellite", { database: "own" });
+  const migrating = recordingRunner({ trees: { [owned.kitRoot]: dirty } });
+  await assert.rejects(
+    deploy(owned.cliRoot, { databaseUrl: PRODUCTION_DIRECT }, migrating.runner),
+    unreleasable("deploy", /the kit checkout has 1 .+/),
+  );
+  assert.deepEqual(migrating.calls, ["envCheck", "tree", "tree"]);
+  assert.deepEqual(
+    migrating.inspected,
+    [
+      { root: owned.appRoot, allowRef: undefined },
+      { root: owned.kitRoot, allowRef: undefined },
+    ],
+    "both are read, the satellite's first",
+  );
+
+  // And `migrate` alone reads the kit checkout alone.
+  const alone = recordingRunner({ trees: { [owned.kitRoot]: dirty } });
+  await assert.rejects(
+    migrateCommand(owned.cliRoot, { databaseUrl: PRODUCTION_DIRECT }, alone.runner),
+    unreleasable("migrate", /the kit checkout has 1 .+/),
+  );
+  assert.deepEqual(
+    alone.inspected.map((i) => i.root),
+    [owned.kitRoot],
+  );
+});
+
+/** A pushed pull request's branch, ahead of origin/main. */
+const PR_TREE: FakeTree = {
+  head: PR_SHA,
+  branch: "feature/0007",
+  pushedAs: ["origin/feature/0007"],
+  refs: { "origin/main": MAIN_SHA, "origin/feature/0007": PR_SHA },
+};
+
+test("F-49: a satellite's own database is migrated only from the kit's default branch, by every command, and --allow-ref never reaches the kit", async () => {
+  // The kit checkout sits on a PUSHED feature branch that adds 0007. The
+  // kit's own `migrate` may run from it (§1.1). A satellite's production may
+  // not: 0007 would be ledgered there under its checksum, and once review
+  // changed it every later migrate of that database would abort.
+  const offDefault = unreleasable(
+    "(deploy|migrate)",
+    /the kit checkout's HEAD 222222222222 is not origin\/main \(111111111111\)/,
+    /No flag changes this\. --allow-ref names the satellite's ref, never the kit's\./,
+  );
+  const stopsAt: Record<string, string[]> = {
+    deploy: ["envCheck", "tree", "tree"],
+    up: ["tree", "tree"],
+    migrate: ["tree"],
+  };
+  for (const [name, run] of Object.entries(COMMANDS)) {
+    const { cliRoot, kitRoot } = fixture("satellite", { database: "own" });
+    const { runner, calls } = recordingRunner({ trees: { [kitRoot]: PR_TREE } });
+    await assert.rejects(run(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner), offDefault, name);
+    assert.deepEqual(calls, stopsAt[name], `${name}: nothing synced, linked, pulled or migrated`);
+  }
+
+  // --allow-ref names the SATELLITE's ref (another repository), so it lets the
+  // satellite checkout through and leaves the kit checkout where it was.
+  const { cliRoot, appRoot, kitRoot } = fixture("satellite", { database: "own" });
+  const named = recordingRunner({ trees: { [appRoot]: PR_TREE, [kitRoot]: PR_TREE } });
+  await assert.rejects(
+    deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "origin/feature/0007" }, named.runner),
+    offDefault,
+  );
+  assert.deepEqual(named.inspected, [
+    { root: appRoot, allowRef: "origin/feature/0007" },
+    { root: kitRoot, allowRef: undefined },
+  ]);
+
+  // The satellite at that ref and the kit at its default branch: released.
+  const released = recordingRunner({ trees: { [appRoot]: PR_TREE } });
+  await deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "origin/feature/0007" }, released.runner);
+  assert.deepEqual(released.calls, ["envCheck", "tree", ...KIT_ORDER.filter((s) => s !== "envCheck")]);
+  const migrated = recordingRunner();
+  await migrateCommand(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, migrated.runner);
+  assert.deepEqual(migrated.calls, MIGRATE_ORDER);
+
+  // The kit's own `migrate` still runs from the same pushed branch.
+  const kit = fixture("kit");
+  const gate = recordingRunner({ trees: { [kit.kitRoot]: PR_TREE } });
+  await migrateCommand(kit.cliRoot, { databaseUrl: PRODUCTION_DIRECT }, gate.runner);
+  assert.deepEqual(gate.calls, MIGRATE_ORDER);
+});
+
+test("F-49: deploy and up promote only origin's default branch, unless --allow-ref names the pushed ref HEAD is", async () => {
+  const offMain = /the kit checkout's HEAD 222222222222 is not origin\/main \(111111111111\)/;
+  for (const [run, stopsAt] of [
+    [deploy, ["envCheck", "tree"]],
+    [up, ["tree"]],
+  ] as const) {
+    const { cliRoot, kitRoot } = fixture("kit");
+    const { runner, calls } = recordingRunner({ trees: { [kitRoot]: PR_TREE } });
+    await assert.rejects(
+      run(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner),
+      unreleasable("deploy", offMain, /--allow-ref <ref>[\s\S]*drk-deploy migrate/),
+    );
+    assert.deepEqual(calls, stopsAt);
+  }
+
+  // Named, it deploys, and the ref reached the check.
+  const { cliRoot, kitRoot } = fixture("kit");
+  const named = recordingRunner({ trees: { [kitRoot]: PR_TREE } });
+  await deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "origin/feature/0007" }, named.runner);
+  assert.deepEqual(named.calls, KIT_ORDER);
+  assert.deepEqual(named.inspected, [{ root: kitRoot, allowRef: "origin/feature/0007" }]);
+  const upped = recordingRunner({ trees: { [kitRoot]: PR_TREE } });
+  await up(cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "origin/feature/0007" }, upped.runner);
+  assert.deepEqual(upped.calls, UP_ORDER);
+
+  // It names a ref HEAD must BE, not a pass: another ref, or one that does
+  // not resolve, is refused.
+  const other = recordingRunner({ trees: { [kitRoot]: PR_TREE } });
+  await assert.rejects(
+    deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "origin/main" }, other.runner),
+    unreleasable("deploy", offMain),
+  );
+  const unknown = recordingRunner({ trees: { [kitRoot]: PR_TREE } });
+  await assert.rejects(
+    deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "origin/nope" }, unknown.runner),
+    unreleasable("deploy", /the kit checkout has no origin\/nope to compare HEAD with/),
+  );
+
+  // And it never lets an unpushed or dirty checkout through.
+  const local = recordingRunner({
+    trees: {
+      [kitRoot]: { ...PR_TREE, pushedAs: [], changes: ["?? notes.txt"], refs: { "feature/0007": PR_SHA } },
+    },
+  });
+  await assert.rejects(
+    deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "feature/0007" }, local.runner),
+    unreleasable(
+      "deploy",
+      /the kit checkout has 1 uncommitted change\(s\).+; the kit checkout's HEAD .+ is not pushed.+/,
+    ),
+  );
+
+  // A "ref" git would read as an option is refused before anything is read.
+  const option = recordingRunner();
+  await assert.rejects(
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, allowRef: "--output=x" }, option.runner),
+    refusal(/^--allow-ref "--output=x" is not a ref\.$/, /origin\/hotfix/, 2),
+  );
+  assert.deepEqual(option.calls, ["envCheck"]);
+});
+
+test("F-49: migrate runs from a pushed pull request's branch (the pre-merge gate), and refuses an unpushed commit", async () => {
+  const { cliRoot, kitRoot } = fixture("kit");
+  const gate = recordingRunner({ trees: { [kitRoot]: PR_TREE }, git: GIT_CONNECTED });
+  await migrateCommand(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, gate.runner);
+  assert.deepEqual(gate.calls, MIGRATE_ORDER, "the git integration is never asked: migrate promotes nothing");
+
+  for (const [name, tree] of [
+    ["committed, not pushed", { ...PR_TREE, pushedAs: [] }],
+    ["detached at a commit no remote branch has", { ...PR_TREE, branch: null, pushedAs: [] }],
+  ] as const) {
+    const { runner, calls } = recordingRunner({ trees: { [kitRoot]: tree } });
+    await assert.rejects(
+      migrateCommand(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner),
+      unreleasable("migrate", /the kit checkout's HEAD 222222222222.* is not pushed: .+/, /git push/),
+      name,
+    );
+    assert.deepEqual(calls, ["tree"], `${name}: nothing linked, pulled or migrated`);
+  }
+
+  const outside = recordingRunner({
+    trees: { [kitRoot]: { notRepository: "fatal: not a git repository", head: null, pushedAs: [] } },
+  });
+  await assert.rejects(
+    migrateCommand(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, outside.runner),
+    unreleasable("migrate", /the kit checkout \(.+\) is not a git checkout/, /git says: fatal/),
+  );
+});
+
+/** A string, as a RegExp source that matches it literally. */
+function literal(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+test("F-49: the commit is printed before anything runs and again next to the database it migrates", async () => {
+  const { cliRoot, kitRoot } = fixture("kit");
+  const fake = recordingRunner({ trees: { [kitRoot]: PR_TREE } });
+  let beforeMigrate = "";
+  const { error, out } = await captureOutput((soFar) =>
+    migrateCommand(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, {
+      ...(fake.runner as object),
+      migrate: async (...received: unknown[]) => {
+        beforeMigrate = soFar();
+        return (fake.runner as { migrate: (...a: unknown[]) => Promise<void> }).migrate(...received);
+      },
+    } as never),
+  );
+  assert.equal(error, undefined, out);
+  const recorded = literal(`${PR_SHA} (on feature/0007, clean tree, pushed as origin/feature/0007)`);
+  assert.match(beforeMigrate, new RegExp(`Release commit \\(kit checkout\\)[\\s\\S]*commit\\s+${recorded}`));
+  assert.match(
+    beforeMigrate,
+    new RegExp(`Migration target[\\s\\S]*from commit\\s+${recorded}`),
+    "printed where the migration is, before it runs",
+  );
+
+  // A promotion prints the release ref it was compared with, and says it was not fetched.
+  const promoted = await captureOutput(() =>
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, recordingRunner().runner),
+  );
+  assert.equal(promoted.error, undefined, promoted.out);
+  assert.match(
+    promoted.out,
+    /release ref\s+origin\/main at 111111111111 \(as last fetched: nothing is fetched\)/,
+  );
+});
+
+test("F-49: a dry run reads and reports the tree, and refuses nothing", async () => {
+  const { cliRoot, kitRoot } = fixture("kit");
+  const dirty = { [kitRoot]: { ...PR_TREE, changes: [`?? ${MIGRATION_0007}`] } };
+
+  const deployed = recordingRunner({ trees: dirty, git: GIT_CONNECTED });
+  const shown = await captureOutput(() =>
+    deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, deployed.runner),
+  );
+  assert.equal(shown.error, undefined, shown.out);
+  assert.deepEqual(deployed.calls, ["envCheck", ...GATE, "migrate"]);
+  assert.match(shown.out, /\[dry-run\] a real run would refuse: the kit checkout has 1 uncommitted change/);
+  assert.match(
+    shown.out,
+    /\[dry-run\] a real run would refuse: the kit checkout's HEAD 222222222222 is not origin\/main/,
+  );
+  assert.match(
+    shown.out,
+    /\[dry-run\] a real run would refuse: Refusing to deploy: Vercel's git integration/,
+  );
+
+  const migrated = recordingRunner({ trees: dirty });
+  const planned = await captureOutput(() =>
+    migrateCommand(cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, migrated.runner),
+  );
+  assert.equal(planned.error, undefined, planned.out);
+  assert.deepEqual(migrated.calls, ["tree", "migrate"]);
+  assert.match(planned.out, /\[dry-run\] a real run would refuse: the kit checkout has 1 uncommitted change/);
+});
+
+test("F-49: a dry run that cannot read the project's git connection says so and plans on; a real run stops", async () => {
+  // The git connection comes from the Vercel API, which a dry run now reads.
+  // An API that is down must not turn "show me the plan" into a failure.
+  const unreadable = /\[dry-run\] could not read the project's git connection \(gitIntegration failed\)/;
+  const dry = recordingRunner({ failAt: "gitIntegration" });
+  const shown = await captureOutput(() =>
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, dry.runner),
+  );
+  assert.equal(shown.error, undefined, shown.out);
+  assert.deepEqual(dry.calls, ["envCheck", ...GATE, "migrate"]);
+  assert.match(shown.out, unreadable);
+  const dryUp = recordingRunner({ failAt: "gitIntegration" });
+  const upShown = await captureOutput(() =>
+    up(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, dryUp.runner),
+  );
+  assert.equal(upShown.error, undefined, upShown.out);
+  assert.deepEqual(dryUp.calls, [...GATE, "envSync", "migrate"]);
+  assert.match(upShown.out, unreadable);
+
+  // A real run cannot tell whether it races Vercel, so it goes no further.
+  for (const run of [deploy, up]) {
+    const real = recordingRunner({ failAt: "gitIntegration" });
+    await assert.rejects(
+      run(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, real.runner),
+      /^Error: gitIntegration failed$/,
+    );
+    assert.deepEqual(real.calls.at(-1), "gitIntegration", "nothing synced, linked, pulled or migrated");
+  }
+});
+
+test("F-49: a run that migrates is refused while Vercel's git integration deploys production, unless named", async () => {
+  const raced = refusal(
+    /^Refusing to deploy: Vercel's git integration also deploys this project's production \(github:devresponse\/devresponsekit: every push to main is built and promoted by Vercel\)\. Nothing was changed\.$/,
+    /"deploymentEnabled": \{ "main": false \}[\s\S]*--allow-git-integration-race[\s\S]*`drk-deploy migrate` is not refused/,
+    2,
+  );
+  const deployed = recordingRunner({ git: GIT_CONNECTED });
+  await assert.rejects(
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, deployed.runner),
+    raced,
+  );
+  assert.deepEqual(deployed.calls, ["envCheck", ...GATE], "nothing linked, pulled or migrated");
+  const upped = recordingRunner({ git: GIT_CONNECTED });
+  await assert.rejects(up(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, upped.runner), raced);
+  assert.deepEqual(upped.calls, GATE, "refused before env:sync wrote anything");
+
+  // Named, it runs in the usual order, and says what it is doing.
+  const allowed = recordingRunner({ git: GIT_CONNECTED });
+  const loud = await captureOutput(() =>
+    deploy(
+      fixture("kit").cliRoot,
+      { databaseUrl: PRODUCTION_DIRECT, allowGitIntegrationRace: true },
+      allowed.runner,
+    ),
+  );
+  assert.equal(loud.error, undefined, loud.out);
+  assert.deepEqual(allowed.calls, KIT_ORDER);
+  assert.match(loud.out, /--allow-git-integration-race: Vercel ALSO promotes every push to production/);
+  const allowedUp = recordingRunner({ git: GIT_CONNECTED });
+  await up(
+    fixture("kit").cliRoot,
+    { databaseUrl: PRODUCTION_DIRECT, allowGitIntegrationRace: true },
+    allowedUp.runner,
+  );
+  assert.deepEqual(allowedUp.calls, UP_ORDER);
+
+  // With no migrate step there is no order to lose: it deploys, and says so.
+  const noMigrate: [string, string, Record<string, unknown>][] = [
+    ["deploy --skip-migrations", fixture("kit").cliRoot, { skipMigrations: true }],
+    ["a satellite on the kit's database", fixture("satellite").cliRoot, {}],
+  ];
+  for (const [name, cliRoot, options] of noMigrate) {
+    const { runner, calls } = recordingRunner({ git: GIT_CONNECTED });
+    const told = await captureOutput(() => deploy(cliRoot, options, runner));
+    assert.equal(told.error, undefined, `${name}: ${told.out}`);
+    assert.deepEqual(
+      calls,
+      KIT_ORDER.filter((s) => s !== "migrate"),
+      name,
+    );
+    assert.match(told.out, /two deployers of the same code, not a race/, name);
+  }
+
+  // Auto-deploy turned off where this can tell: in vercel.json, or an Ignored
+  // Build Step that skips every build.
+  const off: [string, ProjectGit, unknown][] = [
+    ["vercel.json, the production branch", GIT_CONNECTED, { git: { deploymentEnabled: { main: false } } }],
+    ["vercel.json, every branch", GIT_CONNECTED, { git: { deploymentEnabled: false } }],
+    ["Ignored Build Step exit 0", { ...GIT_CONNECTED, ignoreCommand: "exit 0" }, null],
+  ];
+  for (const [name, git, vercelJson] of off) {
+    const { cliRoot, kitRoot } = fixture("kit");
+    if (vercelJson) writeFileSync(join(kitRoot, "vercel.json"), JSON.stringify(vercelJson));
+    const { runner, calls } = recordingRunner({ git });
+    await deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner);
+    assert.deepEqual(calls, KIT_ORDER, name);
+  }
+
+  // Any other Ignored Build Step is a program this cannot run: it counts as
+  // on, and is named.
+  const custom = recordingRunner({ git: { ...GIT_CONNECTED, ignoreCommand: "bash scripts/ignore.sh" } });
+  await assert.rejects(
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, custom.runner),
+    refusal(
+      /unless its Ignored Build Step \(`bash scripts\/ignore\.sh`\), which this cannot evaluate, skips it\)/,
+    ),
+  );
+});
+
+test("F-49: productionAutoDeploy and projectGit read the project's git connection, and count only what they can be sure of as off", () => {
+  const cases: [string, ProjectGit, unknown, boolean][] = [
+    ["nothing connected", NO_GIT, null, false],
+    ["connected", GIT_CONNECTED, null, true],
+    [
+      "connected, another branch disabled",
+      GIT_CONNECTED,
+      { git: { deploymentEnabled: { dev: false } } },
+      true,
+    ],
+    [
+      "connected, a glob is not evaluated",
+      GIT_CONNECTED,
+      { git: { deploymentEnabled: { "*": false } } },
+      true,
+    ],
+    ["connected, main disabled", GIT_CONNECTED, { git: { deploymentEnabled: { main: false } } }, false],
+    [
+      "connected on another production branch",
+      { ...GIT_CONNECTED, productionBranch: "release" },
+      { git: { deploymentEnabled: { release: false } } },
+      false,
+    ],
+    ["every build ignored", { ...GIT_CONNECTED, ignoreCommand: " exit 0 " }, null, false],
+    ["an ignore step that can build", { ...GIT_CONNECTED, ignoreCommand: "exit 1" }, null, true],
+  ];
+  for (const [name, git, vercelJson, on] of cases) {
+    assert.equal(productionAutoDeploy(git, vercelJson).on, on, name);
+  }
+
+  assert.deepEqual(projectGit(undefined, undefined), NO_GIT);
+  assert.deepEqual(projectGit(null, "  "), NO_GIT, "a blank ignore command is none");
+  assert.deepEqual(
+    projectGit(
+      { type: "github", org: "devresponse", repo: "devresponsekit", productionBranch: "main" },
+      null,
+    ),
+    GIT_CONNECTED,
+  );
+  assert.deepEqual(
+    projectGit(
+      { type: "gitlab", projectNameWithNamespace: "acme / kit", productionBranch: "trunk" },
+      "exit 0",
+    ),
+    { repository: "gitlab:acme / kit", productionBranch: "trunk", ignoreCommand: "exit 0" },
+  );
+  assert.equal(
+    projectGit({ type: "bitbucket", owner: "acme", slug: "kit", productionBranch: "main" }, null).repository,
+    "bitbucket:acme/kit",
+  );
+});
+
+test("F-49: doctor counts a checkout every release command refuses, and only notes one that is off the release ref", async () => {
+  const { cliRoot, kitRoot } = fixture("kit");
+  const { main } = pushedCheckout(kitRoot);
+  const run = async () => {
+    const report = await captureOutput(() => doctor(cliRoot));
+    assert.equal(report.error, undefined, report.out);
+    return { problems: report.result as number, out: report.out };
+  };
+
+  // The fixture has no Vercel CLI installed and the API is offline, so the
+  // count is never zero: what matters is what the checkout adds to it.
+  const clean = await run();
+  assert.match(
+    clean.out,
+    new RegExp(`kit checkout\\s+ok ${main} \\(on main, clean tree, pushed as origin/main\\)`),
+  );
+
+  writeFileSync(join(kitRoot, MIGRATION_0007), "create table foo ();\n");
+  const dirty = await run();
+  assert.equal(dirty.problems, clean.problems + 1, dirty.out);
+  assert.match(
+    dirty.out,
+    /kit checkout\s+wrong — the kit checkout has 1 uncommitted change\(s\), untracked files included: \?\? src\/db\/migrations\/0007-foo\.sql/,
+  );
+
+  gitFixture(kitRoot, "switch", "--quiet", "-c", "feature/0007");
+  gitFixture(kitRoot, "add", "-A");
+  gitFixture(kitRoot, "commit", "--quiet", "-m", "0007");
+  const unpushed = await run();
+  assert.equal(unpushed.problems, clean.problems + 1, unpushed.out);
+  assert.match(
+    unpushed.out,
+    /kit checkout\s+wrong — the kit checkout's HEAD \w{12} \(feature\/0007\) is not pushed/,
+  );
+
+  // Pushed, it is what `migrate` runs from before the merge: not a problem.
+  gitFixture(kitRoot, "push", "--quiet", "-u", "origin", "feature/0007");
+  const pr = await run();
+  assert.equal(pr.problems, clean.problems, pr.out);
+  assert.match(
+    pr.out,
+    /release ref\s+HEAD is not origin\/main \(\w{12}\) — deploy and up refuse it without --allow-ref; migrate allows it/,
+  );
+});
+
+/*
+ * next-env.d.ts as the kit commits it (the `next dev` form) and as `next
+ * build` rewrites it: Next 16's writeAppTypeDeclarations with distDir ".next"
+ * instead of ".next/dev". `vercel build`, which deploy and up run in the
+ * checkout, runs `next build`, so every deploy produced the second form.
+ */
+const NEXT_ENV_DEV = [
+  '/// <reference types="next" />',
+  '/// <reference types="next/image-types/global" />',
+  'import "./.next/dev/types/routes.d.ts";',
+  'import "./.next/dev/types/root-params.d.ts";',
+  "",
+  "// NOTE: This file should not be edited",
+  "// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.",
+  "",
+].join("\n");
+const NEXT_ENV_BUILD = NEXT_ENV_DEV.replaceAll("./.next/dev/types/", "./.next/types/");
+
+test("F-49: readStatus reads git's -z porcelain unquoted, and sets aside only a working-tree next-env.d.ts", () => {
+  const { changes, generated } = readStatus(
+    [
+      "R  src/db/migrations/0007-new.sql",
+      "src/db/migrations/0007-old.sql",
+      " M next-env.d.ts",
+      " M app one/next-env.d.ts",
+      "?? notes with spaces.txt",
+      "M  apps/b/next-env.d.ts",
+      "MM apps/c/next-env.d.ts",
+      " D apps/d/next-env.d.ts",
+      "?? apps/e/next-env.d.ts",
+      " M my-next-env.d.ts",
+      " M next-env.d.ts.bak",
+      "",
+    ].join("\0"),
+  );
+  assert.deepEqual(generated, ["next-env.d.ts", "app one/next-env.d.ts"]);
+  assert.deepEqual(changes, [
+    "R  src/db/migrations/0007-old.sql -> src/db/migrations/0007-new.sql",
+    "?? notes with spaces.txt",
+    "M  apps/b/next-env.d.ts",
+    "MM apps/c/next-env.d.ts",
+    " D apps/d/next-env.d.ts",
+    "?? apps/e/next-env.d.ts",
+    " M my-next-env.d.ts",
+    " M next-env.d.ts.bak",
+  ]);
+  assert.deepEqual(readStatus(""), { changes: [], generated: [] });
+});
+
+test("F-49: a next-env.d.ts a build rewrote is set aside and named in a real checkout; anything a person did to it counts", async () => {
+  const { work } = pushedCheckout();
+  commitFile(work, "next-env.d.ts", NEXT_ENV_DEV);
+  commitFile(work, "app one/next-env.d.ts", NEXT_ENV_DEV);
+  gitFixture(work, "push", "--quiet", "origin", "main");
+
+  // `next build` in the checkout, and in another app of the same repository.
+  writeFileSync(join(work, "next-env.d.ts"), NEXT_ENV_BUILD);
+  writeFileSync(join(work, "app one", "next-env.d.ts"), NEXT_ENV_BUILD);
+  const built = await inspectTree(work);
+  assert.deepEqual(built.changes, []);
+  assert.deepEqual([...built.generated].sort(), ["app one/next-env.d.ts", "next-env.d.ts"]);
+  assert.deepEqual(treeProblems(built, { label: "kit checkout", rule: "release" }), []);
+  assert.match(
+    describeCommit(built),
+    /\(on main, clean tree apart from (app one\/)?next-env\.d\.ts and (app one\/)?next-env\.d\.ts, pushed as origin\/main\)$/,
+    "the record still says it",
+  );
+  // Read from inside the app folder, the paths are still the repository's.
+  assert.deepEqual([...(await inspectTree(join(work, "app one"))).generated].sort(), [
+    "app one/next-env.d.ts",
+    "next-env.d.ts",
+  ]);
+
+  // Staged is something a person did: it counts. An edit beside it counts
+  // too, with its path unquoted although it has a space in it.
+  gitFixture(work, "add", "next-env.d.ts");
+  writeFileSync(join(work, "app one", "notes on 0007.txt"), "x\n");
+  const staged = await inspectTree(work);
+  assert.deepEqual(staged.changes, ["M  next-env.d.ts", "?? app one/notes on 0007.txt"]);
+  assert.deepEqual(staged.generated, ["app one/next-env.d.ts"]);
+  assert.equal(treeProblems(staged, { label: "kit checkout", rule: "release" }).length, 1);
+});
+
+/**
+ * A kit fixture whose checkout is a real, pushed git repository holding the
+ * dev form of next-env.d.ts and ignoring `.vercel` (where the fake link and
+ * pull write), as the kit does.
+ */
+function pushedKitWithNextEnv(): { cliRoot: string; kitRoot: string } {
+  const { cliRoot, kitRoot } = fixture("kit");
+  pushedCheckout(kitRoot);
+  commitFile(kitRoot, ".gitignore", ".vercel\n");
+  commitFile(kitRoot, "next-env.d.ts", NEXT_ENV_DEV);
+  gitFixture(kitRoot, "push", "--quiet", "origin", "main");
+  return { cliRoot, kitRoot };
+}
+
+/** The recording fake, with the REAL `inspectTree` and a `build` that rewrites next-env.d.ts as `next build` does. */
+function buildingRunner(options: { failAt?: string } = {}) {
+  const fake = recordingRunner(options);
+  const steps = fake.runner as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const runner = {
+    ...steps,
+    tree: async (root: string, allowRef?: string) => {
+      await steps.tree!(root, allowRef);
+      return inspectTree(root, allowRef);
+    },
+    build: async (vercel: { root: string }) => {
+      writeFileSync(join(vercel.root, "next-env.d.ts"), NEXT_ENV_BUILD);
+      return steps.build!(vercel);
+    },
+  };
+  return { ...fake, runner: runner as never };
+}
+
+test("F-49: deploy's own build leaves next-env.d.ts as it found it, and a rewritten one does not stop the next run", async () => {
+  const { cliRoot, kitRoot } = pushedKitWithNextEnv();
+  const nextEnv = () => readFileSync(join(kitRoot, "next-env.d.ts"), "utf8");
+
+  const first = buildingRunner();
+  await deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, first.runner);
+  assert.deepEqual(first.calls, KIT_ORDER);
+  assert.equal(nextEnv(), NEXT_ENV_DEV, "put back after the build");
+  assert.equal(gitFixture(kitRoot, "status", "--porcelain"), "", "the run leaves the checkout clean");
+
+  // So a second run is released, not refused, and up's build is put back too.
+  const second = buildingRunner();
+  await up(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, second.runner);
+  assert.deepEqual(second.calls, UP_ORDER);
+  assert.equal(nextEnv(), NEXT_ENV_DEV);
+
+  // A build that fails after rewriting it puts it back as well, and promotes nothing.
+  const failed = buildingRunner({ failAt: "build" });
+  await assert.rejects(deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, failed.runner), /build failed/);
+  assert.equal(failed.calls.includes("promote"), false);
+  assert.equal(nextEnv(), NEXT_ENV_DEV);
+
+  // A local `next build` before the run: set aside and named, not refused,
+  // and left the way the run found it.
+  writeFileSync(join(kitRoot, "next-env.d.ts"), NEXT_ENV_BUILD);
+  const local = buildingRunner();
+  const shown = await captureOutput(() => deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, local.runner));
+  assert.equal(shown.error, undefined, shown.out);
+  assert.deepEqual(local.calls, KIT_ORDER);
+  assert.match(
+    shown.out,
+    /set aside\s+next-env\.d\.ts \(modified, set aside: every `next build` rewrites it from the app's config/,
+  );
+  assert.match(
+    shown.out,
+    /commit\s+\w{40} \(on main, clean tree apart from next-env\.d\.ts, pushed as origin\/main\)/,
+  );
+  assert.equal(nextEnv(), NEXT_ENV_BUILD);
+});
+
+test("F-49: doctor counts a satellite's kit checkout off the kit's default branch, and names a set-aside next-env.d.ts", async () => {
+  const { cliRoot, kitRoot, appRoot } = fixture("satellite", { database: "own" });
+  pushedCheckout(kitRoot);
+  pushedCheckout(appRoot);
+  commitFile(appRoot, "next-env.d.ts", NEXT_ENV_DEV);
+  gitFixture(appRoot, "push", "--quiet", "origin", "main");
+  const run = async () => {
+    const report = await captureOutput(() => doctor(cliRoot));
+    assert.equal(report.error, undefined, report.out);
+    return { problems: report.result as number, out: report.out };
+  };
+
+  const clean = await run();
+  assert.match(clean.out, /satellite checkout\s+ok \w{40} \(on main, clean tree, pushed as origin\/main\)/);
+  assert.match(clean.out, /kit checkout\s+ok \w{40} \(on main, clean tree, pushed as origin\/main\)/);
+
+  // A build of the satellite rewrote its next-env.d.ts: named, not counted.
+  writeFileSync(join(appRoot, "next-env.d.ts"), NEXT_ENV_BUILD);
+  const built = await run();
+  assert.equal(built.problems, clean.problems, built.out);
+  assert.match(built.out, /set aside\s+next-env\.d\.ts \(modified, set aside/);
+
+  // The kit checkout on a pushed feature branch: every command that migrates
+  // this satellite's database from it refuses that, and no flag moves it.
+  gitFixture(kitRoot, "switch", "--quiet", "-c", "feature/0007");
+  commitFile(kitRoot, MIGRATION_0007, "create table foo ();\n");
+  gitFixture(kitRoot, "push", "--quiet", "-u", "origin", "feature/0007");
+  const off = await run();
+  assert.equal(off.problems, clean.problems + 1, off.out);
+  assert.match(
+    off.out,
+    /kit checkout\s+wrong — the kit checkout's HEAD \w{12} is not origin\/main \(\w{12}\)/,
+  );
+  assert.match(off.out, /--allow-ref names the satellite's ref, never the kit's/);
 });

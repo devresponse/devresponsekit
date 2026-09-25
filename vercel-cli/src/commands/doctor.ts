@@ -5,6 +5,14 @@ import { pnpmCommand, run } from "../lib/exec.js";
 import { coreMigrations } from "../lib/kit.js";
 import { CliError, dim, field, green, heading, info, ok, red, warn, yellow } from "../lib/log.js";
 import {
+  GENERATED_NOTE,
+  type ReleaseRule,
+  describeCommit,
+  inspectTree,
+  shortSha,
+  treeProblems,
+} from "../lib/release-tree.js";
+import {
   type DeploymentProfile,
   describeProfile,
   migrationPolicy,
@@ -33,6 +41,59 @@ function readProfile(config: ProjectConfig, bad: (message: string) => string): D
     field("config", bad(`${red("unreadable")} — ${(err as Error).message}`));
     if (err instanceof CliError && err.hint) info(`    ${dim(err.hint)}`);
     return null;
+  }
+}
+
+/**
+ * The checkouts `deploy`, `up` and `migrate` release from, judged as they
+ * judge them (F-49), so `doctor` does not say "Ready to deploy." about a tree
+ * every one of them refuses.
+ *
+ * What no flag overrides is counted: not a git checkout, uncommitted or
+ * untracked changes, HEAD not pushed, and the kit checkout behind a satellite
+ * that owns its database off the kit's default branch (every command that
+ * reads it refuses that, `--allow-ref` included). A deployed checkout whose
+ * HEAD is not origin's default branch is only noted. `deploy` and `up` refuse
+ * it without `--allow-ref`, but the kit's `migrate` runs from a pull
+ * request's branch by design, and that is the state a checkout is in while
+ * one is open. A `next-env.d.ts` a build rewrote is named, not counted, as
+ * the release commands do.
+ */
+async function reportReleaseCheckouts(
+  config: ProjectConfig,
+  profile: DeploymentProfile,
+  bad: (message: string) => string,
+): Promise<void> {
+  heading("Release checkout");
+  const sources: { label: string; root: string; rule: ReleaseRule }[] =
+    profile.kind === "satellite"
+      ? [
+          { label: "satellite checkout", root: deployRoot(config), rule: "any-pushed" },
+          ...(migrationPolicy(profile).allowed
+            ? [{ label: "kit checkout", root: config.kitRoot, rule: "default-branch" as const }]
+            : []),
+        ]
+      : [{ label: "kit checkout", root: config.kitRoot, rule: "any-pushed" }];
+  for (const source of sources) {
+    const tree = await inspectTree(source.root);
+    const problems = treeProblems(tree, { label: source.label, rule: source.rule });
+    if (problems.length > 0) {
+      field(source.label, bad(`${red("wrong")} — ${problems.map((problem) => problem.what).join("; ")}`));
+      for (const fix of new Set(problems.map((problem) => problem.fix))) info(`    ${dim(fix)}`);
+      continue;
+    }
+    field(source.label, `${PASS} ${dim(describeCommit(tree))}`);
+    for (const path of tree.generated) field("set aside", `${path} ${dim(`(${GENERATED_NOTE})`)}`);
+    if (source.root === deployRoot(config) && tree.release.commit !== tree.head) {
+      field(
+        "release ref",
+        `${yellow(`HEAD is not ${tree.release.ref} (${shortSha(tree.release.commit)})`)} ${dim(
+          profile.kind === "satellite"
+            ? "— deploy and up refuse it without --allow-ref"
+            : "— deploy and up refuse it without --allow-ref; migrate allows it",
+        )}`,
+      );
+    }
   }
 }
 
@@ -199,6 +260,8 @@ export async function doctor(cliRoot: string): Promise<number> {
     // the operator chose, not a broken one, and `doctor` exiting 1 for it
     // would train people to ignore this command (F-24).
     if (profile) reportContainment(profile, config.origin);
+
+    if (profile) await reportReleaseCheckouts(config, profile, bad);
   }
 
   info("");

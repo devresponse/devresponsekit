@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ProjectConfig, deployRoot, requireConfig, requireToken } from "../lib/config.js";
 import { runOrThrow } from "../lib/exec.js";
@@ -23,7 +23,22 @@ import {
   repointingParams,
   verifyMigrationTarget,
 } from "../lib/migration-target.js";
+import {
+  GENERATED_NOTE,
+  NEXT_ENV_FILE,
+  type ReleaseRule,
+  type TreeProblem,
+  type TreeState,
+  assertRefName,
+  describeCommit,
+  inspectTree,
+  productionAutoDeploy,
+  readVercelJson,
+  shortSha,
+  treeProblems,
+} from "../lib/release-tree.js";
 import { type DeploymentProfile, describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
+import type { ProjectGit } from "../lib/vercel-client.js";
 import { assertCheckoutLink, projectLinkFile, vercelEnvFor } from "../lib/vercel-project.js";
 import { envCheck, envSync, parseEnvFile, reportContainment } from "./env.js";
 
@@ -232,14 +247,23 @@ interface MigrationOptions {
 }
 
 /**
- * `drk-deploy migrate`: link → pull → check the target → migrate, the first
- * half of `deploy`.
+ * `drk-deploy migrate`: check the kit checkout → link → pull → check the
+ * target → migrate, the first half of `deploy`.
  *
  * On its own this command used to migrate whatever URL it resolved, into
  * `auth` unless told otherwise, with nothing to compare either against. It
  * now reads production's settings the way `deploy` does, so a stray URL or a
  * production on another DB_SCHEMA is refused here too (F-47). The guards run
  * first, so a refused migration spawns nothing.
+ *
+ * The migrations come from the kit checkout, so it must be clean and pushed
+ * (F-49). For the kit's own production it may be any pushed branch:
+ * docs/deployment.md §1.1 has production migrated from the open pull
+ * request's branch before it merges, and this command is how that is done
+ * with the target checked. For a satellite's own database it must be the
+ * kit's default branch (`releaseSources`): that gate is the kit's, not the
+ * satellite's. Nothing here promotes, so the Vercel git integration is not
+ * asked about either.
  */
 export async function migrateCommand(
   cliRoot: string,
@@ -250,15 +274,18 @@ export async function migrateCommand(
   const profile = resolveProfile(config);
   assertMayMigrate(profile);
   const migration = resolveMigrationUrl({ ...options, satellite: profile.kind === "satellite" });
+  const sources = releaseSources(config, profile, { promotes: false, migrates: true });
 
   if (options.dryRun) {
-    await dryRunMigration(cliRoot, migration, options, runner);
+    const trees = await assertReleasableTree(runner, sources, { action: "migrate", dryRun: true });
+    await dryRunMigration(cliRoot, migration, options, runner, commitOf(trees, config.kitRoot));
     return;
   }
 
   const vercel = vercelInvocation(cliRoot, config, profile);
+  const trees = await assertReleasableTree(runner, sources, { action: "migrate" });
   await withProductionEnv(vercel, runner, async (production) => {
-    const target = checkMigrationTarget(migration, production(), options);
+    const target = checkMigrationTarget(migration, production(), options, commitOf(trees, config.kitRoot));
     await runner.migrate(cliRoot, migrationStep(migration, target, options));
   });
 }
@@ -273,9 +300,11 @@ async function dryRunMigration(
   migration: MigrationUrl,
   options: MigrationOptions,
   runner: ReleaseRunner,
+  commit: TreeState | undefined,
 ): Promise<void> {
   heading("Migration target");
   field("migrating", `${redactUrl(migration.url)} ${dim(`(${migration.source})`)}`);
+  if (commit) field("from commit", describeCommit(commit));
   step(
     "[dry-run] production's settings are not pulled, so this is NOT checked against production, and the schema is `auth` unless --schema says otherwise. A real run checks both first.",
   );
@@ -291,14 +320,21 @@ async function dryRunMigration(
  * Prints what is about to be migrated, then refuses it unless it is
  * production's (F-47). Values are printed redacted: host, user and database,
  * never the password.
+ *
+ * The commit the migrations come from is printed here, next to the database
+ * it is applied to (F-49). That line is the record of what ran: the kit's
+ * ledger keeps an id, a checksum and a time, and a column for the commit
+ * would need a migration of its own.
  */
 function checkMigrationTarget(
   migration: MigrationUrl,
   production: Readonly<Record<string, string>>,
   options: MigrationOptions,
+  commit: TreeState | undefined,
 ): MigrationTarget {
   heading("Migration target");
   field("migrating", `${redactUrl(migration.url)} ${dim(`(${migration.source})`)}`);
+  if (commit) field("from commit", describeCommit(commit));
   const target = verifyMigrationTarget({
     url: migration.url,
     production,
@@ -364,8 +400,22 @@ export interface VercelInvocation {
  * `pull` comes BEFORE `migrate` (F-47). It is read-only on Vercel's side, and
  * what it writes, production's own variables, is what the migration URL and
  * schema are checked against before anything is migrated.
+ *
+ * `tree` and `gitIntegration` come before anything that writes (F-49): before
+ * `env:sync`, `vercel link`, the pull and the migration. Both only read. So
+ * the order is: [env:check] → tree → git integration → [env:sync] → link →
+ * pull → migrate → build → promote → verify. `migrate` runs tree → link →
+ * pull → migrate.
  */
 export interface ReleaseRunner {
+  /**
+   * The git state of one checkout the run releases from (`inspectTree`):
+   * read-only, nothing fetched. `allowRef` replaces origin's default branch
+   * as the ref a promoted checkout's HEAD must be.
+   */
+  tree(root: string, allowRef?: string): Promise<TreeState>;
+  /** The project's git connection, read from the Vercel API: does Vercel deploy production by itself? */
+  gitIntegration(vercel: VercelInvocation): Promise<ProjectGit>;
   /** `drk-deploy env:sync`. Only `up` runs it. */
   envSync: typeof envSync;
   /** `drk-deploy env:check`, the preflight: the number of problems found. */
@@ -392,6 +442,11 @@ export interface ReleaseRunner {
 
 /** The real steps. The commands use these unless a test passes its own. */
 export const releaseRunner: ReleaseRunner = {
+  tree: inspectTree,
+  gitIntegration: async ({ config }) => {
+    const { VercelClient } = await import("../lib/vercel-client.js");
+    return (await new VercelClient(requireToken(), config.teamId).getProject(config.projectId)).git;
+  },
   envSync,
   envCheck,
   link: ensureLinked,
@@ -523,6 +578,211 @@ function readPulledEnv(file: string): Record<string, string> {
   return parseEnvFile(readFileSync(file, "utf8"));
 }
 
+/** A checkout a run releases from (F-49), and which HEAD it may be at (`ReleaseRule`). */
+interface ReleaseSource {
+  label: string;
+  root: string;
+  rule: ReleaseRule;
+}
+
+/**
+ * The checkouts a run reads, which are the ones that must be clean and pushed
+ * (F-49), and which HEAD each may be at:
+ *
+ * - The kit's own run: the kit checkout, at the release ref when the run
+ *   promotes it, and at any pushed commit for `migrate` (docs/deployment.md
+ *   §1.1 migrates the kit's production from the open pull request's branch).
+ * - A satellite's run: its app folder when it is built and promoted, at the
+ *   release ref, which `--allow-ref` may name. When the satellite owns its
+ *   database, the kit checkout its migrations come from as well, at the kit's
+ *   default branch, for `migrate` as much as for `deploy` and `up`. The §1.1
+ *   gate is the kit's. No document describes migrating a satellite's
+ *   production from an unmerged kit branch, and what such a run applies stays
+ *   ledgered there under its checksum.
+ *
+ * A satellite that does not own its database never reads the kit checkout,
+ * so the kit's state does not stop its deploy.
+ */
+function releaseSources(
+  config: ProjectConfig,
+  profile: DeploymentProfile,
+  run: { promotes: boolean; migrates: boolean },
+): ReleaseSource[] {
+  if (profile.kind !== "satellite") {
+    return [{ label: "kit checkout", root: config.kitRoot, rule: run.promotes ? "release" : "any-pushed" }];
+  }
+  return [
+    ...(run.promotes
+      ? [{ label: "satellite checkout", root: deployRoot(config), rule: "release" as const }]
+      : []),
+    ...(run.migrates
+      ? [{ label: "kit checkout", root: config.kitRoot, rule: "default-branch" as const }]
+      : []),
+  ];
+}
+
+/** The kit checkout's state among those read, which is where migrations come from. */
+function commitOf(trees: TreeState[], kitRoot: string): TreeState | undefined {
+  return trees.find((tree) => tree.root === kitRoot);
+}
+
+/**
+ * Reads every checkout the run releases from, prints the commit each one is
+ * at, and refuses the run unless each is releasable (F-49). The rules, and why
+ * they are these, are in `lib/release-tree.ts`: a git checkout, a clean tree
+ * with untracked files counted, HEAD pushed, and for the checkout a run
+ * promotes, HEAD equal to origin's default branch or to `--allow-ref`. The
+ * kit checkout behind a satellite's own database must be at the kit's default
+ * branch, and `--allow-ref` never reaches it: it names the satellite's ref.
+ * A `next-env.d.ts` that a build rewrote is printed as set aside, not refused.
+ *
+ * It runs before anything writes: before `env:sync`, `vercel link`, the pull
+ * and any migration. No flag lets a dirty or unpushed checkout through. The
+ * fix is a commit and a push, and anything else would ledger in production a
+ * migration no one can look up.
+ *
+ * A dry run reads and reports the same and refuses nothing: it exists to show
+ * what a real run would do, and this is part of that.
+ */
+async function assertReleasableTree(
+  runner: ReleaseRunner,
+  sources: ReleaseSource[],
+  options: { action: string; allowRef?: string; dryRun?: boolean },
+): Promise<TreeState[]> {
+  if (options.allowRef !== undefined) assertRefName(options.allowRef);
+  const trees: TreeState[] = [];
+  const problems: TreeProblem[] = [];
+  for (const source of sources) {
+    const allowRef = source.rule === "release" ? options.allowRef : undefined;
+    const tree = await runner.tree(source.root, allowRef);
+    trees.push(tree);
+    heading(`Release commit (${source.label})`);
+    field("checkout", source.root);
+    if (tree.notRepository === null) {
+      field("commit", describeCommit(tree));
+      for (const path of tree.generated) field("set aside", `${path} ${dim(`(${GENERATED_NOTE})`)}`);
+      if (source.rule !== "any-pushed") {
+        field(
+          "release ref",
+          `${tree.release.ref} at ${shortSha(tree.release.commit)} ${dim("(as last fetched: nothing is fetched)")}`,
+        );
+      }
+    }
+    problems.push(
+      ...treeProblems(tree, {
+        label: source.label,
+        rule: source.rule,
+        ...(allowRef !== undefined ? { allowRef } : {}),
+      }),
+    );
+  }
+  if (problems.length === 0) return trees;
+
+  const refusal = new CliError(
+    `Refusing to ${options.action}: ${problems.map((problem) => problem.what).join("; ")}. Nothing was changed.`,
+    { hint: [...new Set(problems.map((problem) => problem.fix))].join(" "), exitCode: 2 },
+  );
+  if (!options.dryRun) throw refusal;
+  for (const problem of problems) warn(`[dry-run] a real run would refuse: ${problem.what}.`);
+  return trees;
+}
+
+/**
+ * Refuses a run that migrates while Vercel's git integration also deploys
+ * production by itself (F-49, `productionAutoDeploy`).
+ *
+ * The README called that combination a race, and nothing checked it. Vercel
+ * promotes every push to the production branch without migrating, so a merge
+ * goes live ahead of its migration however soon this runs, and this run's
+ * migrate-then-promote order protects nothing. The kit's own production is
+ * deployed that way today (docs/deployment.md §1.1). A run with no migrate
+ * step has no order to lose, so it is only told. `migrate` never asks: it
+ * promotes nothing, and migrating from the pull request's branch before the
+ * merge is exactly the gate that path relies on.
+ *
+ * A real run that cannot read the project's git connection stops: this check
+ * cannot be skipped by an API that is down. A dry run says it could not read
+ * it and goes on, because it refuses nothing anyway and a plan with a gap is
+ * more use than no plan.
+ */
+async function assertNoAutoDeployRace(
+  runner: ReleaseRunner,
+  vercel: VercelInvocation,
+  options: { migrates: boolean; allowGitIntegrationRace?: boolean; dryRun?: boolean },
+): Promise<void> {
+  let git: ProjectGit;
+  try {
+    git = await runner.gitIntegration(vercel);
+  } catch (err) {
+    if (!options.dryRun) throw err;
+    heading("Other deployers");
+    warn(
+      `[dry-run] could not read the project's git connection (${(err as Error).message}), so whether Vercel also deploys production is unknown. A real run reads it before anything writes, and stops if it cannot.`,
+    );
+    return;
+  }
+  const verdict = productionAutoDeploy(git, readVercelJson(vercel.root));
+  heading("Other deployers");
+  field(
+    "vercel git integration",
+    verdict.on
+      ? `${yellow("DEPLOYS PRODUCTION")} ${dim(verdict.why)}`
+      : `${green("off")} ${dim(verdict.why)}`,
+  );
+  if (!verdict.on) return;
+  if (!options.migrates) {
+    warn(
+      "Vercel also deploys production on every push. This run has no migrate step, so that is two deployers of the same code, not a race.",
+    );
+    return;
+  }
+  if (options.allowGitIntegrationRace) {
+    warn(
+      "--allow-git-integration-race: Vercel ALSO promotes every push to production, without migrating. This run's migrate-then-promote order does not stop a merge from going live ahead of its migration.",
+    );
+    return;
+  }
+  const branch = git.productionBranch ?? "main";
+  const refusal = new CliError(
+    `Refusing to deploy: Vercel's git integration also deploys this project's production (${verdict.why}). Nothing was changed.`,
+    {
+      hint: `Vercel promotes a push without migrating, so this run's migrate-then-promote order cannot hold: a merge goes live ahead of its migration whatever runs here. Turn production auto-deploy off (an Ignored Build Step of \`exit 0\` under Vercel → Project → Settings → Git, or \`"git": { "deploymentEnabled": { "${branch}": false } }\` in vercel.json), or pass --allow-git-integration-race to deploy anyway. \`drk-deploy migrate\` is not refused: it promotes nothing, and migrating production from a pull request's branch before it merges is how that path stays safe.`,
+      exitCode: 2,
+    },
+  );
+  if (!options.dryRun) throw refusal;
+  warn(`[dry-run] a real run would refuse: ${refusal.message}`);
+}
+
+/** What `deploy` and `up` settle before anything writes, and `up` hands to `deploy`. */
+interface PreparedRelease {
+  /** Built, and so checked, before env:sync (F-48). */
+  vercel: VercelInvocation;
+  /** The checkouts read and found releasable (F-49). */
+  trees: TreeState[];
+}
+
+/** The F-49 checks of a run that promotes: the commit, then the other deployer. */
+async function releaseGate(
+  runner: ReleaseRunner,
+  config: ProjectConfig,
+  profile: DeploymentProfile,
+  vercel: VercelInvocation,
+  options: { migrates: boolean; allowRef?: string; allowGitIntegrationRace?: boolean; dryRun?: boolean },
+): Promise<TreeState[]> {
+  const trees = await assertReleasableTree(
+    runner,
+    releaseSources(config, profile, { promotes: true, migrates: options.migrates }),
+    {
+      action: "deploy",
+      ...(options.allowRef !== undefined ? { allowRef: options.allowRef } : {}),
+      ...(options.dryRun !== undefined ? { dryRun: options.dryRun } : {}),
+    },
+  );
+  await assertNoAutoDeployRace(runner, vercel, options);
+  return trees;
+}
+
 /**
  * `drk-deploy deploy`: pull production's settings, migrate (checked against
  * them), then build, then promote.
@@ -535,6 +795,12 @@ function readPulledEnv(file: string): Record<string, string> {
  * schema the promoted build reads, so they are checked against production's
  * own `DATABASE_URL` and `DB_SCHEMA` first (F-47): migrating anything else
  * and then promoting is the same outage, reached with every step green.
+ *
+ * And what is released is a commit: a clean, pushed checkout at origin's
+ * default branch (or `--allow-ref`), printed before anything is linked,
+ * pulled or migrated (F-49). A project that Vercel also deploys on every push
+ * is refused unless `--allow-git-integration-race`, because that push wins
+ * the race this order exists for.
  */
 export async function deploy(
   cliRoot: string,
@@ -543,14 +809,16 @@ export async function deploy(
     skipChecks?: boolean;
     dryRun?: boolean;
     yes?: boolean;
+    allowRef?: string;
+    allowGitIntegrationRace?: boolean;
   },
   runner: ReleaseRunner = releaseRunner,
-  /** Built, and so checked, by `up` before env:sync writes anything (F-48). */
-  prepared?: VercelInvocation,
+  /** Built and checked by `up` before env:sync writes anything (F-48, F-49). */
+  prepared?: PreparedRelease,
 ): Promise<void> {
   const config = requireConfig(cliRoot);
   const profile = resolveProfile(config);
-  const vercel = prepared ?? vercelInvocation(cliRoot, config, profile);
+  const vercel = prepared?.vercel ?? vercelInvocation(cliRoot, config, profile);
 
   heading("Preflight");
   field("target", describeProfile(profile));
@@ -592,8 +860,16 @@ export async function deploy(
     migration = resolveMigrationUrl({ ...options, satellite: profile.kind === "satellite" });
   }
 
+  // F-49: the commit, and whether Vercel deploys production by itself, before
+  // anything is linked, pulled or migrated. `up` settled both before env:sync.
+  const trees =
+    prepared?.trees ??
+    (await releaseGate(runner, config, profile, vercel, { ...options, migrates: migration !== null }));
+
   if (options.dryRun) {
-    if (migration) await dryRunMigration(cliRoot, migration, options, runner);
+    if (migration) {
+      await dryRunMigration(cliRoot, migration, options, runner, commitOf(trees, config.kitRoot));
+    }
     heading("Build and promote");
     step(
       `[dry-run] would run: vercel pull → ${migration ? "check the migration target → migrate → " : ""}vercel build --prod → vercel deploy --prebuilt --prod`,
@@ -603,13 +879,13 @@ export async function deploy(
 
   await withProductionEnv(vercel, runner, async (production) => {
     if (migration) {
-      const target = checkMigrationTarget(migration, production(), options);
+      const target = checkMigrationTarget(migration, production(), options, commitOf(trees, config.kitRoot));
       await runner.migrate(cliRoot, migrationStep(migration, target, options));
     }
 
     heading("Build and promote");
     step("Building");
-    await runner.build(vercel);
+    await buildLeavingCheckout(vercel, runner);
 
     step("Promoting the prebuilt output to production");
     await runner.promote(vercel);
@@ -617,6 +893,44 @@ export async function deploy(
   });
 
   await runner.verify(config, profile);
+}
+
+/**
+ * `vercel build`, then `next-env.d.ts` put back the way the build found it
+ * (F-49).
+ *
+ * `vercel build` runs `next build` in the checkout, and that rewrites the
+ * checkout's `next-env.d.ts` (`rewrittenByBuild` in lib/release-tree.ts): the
+ * kit commits the `next dev` form, and the build writes its own. Left alone,
+ * every deploy would end with the tracked file modified. The next run sets it
+ * aside rather than refusing it, but the operator would still see a change
+ * nobody made, and `vercel deploy --prebuilt` would record the promoted build
+ * as made from a dirty tree. So the bytes are read before the build and
+ * written back after it, whether or not the build succeeded. Nothing reads the
+ * file after the build: the promotion uploads `.vercel/output`.
+ *
+ * A file that was not there before is left alone. Removing it would delete
+ * something this run did not have before, which is more than restoring. A
+ * restore that fails is a warning: the build output is sound, and the next
+ * run sets the file aside.
+ */
+async function buildLeavingCheckout(vercel: VercelInvocation, runner: ReleaseRunner): Promise<void> {
+  const file = join(vercel.root, NEXT_ENV_FILE);
+  const before = existsSync(file) ? readFileSync(file) : null;
+  try {
+    await runner.build(vercel);
+  } finally {
+    if (before !== null) {
+      try {
+        const after = existsSync(file) ? readFileSync(file) : null;
+        if (after === null || !after.equals(before)) writeFileSync(file, before);
+      } catch (err) {
+        warn(
+          `Could not put back ${file} after the build (${(err as Error).message}). Restore it with \`git checkout -- ${NEXT_ENV_FILE}\`. The next run sets it aside either way.`,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -758,7 +1072,12 @@ async function reportIssuerKeys(issuerOrigin: string): Promise<void> {
  */
 export async function up(
   cliRoot: string,
-  options: MigrationOptions & { dryRun?: boolean; yes?: boolean },
+  options: MigrationOptions & {
+    dryRun?: boolean;
+    yes?: boolean;
+    allowRef?: string;
+    allowGitIntegrationRace?: boolean;
+  },
   runner: ReleaseRunner = releaseRunner,
 ): Promise<void> {
   const config = requireConfig(cliRoot);
@@ -770,7 +1089,11 @@ export async function up(
   // The safe order for a deployment that does not own its schema has no
   // migrate step at all — saying so up front beats printing a step that then
   // announces it did nothing.
-  info(dim(`  env:sync → pull → ${migrates ? "check target → migrate → " : ""}build → promote → verify`));
+  info(
+    dim(
+      `  check the commit → env:sync → pull → ${migrates ? "check target → migrate → " : ""}build → promote → verify`,
+    ),
+  );
 
   // Before env:sync writes anything to the project: a run that has no
   // migration URL, or a pooled one, stops with production untouched (F-47).
@@ -778,6 +1101,9 @@ export async function up(
   // Likewise a shell naming another Vercel project, or a checkout linked to
   // one (F-48).
   const vercel = vercelInvocation(cliRoot, config, profile);
+  // And a checkout that is not a clean, pushed release commit, or a project
+  // Vercel deploys by itself on every push (F-49).
+  const trees = await releaseGate(runner, config, profile, vercel, { ...options, migrates });
 
   await runner.envSync(cliRoot, {
     ...(options.fromEnv !== undefined ? { fromEnv: options.fromEnv } : {}),
@@ -788,7 +1114,7 @@ export async function up(
 
   // --from-env is passed on: it can name the migration URL
   // (PRODUCTION_DIRECT_DATABASE_URL) as well as the values env:sync writes.
-  await deploy(cliRoot, { ...options, skipChecks: true }, runner, vercel); // env:sync just ran; checking again would only repeat itself
+  await deploy(cliRoot, { ...options, skipChecks: true }, runner, { vercel, trees }); // env:sync just ran; checking again would only repeat itself
 }
 
 /** `drk-deploy status` — a short answer to "what is deployed, and is it well?". */

@@ -324,7 +324,8 @@ Key helpers:
   reachable by superadmin only.
 - `canAccessUser(access, appUserId)` — `app_users` has no `organization_id`
   column, so its tenant is its membership; an org admin may act on a user only
-  when that user holds a membership in the actor's org.
+  when that user holds a membership in the actor's org. That is why a create by
+  a confined caller enrols the new user in the caller's org (§8.1, `POST /users`).
 - `requiresSuperadminForSharedTarget(scope, appUserId)` — account-global actions
   (ban/unban, soft-delete/restore) on a user shared across orgs are reserved for
   a superadmin so the action cannot reach tenants the actor does not administer.
@@ -589,7 +590,7 @@ Manages the application user lifecycle and per-user administration.
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
-| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
+| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). A superadmin's cookie session creates the user in no org, as before. A confined caller with no org is refused with 403 `forbidden` before anything is written. The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself); `admin.user.banned` |

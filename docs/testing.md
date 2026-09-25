@@ -22,11 +22,35 @@ The suite is layered, with **security and tenant-isolation invariants treated as
 | **Integration** | Vitest + mocked DB/auth | `tests/integration` (~50 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
 | **Security** | Vitest | `tests/security` (~14 files) | Cross-tenant isolation, privilege-escalation guards, schema hardening, secret handling — including **property/fuzz tests** (fast-check) over the permission algebra and injection surfaces. See [§5](#5-security-suites). |
 | **DB-backed** | Vitest + real Postgres | `tests/db` (~10 suites, `pnpm test:db`) | Suites that run against a live Postgres (`vitest.db.config.ts`, needs `DATABASE_TEST_URL`). |
-| **E2E** | Playwright | `tests/e2e` (`.spec.ts`) | Full browser flows against a running, seeded app. |
+| **E2E** | Playwright | `tests/e2e` (`.spec.ts`) | Full browser flows against a running, seeded app ([journeys](#end-to-end-journeys)). |
 | **Accessibility** | Playwright + axe-core | `tests/accessibility` (`.spec.ts`) | WCAG checks on key screens. |
 | Shared helpers / setup | — | `tests/helpers`, `tests/setup` | Render harness, factories, jsdom polyfills. |
 
 Vitest unit/component/integration/security tests **mock** the database and auth layers (table-aware proxies, session/access mocks) — they do **not** need a live database. The `tests/db` suites are the exception: they exercise the real query layer against Postgres.
+
+### End-to-end journeys
+
+The Playwright suite is the only layer where the real caller resolver, Better Auth, the database and a browser run together. The route suites mock at least one of those, which is how F-13 (every bearer caller got a 502 on a Better Auth-backed write) passed every check: until F-43, no journey used a bearer to change anything. Specs run in both projects in [`playwright.config.ts`](../playwright.config.ts), desktop Chrome and Pixel 7, with names and emails unique per project. A test skips the mobile project only where it would add nothing: the sidebar specs set their own viewport, and the bearer-mutation, API-key and cross-org bearer journeys are pure HTTP.
+
+| Journey | Spec |
+| --- | --- |
+| Sign in through the form and reach the dashboard | `admin-sign-in` |
+| Anonymous visitors are sent to sign-in with a `returnTo`, including the signed-out SSO launch | `anonymous-redirect` |
+| Self sign-up → "check your inbox" → the emailed verification link → sign in → the dashboard or pending approval, as the default org's policy decides, with the account placed in that org (F-40). Sign-up starts no session, and the right password for an unverified account is refused with `EMAIL_NOT_VERIFIED` | `self-sign-up` |
+| Invited sign-up from the emailed link lands active; the invitation survives a language switch | `invitations`, `locale-switch` |
+| Password reset from the form through the emailed link; the outbox redacts the live link | `email-outbox` |
+| Sign-out revokes the session on the server | `sign-out-revocation` |
+| Client credentials: register → mint a JWT → call `/api/v1` → revoke → minting refused | `machine-credentials` |
+| A JWT alone creates a user (201), approves it (200), and bans and unbans it (200) | `machine-credentials` |
+| API key: mint from the session → list and create users with the key → rotate → the old key gets 401, the new one works | `machine-credentials` |
+| A bearer bound to the default org gets 404 for a user who exists only in another org, and cannot find them by search (MACHINE-2) | `machine-credentials` |
+| The MCP gateway accepts an MCP-audience JWT and refuses a v1-audience JWT and a session cookie | `mcp-bearer-only` |
+| SSO handoff: launch → consume → confirm → replay refused | `sso-handoff` |
+| Signed-out SSO launch → sign-in form → the `/{locale}/sso/launch` trampoline → the application's consume URL (#464) | `sso-handoff` |
+| Tenant and permission boundaries in the admin workspace; impersonation confinement | `admin-cross-org-404`, `admin-permission-denied`, `impersonation-confinement` |
+| Admin workspace and account screens: overview, users grid, create permission, account edits, sidebar | `admin-overview`, `admin-users-grid`, `create-permission`, `account`, `sidebar-*` |
+
+The `browser` job in [`ci.yml`](../.github/workflows/ci.yml) turns on what these journeys need: `API_JWT_ENABLED` with an ephemeral signing key, `API_KEYS_ENABLED`, `MCP_ENABLED`, an ephemeral `SSO_HANDOFF_PRIVATE_KEY`, `AUTH_RATE_LIMIT_DISABLED`, and dummy social-provider credentials. A journey whose switch is off fails; it does not skip. A local run needs the same variables.
 
 ## 2. Frameworks
 
@@ -166,7 +190,7 @@ When you add a route, permission, or string, expect to update the corresponding 
 When automated coverage isn't enough (e.g. a visual or flow change), walk these:
 
 **Authentication**
-- [ ] Sign up (default policy) → verify-email screen → click link → pending-approval; admin approves → can access the app.
+- [ ] Sign up → verify-email screen → click link → sign in → the dashboard under the seeded `auto_active` default (automated in `self-sign-up`), or pending-approval under `admin_approval`; admin approves → can access the app.
 - [ ] Invite a user (org Members tab) → open the emailed `/invite` link → create account → land **active** in the inviting org, no approval step.
 - [ ] Org **Authentication** tab: switch the policy (e.g. auto-active or invite-only) and confirm a new sign-up follows it.
 - [ ] Sign in / sign out; session persists across reload.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useDialogs } from "@/components/ui/dialog-manager";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import {
   Form,
   FormControl,
@@ -68,13 +69,9 @@ export function OrganizationInvitationsPanel({
 }) {
   const t = useTranslations("administrator.orgs.invitations");
   const tErr = useTranslations("administrator.errors");
-  const locale = useLocale();
   const dialogs = useDialogs();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
-    [locale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [reloadKey, setReloadKey] = useState(0);
   const [rowNotice, setRowNotice] = useState<{ kind: "error" | "success"; text: string } | null>(
@@ -233,10 +230,7 @@ export function OrganizationInvitationsPanel({
         id: "expires_at",
         accessorKey: "expires_at",
         header: () => t("columns.expires"),
-        cell: ({ row }) => {
-          const d = new Date(row.original.expires_at);
-          return Number.isNaN(d.getTime()) ? row.original.expires_at : dateFormatter.format(d);
-        },
+        cell: ({ row }) => format.date(row.original.expires_at),
       },
       ...(canUpdate
         ? [
@@ -269,7 +263,7 @@ export function OrganizationInvitationsPanel({
           ]
         : []),
     ],
-    [t, dateFormatter, canUpdate, onResend, onRevoke],
+    [t, format, canUpdate, onResend, onRevoke],
   );
 
   const rootError = form.formState.errors.root?.message;

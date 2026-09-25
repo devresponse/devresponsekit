@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations } from "next-intl";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -28,7 +29,8 @@ interface RawSession {
 export function UserSessionsPanel({ userId }: { userId: string }) {
   const t = useTranslations("administrator.users");
   const tGrid = useTranslations("administrator.grid");
-  const locale = useLocale();
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [sessions, setSessions] = useState<RawSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,17 +39,8 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
   const [busy, setBusy] = useState(true);
 
   const formatExpires = useCallback(
-    (iso: string | null | undefined): string => {
-      if (!iso) return "—";
-      const d = new Date(iso);
-      return Number.isNaN(d.getTime())
-        ? iso
-        : new Intl.DateTimeFormat(locale, {
-            dateStyle: "medium",
-            timeStyle: "short",
-          }).format(d);
-    },
-    [locale],
+    (iso: string | null | undefined): string => (iso ? format.dateTime(iso) : "—"),
+    [format],
   );
 
   // Refetch trigger: handlers bump the token (after their own sync

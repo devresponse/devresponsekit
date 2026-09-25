@@ -1353,6 +1353,7 @@
       "locale": "言語",
       "timeZone": "タイムゾーン",
       "system": "システムのデフォルト",
+      "systemTimeZone": "システムのデフォルト（{zone}）",
       "dateFormat": "日付の書式",
       "numberFormatLocale": "数値の書式"
     },

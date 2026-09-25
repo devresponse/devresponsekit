@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
+import { getAppFormatter } from "@/lib/format/viewer-format.server";
 import { PermissionsCard } from "./_components/permissions-card";
 import { getAccountOverview } from "./_data.server";
 
@@ -40,7 +41,8 @@ export default async function AccountOverviewPage({
   if (!overview) notFound();
 
   const t = await getTranslations({ locale, namespace: "account" });
-  const dateFormatter = new Intl.DateTimeFormat(locale, { dateStyle: "long" });
+  // F-37: the viewer's own zone and date format, as on every other page.
+  const format = await getAppFormatter(locale);
 
   return (
     <section className="space-y-4 p-6">
@@ -64,7 +66,7 @@ export default async function AccountOverviewPage({
                 </Badge>
               </Field>
               <Field label={t("overview.memberSince")}>
-                {dateFormatter.format(new Date(overview.createdAt))}
+                {format.date(overview.createdAt, { style: "long" })}
               </Field>
             </dl>
           </CardContent>

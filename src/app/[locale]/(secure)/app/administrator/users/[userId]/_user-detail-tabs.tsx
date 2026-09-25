@@ -1,7 +1,7 @@
 "use client";
 
-import { useTranslations, useLocale } from "next-intl";
-import { useMemo } from "react";
+import { useTranslations } from "next-intl";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { UserSessionsPanel } from "./_user-sessions-panel";
@@ -61,22 +61,9 @@ export function UserDetailTabs({
   canReadAudit: boolean;
 }) {
   const t = useTranslations("administrator.users");
-  const locale = useLocale();
-
-  const fmt = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }),
-    [locale],
-  );
-
-  const formatDate = (iso: string | null): string => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? iso : fmt.format(d);
-  };
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
+  const formatDate = (iso: string | null): string => (iso ? format.dateTime(iso) : "—");
 
   return (
     <Tabs defaultValue="overview" className="w-full">

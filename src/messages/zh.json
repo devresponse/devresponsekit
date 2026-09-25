@@ -1353,6 +1353,7 @@
       "locale": "语言",
       "timeZone": "时区",
       "system": "系统默认",
+      "systemTimeZone": "系统默认（{zone}）",
       "dateFormat": "日期格式",
       "numberFormatLocale": "数字格式"
     },

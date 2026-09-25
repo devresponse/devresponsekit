@@ -1353,6 +1353,7 @@
       "locale": "Langue",
       "timeZone": "Fuseau horaire",
       "system": "Valeur par défaut du système",
+      "systemTimeZone": "Valeur par défaut du système ({zone})",
       "dateFormat": "Format de date",
       "numberFormatLocale": "Format des nombres"
     },

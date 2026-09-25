@@ -12,8 +12,10 @@ import {
   dailyRegistrations,
   signupsPerOrg,
   type DailyCount,
+  type DayWindow,
   type OrgSignupCount,
 } from "@/lib/admin/metrics.server";
+import { logger } from "@/lib/observability/logger.server";
 
 /**
  * RBAC-scoped dashboard metric selection — the SINGLE place that decides
@@ -56,7 +58,41 @@ export interface DashboardMetrics {
   auditEventsDaily?: DailyCount[];
 }
 
-export async function selectDashboardMetrics(access: AccessLike): Promise<DashboardMetrics> {
+export interface DashboardMetricsOptions {
+  /**
+   * IANA zone whose calendar days the daily series count. Default `"UTC"`,
+   * what the JSON API reports. The Administrator overview passes the viewer's
+   * saved zone (F-37) so its charts agree with the activity lists beside them.
+   */
+  timeZone?: string;
+}
+
+export async function selectDashboardMetrics(
+  access: AccessLike,
+  options: DashboardMetricsOptions = {},
+): Promise<DashboardMetrics> {
+  const timeZone = options.timeZone ?? "UTC";
+  try {
+    return await selectInZone(access, { timeZone });
+  } catch (error) {
+    // Postgres keeps its own tz database. A zone this runtime's ICU accepted
+    // (and so the preferences form offered) can be missing from an older
+    // server's, and Postgres then rejects the query with 22023
+    // (invalid_parameter_value: time zone "…" not recognized). Count UTC days
+    // rather than fail the Administrator overview over a display preference.
+    if (timeZone === "UTC" || !isUnknownTimeZoneError(error)) throw error;
+    logger.warn({ timeZone }, "dashboard metrics: zone unknown to the database; counting UTC days");
+    return selectInZone(access, { timeZone: "UTC" });
+  }
+}
+
+function isUnknownTimeZoneError(error: unknown): boolean {
+  return (
+    typeof error === "object" && error !== null && (error as { code?: unknown }).code === "22023"
+  );
+}
+
+async function selectInZone(access: AccessLike, range: DayWindow): Promise<DashboardMetrics> {
   // A SUPERADMIN holds every capability via the marker, so the literal
   // permission keys are implied; an org admin needs them explicitly. These two
   // are CAPABILITY questions ("may this principal see logins at all?"), not
@@ -75,13 +111,13 @@ export async function selectDashboardMetrics(access: AccessLike): Promise<Dashbo
   // numbers, exactly like an org admin.
   if (hasCrossOrgReach(access)) {
     const [mostActiveOrgs, registrationsDaily, loginsDaily, auditEventsDaily] = await Promise.all([
-      signupsPerOrg(),
-      canSeeRegistrations ? dailyRegistrations() : Promise.resolve(undefined),
-      canSeeLogins ? dailyLogins() : Promise.resolve(undefined),
+      signupsPerOrg(range),
+      canSeeRegistrations ? dailyRegistrations(undefined, range) : Promise.resolve(undefined),
+      canSeeLogins ? dailyLogins(undefined, range) : Promise.resolve(undefined),
       // Total audit volume is SUPERADMIN-only (no org-scoped variant) and is
       // audit data, so it follows the same `admin.audit.read` capability as
       // logins — implied here by the superuser marker.
-      canSeeLogins ? dailyAuditEvents() : Promise.resolve(undefined),
+      canSeeLogins ? dailyAuditEvents(range) : Promise.resolve(undefined),
     ]);
     return {
       scope: "system",
@@ -103,8 +139,8 @@ export async function selectDashboardMetrics(access: AccessLike): Promise<Dashbo
 
   const orgId = scope.organizationId;
   const [registrationsDaily, loginsDaily] = await Promise.all([
-    canSeeRegistrations ? dailyRegistrations(orgId) : Promise.resolve(undefined),
-    canSeeLogins ? dailyLogins(orgId) : Promise.resolve(undefined),
+    canSeeRegistrations ? dailyRegistrations(orgId, range) : Promise.resolve(undefined),
+    canSeeLogins ? dailyLogins(orgId, range) : Promise.resolve(undefined),
   ]);
   return {
     scope: "organization",

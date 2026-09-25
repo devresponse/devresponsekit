@@ -1353,6 +1353,7 @@
       "locale": "भाषा",
       "timeZone": "समय क्षेत्र",
       "system": "सिस्टम डिफ़ॉल्ट",
+      "systemTimeZone": "सिस्टम डिफ़ॉल्ट ({zone})",
       "dateFormat": "दिनांक प्रारूप",
       "numberFormatLocale": "संख्या प्रारूप"
     },

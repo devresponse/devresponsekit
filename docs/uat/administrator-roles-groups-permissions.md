@@ -110,7 +110,7 @@ User stories
 Negative & edge cases
 - Out-of-scope access → the list feed simply omits other orgs' roles; a Limited Admin gets 404 on the whole page.
 - Empty state: with the org filtered to a tenant with no roles, the grid shows its empty message; loading shows skeleton rows.
-- Delete of an in-use role → HTTP 409, surfaced inline as the localized "role in use" message (`_roles-grid.tsx:81`).
+- Delete of an in-use role → HTTP 409, surfaced inline as the localized "role in use" message (`_roles-grid.tsx:78`).
 - Rate-limit: rapid repeated deletes/duplicates → friendly throttle response.
 
 Accessibility: grid is keyboard-navigable; the confirm dialog traps focus and closes on Esc; row buttons are labelled.
@@ -394,7 +394,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-GROUPS-DETAIL-MEMBERS-S3 — As an Org Admin, I want a clear message when a pick is not eligible, so that I know why the add did nothing.
-  - Acceptance criteria: Given a user who is not an active member of the group's org, when I try to add them, then the dialog shows a "not eligible" message rather than a false success. (Server returns `added: 0` / 404 for ineligible ids — `members/route.ts:146-157`; the client surfaces `notEligible` — `_group-members-grid.tsx:102`.)
+  - Acceptance criteria: Given a user who is not an active member of the group's org, when I try to add them, then the dialog shows a "not eligible" message rather than a false success. (Server returns `added: 0` / 404 for ineligible ids — `members/route.ts:146-157`; the client surfaces `notEligible` — `_group-members-grid.tsx:100`.)
   - Escalation note: adding a member is itself a conferral — a non-Superadmin can only add members to a group whose conferred permissions are a subset of their own; otherwise the add returns **403** (`members/route.ts:140`).
   - UAT script:
     | # | Step | Expected result |

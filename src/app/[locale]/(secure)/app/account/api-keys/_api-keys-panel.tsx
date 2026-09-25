@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useDialogs } from "@/components/ui/dialog-manager";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,8 +39,9 @@ interface ApiKey {
 
 export function AccountApiKeysPanel({ grantableScopes }: { grantableScopes: string[] }) {
   const t = useTranslations("account.apiKeys");
-  const locale = useLocale();
   const dialogs = useDialogs();
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [keys, setKeys] = useState<ApiKey[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,17 +49,9 @@ export function AccountApiKeysPanel({ grantableScopes }: { grantableScopes: stri
   const [reloadToken, setReloadToken] = useState(0);
   const [revealed, setRevealed] = useState<string | null>(null);
 
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }),
-    [locale],
-  );
   const formatDate = useCallback(
-    (value: string | null, fallback: string) => {
-      if (!value) return fallback;
-      const d = new Date(value);
-      return Number.isNaN(d.getTime()) ? value : dateFormatter.format(d);
-    },
-    [dateFormatter],
+    (value: string | null, fallback: string) => (value ? format.dateTime(value) : fallback),
+    [format],
   );
 
   useEffect(() => {

@@ -47,10 +47,6 @@ afterEach(() => vi.resetModules());
 const NOW = new Date("2026-06-17T09:30:00.000Z");
 
 describe("date helpers", () => {
-  it("windowStart is midnight UTC, days-1 before today", () => {
-    expect(m.windowStart(7, NOW).toISOString()).toBe("2026-06-11T00:00:00.000Z");
-  });
-
   it("daySpine lists each UTC day oldest → today", () => {
     expect(m.daySpine(7, NOW)).toEqual([
       "2026-06-11",
@@ -63,19 +59,63 @@ describe("date helpers", () => {
     ]);
   });
 
+  // F-37: the Administrator overview counts the viewer's days. At 20:00 UTC it
+  // is already the next day in Kathmandu (UTC+5:45); at 05:00 UTC it is still
+  // the previous day in Vancouver (UTC-7).
+  it("daySpine ends on today IN the zone", () => {
+    const evening = new Date("2026-06-17T20:00:00.000Z");
+    expect(m.daySpine(7, evening, "UTC").at(-1)).toBe("2026-06-17");
+    expect(m.daySpine(7, evening, "Asia/Kathmandu")).toEqual([
+      "2026-06-12",
+      "2026-06-13",
+      "2026-06-14",
+      "2026-06-15",
+      "2026-06-16",
+      "2026-06-17",
+      "2026-06-18",
+    ]);
+    const early = new Date("2026-06-17T05:00:00.000Z");
+    expect(m.daySpine(3, early, "America/Vancouver")).toEqual([
+      "2026-06-14",
+      "2026-06-15",
+      "2026-06-16",
+    ]);
+  });
+
+  it("daySpine crosses month and year ends by the calendar", () => {
+    const newYear = new Date("2027-01-01T01:00:00.000Z");
+    expect(m.daySpine(3, newYear, "UTC")).toEqual(["2026-12-30", "2026-12-31", "2027-01-01"]);
+    expect(m.daySpine(2, newYear, "America/Vancouver")).toEqual(["2026-12-30", "2026-12-31"]);
+  });
+
+  it("calendarDayIn names the day an instant falls on in a zone", () => {
+    const at = new Date("2026-06-13T20:30:00.000Z");
+    expect(m.calendarDayIn(at, "UTC")).toBe("2026-06-13");
+    expect(m.calendarDayIn(at, "Asia/Kathmandu")).toBe("2026-06-14");
+    expect(m.calendarDayIn(at, "+05:45")).toBe("2026-06-14");
+    expect(m.calendarDayIn(at, "Pacific/Honolulu")).toBe("2026-06-13");
+  });
+
+  it("canonicalTimeZone spells an offset one way, keeps a name, and turns an unknown zone into UTC", () => {
+    expect(m.canonicalTimeZone("+0545")).toBe("+05:45");
+    expect(m.canonicalTimeZone("-08")).toBe("-08:00");
+    // ICU would say "Asia/Katmandu"; Postgres knows both, so the saved name stays.
+    expect(m.canonicalTimeZone("Asia/Kathmandu")).toBe("Asia/Kathmandu");
+    expect(m.canonicalTimeZone("UTC")).toBe("UTC");
+    expect(m.canonicalTimeZone("Not/AZone")).toBe("UTC");
+  });
+
   it("fillSpine zero-fills missing days and keeps provided counts", () => {
-    const filled = m.fillSpine(
-      7,
-      [
-        { day: "2026-06-17", count: 5 },
-        { day: "2026-06-13", count: 2 },
-      ],
-      NOW,
-    );
+    const filled = m.fillSpine(m.daySpine(7, NOW), [
+      { day: "2026-06-17", count: 5 },
+      { day: "2026-06-13", count: "2" }, // pg may return count as a string
+      { day: "2026-06-01", count: 9 }, // outside the spine: dropped
+    ]);
     expect(filled).toHaveLength(7);
     expect(filled.find((d) => d.date === "2026-06-17")?.count).toBe(5);
     expect(filled.find((d) => d.date === "2026-06-13")?.count).toBe(2);
     expect(filled.find((d) => d.date === "2026-06-12")?.count).toBe(0);
+    expect(filled.some((d) => d.date === "2026-06-01")).toBe(false);
   });
 });
 

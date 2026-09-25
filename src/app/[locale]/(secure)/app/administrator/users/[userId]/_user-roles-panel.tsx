@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import {
   Dialog,
   DialogContent,
@@ -47,11 +48,8 @@ export function UserRolesPanel({
   const tErr = useTranslations("administrator.errors");
   const locale = useLocale();
   const dialogs = useDialogs();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }),
-    [locale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [reloadKey, setReloadKey] = useState(0);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -164,10 +162,7 @@ export function UserRolesPanel({
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.assigned"),
-        cell: ({ row }) => {
-          const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
-        },
+        cell: ({ row }) => format.date(row.original.created_at),
       },
     ];
     if (!canAssign) return base;
@@ -193,7 +188,7 @@ export function UserRolesPanel({
         ),
       } as GridColumnDef<RoleRow>,
     ];
-  }, [t, locale, dateFormatter, canAssign, onRemove]);
+  }, [t, locale, format, canAssign, onRemove]);
 
   return (
     <div className="space-y-2">

@@ -30,6 +30,7 @@ _Audience: developers and DevOps. Every environment variable, the config files, 
 | `NEXT_PUBLIC_PRODUCTION_HOST` | no | `app.devresponse.com` | Production host; also seeds the SSO origin-suffix default. |
 | `NEXT_PUBLIC_DEFAULT_LOCALE` | no | `en` | **Informational only — NOT read at runtime.** The canonical default lives in `src/config/i18n-config.ts`; editing this does not change behavior. |
 | `NEXT_PUBLIC_SUPPORTED_LOCALES` | no | `en,fr,es,uk,pt,zh,hi,ja` | **Informational only — NOT read at runtime.** The canonical locale list lives in `src/config/i18n-config.ts`; editing this does not change behavior. |
+| `TZ` | no | the host's (UTC on Vercel) | The deployment's time zone, an IANA name. It is what **System default** means in account Preferences: signed-out pages, and users who saved no zone, see every time in it, on the server and in the browser alike (F-37). Honoured by `next start` and the Docker image; a platform that reserves `TZ` keeps its own (UTC). |
 
 #### `app_users.preferred_locale` is constrained on WRITE, tolerant on READ
 
@@ -43,9 +44,10 @@ admin and v1 paths accepted any 2–10 character string and stored it verbatim.
 
 The column itself is plain `text` with no CHECK constraint, and **existing rows
 are deliberately left alone**: no migration rewrites them and no read rejects
-them. next-intl and the access context already fall back to the default locale
-when a stored value has no catalog, so such a row keeps rendering — it simply
-cannot be saved again as-is; the next edit must pick a supported locale.
+them. The UI never renders from this column (the URL's `/<locale>` segment is
+the request locale, F-37), and the email sender falls back to the default
+locale for a value it has no template for, so such a row keeps working — it
+simply cannot be saved again as-is; the next edit must pick a supported locale.
 Operators who want to normalise historical rows can do so with a one-off
 `UPDATE`; nothing in the app requires it.
 

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { isSupportedLocale, locales, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
+import { deploymentTimeZone } from "@/lib/format/viewer-format.server";
 import { getAccountPreferences } from "../_data.server";
 import { PreferencesForm } from "./_preferences-form";
 
@@ -12,6 +13,8 @@ export const dynamic = "force-dynamic";
  *
  * Edit the caller's locale and formatting preferences (locale, time
  * zone, date format, number-format locale). Scoped to `access.appUserId`.
+ * Every page applies them (F-37): next-intl's request config carries the
+ * zone and the root layout the formats.
  */
 export default async function AccountPreferencesPage({
   params,
@@ -36,6 +39,7 @@ export default async function AccountPreferencesPage({
 
       <PreferencesForm
         locales={[...locales]}
+        systemTimeZone={deploymentTimeZone()}
         initial={{
           preferredLocale: prefs.preferredLocale,
           timeZone: prefs.timeZone ?? "",

@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { MAX_BULK_IDS } from "@/lib/admin/bulk-limits";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 import { toFilterOptions, type GridFilterDescriptor } from "../_components/grid/data-grid-filters";
@@ -62,19 +63,14 @@ export function AdministratorUsersGrid({
   const t = useTranslations("administrator.users.columns");
   const tBulk = useTranslations("administrator.users.bulk");
   const tGrid = useTranslations("administrator.grid");
-  const intlLocale = useLocale();
   const selection = useGridSelection();
   const dialogs = useDialogs();
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Memoize the formatter — `Intl.DateTimeFormat` construction is the
-  // expensive part; reusing it across rows and renders keeps the grid
-  // cheap.
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium", timeStyle: "short" }),
-    [intlLocale],
-  );
+  // F-37: the viewer's zone and formats (the same ones the server-rendered
+  // Administrator overview uses), memoized by the hook across renders.
+  const format = useAppFormatter();
 
   const columns = useMemo<GridColumnDef<UserRow>[]>(
     () => [
@@ -117,10 +113,10 @@ export function AdministratorUsersGrid({
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("createdAt"),
-        cell: ({ row }) => formatDate(row.original.created_at, dateFormatter),
+        cell: ({ row }) => format.dateTime(row.original.created_at),
       },
     ],
-    [t, dateFormatter, locale],
+    [t, format, locale],
   );
 
   const runBulkAction = useCallback(
@@ -278,12 +274,4 @@ export function AdministratorUsersGrid({
       headerActions={headerActions}
     />
   );
-}
-
-function formatDate(value: string, formatter: Intl.DateTimeFormat): string {
-  // Defensive: the server returns ISO timestamps. Render falls back to
-  // the raw string if parsing fails so the cell never turns into
-  // "Invalid Date".
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : formatter.format(d);
 }

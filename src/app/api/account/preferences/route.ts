@@ -19,9 +19,18 @@ export const dynamic = "force-dynamic";
  *
  * Updates the CALLER'S OWN locale and formatting preferences. Scoped
  * strictly to `actor.appUserId`; no id is accepted from the client. The
- * preferred locale is mirrored onto `app_users.preferred_locale` (which
- * drives the request locale) and the `app_user_locale_preferences` row,
- * matching the existing `/api/preferences/locale` upsert.
+ * preferred locale is mirrored onto `app_users.preferred_locale` and the
+ * `app_user_locale_preferences` row, matching the existing
+ * `/api/preferences/locale` upsert.
+ *
+ * Where each value takes effect (F-37). The request locale is the URL's
+ * `/<locale>` segment, never this column, so the Preferences form moves the
+ * browser to the saved language itself after a successful save. The stored
+ * locale picks the language of transactional emails and SSO claims and is
+ * reported by `/api/v1/me`. The time zone, date format and number-format
+ * locale are read on every signed-in request by `getViewerFormatPreferences`
+ * (`src/lib/format/viewer-format.server.ts`), which hands them to next-intl
+ * and to the app formatter on both server and client.
  *
  * Validation mirrors `src/lib/account/preferences.ts`: locale against the
  * supported allow-list, time zone against the runtime Intl engine, date
@@ -77,7 +86,8 @@ export const PUT = withAdminRoute(async function PUT(request: NextRequest) {
   const dateFormat = parsed.data.dateFormat === "system" ? null : parsed.data.dateFormat;
   const numberFormatLocale = normalizeOptional(parsed.data.numberFormatLocale);
 
-  // Mirror the preferred locale onto app_users (drives request locale).
+  // Mirror the preferred locale onto app_users, where the email and SSO
+  // paths read it. It does not pick the request locale (the URL does, F-37).
   await db
     .updateTable("app_users")
     .set({ preferred_locale: parsed.data.preferredLocale, updated_at: sql`now()` })

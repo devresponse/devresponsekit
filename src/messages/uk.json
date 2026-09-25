@@ -1353,6 +1353,7 @@
       "locale": "Мова",
       "timeZone": "Часовий пояс",
       "system": "Системне за замовчуванням",
+      "systemTimeZone": "Системне за замовчуванням ({zone})",
       "dateFormat": "Формат дати",
       "numberFormatLocale": "Формат чисел"
     },

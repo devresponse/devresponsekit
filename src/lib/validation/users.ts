@@ -7,10 +7,10 @@ import { optionalUserNameSchema } from "@/lib/user-name";
  *
  * `preferred_locale` is a plain `text` column with no CHECK constraint, and
  * the admin/v1 write paths used to accept any 2-10 character string. An
- * unsupported value is not inert: next-intl falls back to the default catalog
- * at render, but the stored value keeps flowing into email-template selection
- * and SSO handoffs, so "fr-CA" or "xx" silently degrades those surfaces with
- * no error anywhere. Constraining the write closes the hole at the only place
+ * unsupported value is not inert: the UI never reads it (the URL segment is the
+ * request locale, F-37), but the stored value keeps flowing into
+ * email-template selection and SSO handoffs, so "fr-CA" or "xx" silently
+ * degrades those surfaces with no error anywhere. Constraining the write closes the hole at the only place
  * that can distinguish a typo from a deliberate value.
  *
  * The self-service routes (`/api/preferences/locale`, `/api/account/
@@ -20,9 +20,9 @@ import { optionalUserNameSchema } from "@/lib/user-name";
  *
  * READS stay tolerant on purpose: rows written before this constraint (or by
  * a direct SQL edit) may still hold an unsupported value. We do NOT migrate or
- * reject them — `getUserAccessContext` / next-intl already fall back to
- * `defaultLocale` when the stored value is not supported, so an old row keeps
- * rendering; it simply cannot be re-saved as-is. See docs/configuration.md.
+ * reject them — the email sender falls back to `defaultLocale` when the stored
+ * value is not supported, and no page renders from it, so an old row keeps
+ * working; it simply cannot be re-saved as-is. See docs/configuration.md.
  *
  * The error message is the stable `validation.*` i18n key convention used by
  * the rest of this module.

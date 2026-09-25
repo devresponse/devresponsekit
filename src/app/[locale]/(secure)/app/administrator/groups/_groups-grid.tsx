@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { DataGrid, type GridColumnDef } from "../_components/grid/data-grid";
 
 /**
@@ -38,13 +39,9 @@ export function AdministratorGroupsGrid({
   // permitted, where `administrator.errors.forbidden` talks about viewing the
   // page, which is wrong on a page the admin is looking at.
   const tApiErr = useTranslations("errors");
-  const intlLocale = useLocale();
   const dialogs = useDialogs();
-
-  const dateFormatter = useMemo(
-    () => new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium" }),
-    [intlLocale],
-  );
+  // F-37: the viewer's zone and date format.
+  const format = useAppFormatter();
 
   const [reloadKey, setReloadKey] = useState(0);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -112,10 +109,7 @@ export function AdministratorGroupsGrid({
         id: "created_at",
         accessorKey: "created_at",
         header: () => t("columns.createdAt"),
-        cell: ({ row }) => {
-          const d = new Date(row.original.created_at);
-          return Number.isNaN(d.getTime()) ? row.original.created_at : dateFormatter.format(d);
-        },
+        cell: ({ row }) => format.date(row.original.created_at),
       },
       ...(canDelete
         ? [
@@ -139,7 +133,7 @@ export function AdministratorGroupsGrid({
           ]
         : []),
     ],
-    [t, locale, dateFormatter, canDelete, onDelete],
+    [t, locale, format, canDelete, onDelete],
   );
 
   return (

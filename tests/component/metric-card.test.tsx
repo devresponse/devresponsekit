@@ -5,16 +5,17 @@ import { MetricCard } from "@/app/[locale]/(secure)/app/administrator/_component
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
- * Presentational contract of the overview KPI card: locale-aware
- * number formatting, decorative icon, optional hint, and the
- * link-vs-static rendering split.
+ * Presentational contract of the overview KPI card: it shows the value the
+ * caller formatted (the page's app formatter applies the viewer's number
+ * format, F-37), a decorative icon, an optional hint, and the link-vs-static
+ * rendering split.
  */
 describe("MetricCard", () => {
-  it("formats the value with the active locale and renders label + hint", () => {
+  it("renders the caller-formatted value with label + hint", () => {
     renderWithIntl(
       <MetricCard
         label="Users"
-        value={12345}
+        value="12,345"
         hint="12 active · 3 pending"
         icon="users"
         locale="en"
@@ -27,7 +28,7 @@ describe("MetricCard", () => {
 
   it("renders the allow-listed icon as decorative only", () => {
     const { container } = renderWithIntl(
-      <MetricCard label="Roles" value={7} icon="shield" locale="en" />,
+      <MetricCard label="Roles" value="7" icon="shield" locale="en" />,
     );
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
@@ -38,7 +39,7 @@ describe("MetricCard", () => {
     renderWithIntl(
       <MetricCard
         label="Organizations"
-        value={5}
+        value="5"
         href="/app/administrator/organizations"
         locale="en"
       />,
@@ -48,7 +49,7 @@ describe("MetricCard", () => {
   });
 
   it("renders a static card without a link when href is omitted", () => {
-    renderWithIntl(<MetricCard label="Permissions" value={24} locale="en" />);
+    renderWithIntl(<MetricCard label="Permissions" value="24" locale="en" />);
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.getByText("24")).toBeInTheDocument();
   });

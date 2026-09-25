@@ -82,6 +82,19 @@ updates:
     # `applies-to: version-updates`, so security updates (when the repository
     # setting is on — see the header) are never grouped either.
     groups:
+      # `next` and `eslint-config-next` must move in ONE PR:
+      # tests/unit/dependency-governance.test.ts pins the direct
+      # eslint-config-next version to next's (the lint rules have to match the
+      # runtime). next is a production dependency and eslint-config-next a
+      # development one, so the two groups below split every Next bump across
+      # two PRs that each fail that test on their own (#478 + #479, landed
+      # together as #481). A dependency joins the FIRST group it matches, so
+      # this group must stay above them. It has no `dependency-type`, so it
+      # spans both, and it takes majors too, which need the same pairing.
+      next:
+        applies-to: version-updates
+        patterns: ["next", "eslint-config-next"]
+        update-types: ["major", "minor", "patch"]
       dev-minor-patch:
         applies-to: version-updates
         dependency-type: development

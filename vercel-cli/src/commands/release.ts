@@ -250,7 +250,7 @@ export async function deploy(
     const problems = await runner.envCheck(cliRoot);
     if (problems > 0 && !options.yes) {
       throw new CliError(`${problems} environment problem(s).`, {
-        hint: "Fix with `drk-deploy env:sync`, or re-run with --yes to deploy anyway.",
+        hint: "Each WRONG line above names its fix, and `drk-deploy env:sync` fills in what is missing. Or re-run with --yes to deploy anyway.",
       });
     }
   }

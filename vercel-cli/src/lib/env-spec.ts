@@ -817,6 +817,40 @@ export function derivedValuesFor(context: DeploymentContext): Record<string, str
   return satellite;
 }
 
+/**
+ * The derived keys a STORED value must equal (F-46): the deployment's origin
+ * and its SSO identity. A different value in any of them breaks sign-in, the
+ * trusted-origin list, every handoff or the shared session, while the
+ * deployment boots and looks healthy.
+ *
+ * NEXT_PUBLIC_APP_NAME and NEXT_PUBLIC_PRODUCTION_HOST are derived too, but
+ * only as defaults. One is the product name in the UI; the kit reads the other
+ * only outside production (the origin-suffix fallback). A value the operator
+ * chose for either is not a reason to refuse a deploy, so neither is held to
+ * the recorded config.
+ */
+const PINNED_TO_CONFIG: ReadonlySet<string> = new Set([
+  "BETTER_AUTH_URL",
+  "SSO_HANDOFF_ISSUER",
+  "SSO_HANDOFF_AUDIENCE_PREFIX",
+  "SSO_HANDOFF_APPLICATION_ID",
+  "NEXT_PUBLIC_APP_URL",
+  "COOKIE_DOMAIN",
+]);
+
+/**
+ * The values `env:check` and `env:sync` hold a stored Production or Preview
+ * value to (F-46): {@link derivedValuesFor}, narrowed to the keys in
+ * PINNED_TO_CONFIG. `env:sync` refuses to write a supplied value that differs
+ * from one of them, so it never writes what its next run, or `env:check`,
+ * would reject.
+ */
+export function pinnedValuesFor(context: DeploymentContext): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(derivedValuesFor(context)).filter(([key]) => PINNED_TO_CONFIG.has(key)),
+  );
+}
+
 /** The required keys for a deployment, whatever it is. */
 export function requiredKeysFor(context: DeploymentContext): string[] {
   return envSpecsFor(context)

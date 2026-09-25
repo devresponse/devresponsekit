@@ -9,6 +9,7 @@ import {
   derivedValuesFor,
   envSpecsFor,
   mayGenerateAuthSecret,
+  pinnedValuesFor,
   refusedFor,
   vercelTypeFor,
 } from "../lib/env-spec.js";
@@ -36,6 +37,16 @@ import {
   warn,
   yellow,
 } from "../lib/log.js";
+import {
+  type Presence,
+  type StoredProblem,
+  describeEntry,
+  isPresent,
+  isValueChecked,
+  presenceFor,
+  readPublicValues,
+  storedProblems,
+} from "../lib/env-presence.js";
 import { generateAuthSecret, generateHandoffKeypair, generateOperatorSecret } from "../lib/secrets.js";
 import { VercelClient } from "../lib/vercel-client.js";
 
@@ -97,6 +108,8 @@ interface PlannedVar {
   spec: EnvVarSpec;
   value: string;
   origin: "generated" | "derived" | "supplied";
+  /** Where it is written: the targets it is missing from, or every requested one under --force. */
+  targets: EnvTarget[];
 }
 
 /**
@@ -106,6 +119,23 @@ interface PlannedVar {
  * already exists on Vercel is left alone unless `--force` is given. That
  * matters for secrets — re-running this must never silently rotate
  * BETTER_AUTH_SECRET and sign every user out.
+ *
+ * "Already exists" means set for EVERY requested target (F-46, see
+ * `presenceFor`): a DATABASE_URL created for Development only is missing
+ * for a production sync, not "unchanged". A missing key is written only to
+ * the targets it is missing from, so filling in Preview never overwrites the
+ * Production value. And every entry left alone is still checked
+ * (`storedProblems`), including the Production entry of a key being written
+ * to Preview only: `up` runs no `env:check` after this, so this is its
+ * preflight, and a wrong or unverifiable value stops it before anything is
+ * migrated or promoted.
+ *
+ * A supplied value wins over a derived one, except where the recorded config
+ * pins the value (`pinnedValuesFor`: the origin and the SSO identity). There a
+ * supplied value that differs is refused before anything is written to
+ * Production or Preview, because this sync's next run and `env:check` hold the
+ * stored value to the pinned one: written, it would be reported WRONG, and the
+ * printed fix would write it again.
  */
 export async function envSync(
   cliRoot: string,
@@ -123,34 +153,62 @@ export async function envSync(
   info(dim(`  targets: ${targets.join(", ")}`));
 
   const existing = await client.listEnv(config.projectId);
-  const present = new Set(existing.map((e) => e.key));
   const supplied = loadSuppliedValues(
     specs,
     options.fromEnv,
     refused.map((f) => f.key),
   );
   const derived = derivedValuesFor(context);
+  const pinned = pinnedValuesFor(context);
 
   // Refusals come first, before anything is planned. A satellite holding a
   // signing key is not a deployment to top up with a few more variables — it
   // is a consumer that can forge tokens, and syncing it would leave that
-  // property in place while printing a page of green ticks.
-  assertNoRefusedVariables(refused, present, supplied);
+  // property in place while printing a page of green ticks. Deliberately
+  // target-blind (F-46): a refused key set for ANY target is reported, which
+  // over-reports and so fails safe.
+  assertNoRefusedVariables(refused, new Set(existing.map((e) => e.key)), supplied);
+
+  // The public values Vercel lists as ciphertext, read back so the ones left
+  // alone below are verified rather than assumed. Nothing is left alone
+  // under --force, so nothing needs reading.
+  const listing = options.force
+    ? existing
+    : await readPublicValues(existing, specs, targets, (entry) =>
+        client.readEnvValue(config.projectId, entry),
+      );
 
   const planned: PlannedVar[] = [];
-  /** Already on the project: left alone unless --force. */
+  /** Already set for every target: left alone unless --force. */
   const unchanged: string[] = [];
   /** Nothing to set them from — reported separately, because "already set" and
    *  "there was no value" are different facts and only one of them is fixed by
    *  --force. */
   const noValue: string[] = [];
   const blocked: Array<{ key: string; why: string }> = [];
+  /** Supplied, and different from the value the recorded config pins (F-46):
+   *  written, it would fail the next sync and env:check. */
+  const conflicting: Array<{ key: string; why: string }> = [];
+  /** Already set, and wrong: a public value stored write-only, or a value that
+   *  fails the kit's rule or differs from the one the recorded config pins (F-46). */
+  const wrong: Array<{ key: string } & StoredProblem> = [];
 
   for (const spec of specs) {
-    if (present.has(spec.key) && !options.force) {
-      unchanged.push(spec.key);
-      continue;
+    const presence = presenceFor(listing, spec.key, targets);
+    if (!options.force) {
+      // Every entry this sync keeps, and not only when the key is fully
+      // present: a key missing from Preview is still kept on Production, and
+      // `--target all` must not print "(preview, development only)" over an
+      // unreadable Production issuer. Under --force nothing is kept.
+      for (const problem of storedProblems(spec, presence, pinned[spec.key])) {
+        wrong.push({ key: spec.key, ...problem });
+      }
+      if (isPresent(presence)) {
+        unchanged.push(spec.key);
+        continue;
+      }
     }
+    const writeTo = options.force ? targets : presence.missing;
 
     let value = supplied[spec.key];
     let origin: PlannedVar["origin"] = "supplied";
@@ -195,7 +253,10 @@ export async function envSync(
         // generatable — an Option C satellite's shared session secret, its
         // cookie domain — where "no value available" would read like a bug in
         // this CLI rather than a decision it is holding to.
-        blocked.push({ key: spec.key, why: spec.noValueHint ?? "no value available" });
+        blocked.push({
+          key: spec.key,
+          why: (spec.noValueHint ?? "no value available") + setOnlyFor(presence),
+        });
       } else {
         noValue.push(spec.key);
       }
@@ -207,13 +268,30 @@ export async function envSync(
       blocked.push({ key: spec.key, why: invalid });
       continue;
     }
-    planned.push({ spec, value, origin });
+    // Only where the value is checked: Development takes a localhost origin.
+    // Pinned values are public, so quoting both is safe.
+    const expected = pinned[spec.key];
+    if (expected !== undefined && value !== expected && writeTo.some(isValueChecked)) {
+      conflicting.push({
+        key: spec.key,
+        why: `supplied ${JSON.stringify(value)}, but the recorded config derives ${JSON.stringify(expected)}: written to ${writeTo.filter(isValueChecked).join(", ")}, the next check would report it WRONG`,
+      });
+      continue;
+    }
+    planned.push({ spec, value, origin, targets: writeTo });
   }
 
-  if (blocked.length > 0) {
+  if (blocked.length > 0 || conflicting.length > 0) {
     heading("Cannot continue");
-    for (const b of blocked) field(b.key, red(b.why), 32);
+    for (const b of [...blocked, ...conflicting]) field(b.key, red(b.why), 32);
     info("");
+  }
+  if (conflicting.length > 0) {
+    info(
+      `Drop the supplied value from the --from-env file and the shell, and the derived one is written. If the supplied one is right, correct the recorded config with ${bold("drk-deploy init")} instead.`,
+    );
+  }
+  if (blocked.length > 0) {
     info(`Supply them with ${bold("--from-env <file>")} or as shell variables, then re-run.`);
     if (blocked.some((b) => b.key === "DATABASE_URL")) {
       // `db:provision` refuses for a deployment that does not own a schema, so
@@ -228,7 +306,21 @@ export async function envSync(
     if (blocked.some((b) => b.key === "COOKIE_DOMAIN")) {
       info(`Record the cookie domain: ${bold("drk-deploy init --cookie-domain .example.com")}`);
     }
-    throw new CliError(`${blocked.length} required variable(s) unresolved.`);
+  }
+  if (wrong.length > 0) reportWrong(wrong);
+  if (blocked.length > 0 || conflicting.length > 0 || wrong.length > 0) {
+    const wrongKeys = new Set(wrong.map((w) => w.key)).size;
+    throw new CliError(
+      [
+        blocked.length > 0 ? `${blocked.length} required variable(s) unresolved.` : "",
+        conflicting.length > 0
+          ? `${conflicting.length} supplied value(s) differ from the recorded config.`
+          : "",
+        wrongKeys > 0 ? `${wrongKeys} variable(s) already set on Vercel fail the contract.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
   }
 
   heading("Plan");
@@ -239,7 +331,9 @@ export async function envSync(
         : item.origin === "derived"
           ? blue("derive")
           : dim("supplied");
-    field(item.spec.key, `${note} ${item.spec.secret ? mask(item.value) : item.value}`, 32);
+    // Named only when narrower than asked: the key is already set elsewhere.
+    const only = item.targets.length < targets.length ? ` ${dim(`(${item.targets.join(", ")} only)`)}` : "";
+    field(item.spec.key, `${note} ${item.spec.secret ? mask(item.value) : item.value}${only}`, 32);
   }
   if (unchanged.length > 0) {
     info("");
@@ -264,7 +358,12 @@ export async function envSync(
     return;
   }
 
-  const rotating = planned.filter((p) => p.spec.secret && present.has(p.spec.key));
+  // A rotation is a secret overwritten where a deployment already reads it:
+  // on a target this write covers (F-46). One set only for Development is not
+  // rotated by a production write.
+  const rotating = planned.filter(
+    (p) => p.spec.secret && presenceFor(existing, p.spec.key, p.targets).serving.length > 0,
+  );
   if (rotating.length > 0 && !options.yes) {
     warn(`--force will ROTATE ${rotating.map((r) => r.spec.key).join(", ")}.`);
     warn("Rotating BETTER_AUTH_SECRET signs out every active session. Re-run with --yes to confirm.");
@@ -277,7 +376,7 @@ export async function envSync(
       key: item.spec.key,
       value: item.value,
       type: vercelTypeFor(item.spec),
-      target: targets,
+      target: item.targets,
       comment: item.spec.comment,
     });
     ok(`${item.spec.key} ${item.spec.secret ? mask(item.value) : dim(item.value)}`);
@@ -296,13 +395,29 @@ export async function envSync(
 }
 
 /**
- * `drk-deploy env:check` — reports what the deployment is missing, and what it
- * has that it should not.
+ * What `env:check`, and so the `deploy` preflight, checks against: `deploy`
+ * pulls `--environment=production` and builds `--prod`, so a key set for
+ * Preview or Development alone is not there for it.
+ */
+const PREFLIGHT_TARGETS: readonly EnvTarget[] = ["production"];
+
+/**
+ * `drk-deploy env:check` — the preflight `deploy` runs: what the production
+ * deployment is missing, what it has that it should not, and what it has that
+ * is wrong (F-46).
  *
- * It checks PRESENCE only, for every variable: `listEnv` does not fetch
- * values, and Vercel never returns an encrypted or sensitive one anyway. The
- * `validate` rules run in `env:sync`, and only on a value it is about to
- * write. Say so rather than implying a value was verified.
+ * A key counts as set only when entries for the whole Production target serve
+ * it (`presenceFor`): one confined to Development, a git branch or a custom
+ * environment does not. Each PUBLIC value is then read back (a `plain` one
+ * comes with the listing, an `encrypted` one is decrypted on request), checked
+ * against the kit's boot rule and, for the origin and the SSO identity
+ * (`pinnedValuesFor`), against the value the recorded config derives. A public
+ * value with neither is reported "readable, no rule", not "value checked". A
+ * public value stored `sensitive` cannot be read back, and that alone is a
+ * problem: a write-only issuer is how `httsp://` reached production behind a
+ * clean check. Secrets are checked for presence and never fetched; one stored
+ * `plain` arrives with the listing anyway, so its value is validated too, and
+ * never printed.
  */
 export async function envCheck(cliRoot: string): Promise<number> {
   const config = requireConfig(cliRoot);
@@ -310,11 +425,18 @@ export async function envCheck(cliRoot: string): Promise<number> {
   const context = deploymentContext(config);
   const specs = envSpecsFor(context);
   const refused = refusedFor(context.profile);
+  const pinned = pinnedValuesFor(context);
 
   heading(`Environment → ${config.projectId}`);
   info(dim(`  ${describeProfile(context.profile)}`));
+  info(dim(`  checked for: ${PREFLIGHT_TARGETS.join(", ")}`));
   const existing = await client.listEnv(config.projectId);
-  const byKey = new Map(existing.map((e) => [e.key, e]));
+  // Target-blind on purpose, and used only for the refused and forbidden
+  // keys below (F-46): one set for ANY target is reported, which fails safe.
+  const anywhere = new Set(existing.map((e) => e.key));
+  const listing = await readPublicValues(existing, specs, PREFLIGHT_TARGETS, (entry) =>
+    client.readEnvValue(config.projectId, entry),
+  );
 
   let problems = 0;
 
@@ -323,27 +445,34 @@ export async function envCheck(cliRoot: string): Promise<number> {
   // show every variable "set" while no handoff can ever succeed.
   problems += reportConfigProblems(context);
 
-  const rows: Array<[string, string]> = [];
   for (const spec of specs) {
-    const found = byKey.get(spec.key);
-    if (found) {
-      const scope = found.target.length ? dim(found.target.join(",")) : dim("(no target)");
-      rows.push([spec.key, `${green("set")} ${scope}`]);
+    const presence = presenceFor(listing, spec.key, PREFLIGHT_TARGETS);
+    if (isPresent(presence)) {
+      const wrong = storedProblems(spec, presence, pinned[spec.key]);
+      if (wrong.length === 0) {
+        field(spec.key, `${green("set")} ${dim(describeStored(spec, presence, pinned[spec.key]))}`, 32);
+        continue;
+      }
+      field(spec.key, red("WRONG"), 32);
+      for (const problem of wrong) {
+        info(`    ${problem.why}`);
+        info(`    ${dim(problem.fix)}`);
+      }
+      problems += 1;
       continue;
     }
     if (spec.level === "required") {
-      rows.push([spec.key, `${red("MISSING")} — ${spec.consequence}`]);
+      field(spec.key, `${red("MISSING")} — ${spec.consequence}${setOnlyFor(presence)}`, 32);
       problems += 1;
     } else if (spec.level === "recommended") {
-      rows.push([spec.key, `${yellow("missing")} — ${spec.consequence}`]);
+      field(spec.key, `${yellow("missing")} — ${spec.consequence}${setOnlyFor(presence)}`, 32);
       problems += 1;
     } else {
-      rows.push([spec.key, dim("unset (has a default)")]);
+      field(spec.key, dim(`unset (has a default)${setOnlyFor(presence)}`), 32);
     }
   }
-  for (const [key, value] of rows) field(key, value, 32);
 
-  const presentRefused = refused.filter((f) => byKey.has(f.key));
+  const presentRefused = refused.filter((f) => anywhere.has(f.key));
   if (presentRefused.length > 0) {
     heading(`Must NOT be set on this ${context.profile.kind === "satellite" ? "satellite" : "deployment"}`);
     for (const f of presentRefused) {
@@ -354,7 +483,7 @@ export async function envCheck(cliRoot: string): Promise<number> {
     info(`Remove with: ${bold("drk-deploy env:prune")}`);
   }
 
-  const forbidden = FORBIDDEN_ON_VERCEL.filter((f) => byKey.has(f.key));
+  const forbidden = FORBIDDEN_ON_VERCEL.filter((f) => anywhere.has(f.key));
   if (forbidden.length > 0) {
     heading("Should not be set on a deployment");
     for (const f of forbidden) {
@@ -365,21 +494,25 @@ export async function envCheck(cliRoot: string): Promise<number> {
     info(`Remove with: ${bold("drk-deploy env:prune")}`);
   }
 
-  const unknown = existing.filter(
-    (e) =>
-      !specs.some((s) => s.key === e.key) &&
-      !FORBIDDEN_ON_VERCEL.some((f) => f.key === e.key) &&
-      !refused.some((f) => f.key === e.key),
+  const unknown = [...anywhere].filter(
+    (key) =>
+      !specs.some((s) => s.key === key) &&
+      !FORBIDDEN_ON_VERCEL.some((f) => f.key === key) &&
+      !refused.some((f) => f.key === key),
   );
   if (unknown.length > 0) {
     heading("Not part of the contract (left alone)");
-    info(dim(`  ${unknown.map((u) => u.key).join(", ")}`));
+    info(dim(`  ${unknown.join(", ")}`));
   }
 
   info("");
   if (problems === 0) ok("Environment satisfies the contract.");
   else warn(`${problems} item(s) need attention.`);
-  info(dim("  Variables are checked for PRESENCE only — values are not read, so none is validated."));
+  info(
+    dim(
+      "  Public values are read back and checked against the kit's rules, and the origin and SSO identity against the recorded config; secrets are checked for presence only, and never read.",
+    ),
+  );
 
   // After the verdict, and not counted in it: a satellite on the kit's
   // database satisfies the contract and still is not contained (F-24).
@@ -477,6 +610,43 @@ function assertNoRefusedVariables(
   throw new CliError(`${offenders.length} variable(s) must not exist on this deployment target.`, {
     hint: "Remove them with `drk-deploy env:prune`, and drop them from any --from-env file or shell environment, then re-run.",
   });
+}
+
+/**
+ * Prints what `env:sync` found set but wrong (F-46), with the command that
+ * fixes each. It refuses on them, because `up` runs no `env:check` after it,
+ * so this is the only preflight between a write-only `httsp://` issuer and a
+ * promoted build.
+ */
+function reportWrong(wrong: ReadonlyArray<{ key: string } & StoredProblem>): void {
+  heading("Set on Vercel, but wrong or unverifiable");
+  for (const w of wrong) {
+    field(w.key, red(w.why), 32);
+    info(`    ${dim(w.fix)}`);
+  }
+  info("");
+}
+
+/** " (on Vercel only for development, not production)": why a key the dashboard shows still counts as missing. */
+function setOnlyFor(presence: Presence): string {
+  const seen = [...presence.serving.map(describeEntry), ...presence.elsewhere];
+  if (seen.length === 0) return "";
+  return ` (on Vercel only for ${seen.join("; ")}, not ${presence.missing.join(", ")})`;
+}
+
+/**
+ * "production plain, value checked", for a key that passed. A public value
+ * with no rule and no pinned value is only proven readable, and says so.
+ */
+function describeStored(spec: EnvVarSpec, presence: Presence, expected: string | undefined): string {
+  const stored = presence.serving
+    .map(
+      (e) =>
+        `${e.target.filter((t) => (presence.targets as readonly string[]).includes(t)).join(", ")} ${e.type}`,
+    )
+    .join("; ");
+  if (spec.secret) return stored;
+  return `${stored}, ${spec.validate || expected !== undefined ? "value checked" : "readable, no rule"}`;
 }
 
 /** Config-level mistakes that no amount of correctly-set variables can fix. */

@@ -1307,15 +1307,28 @@ async function verifyOrRollBack(
  * restore that fails is a warning: the build output is sound, and the next
  * run sets the file aside.
  */
+/**
+ * The file's bytes, or null when it does not exist. One read, no separate
+ * existence check, so nothing can change between the check and the read.
+ */
+function readIfPresent(file: string): Buffer | null {
+  try {
+    return readFileSync(file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+}
+
 async function buildLeavingCheckout(vercel: VercelInvocation, runner: ReleaseRunner): Promise<void> {
   const file = join(vercel.root, NEXT_ENV_FILE);
-  const before = existsSync(file) ? readFileSync(file) : null;
+  const before = readIfPresent(file);
   try {
     await runner.build(vercel);
   } finally {
     if (before !== null) {
       try {
-        const after = existsSync(file) ? readFileSync(file) : null;
+        const after = readIfPresent(file);
         if (after === null || !after.equals(before)) writeFileSync(file, before);
       } catch (err) {
         warn(

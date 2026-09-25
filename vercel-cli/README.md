@@ -89,8 +89,11 @@ drk-deploy db:provision              :: optional — create a marketplace Postgr
 drk-deploy up --from-env .env.production
 ```
 
-`--from-env` supplies the values that cannot be generated — principally `DATABASE_URL`. Anything
-the CLI _can_ generate (signing keys, cron tokens) it generates.
+`--from-env` supplies the values that cannot be generated. `DATABASE_URL`, the runtime (usually
+pooled) connection string, is written to the project by `env:sync`. `PRODUCTION_DIRECT_DATABASE_URL`,
+the DIRECT connection string of the same database, is what migrations run against. It is read
+locally and never written to Vercel. `DATABASE_URL` is never used for migrations, from the file or
+the shell (F-47). Anything the CLI _can_ generate (signing keys, cron tokens) it generates.
 
 ### A satellite
 
@@ -146,8 +149,8 @@ delete it, breaking handoff verification for the whole fleet.
 | `env:prune`    | Removes variables that must not exist here, including a satellite's stray signing key.                               |
 | `db:provision` | Creates a marketplace Postgres store and connects it to the project. Refused unless this deployment owns a database. |
 | `db:status`    | Shows the database variables wired into the project.                                                                 |
-| `migrate`      | Applies the kit's migrations. Refused for a satellite that does not own its schema.                                  |
-| `deploy`       | Migrate → build → promote → verify (no migrate step when the target does not own a schema).                          |
+| `migrate`      | Applies the kit's migrations to production, checked first. Refused for a satellite that does not own its schema.     |
+| `deploy`       | Pull → migrate (checked) → build → promote → verify (no migrate step when the target does not own a schema).         |
 | `up`           | `env:sync` then `deploy`. The whole thing.                                                                           |
 
 Every command accepts `--dry-run`, every command is safe to re-run, and every command reads the
@@ -162,9 +165,47 @@ succeed. If a migration fails, the currently-live build keeps serving against th
 understands, and nothing is promoted. This is the ordering the repo's own deploy workflow
 documents, and the reason it is documented is that the reverse has caused outages.
 
+**Migrations run against production, checked rather than assumed (F-47).** The migration URL is
+named explicitly: `--database-url`, or `PRODUCTION_DIRECT_DATABASE_URL` in the shell or the
+`--from-env` file (a satellite that owns its database: `SATELLITE_DIRECT_DATABASE_URL`). The shell
+wins over the file, and an empty shell value counts as unset, as it does for `env:sync`: a CI step
+exporting a secret that is not defined exports an empty string. A shell's
+`DATABASE_URL` or `DIRECT_DATABASE_URL` is never used, because on the machine a deploy runs from it
+is usually a local database: `up` used to migrate that, report success, and promote a build that
+expected the new schema over a production without it. Before migrating, `deploy`, `up` and
+`migrate` run the read-only `vercel pull --environment=production` and compare the URL with what
+production reads:
+
+- **The database.** Host, port (5432 when none is given) and database name must equal those of
+  production's `DATABASE_URL` or `DATABASE_URL_UNPOOLED`. Neon's `-pooler` host suffix is ignored,
+  so the direct URL matches the pooled one. On Supabase's shared pooler (`*.pooler.supabase.com`)
+  every project in the region has the same host and the same `postgres` database, so the project in
+  the username (`postgres.<ref>`) is compared instead of the port. A mismatch is refused before
+  anything migrates, and there is no override: point the URL at production's direct endpoint. If
+  production's pooled URL is not the direct one with `-pooler` removed (another host or another
+  port: Supabase, PgBouncer), store the direct URL on the project as `DATABASE_URL_UNPOOLED`,
+  encrypted, so it can be matched. A migration URL whose query re-points the connection (`host`,
+  `hostaddr`, `port`, `dbname`, `database` or `user`) is refused outright, because what is checked
+  would not be what is migrated. The migration runner is handed the URL and the schema with the
+  shell's `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE` and `PGUSER` removed, for the same reason:
+  `pg` fills in any part the URL leaves out from those.
+- **The schema.** It defaults to production's `DB_SCHEMA`, or `auth` when production sets none.
+  Before F-47 it was always `auth`, so a production on `tenant_a` was migrated in the wrong schema.
+  A `--schema` that production does not read is refused unless `--force-schema`.
+- **Values that cannot be read.** A variable stored `sensitive` comes back from `vercel pull` as
+  `[SENSITIVE]`, so there is nothing to compare. That is refused too, unless
+  `--allow-unverified-target`, which prints what it skipped. It never covers a mismatch. An
+  unreadable `DB_SCHEMA` is never guessed: pass `--schema` with it.
+
+The pulled file, `.vercel/.env.production.local`, holds production's secrets in plain text. It is
+deleted before the pull (`vercel pull` keeps a stale copy's local values, so an old file could vouch
+for the wrong database) and again when the run ends, successful or not. The kit's `.gitignore`
+ignores `.vercel/` as well. A `--dry-run` pulls nothing, so it checks nothing, and says so.
+
 **A pooled connection string is refused.** Migrations need the _direct_ endpoint: DDL and the
 advisory lock the migration runner takes do not survive a transaction pooler, and the failure is
-silent rather than loud. Pass `--allow-pooled` only if you know why you are doing it.
+silent rather than loud. Neon's `-pooler` host, a `.pooler.` host (Supabase), port 6543 and
+`pgbouncer=true` are all refused. Pass `--allow-pooled` only if you know why you are doing it.
 
 **Secrets are never printed.** Values reach the terminal only through a mask that shows a length
 and a short fingerprint (`(set, 44 chars, fp 3f8a1c2d)`) — enough to compare two runs, useless to
@@ -331,6 +372,33 @@ delete it — nothing reads it.
 
 ## Upgrading
 
+### F-47: the migration URL is named and checked against production
+
+`deploy`, `up` and `migrate` no longer fall back to `DIRECT_DATABASE_URL` or `DATABASE_URL`. If a
+deploy of the kit relied on either, set `PRODUCTION_DIRECT_DATABASE_URL` to production's DIRECT
+connection string instead, exported in the shell, in the `--from-env` file, or as `--database-url`.
+The refusal names the variables it passed over. A satellite is unchanged: it already had to name
+`SATELLITE_DIRECT_DATABASE_URL` or `--database-url`.
+
+Every real run now pulls production's settings before it migrates and refuses a URL whose host,
+port and database are not production's (see
+[above](#what-it-does-about-the-things-that-go-wrong)). The order is now `env:sync`/`env:check` →
+link → pull → migrate → build → promote → verify, where it used to migrate first. `migrate` on its
+own now needs the Vercel token and links and pulls the same way. Four things to check once:
+
+1. **Production's `DATABASE_URL` is stored `sensitive`.** `vercel pull` cannot read it, so unless a
+   readable `DATABASE_URL_UNPOOLED` is there to match instead, the run is refused. Store the direct
+   URL on the project as `DATABASE_URL_UNPOOLED`, encrypted. Otherwise pass
+   `--allow-unverified-target` on every run, once you have checked the endpoint it prints yourself.
+2. **Production sets `DB_SCHEMA`.** Migrations now go to that schema, not `auth`. A `--schema` that
+   differs is refused unless `--force-schema`. A `DB_SCHEMA` stored `sensitive` cannot be read: store
+   it as plain (it is not a secret), or pass `--schema` with `--allow-unverified-target`.
+3. **Production's `DATABASE_URL` is a pooler on its own port** (PgBouncer, Supabase's dedicated
+   pooler on 6543) in front of the direct server on 5432. The ports differ, so the direct URL does
+   not match it: store the direct URL on the project as `DATABASE_URL_UNPOOLED`, encrypted.
+4. **`.drk-deploy.json` carries `migrationUrlEnvVar`.** Nothing ever read it, and it is gone. Name
+   the URL with `PRODUCTION_DIRECT_DATABASE_URL` instead.
+
 ### F-46: public values must be readable
 
 `env:check`, and therefore `deploy`, and `env:sync`, and therefore `up`, now fail on a public value
@@ -428,16 +496,23 @@ fake Vercel API (`fetch` is replaced), so those tests never reach Vercel either.
 
 The test suite is the only thing standing between a refactor and a silently wrong deployment.
 Everything worth relying on is written as a pure function for that reason: keep it that way when you
-add a rule. The part that cannot be pure, the release ORDER, goes through a runner instead: `deploy`
-and `up` reach every step that touches Vercel, a database or a subprocess (`envSync`, `envCheck`,
-`migrate`, `link`, `pull`, `build`, `promote`, `verify`) through `ReleaseRunner` in
-`src/commands/release.ts`. `test/release.test.ts` passes a recording fake and asserts that migrations
-run before the promotion and that nothing runs after a failed step, so a new step belongs in the
-runner. The fake stands in for every step, so the tests never reach Vercel or a database.
-`drk-deploy migrate` calls `migrate` directly, not through `deploy`, so the same file also calls the
-real `migrate` and asserts both of its refusals: a satellite on the kit's database, and a satellite
-that would inherit the kit's `PRODUCTION_DIRECT_DATABASE_URL` from the shell. Each refuses before
-anything connects or spawns.
+add a rule. The part that cannot be pure, the release ORDER, goes through a runner instead: `deploy`,
+`up` and `migrate` reach every step that touches Vercel, a database or a subprocess (`envSync`,
+`envCheck`, `link`, `pull`, `migrate`, `build`, `promote`, `verify`) through `ReleaseRunner` in
+`src/commands/release.ts`. `test/release.test.ts` passes a recording fake and asserts that production
+is pulled before anything migrates, that migrations run before the promotion, and that nothing runs
+after a failed step, so a new step belongs in the runner. The fake stands in for every step, so the
+tests never reach Vercel or a database. Its `pull` writes a production env file where `vercel pull`
+would, which is how the production-target refusals (F-47) are asserted: a URL that is not
+production's database, a `--schema` production does not read, a value stored `sensitive`, a stale
+pulled file. Its `build` records whether that file is still there, because `vercel build` reads it,
+and a run with no migrate step is asserted never to parse it. `src/lib/migration-target.ts` holds
+those rules as pure functions, table-tested in the same file. The runner's `migrate` step is also
+called for real, and both of its refusals are asserted: a satellite on the kit's database, and a
+satellite that would inherit the kit's `PRODUCTION_DIRECT_DATABASE_URL` from the shell. Each refuses
+before anything connects or spawns. `applyMigrations` runs for real once, against kit scripts that
+are a probe, to assert that the runner is handed the URL and the schema and none of the shell's
+`PG*` fallbacks.
 
 The required keys in `src/lib/env-spec.ts` are checked against the kit's own schema by the kit's
 suite, not this one (`tests/unit/drk-deploy-required-keys.test.ts`, which can import both): a key

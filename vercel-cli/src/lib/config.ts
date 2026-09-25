@@ -34,12 +34,12 @@ export interface ProjectConfig {
   applicationId: string;
   /** Absolute path to the devresponsekit checkout that owns the schema. */
   kitRoot: string;
-  /**
-   * The DIRECT (non-pooled) connection string used for MIGRATIONS ONLY, if it
-   * differs from the pooled runtime DATABASE_URL. Stored as a reference to an
-   * env var name, never the value.
-   */
-  migrationUrlEnvVar?: string;
+  // There is deliberately no field naming the migration URL. One existed
+  // (`migrationUrlEnvVar`), documented as a safeguard and read by nothing, so
+  // a config carrying it still migrated whatever the shell's DATABASE_URL
+  // said (F-47). The URL is named per run instead (`--database-url`, or
+  // PRODUCTION_DIRECT_DATABASE_URL in the shell or the --from-env file) and
+  // checked against production's own DATABASE_URL before anything migrates.
 }
 
 const CONFIG_FILE = ".drk-deploy.json";

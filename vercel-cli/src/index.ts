@@ -6,11 +6,25 @@ import { dbProvision, dbStatus } from "./commands/db.js";
 import { doctor } from "./commands/doctor.js";
 import { envCheck, envPrune, envSync } from "./commands/env.js";
 import { init, login } from "./commands/init.js";
-import { deploy, migrate, status, up } from "./commands/release.js";
+import { deploy, migrateCommand, status, up } from "./commands/release.js";
 import { CliError, dim, fail, info, setQuiet } from "./lib/log.js";
 
 /** The vercel-cli package root: `dist/index.js` → `..`. */
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * The two overrides of the production-target check (F-47), shared by every
+ * command that migrates. Neither covers a DATABASE mismatch: that has no
+ * override, because the fix is the right URL.
+ */
+const ALLOW_UNVERIFIED_TARGET = [
+  "--allow-unverified-target",
+  "migrate even though production's DATABASE_URL / DATABASE_URL_UNPOOLED (or DB_SCHEMA) cannot be read, e.g. stored sensitive: the target is then NOT checked",
+] as const;
+const FORCE_SCHEMA = [
+  "--force-schema",
+  "migrate a --schema that production's DB_SCHEMA does not name",
+] as const;
 
 const program = new Command();
 
@@ -139,15 +153,23 @@ program
 
 program
   .command("migrate")
-  .description("Apply the kit's migrations to the target database (direct endpoint)")
+  .description(
+    "Pull production's settings, check the migration target against them, then apply the kit's migrations (direct endpoint)",
+  )
   .option(
     "--database-url <url>",
-    "the DIRECT connection string. Kit: defaults to PRODUCTION_DIRECT_DATABASE_URL / DIRECT_DATABASE_URL / DATABASE_URL. A satellite must NAME its own: this flag, or SATELLITE_DIRECT_DATABASE_URL — the kit's variables are deliberately not inherited",
+    "the DIRECT connection string. Kit: defaults to PRODUCTION_DIRECT_DATABASE_URL (shell, then --from-env), never DATABASE_URL. A satellite must NAME its own: this flag, or SATELLITE_DIRECT_DATABASE_URL — the kit's variables are deliberately not inherited",
   )
-  .option("--schema <name>", 'target schema (default "auth")')
+  .option(
+    "--from-env <file>",
+    "read PRODUCTION_DIRECT_DATABASE_URL (a satellite: SATELLITE_DIRECT_DATABASE_URL) from a .env file",
+  )
+  .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
   .option("--allow-pooled", "permit a pooled connection string (not recommended)")
-  .option("--dry-run", "show what would run")
-  .action(async (options) => migrate(CLI_ROOT, options));
+  .option(...ALLOW_UNVERIFIED_TARGET)
+  .option(...FORCE_SCHEMA)
+  .option("--dry-run", "show what would run (production is not pulled, so the target is not checked)")
+  .action(async (options) => migrateCommand(CLI_ROOT, options));
 
 /* ---------------------------------------------------------------- */
 /*  Release                                                          */
@@ -155,10 +177,16 @@ program
 
 program
   .command("deploy")
-  .description("Migrate, build, promote to production, then verify")
-  .option("--database-url <url>", "the DIRECT connection string for migrations")
-  .option("--schema <name>", 'target schema (default "auth")')
+  .description("Pull production's settings, migrate (checked against them), build, promote, then verify")
+  .option(
+    "--database-url <url>",
+    "the DIRECT connection string for migrations (default: PRODUCTION_DIRECT_DATABASE_URL)",
+  )
+  .option("--from-env <file>", "read the migration URL (PRODUCTION_DIRECT_DATABASE_URL) from a .env file")
+  .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
   .option("--allow-pooled", "permit a pooled connection string")
+  .option(...ALLOW_UNVERIFIED_TARGET)
+  .option(...FORCE_SCHEMA)
   .option("--skip-migrations", "promote without touching the schema")
   .option("--skip-checks", "skip the environment preflight")
   .option("--dry-run", "show the plan without deploying")
@@ -167,11 +195,21 @@ program
 
 program
   .command("up")
-  .description("The whole pipeline: env:sync → migrate → build → promote → verify")
-  .option("--from-env <file>", "read supplied values from a .env file")
-  .option("--database-url <url>", "the DIRECT connection string for migrations")
-  .option("--schema <name>", 'target schema (default "auth")')
+  .description(
+    "The whole pipeline: env:sync → pull → migrate (checked against production) → build → promote → verify",
+  )
+  .option(
+    "--from-env <file>",
+    "read supplied values from a .env file, including the migration URL (PRODUCTION_DIRECT_DATABASE_URL)",
+  )
+  .option(
+    "--database-url <url>",
+    "the DIRECT connection string for migrations (default: PRODUCTION_DIRECT_DATABASE_URL)",
+  )
+  .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
   .option("--allow-pooled", "permit a pooled connection string")
+  .option(...ALLOW_UNVERIFIED_TARGET)
+  .option(...FORCE_SCHEMA)
   .option("--dry-run", "show the plan without changing anything")
   .option("-y, --yes", "do not stop for confirmations")
   .action(async (options) => up(CLI_ROOT, options));

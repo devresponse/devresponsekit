@@ -30,6 +30,7 @@ const enforceApiRateLimit = vi.fn();
 const requireApiAccount = vi.fn();
 const createBetterAuthUser = vi.fn();
 const auditUserAction = vi.fn();
+const auditOrgAction = vi.fn();
 
 const dbState = vi.hoisted(() => ({
   execute: [] as unknown[],
@@ -112,8 +113,21 @@ vi.mock("@/lib/admin/auth-admin.server", () => ({
 }));
 vi.mock("@/lib/admin/audit-helpers.server", () => ({
   auditUserAction: (...a: unknown[]) => auditUserAction(...a),
+  auditOrgAction: (...a: unknown[]) => auditOrgAction(...a),
 }));
-vi.mock("@/db/database", () => ({ db: { selectFrom: () => chain(), insertInto: () => chain() } }));
+// The create writes the user (and, for a caller confined to one org, its
+// membership) in one transaction; tests/integration/user-create-enrolment
+// .test.ts pins what it writes.
+vi.mock("@/db/database", () => ({
+  db: {
+    selectFrom: () => chain(),
+    insertInto: () => chain(),
+    transaction: () => ({
+      execute: (cb: (trx: unknown) => Promise<unknown>) =>
+        cb({ selectFrom: () => chain(), insertInto: () => chain() }),
+    }),
+  },
+}));
 
 function req(
   path: string,
@@ -153,6 +167,7 @@ beforeEach(() => {
     requireApiAccount,
     createBetterAuthUser,
     auditUserAction,
+    auditOrgAction,
   ])
     m.mockReset();
   consumeToken.mockReturnValue({ ok: true });

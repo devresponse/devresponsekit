@@ -192,11 +192,8 @@ test("a client-credentials bearer creates, approves, bans and unbans a user (F-1
     userId = created.id;
     expect(created).toMatchObject({ email, status: "pending_approval" });
 
-    // Neither create route places the account in an organization, and a
-    // credential bound to one org reaches only that org's users (ADR-0001,
-    // MACHINE-2). The admin adds the membership, as an operator would.
-    await addActiveMembership(api, created.id, org.id);
-
+    // A credential bound to one org reaches only that org's users (ADR-0001,
+    // MACHINE-2); the create enrolled the user in it, so the bearer reads it.
     const readBack = async () => {
       const res = await request.get(`/api/v1/users/${created.id}`, { headers: auth });
       expect(res.status(), await res.text()).toBe(200);

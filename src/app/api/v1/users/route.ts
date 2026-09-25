@@ -8,6 +8,11 @@ import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { isAuthEmailTakenError } from "@/lib/admin/auth-email-taken";
 import {
+  auditCreationMembership,
+  insertCreatedUser,
+  type CreatedAppUser,
+} from "@/lib/admin/user-create.server";
+import {
   likeContains,
   applySortAndPagination,
   buildListResponse,
@@ -21,6 +26,7 @@ import {
   actingOrganizationId,
   hasCrossOrgReach,
   resolveOrgScope,
+  scopeOrganizationId,
 } from "@/lib/admin/access-scope.server";
 import { problemResponse, v1JsonResponse } from "@/lib/api-auth/problem";
 import { withV1Route } from "@/lib/route-handler.server";
@@ -121,7 +127,10 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
  * a cookie session (F-13). `role: "admin"` also requires cross-org reach,
  * which only a superadmin's cookie session has: every API key and JWT is
  * bound to one org (MACHINE-2), so a bearer caller always gets 403 for it.
- * Defaults to `pending_approval`. The password is
+ * Defaults to `pending_approval`. A caller without cross-org reach (every
+ * bearer, an org admin's session) enrols the user in its own org with that
+ * same status, so it can act on the user it created; a superadmin's cookie
+ * session creates the user in no org (`insertCreatedUser`). The password is
  * forwarded to Better Auth and never logged or echoed. An address that already
  * has an account is a 409, including one Better Auth holds with no `app_users`
  * row and the loser of a concurrent create (F-30); a failure to store the new
@@ -169,6 +178,14 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
   // JWT is org-bound (MACHINE-2) and so has no cross-org reach: on this surface
   // only a superadmin's cookie session can mint one.
   if (input.role === "admin" && !hasCrossOrgReach(grant.caller.access)) {
+    return problemResponse("forbidden", 403, request, { requestId: grant.requestId });
+  }
+
+  // The new user joins the org a confined caller acts in (`insertCreatedUser`).
+  // A confined caller with no org would create a user it cannot reach, so it is
+  // refused before anything is written, as a null scope is everywhere else.
+  const scope = resolveOrgScope(grant.caller.access);
+  if (!scope) {
     return problemResponse("forbidden", 403, request, { requestId: grant.requestId });
   }
 
@@ -251,31 +268,29 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     });
   }
 
-  let appUser;
+  let stored: CreatedAppUser;
   try {
-    appUser = await db
-      .insertInto("app_users")
-      .values({
-        better_auth_user_id: betterAuthUserId,
-        primary_email: email,
-        display_name: input.name ?? null,
-        status: input.initialAppStatus,
-        preferred_locale: input.preferredLocale ?? "en",
-      })
-      .returning(["id", "primary_email", "status"])
-      .executeTakeFirstOrThrow();
+    stored = await insertCreatedUser({
+      betterAuthUserId,
+      email,
+      displayName: input.name ?? null,
+      status: input.initialAppStatus,
+      preferredLocale: input.preferredLocale ?? "en",
+      enrolOrganizationId: scopeOrganizationId(scope),
+    });
   } catch (err) {
     // OPS-OBS-1: an insert failure here would otherwise surface as a generic
     // 500 with no audit row. Audit it and return a typed problem, which logs
     // the 5xx to stdout regardless of Sentry.
     //
     // F-30: the row names NO `app_users` row, because this insert is what
-    // failed to create one; the nil UUID it used to name failed the audit's
-    // foreign key, so this branch answered 500 with no audit row after all.
-    // The new Better Auth id, now without an `app_users` row, is in metadata.
-    // Nor can this insert lose an email race: Better Auth refused the loser
-    // above, and the one unique key here is the `better_auth_user_id` that call
-    // just minted, so the 23505 → 409 branch that used to sit here is gone.
+    // failed to create one (a failed membership insert rolls it back too); the
+    // nil UUID it used to name failed the audit's foreign key, so this branch
+    // answered 500 with no audit row after all. The new Better Auth id, now
+    // without an `app_users` row, is in metadata. Nor can this insert lose an
+    // email race: Better Auth refused the loser above, and the one unique key
+    // here is the `better_auth_user_id` that call just minted, so the 23505 →
+    // 409 branch that used to sit here is gone.
     await auditUserAction("admin.user.create_failed", "error", {
       request,
       actorBetterAuthUserId: grant.caller.betterAuthUserId,
@@ -292,6 +307,7 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
       requestId: grant.requestId,
     });
   }
+  const { appUser, membership } = stored;
 
   await auditUserAction("admin.user.created", "success", {
     request,
@@ -302,6 +318,16 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     requestId: grant.requestId,
     metadata: { betterAuthUserId, via: "api.v1", initialAppStatus: appUser.status },
   });
+  if (membership) {
+    await auditCreationMembership(membership, {
+      request,
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      appUserId: appUser.id,
+      status: appUser.status,
+      requestId: grant.requestId,
+      metadata: { via: "api.v1" },
+    });
+  }
 
   return v1JsonResponse(
     {

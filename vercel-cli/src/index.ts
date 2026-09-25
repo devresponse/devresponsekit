@@ -7,6 +7,7 @@ import { doctor } from "./commands/doctor.js";
 import { envCheck, envPrune, envSync } from "./commands/env.js";
 import { init, login } from "./commands/init.js";
 import { deploy, migrateCommand, status, up } from "./commands/release.js";
+import { configFileFrom, useConfigFile } from "./lib/config.js";
 import { CliError, dim, fail, info, setQuiet } from "./lib/log.js";
 
 /** The vercel-cli package root: `dist/index.js` → `..`. */
@@ -56,16 +57,27 @@ program
       "Two targets. The KIT issues SSO handoffs and owns the database schema. A",
       "SATELLITE consumes handoffs, holds no signing key, and — unless it owns its",
       "own database — is refused migrations. Configure one with:",
-      "  drk-deploy init --satellite <standalone|handoff|shared> \\",
+      "  drk-deploy --config .drk-deploy.<name>.json init \\",
+      "                  --satellite <standalone|handoff|shared> \\",
       "                  --app-root <path> --issuer <the kit's url>",
       "",
+      "One config file per deployment: --config (or DRK_DEPLOY_CONFIG) picks it.",
       "Every command is idempotent and takes --dry-run.",
     ].join("\n"),
   )
   .version("1.0.0")
   .option("-q, --quiet", "only print warnings and errors")
+  .option(
+    "--config <file>",
+    "this deployment's config file (default: DRK_DEPLOY_CONFIG, else .drk-deploy.json); a relative path is beside this CLI, whatever the current directory; one file per deployment",
+  )
   .hook("preAction", (thisCommand) => {
-    setQuiet(Boolean(thisCommand.opts().quiet));
+    const options = thisCommand.opts<{ quiet?: boolean; config?: string }>();
+    setQuiet(Boolean(options.quiet));
+    // F-50: each deployment (the kit, each satellite) has its own file, so
+    // configuring one never rewrites another's. A relative one is beside the
+    // CLI, where the default file is and where .gitignore covers it.
+    useConfigFile(configFileFrom(options.config, process.env, CLI_ROOT));
   });
 
 program

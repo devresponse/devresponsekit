@@ -1,14 +1,16 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DEFAULT_CONFIG_FILE, commandFor, selectedConfigFile } from "./config-file.js";
 import type { DeploymentContext } from "./env-spec.js";
 import { CliError } from "./log.js";
 import { type DeployTarget, type SatelliteConfig, resolveProfile } from "./target.js";
 
 /**
- * Project settings live in the repo (`vercel-cli/.drk-deploy.json`, gitignored);
- * the access token lives in the user profile, never in the repo, so a stray
- * `git add -A` can never commit it.
+ * Project settings live in the repo (`vercel-cli/.drk-deploy.json`, gitignored,
+ * or the per-deployment file `--config` names, F-50); the access token lives in
+ * the user profile, never in the repo, so a stray `git add -A` can never commit
+ * it.
  */
 
 export interface ProjectConfig {
@@ -52,10 +54,47 @@ export interface ProjectConfig {
   // checked against production's own DATABASE_URL before anything migrates.
 }
 
-const CONFIG_FILE = ".drk-deploy.json";
+export { commandFor, configFileFrom, useConfigFile } from "./config-file.js";
 
 export function configPath(cliRoot: string): string {
-  return join(cliRoot, CONFIG_FILE);
+  return selectedConfigFile() ?? join(cliRoot, DEFAULT_CONFIG_FILE);
+}
+
+/**
+ * The `init` that records THIS satellite again from another checkout, with
+ * the deployment named in full from what the file records (F-50): its
+ * project, domain, application id, option and database, and its cookie domain
+ * for Option C. `appRoot` is the checkout as it is to be printed, a path or a
+ * placeholder.
+ *
+ * A moved or re-cloned checkout is a new `--app-root`, and `init` treats a new
+ * checkout as another deployment unless it is named in full, because another
+ * folder is far more often another app. So the fix `deploy` prints for a
+ * checkout that no longer exists is this command rather than a bare
+ * `init --app-root`, which would be refused. The fleet's settings (the issuer,
+ * the audience prefix, the team, the kit checkout) need no flag, and the
+ * product name is kept because the project is the recorded one.
+ */
+export function sameDeploymentInit(
+  config: Pick<ProjectConfig, "projectId" | "origin" | "applicationId"> & { satellite: SatelliteConfig },
+  appRoot: string,
+): string {
+  const { satellite } = config;
+  const database =
+    satellite.option === "shared" ? [] : [satellite.database === "own" ? "--own-database" : "--kit-database"];
+  return commandFor(
+    [
+      "init",
+      `--project ${config.projectId}`,
+      // init reads a bare host as https://, and takes any other origin whole.
+      `--domain ${config.origin.replace(/^https:\/\//, "")}`,
+      `--application-id ${config.applicationId}`,
+      `--satellite ${satellite.option}`,
+      `--app-root ${appRoot}`,
+      ...database,
+      ...(satellite.cookieDomain ? [`--cookie-domain ${satellite.cookieDomain}`] : []),
+    ].join(" "),
+  );
 }
 
 export function loadConfig(cliRoot: string): ProjectConfig | null {
@@ -64,8 +103,8 @@ export function loadConfig(cliRoot: string): ProjectConfig | null {
   try {
     return JSON.parse(readFileSync(file, "utf8")) as ProjectConfig;
   } catch (err) {
-    throw new CliError(`${CONFIG_FILE} is not valid JSON: ${(err as Error).message}`, {
-      hint: "Delete it and re-run `drk-deploy init`.",
+    throw new CliError(`${file} is not valid JSON: ${(err as Error).message}`, {
+      hint: `Delete it and re-run \`${commandFor("init")}\`.`,
     });
   }
 }
@@ -73,8 +112,10 @@ export function loadConfig(cliRoot: string): ProjectConfig | null {
 export function requireConfig(cliRoot: string): ProjectConfig {
   const config = loadConfig(cliRoot);
   if (!config) {
-    throw new CliError("This deployment is not configured yet.", {
-      hint: "Run `drk-deploy init` first.",
+    throw new CliError(`This deployment is not configured yet: there is no ${configPath(cliRoot)}.`, {
+      hint: selectedConfigFile()
+        ? `Run \`${commandFor("init")}\` first, or check which file --config or DRK_DEPLOY_CONFIG names.`
+        : "Run `drk-deploy init` first.",
     });
   }
   return config;

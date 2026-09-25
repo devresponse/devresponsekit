@@ -1,3 +1,4 @@
+import { commandFor } from "./config-file.js";
 import { ed25519PrivateJwkProblem } from "./secrets.js";
 import {
   type DeploymentProfile,
@@ -575,8 +576,7 @@ export function satelliteEnvSpecs(context: DeploymentContext & { profile: Satell
         "Parent domain the session cookie is scoped to, e.g. .example.com. Option C only — it is what makes one session span both hosts.",
       consequence:
         "The cookie stays scoped to this host, so the kit's session is never presented here: the app boots, looks healthy, and users appear randomly signed out.",
-      noValueHint:
-        "must be supplied for an Option C satellite and is never guessed — record it with `drk-deploy init --cookie-domain .example.com` (the domain BOTH the kit and this app sit under).",
+      noValueHint: `must be supplied for an Option C satellite and is never guessed — record it with \`${commandFor("init --cookie-domain .example.com")}\` (the domain BOTH the kit and this app sit under).`,
       validate: (value) => {
         if (!isCookieDomainShaped(value)) {
           return "must be a registrable domain with at least one dot, e.g. .example.com (a bare public suffix is refused by browsers)";

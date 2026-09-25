@@ -10,6 +10,8 @@
  * is how it used to surface.
  */
 
+import { commandFor } from "./config-file.js";
+
 export type ReadyStatus = "ready" | "schema_behind" | "database_unreachable" | "config_invalid" | "unknown";
 
 export interface HealthReport {
@@ -218,7 +220,7 @@ export function describe(report: HealthReport): string[] {
   if (report.readyStatus === "schema_behind") {
     lines.push("");
     lines.push(
-      "The build is live but its schema is behind: run `drk-deploy migrate` against the direct endpoint.",
+      `The build is live but its schema is behind: run \`${commandFor("migrate")}\` against the direct endpoint.`,
     );
     lines.push(
       "If the log says auth-schema-behind, redeploy afterwards: Better Auth keeps refusing until it restarts.",

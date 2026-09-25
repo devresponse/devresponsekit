@@ -1,6 +1,14 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type ProjectConfig, deployRoot, loadConfig, resolveToken, tokenSource } from "../lib/config.js";
+import {
+  type ProjectConfig,
+  commandFor,
+  configPath,
+  deployRoot,
+  loadConfig,
+  resolveToken,
+  tokenSource,
+} from "../lib/config.js";
 import { pnpmCommand, run } from "../lib/exec.js";
 import { coreMigrations } from "../lib/kit.js";
 import { CliError, dim, field, green, heading, info, ok, red, warn, yellow } from "../lib/log.js";
@@ -20,7 +28,13 @@ import {
   satelliteConfigProblems,
 } from "../lib/target.js";
 import { VercelClient } from "../lib/vercel-client.js";
-import { assertCheckoutLink, projectLinkFile, projectOwner, vercelEnvFor } from "../lib/vercel-project.js";
+import {
+  assertCheckoutLink,
+  issuerProjectProblem,
+  projectLinkFile,
+  projectOwner,
+  vercelEnvFor,
+} from "../lib/vercel-project.js";
 import { reportContainment } from "./env.js";
 
 const PASS = green("ok");
@@ -98,6 +112,33 @@ async function reportReleaseCheckouts(
 }
 
 /**
+ * The refusal every command that acts on a satellite's project stops on
+ * (F-50), reported here first and counted: a satellite config pointing at the
+ * SSO issuer's own project. A project that cannot be read is said, not
+ * counted: the credential and API checks above already count why.
+ */
+async function reportIssuerProject(
+  config: ProjectConfig,
+  profile: DeploymentProfile,
+  bad: (message: string) => string,
+): Promise<void> {
+  const token = resolveToken();
+  if (!token) return;
+  try {
+    const project = await new VercelClient(token, config.teamId).getProject(config.projectId);
+    const problem = issuerProjectProblem(profile, { project });
+    field(
+      "vercel project",
+      problem === null
+        ? `${PASS} ${dim(`${project.name} does not serve the issuer's host`)}`
+        : bad(`${red("wrong")} — this satellite config points at ${problem}`),
+    );
+  } catch (err) {
+    field("vercel project", dim(`not read (${(err as Error).message})`));
+  }
+}
+
+/**
  * `drk-deploy doctor` — checks the machine and the link before anything is
  * changed, so a deploy fails here (cheaply, with a fix) rather than halfway
  * through a promotion.
@@ -153,6 +194,8 @@ export async function doctor(cliRoot: string): Promise<number> {
   }
 
   heading("Project link");
+  // Which deployment this is, by its file: each has its own (F-50).
+  field("config file", configPath(cliRoot));
   // Unparseable JSON gets the same treatment as an unresolvable target, for the
   // same reason: `doctor` exists to list what is wrong, so it must survive
   // finding something wrong.
@@ -168,7 +211,7 @@ export async function doctor(cliRoot: string): Promise<number> {
   if (!config) {
     // Absent and unreadable are different facts, and only one of them is fixed
     // by running `init` — so only one of them says to.
-    if (!unreadable) field("config", bad(`${FAIL} — run \`drk-deploy init\``));
+    if (!unreadable) field("config", bad(`${FAIL} — run \`${commandFor("init")}\``));
   } else {
     field("project", `${PASS} ${dim(config.projectId)}`);
     // Not a counted problem: such a config still deploys, through the
@@ -178,7 +221,7 @@ export async function doctor(cliRoot: string): Promise<number> {
       "owner",
       owner
         ? `${PASS} ${dim(owner)}`
-        : `${yellow("not recorded")} ${dim("— re-run `drk-deploy init`; until then .vercel/project.json decides")}`,
+        : `${yellow("not recorded")} ${dim(`— re-run \`${commandFor("init")}\`; until then .vercel/project.json decides`)}`,
     );
     // `doctor` is the command you run when something is already wrong, so a
     // config it cannot parse must be REPORTED as a problem, not thrown as one:
@@ -226,6 +269,7 @@ export async function doctor(cliRoot: string): Promise<number> {
       const appOk = existsSync(join(appRoot, "package.json"));
       field("app checkout", appOk ? `${PASS} ${dim(appRoot)}` : bad(`${red("not found")} ${appRoot}`));
       field("sso issuer", profile.issuerOrigin);
+      await reportIssuerProject(config, profile, bad);
       field(
         "migrations",
         migrationPolicy(profile).allowed

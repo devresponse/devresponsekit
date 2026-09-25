@@ -33,7 +33,9 @@ const state: {
   grantReadOn: "db" | "trx" | null;
   /** Every UPDATE the handler issued, in order. */
   updates: Array<{ values: Record<string, unknown>; where: unknown[][] }>;
-} = { org: undefined, grants: [], grantReadOn: null, updates: [] };
+  /** F-40 lock order: "lock" (default-flag lock) and "grants" (row-locking read), in order. */
+  order: string[];
+} = { org: undefined, grants: [], grantReadOn: null, updates: [], order: [] };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -41,6 +43,23 @@ vi.mock("@/lib/auth-status", async () => {
   return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
 });
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMock(...a) }));
+// F-40: the default flag is moved (and a clear refused) by the helpers in
+// `default-organization.server`, which take an advisory lock this stubbed
+// transaction cannot run; their real SQL is pinned by
+// tests/db/default-organization.db.test.ts. Here: that the route calls them
+// on the TRANSACTION, in the right order, and honours what they answer.
+const lockDefaultMock = vi.fn();
+const moveDefaultMock = vi.fn();
+const clearDefaultMock = vi.fn();
+vi.mock("@/lib/default-organization.server", () => ({
+  lockDefaultOrganizationFlag: (...a: unknown[]) => {
+    state.order.push("lock");
+    return lockDefaultMock(...a);
+  },
+  moveDefaultOrganizationFlag: (...a: unknown[]) => moveDefaultMock(...a),
+  clearDefaultOrganizationFlag: (...a: unknown[]) => clearDefaultMock(...a),
+  isDefaultOrganizationLocked: async () => false,
+}));
 
 vi.mock("@/db/database", () => {
   function select(table: string, on: "db" | "trx"): unknown {
@@ -52,6 +71,7 @@ vi.mock("@/db/database", () => {
             return async () => {
               if (table === "app_user_roles") {
                 state.grantReadOn = on;
+                state.order.push("grants");
                 return state.grants;
               }
               return [];
@@ -83,7 +103,11 @@ vi.mock("@/db/database", () => {
       return chain;
     },
   });
-  const trx = { selectFrom: (t: unknown) => select(tableOf(t), "trx"), updateTable: update };
+  const trx = {
+    __handle: "trx",
+    selectFrom: (t: unknown) => select(tableOf(t), "trx"),
+    updateTable: update,
+  };
   return {
     pgPool: {},
     db: {
@@ -133,6 +157,10 @@ beforeEach(async () => {
   state.grants = [{ app_user_id: "u-super", organization_id: ORG_ID, role_id: "r-superuser" }];
   state.grantReadOn = null;
   state.updates = [];
+  state.order = [];
+  lockDefaultMock.mockReset().mockResolvedValue(undefined);
+  moveDefaultMock.mockReset().mockResolvedValue(["previous-default-id"]);
+  clearDefaultMock.mockReset().mockResolvedValue("unchanged");
   ({ PATCH } = await import("@/app/api/administrator/organizations/[id]/route"));
 });
 afterEach(() => vi.resetModules());
@@ -218,16 +246,141 @@ describe("PATCH /organizations/:id — status away from active vs the last super
     expect(state.updates[0]!.values).not.toHaveProperty("status");
   });
 
-  it("setting the default flag still clears the previous default in the SAME transaction", async () => {
+  it("F-40: setting the default flag MOVES it, in the SAME transaction, through the locked helper", async () => {
     const res = await PATCH(patchReq({ isDefault: true }), ctx());
 
     expect(res.status).toBe(200);
-    expect(state.updates).toHaveLength(2);
-    expect(state.updates[0]).toEqual({
-      values: { is_default: false },
-      where: [["is_default", "=", true]],
+    expect(moveDefaultMock).toHaveBeenCalledTimes(1);
+    expect(moveDefaultMock.mock.calls[0]![0]).toMatchObject({ __handle: "trx" });
+    expect(moveDefaultMock.mock.calls[0]![1]).toBe(ORG_ID);
+    // The body never writes `is_default` directly (a plain write raced).
+    expect(state.updates).toHaveLength(1);
+    expect(state.updates[0]!.values).not.toHaveProperty("is_default");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.updated",
+        organizationId: ORG_ID,
+        metadata: expect.objectContaining({
+          previousDefaultOrganizationIds: ["previous-default-id"],
+        }),
+      }),
+    );
+  });
+
+  it("F-40: clearing the flag on the CURRENT default is refused 409 organization_is_default — nothing written", async () => {
+    clearDefaultMock.mockResolvedValue("refused");
+
+    const res = await PATCH(patchReq({ isDefault: false, name: "Renamed" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "organization_is_default",
+      message: "errors.organization_is_default",
     });
-    expect(state.updates[1]!.values).toMatchObject({ is_default: true });
+    expect(clearDefaultMock.mock.calls[0]![0]).toMatchObject({ __handle: "trx" });
+    expect(clearDefaultMock.mock.calls[0]![1]).toBe(ORG_ID);
+    expect(moveDefaultMock).not.toHaveBeenCalled();
+    expect(state.updates).toEqual([]);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.update_blocked",
+        outcome: "denied",
+        reason: "organization_is_default",
+        organizationId: ORG_ID,
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.organization.updated" }),
+    );
+  });
+
+  it("F-40: isDefault false on an org that is NOT flagged changes no flag", async () => {
+    const res = await PATCH(patchReq({ isDefault: false }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(moveDefaultMock).not.toHaveBeenCalled();
+    expect(clearDefaultMock).toHaveBeenCalledTimes(1);
+    expect(state.updates).toHaveLength(1);
+    expect(state.updates[0]!.values).not.toHaveProperty("is_default");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.updated",
+        metadata: expect.not.objectContaining({ clearedExtraDefaultFlag: true }),
+      }),
+    );
+  });
+
+  it("F-40: isDefault false on a legacy EXTRA default clears it (the repair) and says so in the audit", async () => {
+    clearDefaultMock.mockResolvedValue("cleared");
+
+    const res = await PATCH(patchReq({ isDefault: false }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(clearDefaultMock.mock.calls[0]![0]).toMatchObject({ __handle: "trx" });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.updated",
+        outcome: "success",
+        metadata: expect.objectContaining({ clearedExtraDefaultFlag: true }),
+      }),
+    );
+  });
+
+  it.each([
+    ["isDefault true", { status: "suspended", isDefault: true }],
+    ["isDefault false", { status: "suspended", isDefault: false }],
+  ])(
+    "F-40 lock order (%s): the default-flag lock is taken BEFORE the last-superuser row locks",
+    async (_label, body) => {
+      // A grant survives elsewhere, so the save goes through.
+      state.grants.push({
+        app_user_id: "u-other-super",
+        organization_id: OTHER_ORG_ID,
+        role_id: "r-superuser-2",
+      });
+
+      const res = await PATCH(patchReq(body), ctx());
+
+      expect(res.status).toBe(200);
+      // Taken after the grant read, the lock was awaited while holding the
+      // grant orgs' rows that a concurrent move needs: a deadlock.
+      expect(state.order).toEqual(["lock", "grants"]);
+      expect(lockDefaultMock.mock.calls[0]![0]).toMatchObject({ __handle: "trx" });
+    },
+  );
+
+  it("F-40: a save that does not touch the flag takes no default-flag lock", async () => {
+    state.grants.push({
+      app_user_id: "u-other-super",
+      organization_id: OTHER_ORG_ID,
+      role_id: "r-superuser-2",
+    });
+
+    const res = await PATCH(patchReq({ status: "suspended", name: "Renamed" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(state.order).toEqual(["grants"]);
+    expect(lockDefaultMock).not.toHaveBeenCalled();
+  });
+
+  it("F-40: a target deleted after the existence check answers 404, with no default cleared", async () => {
+    moveDefaultMock.mockResolvedValue(null);
+
+    const res = await PATCH(patchReq({ isDefault: true }), ctx());
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "organization_not_found" });
+    expect(state.updates).toEqual([]);
+  });
+
+  it("F-40: a slug change is an ordinary update — routing no longer depends on it", async () => {
+    const res = await PATCH(patchReq({ slug: "renamed-default" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(moveDefaultMock).not.toHaveBeenCalled();
+    expect(clearDefaultMock).not.toHaveBeenCalled();
+    expect(lockDefaultMock).not.toHaveBeenCalled();
+    expect(state.updates[0]!.values).toMatchObject({ slug: "renamed-default" });
   });
 
   it("an ORG-BOUND credential never reaches the check (the PATCH is superadmin-at-a-browser only)", async () => {

@@ -16,6 +16,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import { moveDefaultOrganizationFlag } from "@/lib/default-organization.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -129,8 +130,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *
  * Creates a new organization. Caller MUST hold `admin.orgs.create`.
  *
- * If `isDefault: true`, in a single transaction we first clear the
- * existing default then insert with `is_default = true`.
+ * If `isDefault: true`, the new org is inserted and then made THE default in
+ * the same transaction (`moveDefaultOrganizationFlag`, F-40): the flag is
+ * cleared on the previous default under the default-flag lock, and new
+ * unmapped sign-ups land in the new org from then on.
  */
 
 export const POST = withAdminRoute(async function POST(request: NextRequest) {
@@ -169,23 +172,24 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   const setDefault = input.isDefault === true;
 
   let inserted: { id: string; slug: string };
+  let previousDefaultOrganizationIds: string[] = [];
   try {
     if (setDefault) {
       inserted = await db.transaction().execute(async (trx) => {
-        await trx
-          .updateTable("app_organizations")
-          .set({ is_default: false })
-          .where("is_default", "=", true)
-          .execute();
-        return await trx
+        // Inserted as non-default, then MOVED onto it: the one helper that
+        // sets the flag takes the lock that keeps concurrent moves from
+        // leaving two defaults (F-40).
+        const row = await trx
           .insertInto("app_organizations")
           .values({
             slug: input.slug,
             name: input.name,
-            is_default: true,
+            is_default: false,
           })
           .returning(["id", "slug"])
           .executeTakeFirstOrThrow();
+        previousDefaultOrganizationIds = (await moveDefaultOrganizationFlag(trx, row.id)) ?? [];
+        return row;
       });
     } else {
       inserted = await db
@@ -210,7 +214,13 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     organizationId: inserted.id,
-    metadata: { organizationId: inserted.id, slug: inserted.slug },
+    metadata: {
+      organizationId: inserted.id,
+      slug: inserted.slug,
+      ...(setDefault ? { isDefault: true } : {}),
+      // F-40: the org(s) that lost the default flag to the new one.
+      ...(previousDefaultOrganizationIds.length > 0 ? { previousDefaultOrganizationIds } : {}),
+    },
   });
 
   return NextResponse.json({ ok: true, id: inserted.id, slug: inserted.slug }, { status: 201 });

@@ -1,5 +1,6 @@
 import "server-only";
 import { db } from "@/db/database";
+import { getDefaultOrganization } from "@/lib/default-organization.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import {
   resolveProviderOrganization,
@@ -33,9 +34,9 @@ import {
  *   - The sign-up-time verification decision (`resolveSignupPolicy`) and the
  *     provisioning-time placement (`provisionUserFromAuth`) resolve the
  *     target organization with the SAME precedence — organization hint,
- *     provider metadata, email-domain routing, `default` — so the org whose
- *     policy waived verification is always the org that receives the account
- *     (review 2026-09-04 #2).
+ *     provider metadata, email-domain routing, the default org (by
+ *     `is_default`, F-40) — so the org whose policy waived verification is
+ *     always the org that receives the account (review 2026-09-04 #2).
  *   - `signup_approval_mode = 'auto_active'` intentionally activates anyone
  *     who completes signup for that org — the org admin's explicit choice.
  */
@@ -149,7 +150,7 @@ function toPolicy(row: PolicyRow, source: OrgAuthPolicy["source"]): OrgAuthPolic
 /**
  * Admin-curated email-domain routing: an `app_provider_organizations` row
  * with `provider = 'email'` maps an email domain to an organization for
- * email/password signups (which otherwise land in the `default` org). Rows
+ * email/password signups (which otherwise land in the default org). Rows
  * are created through the provider-bindings API by a superadmin only (F-04:
  * a binding claims the domain across the whole platform) and can be removed
  * on the organization's Providers tab; absence simply means "no routing".
@@ -181,11 +182,11 @@ export async function findEmailDomainOrganization(
  * needs email verification. Mirrors provisioning's org resolution EXACTLY
  * (`provisionUserFromAuth`): the organization-scoped sign-up hint
  * (`/sign-in/<org>`, `?org=`) when it names an existing ACTIVE org → provider
- * metadata → email-domain routing → the `default` org — so the verification
- * decision and the eventual membership always follow the same organization's
- * policy. (An invitation, which outranks all of these in provisioning, is
- * handled by the hook itself before this is consulted: a live token for the
- * address is mailbox proof, not a policy question.)
+ * metadata → email-domain routing → the default org (`is_default`, F-40) — so
+ * the verification decision and the eventual membership always follow the
+ * same organization's policy. (An invitation, which outranks all of these in
+ * provisioning, is handled by the hook itself before this is consulted: a
+ * live token for the address is mailbox proof, not a policy question.)
  *
  * Review 2026-09-04 #2: the hint MUST be consulted here. Before it was, a lax
  * default/domain-routed org could waive verification for an account that the
@@ -211,7 +212,7 @@ export async function resolveSignupPolicy(
 
     const resolution = resolveProviderOrganization(input);
 
-    if (resolution.providerOrganizationKey !== "default") {
+    if (!resolution.routesToDefaultOrganization) {
       const org = await db
         .selectFrom("app_organizations")
         .select(["id"])
@@ -229,12 +230,17 @@ export async function resolveSignupPolicy(
       }
     }
 
-    const defaultOrg = await db
-      .selectFrom("app_organizations")
-      .select(["id"])
-      .where("slug", "=", "default")
-      .executeTakeFirst();
-    return await getAuthPolicyForOrg(defaultOrg?.id ?? null);
+    // F-40: the default org by `is_default`, as provisioning places it. The
+    // slug lookup this replaces missed a renamed default org and returned the
+    // PLATFORM policy, so a stricter override on the real default org (e.g.
+    // invite_only) silently stopped governing the verification decision. With
+    // no default org, provisioning refuses to place the account, so there is
+    // no org whose policy applies: fail closed (verification required).
+    const defaultOrg = await getDefaultOrganization();
+    if (!defaultOrg) {
+      return FAIL_CLOSED_AUTH_POLICY;
+    }
+    return await getAuthPolicyForOrg(defaultOrg.id);
   } catch (error) {
     const { logServerError } = await import("@/lib/observability/logger.server");
     logServerError("signup policy resolution failed; failing closed", { err: error });

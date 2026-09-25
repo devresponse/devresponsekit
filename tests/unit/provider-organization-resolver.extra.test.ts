@@ -40,6 +40,7 @@ describe("resolveProviderOrganization (extended)", () => {
       providerOrganizationKey: "default",
       displayName: "Default Organization",
       confidence: "fallback",
+      routesToDefaultOrganization: true,
     });
   });
 });

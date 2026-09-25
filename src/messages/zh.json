@@ -827,7 +827,8 @@
         "slugHelp": "小写字母、数字、连字符。1-64 个字符。",
         "name": "名称",
         "status": "状态",
-        "isDefault": "设为默认组织"
+        "isDefault": "设为默认组织",
+        "isDefaultHelp": "未被任何邀请、组织登录链接或邮箱域名绑定分配到其他组织的新注册，会按照默认组织的注册策略加入默认组织。默认组织只有一个：在此设置会将其从当前默认组织移到这里。"
       },
       "tabs": {
         "members": "成员",
@@ -849,7 +850,11 @@
         "statusActive": "活跃",
         "statusPending": "待处理",
         "statusSuspended": "已暂停",
-        "statusArchived": "已归档"
+        "statusArchived": "已归档",
+        "isDefaultCurrent": "这是默认组织：未被其他方式分配的新注册会按照其注册策略加入此组织。要更换默认组织，请在另一个组织上设置。",
+        "defaultRequired": "无法取消默认组织。要更换默认组织，请在另一个组织上设置。",
+        "isDefaultExtra": "此组织也被标记为默认组织，但新注册会加入最早被标记的组织，而不是此组织。取消勾选并保存即可清除多余的标记。",
+        "slugChangeWarning": "更改标识会使现有的 /sign-in/{slug} 链接以及按标识指定此组织的环境变量（MCP_REGISTRATION_DEFAULT_ORG、MCP_REGISTRATION_ALLOWED_ORGS）失效；请改为在这些位置使用组织的 ID。新注册加入哪个组织与标识无关。"
       },
       "members": {
         "columns": {

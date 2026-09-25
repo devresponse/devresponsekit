@@ -43,6 +43,17 @@ function toOrganizationPatch(values: OrganizationSettingsInput) {
  * docs/form-validation.md). React Hook Form + the shared
  * `organizationSettingsSchema`. Edits slug, name, status, and the default flag.
  *
+ * F-40: the default flag is THE routing target for unmapped sign-ups, and it
+ * moves (setting it here clears it on the previous default), so the checkbox
+ * says so, and on the current default it is read-only: the server refuses to
+ * clear it (409 `organization_is_default`) because sign-ups would then have
+ * nowhere to land. "Current default" is `isResolvedDefault`, the org sign-ups
+ * actually resolve to, not the row's own flag: in a legacy database holding
+ * two flagged orgs the newer one is an EXTRA flag, so its checkbox stays
+ * enabled and says so, and unticking it clears that flag (the repair). A slug
+ * edit shows a warning, since the slug is what `/sign-in/<slug>` links and
+ * slug-configured env vars name; routing no longer depends on it.
+ *
  * F-39: saves through `useSavedFormBaseline`. The PATCH carries only the
  * fields the admin changed, and a successful save moves the form's baseline
  * and refreshes the page, so coming back from another tab (which remounts
@@ -54,13 +65,17 @@ export function OrganizationSettingsForm({
   initialName,
   initialStatus,
   initialIsDefault,
+  isResolvedDefault,
   canUpdate,
 }: {
   orgId: string;
   initialSlug: string;
   initialName: string;
   initialStatus: string;
+  /** The row's own `is_default` flag (the checkbox's saved value). */
   initialIsDefault: boolean;
+  /** Whether this is THE default, the org unmapped sign-ups resolve to. */
+  isResolvedDefault: boolean;
   canUpdate: boolean;
 }) {
   const t = useTranslations("administrator.orgs.settings");
@@ -113,6 +128,11 @@ export function OrganizationSettingsForm({
           form.setError("root", { type: "server", message: tErr("lastSuperadmin") });
           return;
         }
+        // F-40: this org is (now) the default, and the flag can only be moved.
+        if (body?.error === "organization_is_default") {
+          form.setError("root", { type: "server", message: t("defaultRequired") });
+          return;
+        }
         form.setError("slug", { type: "server", message: tErr("slugTaken") });
         return;
       }
@@ -131,6 +151,8 @@ export function OrganizationSettingsForm({
   };
 
   const rootError = form.formState.errors.root?.message;
+  // Against the server's saved slug (the prop follows each save's refresh).
+  const slugChanged = form.watch("slug").trim() !== initialSlug;
 
   return (
     <Form {...form} schema={organizationSettingsSchema}>
@@ -152,6 +174,11 @@ export function OrganizationSettingsForm({
                 />
               </FormControl>
               <FormDescription>{tFields("slugHelp")}</FormDescription>
+              {canUpdate && slugChanged ? (
+                <p className="text-warning text-sm" role="note">
+                  {t("slugChangeWarning", { slug: initialSlug })}
+                </p>
+              ) : null}
               <FormMessage />
             </FormItem>
           )}
@@ -199,15 +226,26 @@ export function OrganizationSettingsForm({
           control={form.control}
           name="isDefault"
           render={({ field }) => (
-            <FormItem className="flex flex-row items-center gap-2 space-y-0">
-              <FormControl>
-                <Checkbox
-                  checked={field.value ?? false}
-                  onCheckedChange={(v) => field.onChange(v === true)}
-                  disabled={!canUpdate}
-                />
-              </FormControl>
-              <FormLabel className="font-normal">{tFields("isDefault")}</FormLabel>
+            <FormItem>
+              <div className="flex flex-row items-center gap-2">
+                <FormControl>
+                  <Checkbox
+                    checked={field.value ?? false}
+                    onCheckedChange={(v) => field.onChange(v === true)}
+                    // THE default cannot be unticked, only moved (F-40); an
+                    // extra legacy flag can be.
+                    disabled={!canUpdate || isResolvedDefault}
+                  />
+                </FormControl>
+                <FormLabel className="font-normal">{tFields("isDefault")}</FormLabel>
+              </div>
+              <FormDescription>
+                {isResolvedDefault
+                  ? t("isDefaultCurrent")
+                  : initialIsDefault
+                    ? t("isDefaultExtra")
+                    : tFields("isDefaultHelp")}
+              </FormDescription>
             </FormItem>
           )}
         />

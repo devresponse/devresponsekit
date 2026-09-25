@@ -25,6 +25,8 @@ export interface OrganizationDetailJson {
   name: string;
   status: string;
   isDefault: boolean;
+  /** THE default (where unmapped sign-ups resolve), not just flagged (F-40). */
+  isResolvedDefault: boolean;
   memberCount: number;
   bindingCount: number;
 }
@@ -82,6 +84,7 @@ export function OrganizationDetailTabs({
           initialName={org.name}
           initialStatus={org.status}
           initialIsDefault={org.isDefault}
+          isResolvedDefault={org.isResolvedDefault}
           canUpdate={canUpdate}
         />
       </TabsContent>

@@ -24,7 +24,7 @@ Manages a single tenant (captured for the seed "Default Organization"): its memb
 - Remove members, invite members (sends an invitation email) — *not exercised.*
 - **Providers** tab: bind identity providers / email-domain routing for org-scoped sign-in.
 - **Authentication** tab: the per-organization sign-up/auth policy override (same controls as the platform defaults).
-- **Settings** tab: rename, change status, and other org attributes.
+- **Settings** tab: rename, change status, and make this the **default organization**, where new sign-ups that no invitation, organization sign-in link or email-domain binding places elsewhere land. There is only ever one default: setting it here moves it from the current one, and on the current default the checkbox is read-only. Editing the slug shows a warning, because `/sign-in/<slug>` links and settings that name the organization by slug stop matching.
 
 ## Navigation
 - Reached from: the organizations list.

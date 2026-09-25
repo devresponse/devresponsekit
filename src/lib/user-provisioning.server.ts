@@ -16,6 +16,7 @@ import {
   findValidInvitationByToken,
   type InvitationRow,
 } from "@/lib/invitations.server";
+import { requireDefaultOrganization } from "@/lib/default-organization.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
 import {
   resolveProviderOrganization,
@@ -70,7 +71,10 @@ export interface ProvisionUserResult {
  *   1. Create or update `app_users`.
  *   2. Resolve the target organization: a live email-matching invitation
  *      (0008) overrides everything; otherwise provider metadata, then the
- *      admin-curated email-domain mapping (0007), then the `default` org.
+ *      admin-curated email-domain mapping (0007), then THE default org —
+ *      the one flagged `is_default`, whatever its slug (F-40). With no
+ *      default org the call throws `NoDefaultOrganizationError` before
+ *      writing anything; it never invents one.
  *   3. Create an organization membership when missing.
  *   4. Initial statuses follow the organization's runtime-configurable
  *      signup policy (`app_organization_auth_settings`, 0007):
@@ -129,7 +133,7 @@ export async function provisionUserFromAuth(
   // other resolution — the sign-up lands in the INVITING org (that is the
   // invitation's whole point). Otherwise: provider metadata, then the
   // admin-curated email-domain mapping (`app_provider_organizations` with
-  // provider = 'email', 0007), then the `default` org.
+  // provider = 'email', 0007), then the default org (`is_default`, F-40).
   let organizationId: string | undefined;
   let membershipOrgKey: string | null = resolution.providerOrganizationKey;
   let emailDomainRouted = false;
@@ -156,11 +160,7 @@ export async function provisionUserFromAuth(
     }
   }
 
-  if (
-    !organizationId &&
-    input.provider === "email" &&
-    resolution.providerOrganizationKey === "default"
-  ) {
+  if (!organizationId && input.provider === "email" && resolution.routesToDefaultOrganization) {
     const mapped = await findEmailDomainOrganization(input.email);
     if (mapped) {
       organizationId = mapped.organizationId;
@@ -169,17 +169,26 @@ export async function provisionUserFromAuth(
     }
   }
 
+  if (!organizationId && resolution.routesToDefaultOrganization) {
+    // F-40: THE default org is the one flagged `is_default`, whatever its slug.
+    // This used to look up the slug `default`, so after a superadmin renamed
+    // the default org the lookup missed and the branch below created a new,
+    // active "Default Organization" with no admins, roles or policy row, and
+    // every later unmapped sign-up joined it under the platform policy. With
+    // no default org at all this throws before anything is written: an account
+    // with nowhere to land stays unprovisioned (and so without access) and the
+    // error names the fix, rather than a tenant nobody administers appearing.
+    organizationId = (await requireDefaultOrganization()).id;
+  }
+
   if (!organizationId) {
+    // Provider-keyed placement (GitHub: the verified email domain). Creating
+    // an org for an unknown key is review item F-52, tracked separately; it
+    // never runs for the default-org fallback above.
     const orgRow = await db
       .selectFrom("app_organizations")
       .select(["id"])
-      .where(
-        "slug",
-        "=",
-        resolution.providerOrganizationKey === "default"
-          ? "default"
-          : resolution.providerOrganizationKey,
-      )
+      .where("slug", "=", resolution.providerOrganizationKey)
       .executeTakeFirst();
 
     if (orgRow) {

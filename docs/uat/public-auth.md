@@ -36,8 +36,9 @@ test-management tool. A condensed one-row-per-story export (all areas) lives at
 - **Seeding personas:**
   - `pnpm db:seed` — the canonical single **Local Admin** (from
     `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` in `.env`); this account holds
-    `admin`, `admin.platform`, and `superuser` roles in the `default` org
-    (`src/db/seeds/seed-local.ts:307-355`).
+    `admin`, `admin.platform`, and `superuser` roles in the `default` org, the
+    platform org the seed keeps them in even after the default is moved
+    (`src/db/seeds/default-admin.ts:280-308`).
   - `pnpm db:seed:dev` — the richer multi-org fixture: 3 orgs (`org-a`,
     `org-b`, `org-c`), each with `superuser@`, `orgadmin@`, and `user1..5@`
     accounts, plus 3 cross-org `multi*@shared.local` members and 2 groups in

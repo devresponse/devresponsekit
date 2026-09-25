@@ -4,6 +4,7 @@ import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import { canAccessOrg, isSuperadmin } from "@/lib/admin/access-scope.server";
 import { getOrgAuthSettingsRow } from "@/lib/admin/auth-settings.server";
 import { AdminError, loadOrgOrThrow } from "@/lib/admin/orgs.server";
+import { getDefaultOrganization } from "@/lib/default-organization.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -86,6 +87,12 @@ export default async function AdministratorOrganizationDetailPage({
 
   const canUpdate = guard.access.permissions.includes("admin.orgs.update");
 
+  // F-40: whether this org is THE default, the one unmapped sign-ups resolve
+  // to, rather than merely flagged. They differ only in a legacy database
+  // holding two flagged orgs, where the newer flag is an extra one the
+  // Settings form lets an admin clear.
+  const isResolvedDefault = org.is_default && (await getDefaultOrganization())?.id === org.id;
+
   // Initial rows for the Authentication tab (0007): the org's override (null
   // = inheriting) and the platform default it would inherit. Loaded here —
   // AFTER the canAccessOrg gate above — so the client tab needs no fetch.
@@ -133,6 +140,7 @@ export default async function AdministratorOrganizationDetailPage({
           name: org.name,
           status: org.status,
           isDefault: org.is_default,
+          isResolvedDefault,
           memberCount: org.member_count,
           bindingCount: org.binding_count,
         }}

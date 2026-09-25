@@ -33,6 +33,38 @@ describe("resolveProviderOrganization", () => {
 });
 
 /**
+ * F-40: whether a sign-up belongs in THE default org is an explicit flag, so
+ * callers resolve that org by `is_default` instead of reading the `default`
+ * key as a slug (which broke the moment the default org was renamed).
+ */
+describe("resolveProviderOrganization — the default-org fallback is a flag, not a slug (F-40)", () => {
+  it.each([
+    ["email", false],
+    ["email", true],
+    ["google", true],
+    ["microsoft", true],
+    ["github", false],
+  ] as const)("flags a %s sign-up (verified: %s) for the default org", (provider, verified) => {
+    const result = resolveProviderOrganization({
+      provider,
+      email: "user@example.com",
+      emailVerified: verified,
+    });
+    expect(result.routesToDefaultOrganization).toBe(true);
+  });
+
+  it("does not flag a verified GitHub sign-up, which is keyed by its email domain", () => {
+    const result = resolveProviderOrganization({
+      provider: "github",
+      email: "user@example.com",
+      emailVerified: true,
+    });
+    expect(result.routesToDefaultOrganization).toBe(false);
+    expect(result.providerOrganizationKey).toBe("example.com");
+  });
+});
+
+/**
  * Review #38 — the Microsoft `tid` / Google `hd` tenant-routing branches were
  * DEAD (no call site ever passed `profile` or `account`) and were removed
  * rather than switched on, because switching them on would have repointed

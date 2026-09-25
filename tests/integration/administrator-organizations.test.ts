@@ -32,6 +32,17 @@ vi.mock("@/lib/auth-status", async () => {
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
 }));
+// F-40: the DELETE re-checks the default flag inside its transaction through
+// this helper, which takes an advisory lock the stubbed transaction cannot
+// run; its real SQL and the race it closes are pinned by
+// tests/db/default-organization.db.test.ts.
+const isDefaultLockedMock = vi.fn();
+vi.mock("@/lib/default-organization.server", () => ({
+  isDefaultOrganizationLocked: (...args: unknown[]) => isDefaultLockedMock(...args),
+  lockDefaultOrganizationFlag: async () => undefined,
+  moveDefaultOrganizationFlag: async () => [],
+  clearDefaultOrganizationFlag: async () => "unchanged",
+}));
 
 vi.mock("@/db/database", () => {
   function makeChain() {
@@ -180,8 +191,10 @@ beforeEach(async () => {
     insertExecute,
     updateExecute,
     countExecute,
+    isDefaultLockedMock,
   ])
     m.mockReset();
+  isDefaultLockedMock.mockResolvedValue(false);
   itemsExecute.mockResolvedValue([]);
   selectFirst.mockResolvedValue({ total: "0" });
   ({ GET, POST } = await import("@/app/api/administrator/organizations/route"));
@@ -349,6 +362,37 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     expect(auditOrder).toBeDefined();
     expect(deleteOrder).toBeDefined();
     expect(auditOrder as number).toBeLessThan(deleteOrder as number);
+    // F-40: the default flag is re-checked on the transaction before either.
+    const [recheckOrder] = isDefaultLockedMock.mock.invocationCallOrder;
+    expect(isDefaultLockedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ deleteFrom: expect.any(Function) }),
+      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    );
+    expect(recheckOrder as number).toBeLessThan(auditOrder as number);
+  });
+
+  it("F-40: an org made the default after the pool guards ran is refused INSIDE the transaction — 409, nothing deleted", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
+    // The pool-side guards still see an empty, non-default org...
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
+    // ...but a "Set as default" on it committed before the re-check under the
+    // default-flag lock. Deleting it would have left no default at all.
+    isDefaultLockedMock.mockResolvedValue(true);
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "organization_is_default" });
+    expect(itemsExecute).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.organization.delete_blocked",
+        outcome: "denied",
+        metadata: expect.objectContaining({ reason: "organization_is_default" }),
+      }),
+    );
   });
 
   it("maps a FK violation to 409 organization_in_use instead of a raw 500 (DB-1)", async () => {

@@ -15,7 +15,6 @@ describe("getServerEnv", () => {
     expect(env.NODE_ENV).toBe("test");
     expect(env.BETTER_AUTH_SECRET.length).toBeGreaterThanOrEqual(32);
     expect(env.SSO_HANDOFF_TTL_SECONDS).toBeGreaterThan(0);
-    expect(env.SEED_DEFAULT_ORGANIZATION_SLUG).toBe("default");
   });
 
   it("caches the parsed env on subsequent calls", () => {

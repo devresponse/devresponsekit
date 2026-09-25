@@ -499,7 +499,10 @@ const serverEnvSchema = z
     ),
     SEED_ADMIN_EMAIL: z.string().email().optional(),
     SEED_ADMIN_PASSWORD: z.string().optional(),
-    SEED_DEFAULT_ORGANIZATION_SLUG: z.string().default("default"),
+    // F-40: SEED_DEFAULT_ORGANIZATION_SLUG is gone. Nothing ever read it, and
+    // the default org is identified by `is_default`, not by a slug an env var
+    // could name. A deployment that still sets it is unaffected (unknown keys
+    // are ignored).
     /* ----------------------------------------------------------------- */
     /*  Documentation viewer (src/app/[locale]/(secure)/app/docs)        */
     /* ----------------------------------------------------------------- */

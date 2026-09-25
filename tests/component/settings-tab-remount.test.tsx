@@ -110,6 +110,7 @@ describe("organization Settings tab (F-39)", () => {
     name: "Acme Crop",
     status: "active",
     isDefault: false,
+    isResolvedDefault: false,
     memberCount: 3,
     bindingCount: 0,
   };
@@ -206,6 +207,7 @@ describe("organization Authentication tab (F-39)", () => {
     name: "Acme",
     status: "active",
     isDefault: false,
+    isResolvedDefault: false,
     memberCount: 3,
     bindingCount: 0,
   };

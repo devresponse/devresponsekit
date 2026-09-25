@@ -22,6 +22,9 @@ if (!process.env["NODE_ENV"]) {
 }
 process.env.BETTER_AUTH_SECRET ??= "test-secret-test-secret-test-secret";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
+// Only the mocked-DB runs reach this default. `pnpm test:db` always arrives
+// with DATABASE_URL set to the database `vitest.db.config.ts` resolved and
+// host-checked (F-44), so it never falls through to this one.
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5444/test";
 // The issuer equals BETTER_AUTH_URL so the suite runs as a SELF-ISSUER: the
 // handoff verifier uses the local public key set (no JWKS fetch), exactly like

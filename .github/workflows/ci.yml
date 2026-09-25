@@ -27,10 +27,9 @@ jobs:
     timeout-minutes: 20
 
     services:
-      # Matches docker-compose.yml. The vitest suites stub the DB layer
-      # and don't need it today; the service is groundwork for the
-      # Playwright e2e/a11y suites (seeded DB + `next start`) so adding
-      # them later is a job step, not an infrastructure change.
+      # Matches docker-compose.yml. The default vitest run stubs the DB
+      # layer; the `pnpm test:db` step below runs the tests/db suites
+      # against this service.
       postgres:
         image: pgvector/pgvector:pg17
         env:
@@ -46,8 +45,10 @@ jobs:
           --health-retries 10
 
     env:
-      # vitest.setup.ts provides test defaults for required env vars;
-      # DATABASE_URL points at the service for future DB-backed suites.
+      # vitest.setup.ts provides test defaults for required env vars.
+      # DATABASE_URL points at the service. DATABASE_TEST_URL is left unset,
+      # so `pnpm test:db` uses this URL; its localhost host is what lets
+      # vitest.db.config.ts accept it (F-44). No DB_TEST_ALLOW_REMOTE here.
       DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
       DB_SCHEMA: auth
 

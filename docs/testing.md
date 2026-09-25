@@ -21,7 +21,7 @@ The suite is layered, with **security and tenant-isolation invariants treated as
 | **Component** | Vitest + Testing Library (jsdom) | `tests/component` (~51 files) | Client React components (grids, forms, comboboxes) rendered against real primitives. |
 | **Integration** | Vitest + mocked DB/auth | `tests/integration` (~50 files) | Route handlers end-to-end at the HTTP boundary (auth, validation, scoping, audit). |
 | **Security** | Vitest | `tests/security` (~14 files) | Cross-tenant isolation, privilege-escalation guards, schema hardening, secret handling — including **property/fuzz tests** (fast-check) over the permission algebra and injection surfaces. See [§5](#5-security-suites). |
-| **DB-backed** | Vitest + real Postgres | `tests/db` (~10 suites, `pnpm test:db`) | Suites that run against a live Postgres (`vitest.db.config.ts`, needs `DATABASE_TEST_URL`). |
+| **DB-backed** | Vitest + real Postgres | `tests/db` (~40 suites, `pnpm test:db`) | Suites that run against a live, migrated Postgres (`vitest.db.config.ts`): `DATABASE_TEST_URL`, else `DATABASE_URL`, and never a non-local host unless overridden ([which database](#the-db-backed-suites-database)). |
 | **E2E** | Playwright | `tests/e2e` (`.spec.ts`) | Full browser flows against a running, seeded app ([journeys](#end-to-end-journeys)). |
 | **Accessibility** | Playwright + axe-core | `tests/accessibility` (`.spec.ts`) | WCAG checks on key screens. |
 | Shared helpers / setup | — | `tests/helpers`, `tests/setup` | Render harness, factories, jsdom polyfills. |
@@ -78,7 +78,7 @@ pnpm test:unit       # vitest run tests/unit
 pnpm test:component  # vitest run tests/component
 pnpm test:integration
 pnpm test:security
-pnpm test:db         # DB-backed suite vs a real Postgres (vitest.db.config.ts, needs DATABASE_TEST_URL)
+pnpm test:db         # DB-backed suite vs a real Postgres: DATABASE_TEST_URL, else DATABASE_URL (local hosts only)
 pnpm test:coverage   # full run WITH the coverage ratchet (what CI gates on)
 pnpm test:serial     # plain `vitest run` (no sharding) — for debugging only
 pnpm test:mutation   # Stryker mutation testing on the security core (slow; advisory in CI)
@@ -97,6 +97,26 @@ Run a single file or test:
 pnpm exec vitest run tests/integration/administrator-phase7.test.ts
 pnpm exec vitest run tests/unit/admin-permissions.test.ts -t "catalog"
 ```
+
+### The DB-backed suite's database
+
+`pnpm test:db` writes to the database it runs against. It creates and deletes users and organizations, and it briefly changes the platform sign-up policy. `vitest.db.config.ts` chooses that database once, when it loads, before any suite connects (F-44):
+
+1. `DATABASE_TEST_URL`, when it is set. The suites receive it as their `DATABASE_URL`, the only variable the db layer reads.
+2. Otherwise `DATABASE_URL`. CI's `quality` job sets only this one, to its Postgres service on `localhost`.
+3. Either way, a host that is not local stops the run before it starts. Local means `localhost`, `127.0.0.1`, `::1`, `0.0.0.0` or no host, and a URL that does not parse counts as remote ([`src/db/guards.ts`](../src/db/guards.ts), the same classification `db:seed:dev` and `db:reset` use). Only `DB_TEST_ALLOW_REMOTE=1` lifts it, and only a disposable database deserves it. `CI` does not lift it.
+
+With neither variable set, the run stops and asks for `DATABASE_TEST_URL`. Every run prints its target before the first suite starts, for example `[test:db] target  host=localhost  database=devresponse_db_test  (from DATABASE_TEST_URL)`. When the target comes from `DATABASE_TEST_URL`, a second line points back to this section.
+
+[`.env.example`](../.env.example) points `DATABASE_TEST_URL` at `devresponse_db_test` on the Compose Postgres, and nothing creates that database for you. An `.env` copied before F-44 sets it too, and `pnpm test:db` used to ignore it, so the first run after F-44 fails every suite with `database "devresponse_db_test" does not exist` until you create it. Create and migrate it once, then re-run both migrate commands whenever a migration lands. The suites need the migrations only, as in CI, not a seed:
+
+```bash
+docker compose exec postgres createdb -U devresponse devresponse_db_test
+DATABASE_URL=postgresql://devresponse:devresponse@localhost:5444/devresponse_db_test pnpm db:app:migrate
+DATABASE_URL=postgresql://devresponse:devresponse@localhost:5444/devresponse_db_test pnpm db:auth:migrate
+```
+
+A variable already in the shell beats `.env` (dotenv never overrides one), which is what points the two migrate commands at the test database. Without `DATABASE_TEST_URL`, the suites run against your development database. On a seeded one, two `organization-auth-settings` tests fail, because they expect the platform default the migrations create (`admin_approval`) and `pnpm db:seed` changes it to `auto_active`.
 
 ### Why the sharded runner
 
@@ -175,6 +195,7 @@ These encode project rules and will fail the build if violated:
 | `tests/unit/gitleaks-config.test.ts` | The secret-scan config (`.gitleaks.toml`) detects the app's own credential formats at their real lengths, no fixture in the tree reaches those lengths, and the seed-admin default password is allowlisted only in the files that document it (never globally). See [SECURITY.md → Secret scanning](../SECURITY.md#secret-scanning). |
 | `tests/unit/help-capture-tooling.test.ts` | `help/capture.mjs` takes credentials from `CAPTURE_*` env vars only (fails fast when unset), holds no credential literal, resolves entity ids at run time and refuses a non-2xx page (#237), and is excluded from the Docker build context. |
 | `tests/unit/db-transaction-discipline.test.ts` | The migration runner, seed and reset scripts open every transaction on a **checked-out** client, never through the pool (#84). The behavioural half is `tests/db/migration-transaction.db.test.ts` — a failing migration leaves neither DDL nor a ledger row. |
+| `tests/unit/db-test-target.test.ts` | `pnpm test:db` runs against `DATABASE_TEST_URL`, else `DATABASE_URL`, and refuses a non-local host of either unless `DB_TEST_ALLOW_REMOTE=1` (F-44). It loads the real `vitest.db.config.ts` too, so a config that stops calling the check, or stops handing its answer to the workers, fails here. |
 | `tests/unit/migration-catalog-scoping.test.ts` | Every migration's system-catalog lookup is schema-scoped (`conrelid = '…'::regclass`, an `nspname` join, or `table_schema = current_schema()`), with one documented exception in the frozen `0001` (#88). |
 
 When you add a route, permission, or string, expect to update the corresponding invariant.
@@ -182,7 +203,8 @@ When you add a route, permission, or string, expect to update the corresponding 
 ## 7. Test data
 
 - Vitest unit/component/integration/security tests **mock** the database and auth layers (table-aware proxies, session/access mocks) — they do **not** need a live database.
-- The `tests/db` and Playwright suites need a **running, seeded app / database**. CI does this by migrating and running `pnpm db:seed` against the Postgres service, then `pnpm start`. Locally, mirror that: `pnpm db:reset:reload` (or migrate + seed), `pnpm build && pnpm start`, then run `pnpm test:e2e`.
+- The `tests/db` suites need a **migrated** database, not a seeded one: CI's `quality` job migrates its Postgres service and runs them without a seed. See [which database they use](#the-db-backed-suites-database).
+- The Playwright suites need a **running, seeded app / database**. CI does this by migrating and running `pnpm db:seed` against the Postgres service, then `pnpm start`. Locally, mirror that: `pnpm db:reset:reload` (or migrate + seed), `pnpm build && pnpm start`, then run `pnpm test:e2e`.
 - CI sets `AUTH_RATE_LIMIT_DISABLED=1` for the browser job so the suites don't trip Better Auth's sign-in rate limiter. Never set this on a real deployment.
 
 ## 8. Manual QA checklist

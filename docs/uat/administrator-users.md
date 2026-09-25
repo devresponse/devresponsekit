@@ -61,7 +61,7 @@ groups in ORG A. Every account shares one password
 
 **Limited Admin (partial permissions):** the plain `admin` role holds only
 `shell.view`, `admin.users.read`, `admin.users.manage`, and `admin.audit.read`
-(`src/db/seeds/seed-local.ts:80`, `dev-init.ts:249`). This persona is the key
+(`src/db/seeds/baseline-roles.ts:27-31`, `dev-init.ts:249`). This persona is the key
 to the per-permission gating stories below (it can view users and change their
 status, but cannot create users, assign roles, manage groups, edit memberships,
 or manage sessions). **`TODO: verify`** — neither `seed-local.ts` nor
@@ -694,7 +694,7 @@ Legend: **view** = can open/read the screen; **act** = can perform the screen's 
 
 ## `TODO: verify` items
 
-1. **Limited Admin fixture** — no seed creates a user whose only role is `admin`; a tester must assign it manually (or add an `admin`-only fixture) to run the partial-permission stories. (`seed-local.ts:80`, `dev-init.ts:249`.)
+1. **Limited Admin fixture** — no seed creates a user whose only role is `admin`; a tester must assign it manually (or add an `admin`-only fixture) to run the partial-permission stories. (`baseline-roles.ts:27-31`, `dev-init.ts:249`.)
 2. **"No audit" persona** — every seeded admin role includes `admin.audit.read`, so ADMIN-USERS-DETAIL-AUDIT-S2 needs a hand-built role that omits it.
 3. **New-user locale set** — the create form offers only `en`/`es`/`fr`/`uk` (`_new-user-form.tsx:30`) vs. the app's 8 locales; confirm the narrower admin set is intentional.
 4. **Impersonation escalation target in scope** — ADMIN-USERS-IMPERSONATE-S2 step 2 assumes `superuser@orga.local` is resolvable by `orgadmin@orga.local` (same ORG A). Confirm the superuser holds an ORG A membership so the 403 path (not a 404) is what a tester observes. (If the superuser is out of the org admin's scope, the observed result is 404, not the 403 escalation refusal.)

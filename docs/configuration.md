@@ -383,8 +383,8 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | `API_JWT_ISSUER` (with MCP) | While `MCP_ENABLED` is on this must be unset or identical to `BETTER_AUTH_URL`: `/.well-known/oauth-authorization-server` is served from `BETTER_AUTH_URL` and RFC 8414 requires the advertised `issuer` to be the URL its metadata was retrieved from. A divergent value **fails at boot**. |
 | `MCP_REGISTRATION_ENABLED` | Enable `POST /api/mcp/register` — RFC 7591 agent self-registration (`1`/`true`). **Dark by default.** RFC 7592 registration *management* is deliberately not offered: the response carries no `registration_access_token` / `registration_client_uri`, and lifecycle (approve / scope / revoke / rotate) is admin-side. |
 | `MCP_REGISTRATION_MODE` | `approval` (default — new agents park pending admin activation) or `open` (active but scopeless). |
-| `MCP_REGISTRATION_DEFAULT_ORG` | Target org slug/id used when a registration request omits `organization`. Once set, a request naming a **different** org is refused (same generic error as an unknown org) unless that org is on `MCP_REGISTRATION_ALLOWED_ORGS`. |
-| `MCP_REGISTRATION_ALLOWED_ORGS` | Comma-separated org slugs/ids a registration may name in `organization`. Unset: only the default org is reachable (when one is set). With neither this nor a default configured, any active org resolves — the deliberate open multi-tenant mode. |
+| `MCP_REGISTRATION_DEFAULT_ORG` | Target org slug/id used when a registration request omits `organization`. Once set, a request naming a **different** org is refused (same generic error as an unknown org) unless that org is on `MCP_REGISTRATION_ALLOWED_ORGS`. This is an explicit operator choice, independent of the platform's default organization (`is_default`, which only routes human sign-ups). Prefer the org's **id**: a slug stops matching when the org is renamed, and registrations then fail closed with `Unknown organization` until the value is updated (the org Settings form warns about this on a slug edit, F-40). |
+| `MCP_REGISTRATION_ALLOWED_ORGS` | Comma-separated org slugs/ids a registration may name in `organization`. Unset: only the default org is reachable (when one is set). With neither this nor a default configured, any active org resolves — the deliberate open multi-tenant mode. As with `MCP_REGISTRATION_DEFAULT_ORG`, an id survives a rename and a slug does not. |
 | `MCP_REGISTRATION_MAX_PER_ORG` | Max **self-registered** active OAuth clients per org before registration is refused (`0` = unlimited; default `50`). Counted atomically with the insert under a per-org lock; admin-created clients and still-pending registrations never count. In `open` mode every registration is active at once and does count — the quota is then the hard ceiling on the public endpoint. |
 | `MCP_REGISTRATION_PENDING_TTL_DAYS` | Days after which a still-`pending_approval` self-registration is expired by the reaper (`GET /api/internal/mcp-registration-reap` via Vercel Cron, or `pnpm mcp:reap` elsewhere): service user `deactivated`, membership `blocked`, client `revoked`. Default `7`; `0` disables the sweep; blank = default. |
 
@@ -394,7 +394,6 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 | --- | --- |
 | `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | Local seed admin credentials. |
 | `SEED_ADMIN_ADOPT_EXISTING` | Set `1` to let `db:seed` confer the admin grants on a **pre-existing** Better Auth account matching `SEED_ADMIN_EMAIL` that the seed did not create and cannot recognise as its own (not yet email-verified, or not already `superuser`). Off by default: such an account makes the seed **refuse** with exit code 1 and nothing written. Even when set, the account's password, `emailVerified` flag and status are left as found. See [Deployment §2](./deployment.md#2-one-time-database-bootstrap). |
-| `SEED_DEFAULT_ORGANIZATION_SLUG` | Default org slug (e.g. `default`). |
 | `DEV_SEED_PASSWORD` | Shared password for the multi-org dev fixture. |
 | `DEV_SEED_ALLOW_PROD` | Set `1` to allow the dev fixture under `NODE_ENV=production` (otherwise it refuses). Does **not** lift the host guard below. |
 | `DEV_SEED_ALLOW_REMOTE` | Set `1` to let `db:seed:dev` target a `DATABASE_URL` whose host is **not local** (`localhost` / `127.0.0.1` / `::1` / `0.0.0.0` / none). Off by default: a hosted URL makes the fixture refuse before opening a connection, regardless of `NODE_ENV`. Equivalent to `pnpm db:seed:dev --force`. See [Deployment §2](./deployment.md#2-one-time-database-bootstrap). |
@@ -482,7 +481,6 @@ SSO_HANDOFF_PRIVATE_KEY={"kty":"OKP","crv":"Ed25519","x":"…","d":"…"}
 # --- Local seed admin ---
 SEED_ADMIN_EMAIL=admin@devresponse.local
 SEED_ADMIN_PASSWORD=ChangeMe-LocalOnly-123!
-SEED_DEFAULT_ORGANIZATION_SLUG=default
 
 # --- Optional features (see .env.example for the full set) ---
 # EMAIL_PROVIDER=resend

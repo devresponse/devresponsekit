@@ -827,7 +827,8 @@
         "slugHelp": "Letras minúsculas, números, hífenes. 1-64 caracteres.",
         "name": "Nome",
         "status": "Estado",
-        "isDefault": "Definir como organização predefinida"
+        "isDefault": "Definir como organização predefinida",
+        "isDefaultHelp": "Os novos registos que nenhum convite, ligação de início de sessão da organização ou associação de domínio de e-mail coloca noutra organização juntam-se à organização predefinida, com a respetiva política de registo. Só existe uma predefinida: defini-la aqui move-a da atual."
       },
       "tabs": {
         "members": "Membros",
@@ -849,7 +850,11 @@
         "statusActive": "Ativa",
         "statusPending": "Pendente",
         "statusSuspended": "Suspensa",
-        "statusArchived": "Arquivada"
+        "statusArchived": "Arquivada",
+        "isDefaultCurrent": "Esta é a organização predefinida: os novos registos que nada mais coloca juntam-se a ela, com a respetiva política de registo. Para mudar a predefinida, defina-a noutra organização.",
+        "defaultRequired": "A organização predefinida não pode ser desmarcada. Para mudar a predefinida, defina-a noutra organização.",
+        "isDefaultExtra": "Esta organização também está marcada como predefinida, mas os novos registos juntam-se à organização marcada mais antiga, não a esta. Desmarque e guarde para retirar a marca a mais.",
+        "slugChangeWarning": "Alterar o slug quebra as ligações /sign-in/{slug} existentes e qualquer variável de ambiente que identifique esta organização pelo slug (MCP_REGISTRATION_DEFAULT_ORG, MCP_REGISTRATION_ALLOWED_ORGS); utilize aí o respetivo id. O destino dos novos registos não depende do slug."
       },
       "members": {
         "columns": {

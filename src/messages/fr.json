@@ -827,7 +827,8 @@
         "slugHelp": "Lettres minuscules, chiffres, tirets. 1-64 caractères.",
         "name": "Nom",
         "status": "Statut",
-        "isDefault": "Définir comme organisation par défaut"
+        "isDefault": "Définir comme organisation par défaut",
+        "isDefaultHelp": "Les nouvelles inscriptions qu'aucune invitation, aucun lien de connexion d'organisation ni aucune liaison de domaine e-mail ne place ailleurs rejoignent l'organisation par défaut, selon sa politique d'inscription. Il n'y en a qu'une : la définir ici la déplace depuis l'organisation par défaut actuelle."
       },
       "tabs": {
         "members": "Membres",
@@ -849,7 +850,11 @@
         "statusActive": "Active",
         "statusPending": "En attente",
         "statusSuspended": "Suspendue",
-        "statusArchived": "Archivée"
+        "statusArchived": "Archivée",
+        "isDefaultCurrent": "Ceci est l'organisation par défaut : les nouvelles inscriptions que rien d'autre ne place la rejoignent, selon sa politique d'inscription. Pour déplacer l'organisation par défaut, définissez-la sur une autre organisation.",
+        "defaultRequired": "L'organisation par défaut ne peut pas être désélectionnée. Pour la déplacer, définissez une autre organisation par défaut.",
+        "isDefaultExtra": "Cette organisation est aussi marquée comme organisation par défaut, mais les nouvelles inscriptions rejoignent la plus ancienne organisation marquée, pas celle-ci. Décochez puis enregistrez pour retirer ce marquage en trop.",
+        "slugChangeWarning": "Modifier le slug casse les liens /sign-in/{slug} existants et toute variable d'environnement qui désigne cette organisation par son slug (MCP_REGISTRATION_DEFAULT_ORG, MCP_REGISTRATION_ALLOWED_ORGS) ; utilisez-y plutôt son identifiant. La destination des nouvelles inscriptions ne dépend pas du slug."
       },
       "members": {
         "columns": {

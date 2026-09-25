@@ -31,8 +31,15 @@ vi.mock("@/lib/org-lookup.server", () => ({
   resolveOrganizationByIdentifier: (...a: unknown[]) => resolveOrgMock(...a),
 }));
 
+// F-40: the default org is resolved by `is_default` in its own module.
+vi.mock("@/lib/default-organization.server", () => ({
+  getDefaultOrganization: () => stubs.defaultOrg(),
+}));
+
 interface Stubs {
   policyRows: () => unknown[];
+  /** The org flagged `is_default` (F-40), or null when there is none. */
+  defaultOrg: () => Promise<{ id: string; slug: string; name: string; status: string } | null>;
   orgBySlug: () => unknown;
   emailMapping: () => unknown;
 }
@@ -83,6 +90,13 @@ beforeEach(() => {
   resolveOrgMock.mockResolvedValue(null);
   stubs = {
     policyRows: () => [DEFAULT_ROW],
+    defaultOrg: () =>
+      Promise.resolve({
+        id: "org-default",
+        slug: "default",
+        name: "Default Organization",
+        status: "active",
+      }),
     orgBySlug: () => Promise.resolve({ id: "org-default" }),
     emailMapping: () => Promise.resolve(undefined),
   };
@@ -238,6 +252,43 @@ describe("resolveSignupPolicy", () => {
     });
     expect(policy.source).toBe("organization");
     expect(policy.requireEmailVerification).toBe(false);
+  });
+
+  it("F-40: resolves the default org by is_default, so a RENAMED default keeps governing", async () => {
+    stubs.defaultOrg = () =>
+      Promise.resolve({ id: "org-renamed", slug: "acme", name: "Acme", status: "active" });
+    stubs.orgBySlug = () => {
+      throw new Error("the default org must not be looked up by slug");
+    };
+    stubs.policyRows = () => [
+      { ...DEFAULT_ROW, signup_approval_mode: "auto_active", require_email_verification: false },
+      { ...DEFAULT_ROW, organization_id: "org-renamed", signup_approval_mode: "invite_only" },
+    ];
+    const policy = await resolveSignupPolicy({
+      provider: "email",
+      email: "someone@example.com",
+      emailVerified: false,
+    });
+    // The renamed default's own strict override, not the lax platform row.
+    expect(policy.source).toBe("organization");
+    expect(policy.signupApprovalMode).toBe("invite_only");
+    expect(policy.requireEmailVerification).toBe(true);
+    expect(logMock).not.toHaveBeenCalled();
+  });
+
+  it("F-40: fails closed when no org is flagged default (provisioning will not place the account)", async () => {
+    stubs.defaultOrg = () => Promise.resolve(null);
+    // The old slug lookup found nothing either, and fell to the platform row.
+    stubs.orgBySlug = () => Promise.resolve(undefined);
+    stubs.policyRows = () => [
+      { ...DEFAULT_ROW, signup_approval_mode: "auto_active", require_email_verification: false },
+    ];
+    const policy = await resolveSignupPolicy({
+      provider: "google",
+      email: "someone@example.com",
+      emailVerified: true,
+    });
+    expect(policy).toBe(FAIL_CLOSED_AUTH_POLICY);
   });
 
   it("fails closed (and logs) when resolution throws", async () => {

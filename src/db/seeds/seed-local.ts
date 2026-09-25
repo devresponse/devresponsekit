@@ -4,11 +4,19 @@ import { setSignupProvisioningSuppressed } from "@/lib/auth-signup-provisioning"
 import { ADMIN_PERMISSION_CATALOG } from "@/lib/admin/permissions";
 import { seedPlatformSignupPolicy } from "@/db/seeds/platform-signup-policy";
 import { seedDefaultAdminUser } from "@/db/seeds/default-admin";
+import {
+  ensureDefaultOrganization,
+  resolveSeedPlatformOrganization,
+} from "@/db/seeds/default-organization";
+import { seedBaselineRoles } from "@/db/seeds/baseline-roles";
 
 /**
  * Local development seed.
  *
- * Inserts the default organization, baseline roles and permissions, the
+ * Ensures the default organization (the one flagged `is_default`, created
+ * only when there is none — F-40), baseline roles and permissions in the
+ * platform organization (the one holding the seeded superuser role, which is
+ * not necessarily the default — F-40), the
  * platform sign-up policy, the default local Better Auth admin user
  * described in `.env.example`, and — only outside `NODE_ENV=production`,
  * or with `SEED_DEMO_APPS=1` — the three demo satellite enterprise
@@ -42,11 +50,16 @@ async function main() {
     await client.query("begin");
     inTransaction = true;
 
-    await client.query(
-      `insert into app_organizations (slug, name, status, is_default)
-       values ('default', 'Default Organization', 'active', true)
-       on conflict (slug) do nothing`,
-    );
+    // F-40: THE default org is the one flagged `is_default`, whatever an
+    // administrator has renamed it to; created only when there is none. The
+    // slug-keyed insert this replaces added a second default after a rename.
+    const { id: defaultOrgId } = await ensureDefaultOrganization(client);
+    // ...but the platform roles and the admin belong in the PLATFORM org, the
+    // one holding the seeded superuser role. Once a superadmin moves the
+    // default to a customer tenant the two differ, and following the flag
+    // wrote Superuser / Platform Administrator into that tenant and then
+    // refused the seed admin (exit 1).
+    const orgId = await resolveSeedPlatformOrganization(client, defaultOrgId);
 
     const permissions = [
       ["shell.view", "View the secure shell"],
@@ -78,11 +91,6 @@ async function main() {
       );
     }
 
-    const orgId = (
-      await client.query<{ id: string }>(`select id from app_organizations where slug = 'default'`)
-    ).rows[0]?.id;
-    if (!orgId) throw new Error("default org missing after insert");
-
     // Platform sign-up defaults (0007): a new member is ACTIVE once they VERIFY
     // their email — NO explicit administrator-approval step. This relaxes the
     // migration's fail-closed baseline (verification + admin approval) to the
@@ -100,64 +108,8 @@ async function main() {
     // and logs a loud notice instead of silently reopening self-registration.
     await seedPlatformSignupPolicy(client);
 
-    const roles: Array<[string, string, string[]]> = [
-      ["member", "Member", ["shell.view"]],
-      // Canonical catalog keys: `admin.users.read` (view) + `admin.users.manage`
-      // (act) for the users area, `admin.audit.read` for the audit log. The old
-      // grant linked to those pages but couldn't open them (page guards require
-      // the `*.read` keys; `audit.view` is a phantom the pages never check).
-      [
-        "admin",
-        "Administrator",
-        ["shell.view", "admin.users.read", "admin.users.manage", "admin.audit.read"],
-      ],
-      [
-        "admin.platform",
-        "Platform Administrator",
-        // Platform-administrator gets every admin.* permission. Sourced
-        // from the canonical catalog so adding a new key automatically
-        // grants it to platform admins on next seed run.
-        ["shell.view", ...ADMIN_PERMISSION_CATALOG.map((p) => p.key)],
-      ],
-      [
-        "superuser",
-        "Superuser",
-        // Superuser is the default top-level access level. Its authority
-        // comes from the `superuser` MARKER, not enumerated grants: the
-        // runtime (getUserAccessContext) synthesizes the full permission set
-        // for any holder and the admin gate short-circuits on isSuperadmin
-        // (PR #97), so the role needs only the marker (+ shell.view to enter
-        // the shell before synthesis).
-        ["shell.view", "superuser"],
-      ],
-    ];
-    for (const [key, name, permKeys] of roles) {
-      await client.query(
-        `insert into app_roles (organization_id, key, name) values ($1, $2, $3)
-         on conflict (organization_id, key) do nothing`,
-        [orgId, key, name],
-      );
-      const roleId = (
-        await client.query<{ id: string }>(
-          `select id from app_roles where organization_id = $1 and key = $2`,
-          [orgId, key],
-        )
-      ).rows[0]?.id;
-      if (!roleId) throw new Error(`role ${key} missing after insert`);
-      for (const permKey of permKeys) {
-        const permId = (
-          await client.query<{ id: string }>(`select id from app_permissions where key = $1`, [
-            permKey,
-          ])
-        ).rows[0]?.id;
-        if (!permId) continue;
-        await client.query(
-          `insert into app_role_permissions (role_id, permission_id) values ($1, $2)
-           on conflict do nothing`,
-          [roleId, permId],
-        );
-      }
-    }
+    // Baseline roles, in the PLATFORM org resolved above (src/db/seeds/baseline-roles.ts).
+    await seedBaselineRoles(client, orgId);
 
     // The three reference satellite apps (devresponseapps forks), pointed at
     // the local subdomain rig from docs/integration-satellite-apps.md §6.6 —

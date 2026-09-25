@@ -19,6 +19,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("NewOrganizationForm", () => {
+  it("F-40: says the default flag MOVES the default and that unmapped sign-ups follow it", () => {
+    renderWithIntl(<NewOrganizationForm locale="en" />);
+    const checkbox = screen.getByRole("checkbox", { name: /set as default organization/i });
+    expect(checkbox).toHaveAccessibleDescription(/join the default organization/);
+    expect(checkbox).toHaveAccessibleDescription(/moves it from the current one/);
+  });
+
   it("marks slug and name required", () => {
     renderWithIntl(<NewOrganizationForm locale="en" />);
     expect(screen.getByRole("textbox", { name: "Slug" })).toHaveAttribute("aria-required", "true");

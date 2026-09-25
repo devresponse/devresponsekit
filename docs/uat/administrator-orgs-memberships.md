@@ -16,20 +16,21 @@ The area is anchored on a single load-bearing rule (ADR-0001): **the organizatio
 
 | Rule | Behaviour | Source |
 | --- | --- | --- |
-| Read gate | List, detail, memberships, members, provider-bindings all require `admin.orgs.read` | `organizations/page.tsx:28`, `organizations/[orgId]/page.tsx:34`, `memberships/page.tsx:22`, `api/administrator/organizations/route.ts:36`, `api/administrator/memberships/route.ts:32` |
-| Create gate | `/organizations/new` page and `POST` require `admin.orgs.create` | `organizations/new/page.tsx:20`, `api/administrator/organizations/route.ts:135` |
-| Create is SUPERADMIN-only | Even with `admin.orgs.create`, a non-superadmin `POST` gets **403** | `api/administrator/organizations/route.ts:149` |
-| Rename / status / default is SUPERADMIN-only | `PATCH` gates on `admin.orgs.update`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:67,81` |
-| Delete is SUPERADMIN-only | `DELETE` gates on `admin.orgs.delete`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:156,169` |
-| Org Admin sees only their org | List is scoped by `resolveOrgScope`; a null scope returns an empty list | `api/administrator/organizations/route.ts:49`, `lib/admin/access-scope.server.ts:51` |
-| Cross-tenant detail is 404, not 403 | A foreign `orgId` returns `notFound()` / a 404 envelope, never 403 | `organizations/[orgId]/page.tsx:54`, `api/administrator/organizations/[id]/route.ts:39` |
-| Delete of a default org | Blocked with **409** `organization_is_default` | `api/administrator/organizations/[id]/route.ts:188`, `lib/admin/orgs.server.ts:120` |
+| Read gate | List, detail, memberships, members, provider-bindings all require `admin.orgs.read` | `organizations/page.tsx:28`, `organizations/[orgId]/page.tsx:34`, `memberships/page.tsx:22`, `api/administrator/organizations/route.ts:39`, `api/administrator/memberships/route.ts:32` |
+| Create gate | `/organizations/new` page and `POST` require `admin.orgs.create` | `organizations/new/page.tsx:20`, `api/administrator/organizations/route.ts:140` |
+| Create is SUPERADMIN-only | Even with `admin.orgs.create`, a non-superadmin `POST` gets **403** | `api/administrator/organizations/route.ts:157` |
+| Rename / status / default is SUPERADMIN-only | `PATCH` gates on `admin.orgs.update`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:104,124` |
+| Delete is SUPERADMIN-only | `DELETE` gates on `admin.orgs.delete`, then blocks any non-superadmin with **403** | `api/administrator/organizations/[id]/route.ts:279,295` |
+| Org Admin sees only their org | List is scoped by `resolveOrgScope`; a null scope returns an empty list | `api/administrator/organizations/route.ts:52`, `lib/admin/access-scope.server.ts:51` |
+| Cross-tenant detail is 404, not 403 | A foreign `orgId` returns `notFound()` / a 404 envelope, never 403 | `organizations/[orgId]/page.tsx:54`, `api/administrator/organizations/[id]/route.ts:57` |
+| Delete of a default org | Blocked with **409** `organization_is_default`; re-checked inside the deleting transaction under the default-flag lock, so a delete racing a "Set as default" on the same org cannot remove the new default (F-40) | `api/administrator/organizations/[id]/route.ts:314,361`, `lib/admin/orgs.server.ts:120` |
+| The default organization is the org flagged `is_default` (F-40) | Unmapped sign-ups (no invitation, `/sign-in/<org>` hint or email-domain binding) land in it under its policy, whatever its slug; no org is ever auto-created for them. *Set as default organization* (Settings, or `isDefault: true` on create/update) **moves** the flag, so exactly one org carries it; clearing it on the current default is refused with **409** `organization_is_default` and the checkbox is read-only there (on a legacy database's extra flag the checkbox stays enabled and unticking it clears that flag). A slug edit shows a warning (it breaks `/sign-in/<slug>` links and slug-configured env vars). `db:seed` keeps its platform roles and admin in the platform org, never in a moved default | `lib/default-organization.server.ts`, `lib/user-provisioning.server.ts`, `lib/auth-policy.server.ts` (`resolveSignupPolicy`), `api/administrator/organizations/[id]/route.ts` (PATCH), `_organization-settings-form.tsx`, `db/seeds/default-organization.ts` |
 | Organization status is enforced (F-09) | Only an `active` org confers membership: a `pending` / `suspended` / `archived` org's members, org admins, bound credentials, SSO launches and invitations stop working, and a `superuser` grant held there confers nothing, until it is reactivated | `lib/auth-status.ts` (`getUserAccessContext`), `lib/admin/access-scope.server.ts` (`userIsGlobalSuperuser`) |
 | Suspending the tenant that holds the last superuser grant | Blocked with **409** `last_superadmin` (REVOKE-2); reactivation is never blocked | `api/administrator/organizations/[id]/route.ts` (PATCH) |
 | A membership's status only affects its own org (F-33) | A signed-in user acts in an **active** membership whenever they have one: the `active_org` cookie picks among active memberships, else the earliest active one. A suspended, blocked or pending membership is used only when the user has no active membership anywhere, which is what shows the blocked or pending-approval screen. Accepting an invitation sets the user's active org to the inviting org | `lib/auth-status.ts` (`getUserAccessContext`), `api/invitations/accept/route.ts` |
 | Inviting into / resending for a non-active org | Blocked with **409** `organization_not_active`; revoke still works | `api/administrator/organizations/[id]/invitations/route.ts`, `…/[invitationId]/resend/route.ts` |
-| Delete of a non-empty org | Blocked with **409** `organization_not_empty` (any membership, any status) | `api/administrator/organizations/[id]/route.ts:189`, `lib/admin/orgs.server.ts:104` |
-| Delete of an org with other dependents (roles, bindings, apps, credentials) | FK violation translated to **409** `organization_in_use` | `api/administrator/organizations/[id]/route.ts:212` |
+| Delete of a non-empty org | Blocked with **409** `organization_not_empty` (any membership, any status) | `api/administrator/organizations/[id]/route.ts:315`, `lib/admin/orgs.server.ts:104` |
+| Delete of an org with other dependents (roles, bindings, apps, credentials) | FK violation translated to **409** `organization_in_use` | `api/administrator/organizations/[id]/route.ts:429` |
 | Member / binding mutations | `POST`/`PATCH`/`DELETE` on members and bindings require `admin.orgs.update` (NOT `.delete`, NOT `.manage`); **creating** a binding additionally requires a Superadmin (F-04) | `api/administrator/organizations/[id]/members/route.ts:123,239,340`, `.../provider-bindings/route.ts:113,207` |
 
 > `TODO: verify` — the catalog defines `admin.orgs.manage` ("Manage organization members and bindings", `lib/admin/permissions.ts:49`) but **no page guard or API route references it**; member and binding mutations gate on `admin.orgs.update` instead. Confirm with product whether `admin.orgs.manage` is intended to gate the Members/Providers write actions (currently dead), or is reserved for future use. A holder of only `admin.orgs.manage` (without `.update`) can read but cannot mutate members/bindings today.
@@ -79,7 +80,7 @@ Base URL `http://localhost:3000`. Test in `en` first, then repeat one story in a
 | Cross-org member | `multi1@shared.local` | `member` in all 3 orgs | Test data: appears in every org's Members grid |
 | Visitor | (signed out) | — | Redirected to sign-in |
 
-Seed data you can rely on: default org has `slug` `default` and `is_default = true` (created by `seed-local.ts`); `pnpm db:seed:dev` orgs are `org-a`, `org-b`, `org-c` (all `is_default = false`, `status = active`); ORG A has an `engineering` and a `support` group and users `user1..5@orga.local`.
+Seed data you can rely on: default org has `slug` `default` and `is_default = true` (created by `seed-local.ts`; the flag, not the slug, is what makes it the default, F-40); `pnpm db:seed:dev` orgs are `org-a`, `org-b`, `org-c` (all `is_default = false`, `status = active`); ORG A has an `engineering` and a `support` group and users `user1..5@orga.local`.
 
 ---
 
@@ -157,7 +158,7 @@ i18n: run in `en` and `uk`/`ja`; column headers, status badges, the "New organiz
 
 - Route: `/app/administrator/organizations/new`  ·  Example URL: `/en/app/administrator/organizations/new`  ·  Code: `src/app/[locale]/(secure)/app/administrator/organizations/new/page.tsx:14`
 - Purpose: Form to create a new organization (tenant): slug, name, and an optional "make default" flag. Creating a tenant is a platform-level action.
-- Guard / who can access: page requires `admin.orgs.create`; the `POST` additionally enforces **SUPERADMIN-only** (`api/administrator/organizations/route.ts:149`). So only a Superadmin ever reaches and successfully submits this form.
+- Guard / who can access: page requires `admin.orgs.create`; the `POST` additionally enforces **SUPERADMIN-only** (`api/administrator/organizations/route.ts:157`). So only a Superadmin ever reaches and successfully submits this form.
 - Access matrix: Visitor / Pending / Member / Limited Admin / Org Admin -> cannot open (404; none hold `admin.orgs.create` except a superadmin). Superadmin -> can open and submit.
 - Preconditions & test data: signed in as `superuser@orga.local`. Shared schema `createOrganizationSchema` (`lib/validation/organizations.ts:16`): slug required, lowercase, matches the slug pattern, max 64; name required, max 200; `isDefault` optional.
 
@@ -169,7 +170,7 @@ User stories
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `superuser@orga.local` and open **Organizations**. | The list loads with a **New organization** button. |
-    | 2 | Click **New organization**. | The create form opens with Slug and Name fields (both marked required `*`) and a "make default" checkbox. |
+    | 2 | Click **New organization**. | The create form opens with Slug and Name fields (both marked required `*`) and a "make default" checkbox whose hint says new unmapped sign-ups join the default organization and that setting it moves the default from the current one (F-40). |
     | 3 | Type `Acme-QA` into **Slug**. | The value is normalised to lowercase `acme-qa` as you type. |
     | 4 | Type `Acme QA` into **Name** and leave the default checkbox unchecked. | Both required fields are filled. |
     | 5 | Click **Create** (the submit button). | The org is created and you are redirected to `/en/app/administrator/organizations/<new id>`, showing name "Acme QA" and slug `acme-qa`. |
@@ -265,7 +266,7 @@ User stories
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
-    | 1 | Sign in as `superuser@orga.local` and open `org-c` → **Settings**. | The Settings form shows editable Slug, Name, Status (a select), and a "default" checkbox, with a required legend. |
+    | 1 | Sign in as `superuser@orga.local` and open `org-c` → **Settings**. | The Settings form shows editable Slug, Name, Status (a select), and a "default" checkbox (its hint says setting it moves the default and re-routes new sign-ups, F-40), with a required legend. |
     | 2 | Change **Name** to `ORG C (renamed)`. | The field accepts the edit. |
     | 3 | Change **Status** to `suspended`. | The select shows the localized "Suspended" option selected. |
     | 4 | Click **Save**. | A success message `role="status"` ("saved") appears, and the header updates to the new name and a Suspended badge without a reload. Open **Members**, then **Settings** again: the form shows `ORG C (renamed)` and Suspended, not the values from before the save (F-39). |
@@ -287,13 +288,31 @@ User stories
     | 3 | Reload the page. | Status is still Active. The audit explorer shows `admin.superuser.revocation_denied` (`reason: last_global_superuser`, `metadata.action: organization_status_update`). |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
+- UAT-ADMIN-ORG-DETAIL-S4c — As a Superadmin, I want the default organization to be one org I can rename or move, so that new sign-ups always land in the tenant I chose, under its policy (F-40).
+  - Acceptance criteria: Given the default org, when I rename its slug, then unmapped sign-ups still land in it (no new "Default Organization" appears) and a re-run of `pnpm db:seed` adds no second default. When I set another org as default, then exactly one org carries the Default badge and new sign-ups land there, and a re-run of `pnpm db:seed` writes no platform role or admin grant into it. The default can be moved but not unticked.
+  - UAT script (local rig; step 9 restores the starting state):
+    | # | Step (what to do) | Expected result |
+    |---|---|---|
+    | 1 | Sign in as `superuser@orga.local` and open the default org (slug `default`) → **Settings**. | The "Set as default organization" checkbox is ticked and **disabled**; its hint says this is the default organization and that the default moves by setting it on another organization. |
+    | 2 | Change **Slug** to `default-renamed` (do not save yet). | A warning `role="note"` appears under the slug: it breaks existing `/sign-in/default` links and env vars that name the org by slug (`MCP_REGISTRATION_DEFAULT_ORG`, `MCP_REGISTRATION_ALLOWED_ORGS`). Typing `default` back hides it. |
+    | 3 | Set the slug to `default-renamed` and click **Save**. | Saved. |
+    | 4 | In a private window, sign up with email + password as `f40-check@example.test` (a domain with no binding). | Back as the Superadmin, the renamed default org's **Members** tab lists the new address; the Organizations list shows no new "Default Organization" and one Default badge. |
+    | 5 | Run `pnpm db:seed`, then reload **Organizations**. | Still one Default badge (on `default-renamed`) and no new `default` org. |
+    | 6 | Open `org-c` → **Settings**, tick "Set as default organization" and save. | Saved; the checkbox becomes read-only; the Organizations list shows exactly one Default badge, on `org-c`; the audit explorer's `admin.organization.updated` row for `org-c` names the previous default in `previousDefaultOrganizationIds`. |
+    | 7 | Sign up another unmapped account (`f40-check2@example.test`). | It appears on `org-c`'s **Members** tab. |
+    | 8 | Run `pnpm db:seed` again. | It exits 0 (it no longer refuses the seed admin with `REFUSED to escalate pre-existing account`) and logs that the platform roles and the default admin stay in the `default-renamed` org's id. `admin@devresponse.local` is still not a member of `org-c`, and `org-c` keeps the Default badge. |
+    | 9 | Restore: on `default-renamed` → **Settings**, tick "Set as default organization" and save; then set the slug back to `default` and save. Remove the two test accounts. | One Default badge, on `default`. |
+  - API check: `PATCH /api/administrator/organizations/{default org id}` with `{"isDefault": false}` returns **409** `organization_is_default` and writes `admin.organization.update_blocked` (`reason: organization_is_default`); the flag is unchanged.
+  - Legacy check (only on a database that already holds two flagged orgs, from a pre-F-40 seed re-run): the newer flagged org's **Settings** shows the checkbox ticked but **enabled**, with a hint that new sign-ups join the oldest flagged organization instead; unticking it and saving clears that flag (the audit row carries `clearedExtraDefaultFlag: true`), leaving one Default badge.
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+
 - UAT-ADMIN-ORG-DETAIL-S5 — As an Org Admin, I want the Settings save to be refused, so that I cannot mutate the org record I do not own at the platform level.
-  - Acceptance criteria: Given I am an Org Admin on my org's Settings tab, when I edit a field and save, then the save is refused with a "forbidden" message and the record is unchanged. (SUPERADMIN-only, `[id]/route.ts:81`.)
+  - Acceptance criteria: Given I am an Org Admin on my org's Settings tab, when I edit a field and save, then the save is refused with a "forbidden" message and the record is unchanged. (SUPERADMIN-only, `[id]/route.ts:124`.)
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `orgadmin@orga.local` and open `org-a` → **Settings**. | The Settings form renders. Because this persona holds `admin.orgs.update`, the fields are editable. |
-    | 2 | Change **Name** to anything and click **Save**. | The save is rejected: a root inline error `role="alert"` shows the localized "forbidden" message (mapped from the 403 at `_organization-settings-form.tsx:123`). |
+    | 2 | Change **Name** to anything and click **Save**. | The save is rejected: a root inline error `role="alert"` shows the localized "forbidden" message (mapped from the 403 at `_organization-settings-form.tsx:143`). |
     | 3 | Reload the page. | The name is unchanged — the edit did not persist. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
@@ -313,9 +332,9 @@ Negative & edge cases
 1. Cross-tenant 404 (not 403): a foreign `orgId` returns Not Found for the page and a 404 envelope for the members/providers endpoints (`members/route.ts:54`, `provider-bindings/route.ts:53`).
 2. Invalid id: a non-UUID `orgId` returns 404 on the page and `invalid_id` (400) on the API.
 3. Settings required validation: clearing Slug or Name shows the `*` marker, a red border, and a localized "required" message; Slug also enforces the lowercase slug pattern.
-4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:108`).
+4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:136`).
 5. Member add errors: adding a non-existent `appUserId` returns `user_not_found` (404); adding an existing membership returns `membership_exists` (409).
-6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:138,226`).
+6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:160,264`).
 7. Rate-limit: rapid member/binding mutations hit the admin mutation limit and return a friendly rate-limited response (`members/route.ts:126`).
 8. Removing a member whose roles or groups in the org confer a permission the caller cannot confer is refused with **403** `forbidden` and an `admin.membership.revocation_denied` audit row, and nothing is removed (REVOKE-1, F-12). An Org Admin at a browser is normally stopped earlier by the rank guard; the case to try is a bearer key scoped only to `admin.orgs.update`, removing a member who holds an `admin.*` role. The same key removes a plain member (`user1..5`, the `member` role) with **200**: `shell.view` goes with the membership and is not measured.
 

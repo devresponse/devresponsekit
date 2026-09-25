@@ -738,7 +738,7 @@ Manages the tenant entity and its memberships.
 | --- | --- | --- |
 | `GET /organizations` | `admin.orgs.read` | List with member counts; an org admin sees only their own org row |
 | `POST /organizations` | `admin.orgs.create` | **Superadmin-only** (the tenant entity); `admin.organization.created` |
-| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below) |
+| `GET/PATCH/DELETE /organizations/[id]` | `.read` / `.update` / `.delete` | `admin.organization.updated` / `.deleted`; a guarded delete may emit `.delete_blocked`. A PATCH that moves `status` away from `active` may return 409 `last_superadmin` (REVOKE-2, see *Organization status* below); `isDefault: true` moves the default here, `isDefault: false` on the current default returns 409 `organization_is_default` and emits `.update_blocked` (on a legacy extra default it clears that flag), and a DELETE of a flagged org returns 409 `organization_is_default` (F-40, see *The default organization* below) |
 | `…/[id]/members` | `admin.orgs.read` / `admin.orgs.update` | Add/update/remove; `admin.organization.member_added` / `.member_updated` / `.members_removed` (+ mirrored `admin.user.membership_*`). PATCH/DELETE are rank-gated (REVOKE-1, whole batch refused with 403) and may return 409 `last_superadmin` (REVOKE-2). DELETE also deletes each member's roles and group memberships in this org and is conferral-gated on them (F-12, §8.3) |
 | `…/[id]/provider-bindings` | `admin.orgs.read` / `admin.orgs.update` (POST: + **superadmin**) | IdP org links and email-domain routing; creating one is a platform-wide claim, so POST also requires cross-org reach (F-04) and validates the provider, lowercases an `email` domain and refuses consumer mailbox domains; `admin.organization.provider_bound` / `.provider_bind_denied` / `.provider_unbound` |
 | `GET/PATCH/DELETE …/[id]/auth-settings` | `admin.orgs.read` / `admin.orgs.update` | Per-org sign-up policy (0007); GET returns the raw override + the EFFECTIVE resolved policy; PATCH replaces the COMPLETE policy; DELETE reverts to the platform default; `admin.organization.auth_policy_updated` / `.auth_policy_reset` — see [Sign-up Policy](./auth-signup-policy.md) |
@@ -756,6 +756,41 @@ session's email must equal the invited address). See
 
 Creating, renaming, and deleting an **organization** is superadmin-only — an org
 admin manages the *contents* of their org, not the org record (ADR-0001).
+
+**The default organization (F-40).** Exactly one organization is flagged
+`is_default`, and that flag is its only identity: sign-ups that no invitation,
+`/sign-in/<org>` hint or email-domain binding places elsewhere land in it,
+under its sign-up policy ([Sign-up Policy §4](./auth-signup-policy.md#4-which-organization-governs-a-sign-up)),
+and it cannot be deleted. Nothing looks it up by slug, so renaming it is
+harmless to routing; the Settings form still warns on a slug edit, because
+`/sign-in/<slug>` links and env vars that name an org by slug
+(`MCP_REGISTRATION_DEFAULT_ORG`, `MCP_REGISTRATION_ALLOWED_ORGS`; an org id
+survives a rename) stop matching. *Set as default organization* (Settings, or
+`isDefault: true` on `POST`/`PATCH`) **moves** the flag: the previous default
+is cleared in the same transaction, under a transaction-scoped advisory lock
+every writer of the flag takes (`src/lib/default-organization.server.ts`), so
+two concurrent moves cannot leave two defaults. The audit row names the org(s)
+that lost it (`previousDefaultOrganizationIds`). The flag cannot be cleared on
+the current default (409 `organization_is_default`, audited as
+`admin.organization.update_blocked`); the Settings checkbox is read-only there.
+A flagged org cannot be deleted either, and the DELETE re-checks the flag
+inside its deleting transaction under the same lock, so a delete racing a
+move onto the same org cannot remove the new default. A save that touches the
+flag takes that lock before any row lock, so it cannot deadlock against a
+concurrent move. `pnpm db:seed` reuses whichever org is flagged and creates
+the initial `default` org only when none is, so re-running it after a rename
+adds no second default. Its platform roles (Superuser, Platform
+Administrator, …) and first admin do not follow the flag: they stay in the
+platform org, the oldest org whose `superuser` role carries the `superuser`
+marker (the original default), so re-running the seed after the default was
+moved to a tenant writes nothing into that tenant. No partial unique index
+enforces "one default" in the schema (that would need a core migration); the
+write paths do, and a legacy database that already holds two defaults (a
+pre-F-40 seed re-run after a rename) resolves to the oldest. To repair it,
+open the newer flagged org → **Settings**: its checkbox is ticked but enabled,
+with a hint that sign-ups go elsewhere; untick it and save (`isDefault: false`
+clears an extra flag on any org except the one sign-ups resolve to, audited
+with `clearedExtraDefaultFlag: true`).
 
 **Organization status is enforced (F-09).** Only an `active` organization
 confers anything. While an org is `pending`, `suspended` or `archived`, every

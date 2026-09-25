@@ -23,6 +23,7 @@ const canAccessOrg = vi.fn();
 const isSuperadmin = vi.fn();
 const getOrgAuthSettingsRow = vi.fn();
 const loadOrgOrThrow = vi.fn();
+const getDefaultOrganization = vi.fn();
 
 vi.mock("next/navigation", () => ({ notFound: () => notFoundMock() }));
 vi.mock("next-intl/server", () => ({
@@ -37,6 +38,9 @@ vi.mock("@/lib/admin/access-scope.server", () => ({
 }));
 vi.mock("@/lib/admin/auth-settings.server", () => ({
   getOrgAuthSettingsRow: (...a: unknown[]) => getOrgAuthSettingsRow(...a),
+}));
+vi.mock("@/lib/default-organization.server", () => ({
+  getDefaultOrganization: (...a: unknown[]) => getDefaultOrganization(...a),
 }));
 vi.mock("@/lib/admin/orgs.server", async () => {
   const actual = await vi.importActual<typeof OrgsModule>("@/lib/admin/orgs.server");
@@ -103,6 +107,7 @@ beforeEach(async () => {
     isSuperadmin,
     getOrgAuthSettingsRow,
     loadOrgOrThrow,
+    getDefaultOrganization,
   ])
     m.mockReset();
   notFoundMock.mockClear();
@@ -149,5 +154,34 @@ describe("administrator/organizations/[orgId] — platform defaults (review #72)
     canAccessOrg.mockReturnValue(false);
     await expect(Page(params(ORG_ID))).rejects.toThrow(NOT_FOUND);
     expect(getOrgAuthSettingsRow).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-40: the Settings form locks the default checkbox only on THE default, the
+ * org unmapped sign-ups resolve to (`getDefaultOrganization`: the oldest
+ * flagged org). In a legacy database holding two flagged orgs, keying that on
+ * the row's own flag locked BOTH, told the newer one it received sign-ups,
+ * and left no way to clear the extra flag from Settings.
+ */
+describe("administrator/organizations/[orgId] — the resolved default (F-40)", () => {
+  const orgProp = async () =>
+    findTabsProps(await Page(params(ORG_ID)))!.org as Record<string, unknown>;
+
+  it("a flagged org that IS where sign-ups resolve is the resolved default", async () => {
+    loadOrgOrThrow.mockResolvedValue({ ...ORG_ROW, is_default: true });
+    getDefaultOrganization.mockResolvedValue({ id: ORG_ID });
+    expect(await orgProp()).toMatchObject({ isDefault: true, isResolvedDefault: true });
+  });
+
+  it("a flagged org that is NOT where sign-ups resolve carries an extra flag only", async () => {
+    loadOrgOrThrow.mockResolvedValue({ ...ORG_ROW, is_default: true });
+    getDefaultOrganization.mockResolvedValue({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+    expect(await orgProp()).toMatchObject({ isDefault: true, isResolvedDefault: false });
+  });
+
+  it("an unflagged org is neither, and costs no lookup", async () => {
+    expect(await orgProp()).toMatchObject({ isDefault: false, isResolvedDefault: false });
+    expect(getDefaultOrganization).not.toHaveBeenCalled();
   });
 });

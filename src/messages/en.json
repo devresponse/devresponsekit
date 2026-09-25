@@ -827,7 +827,8 @@
         "slugHelp": "Lowercase letters, numbers, hyphens. 1-64 characters.",
         "name": "Name",
         "status": "Status",
-        "isDefault": "Set as default organization"
+        "isDefault": "Set as default organization",
+        "isDefaultHelp": "New sign-ups that no invitation, organization sign-in link or email-domain binding places elsewhere join the default organization, under its sign-up policy. There is only one default: setting it here moves it from the current one."
       },
       "tabs": {
         "members": "Members",
@@ -849,7 +850,11 @@
         "statusActive": "Active",
         "statusPending": "Pending",
         "statusSuspended": "Suspended",
-        "statusArchived": "Archived"
+        "statusArchived": "Archived",
+        "isDefaultCurrent": "This is the default organization: new sign-ups that nothing else places join it, under its sign-up policy. To move the default, set it on another organization.",
+        "defaultRequired": "The default organization cannot be unset. To move the default, set it on another organization.",
+        "isDefaultExtra": "This organization is also flagged as the default, but new sign-ups join the oldest flagged organization, not this one. Untick and save to clear the extra flag.",
+        "slugChangeWarning": "Changing the slug breaks existing /sign-in/{slug} links and any environment variable that names this organization by slug (MCP_REGISTRATION_DEFAULT_ORG, MCP_REGISTRATION_ALLOWED_ORGS); name it by its id there instead. Where new sign-ups land does not depend on the slug."
       },
       "members": {
         "columns": {

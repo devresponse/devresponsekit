@@ -1,3 +1,8 @@
+import {
+  DEFAULT_ORGANIZATION_PROVIDER_KEY,
+  INITIAL_DEFAULT_ORGANIZATION,
+} from "@/lib/default-organization";
+
 /**
  * Provider-organization input shape.
  *
@@ -28,17 +33,34 @@ export interface ProviderOrganizationInput {
 
 export interface ProviderOrganizationResolution {
   provider: string;
+  /**
+   * The provider-derived organization key (GitHub: the verified email
+   * domain), or the display label `default` when the sign-up falls back to
+   * the default organization. That label is stored on the membership and
+   * audit row only; it is NOT a slug and is never resolved back to an org
+   * (F-40) — {@link routesToDefaultOrganization} says which case this is.
+   */
   providerOrganizationKey: string;
   displayName: string;
   confidence: "medium" | "fallback";
+  /**
+   * True when no provider metadata placed the sign-up, so it belongs in THE
+   * default organization, which callers resolve by `is_default`
+   * (`getDefaultOrganization`). Before F-40 callers compared
+   * `providerOrganizationKey` with `"default"` and then looked the org up by
+   * that slug, so renaming the default org's slug made provisioning create a
+   * second, adminless "Default Organization".
+   */
+  routesToDefaultOrganization: boolean;
 }
 
 /**
  * Resolves an application organization key from provider metadata.
  *
  * Threat / contract:
- *   - Returning `default` is always safe; downstream membership creation
- *     keeps the user in `pending_approval` until an admin approves them.
+ *   - Falling back to the default organization is always safe: the org's own
+ *     sign-up policy decides the initial status, and placement looks the org
+ *     up by `is_default`, never by a slug (F-40).
  *   - GitHub uses email domain only when the email is verified, since
  *     GitHub does not surface organization data in the OAuth profile by
  *     default and we do not query its API.
@@ -56,13 +78,15 @@ export function resolveProviderOrganization(
       providerOrganizationKey: emailDomain,
       displayName: emailDomain,
       confidence: "medium",
+      routesToDefaultOrganization: false,
     };
   }
 
   return {
     provider: input.provider,
-    providerOrganizationKey: "default",
-    displayName: "Default Organization",
+    providerOrganizationKey: DEFAULT_ORGANIZATION_PROVIDER_KEY,
+    displayName: INITIAL_DEFAULT_ORGANIZATION.name,
     confidence: "fallback",
+    routesToDefaultOrganization: true,
   };
 }

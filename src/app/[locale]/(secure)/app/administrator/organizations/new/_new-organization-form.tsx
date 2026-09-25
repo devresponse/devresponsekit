@@ -123,14 +123,18 @@ export function NewOrganizationForm({ locale }: { locale: string }) {
           control={form.control}
           name="isDefault"
           render={({ field }) => (
-            <FormItem className="flex flex-row items-center gap-2 space-y-0">
-              <FormControl>
-                <Checkbox
-                  checked={field.value ?? false}
-                  onCheckedChange={(v) => field.onChange(v === true)}
-                />
-              </FormControl>
-              <FormLabel className="font-normal">{t("fields.isDefault")}</FormLabel>
+            <FormItem>
+              <div className="flex flex-row items-center gap-2">
+                <FormControl>
+                  <Checkbox
+                    checked={field.value ?? false}
+                    onCheckedChange={(v) => field.onChange(v === true)}
+                  />
+                </FormControl>
+                <FormLabel className="font-normal">{t("fields.isDefault")}</FormLabel>
+              </div>
+              {/* F-40: the flag moves, and new unmapped sign-ups follow it. */}
+              <FormDescription>{t("fields.isDefaultHelp")}</FormDescription>
             </FormItem>
           )}
         />

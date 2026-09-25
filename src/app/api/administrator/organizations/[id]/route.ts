@@ -22,6 +22,12 @@ import {
 } from "@/lib/admin/access-scope.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import {
+  clearDefaultOrganizationFlag,
+  isDefaultOrganizationLocked,
+  lockDefaultOrganizationFlag,
+  moveDefaultOrganizationFlag,
+} from "@/lib/default-organization.server";
+import {
   ACTIVE_ORGANIZATION_STATUS,
   updateOrganizationSchema,
 } from "@/lib/validation/organizations";
@@ -79,6 +85,16 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * launches and invitations until it is set back to `active`. A move away from
  * `active` that would suspend the platform's last superuser grant is refused
  * with 409 `last_superadmin` (REVOKE-2).
+ *
+ * `isDefault` MOVES the default (F-40): `true` clears the flag on the previous
+ * default in the same transaction, under the default-flag lock, and since
+ * sign-up routing follows `is_default` new unmapped sign-ups land here from
+ * then on. `false` on the current default (the org sign-ups resolve to) is
+ * refused with 409 `organization_is_default` (the flag can only be moved, or
+ * sign-ups would have nowhere to land). On an org carrying a legacy EXTRA flag
+ * it clears that flag (the Settings repair for a database holding two
+ * defaults); on any other org it is a no-op. A slug change is harmless to
+ * routing, which no longer looks the default org up by slug.
  */
 
 export const PATCH = withAdminRoute(async function PATCH(
@@ -139,7 +155,11 @@ export const PATCH = withAdminRoute(async function PATCH(
   if (input.slug !== undefined) updates.slug = input.slug;
   if (input.name !== undefined) updates.name = input.name;
   if (input.status !== undefined) updates.status = input.status;
-  if (input.isDefault !== undefined) updates.is_default = input.isDefault;
+  // F-40: `is_default` is never written from the body directly. Setting it
+  // goes through `moveDefaultOrganizationFlag` below, which also clears it on
+  // the previous default under the default-flag lock; a plain write let two
+  // concurrent saves both clear-then-set and leave two defaults, and a plain
+  // `false` left the platform with none.
   updates.updated_at = new Date();
 
   // F-09 + REVOKE-2: organization status is enforced now — a membership, and
@@ -152,18 +172,30 @@ export const PATCH = withAdminRoute(async function PATCH(
   // status alone, can only ever ADD a grant and is never gated.
   const leavesActive = input.status !== undefined && input.status !== ACTIVE_ORGANIZATION_STATUS;
 
-  let outcome: "updated" | "last_superadmin";
+  let outcome: "updated" | "last_superadmin" | "default_required" | "vanished";
+  let previousDefaultOrganizationIds: string[] = [];
+  let clearedExtraDefaultFlag = false;
   try {
     outcome = await db.transaction().execute(async (trx) => {
+      // F-40 lock order: a save that touches the default flag takes the
+      // default-flag lock FIRST. The last-superuser check below row-locks the
+      // orgs holding superuser grants (by default the default org); taken
+      // after it, the lock was awaited while holding that row, a concurrent
+      // move held the lock while awaiting the row, and one of the two died
+      // as a deadlock (a 500).
+      if (input.isDefault !== undefined) await lockDefaultOrganizationFlag(trx);
       if (leavesActive && (await wouldStripLastGlobalSuperuser({ organizationIds: [id] }, trx))) {
         return "last_superadmin" as const;
       }
       if (input.isDefault === true) {
-        await trx
-          .updateTable("app_organizations")
-          .set({ is_default: false })
-          .where("is_default", "=", true)
-          .execute();
+        const cleared = await moveDefaultOrganizationFlag(trx, id);
+        // Deleted by another superadmin since the existence check above.
+        if (cleared === null) return "vanished" as const;
+        previousDefaultOrganizationIds = cleared;
+      } else if (input.isDefault === false) {
+        const cleared = await clearDefaultOrganizationFlag(trx, id);
+        if (cleared === "refused") return "default_required" as const;
+        clearedExtraDefaultFlag = cleared === "cleared";
       }
       await trx.updateTable("app_organizations").set(updates).where("id", "=", id).execute();
       return "updated" as const;
@@ -195,11 +227,40 @@ export const PATCH = withAdminRoute(async function PATCH(
     });
   }
 
+  if (outcome === "vanished") {
+    return adminErrorResponse("organization_not_found", 404, request);
+  }
+
+  if (outcome === "default_required") {
+    // F-40: clearing the flag on the default org would leave sign-ups with
+    // nowhere to land. Nothing was written; the admin moves the default by
+    // setting it on another org instead.
+    await auditOrgAction("admin.organization.update_blocked", "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: id,
+      requestId: guard.requestId,
+      reason: "organization_is_default",
+      metadata: { organizationId: id, slug: existing.slug, changes: input },
+    });
+    return adminErrorResponse("organization_is_default", 409, request, {
+      requestId: guard.requestId,
+    });
+  }
+
   await auditOrgAction("admin.organization.updated", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     organizationId: id,
-    metadata: { organizationId: id, slug: input.slug ?? existing.slug, changes: input },
+    metadata: {
+      organizationId: id,
+      slug: input.slug ?? existing.slug,
+      changes: input,
+      // F-40: the org(s) that lost the default flag to this one.
+      ...(previousDefaultOrganizationIds.length > 0 ? { previousDefaultOrganizationIds } : {}),
+      // F-40: a legacy extra default flag was cleared here (not a no-op).
+      ...(clearedExtraDefaultFlag ? { clearedExtraDefaultFlag: true } : {}),
+    },
   });
 
   return NextResponse.json({ ok: true });
@@ -287,8 +348,20 @@ export const DELETE = withAdminRoute(async function DELETE(
   // row with it, and a tenant can no longer be removed without one.
   let blockedByForeignKey = false;
   let vanishedMidRequest = false;
+  let becameDefault = false;
   try {
     await db.transaction().execute(async (trx) => {
+      // F-40: re-check the default flag INSIDE the deleting transaction, under
+      // the default-flag lock that every move takes. The `assertOrgNotDefault`
+      // above read the pool before any of this, so a "Set as default" saved on
+      // this org in between went unseen, and the delete then removed the only
+      // default (every unmapped sign-up refused from then on). Under the lock,
+      // a move that committed first is seen here, and one that starts later
+      // waits for this delete and then finds its target gone (404).
+      if (await isDefaultOrganizationLocked(trx, id)) {
+        becameDefault = true;
+        return;
+      }
       try {
         await auditOrgAction("admin.organization.deleted", "success", {
           request,
@@ -300,9 +373,10 @@ export const DELETE = withAdminRoute(async function DELETE(
       } catch (err) {
         // DB-5: the existence check above ran on the pool, so a second
         // superadmin can commit its own delete of this tenant between that
-        // read and this INSERT. Making the audit the FIRST statement in the
+        // read and this INSERT. Making the audit the FIRST write in the
         // transaction (DB-3) also makes it the statement that DISCOVERS the
         // race: its `organization_id` has no parent left and the FK rejects it.
+        // (The F-40 flag re-check before it reads nothing for a missing org.)
         // Unhandled, that reaches the generic rethrow below and the caller gets
         // a 500 — for a tenant this same handler answers 404 for whenever the
         // row happens to be missing a moment sooner. Flag it so the outer catch
@@ -353,6 +427,17 @@ export const DELETE = withAdminRoute(async function DELETE(
       metadata: { organizationId: id, slug: existing.slug, reason: "organization_in_use" },
     });
     return adminErrorResponse("organization_in_use", 409, request);
+  }
+
+  if (becameDefault) {
+    // Nothing was written: the re-check comes before the transaction's writes.
+    await auditOrgAction("admin.organization.delete_blocked", "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: id,
+      metadata: { organizationId: id, slug: existing.slug, reason: "organization_is_default" },
+    });
+    return adminErrorResponse("organization_is_default", 409, request);
   }
 
   return NextResponse.json({ ok: true });

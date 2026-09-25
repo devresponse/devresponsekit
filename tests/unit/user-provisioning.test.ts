@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as DefaultOrganizationModule from "@/lib/default-organization.server";
+import { NoDefaultOrganizationError } from "@/lib/default-organization.server";
 import { provisionUserFromAuth, reevaluatePendingActivation } from "@/lib/user-provisioning.server";
 
 /**
@@ -13,8 +15,13 @@ import { provisionUserFromAuth, reevaluatePendingActivation } from "@/lib/user-p
  *   - seed users are activated immediately WITHOUT reading policy;
  *   - existing users keep their current status (no privilege escalation
  *     from arbitrary OAuth profile data) and emit `auth.account.linked`;
- *   - a missing organization triggers an insert into
- *     `app_organizations` + `app_provider_organizations`;
+ *   - a missing PROVIDER-keyed organization (GitHub: the verified email
+ *     domain) triggers an insert into `app_organizations` +
+ *     `app_provider_organizations`;
+ *   - F-40: the default-org fallback places the sign-up in the org flagged
+ *     `is_default` (`@/lib/default-organization.server`, stubbed here),
+ *     whatever its slug, and with no default org it refuses before writing
+ *     anything — it never creates a "Default Organization";
  *   - email/password sign-ups are routed to an admin-mapped org for their
  *     email domain (`app_provider_organizations`, provider = 'email');
  *   - `reevaluatePendingActivation` upgrades ONLY `pending_approval` rows,
@@ -45,6 +52,20 @@ vi.mock("@/lib/observability/logger.server", () => ({
   logServerError: (...a: unknown[]) => logErrorMock(...a),
 }));
 
+// F-40: the default org is resolved by `is_default` in its own module; the
+// real `NoDefaultOrganizationError` is kept so the refusal is the real one.
+vi.mock("@/lib/default-organization.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof DefaultOrganizationModule>();
+  return {
+    ...actual,
+    requireDefaultOrganization: async () => {
+      const org = await stubs.defaultOrg();
+      if (!org) throw new actual.NoDefaultOrganizationError();
+      return org;
+    },
+  };
+});
+
 interface PolicyRow {
   organization_id: string | null;
   require_email_verification: boolean;
@@ -54,6 +75,8 @@ interface PolicyRow {
 }
 
 interface Stubs {
+  /** The org flagged `is_default` (F-40), or null when there is none. */
+  defaultOrg: () => Promise<{ id: string; slug: string; name: string; status: string } | null>;
   orgSelect: () => unknown;
   orgInsert?: unknown;
   providerOrgSelect: () => unknown;
@@ -169,6 +192,13 @@ beforeEach(() => {
   insertCalls = [];
   updateCalls = [];
   stubs = {
+    defaultOrg: () =>
+      Promise.resolve({
+        id: "org-default",
+        slug: "default",
+        name: "Default Organization",
+        status: "active",
+      }),
     orgSelect: () => Promise.resolve({ id: "org-default" }),
     providerOrgSelect: () => Promise.resolve(undefined),
     policyRows: () => [DEFAULT_POLICY_ROW],
@@ -266,6 +296,76 @@ describe("provisionUserFromAuth", () => {
     expect(insertCalls.find((c) => c.table === "app_organizations")?.values.slug).toBe(
       "contoso.com",
     );
+  });
+
+  it("F-40: places an unmapped sign-up in the org flagged is_default, whatever its slug", async () => {
+    // The default org was renamed: its slug is no longer `default`. Routing
+    // must follow the flag and never look the default org up by slug.
+    stubs.defaultOrg = () =>
+      Promise.resolve({
+        id: "org-renamed",
+        slug: "acme-renamed",
+        name: "Acme",
+        status: "active",
+      });
+    stubs.orgSelect = () => {
+      throw new Error("the default org must not be looked up by slug");
+    };
+    stubs.policyRows = () => [
+      DEFAULT_POLICY_ROW,
+      {
+        ...DEFAULT_POLICY_ROW,
+        organization_id: "org-renamed",
+        signup_approval_mode: "invite_only",
+      },
+    ];
+
+    for (const provider of ["email", "google"] as const) {
+      insertCalls = [];
+      auditMock.mockReset();
+      const result = await provisionUserFromAuth({
+        betterAuthUserId: `ba-renamed-${provider}`,
+        email: "ada@example.com",
+        emailVerified: true,
+        provider,
+      });
+      expect(result.organizationId).toBe("org-renamed");
+      expect(result.status).toBe("pending_approval");
+      // No org is invented, and the membership lands in the renamed default
+      // under ITS policy (invite_only), not the platform's.
+      expect(insertCalls.some((c) => c.table === "app_organizations")).toBe(false);
+      expect(
+        insertCalls.find((c) => c.table === "app_organization_memberships")?.values,
+      ).toMatchObject({ organization_id: "org-renamed", provider_organization_key: "default" });
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: "org-renamed",
+          metadata: expect.objectContaining({
+            decisionReason: "invite_required",
+            policySource: "organization",
+          }),
+        }),
+      );
+    }
+  });
+
+  it("F-40: with no default org it refuses before writing anything — no 'Default Organization' is created", async () => {
+    stubs.defaultOrg = () => Promise.resolve(null);
+    // What the old slug lookup saw after a rename: no org with slug `default`.
+    stubs.orgSelect = () => Promise.resolve(undefined);
+    stubs.orgInsert = Promise.resolve({ id: "phantom-default" });
+
+    await expect(
+      provisionUserFromAuth({
+        betterAuthUserId: "ba-orphan",
+        email: "ada@example.com",
+        emailVerified: true,
+        provider: "email",
+      }),
+    ).rejects.toBeInstanceOf(NoDefaultOrganizationError);
+    expect(insertCalls).toEqual([]);
+    expect(updateCalls).toEqual([]);
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("activates immediately when the org policy is auto_active", async () => {

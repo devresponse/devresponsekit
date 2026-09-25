@@ -333,7 +333,8 @@
         "saving": "A guardar…",
         "saved": "Funções atualizadas.",
         "noResults": "Não há funções correspondentes.",
-        "errorToast": "Não foi possível atualizar as funções."
+        "errorToast": "Não foi possível atualizar as funções.",
+        "forbidden": "Você só pode adicionar ou remover funções cujas permissões você mesmo possui."
       },
       "members": {
         "columns": {
@@ -673,7 +674,8 @@
       "memberExists": "Este endereço já pertence a um membro ativo.",
       "invitationExists": "Já existe um convite pendente para este endereço.",
       "lastSuperadmin": "Este é o último superadministrador da plataforma; a alteração deixaria a plataforma sem ninguém que possa administrá-la.",
-      "organizationNotActive": "Esta organização não está ativa. Reative-a antes de convidar alguém."
+      "organizationNotActive": "Esta organização não está ativa. Reative-a antes de convidar alguém.",
+      "saveStateUnknown": "Não foi possível recarregar o estado salvo. Recarregue a página antes de fazer mais alterações."
     },
     "roles": {
       "title": "Funções",
@@ -739,7 +741,8 @@
         "saved": "Permissões atualizadas.",
         "noResults": "Não há permissões correspondentes.",
         "empty": "Ainda não há permissões atribuídas.",
-        "errorToast": "Não foi possível atualizar as permissões."
+        "errorToast": "Não foi possível atualizar as permissões.",
+        "forbidden": "Você só pode adicionar ou remover permissões que você mesmo possui."
       },
       "members": {
         "empty": "Ainda nenhum membro tem esta função.",

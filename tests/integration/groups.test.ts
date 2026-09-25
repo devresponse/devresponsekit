@@ -27,6 +27,14 @@ const state: {
   eligibleMembers: Array<{ app_user_id: string }>;
   membership: { id: string } | undefined;
   listExec: unknown[];
+  /**
+   * What the `app_group_roles` write's `RETURNING` reports (F-38): the rows the
+   * insert actually created / the delete actually removed.
+   */
+  groupRolesInserted: { role_id: string }[];
+  groupRolesDeleted: { role_id: string }[];
+  /** Every `.values(...)` payload an insert was given. */
+  insertedValues: unknown[];
 } = {
   group: undefined,
   org: undefined,
@@ -35,6 +43,9 @@ const state: {
   eligibleMembers: [],
   membership: undefined,
   listExec: [],
+  groupRolesInserted: [],
+  groupRolesDeleted: [],
+  insertedValues: [],
 };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
@@ -71,6 +82,8 @@ function firstFor(table: string): unknown {
   return { total: "0", c: "0" };
 }
 function execFor(table: string): unknown[] {
+  if (table === "insert:app_group_roles") return state.groupRolesInserted;
+  if (table === "delete:app_group_roles") return state.groupRolesDeleted;
   if (table === "app_roles") return state.roles;
   // permissionKeysForRoles(...) selects the bundled roles' conferred keys.
   if (table === "app_role_permissions") return state.conferredPermKeys;
@@ -89,6 +102,7 @@ function makeChain(table: string): unknown {
         if (prop === "executeTakeFirstOrThrow") return async () => ({ id: "g-new", key: "new" });
         if (prop === "execute") return async () => execFor(table);
         return (...args: unknown[]) => {
+          if (prop === "values") state.insertedValues.push(args[0]);
           const cb = args[0];
           if (typeof cb === "function") {
             try {
@@ -105,14 +119,19 @@ function makeChain(table: string): unknown {
 }
 /** Tables a handler issued a DELETE against — a refusal must leave this empty. */
 const deletedTables: string[] = [];
+/** The `app_group_roles` writes answer from their own RETURNING fixtures (F-38). */
+function writeChain(kind: "insert" | "delete", t: unknown): unknown {
+  const table = tableKey(t);
+  return makeChain(table === "app_group_roles" ? `${kind}:${table}` : table);
+}
 vi.mock("@/db/database", () => ({
   db: {
     selectFrom: (t: unknown) => makeChain(tableKey(t)),
-    insertInto: (t: unknown) => makeChain(tableKey(t)),
+    insertInto: (t: unknown) => writeChain("insert", t),
     updateTable: (t: unknown) => makeChain(tableKey(t)),
     deleteFrom: (t: unknown) => {
       deletedTables.push(tableKey(t));
-      return makeChain(tableKey(t));
+      return writeChain("delete", t);
     },
   },
 }));
@@ -177,6 +196,9 @@ beforeEach(async () => {
   state.eligibleMembers = [{ app_user_id: USER }];
   state.membership = { id: "m-1" };
   state.listExec = [];
+  state.groupRolesInserted = [];
+  state.groupRolesDeleted = [];
+  state.insertedValues = [];
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   list = await import("@/app/api/administrator/groups/route");
   byId = await import("@/app/api/administrator/groups/[id]/route");
@@ -334,6 +356,62 @@ describe("groups/[id]/roles — same-org + superuser guards", () => {
   });
 });
 
+/**
+ * F-38: `admin.group.roles_changed` records the rows the write's `RETURNING`
+ * reported. POST used to record the requested `roleIds` (an already-bundled
+ * role logged as added again) and DELETE the raw body (duplicates, and roles
+ * the group never bundled, logged as removed). The real Postgres semantics are
+ * pinned in tests/db/dual-list-audit-delta.db.test.ts.
+ */
+describe("groups/[id]/roles — audit records the applied delta (F-38)", () => {
+  const ROLE_2 = "44444444-4444-4444-8444-444444444444";
+
+  function changedMetadata(): Record<string, unknown> {
+    const call = auditMock.mock.calls.find((c) => c[0] === "admin.group.roles_changed");
+    expect(call, "an admin.group.roles_changed row").toBeDefined();
+    return (call![2] as { metadata: Record<string, unknown> }).metadata;
+  }
+
+  it("POST audits only the roles the insert created, not an already-bundled one", async () => {
+    state.roles = [
+      { id: ROLE, organization_id: ORG_A },
+      { id: ROLE_2, organization_id: ORG_A },
+    ];
+    state.groupRolesInserted = [{ role_id: ROLE_2 }]; // ROLE was already bundled
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await roles.POST(
+      req(`groups/${GROUP}/roles`, { method: "POST", body: { roleIds: [ROLE, ROLE_2] } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(changedMetadata()).toEqual({ groupId: GROUP, key: "marketing", added: [ROLE_2] });
+  });
+
+  it("DELETE audits only the roles the delete removed — no duplicates, no never-bundled role", async () => {
+    state.groupRolesDeleted = [{ role_id: ROLE }]; // ROLE_2 was never bundled
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await roles.DELETE(
+      req(`groups/${GROUP}/roles`, {
+        method: "DELETE",
+        body: { roleIds: [ROLE, ROLE, ROLE_2] },
+      }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(changedMetadata()).toEqual({ groupId: GROUP, key: "marketing", removed: [ROLE] });
+  });
+
+  it("a request that changes nothing is still audited, with an empty delta", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await roles.DELETE(
+      req(`groups/${GROUP}/roles`, { method: "DELETE", body: { roleIds: [ROLE_2] } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(200);
+    expect(changedMetadata()).toMatchObject({ removed: [] });
+  });
+});
+
 describe("groups/[id]/members — org-membership constraint", () => {
   it("adds an eligible org member (200)", async () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
@@ -452,13 +530,17 @@ describe("groups/[id] body-id validation (review #70)", () => {
 
   // The DB returns one row per DISTINCT id, so the pre-#70 length compare
   // turned a duplicated (but real) role id into a false role_not_found 404.
-  it("roles POST accepts a duplicated role id (no false 404) and audits it once", async () => {
+  it("roles POST accepts a duplicated role id (no false 404), inserts and audits it once", async () => {
+    state.groupRolesInserted = [{ role_id: ROLE }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     const res = await roles.POST(
       req(`groups/${GROUP}/roles`, { method: "POST", body: { roleIds: [ROLE, ROLE] } }),
       groupCtx,
     );
     expect(res.status).toBe(200);
+    expect(state.insertedValues).toEqual([
+      [{ group_id: GROUP, role_id: ROLE, organization_id: ORG_A }],
+    ]);
     expect(auditMock).toHaveBeenCalledWith(
       "admin.group.roles_changed",
       "success",

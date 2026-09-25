@@ -65,9 +65,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
 });
 
 /**
- * POST/DELETE body shared schema. The dual-list editor sends two
- * atomic mutations (one POST for `toAdd`, one DELETE for `toRemove`)
- * per the Phase-4 spec; both endpoints accept the same `{ ids }` body.
+ * POST/DELETE body shared schema. The dual-list editor saves through both
+ * (one POST for `toAdd`, THEN one DELETE for `toRemove`); both endpoints
+ * accept the same `{ ids }` body. Each write is atomic on its own, but the
+ * pair is not — see `src/lib/admin/dual-list-save.client.ts` for how the
+ * editor keeps a half-applied save visible (F-38).
  *
  * `ids` are permission keys (not row UUIDs) — the editor works in the
  * domain language of "admin.users.read" rather than opaque ids.
@@ -94,6 +96,25 @@ async function currentPermissionKeys(roleId: string): Promise<string[]> {
     .where("rp.role_id", "=", roleId)
     .execute();
   return rows.map((r) => r.key);
+}
+
+/**
+ * F-38: the keys of the rows a write ACTUALLY touched, as its `RETURNING`
+ * reported them, for the audit row's `added` / `removed`. Before this the
+ * audit named the keys the body asked for: a re-POST of an attached key
+ * logged it as added again, and a DELETE naming a never-attached key logged
+ * it as removed although the route's own contract calls that a no-op. Every
+ * returned id came out of `resolved`, so the lookup always hits.
+ */
+function appliedKeys(
+  rows: ReadonlyArray<{ permission_id: string }>,
+  resolved: ReadonlyArray<{ id: string; key: string }>,
+): string[] {
+  const keyById = new Map(resolved.map((p) => [p.id, p.key]));
+  return rows
+    .map((r) => keyById.get(r.permission_id))
+    .filter((key): key is string => key !== undefined)
+    .sort();
 }
 
 /**
@@ -162,18 +183,28 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     .execute();
   const resolved = permRows.map((r) => ({ id: r.id, key: r.key }));
 
+  let added: string[] = [];
   if (resolved.length > 0) {
-    await db.transaction().execute(async (trx) => {
-      await trx
+    // `ON CONFLICT DO NOTHING ... RETURNING` yields only the rows this insert
+    // created, so a key the role already carried is not reported as added
+    // (F-38).
+    const inserted = await db.transaction().execute((trx) =>
+      trx
         .insertInto("app_role_permissions")
         .values(resolved.map((p) => ({ role_id: id, permission_id: p.id })))
         .onConflict((oc) => oc.doNothing())
-        .execute();
-    });
+        .returning("permission_id")
+        .execute(),
+    );
+    added = appliedKeys(inserted, resolved);
   }
 
   const finalKeys = await currentPermissionKeys(id);
 
+  // F-38: a request that changed nothing (every key already attached) is still
+  // audited, with an empty `added`: the row records that the actor asked and
+  // what the role holds afterwards, and every 200 from this route keeps
+  // leaving exactly one row.
   await auditRoleAction("admin.role.permissions_changed", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
@@ -181,7 +212,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     metadata: {
       roleId: id,
       key: role.key,
-      added: resolved.map((r) => r.key).sort(),
+      added,
       removed: [],
       resulting: finalKeys,
     },
@@ -276,12 +307,16 @@ export const DELETE = withAdminRoute(async function DELETE(
   // it removes nothing. The check shares the deleting transaction and its row
   // lock (see `activeGlobalSuperuserGrants`).
   const strippingSuperuser = resolved.some((r) => r.key === SUPERADMIN_PERMISSION);
+  let removed: string[] = [];
   if (resolved.length > 0) {
     const outcome = await db.transaction().execute(async (trx) => {
       if (strippingSuperuser && (await wouldStripLastGlobalSuperuser({ roleIds: [id] }, trx))) {
         return "last_superadmin" as const;
       }
-      await trx
+      // `RETURNING` names only the rows this delete removed: a key the role
+      // never carried is a no-op here and must not be audited as removed
+      // (F-38).
+      return trx
         .deleteFrom("app_role_permissions")
         .where("role_id", "=", id)
         .where(
@@ -289,8 +324,8 @@ export const DELETE = withAdminRoute(async function DELETE(
           "in",
           resolved.map((r) => r.id),
         )
+        .returning("permission_id")
         .execute();
-      return "detached" as const;
     });
 
     if (outcome === "last_superadmin") {
@@ -311,10 +346,13 @@ export const DELETE = withAdminRoute(async function DELETE(
         requestId: guard.requestId,
       });
     }
+    removed = appliedKeys(outcome, resolved);
   }
 
   const finalKeys = await currentPermissionKeys(id);
 
+  // Audited even when nothing was attached to remove (`removed: []`), for the
+  // same reason as POST (F-38).
   await auditRoleAction("admin.role.permissions_changed", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
@@ -323,7 +361,7 @@ export const DELETE = withAdminRoute(async function DELETE(
       roleId: id,
       key: role.key,
       added: [],
-      removed: resolved.map((r) => r.key).sort(),
+      removed,
       resulting: finalKeys,
     },
   });

@@ -6,16 +6,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  useDualListSave,
+  type DualListEndpoint,
+  type DualListSaveError,
+} from "@/lib/admin/dual-list-save.client";
 
 /**
  * Dual-list ROLES editor for a group (ADR-0002).
  *
  * Left column = roles available in the org (the org's role catalog minus the
  * ones already bundled). Right column = roles the group currently confers.
- * `Save` diffs against the server's known set and dispatches one
- * POST `{ roleIds: toAdd }` and one DELETE `{ roleIds: toRemove }` against
- * `/api/administrator/groups/[id]/roles`. The server rejects a foreign/global
- * role (404) and a `superuser`-granting role for a non-superadmin (403).
+ * `Save` diffs against the server's known set and goes through the shared
+ * dual-list save (`useDualListSave`, F-38): one POST `{ roleIds: toAdd }`,
+ * THEN one DELETE `{ roleIds: toRemove }` against
+ * `/api/administrator/groups/[id]/roles` (additions first, so swapping the
+ * role that confers the admin's own authority cannot strand the group empty),
+ * then a re-read of the group's roles that resets both the baseline and the
+ * lists, after a failure too. The server rejects a foreign/global role (404)
+ * and, in either direction, a role conferring a permission a non-superadmin
+ * does not hold (403, AUTHZ-3 / REVOKE-1).
  */
 interface RoleOption {
   id: string;
@@ -48,10 +58,22 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
   const [assignedQ, setAssignedQ] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   // The group's organization id, fetched from the API (not passed as a prop) so
   // the editor is self-contained and the scope can never go stale.
   const [orgId, setOrgId] = useState<string | null>(null);
+
+  const endpoint = useMemo<DualListEndpoint>(
+    () => ({
+      url: `/api/administrator/groups/${groupId}/roles`,
+      bodyKey: "roleIds",
+      readAssigned: (body) => (body as { roles: Array<{ id: string }> }).roles.map((r) => r.id),
+    }),
+    [groupId],
+  );
+  const { saving, stale, save } = useDualListSave(endpoint);
+  // Nothing may move while a save is in flight (its re-read would overwrite
+  // the move) or once the server's set is unknown.
+  const locked = !canAssign || saving || stale;
 
   // Load the group's org + currently-assigned roles, then the org-scoped role
   // catalog. The org id comes from the group-detail endpoint (a live request),
@@ -169,50 +191,28 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
   const onSave = useCallback(async () => {
     setError(null);
     setInfo(null);
-    setSaving(true);
-    try {
-      if (diff.toAdd.length > 0) {
-        const res = await fetch(`/api/administrator/groups/${groupId}/roles`, {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ roleIds: diff.toAdd }),
-        });
-        if (!res.ok) {
-          setError(res.status === 403 ? tErr("forbidden") : t("errorToast"));
-          return;
-        }
-      }
-      if (diff.toRemove.length > 0) {
-        const res = await fetch(`/api/administrator/groups/${groupId}/roles`, {
-          method: "DELETE",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ roleIds: diff.toRemove }),
-        });
-        if (!res.ok) {
-          setError(t("errorToast"));
-          return;
-        }
-      }
-      const fresh = await fetch(`/api/administrator/groups/${groupId}/roles`, {
-        credentials: "same-origin",
-      });
-      if (fresh.ok) {
-        const body = (await fresh.json()) as { roles: Array<{ id: string }> };
-        const ids = body.roles.map((r) => r.id).sort();
-        setAssigned(ids);
-        setServerAssigned(ids);
-      } else {
-        setServerAssigned([...assigned].sort());
-      }
-      setInfo(t("saved"));
-    } catch {
-      setError(t("errorToast"));
-    } finally {
-      setSaving(false);
+    const result = await save(serverAssigned, assigned);
+    if (!result) return;
+    if (result.synced) {
+      setAssigned(result.synced);
+      setServerAssigned(result.synced);
+      setAvailableSelected([]);
+      setAssignedSelected([]);
     }
-  }, [groupId, diff, assigned, t, tErr]);
+    if (result.error === null) {
+      setInfo(t("saved"));
+      return;
+    }
+    // The group routes never answer 409 `last_superadmin` (REVOKE-2 counts
+    // direct assignments only, docs/admin-manager.md §8.6), but the shared
+    // classification is total, so the message is mapped anyway.
+    const messages: Record<DualListSaveError, string> = {
+      forbidden: t("forbidden"),
+      lastSuperadmin: tErr("lastSuperadmin"),
+      failed: t("errorToast"),
+    };
+    setError(messages[result.error]);
+  }, [save, serverAssigned, assigned, t, tErr]);
 
   if (!catalog) {
     // A failed initial load sets `error` but leaves the catalog null; surface
@@ -236,9 +236,10 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
   return (
     <div className="space-y-3">
       {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
+        <div className="text-destructive space-y-1 text-sm" role="alert">
+          <p>{error}</p>
+          {stale ? <p>{tErr("saveStateUnknown")}</p> : null}
+        </div>
       ) : null}
       {info ? (
         <p className="text-success text-sm" role="status">
@@ -258,7 +259,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
           onSelectedChange={setAvailableSelected}
           q={availableQ}
           onQChange={setAvailableQ}
-          disabled={!canAssign}
+          disabled={locked}
         />
         <Column
           titleKey="assigned"
@@ -271,7 +272,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
           onSelectedChange={setAssignedSelected}
           q={assignedQ}
           onQChange={setAssignedQ}
-          disabled={!canAssign}
+          disabled={locked}
         />
       </div>
 
@@ -281,7 +282,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
           variant="outline"
           size="sm"
           onClick={moveToAssigned}
-          disabled={!canAssign || availableSelected.length === 0}
+          disabled={locked || availableSelected.length === 0}
         >
           {t("add")}
         </Button>
@@ -290,12 +291,12 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
           variant="outline"
           size="sm"
           onClick={moveToAvailable}
-          disabled={!canAssign || assignedSelected.length === 0}
+          disabled={locked || assignedSelected.length === 0}
         >
           {t("remove")}
         </Button>
         <div className="flex-1" />
-        <Button type="button" size="sm" onClick={onSave} disabled={!canAssign || saving || !dirty}>
+        <Button type="button" size="sm" onClick={onSave} disabled={locked || !dirty}>
           {saving ? t("saving") : t("save")}
         </Button>
       </div>

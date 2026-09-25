@@ -333,7 +333,8 @@
         "saving": "Enregistrement…",
         "saved": "Rôles mis à jour.",
         "noResults": "Aucun rôle correspondant.",
-        "errorToast": "Impossible de mettre à jour les rôles."
+        "errorToast": "Impossible de mettre à jour les rôles.",
+        "forbidden": "Vous ne pouvez ajouter ou retirer que des rôles dont vous détenez vous-même les permissions."
       },
       "members": {
         "columns": {
@@ -673,7 +674,8 @@
       "memberExists": "Cette adresse appartient déjà à un membre actif.",
       "invitationExists": "Une invitation en attente existe déjà pour cette adresse.",
       "lastSuperadmin": "Il s'agit du dernier super-administrateur de la plateforme ; cette modification ne laisserait personne pour l'administrer.",
-      "organizationNotActive": "Cette organisation n'est pas active. Réactivez-la avant d'inviter quiconque."
+      "organizationNotActive": "Cette organisation n'est pas active. Réactivez-la avant d'inviter quiconque.",
+      "saveStateUnknown": "Impossible de recharger l'état enregistré. Rechargez la page avant d'apporter d'autres modifications."
     },
     "roles": {
       "title": "Rôles",
@@ -739,7 +741,8 @@
         "saved": "Permissions mises à jour.",
         "noResults": "Aucune permission correspondante.",
         "empty": "Aucune permission attribuée pour le moment.",
-        "errorToast": "Impossible de mettre à jour les permissions."
+        "errorToast": "Impossible de mettre à jour les permissions.",
+        "forbidden": "Vous ne pouvez ajouter ou retirer que des permissions que vous détenez vous-même."
       },
       "members": {
         "empty": "Aucun membre n'a encore ce rôle.",

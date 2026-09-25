@@ -122,7 +122,8 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // Review #70: dedupe BEFORE the count compare. The DB returns one row per
   // distinct id, so `["r1","r1"]` used to yield 1 row against a length of 2
   // and produced a false `role_not_found` 404 for a body that names only
-  // real roles. The deduped list is also what we insert and audit.
+  // real roles. The deduped list is also what we insert (the audit records
+  // what the insert returned, F-38).
   const roleIds = [...new Set(parsed.data.roleIds)];
 
   // Every requested role must exist AND belong to the group's own org.
@@ -153,7 +154,11 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // Review #218: the row carries the org of both ends; the composite FKs
   // (migration 0005) reject a role from any other org even if the same-org
   // check above were bypassed.
-  await db
+  // F-38: `ON CONFLICT DO NOTHING ... RETURNING` yields only the rows this
+  // insert created, and that — not the requested `roleIds` — is what the
+  // audit records, so re-bundling a role the group already confers is not
+  // logged as a new grant.
+  const inserted = await db
     .insertInto("app_group_roles")
     .values(
       roleIds.map((roleId) => ({
@@ -163,13 +168,16 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       })),
     )
     .onConflict((oc) => oc.doNothing())
+    .returning("role_id")
     .execute();
 
+  // A request that bundled nothing new is still audited (`added: []`): every
+  // 200 from this route leaves exactly one row recording the attempt.
   await auditOrgAction("admin.group.roles_changed", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     organizationId: group.organization_id,
-    metadata: { groupId: id, key: group.key, added: roleIds },
+    metadata: { groupId: id, key: group.key, added: inserted.map((r) => r.role_id).sort() },
   });
 
   return NextResponse.json({ ok: true, roleIds: await currentRoleIds(id) });
@@ -235,17 +243,21 @@ export const DELETE = withAdminRoute(async function DELETE(
     if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
   }
 
-  await db
+  // F-38: the audit used to record `parsed.data.roleIds` verbatim — duplicates
+  // included, and roles the group never bundled (a no-op here) reported as
+  // removed. `RETURNING` names exactly the rows this delete took away.
+  const deleted = await db
     .deleteFrom("app_group_roles")
     .where("group_id", "=", id)
     .where("role_id", "in", parsed.data.roleIds)
+    .returning("role_id")
     .execute();
 
   await auditOrgAction("admin.group.roles_changed", "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     organizationId: group.organization_id,
-    metadata: { groupId: id, key: group.key, removed: parsed.data.roleIds },
+    metadata: { groupId: id, key: group.key, removed: deleted.map((r) => r.role_id).sort() },
   });
 
   return NextResponse.json({ ok: true, roleIds: await currentRoleIds(id) });

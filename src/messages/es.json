@@ -333,7 +333,8 @@
         "saving": "Guardando…",
         "saved": "Roles actualizados.",
         "noResults": "No hay roles coincidentes.",
-        "errorToast": "No se pudieron actualizar los roles."
+        "errorToast": "No se pudieron actualizar los roles.",
+        "forbidden": "Solo puede añadir o quitar roles cuyos permisos usted mismo tenga."
       },
       "members": {
         "columns": {
@@ -673,7 +674,8 @@
       "memberExists": "Esta dirección ya pertenece a un miembro activo.",
       "invitationExists": "Ya existe una invitación pendiente para esta dirección.",
       "lastSuperadmin": "Es el último superadministrador de la plataforma; el cambio dejaría la plataforma sin nadie que pueda administrarla.",
-      "organizationNotActive": "Esta organización no está activa. Reactívela antes de invitar a nadie."
+      "organizationNotActive": "Esta organización no está activa. Reactívela antes de invitar a nadie.",
+      "saveStateUnknown": "No se pudo volver a cargar el estado guardado. Recargue la página antes de hacer más cambios."
     },
     "roles": {
       "title": "Roles",
@@ -739,7 +741,8 @@
         "saved": "Permisos actualizados.",
         "noResults": "No hay permisos coincidentes.",
         "empty": "Aún no hay permisos asignados.",
-        "errorToast": "No se pudieron actualizar los permisos."
+        "errorToast": "No se pudieron actualizar los permisos.",
+        "forbidden": "Solo puede añadir o quitar permisos que usted mismo tenga."
       },
       "members": {
         "empty": "Ningún miembro tiene este rol todavía.",

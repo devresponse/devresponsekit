@@ -333,7 +333,8 @@
         "saving": "Saving…",
         "saved": "Roles updated.",
         "noResults": "No matching roles.",
-        "errorToast": "Could not update roles."
+        "errorToast": "Could not update roles.",
+        "forbidden": "You can only add or remove roles whose permissions you hold yourself."
       },
       "members": {
         "columns": {
@@ -673,7 +674,8 @@
       "memberExists": "This address already belongs to an active member.",
       "invitationExists": "A pending invitation for this address already exists.",
       "lastSuperadmin": "This is the last platform superadmin; the change would leave nobody able to administer the platform.",
-      "organizationNotActive": "This organization is not active. Reactivate it before inviting anyone."
+      "organizationNotActive": "This organization is not active. Reactivate it before inviting anyone.",
+      "saveStateUnknown": "The saved state could not be reloaded. Reload the page before making more changes."
     },
     "roles": {
       "title": "Roles",
@@ -739,7 +741,8 @@
         "saved": "Permissions updated.",
         "noResults": "No matching permissions.",
         "empty": "No permissions assigned yet.",
-        "errorToast": "Could not update permissions."
+        "errorToast": "Could not update permissions.",
+        "forbidden": "You can only add or remove permissions you hold yourself."
       },
       "members": {
         "empty": "No members carry this role yet.",

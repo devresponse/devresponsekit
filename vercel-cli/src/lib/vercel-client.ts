@@ -14,6 +14,12 @@ import { CliError } from "./log.js";
 export interface ProjectSummary {
   id: string;
   name: string;
+  /**
+   * The project's owner: a team id, or a personal account's own id. It is
+   * what the Vercel CLI wants in VERCEL_ORG_ID (F-48). Null only if the API
+   * left it out.
+   */
+  accountId: string | null;
   framework: string | null;
   /** Production alias(es), when Vercel reports them. */
   aliases: string[];
@@ -67,6 +73,7 @@ export class VercelClient {
       const project = (await this.sdk.projects.getProject(this.scope({ idOrName }))) as {
         id: string;
         name: string;
+        accountId?: string;
         framework?: string | null;
         alias?: Array<{ domain?: string }> | undefined;
         targets?: { production?: { alias?: string[] } };
@@ -78,6 +85,7 @@ export class VercelClient {
       return {
         id: project.id,
         name: project.name,
+        accountId: project.accountId || null,
         framework: project.framework ?? null,
         aliases: [...new Set(aliases)],
       };
@@ -100,8 +108,14 @@ export class VercelClient {
         this.scope({ requestBody: { name, framework } }) as Parameters<
           Vercel["projects"]["createProject"]
         >[0],
-      )) as { id: string; name: string; framework?: string | null };
-      return { id: created.id, name: created.name, framework: created.framework ?? null, aliases: [] };
+      )) as { id: string; name: string; accountId?: string; framework?: string | null };
+      return {
+        id: created.id,
+        name: created.name,
+        accountId: created.accountId || null,
+        framework: created.framework ?? null,
+        aliases: [],
+      };
     } catch (err) {
       throw asCliError(err, `Could not create project \`${name}\``);
     }

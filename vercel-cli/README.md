@@ -95,6 +95,12 @@ the DIRECT connection string of the same database, is what migrations run agains
 locally and never written to Vercel. `DATABASE_URL` is never used for migrations, from the file or
 the shell (F-47). Anything the CLI _can_ generate (signing keys, cron tokens) it generates.
 
+A team and a personal account are set up the same way. Pass `--team <team_id>` only for a project
+a team owns. Either way `init` reads the project's owner from the project itself (its `accountId`:
+the team's id, or the personal account's own id) and records it as `orgId`. The Vercel CLI takes its
+project from the environment only as the pair `VERCEL_ORG_ID` + `VERCEL_PROJECT_ID`, and refuses one
+without the other (F-48).
+
 ### A satellite
 
 ```cmd
@@ -201,6 +207,21 @@ The pulled file, `.vercel/.env.production.local`, holds production's secrets in 
 deleted before the pull (`vercel pull` keeps a stale copy's local values, so an old file could vouch
 for the wrong database) and again when the run ends, successful or not. The kit's `.gitignore`
 ignores `.vercel/` as well. A `--dry-run` pulls nothing, so it checks nothing, and says so.
+
+**`vercel` acts on the recorded project, and only that one (F-48).** Every `vercel link`, `pull`,
+`build` and `deploy` is handed `VERCEL_ORG_ID` together with `VERCEL_PROJECT_ID`, both from
+`.drk-deploy.json`, or neither. The Vercel CLI exits 1 on one without the other, and this CLI used to
+set the project id without the owner for a personal account, so every deploy from one failed at
+`vercel pull`. With neither set, `vercel` reads the checkout's `.vercel/project.json`, so that file is
+checked against the config before anything runs and again after `vercel link` writes it. A checkout
+linked to another project is refused, never re-linked over: the two disagree because one of them is
+wrong, and a satellite checkout linked to the kit's project would otherwise build and promote into
+it. Delete the file if the config is right, or re-run `init` if the checkout is. The shell's
+`VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (and the legacy `NOW_ORG_ID` / `NOW_PROJECT_ID`, in any
+casing) are never passed to `vercel`. One that names another project or owner than the config is
+refused before anything runs, `env:sync` included, because whoever exported it meant that project.
+Only a name `vercel` would read is checked: any casing on Windows, where a variable's name has none,
+and the exact name elsewhere. `doctor` reports the same refusal.
 
 **A pooled connection string is refused.** Migrations need the _direct_ endpoint: DDL and the
 advisory lock the migration runner takes do not survive a transaction pooler, and the failure is
@@ -372,6 +393,19 @@ delete it — nothing reads it.
 
 ## Upgrading
 
+### F-48: the project's owner is recorded
+
+A config that an earlier `init` wrote for a personal account has no `orgId`. It still deploys:
+`vercel` then finds the project through the checkout's `.vercel/project.json`, which is checked
+against the config, and each run says so. Re-run `drk-deploy init --yes` once to record the owner. It
+reads the project again and keeps every other recorded setting. A team config needs nothing: its
+`teamId` is its owner.
+
+If you exported `VERCEL_ORG_ID` to get past the old `vercel pull` failure, unset it. It is no longer
+passed on, and once the owner is recorded a value that differs from it is refused. A CI job that
+exports `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` keeps working as long as they name the recorded
+project.
+
 ### F-47: the migration URL is named and checked against production
 
 `deploy`, `up` and `migrate` no longer fall back to `DIRECT_DATABASE_URL` or `DATABASE_URL`. If a
@@ -467,6 +501,9 @@ Set `VERCEL_TOKEN` and it takes precedence over any saved credential:
     PRODUCTION_DIRECT_DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
 ```
 
+`VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` are not needed: the project comes from `.drk-deploy.json`. A
+job that exports them anyway must name that project, or the run is refused (F-48).
+
 If this becomes the deployment path, turn off Vercel's automatic production deploys for the
 project — otherwise a push promotes a build before this has migrated anything, which is the exact
 race the ordering above exists to prevent.
@@ -490,7 +527,10 @@ rules — the migration policy, the config sanity checks — so they can be asse
 `src/lib/env-spec.ts` is the environment contract for both targets, and the one to edit when the
 kit's `src/lib/env.ts` or a satellite's changes. `src/lib/env-presence.ts` decides what counts as set
 for a target and what is wrong with a stored value; every command that asks goes through it.
-`src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/commands/` is one file per command group.
+`src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/lib/vercel-project.ts` builds the environment
+of every `vercel` child and checks the checkout's `.vercel/project.json` (F-48): nothing else sets
+`VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`, and `test/release.test.ts` asserts that from the source.
+`src/commands/` is one file per command group.
 `test/env-presence.test.ts` runs `env:check`, `env:sync` and the `deploy` preflight for real against a
 fake Vercel API (`fetch` is replaced), so those tests never reach Vercel either.
 

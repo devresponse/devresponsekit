@@ -24,6 +24,7 @@ import {
   verifyMigrationTarget,
 } from "../lib/migration-target.js";
 import { type DeploymentProfile, describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
+import { assertCheckoutLink, projectLinkFile, vercelEnvFor } from "../lib/vercel-project.js";
 import { envCheck, envSync, parseEnvFile, reportContainment } from "./env.js";
 
 // Kept importable from here, where it lived before F-47 moved it next to the
@@ -335,7 +336,14 @@ export interface VercelInvocation {
   vercelJs: string;
   config: ProjectConfig;
   root: string;
-  env: Record<string, string>;
+  /**
+   * From `vercelEnvFor`, the only place it is built (F-48): the token, and
+   * VERCEL_ORG_ID with VERCEL_PROJECT_ID, both or neither. `undefined`
+   * removes the shell's copy from the child.
+   */
+  env: Record<string, string | undefined>;
+  /** The owner `env` names, or null when the checkout's `.vercel/project.json` decides. */
+  orgId: string | null;
 }
 
 /**
@@ -362,7 +370,10 @@ export interface ReleaseRunner {
   envSync: typeof envSync;
   /** `drk-deploy env:check`, the preflight: the number of problems found. */
   envCheck: typeof envCheck;
-  /** `vercel link`, when the checkout has no `.vercel/project.json` yet. */
+  /**
+   * `vercel link`, when the checkout has no `.vercel/project.json` yet. What
+   * it links is checked against the config before `pull` runs (F-48).
+   */
   link(vercel: VercelInvocation): Promise<void>;
   /**
    * `vercel pull`: production's variables and project settings, written to
@@ -391,7 +402,11 @@ export const releaseRunner: ReleaseRunner = {
   verify,
 };
 
-/** Runs the pinned Vercel CLI in the deployed checkout. A non-zero exit throws. */
+/**
+ * Runs the pinned Vercel CLI in the deployed checkout. A non-zero exit throws.
+ * The one place a `vercel` child is spawned, always with the invocation's
+ * `env` (F-48).
+ */
 async function runVercel(
   { vercelJs, root, env }: VercelInvocation,
   args: string[],
@@ -402,7 +417,12 @@ async function runVercel(
 
 /**
  * The Vercel CLI invocation for this deployment: the pinned entry point, the
- * checkout, and the token.
+ * checkout, and the environment `vercelEnvFor` builds for it.
+ *
+ * Everything that would send a `vercel` child to the wrong project is refused
+ * here, before any step runs (F-48): a shell VERCEL_PROJECT_ID or
+ * VERCEL_ORG_ID that disagrees with the config, and a checkout already linked
+ * to another project.
  */
 function vercelInvocation(
   cliRoot: string,
@@ -422,14 +442,21 @@ function vercelInvocation(
           : "Re-run `drk-deploy init --kit-root <path-to-the-kit-checkout>`.",
     });
   }
-  // The token travels in the environment, never in argv: an argument list is
-  // visible to other processes and lands in shell history.
-  const env = {
-    VERCEL_TOKEN: token,
-    ...(config.teamId ? { VERCEL_ORG_ID: config.teamId } : {}),
-    VERCEL_PROJECT_ID: config.projectId,
-  };
-  return { vercelJs, config, root, env };
+  const { env, orgId, ignored } = vercelEnvFor(config, token);
+  for (const key of ignored) {
+    warn(
+      `${key} is set in the shell and NOT passed to vercel: this config records no project owner to check it against.`,
+    );
+  }
+  if (!orgId) {
+    // Still deployable: `vercel` then reads the checkout's link, which is
+    // checked against the config before and after `vercel link` runs.
+    warn(
+      "This config records no project owner (written before F-48), so .vercel/project.json picks the project. Re-run `drk-deploy init` to record it.",
+    );
+  }
+  assertCheckoutLink(root, config, { required: false });
+  return { vercelJs, config, root, env, orgId };
 }
 
 /**
@@ -457,6 +484,11 @@ export function pulledEnvFile(root: string): string {
  * could therefore vouch for a database production no longer reads (F-47).
  * Production's variables are read only on demand, so a run with no migration
  * step never parses them.
+ *
+ * What `link` linked is checked before `pull` (F-48). With no owner recorded,
+ * the link file is the only thing naming the project for `pull`, `build` and
+ * `deploy`, so it must exist and name the configured project. A link that went
+ * wrong stops the run here, before anything is pulled or migrated.
  */
 async function withProductionEnv(
   vercel: VercelInvocation,
@@ -465,6 +497,7 @@ async function withProductionEnv(
 ): Promise<void> {
   heading("Production settings");
   await runner.link(vercel);
+  assertCheckoutLink(vercel.root, vercel.config, { required: vercel.orgId === null });
   const file = pulledEnvFile(vercel.root);
   rmSync(file, { force: true });
   try {
@@ -512,14 +545,20 @@ export async function deploy(
     yes?: boolean;
   },
   runner: ReleaseRunner = releaseRunner,
+  /** Built, and so checked, by `up` before env:sync writes anything (F-48). */
+  prepared?: VercelInvocation,
 ): Promise<void> {
   const config = requireConfig(cliRoot);
   const profile = resolveProfile(config);
-  const vercel = vercelInvocation(cliRoot, config, profile);
+  const vercel = prepared ?? vercelInvocation(cliRoot, config, profile);
 
   heading("Preflight");
   field("target", describeProfile(profile));
   field("checkout", vercel.root);
+  field(
+    "vercel project",
+    `${config.projectId} ${dim(vercel.orgId ? `(owner ${vercel.orgId})` : "(no owner recorded: .vercel/project.json decides, checked)")}`,
+  );
   if (options.skipChecks) {
     warn("--skip-checks: the environment contract was not verified.");
     // `env:check` is what prints the containment warning (F-24), and `up`
@@ -581,29 +620,32 @@ export async function deploy(
 }
 
 /**
- * `vercel pull/build/deploy` need to know which project they are acting on.
- * Linking writes `.vercel/project.json` in the checkout being deployed, which
- * works for a personal account as well as a team (VERCEL_ORG_ID alone does
- * not, because a personal account's org id is the user id, which this CLI
- * never asks for).
+ * Links the deployed checkout to the configured project, writing
+ * `.vercel/project.json`, unless it is linked already.
+ *
+ * `vercel build` reads the project's settings from that file. With an owner
+ * recorded, VERCEL_ORG_ID and VERCEL_PROJECT_ID name the project for every
+ * step. Without one (a personal-account config written before F-48), the file
+ * is what names it, so what this writes is checked before `pull` runs. An
+ * existing file was checked before anything ran (`vercelInvocation`).
  *
  * `root` is the deployed checkout — the kit, or a satellite's own app folder.
  * Each satellite is its own Vercel project, so each gets its own link file and
  * they cannot be confused for one another.
  */
-async function ensureLinked({ vercelJs, config, root, env }: VercelInvocation): Promise<void> {
-  if (existsSync(join(root, ".vercel", "project.json"))) return;
+async function ensureLinked(vercel: VercelInvocation): Promise<void> {
+  if (existsSync(projectLinkFile(vercel.root))) return;
   step("Linking the checkout to the Vercel project");
-  await runOrThrow(
-    process.execPath,
+  const { config } = vercel;
+  await runVercel(
+    vercel,
     [
-      vercelJs,
       "link",
       "--yes",
       `--project=${config.projectId}`,
       ...(config.teamId ? [`--scope=${config.teamId}`] : []),
     ],
-    { cwd: root, env, failureMessage: "vercel link failed" },
+    "vercel link failed",
   );
 }
 
@@ -719,7 +761,8 @@ export async function up(
   options: MigrationOptions & { dryRun?: boolean; yes?: boolean },
   runner: ReleaseRunner = releaseRunner,
 ): Promise<void> {
-  const profile = resolveProfile(requireConfig(cliRoot));
+  const config = requireConfig(cliRoot);
+  const profile = resolveProfile(config);
   const migrates = migrationPolicy(profile).allowed;
 
   heading(profile.kind === "satellite" ? "Deploy a satellite to Vercel" : "Deploy devresponsekit to Vercel");
@@ -732,6 +775,9 @@ export async function up(
   // Before env:sync writes anything to the project: a run that has no
   // migration URL, or a pooled one, stops with production untouched (F-47).
   if (migrates) resolveMigrationUrl({ ...options, satellite: profile.kind === "satellite" });
+  // Likewise a shell naming another Vercel project, or a checkout linked to
+  // one (F-48).
+  const vercel = vercelInvocation(cliRoot, config, profile);
 
   await runner.envSync(cliRoot, {
     ...(options.fromEnv !== undefined ? { fromEnv: options.fromEnv } : {}),
@@ -742,7 +788,7 @@ export async function up(
 
   // --from-env is passed on: it can name the migration URL
   // (PRODUCTION_DIRECT_DATABASE_URL) as well as the values env:sync writes.
-  await deploy(cliRoot, { ...options, skipChecks: true }, runner); // env:sync just ran; checking again would only repeat itself
+  await deploy(cliRoot, { ...options, skipChecks: true }, runner, vercel); // env:sync just ran; checking again would only repeat itself
 }
 
 /** `drk-deploy status` — a short answer to "what is deployed, and is it well?". */

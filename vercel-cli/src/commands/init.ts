@@ -196,6 +196,10 @@ export async function init(cliRoot: string, options: InitOptions): Promise<void>
     ...(satellite ? { target: "satellite" as const, satellite } : {}),
     projectId: project.id,
     ...(teamId ? { teamId } : {}),
+    // The owner as the project itself reports it, never inherited: every
+    // `vercel` child gets VERCEL_PROJECT_ID only together with it, and a
+    // personal account has no --team to fall back on (F-48).
+    ...(project.accountId ? { orgId: project.accountId } : {}),
     origin,
     appName: options.appName ?? existing?.appName ?? project.name,
     audiencePrefix: options.audiencePrefix ?? existing?.audiencePrefix ?? "devresponse-app",
@@ -216,6 +220,10 @@ export async function init(cliRoot: string, options: InitOptions): Promise<void>
   field("target", describeProfile(profile));
   field("project", `${project.name} ${dim(config.projectId)}`);
   field("team", config.teamId ?? dim("(personal account)"));
+  field(
+    "owner",
+    config.orgId ?? dim("(not reported by Vercel: the checkout's .vercel/project.json will decide)"),
+  );
   field("origin", config.origin);
   field("application id", config.applicationId);
   if (satellite) {

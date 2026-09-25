@@ -12,6 +12,7 @@ import {
   satelliteConfigProblems,
 } from "../lib/target.js";
 import { VercelClient } from "../lib/vercel-client.js";
+import { assertCheckoutLink, projectLinkFile, projectOwner, vercelEnvFor } from "../lib/vercel-project.js";
 import { reportContainment } from "./env.js";
 
 const PASS = green("ok");
@@ -109,6 +110,15 @@ export async function doctor(cliRoot: string): Promise<number> {
     if (!unreadable) field("config", bad(`${FAIL} — run \`drk-deploy init\``));
   } else {
     field("project", `${PASS} ${dim(config.projectId)}`);
+    // Not a counted problem: such a config still deploys, through the
+    // checkout's link, which is checked against it (F-48).
+    const owner = projectOwner(config);
+    field(
+      "owner",
+      owner
+        ? `${PASS} ${dim(owner)}`
+        : `${yellow("not recorded")} ${dim("— re-run `drk-deploy init`; until then .vercel/project.json decides")}`,
+    );
     // `doctor` is the command you run when something is already wrong, so a
     // config it cannot parse must be REPORTED as a problem, not thrown as one:
     // throwing here abandons the toolchain, credential and kit-checkout
@@ -117,6 +127,38 @@ export async function doctor(cliRoot: string): Promise<number> {
     const profile = readProfile(config, bad);
     field("target", profile ? describeProfile(profile) : red("unreadable"));
     field("origin", config.origin);
+    // The refusals `deploy`, `up` and `migrate` stop on before running
+    // anything, reported here first (F-48). Without this, `doctor` says
+    // "Ready to deploy." to a shell that names another Vercel project, and
+    // every one of them then exits 2.
+    try {
+      const { ignored } = vercelEnvFor(config, resolveToken() ?? "");
+      field(
+        "shell project ids",
+        ignored.length === 0
+          ? `${PASS} ${dim("none name another project")}`
+          : `${yellow("ignored")} ${dim(`${ignored.join(", ")} — not passed to vercel: no owner recorded to check it against`)}`,
+      );
+    } catch (err) {
+      field("shell project ids", bad(`${red("wrong")} — ${(err as Error).message}`));
+      if (err instanceof CliError && err.hint) info(`    ${dim(err.hint)}`);
+    }
+    if (profile) {
+      // The refusal `deploy` would stop on, reported here first (F-48).
+      const root = deployRoot(config);
+      try {
+        assertCheckoutLink(root, config, { required: false });
+        field(
+          "checkout link",
+          existsSync(projectLinkFile(root))
+            ? `${PASS} ${dim(projectLinkFile(root))}`
+            : dim("not linked yet (linked on the first deploy)"),
+        );
+      } catch (err) {
+        field("checkout link", bad(`${red("wrong")} — ${(err as Error).message}`));
+        if (err instanceof CliError && err.hint) info(`    ${dim(err.hint)}`);
+      }
+    }
 
     if (profile?.kind === "satellite") {
       const appRoot = deployRoot(config);

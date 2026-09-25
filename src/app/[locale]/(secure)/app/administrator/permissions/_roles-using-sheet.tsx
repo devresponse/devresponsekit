@@ -5,6 +5,8 @@ import { useLocale, useTranslations } from "next-intl";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { fetchAllPages } from "@/lib/admin/admin-list.client";
+import { ListLimitNotice } from "../_components/list-limit-notice";
 
 /**
  * "Roles using this permission" panel rendered inside the catalog Sheet
@@ -14,6 +16,10 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
  * `permission` filter — there's no need for a dedicated reverse-lookup
  * endpoint, and reusing the list endpoint inherits its pagination,
  * sort, and permission-gating contract for free.
+ *
+ * Every page is read (`fetchAllPages`, F-41): one `pageSize=200` request
+ * listed at most 200 of the roles holding the key while the catalog grid's
+ * "Roles using this" count said more, and nothing said the list was short.
  */
 interface RoleRow {
   id: string;
@@ -28,6 +34,7 @@ export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: st
   const locale = useLocale();
 
   const [rows, setRows] = useState<RoleRow[] | null>(null);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,14 +43,10 @@ export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: st
       try {
         const url = new URL("/api/administrator/roles", window.location.origin);
         url.searchParams.set("filter[permission]", permissionKey);
-        url.searchParams.set("pageSize", "200");
-        const res = await fetch(url.toString(), { credentials: "same-origin" });
-        if (!res.ok) {
-          if (!cancelled) setError(tErr("generic"));
-          return;
-        }
-        const body = (await res.json()) as { items: RoleRow[] };
-        if (!cancelled) setRows(body.items);
+        const all = await fetchAllPages<RoleRow>(url.toString());
+        if (cancelled) return;
+        setRows(all.items);
+        setTotal(all.total);
       } catch {
         if (!cancelled) setError(tErr("generic"));
       }
@@ -75,23 +78,26 @@ export function RolesUsingPermissionPanel({ permissionKey }: { permissionKey: st
         ) : rows.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t("empty")}</p>
         ) : (
-          <ul className="divide-y rounded-md border text-sm">
-            {rows.map((r) => (
-              <li key={r.id} className="flex items-center justify-between gap-3 p-3">
-                <div className="space-y-1">
-                  <p className="font-medium">{r.name}</p>
-                  <code className="text-muted-foreground text-xs">{r.key}</code>
-                </div>
-                <LocaleLink
-                  locale={locale}
-                  href={`/app/administrator/roles/${r.id}`}
-                  className="text-primary text-sm underline-offset-4 hover:underline"
-                >
-                  {t("viewRole")}
-                </LocaleLink>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ListLimitNotice shown={rows.length} total={total} kind="catalog" className="mb-2" />
+            <ul className="divide-y rounded-md border text-sm">
+              {rows.map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="space-y-1">
+                    <p className="font-medium">{r.name}</p>
+                    <code className="text-muted-foreground text-xs">{r.key}</code>
+                  </div>
+                  <LocaleLink
+                    locale={locale}
+                    href={`/app/administrator/roles/${r.id}`}
+                    className="text-primary text-sm underline-offset-4 hover:underline"
+                  >
+                    {t("viewRole")}
+                  </LocaleLink>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
     </>

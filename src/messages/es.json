@@ -1238,7 +1238,12 @@
       "searchPlaceholder": "Buscar grupos…",
       "noResults": "No se encontraron grupos.",
       "loading": "Cargando…",
-      "loadError": "No se pudieron cargar los grupos."
+      "loadError": "No se pudieron cargar los grupos.",
+      "alreadyMember": "Ya es miembro"
+    },
+    "listLimit": {
+      "searchTruncated": "Se muestran {shown} de {total}. Escribe para acotar la lista.",
+      "catalogTruncated": "Se muestran {shown} de {total}. El resto no se pudo cargar y no aparece en la lista."
     },
     "agents": {
       "title": "MCP agents",

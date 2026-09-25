@@ -149,6 +149,8 @@ export async function listOauthClients(
     base
       .select(SUMMARY_COLUMNS)
       .orderBy("created_at", "desc")
+      // F-41: a unique tiebreaker, so OFFSET pages slice one total order.
+      .orderBy("id", "asc")
       .limit(query.limit)
       .offset(query.offset)
       .execute(),

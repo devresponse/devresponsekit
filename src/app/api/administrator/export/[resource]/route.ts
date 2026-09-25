@@ -623,7 +623,22 @@ function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       else if (scopeFilter === "org") q = q.where("organization_id", "is not", null);
       if (query.q) {
         const like = likeContains(query.q);
-        q = q.where((eb) => eb.or([eb("key", "ilike", like), eb("name", "ilike", like)]));
+        // The list's `q` also matches the owning org's name (F-41); an EXISTS
+        // rather than the list's join keeps this SELECT's bare column names
+        // unambiguous.
+        q = q.where((eb) =>
+          eb.or([
+            eb("key", "ilike", like),
+            eb("name", "ilike", like),
+            eb.exists(
+              eb
+                .selectFrom("app_organizations as o")
+                .select(sql`1`.as("one"))
+                .whereRef("o.id", "=", "app_roles.organization_id")
+                .where("o.name", "ilike", like),
+            ),
+          ]),
+        );
       }
       const seek = buildKeysetSort(query.sort);
       const rows = await applyKeyset(

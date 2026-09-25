@@ -8,8 +8,9 @@ import { renderWithIntl } from "../helpers/render-with-intl";
  * Component tests for the editable user-detail Groups tab and its GroupPicker.
  *
  * The backend (`POST`/`DELETE /api/administrator/users/[id]/groups`) already
- * existed; these cover the new UI: the picker (excludes current memberships),
- * the `canManage` gating, and the add/remove wiring.
+ * existed; these cover the new UI: the picker (the user's orgs' groups, with
+ * current memberships listed but not selectable, F-41), the `canManage`
+ * gating, and the add/remove wiring.
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
@@ -39,6 +40,13 @@ const PICKER_GROUPS = {
     { id: G2, organization_id: ORG, key: "ops", name: "Operations" },
   ],
 };
+// The picker lists the groups of the user's orgs, read from their memberships.
+const USER_MEMBERSHIPS = {
+  items: [{ id: "m1", organization_id: ORG, organization_name: "Org A" }],
+  page: 1,
+  pageSize: 200,
+  total: 1,
+};
 
 const fetchMock = vi.fn();
 
@@ -62,6 +70,8 @@ beforeEach(() => {
     if (init?.method === "DELETE") return Promise.resolve(jsonOk({ ok: true }, 200));
     if (u.includes(`/users/${USER_ID}/groups`))
       return Promise.resolve(jsonOk({ groups: USER_GROUPS }));
+    if (u.includes(`/users/${USER_ID}/memberships`))
+      return Promise.resolve(jsonOk(USER_MEMBERSHIPS));
     if (u.includes("/api/administrator/groups")) return Promise.resolve(jsonOk(PICKER_GROUPS));
     return Promise.resolve(jsonOk({ groups: [] }));
   });
@@ -70,27 +80,43 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("GroupPicker", () => {
-  it("lists groups, excludes current memberships, and reports the choice", async () => {
+  it("lists the user's orgs' groups, marks current memberships unavailable, and reports the choice", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     const { container } = renderWithIntl(
-      <GroupPicker value={null} onChange={onChange} excludeIds={[G1]} />,
+      <GroupPicker userId={USER_ID} value={null} onChange={onChange} excludeIds={[G1]} />,
     );
 
     const trigger = container.querySelector("#group-picker")!;
     await waitFor(() => expect(trigger).not.toBeDisabled());
     await user.click(trigger);
 
-    // Engineering (already a member) is excluded; only Operations is offered.
-    expect(screen.queryByRole("option", { name: /Engineering/ })).not.toBeInTheDocument();
+    // Engineering (already a member) is listed but cannot be chosen (F-41).
+    const engineering = await screen.findByRole("option", { name: /Engineering/ });
+    expect(engineering).toHaveAttribute("aria-disabled", "true");
+    expect(engineering).toHaveTextContent("Already a member");
     await user.click(await screen.findByRole("option", { name: /Operations/ }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: G2 }));
+    const groupsRequest = fetchMock.mock.calls
+      .map(([url]) => new URL(String(url), "http://test.local"))
+      .find((u) => u.pathname === "/api/administrator/groups")!;
+    expect(groupsRequest.searchParams.getAll("filter[organization]")).toEqual([ORG]);
   });
 
   it("shows an error when the group list fails to load", async () => {
     fetchMock.mockResolvedValue(jsonOk({}, 500));
-    renderWithIntl(<GroupPicker value={null} onChange={vi.fn()} />);
+    renderWithIntl(<GroupPicker userId={USER_ID} value={null} onChange={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load groups.");
+  });
+
+  it("shows an error when the user's memberships fail to load", async () => {
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(
+        String(url).includes("/memberships") ? jsonOk({}, 500) : jsonOk(PICKER_GROUPS),
+      ),
+    );
+    renderWithIntl(<GroupPicker userId={USER_ID} value={null} onChange={vi.fn()} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load groups.");
   });
 });

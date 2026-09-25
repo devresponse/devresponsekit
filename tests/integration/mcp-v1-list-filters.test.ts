@@ -180,7 +180,8 @@ describe("MCP → v1 list filters (F-34)", () => {
       { field: "status", direction: "asc" },
     ]);
     const directions = calls.filter(([m]) => m === "orderBy").map(([, args]) => args[1]);
-    expect(directions).toEqual(["desc", "asc"]);
+    // The two directives, then the `id` tiebreaker every OFFSET page ends on (F-41).
+    expect(directions).toEqual(["desc", "asc", "asc"]);
   });
 
   it("surfaces a v1 400 as a tool error — never as an unfiltered page", async () => {

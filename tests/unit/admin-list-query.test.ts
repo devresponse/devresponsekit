@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DummyDriver,
+  Kysely,
+  PostgresAdapter,
+  PostgresIntrospector,
+  PostgresQueryCompiler,
+} from "kysely";
+import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
@@ -377,7 +384,72 @@ describe("applySortAndPagination", () => {
 
     expect(ops.find((o) => o.kind === "limit")?.arg).toBe(10);
     expect(ops.find((o) => o.kind === "offset")?.arg).toBe(10);
-    expect(ops.filter((o) => o.kind === "orderBy")).toHaveLength(1);
+    // The requested sort, then the `id` tiebreaker (F-41).
+    expect(ops.filter((o) => o.kind === "orderBy").map((o) => o.arg2)).toEqual(["asc", "asc"]);
+  });
+});
+
+/**
+ * F-41: every OFFSET page ends its ORDER BY with a unique tiebreaker, so the
+ * pages slice ONE total order. Rows tying on the sort came back in no
+ * particular order from one page query to the next, so a client paging a
+ * catalog saw some rows twice and others never. Compiled against a
+ * `DummyDriver`; the real round trip is tests/db/admin-list-paging.db.test.ts.
+ */
+describe("applySortAndPagination tiebreaker (F-41)", () => {
+  interface TieDB {
+    t: { id: string; key: string; status: string; app_user_id: string; organization_id: string };
+  }
+  const kdb = new Kysely<TieDB>({
+    dialect: {
+      createAdapter: () => new PostgresAdapter(),
+      createDriver: () => new DummyDriver(),
+      createIntrospector: (k) => new PostgresIntrospector(k),
+      createQueryCompiler: () => new PostgresQueryCompiler(),
+    },
+  });
+  const OPTIONS = {
+    allowedSortFields: ["key", "status", "id"],
+    defaultSort: [{ field: "key", direction: "asc" as const }],
+  };
+
+  /** The compiled ORDER BY of `select id, key from t` for a query string. */
+  function orderBy(qs: string, tiebreaker?: ReadonlyArray<string>): string | undefined {
+    const query = parseListQuery(p(qs), OPTIONS);
+    const { sql } = applySortAndPagination(
+      kdb.selectFrom("t").select(["id", "key"]),
+      query,
+      tiebreaker,
+    ).compile();
+    return /order by (.*) limit/.exec(sql)?.[1];
+  }
+
+  it("appends `id` asc after the DEFAULT sort", () => {
+    expect(orderBy("")).toBe('"key" asc, "id" asc');
+  });
+
+  it("appends `id` after a requested sort too, and leaves the echoed sort alone", () => {
+    expect(orderBy("sort=status.desc&sort=key.asc")).toBe('"status" desc, "key" asc, "id" asc');
+    // The envelope reports the sort the caller asked for, not the tiebreaker.
+    const query = parseListQuery(p("sort=status.desc"), OPTIONS);
+    expect(buildListResponse([], 0, query).sort).toEqual([{ field: "status", direction: "desc" }]);
+  });
+
+  it("does not repeat a tiebreaker the sort already names, in either direction", () => {
+    expect(orderBy("sort=id.desc")).toBe('"id" desc');
+    expect(orderBy("sort=status.asc&sort=id.desc")).toBe('"status" asc, "id" desc');
+  });
+
+  it("orders by a list's own unique key when its rows carry no `id`", () => {
+    expect(orderBy("", ["app_user_id", "organization_id"])).toBe(
+      '"key" asc, "app_user_id" asc, "organization_id" asc',
+    );
+  });
+
+  it("still orders by the tiebreaker when the list declares no sort at all", () => {
+    const query = parseListQuery(p("sort=key.asc"), { allowedSortFields: [] });
+    const { sql } = applySortAndPagination(kdb.selectFrom("t").select(["id"]), query).compile();
+    expect(/order by (.*) limit/.exec(sql)?.[1]).toBe('"id" asc');
   });
 });
 

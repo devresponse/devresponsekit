@@ -9,7 +9,8 @@ import { renderWithIntl } from "../helpers/render-with-intl";
  * combobox (Popover + cmdk Command) — and its two consumers' SUPERADMIN /
  * org-admin wiring in the new-role form. The picker is SUPERADMIN-only: an
  * org admin's scope is forced server-side and the form sends their own org
- * id without rendering the control.
+ * id without rendering the control. Its server search past the first page
+ * (F-41) is pinned in admin-list-pickers.test.tsx.
  */
 const push = vi.fn();
 const refresh = vi.fn();
@@ -82,8 +83,13 @@ describe("OrganizationPicker", () => {
     expect(onChange).toHaveBeenCalledWith(O2);
   });
 
-  it("filters the options client-side by name or slug", async () => {
-    fetchMock.mockResolvedValue(jsonOk(ORGS));
+  it("searches the server by name or slug (q=), not the first page client-side (F-41)", async () => {
+    // The endpoint matches `q` against slug and name; the picker shows its answer as is.
+    fetchMock.mockImplementation((url: string) => {
+      const q = new URL(url, "http://test.local").searchParams.get("q")?.toLowerCase() ?? "";
+      const items = ORGS.items.filter((o) => !q || `${o.slug} ${o.name}`.toLowerCase().includes(q));
+      return Promise.resolve(jsonOk({ items, total: items.length }));
+    });
     const onChange = vi.fn();
     const user = userEvent.setup();
     const { container } = renderWithIntl(<OrganizationPicker value={null} onChange={onChange} />);
@@ -94,6 +100,7 @@ describe("OrganizationPicker", () => {
     await waitFor(() =>
       expect(screen.queryByRole("option", { name: /Acme/ })).not.toBeInTheDocument(),
     );
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("q=globex");
     await user.click(screen.getByRole("option", { name: /Globex/ }));
     expect(onChange).toHaveBeenCalledWith(O2);
   });

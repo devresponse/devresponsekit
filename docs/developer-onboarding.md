@@ -105,7 +105,7 @@ pnpm format:check   # prettier --check  (use `pnpm format` to auto-fix)
 pnpm test:coverage  # vitest with the coverage ratchet
 ```
 
-The DB-backed suite runs against a real Postgres (set `DATABASE_TEST_URL`):
+The DB-backed suite runs against a real, migrated Postgres: the database in `DATABASE_TEST_URL`, or `DATABASE_URL` when that is unset. It refuses a host that is not local, like `db:seed:dev`. `.env.example`'s `DATABASE_TEST_URL` names `devresponse_db_test`, which you create and migrate once ([Testing §3](./testing.md#the-db-backed-suites-database) has the commands):
 
 ```bash
 pnpm test:db        # vitest run --config vitest.db.config.ts

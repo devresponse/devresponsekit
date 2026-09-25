@@ -2,18 +2,21 @@
  * Shared safety rails for the OPERATIONAL database tools (`db:reset`,
  * `db:seed:dev`) — the scripts whose effect on the wrong database is either
  * irreversible (dropping the schema) or a credential leak (24 accounts with a
- * source-committed password, three of them cross-tenant superusers).
+ * source-committed password, three of them cross-tenant superusers) — and for
+ * the DB-backed test suite (`pnpm test:db`), which writes test users and
+ * organizations into whatever database it is given (F-44).
  *
  * The rail is a HOST check on `DATABASE_URL`, not a `NODE_ENV` check:
  * `NODE_ENV` is a runtime convention of the Next server process and is
  * routinely unset in an operator's shell or a CI job whose `.env` carries a
  * production `DATABASE_URL`. Whatever the environment claims to be, a
  * connection string pointing at a non-local host is refused unless the caller
- * explicitly overrides it (review #19). Both scripts share this one
+ * explicitly overrides it (review #19). Every tool shares this one
  * classification so the definition of "local" cannot drift between them.
  *
  * Like `schema-config.ts`, this module intentionally does NOT import
- * `server-only`: it must load from `tsx` scripts as well as Vitest.
+ * `server-only`: it must load from `tsx` scripts, from Vitest, and from
+ * `vitest.db.config.ts` itself.
  */
 
 /**
@@ -155,4 +158,64 @@ export function assertDevSeedTarget(input: {
       "The development seed creates 24 known-password accounts (three of them cross-tenant superusers).",
     overrideHint: "re-run with --force or set DEV_SEED_ALLOW_REMOTE=1 (not recommended)",
   });
+}
+
+/** Which variable named the database `pnpm test:db` runs against. */
+export type DbTestTargetSource = "DATABASE_TEST_URL" | "DATABASE_URL";
+
+export interface DbTestTarget extends DatabaseTarget {
+  /** The connection string the DB-backed suites receive as `DATABASE_URL`. */
+  url: string;
+  source: DbTestTargetSource;
+}
+
+/**
+ * The pre-flight for `pnpm test:db` (F-44), run once by `vitest.db.config.ts`
+ * when the config loads, before any worker starts, so a refusal opens no
+ * connection:
+ *
+ *   1. `DATABASE_TEST_URL` names the database when it is set. The suites get
+ *      it AS their `DATABASE_URL`, because that is the only variable the db
+ *      layer reads (`src/db/schema-config.ts`). Before F-44 the config ignored
+ *      it, so a developer who set it to a scratch database, as the docs said,
+ *      still ran the suites against `.env`'s `DATABASE_URL`, hosted or not.
+ *   2. Otherwise `DATABASE_URL`: the CI quality job's Postgres service, or a
+ *      developer's local dev database. An empty value counts as unset (an
+ *      `X=` line in `.env`).
+ *   3. Whichever it is, a non-local host is refused unless
+ *      `DB_TEST_ALLOW_REMOTE=1`. The suites create and delete users and
+ *      organizations and briefly change the platform sign-up policy, which on
+ *      a shared database would govern real sign-ups meanwhile. `CI` is no
+ *      override: CI's database is on localhost, and a CI job whose environment
+ *      carries a hosted `DATABASE_URL` is exactly the case to refuse.
+ *
+ * Neither variable set throws: the setup file's `DATABASE_URL ??=` default
+ * names a database that does not exist, which would only fail later with a
+ * connection error per suite.
+ */
+export function resolveDbTestTarget(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): DbTestTarget {
+  const source: DbTestTargetSource | undefined = env.DATABASE_TEST_URL
+    ? "DATABASE_TEST_URL"
+    : env.DATABASE_URL
+      ? "DATABASE_URL"
+      : undefined;
+  const url = source && env[source];
+  if (!source || !url) {
+    throw new Error(
+      "[test:db] No database to run against: set DATABASE_TEST_URL to a local, migrated " +
+        "Postgres database (docs/testing.md#the-db-backed-suites-database). DATABASE_URL is used only " +
+        "when DATABASE_TEST_URL is unset.",
+    );
+  }
+  const target = assertLocalDatabaseTarget(url, {
+    allowRemote: env.DB_TEST_ALLOW_REMOTE === "1",
+    tool: "test:db",
+    consequence:
+      `${source} names it, and the DB-backed suites create and delete users and organizations ` +
+      "there and briefly change the platform sign-up policy.",
+    overrideHint: "point it at a disposable database and set DB_TEST_ALLOW_REMOTE=1",
+  });
+  return { ...target, url, source };
 }

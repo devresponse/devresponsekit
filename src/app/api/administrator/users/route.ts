@@ -17,11 +17,17 @@ import {
   actingOrganizationId,
   hasCrossOrgReach,
   resolveOrgScope,
+  scopeOrganizationId,
 } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { isAuthEmailTakenError } from "@/lib/admin/auth-email-taken";
+import {
+  auditCreationMembership,
+  insertCreatedUser,
+  type CreatedAppUser,
+} from "@/lib/admin/user-create.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -172,6 +178,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *     cross-org reach (403 otherwise), as on `POST /users/[id]/role` (F-13).
  *   - Initial app status defaults to `pending_approval` so admin
  *     approval is still required even when an admin creates the user.
+ *   - A caller without cross-org reach (an org admin, any bearer credential)
+ *     enrols the user in its own org, with a membership of that same status,
+ *     in the transaction that inserts the `app_users` row; otherwise it could
+ *     not reach the user it just created. A superadmin's cookie session
+ *     creates the user in no org (`insertCreatedUser`).
  *   - The new password is forwarded to Better Auth and never logged or
  *     returned in the response or audit metadata.
  *
@@ -211,6 +222,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // to check it here against the actor's own role; `createBetterAuthUser` now
   // runs as a trusted server call, so this route is the only check.
   if (input.role === "admin" && !hasCrossOrgReach(guard.access)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
+
+  // The new user joins the org a confined caller acts in (`insertCreatedUser`).
+  // A confined caller with no org would create a user it cannot reach, so it is
+  // refused before anything is written, as a null scope is everywhere else.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) {
     return adminErrorResponse("forbidden", 403, request);
   }
 
@@ -297,10 +316,10 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     });
   }
 
-  // Insert the application user row. We deliberately do NOT auto-create
-  // a membership here — that's the responsibility of the membership
-  // endpoint (Phase 5), and admin-created users are explicitly approved
-  // (or not) by an admin in a follow-up action.
+  // Insert the application user row and, for a caller confined to one org,
+  // its membership there, in one transaction (`insertCreatedUser`). A
+  // superadmin's creation gets no membership: it is placed with the membership
+  // endpoint, and approved (or not) in a follow-up action either way.
   //
   // F-30: this insert cannot lose an email race. Better Auth refused the
   // loser above, and the only unique key here is `better_auth_user_id`,
@@ -308,21 +327,19 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // to sit here could not fire for an email. Any failure is a fault in our
   // own store: the 500 a throw would give (docs/admin-manager.md §5.1), plus
   // the audit row a throw would not write. The row names the new Better Auth
-  // id, which is left without an `app_users` row, so an operator can
-  // reconcile it; until then a retry of this address answers 409.
-  let appUser;
+  // id, which is left without an `app_users` row (a failed membership insert
+  // rolls that row back too), so an operator can reconcile it; until then a
+  // retry of this address answers 409.
+  let stored: CreatedAppUser;
   try {
-    appUser = await db
-      .insertInto("app_users")
-      .values({
-        better_auth_user_id: betterAuthUserId,
-        primary_email: normalisedEmail,
-        display_name: input.name?.trim() || null,
-        status: input.initialAppStatus,
-        preferred_locale: input.preferredLocale ?? "en",
-      })
-      .returning(["id", "primary_email", "status"])
-      .executeTakeFirstOrThrow();
+    stored = await insertCreatedUser({
+      betterAuthUserId,
+      email: normalisedEmail,
+      displayName: input.name?.trim() || null,
+      status: input.initialAppStatus,
+      preferredLocale: input.preferredLocale ?? "en",
+      enrolOrganizationId: scopeOrganizationId(scope),
+    });
   } catch (err) {
     await auditUserAction("admin.user.create_failed", "error", {
       request,
@@ -336,6 +353,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     });
     return adminErrorResponse("internal_error", 500, request, { cause: err });
   }
+  const { appUser, membership } = stored;
 
   await auditUserAction("admin.user.created", "success", {
     request,
@@ -349,6 +367,15 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       role: input.role ?? null,
     },
   });
+  if (membership) {
+    await auditCreationMembership(membership, {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: appUser.id,
+      status: appUser.status,
+      requestId: guard.requestId,
+    });
+  }
 
   return NextResponse.json(
     {

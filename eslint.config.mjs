@@ -15,7 +15,9 @@ export default tseslint.config(
       "dist/**",
       "src/db/schema/generated.ts",
       "sdk/**",
-      // Standalone deploy CLI: its own package, tsconfig and lint setup.
+      // Standalone deploy CLI: its own package and tsconfig. ci.yml's
+      // `Deploy CLI (drk-deploy)` job typechecks, tests and format-checks it
+      // (F-45); it has no ESLint setup of its own.
       "vercel-cli/**",
       "coverage/**",
       "playwright-report/**",

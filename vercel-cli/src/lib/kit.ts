@@ -86,8 +86,8 @@ export interface SatelliteCheckout {
  *
  * So a checkout that owns a schema is refused outright, and `kitRoot` — when
  * the caller knows it — is compared by resolved path as well. A safety claim
- * in a comment that the code does not enforce is worse than no claim at all,
- * particularly in a package with no CI.
+ * in a comment that the code does not enforce is worse than no claim at all:
+ * this package's tests are the only thing that checks it.
  */
 export function assertSatelliteRoot(appRoot: string, kitRoot?: string): SatelliteCheckout {
   const pkgPath = join(appRoot, "package.json");

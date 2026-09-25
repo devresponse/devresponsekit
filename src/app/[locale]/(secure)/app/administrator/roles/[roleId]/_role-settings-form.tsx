@@ -14,8 +14,16 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RequiredLegend } from "@/components/ui/required-legend";
-import { useZodForm } from "@/lib/forms/use-zod-form";
+import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 import { roleSettingsSchema, type RoleSettingsInput } from "@/lib/validation/roles";
+
+/** The PATCH wire shape of the form, normalized the way the route stores it. */
+function toRolePatch(values: RoleSettingsInput) {
+  return {
+    name: values.name.trim(),
+    description: values.description?.trim() ? values.description.trim() : null,
+  };
+}
 
 /**
  * Settings tab for the role detail (docs/admin-manager.md §8.4;
@@ -24,6 +32,12 @@ import { roleSettingsSchema, type RoleSettingsInput } from "@/lib/validation/rol
  *
  * The key is shown read-only — roles are referenced by key in audit metadata
  * and policy lookups, so a rename would silently break them.
+ *
+ * F-39: saves through `useSavedFormBaseline`. The PATCH carries only the
+ * fields the admin changed (the route answers 400 `no_changes` to an empty
+ * one, so a save with nothing changed sends nothing), and a successful save
+ * moves the form's baseline and refreshes the page, so a description-only
+ * save after a tab switch cannot send back the pre-rename name.
  */
 export function RoleSettingsForm({
   roleId,
@@ -43,24 +57,29 @@ export function RoleSettingsForm({
   const tErr = useTranslations("administrator.errors");
 
   const [saved, setSaved] = useState(false);
-  const form = useZodForm<RoleSettingsInput>(roleSettingsSchema, {
-    defaultValues: { name: initialName, description: initialDescription ?? "" },
-  });
+  const { form, changedBody, commitSaved } = useSavedFormBaseline<
+    RoleSettingsInput,
+    ReturnType<typeof toRolePatch>
+  >(roleSettingsSchema, { name: initialName, description: initialDescription ?? "" }, toRolePatch);
 
   const onValid = async (values: RoleSettingsInput) => {
     form.clearErrors("root");
     setSaved(false);
+    const changes = changedBody(values);
+    if (!changes) {
+      commitSaved(values);
+      setSaved(true);
+      return;
+    }
     try {
       const res = await fetch(`/api/administrator/roles/${roleId}`, {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: values.name.trim(),
-          description: values.description?.trim() ? values.description.trim() : null,
-        }),
+        body: JSON.stringify(changes),
       });
       if (res.ok) {
+        commitSaved(values);
         setSaved(true);
         return;
       }

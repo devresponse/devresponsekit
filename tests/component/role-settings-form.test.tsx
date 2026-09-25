@@ -5,9 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RoleSettingsForm } from "@/app/[locale]/(secure)/app/administrator/roles/[roleId]/_role-settings-form";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
+
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
+  refresh.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -57,6 +61,10 @@ describe("RoleSettingsForm", () => {
         expect.objectContaining({ method: "PATCH" }),
       ),
     );
+    // F-39: only the edited field; the untouched description is not re-sent.
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({ name: "Support Team" });
     expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

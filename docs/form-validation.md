@@ -132,6 +132,47 @@ which maps a server response's per-field errors back onto the form via
 error applies. So a 409 "email already taken" lands **on the email field**, and
 only genuinely form-level failures (network, 403) use the banner.
 
+### Settings forms seeded from server props (F-39)
+
+An edit form whose starting values come from the server page (RSC props)
+builds its form with `useSavedFormBaseline(schema, serverValues, toBody)`
+(`src/lib/forms/use-saved-form-baseline.ts`), a wrapper around `useZodForm`.
+The organization, role and group **Settings** tabs and the organization
+**Authentication** tab use it. Those forms sit in Radix tab panels, which
+unmount when another tab opens, so each tab switch remounts the form from the
+props the page was rendered with. Before this hook a save did not change those
+props, and every save re-sent every field. An admin who suspended an org,
+opened Members and came back saw Active again, and the next save of an
+unrelated fix quietly reactivated the org. The hook applies three rules:
+
+- **`commitSaved(values)` after a successful save** moves the form's baseline
+  to what was saved and calls `router.refresh()`, so the page re-renders and
+  its props, and the page header, show the saved state. It moves the baseline
+  only: the inputs stay live while the request is in flight, so a field typed
+  into meanwhile keeps its text, stays changed, and goes in the next save.
+  Every other field is clean at once.
+- **The form follows `serverValues`.** When they change, because the refresh
+  landed (possibly after a remount that happened while it was in flight), the
+  baseline moves to them, and every field the admin has not edited since the
+  last save takes the new value. An edit in progress is kept, and so are the
+  form's errors and submit state, so a failed save's message is not wiped by
+  an earlier save's refresh.
+- **`changedBody(values)` builds the PATCH body** from only the fields whose
+  value, normalized by `toBody`, differs from that baseline. It returns `null`
+  when nothing changed; the form then sends nothing and shows its saved
+  message (the role and group routes answer an empty PATCH with 400
+  `no_changes`). An untouched field is never written back, even from a stale
+  view, and the audit row names only the fields the admin changed (the group
+  row's `fields` also carries its `updated_at` stamp). Use it only against a
+  partial PATCH contract. The sign-up policy
+  route replaces a complete policy, so the Authentication tab sends the whole
+  policy and relies on the first two rules.
+
+The role **Permissions** editor is not a React Hook Form form, but it follows
+the same rules: it calls `router.refresh()` after every save and takes a new
+`initialAssigned` when it has no unsaved moves. `serverValues` must be plain
+JSON, because it is compared by its JSON text.
+
 ### The primitives — `src/components/ui/form.tsx`
 
 The shadcn React Hook Form wrapper (`Form`, `FormField`, `FormItem`,
@@ -231,6 +272,9 @@ reset-password (the `sign-in` / `sign-up` wrappers compose these).
 - **Component (RTL):** the auth and admin form tests assert required-field
   asterisks, invalid-submit → `aria-invalid` + `FormMessage` text, server-error
   mapping, and the happy path.
+  `tests/component/settings-tab-remount.test.tsx` drives the real tab
+  containers through save → tab switch → refresh for every form on
+  `useSavedFormBaseline` and for the role Permissions editor (F-39).
 - **Security:** the shared Zod schemas are exercised at the API boundary
   (`tests/security/handler-input-validation.test.ts`) to reject unknown keys,
   oversized, and malformed input — the same schemas the forms use.

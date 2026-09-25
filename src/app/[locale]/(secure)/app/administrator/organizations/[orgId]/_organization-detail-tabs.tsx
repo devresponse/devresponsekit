@@ -13,6 +13,11 @@ import { OrganizationSettingsForm } from "./_organization-settings-form";
  *
  * Each tab owns its own data fetch; the Authentication tab receives its
  * initial policy rows from the server page (0007).
+ *
+ * Radix unmounts an inactive panel, so the Authentication and Settings forms
+ * remount from these props on every tab switch. Both save through
+ * `useSavedFormBaseline` (F-39), which refreshes the page after a save and
+ * follows the refreshed props; a new panel seeded from props must do the same.
  */
 export interface OrganizationDetailJson {
   id: string;

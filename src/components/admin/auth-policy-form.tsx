@@ -29,8 +29,9 @@ import {
   type AuthPolicyApprovalMode,
   type AuthPolicyFormInput,
   type AuthPolicyMethod,
+  type AuthPolicySettingsInput,
 } from "@/lib/validation/auth-policy";
-import { useZodForm } from "@/lib/forms/use-zod-form";
+import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 
 /**
  * JSON-safe view of a signup-policy row, passed from RSC pages
@@ -104,6 +105,19 @@ function toFormValues(settings: AuthPolicySettingsJson | null): AuthPolicyFormIn
  * inherit view while the defaults are withheld). `router.refresh()` after a
  * successful Reset re-runs the RSC, which — the override now gone — streams
  * the real defaults back, so the summary appears on its own.
+ *
+ * F-39: on the organization detail this form lives in a Radix tab panel, which
+ * unmounts when another tab is opened and remounts from the page's props. A
+ * successful Save only used to flip local state, so after a tab switch an org
+ * that had just been given an override showed the "inherits the platform
+ * default" view (misstating its live sign-in policy), and an edited override
+ * showed its pre-save values. Save now goes through `useSavedFormBaseline`
+ * (the baseline moves and the page refreshes, as Reset already did), and the
+ * override flags below follow `initialSettings`, so the refreshed props, even
+ * when they land after a remount, put the form back on the saved policy (and,
+ * after a Reset, back on the inherit view, unless the admin has already opened
+ * Customize again). The PATCH still carries the COMPLETE policy: the route has
+ * no partial contract.
  */
 export function AuthPolicyForm({
   endpoint,
@@ -134,9 +148,34 @@ export function AuthPolicyForm({
   const [editing, setEditing] = useState(scope === "platform" || initialSettings !== null);
   const [notice, setNotice] = useState<"saved" | "reset" | null>(null);
 
-  const form = useZodForm<AuthPolicyFormInput>(authPolicyFormSchema, {
-    defaultValues: toFormValues(initialSettings ?? (scope === "platform" ? null : editBaseline)),
-  });
+  // F-39: whether the org has an override is the SERVER's answer. When the
+  // refreshed props change it (a save gave the org one, a reset took it away),
+  // adopt it; state adjusted during render, so the inherit view is never
+  // painted over a live override once the props say otherwise.
+  //
+  // One exception: an unsaved Customize (the editor is open, but no override
+  // is saved yet, so it was opened from the inherit view) stays open. Reset's
+  // refresh can land AFTER the admin has already pressed Customize and started
+  // editing; closing the editor then would throw the edit away (Customize
+  // re-seeds the form). A form that is open because of an override the props
+  // no longer have, such as a remount from the stale props after Reset, still
+  // closes. In the organization scope `hasRow` implies `editing` (every path
+  // that sets one sets the other), so `editing && !hasRow` is exactly that
+  // unsaved Customize.
+  const settingsKey = JSON.stringify(initialSettings);
+  const [syncedSettingsKey, setSyncedSettingsKey] = useState(settingsKey);
+  if (syncedSettingsKey !== settingsKey) {
+    const customizing = scope === "organization" && editing && !hasRow;
+    setSyncedSettingsKey(settingsKey);
+    setHasRow(initialSettings !== null);
+    setEditing(scope === "platform" || initialSettings !== null || customizing);
+  }
+
+  const { form, commitSaved } = useSavedFormBaseline<AuthPolicyFormInput, AuthPolicySettingsInput>(
+    authPolicyFormSchema,
+    toFormValues(initialSettings ?? (scope === "platform" ? null : editBaseline)),
+    toAuthPolicyApiBody,
+  );
 
   const onValid = async (values: AuthPolicyFormInput) => {
     form.clearErrors("root");
@@ -149,6 +188,7 @@ export function AuthPolicyForm({
         body: JSON.stringify(toAuthPolicyApiBody(values)),
       });
       if (res.ok) {
+        commitSaved(values);
         setHasRow(true);
         setNotice("saved");
         return;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,16 @@ import { diffPermissions } from "@/lib/admin/roles.client";
  * lists — after a failure too, so a half-applied save is shown as it landed
  * and a committed grant can never hide behind a stale baseline.
  *
+ * F-39: the editor is seeded from the page's `initialAssigned`, and the
+ * Permissions tab panel unmounts when another tab is opened. After a save,
+ * switching to Members and back re-seeded it from the pre-save set, so a
+ * removed key showed as Assigned again and an added one as Available. Every
+ * save therefore ends with `router.refresh()`, which makes the page's set the
+ * saved one, and the editor adopts a changed `initialAssigned` whenever it has
+ * no unsaved moves and no save in flight (the refresh may land after the
+ * remount). Moves in progress are never overwritten; the next save re-reads
+ * the server's set anyway (F-38).
+ *
  * Search inputs filter each column independently. Results show a count
  * indicator so the operator knows the filter is active.
  */
@@ -50,10 +61,14 @@ export function RolePermissionsEditor({
 }) {
   const t = useTranslations("administrator.roles.permissionsEditor");
   const tErr = useTranslations("administrator.errors");
+  const router = useRouter();
 
   const [catalog, setCatalog] = useState<CatalogRow[] | null>(null);
   const [assigned, setAssigned] = useState<string[]>([...initialAssigned].sort());
   const [serverAssigned, setServerAssigned] = useState<string[]>([...initialAssigned].sort());
+  // The `initialAssigned` the lists were last seeded from (F-39), by content.
+  const initialKey = JSON.stringify([...initialAssigned].sort());
+  const [seededFrom, setSeededFrom] = useState(initialKey);
 
   const [availableSelected, setAvailableSelected] = useState<string[]>([]);
   const [assignedSelected, setAssignedSelected] = useState<string[]>([]);
@@ -121,6 +136,19 @@ export function RolePermissionsEditor({
     return toAdd.length > 0 || toRemove.length > 0;
   }, [serverAssigned, assigned]);
 
+  // F-39: follow the page's set once a refresh brings a new one, unless the
+  // admin has unsaved moves or a save is in flight (its re-read decides then).
+  // State adjusted during render, React's pattern for "reset on prop change"
+  // without a remount (which would drop the saved notice).
+  if (seededFrom !== initialKey) {
+    setSeededFrom(initialKey);
+    if (!dirty && !saving) {
+      const next = JSON.parse(initialKey) as string[];
+      setAssigned(next);
+      setServerAssigned(next);
+    }
+  }
+
   const moveToAssigned = useCallback(() => {
     setError(null);
     setInfo(null);
@@ -146,6 +174,10 @@ export function RolePermissionsEditor({
       setAvailableSelected([]);
       setAssignedSelected([]);
     }
+    // F-39: after ANY save (a failed one may have landed half-way, F-38), so
+    // the page's `initialAssigned` is what the server now holds and a tab
+    // switch cannot re-seed the editor from the pre-save set.
+    router.refresh();
     if (result.error === null) {
       setInfo(t("saved"));
       return;
@@ -156,7 +188,7 @@ export function RolePermissionsEditor({
       failed: t("errorToast"),
     };
     setError(messages[result.error]);
-  }, [save, serverAssigned, assigned, t, tErr]);
+  }, [save, serverAssigned, assigned, router, t, tErr]);
 
   if (!catalog) {
     return (

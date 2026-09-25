@@ -466,6 +466,35 @@ returns 404 (§6.2). The committed
 [`docs/openapi-admin.json`](./openapi-admin.json) is canonical for exact
 request/response shapes.
 
+**Detail-page saves send only what changed (F-39).** The organization, role
+and group detail pages are tabbed, and a tab panel unmounts when another tab
+opens, so each Settings form remounts from the props the page was rendered
+with. A save used to re-send every field and leave those props as they were,
+so after a tab switch the form showed the values from before the save, and the
+next save wrote them back: fixing a typo in a suspended org's name reactivated
+it. Each Settings form now sends only the fields that differ from the last
+saved state. The org, role and group PATCH routes all take a partial body, so
+untouched fields are never written, and the audit row names only the fields
+the admin changed (the group row's `fields` also carries its `updated_at`
+stamp). After a successful save the form refreshes the page, so the header and
+the props show the saved state, and it follows the refreshed props, so
+returning to the tab shows what was saved. Text typed while a save is in
+flight is kept and goes in the next save. The organization **Authentication**
+tab and the role **Permissions** editor refresh and follow the page the same
+way; after a Reset, the refresh returns the Authentication tab to the inherit
+view unless the admin has already opened Customize again. The sign-up policy
+PATCH still carries the complete policy. See
+[Form Validation](./form-validation.md#settings-forms-seeded-from-server-props-f-39).
+
+Known limitation: the org, role and group PATCH routes have no optimistic
+concurrency. When two admins, or two browser tabs, edit the same record,
+neither sees the other's save, and the later write of a field wins. Changed-only
+bodies limit a stale editor to the fields it actually changed. An ETag plus
+`If-Match` on those routes is a follow-up. `app_roles` has no `updated_at`
+column to derive the ETag from, so it needs a migration, and a new request
+header and a 412 response change the admin OpenAPI spec and the generated
+admin SDK.
+
 ### 8.0 Overview dashboard
 
 The workspace landing page (`administrator/page.tsx`) — a read-only,

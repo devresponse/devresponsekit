@@ -5,9 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrganizationSettingsForm } from "@/app/[locale]/(secure)/app/administrator/organizations/[orgId]/_organization-settings-form";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
+
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
+  refresh.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -84,7 +88,9 @@ describe("OrganizationSettingsForm", () => {
         }
       ).body,
     );
-    expect(body).toMatchObject({ slug: "acme", name: "Acme Corp", status: "active" });
+    // F-39: only the edited field; the untouched slug/status/default are not re-sent.
+    expect(body).toEqual({ name: "Acme Corp" });
     expect(await screen.findByRole("status")).toHaveTextContent("Organization updated.");
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

@@ -301,6 +301,7 @@ describe("GroupSettingsForm", () => {
       />,
     );
 
+    await user.type(screen.getByRole("textbox", { name: /^Name/ }), " Team");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
@@ -309,7 +310,31 @@ describe("GroupSettingsForm", () => {
         expect.objectContaining({ method: "PATCH" }),
       ),
     );
+    // F-39: only the edited field; the untouched description is not re-sent.
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({ name: "Engineering Team" });
     expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("F-39: a save with nothing changed sends no PATCH (the route would answer 400 no_changes)", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(
+      <GroupSettingsForm
+        groupId="g1"
+        initialKey="engineering"
+        initialName="Engineering"
+        initialDescription="Builds things"
+        canUpdate
+      />,
+    );
+
+    // A whitespace-only edit normalizes back to the saved value: not a change.
+    await user.type(screen.getByRole("textbox", { name: /^Description/ }), "  ");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shows an invalid-body error on 400", async () => {
@@ -325,8 +350,10 @@ describe("GroupSettingsForm", () => {
       />,
     );
 
+    await user.type(screen.getByRole("textbox", { name: /^Description/ }), " fast");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The submitted data is invalid.");
+    expect(refresh).not.toHaveBeenCalled();
   });
 });
 

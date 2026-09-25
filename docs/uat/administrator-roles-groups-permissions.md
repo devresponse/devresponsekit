@@ -166,7 +166,7 @@ i18n: labels + validation messages localize.
 - Access matrix: Member / Limited Admin → 404; Org Admin → their org's roles editable; Superadmin → any role including Global; a role in another org → 404 for the org admin.
 - Preconditions & test data: know a role UUID (click through from the list).
 
-Tabs: **Permissions** (default), **Members**, **Settings** (`_role-detail-tabs.tsx:30`).
+Tabs: **Permissions** (default), **Members**, **Settings** (`_role-detail-tabs.tsx:35`).
 
 User stories
 
@@ -180,7 +180,7 @@ User stories
     | 2 | Select one or more keys in Available, click **Add** | They move to the Assigned column; Save becomes enabled |
     | 3 | Type into the Available search box | The left list filters; the count updates |
     | 4 | Select an Assigned key, click **Remove** | It moves back to Available |
-    | 5 | Click **Save** | A green "saved" status appears; reload the page and the Assigned set matches |
+    | 5 | Click **Save** | A green "saved" status appears; open **Members**, then **Permissions** again, and the Assigned set is the saved one (F-39); reload the page and it still matches |
     | 6 | (Org Admin only) Try to add a permission you do not hold, then Save | The save is refused with "You can only add or remove permissions you hold yourself." (server 403); the lists snap back to the saved set, and a reload shows the same set |
     | 7 | (Org Admin only) On a role that carries a permission you do not hold, move a key you hold into Assigned **and** move the unheld key out, then Save | The addition is sent first and lands; the removal is then refused (403) and the same message appears. The lists reload to what is saved: the added key **and** the unheld key are both Assigned, and Save is disabled (nothing pending). Moving the added key back out and saving removes it again (you hold it) |
     | 8 | (Superadmin) On the only role that carries `superuser` for the last superadmin, move `superuser` out and Save | The last-superadmin message appears (409 `last_superadmin`); `superuser` stays in Assigned |
@@ -197,7 +197,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-ROLES-DETAIL-S3 — As an Org Admin, I want to rename a role and edit its description, so that its label stays meaningful; the key must stay fixed.
-  - Acceptance criteria: Given the Settings tab, when I change Name/Description and Save, then it persists; the Key field is read-only; Name is required.
+  - Acceptance criteria: Given the Settings tab, when I change Name/Description and Save, then it persists, and the tab shows the saved values after a switch to another tab and back (F-39); the Key field is read-only; Name is required.
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -205,6 +205,7 @@ User stories
     | 2 | Clear the Name and Save | A required validation error appears; nothing is saved |
     | 3 | Restore a Name, edit Description, Save | A green "saved" status appears |
     | 4 | Attempt to edit the Key field | It is not editable (read-only) |
+    | 5 | Change the Name and Save; open **Members**, return to **Settings**, change only the Description and Save; reload | The Settings tab shows the new Name on return, and after the reload both the new Name and the new Description are kept: a save sends only the fields it changed, so it can never restore the old Name (F-39) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-ROLES-DETAIL-S4 — As an Org Admin, I want another tenant's role to be invisible, so that cross-tenant existence never leaks.
@@ -330,7 +331,7 @@ i18n: labels + messages localize.
 - Access matrix: Member / Limited Admin → 404; Org Admin → their group, fully manageable; Superadmin → any group; another org's group → 404 for the org admin.
 - Preconditions & test data: use the ORG A seed groups; Engineering already confers `admin` with members user1/user2.
 
-Tabs default to **Roles** (`_group-detail-tabs.tsx:32`).
+Tabs default to **Roles** (`_group-detail-tabs.tsx:37`).
 
 #### UAT-ADMIN-RGP-GROUPS-DETAIL-ROLES: Roles tab (dual-list editor)
 
@@ -423,7 +424,7 @@ i18n: dialog + grid copy localize.
 User stories
 
 - UAT-ADMIN-RGP-GROUPS-DETAIL-SETTINGS-S1 — As an Org Admin, I want to rename a group and edit its description, so that its label stays meaningful.
-  - Acceptance criteria: Given `admin.groups.update`, when I change Name/Description and Save, then it persists; Key is read-only; Name is required.
+  - Acceptance criteria: Given `admin.groups.update`, when I change Name/Description and Save, then it persists, and the tab shows the saved values after a switch to another tab and back (F-39); Key is read-only; Name is required.
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -431,6 +432,7 @@ User stories
     | 2 | Clear Name, Save | A required validation error appears |
     | 3 | Restore Name, edit Description, Save | A green "saved" status appears |
     | 4 | Try to edit Key | Not editable |
+    | 5 | Change the Name and Save; open **Members**, return to **Settings**, change only the Description and Save; reload | The Settings tab shows the new Name on return, and after the reload both the new Name and the new Description are kept (F-39) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases

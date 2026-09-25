@@ -16,6 +16,11 @@ export interface GroupDetailJson {
 /**
  * Tab container for the group detail (ADR-0002): Roles (the roles the group
  * confers), Members (users in the group), Settings (name/description).
+ *
+ * Radix unmounts an inactive panel. Roles and Members fetch on mount; the
+ * Settings form is seeded from these props, so it saves through
+ * `useSavedFormBaseline` (F-39), which refreshes the page after a save and
+ * follows the refreshed props.
  */
 export function GroupDetailTabs({
   group,

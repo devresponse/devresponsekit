@@ -22,16 +22,31 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RequiredLegend } from "@/components/ui/required-legend";
-import { useZodForm } from "@/lib/forms/use-zod-form";
+import { useSavedFormBaseline } from "@/lib/forms/use-saved-form-baseline";
 import {
   organizationSettingsSchema,
   type OrganizationSettingsInput,
 } from "@/lib/validation/organizations";
 
+/** The PATCH wire shape of the form, normalized the way the route stores it. */
+function toOrganizationPatch(values: OrganizationSettingsInput) {
+  return {
+    slug: values.slug.trim(),
+    name: values.name.trim(),
+    status: values.status,
+    isDefault: values.isDefault ?? false,
+  };
+}
+
 /**
  * Settings tab for the organization detail (docs/admin-manager.md §8.2;
  * docs/form-validation.md). React Hook Form + the shared
  * `organizationSettingsSchema`. Edits slug, name, status, and the default flag.
+ *
+ * F-39: saves through `useSavedFormBaseline`. The PATCH carries only the
+ * fields the admin changed, and a successful save moves the form's baseline
+ * and refreshes the page, so coming back from another tab (which remounts
+ * this form) can neither show nor re-send the pre-save status or name.
  */
 export function OrganizationSettingsForm({
   orgId,
@@ -53,31 +68,40 @@ export function OrganizationSettingsForm({
   const tErr = useTranslations("administrator.errors");
 
   const [saved, setSaved] = useState(false);
-  const form = useZodForm<OrganizationSettingsInput>(organizationSettingsSchema, {
-    defaultValues: {
+  const { form, changedBody, commitSaved } = useSavedFormBaseline<
+    OrganizationSettingsInput,
+    ReturnType<typeof toOrganizationPatch>
+  >(
+    organizationSettingsSchema,
+    {
       slug: initialSlug,
       name: initialName,
       status: initialStatus as OrganizationSettingsInput["status"],
       isDefault: initialIsDefault,
     },
-  });
+    toOrganizationPatch,
+  );
 
   const onValid = async (values: OrganizationSettingsInput) => {
     form.clearErrors("root");
     setSaved(false);
+    const changes = changedBody(values);
+    if (!changes) {
+      // Nothing differs from what is saved, so nothing is sent: an empty PATCH
+      // would only write an audit row claiming an update.
+      commitSaved(values);
+      setSaved(true);
+      return;
+    }
     try {
       const res = await fetch(`/api/administrator/organizations/${orgId}`, {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          slug: values.slug.trim(),
-          name: values.name.trim(),
-          status: values.status,
-          isDefault: values.isDefault ?? false,
-        }),
+        body: JSON.stringify(changes),
       });
       if (res.ok) {
+        commitSaved(values);
         setSaved(true);
         return;
       }

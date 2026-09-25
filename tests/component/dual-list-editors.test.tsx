@@ -39,6 +39,11 @@ interface Harness {
   /** Answers the editor's other GETs (catalog, group detail); `undefined` when unrouted. */
   aux(url: string): unknown;
   messages: { forbidden: string; failed: string; saved: string };
+  /**
+   * Whether a save ends with `router.refresh()` (F-39): the role editor is
+   * seeded from the page's props, the group editor fetches its own set.
+   */
+  refreshesPage: boolean;
 }
 
 const PERMISSION_CATALOG = ["admin.users.ban", "admin.users.read", "admin.users.update"].map(
@@ -68,6 +73,7 @@ const roleEditor: Harness = {
     failed: "Could not update permissions.",
     saved: "Permissions updated.",
   },
+  refreshesPage: true,
 };
 
 const ROLE_CATALOG = [
@@ -98,7 +104,14 @@ const groupEditor: Harness = {
     failed: "Could not update roles.",
     saved: "Roles updated.",
   },
+  refreshesPage: false,
 };
+
+// F-39: the role editor refreshes the page after every save, a failed one
+// included (it may have landed half-way), so its RSC set catches up with what
+// the save left on the server. `expectRefreshedOnce(h)` pins it on every outcome below.
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 
 const LAST_SUPERADMIN =
   "This is the last platform superadmin; the change would leave nobody able to administer the platform.";
@@ -196,6 +209,11 @@ function values(list: HTMLSelectElement): string[] {
     .sort();
 }
 
+/** One `router.refresh()` per save for the editor seeded from props, none otherwise. */
+function expectRefreshedOnce(h: Harness): void {
+  expect(refresh).toHaveBeenCalledTimes(h.refreshesPage ? 1 : 0);
+}
+
 function button(name: string): HTMLButtonElement {
   return screen.getByRole("button", { name }) as HTMLButtonElement;
 }
@@ -223,6 +241,7 @@ async function stage(
 
 beforeEach(() => {
   fetchMock.mockReset();
+  refresh.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -247,6 +266,7 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     expect(fetchMock.mock.calls.at(-1)).toEqual([h.saveUrl, { credentials: "same-origin" }]);
     expect(values(lists().assigned)).toEqual([h.extra, h.kept].sort());
     expect(button("Save changes")).toBeDisabled();
+    expectRefreshedOnce(h);
   });
 
   it("completes a swap of the item the actor's own authority comes through", async () => {
@@ -288,6 +308,7 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     expect(values(lists().assigned)).toEqual([...h.initial].sort());
     expect(values(lists().available)).toContain(h.extra);
     expect(button("Save changes")).toBeDisabled();
+    expectRefreshedOnce(h);
   });
 
   it("a refused removal (403) after the addition landed shows the grant and names the guard", async () => {
@@ -306,6 +327,8 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     // The committed grant is in Assigned, next to the item that stayed.
     expect(values(lists().assigned)).toEqual([...h.initial, h.extra].sort());
     expect(button("Save changes")).toBeDisabled();
+    // The page is refreshed too, so a tab switch re-seeds the half-applied set.
+    expectRefreshedOnce(h);
     // The baseline IS the server's set, so taking the grant back out is a real
     // pending change the admin can save.
     await user.selectOptions(lists().assigned, h.extra);
@@ -352,6 +375,7 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
       ].sort();
       expect(values(lists().assigned)).toEqual([...server].sort());
       expect(values(lists().assigned)).toEqual(expected);
+      expectRefreshedOnce(h);
       // The baseline IS the server's set, so moving `extra` back is a real
       // pending change: Save wakes up instead of going quiet over a live grant.
       expect(button("Save changes")).toBeDisabled();
@@ -384,6 +408,7 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     ]);
     // The refused removal is still Assigned; the addition is shown as landed.
     expect(values(lists().assigned)).toEqual([...h.initial, h.extra].sort());
+    expectRefreshedOnce(h);
   });
 
   it("keeps the generic message for a 409 that is not last_superadmin", async () => {
@@ -441,6 +466,8 @@ describe.each([roleEditor, groupEditor])("$name save (F-38)", (h) => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(h.messages.failed);
     expect(alert).toHaveTextContent(SAVE_STATE_UNKNOWN);
+    // The page's set cannot be trusted either, so it is refreshed as well.
+    expectRefreshedOnce(h);
     expect(button("Save changes")).toBeDisabled();
     expect(button("Add")).toBeDisabled();
     expect(button("Remove")).toBeDisabled();

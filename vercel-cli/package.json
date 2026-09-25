@@ -22,7 +22,7 @@
   "dependencies": {
     "@vercel/sdk": "1.28.36",
     "commander": "15.0.0",
-    "vercel": "59.23.2"
+    "vercel": "60.0.0"
   },
   "devDependencies": {
     "@types/node": "26.6.2",

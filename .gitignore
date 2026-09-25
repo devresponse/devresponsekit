@@ -15,6 +15,11 @@ build
 .env.local
 .env.*.local
 
+# Vercel CLI state: the project link, `vercel build` output, and the env file
+# `vercel pull` writes with production's secrets in plain text (drk-deploy
+# deletes that one after each run, F-47).
+.vercel
+
 # Logs
 *.log
 npm-debug.log*

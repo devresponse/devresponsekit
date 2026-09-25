@@ -133,6 +133,38 @@ export function coreMigrations(kitRoot: string): string[] {
     .sort();
 }
 
+/**
+ * The libpq variables `pg` falls back to for any part a connection string
+ * leaves out: a URL with no port connects to PGPORT, one with no database to
+ * PGDATABASE, and so on.
+ */
+const LIBPQ_TARGET_FALLBACKS = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER"];
+
+/**
+ * What the migration runners are handed, layered over the inherited
+ * environment: the URL and the schema, with every libpq fallback that could
+ * pick a different server removed (an `undefined` value drops the variable
+ * from the child).
+ *
+ * The URL was checked against production from what it says alone (F-47):
+ * no port is 5432, no database is the user's name. A shell's PGPORT=5433 would
+ * otherwise send a portless URL to a server the check never saw. Names are
+ * matched case-insensitively, because on Windows `pgport` IS `PGPORT` to the
+ * child.
+ */
+export function migrationEnv(
+  databaseUrl: string,
+  schema: string,
+  inherited: NodeJS.ProcessEnv = process.env,
+): Record<string, string | undefined> {
+  const spelled = Object.keys(inherited).filter((key) => LIBPQ_TARGET_FALLBACKS.includes(key.toUpperCase()));
+  return {
+    ...Object.fromEntries([...LIBPQ_TARGET_FALLBACKS, ...spelled].map((key) => [key, undefined])),
+    DATABASE_URL: databaseUrl,
+    DB_SCHEMA: schema,
+  };
+}
+
 export interface MigrateOptions {
   kitRoot: string;
   /** The DIRECT (non-pooled) connection string. */
@@ -157,7 +189,7 @@ export async function applyMigrations(options: MigrateOptions): Promise<void> {
     return;
   }
 
-  const env = { DATABASE_URL: options.databaseUrl, DB_SCHEMA: options.schema };
+  const env = migrationEnv(options.databaseUrl, options.schema);
 
   step("Applying application migrations (pnpm db:app:migrate)");
   await runPnpm(["db:app:migrate"], {

@@ -1,3 +1,4 @@
+import { commandFor, configFileLabel } from "./config-file.js";
 import { CliError } from "./log.js";
 
 /**
@@ -131,8 +132,8 @@ export function resolveProfile(config: TargetConfigShape): DeploymentProfile {
   const target = config.target ?? "kit";
 
   if (target !== "kit" && target !== "satellite") {
-    throw new CliError(`Unknown deployment target \`${String(target)}\` in .drk-deploy.json.`, {
-      hint: 'Use "kit" (the default when absent) or "satellite". Re-run `drk-deploy init`.',
+    throw new CliError(`Unknown deployment target \`${String(target)}\` in ${configFileLabel()}.`, {
+      hint: `Use "kit" (the default when absent) or "satellite". Re-run \`${commandFor("init")}\`.`,
     });
   }
 
@@ -142,8 +143,8 @@ export function resolveProfile(config: TargetConfigShape): DeploymentProfile {
     // satellite's database, and reading it as "satellite" would silently
     // change what `deploy` builds.
     if (config.satellite) {
-      throw new CliError('.drk-deploy.json has a `satellite` block but `target` is "kit".', {
-        hint: 'Set "target": "satellite" if this is a satellite, or delete the `satellite` block. Re-run `drk-deploy init` to rewrite it.',
+      throw new CliError(`${configFileLabel()} has a \`satellite\` block but \`target\` is "kit".`, {
+        hint: `Set "target": "satellite" if this is a satellite, or delete the \`satellite\` block. Re-run \`${commandFor("init")}\` to rewrite it.`,
       });
     }
     return { kind: "kit" };
@@ -151,8 +152,8 @@ export function resolveProfile(config: TargetConfigShape): DeploymentProfile {
 
   const satellite = config.satellite;
   if (!satellite) {
-    throw new CliError('.drk-deploy.json sets `target: "satellite"` but has no `satellite` block.', {
-      hint: "Re-run `drk-deploy init --satellite <standalone|handoff|shared>` to record the option, app checkout and issuer.",
+    throw new CliError(`${configFileLabel()} sets \`target: "satellite"\` but has no \`satellite\` block.`, {
+      hint: `Re-run \`${commandFor("init --satellite <standalone|handoff|shared>")}\` to record the option, app checkout and issuer.`,
     });
   }
   if (!SATELLITE_OPTIONS.includes(satellite.option)) {
@@ -168,7 +169,7 @@ export function resolveProfile(config: TargetConfigShape): DeploymentProfile {
   }
   if (!satellite.appRoot) {
     throw new CliError("The satellite block has no `appRoot` — nothing to build.", {
-      hint: "Re-run `drk-deploy init --app-root <path-to-the-satellite-checkout>`.",
+      hint: `Re-run \`${commandFor("init --app-root <path-to-the-satellite-checkout>")}\`.`,
     });
   }
   if (!isHttpOrigin(satellite.issuerOrigin)) {
@@ -249,7 +250,7 @@ export function migrationPolicy(profile: DeploymentProfile): MigrationPolicy {
   return {
     allowed: false,
     why: "Refusing to migrate: this satellite runs against the KIT's database and does not own its schema.",
-    hint: "Run migrations from the kit's deployment instead (a `drk-deploy` checkout configured for the kit). If this satellite genuinely has its OWN database, re-run `drk-deploy init --own-database` so the decision is recorded, then migrate with an explicit --database-url.",
+    hint: `Run migrations from the kit's deployment instead (a \`drk-deploy\` config for the kit). If this satellite genuinely has its OWN database, re-run \`${commandFor("init --own-database")}\` so the decision is recorded, then migrate with an explicit --database-url.`,
   };
 }
 
@@ -304,7 +305,7 @@ export function satelliteConfigProblems(input: SatelliteCheckInput): ConfigProbl
       problems.push({
         what: "COOKIE_DOMAIN",
         why: "Option C shares the kit's session cookie; without a parent domain the cookie stays scoped to this host and the shared session silently does not work",
-        hint: "Re-run `drk-deploy init --cookie-domain .example.com` with the domain BOTH hosts sit under.",
+        hint: `Re-run \`${commandFor("init --cookie-domain .example.com")}\` with the domain BOTH hosts sit under.`,
       });
     } else if (own !== null && !hostSitsUnder(hostOf(own), domain)) {
       problems.push({
@@ -396,7 +397,7 @@ export function containmentWarnings(input: {
     warnings.push({
       what: "database",
       why: "this satellite runs on the KIT's database, so a compromise of its server reads and writes the primary's auth tables (users, credentials, sessions, roles): platform-wide takeover, superadmins included. It is security-equivalent to Option C, not contained",
-      hint: `Contained only when DATABASE_URL signs in as a Postgres ROLE with no privileges on the kit's schema: one on a separate cluster or project, or a dedicated role that is not the kit's. A new database under the kit's role is no boundary (roles are cluster-wide), nor is a role made in the Neon console (it joins neon_superuser, which writes every table; create it with SQL), and a different DB_SCHEMA is a search_path, not a boundary. Then record it with \`drk-deploy init --own-database\`.`,
+      hint: `Contained only when DATABASE_URL signs in as a Postgres ROLE with no privileges on the kit's schema: one on a separate cluster or project, or a dedicated role that is not the kit's. A new database under the kit's role is no boundary (roles are cluster-wide), nor is a role made in the Neon console (it joins neon_superuser, which writes every table; create it with SQL), and a different DB_SCHEMA is a search_path, not a boundary. Then record it with \`${commandFor("init --own-database")}\`.`,
     });
   }
 

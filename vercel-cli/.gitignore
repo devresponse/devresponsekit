@@ -2,8 +2,9 @@ node_modules/
 dist/
 
 # Written by `drk-deploy init` — project ids and the production origin.
-# Harmless, but it is machine-local state, not source.
-.drk-deploy.json
+# Harmless, but it is machine-local state, not source. One file per
+# deployment (F-50): .drk-deploy.json, or .drk-deploy.<name>.json via --config.
+.drk-deploy*.json
 
 # Never: the access token lives in the user profile, but guard against a
 # stray copy landing here.

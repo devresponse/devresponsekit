@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { deploymentContext, requireConfig, requireToken } from "../lib/config.js";
+import { commandFor, deploymentContext, requireConfig, requireToken } from "../lib/config.js";
 import {
   ALL_TARGETS,
   type DeploymentContext,
@@ -49,6 +49,7 @@ import {
 } from "../lib/env-presence.js";
 import { generateAuthSecret, generateHandoffKeypair, generateOperatorSecret } from "../lib/secrets.js";
 import { VercelClient } from "../lib/vercel-client.js";
+import { refuseIssuerProject } from "../lib/vercel-project.js";
 
 /** Minimal .env reader: `KEY=value`, optional quotes, `#` comments, no interpolation. */
 export function parseEnvFile(contents: string): Record<string, string> {
@@ -153,6 +154,11 @@ export async function envSync(
   info(dim(`  targets: ${targets.join(", ")}`));
 
   const existing = await client.listEnv(config.projectId);
+  // Before anything else is judged, and so before anything is written: a
+  // satellite config pointing at the kit's project would write the
+  // satellite's environment over the issuer's, and the refusal below would
+  // name the issuer's own signing key as a stray one (F-50).
+  await refuseIssuerProject(client, config, context.profile, existing);
   const supplied = loadSuppliedValues(
     specs,
     options.fromEnv,
@@ -167,7 +173,7 @@ export async function envSync(
   // property in place while printing a page of green ticks. Deliberately
   // target-blind (F-46): a refused key set for ANY target is reported, which
   // over-reports and so fails safe.
-  assertNoRefusedVariables(refused, new Set(existing.map((e) => e.key)), supplied);
+  assertNoRefusedVariables(refused, new Set(existing.map((e) => e.key)), supplied, config.projectId);
 
   // The public values Vercel lists as ciphertext, read back so the ones left
   // alone below are verified rather than assumed. Nothing is left alone
@@ -288,7 +294,7 @@ export async function envSync(
   }
   if (conflicting.length > 0) {
     info(
-      `Drop the supplied value from the --from-env file and the shell, and the derived one is written. If the supplied one is right, correct the recorded config with ${bold("drk-deploy init")} instead.`,
+      `Drop the supplied value from the --from-env file and the shell, and the derived one is written. If the supplied one is right, correct the recorded config with ${bold(commandFor("init"))} instead.`,
     );
   }
   if (blocked.length > 0) {
@@ -299,12 +305,12 @@ export async function envSync(
       // no — and, if it did not, at an empty database. Same policy, one source.
       info(
         migrationPolicy(context.profile).allowed
-          ? `For a new database: ${bold("drk-deploy db:provision")}`
+          ? `For a new database: ${bold(commandFor("db:provision"))}`
           : `This deployment runs against the ${bold("KIT's")} database — supply the kit's DATABASE_URL (and matching DB_SCHEMA). ${dim("db:provision is refused here.")}`,
       );
     }
     if (blocked.some((b) => b.key === "COOKIE_DOMAIN")) {
-      info(`Record the cookie domain: ${bold("drk-deploy init --cookie-domain .example.com")}`);
+      info(`Record the cookie domain: ${bold(commandFor("init --cookie-domain .example.com"))}`);
     }
   }
   if (wrong.length > 0) reportWrong(wrong);
@@ -431,6 +437,11 @@ export async function envCheck(cliRoot: string): Promise<number> {
   info(dim(`  ${describeProfile(context.profile)}`));
   info(dim(`  checked for: ${PREFLIGHT_TARGETS.join(", ")}`));
   const existing = await client.listEnv(config.projectId);
+  // On the kit's project a satellite's report is worse than useless: it lists
+  // the issuer's real SSO_HANDOFF_PRIVATE_KEY under "Must NOT be set" and
+  // points at env:prune, which deleted it. Refused before anything is
+  // reported, so `deploy`'s preflight stops on it, --yes or not (F-50).
+  await refuseIssuerProject(client, config, context.profile, existing);
   // Target-blind on purpose, and used only for the refused and forbidden
   // keys below (F-46): one set for ANY target is reported, which fails safe.
   const anywhere = new Set(existing.map((e) => e.key));
@@ -480,7 +491,12 @@ export async function envCheck(cliRoot: string): Promise<number> {
       problems += 1;
     }
     info("");
-    info(`Remove with: ${bold("drk-deploy env:prune")}`);
+    // Only a satellite has refused keys, and a satellite reaches this line
+    // only once its project is shown not to be the issuer's (F-50). The
+    // project is named, so the operator sees which one the prune acts on.
+    info(
+      `Remove them from this satellite's project (${config.projectId}) with: ${bold(commandFor("env:prune"))}`,
+    );
   }
 
   const forbidden = FORBIDDEN_ON_VERCEL.filter((f) => anywhere.has(f.key));
@@ -491,7 +507,7 @@ export async function envCheck(cliRoot: string): Promise<number> {
       problems += 1;
     }
     info("");
-    info(`Remove with: ${bold("drk-deploy env:prune")}`);
+    info(`Remove with: ${bold(commandFor("env:prune"))}`);
   }
 
   const unknown = [...anywhere].filter(
@@ -544,19 +560,34 @@ export function reportContainment(profile: DeploymentProfile, origin: string): n
   return warnings.length;
 }
 
-/** `drk-deploy env:prune` — removes variables that must not exist on a deployment. */
+/**
+ * `drk-deploy env:prune` — removes variables that must not exist on a deployment.
+ *
+ * On a satellite this is the command that removes a stray signing key, so it
+ * prunes the target-specific refusals (`refusedFor`: SSO_HANDOFF_PRIVATE_KEY,
+ * SSO_HANDOFF_PREVIOUS_PRIVATE_KEY, the key ids, SSO_ALLOWED_ORIGIN_SUFFIXES,
+ * and COOKIE_DOMAIN on A and B) as well as the development-only ones. Every one
+ * of those is the ISSUER's to hold, so the command refuses outright on a
+ * project that serves the issuer's origin (F-50). A satellite config pointed at
+ * the kit's project used to delete the kit's signing key and its origin
+ * allow-list from production here, with `--yes`, after `env:check` and the
+ * `up` refusal had both pointed at this command. After the next deployment
+ * the kit published an empty key set, and every handoff failed. The kit's
+ * own list holds none of these: `refusedFor` is empty for it.
+ */
 export async function envPrune(cliRoot: string, options: { dryRun?: boolean; yes?: boolean }): Promise<void> {
   const config = requireConfig(cliRoot);
   const client = new VercelClient(requireToken(), config.teamId);
   const context = deploymentContext(config);
-  // On a satellite this is the command that removes a stray signing key, so it
-  // prunes the target-specific refusals as well as the development-only ones.
   const removable = [...refusedFor(context.profile), ...FORBIDDEN_ON_VERCEL];
   const existing = await client.listEnv(config.projectId);
-  const doomed = existing.filter((e) => removable.some((f) => f.key === e.key));
 
   heading("Prune variables that must not be set here");
   info(dim(`  ${describeProfile(context.profile)}`));
+  // Before anything is listed as removable, so neither --dry-run nor --yes
+  // presents the issuer's keys as strays (F-50).
+  await refuseIssuerProject(client, config, context.profile, existing);
+  const doomed = existing.filter((e) => removable.some((f) => f.key === e.key));
   if (doomed.length === 0) {
     ok("Nothing to remove.");
     return;
@@ -597,6 +628,7 @@ function assertNoRefusedVariables(
   refused: ReadonlyArray<{ key: string; why: string }>,
   present: ReadonlySet<string>,
   supplied: Readonly<Record<string, string>>,
+  projectId: string,
 ): void {
   const offenders = refused.filter((f) => present.has(f.key) || supplied[f.key] !== undefined);
   if (offenders.length === 0) return;
@@ -607,8 +639,10 @@ function assertNoRefusedVariables(
     field(f.key, `${red(where)} — ${f.why}`, 32);
   }
   info("");
+  // Reached only once the project is shown not to be the issuer's (F-50), so
+  // the prune this names removes a satellite's stray key, not the kit's.
   throw new CliError(`${offenders.length} variable(s) must not exist on this deployment target.`, {
-    hint: "Remove them with `drk-deploy env:prune`, and drop them from any --from-env file or shell environment, then re-run.",
+    hint: `Remove them from this satellite's project (${projectId}) with \`${commandFor("env:prune")}\`, and drop them from any --from-env file or shell environment, then re-run.`,
   });
 }
 

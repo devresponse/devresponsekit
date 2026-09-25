@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -10,13 +10,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 
 // Tests run against the BUILT output, so they exercise exactly what ships.
 import { doctor } from "../dist/commands/doctor.js";
-import { init } from "../dist/commands/init.js";
+import { init, recordedSatelliteAnswers } from "../dist/commands/init.js";
 import {
   deploy,
   migrate,
@@ -25,6 +25,7 @@ import {
   resolveMigrationUrl,
   up,
 } from "../dist/commands/release.js";
+import { configFileFrom, configPath, requireConfig, useConfigFile } from "../dist/lib/config.js";
 import { applyMigrations, migrationEnv } from "../dist/lib/kit.js";
 import { CliError, setQuiet } from "../dist/lib/log.js";
 import { verifyMigrationTarget } from "../dist/lib/migration-target.js";
@@ -37,7 +38,8 @@ import {
   treeProblems,
 } from "../dist/lib/release-tree.js";
 import { projectGit } from "../dist/lib/vercel-client.js";
-import { assertCheckoutLink, vercelEnvFor } from "../dist/lib/vercel-project.js";
+import { resolveProfile } from "../dist/lib/target.js";
+import { assertCheckoutLink, issuerProjectProblem, vercelEnvFor } from "../dist/lib/vercel-project.js";
 
 /* ================================================================== */
 /*  F-45 / F-47: the release ORDER, asserted rather than read          */
@@ -51,7 +53,7 @@ import { assertCheckoutLink, vercelEnvFor } from "../dist/lib/vercel-project.js"
  */
 const STEPS = [
   "tree",
-  "gitIntegration",
+  "project",
   "envSync",
   "envCheck",
   "link",
@@ -63,11 +65,11 @@ const STEPS = [
 ];
 
 /**
- * The F-49 checks of a run that promotes: the checkout's commit, then whether
- * Vercel deploys production by itself. Both only read, and both come before
- * anything writes.
+ * The F-49 and F-50 checks of a run that promotes: the checkout's commit, then
+ * the project (is it the SSO issuer's own? does Vercel deploy production by
+ * itself?). Both only read, and both come before anything writes.
  */
-const GATE = ["tree", "gitIntegration"];
+const GATE = ["tree", "project"];
 
 /**
  * `deploy` with a preflight, on a target that owns its schema. `pull` comes
@@ -79,6 +81,8 @@ const KIT_ORDER = ["envCheck", ...GATE, "link", "pull", "migrate", "build", "pro
 const UP_ORDER = [...GATE, "envSync", "link", "pull", "migrate", "build", "promote", "verify"];
 /** `drk-deploy migrate`: the first half of `deploy`. It promotes nothing, so it reads the tree alone. */
 const MIGRATE_ORDER = ["tree", "link", "pull", "migrate"];
+/** A satellite's `migrate` reads the project too, before anything is linked: never the issuer's (F-50). */
+const SATELLITE_MIGRATE_ORDER = ["tree", "project", "link", "pull", "migrate"];
 /** Where `deploy` stops when the migration target is refused: after the pull, before anything migrates. */
 const DEPLOY_TO_PULL = ["envCheck", ...GATE, "link", "pull"];
 
@@ -252,8 +256,10 @@ function vercelEnvFile(values: Record<string, string>): string {
  * Its `tree` answers what `inspectTree` would for each checkout (F-49): by
  * default a clean one on main, pushed, at origin/main, and `trees` describes
  * any other, by root. Each call is recorded in `inspected`, with the
- * `--allow-ref` it was handed. Its `gitIntegration` answers `git`, by default
- * a project with no repository connected, so nothing else deploys it.
+ * `--allow-ref` it was handed. Its `project` answers the configured project
+ * with `git` as its git connection, by default none connected, so nothing
+ * else deploys it, and `aliases` as its production aliases, by default none,
+ * so it is nobody's issuer (F-50).
  */
 function recordingRunner(
   options: {
@@ -263,6 +269,7 @@ function recordingRunner(
     linked?: string | null;
     trees?: Record<string, FakeTree>;
     git?: ProjectGit;
+    aliases?: string[];
   } = {},
 ) {
   const calls: string[] = [];
@@ -284,9 +291,17 @@ function recordingRunner(
           if (options.failAt === name) throw new Error(`${name} failed`);
           return fakeTree(root, allowRef, options.trees?.[root]);
         }
-        if (name === "gitIntegration") {
+        if (name === "project") {
           if (options.failAt === name) throw new Error(`${name} failed`);
-          return options.git ?? NO_GIT;
+          const { config } = received[0] as { config: { projectId: string } };
+          return {
+            id: config.projectId,
+            name: config.projectId.replace(/^prj_/, ""),
+            accountId: null,
+            framework: "nextjs",
+            aliases: options.aliases ?? [],
+            git: options.git ?? NO_GIT,
+          };
         }
         if (name === "build") {
           seen.pulledAtBuild = existsSync(pulledFile((received[0] as { root: string }).root));
@@ -885,7 +900,7 @@ test("F-47: a satellite that owns its database is checked against ITS production
   await assert.rejects(deploy(cliRoot, { databaseUrl: LOCAL }, runner), refusal(/not production's database/));
   // Two checkouts are read (F-49): the satellite's, which is built, and the
   // kit's, which the migrations come from.
-  assert.deepEqual(calls, ["envCheck", "tree", "tree", "gitIntegration", "link", "pull"]);
+  assert.deepEqual(calls, ["envCheck", "tree", "tree", "project", "link", "pull"]);
   assert.equal((args.pull as [{ root: string }])[0].root, appRoot, "its own checkout's pull");
 
   const matched = recordingRunner();
@@ -2164,7 +2179,7 @@ test("F-49: a satellite's own database is migrated only from the kit's default b
   assert.deepEqual(released.calls, ["envCheck", "tree", ...KIT_ORDER.filter((s) => s !== "envCheck")]);
   const migrated = recordingRunner();
   await migrateCommand(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, migrated.runner);
-  assert.deepEqual(migrated.calls, MIGRATE_ORDER);
+  assert.deepEqual(migrated.calls, SATELLITE_MIGRATE_ORDER);
 
   // The kit's own `migrate` still runs from the same pushed branch.
   const kit = fixture("kit");
@@ -2332,15 +2347,16 @@ test("F-49: a dry run reads and reports the tree, and refuses nothing", async ()
 test("F-49: a dry run that cannot read the project's git connection says so and plans on; a real run stops", async () => {
   // The git connection comes from the Vercel API, which a dry run now reads.
   // An API that is down must not turn "show me the plan" into a failure.
-  const unreadable = /\[dry-run\] could not read the project's git connection \(gitIntegration failed\)/;
-  const dry = recordingRunner({ failAt: "gitIntegration" });
+  const unreadable =
+    /\[dry-run\] could not read the project \(project failed\), so whether it is the SSO issuer's own project and whether Vercel also deploys production are unknown/;
+  const dry = recordingRunner({ failAt: "project" });
   const shown = await captureOutput(() =>
     deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, dry.runner),
   );
   assert.equal(shown.error, undefined, shown.out);
   assert.deepEqual(dry.calls, ["envCheck", ...GATE, "migrate"]);
   assert.match(shown.out, unreadable);
-  const dryUp = recordingRunner({ failAt: "gitIntegration" });
+  const dryUp = recordingRunner({ failAt: "project" });
   const upShown = await captureOutput(() =>
     up(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, dryUp.runner),
   );
@@ -2350,12 +2366,12 @@ test("F-49: a dry run that cannot read the project's git connection says so and 
 
   // A real run cannot tell whether it races Vercel, so it goes no further.
   for (const run of [deploy, up]) {
-    const real = recordingRunner({ failAt: "gitIntegration" });
+    const real = recordingRunner({ failAt: "project" });
     await assert.rejects(
       run(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, real.runner),
-      /^Error: gitIntegration failed$/,
+      /^Error: project failed$/,
     );
-    assert.deepEqual(real.calls.at(-1), "gitIntegration", "nothing synced, linked, pulled or migrated");
+    assert.deepEqual(real.calls.at(-1), "project", "nothing synced, linked, pulled or migrated");
   }
 });
 
@@ -2724,4 +2740,765 @@ test("F-49: doctor counts a satellite's kit checkout off the kit's default branc
     /kit checkout\s+wrong — the kit checkout's HEAD \w{12} is not origin\/main \(\w{12}\)/,
   );
   assert.match(off.out, /--allow-ref names the satellite's ref, never the kit's/);
+});
+
+/* ================================================================== */
+/*  F-50: one config per deployment, and never the issuer's project    */
+/* ================================================================== */
+
+/** The kit's origin in every F-50 fixture, and so every satellite's SSO issuer. */
+const ISSUER = "https://demo.example.com";
+
+/** A satellite app folder as `assertSatelliteRoot` accepts one: a build, a consume route, the refusal stub. */
+function satelliteCheckout(root: string, name: string): string {
+  mkdirSync(join(root, "src", "app", "api", "sso", "consume"), { recursive: true });
+  const stub = "node scripts/db-owned-by-kit.mjs";
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      name,
+      scripts: { build: "next build", "db:app:migrate": stub, "db:auth:migrate": stub },
+    }),
+  );
+  return root;
+}
+
+/**
+ * The projects `GET /v9/projects/{idOrName}` answers, by id or name, each with
+ * its production aliases, in the shape the SDK validates. Any other call
+ * throws, and every request is recorded.
+ */
+function fakeProjects(projects: Record<string, { name: string; aliases: string[] }>): string[] {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, request?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    requests.push(
+      `${request?.method ?? (input instanceof Request ? input.method : "GET")} ${url.pathname}${url.search}`,
+    );
+    const match = url.hostname === "api.vercel.com" ? /^\/v9\/projects\/([^/]+)$/.exec(url.pathname) : null;
+    const ref = match ? decodeURIComponent(match[1]!) : "";
+    const found = Object.entries(projects).find(([id, project]) => id === ref || project.name === ref);
+    if (!found) throw new Error(`an F-50 test made an unexpected call: ${url}`);
+    const [id, { name, aliases }] = found;
+    return new Response(
+      JSON.stringify({
+        id,
+        name,
+        accountId: "team_test",
+        alias: aliases.map((domain) => ({
+          domain,
+          environment: "production",
+          target: "PRODUCTION",
+          deployment: null,
+        })),
+        nodeVersion: "24.x",
+        defaultResourceConfig: { functionDefaultRegions: [] },
+        resourceConfig: { functionDefaultRegions: [] },
+        deploymentExpiration: {},
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+  return requests;
+}
+
+/** The fleet as the Vercel API sees it: two satellites' projects, a spare, and the kit's. */
+const FLEET = {
+  prj_standalone: { name: "app-standalone", aliases: ["app1.example.net", "app-standalone.vercel.app"] },
+  prj_handoff: { name: "app-handoff", aliases: ["app2.example.net"] },
+  prj_moved: { name: "app-standalone-2", aliases: ["app1-new.example.net"] },
+  prj_kit: { name: "devresponsekit", aliases: ["demo.example.com", "devresponsekit.vercel.app"] },
+};
+
+/** A CLI root with no config yet, a kit checkout `init` accepts, and the two satellites' app folders. */
+function fleetRoot(): { cliRoot: string; kitRoot: string; standalone: string; handoff: string } {
+  const { cliRoot, kitRoot } = fixture("kit", { migratableKit: true });
+  rmSync(join(cliRoot, ".drk-deploy.json"));
+  return {
+    cliRoot,
+    kitRoot,
+    standalone: satelliteCheckout(join(cliRoot, "app-standalone"), "app-standalone"),
+    handoff: satelliteCheckout(join(cliRoot, "app-handoff"), "app-handoff"),
+  };
+}
+
+/** app-standalone, as a first `init` records it: its own project, on its own database. */
+async function initStandalone(fleet: ReturnType<typeof fleetRoot>): Promise<void> {
+  await init(fleet.cliRoot, {
+    project: "prj_standalone",
+    domain: "app1.example.net",
+    appName: "Standalone",
+    satellite: "standalone",
+    appRoot: fleet.standalone,
+    issuer: ISSUER,
+    kitRoot: fleet.kitRoot,
+    ownDatabase: true,
+    yes: true,
+  });
+}
+
+const configText = (cliRoot: string) => readFileSync(join(cliRoot, ".drk-deploy.json"), "utf8");
+
+test("F-50: init refuses to carry one deployment's project, domain and app id into another", async () => {
+  const requests = fakeProjects(FLEET);
+  try {
+    const fleet = fleetRoot();
+    await initStandalone(fleet);
+    const recorded = configText(fleet.cliRoot);
+    assert.equal(configOf(fleet.cliRoot).satellite.database, "own");
+
+    // The recorded scenario: app-handoff configured over app-standalone's file
+    // with no --project. It used to build app-handoff into app-standalone's
+    // project, domain and application id, and `up` then replaced
+    // app-standalone's production.
+    const cases: [string, Record<string, unknown>, RegExp, RegExp][] = [
+      [
+        "a new option and checkout",
+        { satellite: "handoff", appRoot: fleet.handoff, issuer: ISSUER, yes: true },
+        /its satellite option is standalone, and this run names handoff; its app checkout is .+app-standalone, and this run names .+app-handoff\./,
+        /pass --project <name\|id>, --domain <host>, --application-id <id>, --kit-database or --own-database\.$/,
+      ],
+      [
+        // The verifier's sibling: the option alone kept the other app's checkout too.
+        "a new option alone",
+        { satellite: "handoff", yes: true },
+        /its satellite option is standalone, and this run names handoff\./,
+        /--application-id <id>, --app-root <path>, --kit-database or --own-database\.$/,
+      ],
+      [
+        "a new checkout alone",
+        { appRoot: fleet.handoff, project: "prj_handoff", domain: "app2.example.net", yes: true },
+        /its app checkout is .+app-standalone, and this run names .+app-handoff\./,
+        /pass --application-id <id>, --satellite <standalone\|handoff\|shared>, --kit-database or --own-database\.$/,
+      ],
+    ];
+    for (const [name, options, what, missing] of cases) {
+      requests.length = 0;
+      await assert.rejects(
+        init(fleet.cliRoot, options),
+        (err: unknown) =>
+          err instanceof CliError &&
+          err.message.startsWith(`${configPath(fleet.cliRoot)} records another deployment: `) &&
+          what.test(err.message) &&
+          missing.test(err.message) &&
+          /--config \.drk-deploy\.<name>\.json/.test(err.hint ?? ""),
+        name,
+      );
+      assert.equal(configText(fleet.cliRoot), recorded, `${name}: the file is untouched`);
+      assert.deepEqual(requests, [], `${name}: refused before any call`);
+    }
+
+    // Named in full, it is configured, and nothing of app-standalone's own
+    // carries over: not its database, not its product name. The issuer and
+    // the audience prefix are the fleet's and are kept.
+    await init(fleet.cliRoot, {
+      project: "prj_handoff",
+      domain: "app2.example.net",
+      applicationId: "handoff",
+      satellite: "handoff",
+      appRoot: fleet.handoff,
+      kitDatabase: true,
+      yes: true,
+    });
+    const handoff = configOf(fleet.cliRoot);
+    assert.equal(handoff.projectId, "prj_handoff");
+    assert.equal(handoff.origin, "https://app2.example.net");
+    assert.equal(handoff.applicationId, "handoff");
+    assert.equal(handoff.appName, "app-handoff", "the new project's name, not app-standalone's product name");
+    assert.equal(handoff.audiencePrefix, "devresponse-app");
+    assert.deepEqual(handoff.satellite, {
+      option: "handoff",
+      appRoot: fleet.handoff,
+      issuerOrigin: ISSUER,
+      database: "shared-with-kit",
+    });
+
+    // A kit config turned into a satellite: the same rule, and the kit's
+    // project is never inherited.
+    const kit = fleetRoot();
+    await init(kit.cliRoot, {
+      project: "prj_kit",
+      domain: "demo.example.com",
+      kitRoot: kit.kitRoot,
+      yes: true,
+    });
+    const kitRecorded = configText(kit.cliRoot);
+    requests.length = 0;
+    await assert.rejects(
+      init(kit.cliRoot, { satellite: "standalone", appRoot: kit.standalone, issuer: ISSUER, yes: true }),
+      refusal(
+        /records another deployment: it is the kit's, and this run makes it a satellite\. A new deployment is named in full: pass --project <name\|id>, --domain <host>, --application-id <id>, --kit-database or --own-database\.$/,
+      ),
+    );
+    assert.equal(configText(kit.cliRoot), kitRecorded);
+    assert.deepEqual(requests, []);
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-50: a re-run for the same deployment keeps every recorded value; a new project does not keep the old domain", async () => {
+  fakeProjects(FLEET);
+  try {
+    const fleet = fleetRoot();
+    await initStandalone(fleet);
+    const recorded = configOf(fleet.cliRoot);
+
+    // `init --yes` is the documented refresh (F-48), and naming the same
+    // option and checkout again is the same deployment.
+    for (const options of [
+      { yes: true },
+      { satellite: "standalone", appRoot: fleet.standalone, yes: true },
+      { satellite: "standalone", appRoot: join(fleet.standalone, "."), yes: true },
+    ]) {
+      await init(fleet.cliRoot, options);
+      assert.deepEqual(configOf(fleet.cliRoot), recorded, JSON.stringify(options));
+    }
+
+    // The recorded origin was the recorded project's domain: a re-run naming
+    // another project takes the new one's, as a first init does. The app's
+    // own settings stay.
+    await init(fleet.cliRoot, { project: "prj_moved", yes: true });
+    const moved = configOf(fleet.cliRoot);
+    assert.equal(moved.projectId, "prj_moved");
+    assert.equal(moved.origin, "https://app1-new.example.net");
+    assert.equal(moved.applicationId, "standalone");
+    assert.equal(moved.appName, "Standalone");
+    assert.equal(moved.satellite.database, "own");
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+const issuersProject = (hint: RegExp = /./) =>
+  refusal(
+    /^This satellite config points at the SSO issuer's own Vercel project: devresponsekit \(prj_kit\) serves demo\.example\.com, the SSO issuer's host, so it is the kit's project\. Nothing was changed\.$/,
+    hint,
+    2,
+  );
+
+test("F-50: init never saves a satellite config bound to the SSO issuer's own project", async () => {
+  fakeProjects(FLEET);
+  try {
+    // The verifier's route (b): "back to the kit" with --project on a
+    // satellite config, which stays a satellite. With --domain it reached the
+    // kit's project; without it the kit's own domain is now inferred, which
+    // the issuer check refuses first.
+    const fleet = fleetRoot();
+    await initStandalone(fleet);
+    const recorded = configText(fleet.cliRoot);
+    await assert.rejects(
+      init(fleet.cliRoot, { project: "prj_kit", domain: "app1.example.net", yes: true }),
+      issuersProject(/No flag overrides this, not --yes and not --skip-checks/),
+    );
+    await assert.rejects(
+      init(fleet.cliRoot, { project: "prj_kit", yes: true }),
+      refusal(/^The SSO issuer must not be this deployment's own origin\.$/),
+    );
+    assert.equal(configText(fleet.cliRoot), recorded, "the file is untouched");
+
+    // A first init straight onto the kit's project writes nothing.
+    const fresh = fleetRoot();
+    await assert.rejects(
+      init(fresh.cliRoot, {
+        project: "prj_kit",
+        domain: "app9.example.net",
+        satellite: "standalone",
+        appRoot: fresh.standalone,
+        issuer: ISSUER,
+        kitRoot: fresh.kitRoot,
+        yes: true,
+      }),
+      issuersProject(),
+    );
+    assert.equal(existsSync(join(fresh.cliRoot, ".drk-deploy.json")), false);
+
+    // The kit on its own project is what the kit is.
+    const kit = fleetRoot();
+    await init(kit.cliRoot, {
+      project: "prj_kit",
+      domain: "demo.example.com",
+      kitRoot: kit.kitRoot,
+      yes: true,
+    });
+    assert.equal(configOf(kit.cliRoot).projectId, "prj_kit");
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-50: issuerProjectProblem recognises the issuer's project by its host, and nothing looser", () => {
+  const satellite = resolveProfile(configOf(fixture("satellite").cliRoot));
+  const kit = resolveProfile(configOf(fixture("kit").cliRoot));
+  const project = (aliases: string[]) => ({ id: "prj_x", name: "x", aliases });
+  const cases: [string, Parameters<typeof issuerProjectProblem>[1], boolean][] = [
+    ["its own aliases", { project: project(["app1.example.net", "x.vercel.app"]) }, false],
+    ["no aliases reported", { project: project([]) }, false],
+    ["the issuer's host", { project: project(["x.vercel.app", "demo.example.com"]) }, true],
+    ["another casing, a trailing dot", { project: project(["DEMO.Example.COM."]) }, true],
+    ["written as a URL", { project: project(["https://demo.example.com/"]) }, true],
+    ["a host that merely ends with it", { project: project(["evil-demo.example.com"]) }, false],
+    ["a host that merely starts with it", { project: project(["demo.example.com.evil.net"]) }, false],
+    ["a parent of it", { project: project(["example.com"]) }, false],
+    [
+      "BETTER_AUTH_URL stored readable as the issuer's origin",
+      { project: project([]), env: [{ key: "BETTER_AUTH_URL", value: "https://demo.example.com/" }] },
+      true,
+    ],
+    [
+      "NEXT_PUBLIC_APP_URL stored readable as the issuer's origin",
+      { project: project([]), env: [{ key: "NEXT_PUBLIC_APP_URL", value: "https://demo.example.com" }] },
+      true,
+    ],
+    [
+      // Every satellite stores this as the kit's origin: that is its job.
+      "SSO_HANDOFF_ISSUER as the issuer's origin",
+      { project: project([]), env: [{ key: "SSO_HANDOFF_ISSUER", value: "https://demo.example.com" }] },
+      false,
+    ],
+    [
+      "BETTER_AUTH_URL unreadable",
+      { project: project([]), env: [{ key: "BETTER_AUTH_URL", value: undefined }] },
+      false,
+    ],
+  ];
+  for (const [name, evidence, refused] of cases) {
+    assert.equal(issuerProjectProblem(satellite, evidence) !== null, refused, name);
+    assert.equal(issuerProjectProblem(kit, evidence), null, `${name}: the kit IS the issuer`);
+  }
+});
+
+test("F-50: deploy, up and migrate refuse a satellite config on the issuer's project before anything writes, --yes and --skip-checks included", async () => {
+  const kitAliases = { aliases: ["devresponsekit.vercel.app", "demo.example.com"] };
+  const refused = refusal(
+    /^This satellite config points at the SSO issuer's own Vercel project: sat \(prj_sat\) serves demo\.example\.com/,
+    /No flag overrides this, not --yes and not --skip-checks/,
+    2,
+  );
+  const owned = { database: "own" } as const;
+  const cases: [string, (runner: never) => Promise<void>, string[]][] = [
+    // env:check finds 3 problems here, and --yes deploys past them.
+    ["deploy --yes", (r) => deploy(fixture("satellite").cliRoot, { yes: true }, r), ["envCheck", ...GATE]],
+    ["deploy --skip-checks", (r) => deploy(fixture("satellite").cliRoot, { skipChecks: true }, r), GATE],
+    [
+      "deploy with every flag that skips something",
+      (r) =>
+        deploy(
+          fixture("satellite", owned).cliRoot,
+          { yes: true, skipChecks: true, skipMigrations: true, allowGitIntegrationRace: true },
+          r,
+        ),
+      GATE,
+    ],
+    ["up --yes", (r) => up(fixture("satellite").cliRoot, { yes: true }, r), GATE],
+    [
+      "deploy, a satellite that owns its database",
+      (r) => deploy(fixture("satellite", owned).cliRoot, { databaseUrl: PRODUCTION_DIRECT, yes: true }, r),
+      ["envCheck", "tree", "tree", "project"],
+    ],
+    [
+      "migrate, a satellite that owns its database",
+      (r) => migrateCommand(fixture("satellite", owned).cliRoot, { databaseUrl: PRODUCTION_DIRECT }, r),
+      ["tree", "project"],
+    ],
+  ];
+  for (const [name, run, stopsAt] of cases) {
+    const { runner, calls } = recordingRunner({ ...kitAliases, envProblems: 3 });
+    await assert.rejects(run(runner), refused, name);
+    assert.deepEqual(calls, stopsAt, `${name}: nothing synced, linked, pulled, built or promoted`);
+  }
+
+  // A dry run reads and reports it, and refuses nothing, as for F-49.
+  const dry = recordingRunner(kitAliases);
+  const shown = await captureOutput(() => deploy(fixture("satellite").cliRoot, { dryRun: true }, dry.runner));
+  assert.equal(shown.error, undefined, shown.out);
+  assert.match(
+    shown.out,
+    /\[dry-run\] a real run would refuse: this satellite config points at sat \(prj_sat\) serves demo\.example\.com/,
+  );
+
+  // The kit on its own project, and a satellite on its own, deploy as before.
+  const kit = recordingRunner(kitAliases);
+  await deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, kit.runner);
+  assert.deepEqual(kit.calls, KIT_ORDER);
+  const own = recordingRunner({ aliases: ["app1.example.net"] });
+  await up(fixture("satellite").cliRoot, {}, own.runner);
+  assert.deepEqual(
+    own.calls,
+    UP_ORDER.filter((s) => s !== "migrate"),
+  );
+});
+
+test("F-50: doctor counts a satellite config on the issuer's project", async () => {
+  const { cliRoot } = fixture("satellite");
+  const run = async (aliases: string[]) => {
+    fakeProjects({ prj_sat: { name: "sat", aliases } });
+    try {
+      const report = await captureOutput(() => doctor(cliRoot));
+      assert.equal(report.error, undefined, report.out);
+      return { problems: report.result as number, out: report.out };
+    } finally {
+      globalThis.fetch = offline;
+    }
+  };
+  // The fixture has no Vercel CLI and no app checkout, so the count is never
+  // zero: what matters is what the project adds to it.
+  const own = await run(["app1.example.net"]);
+  assert.match(own.out, /vercel project\s+ok sat does not serve the issuer's host/);
+  const kits = await run(["demo.example.com"]);
+  assert.equal(kits.problems, own.problems + 1, kits.out);
+  assert.match(
+    kits.out,
+    /vercel project\s+wrong — this satellite config points at sat \(prj_sat\) serves demo\.example\.com/,
+  );
+  assert.match(kits.out, new RegExp(`config file\\s+${literal(join(cliRoot, ".drk-deploy.json"))}`));
+});
+
+test("F-50: --config and DRK_DEPLOY_CONFIG pick the deployment's file; the flag wins, and an empty flag is refused", async () => {
+  // A relative name is a file beside the CLI, where the default file is and
+  // where vercel-cli/.gitignore ignores it, never one in the working
+  // directory: the .cmd wrapper runs from wherever the operator stands, and
+  // from the kit's root the file used to land in the kit's tree, unignored.
+  const cliRoot = join(workspace, "config-cli-root");
+  const beside = (file: string) => join(cliRoot, file);
+  assert.notEqual(beside("a.json"), join(process.cwd(), "a.json"), "the test tells the two apart");
+  const cases: [string, string | undefined, Record<string, string>, string | null][] = [
+    ["neither", undefined, {}, null],
+    ["the flag", "a.json", {}, beside("a.json")],
+    ["the variable", undefined, { DRK_DEPLOY_CONFIG: "b.json" }, beside("b.json")],
+    ["both: the flag wins", "a.json", { DRK_DEPLOY_CONFIG: "b.json" }, beside("a.json")],
+    ["an empty variable is unset", undefined, { DRK_DEPLOY_CONFIG: "  " }, null],
+    ["an absolute path", join(workspace, "c.json"), {}, join(workspace, "c.json")],
+    [
+      "an absolute path in the variable",
+      undefined,
+      { DRK_DEPLOY_CONFIG: join(workspace, "d.json") },
+      join(workspace, "d.json"),
+    ],
+  ];
+  for (const [name, flag, env, expected] of cases) {
+    assert.equal(configFileFrom(flag, env, cliRoot), expected, name);
+  }
+  assert.throws(
+    () => configFileFrom(" ", { DRK_DEPLOY_CONFIG: "b.json" }, cliRoot),
+    refusal(/^--config was given an EMPTY value\.$/),
+    "an explicit empty flag is never skipped over",
+  );
+
+  // A file per deployment: init writes the named one, every command reads
+  // it, and the default file is left alone.
+  fakeProjects(FLEET);
+  const fleet = fleetRoot();
+  const standaloneFile = join(fleet.cliRoot, ".drk-deploy.app-standalone.json");
+  const handoffFile = join(fleet.cliRoot, ".drk-deploy.app-handoff.json");
+  try {
+    await init(fleet.cliRoot, {
+      project: "prj_kit",
+      domain: "demo.example.com",
+      kitRoot: fleet.kitRoot,
+      yes: true,
+    });
+    const kitDefault = configText(fleet.cliRoot);
+    useConfigFile(standaloneFile);
+    await initStandalone(fleet);
+    useConfigFile(handoffFile);
+    // A first init in its own file: nothing to inherit, nothing to refuse.
+    await init(fleet.cliRoot, {
+      project: "prj_handoff",
+      domain: "app2.example.net",
+      satellite: "handoff",
+      appRoot: fleet.handoff,
+      issuer: ISSUER,
+      kitRoot: fleet.kitRoot,
+      yes: true,
+    });
+    assert.equal(configPath(fleet.cliRoot), handoffFile);
+    assert.equal(requireConfig(fleet.cliRoot).projectId, "prj_handoff");
+    useConfigFile(standaloneFile);
+    assert.equal(requireConfig(fleet.cliRoot).projectId, "prj_standalone");
+    useConfigFile(null);
+    assert.equal(configText(fleet.cliRoot), kitDefault, "the kit's default file is untouched");
+    assert.equal(requireConfig(fleet.cliRoot).projectId, "prj_kit");
+
+    useConfigFile(join(fleet.cliRoot, "missing.json"));
+    assert.throws(
+      () => requireConfig(fleet.cliRoot),
+      refusal(/there is no .+missing\.json\.$/, /drk-deploy --config ".+missing\.json" init/),
+    );
+  } finally {
+    useConfigFile(null);
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-50: the CLI entry point hands --config (before or after the command) and DRK_DEPLOY_CONFIG to every command", () => {
+  const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  const dir = join(workspace, `config-${++fixtures}`);
+  mkdirSync(join(dir, "home"), { recursive: true });
+  // Unparseable, so the command stops at reading the file and names the one it read.
+  for (const name of ["flag.json", "variable.json"]) writeFileSync(join(dir, name), "{ not json");
+  const cli = (args: string[], extra: Record<string, string> = {}) => {
+    // No token, no saved credential (the profile is a scratch folder) and no
+    // inherited DRK_DEPLOY_CONFIG: were the file not honoured, the run would
+    // stop at the missing token before reaching anything.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !["VERCEL_TOKEN", "DRK_DEPLOY_CONFIG"].includes(key.toUpperCase()),
+      ),
+    );
+    const result = spawnSync(process.execPath, [entry, ...args], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...env, HOME: join(dir, "home"), USERPROFILE: join(dir, "home"), NO_COLOR: "1", ...extra },
+    });
+    return { status: result.status, out: `${result.stdout}${result.stderr}` };
+  };
+  const read = (file: string) => new RegExp(`${literal(join(dir, file))} is not valid JSON`);
+  const [flagFile, variableFile] = [join(dir, "flag.json"), join(dir, "variable.json")];
+
+  for (const args of [
+    ["--config", flagFile, "env:check"],
+    ["env:check", "--config", flagFile],
+  ]) {
+    const flag = cli(args, { DRK_DEPLOY_CONFIG: variableFile });
+    assert.equal(flag.status, 1, flag.out);
+    assert.match(flag.out, read("flag.json"), args.join(" "));
+  }
+  const variable = cli(["env:check"], { DRK_DEPLOY_CONFIG: variableFile });
+  assert.match(variable.out, read("variable.json"));
+  const missing = cli(["status"], { DRK_DEPLOY_CONFIG: join(dir, "nowhere.json") });
+  assert.match(missing.out, new RegExp(`there is no ${literal(join(dir, "nowhere.json"))}`));
+
+  // A relative name is read beside the CLI, as the default file is, and not
+  // from the working directory the wrapper was run in. Nothing is created:
+  // `status` stops at the missing file.
+  const cliDir = join(dirname(entry), "..");
+  const unique = `.drk-deploy.entry-test-${process.pid}-${fixtures}.json`;
+  for (const [how, args, extra] of [
+    ["--config", ["--config", unique, "status"], {}],
+    ["DRK_DEPLOY_CONFIG", ["status"], { DRK_DEPLOY_CONFIG: unique }],
+  ] as const) {
+    const relative = cli([...args], extra);
+    assert.equal(relative.status, 1, relative.out);
+    assert.match(relative.out, new RegExp(`there is no ${literal(join(cliDir, unique))}\\.`), how);
+    assert.doesNotMatch(relative.out, new RegExp(literal(join(dir, unique))), how);
+  }
+  assert.equal(existsSync(join(cliDir, unique)), false);
+  const empty = cli(["--config", "", "doctor"]);
+  assert.equal(empty.status, 1, empty.out);
+  assert.match(empty.out, /--config was given an EMPTY value/);
+});
+
+test("F-50: under --config, the commands the refusals print name that file, so they act on the same deployment", async () => {
+  fakeProjects(FLEET);
+  const fleet = fleetRoot();
+  const file = join(fleet.cliRoot, ".drk-deploy.app-standalone.json");
+  const named = (command: string) => new RegExp(literal(`drk-deploy --config "${file}" ${command}`));
+  try {
+    // The layout the README recommends: the kit keeps the default file, and
+    // the satellite has its own.
+    await init(fleet.cliRoot, {
+      project: "prj_kit",
+      domain: "demo.example.com",
+      kitRoot: fleet.kitRoot,
+      yes: true,
+    });
+    const kitDefault = configText(fleet.cliRoot);
+    useConfigFile(file);
+    await initStandalone(fleet);
+
+    // The issuer refusal's fix. Printed bare, it ran on the KIT's default
+    // file: a kit config names no satellite, so it counted as a re-run, and
+    // init saved the kit's config on the satellite's project.
+    await assert.rejects(
+      init(fleet.cliRoot, { project: "prj_kit", domain: "app1.example.net", yes: true }),
+      issuersProject(named("init --project <its project> --domain <its host> --application-id <its id>")),
+    );
+    // The same refusal from deploy's gate, and the preflight's own hint.
+    const gate = recordingRunner({ aliases: ["demo.example.com"] });
+    await assert.rejects(
+      // app-standalone owns its database; the migration is not what is shown here.
+      deploy(fleet.cliRoot, { skipChecks: true, skipMigrations: true }, gate.runner),
+      refusal(/SSO issuer's own Vercel project/, named("init --project <its project>"), 2),
+    );
+    assert.deepEqual(gate.calls, GATE);
+    const preflight = recordingRunner({ envProblems: 2 });
+    await assert.rejects(
+      deploy(fleet.cliRoot, { skipMigrations: true }, preflight.runner),
+      refusal(/^2 environment problem\(s\)\.$/, named("env:sync")),
+    );
+    // A broken file is named, and so is the file the repair is run on.
+    assert.throws(
+      () => resolveProfile({ target: "satellite" }),
+      refusal(
+        new RegExp(`^${literal(file)} sets \`target: "satellite"\` but has no \`satellite\` block\\.$`),
+        named("init --satellite <standalone|handoff|shared>"),
+      ),
+    );
+
+    useConfigFile(null);
+    assert.equal(configText(fleet.cliRoot), kitDefault, "the kit's file is untouched");
+    // With the default file the commands stay as they always were.
+    assert.throws(
+      () => resolveProfile({ target: "satellite" }),
+      refusal(
+        /^\.drk-deploy\.json sets `target: "satellite"` but has no `satellite` block\.$/,
+        /^Re-run `drk-deploy init --satellite <standalone\|handoff\|shared>`/,
+      ),
+    );
+  } finally {
+    useConfigFile(null);
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-50: a moved checkout is re-recorded by the init deploy prints, and keeps the product name", async () => {
+  fakeProjects(FLEET);
+  try {
+    const fleet = fleetRoot();
+    await initStandalone(fleet);
+    const recorded = configOf(fleet.cliRoot);
+    // Nothing is offered while the recorded checkout still exists: another
+    // folder is then another app far more often than a move.
+    await assert.rejects(
+      init(fleet.cliRoot, { appRoot: fleet.handoff, yes: true }),
+      (err: unknown) =>
+        err instanceof CliError &&
+        /records another deployment/.test(err.message) &&
+        !/--project prj_standalone/.test(err.hint ?? ""),
+    );
+    // The checkout moves, as after a re-clone of the satellites' repository.
+    const moved = satelliteCheckout(join(fleet.cliRoot, "re-cloned", "app-standalone"), "app-standalone");
+    rmSync(fleet.standalone, { recursive: true, force: true });
+
+    // deploy's fix used to be `init --app-root <path>`, which F-50 refuses as
+    // another deployment. It now names this one in full, from the file.
+    const printed =
+      "drk-deploy init --project prj_standalone --domain app1.example.net --application-id standalone --satellite standalone --app-root <path-to-the-satellite-checkout> --own-database";
+    const { runner, calls } = recordingRunner();
+    await assert.rejects(
+      deploy(fleet.cliRoot, {}, runner),
+      refusal(/^The checkout to deploy does not exist: /, new RegExp(`^Re-run \`${literal(printed)}\``)),
+    );
+    assert.deepEqual(calls, [], "stopped before any step");
+
+    // A bare new --app-root is still another deployment. Its refusal offers
+    // the same command, with the path filled in, because the recorded
+    // checkout is gone.
+    const filled = printed.replace("<path-to-the-satellite-checkout>", `"${moved}"`);
+    await assert.rejects(
+      init(fleet.cliRoot, { appRoot: moved, yes: true }),
+      refusal(/records another deployment: its app checkout is /, new RegExp(literal(filled))),
+    );
+    assert.deepEqual(configOf(fleet.cliRoot), recorded, "refusals write nothing");
+
+    // Run as printed, it is the same deployment in its new place. Its product
+    // name is kept: --project names the recorded project.
+    await init(fleet.cliRoot, {
+      project: "prj_standalone",
+      domain: "app1.example.net",
+      applicationId: "standalone",
+      satellite: "standalone",
+      appRoot: moved,
+      ownDatabase: true,
+      yes: true,
+    });
+    assert.deepEqual(configOf(fleet.cliRoot), {
+      ...recorded,
+      satellite: { ...recorded.satellite, appRoot: moved },
+    });
+    assert.equal(configOf(fleet.cliRoot).appName, "Standalone");
+
+    // A satellite block with no checkout recorded at all (resolveProfile's
+    // hint) is filled in, not changed: there is no other checkout to carry
+    // the deployment away from.
+    const blank = fleetRoot();
+    await initStandalone(blank);
+    const complete = configOf(blank.cliRoot);
+    const { appRoot: _dropped, ...rest } = complete.satellite;
+    writeFileSync(join(blank.cliRoot, ".drk-deploy.json"), JSON.stringify({ ...complete, satellite: rest }));
+    assert.throws(
+      () => resolveProfile(configOf(blank.cliRoot)),
+      refusal(/has no `appRoot`/, /^Re-run `drk-deploy init --app-root <path-to-the-satellite-checkout>`\.$/),
+    );
+    await init(blank.cliRoot, { appRoot: blank.standalone, yes: true });
+    assert.deepEqual(configOf(blank.cliRoot), complete);
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-50: a new deployment keeps only the fleet's issuer of the recorded satellite block", async () => {
+  // The narrowing that keeps a database mode, a checkout or a cookie domain
+  // from being inherited where nobody is asked: init under --yes, and the
+  // interactive database question, which is put only when nothing is
+  // recorded.
+  const block = {
+    option: "shared",
+    appRoot: join(workspace, "app-shared"),
+    issuerOrigin: ISSUER,
+    database: "own",
+    cookieDomain: ".example.com",
+  };
+  const satellite = {
+    projectId: "prj_standalone",
+    origin: "https://app1.example.net",
+    target: "satellite",
+    satellite: block,
+  };
+  const cases: [string, unknown, boolean, unknown][] = [
+    ["a re-run of the same deployment keeps the whole block", satellite, false, block],
+    ["a new deployment keeps the issuer only", satellite, true, { issuerOrigin: ISSUER }],
+    [
+      "a new deployment of a block with no issuer keeps nothing",
+      { ...satellite, satellite: { ...block, issuerOrigin: undefined } },
+      true,
+      undefined,
+    ],
+    ["a kit config has no block", { projectId: "prj_kit", origin: ISSUER }, false, undefined],
+    ["a kit config turned into a satellite", { projectId: "prj_kit", origin: ISSUER }, true, undefined],
+    ["no config", null, false, undefined],
+  ];
+  for (const [name, existing, isNew, expected] of cases) {
+    assert.deepEqual(recordedSatelliteAnswers(existing as never, isNew), expected, name);
+  }
+
+  // And end to end: an Option C deployment named in full under --yes, over
+  // another Option C app's file, is not handed that app's cookie domain.
+  fakeProjects({
+    ...FLEET,
+    prj_shared: { name: "app-shared", aliases: ["app3.example.com"] },
+    prj_shared_2: { name: "app-shared-2", aliases: ["app4.example.com"] },
+  });
+  try {
+    const fleet = fleetRoot();
+    const shared = satelliteCheckout(join(fleet.cliRoot, "app-shared"), "app-shared");
+    const other = satelliteCheckout(join(fleet.cliRoot, "app-shared-2"), "app-shared-2");
+    await init(fleet.cliRoot, {
+      project: "prj_shared",
+      domain: "app3.example.com",
+      satellite: "shared",
+      appRoot: shared,
+      issuer: ISSUER,
+      kitRoot: fleet.kitRoot,
+      cookieDomain: ".example.com",
+      yes: true,
+    });
+    assert.equal(configOf(fleet.cliRoot).satellite.cookieDomain, ".example.com");
+    const recorded = configText(fleet.cliRoot);
+    await assert.rejects(
+      init(fleet.cliRoot, {
+        project: "prj_shared_2",
+        domain: "app4.example.com",
+        applicationId: "shared-2",
+        satellite: "shared",
+        appRoot: other,
+        yes: true,
+      }),
+      refusal(/^An Option C satellite needs a cookie domain\.$/),
+    );
+    assert.equal(configText(fleet.cliRoot), recorded);
+  } finally {
+    globalThis.fetch = offline;
+  }
 });

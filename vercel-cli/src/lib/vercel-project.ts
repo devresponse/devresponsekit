@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { commandFor } from "./config-file.js";
 import type { ProjectConfig } from "./config.js";
 import { CliError } from "./log.js";
+import { type DeploymentProfile, originOf } from "./target.js";
+import type { EnvVarSummary, ProjectSummary, VercelClient } from "./vercel-client.js";
 
 /**
  * Which Vercel project the pinned Vercel CLI acts on (F-48).
@@ -108,8 +111,8 @@ export function vercelEnvFor(
       exitCode: 2,
       hint: [
         `${conflicts.join("; ")}.`,
-        "drk-deploy acts only on the project recorded in .drk-deploy.json and never passes these variables to `vercel`, so whoever exported them would get a deploy of a project they did not name.",
-        "Unset them (drk-deploy does not need them), or run the vercel-cli checkout whose config names that project.",
+        "drk-deploy acts only on the project recorded in its config file (.drk-deploy.json, or the one --config names) and never passes these variables to `vercel`, so whoever exported them would get a deploy of a project they did not name.",
+        "Unset them (drk-deploy does not need them), or run with the config (--config) whose deployment names that project.",
       ].join(" "),
     });
   }
@@ -157,7 +160,7 @@ export function assertCheckoutLink(
       `vercel link wrote no ${file}, so nothing names the project to pull. Nothing was pulled.`,
       {
         exitCode: 2,
-        hint: "This config records no project owner, so `vercel` finds its project through that file. Re-run `drk-deploy init` to record the owner (a personal account needs no --team), then re-run.",
+        hint: `This config records no project owner, so \`vercel\` finds its project through that file. Re-run \`${commandFor("init")}\` to record the owner (a personal account needs no --team), then re-run.`,
       },
     );
   }
@@ -182,8 +185,123 @@ export function assertCheckoutLink(
       hint: [
         "One of the two is wrong, and drk-deploy will not guess which: a satellite checkout linked to the kit's project, or a config carrying another deployment's project id, would build and promote into the wrong project.",
         `If the config is right, delete ${file} and re-run: drk-deploy links the checkout to ${config.projectId}.`,
-        "If the checkout is right, re-run `drk-deploy init` so the config names its project.",
+        `If the checkout is right, re-run \`${commandFor("init")}\` so the config names its project.`,
       ].join(" "),
     },
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  F-50: a satellite config never acts on the SSO issuer's project    */
+/* ------------------------------------------------------------------ */
+
+/** A host as a Vercel alias names it: lower-case, with no scheme, port, path or trailing dot. */
+function aliasHost(alias: string): string {
+  const bare = alias
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, "");
+  return (bare.split("/")[0] ?? "").replace(/:\d*$/, "").replace(/\.$/, "");
+}
+
+/** The variables whose value is the origin a deployment serves, when stored readable. */
+const SERVED_ORIGIN_KEYS: readonly string[] = ["BETTER_AUTH_URL", "NEXT_PUBLIC_APP_URL"];
+
+/**
+ * What {@link issuerProjectProblem} judges a project by: the project as
+ * `getProject` reports it, and its environment when the command has listed it
+ * anyway.
+ */
+export interface IssuerProjectEvidence {
+  project: Pick<ProjectSummary, "id" | "name" | "aliases">;
+  env?: ReadonlyArray<Pick<EnvVarSummary, "key" | "value">>;
+}
+
+/**
+ * Why a SATELLITE config must not act on this Vercel project, or null (F-50).
+ *
+ * A satellite config names the kit only by its origin (`issuerOrigin`), never
+ * by its project id, so the kit's project is recognised by what it serves:
+ * one whose production aliases include the issuer's host IS the issuer's. No
+ * satellite project may serve that host, because `init` refuses an issuer
+ * equal to the satellite's own origin. A listing the command made anyway says
+ * the same thing when it stores BETTER_AUTH_URL or NEXT_PUBLIC_APP_URL
+ * readable as the issuer's origin, at no extra call, which covers a project
+ * whose aliases the API left out.
+ *
+ * A satellite config carrying the kit's project id is the costliest mistake
+ * this CLI can make. Before this check, `deploy --yes` or `--skip-checks`
+ * (past the env preflight) built the satellite and promoted it over the
+ * primary, `env:sync` wrote the satellite's environment into the kit's, and
+ * `env:prune` deleted the issuer's SSO_HANDOFF_PRIVATE_KEY and
+ * SSO_ALLOWED_ORIGIN_SUFFIXES, after which the kit published an empty key set
+ * and every handoff failed. `init` could produce such a config: re-run with
+ * `--project <the kit's>` on a satellite config, it stayed a satellite.
+ *
+ * The kit is never refused: it IS the issuer.
+ */
+export function issuerProjectProblem(
+  profile: DeploymentProfile,
+  evidence: IssuerProjectEvidence,
+): string | null {
+  if (profile.kind !== "satellite") return null;
+  const issuer = originOf(profile.issuerOrigin);
+  if (issuer === null) return null;
+  const host = new URL(issuer).hostname;
+  const { project } = evidence;
+  const named = `${project.name} (${project.id})`;
+  if (project.aliases.some((alias) => aliasHost(alias) === host)) {
+    return `${named} serves ${host}, the SSO issuer's host, so it is the kit's project`;
+  }
+  const served = evidence.env?.find(
+    (entry) =>
+      SERVED_ORIGIN_KEYS.includes(entry.key) &&
+      entry.value !== undefined &&
+      originOf(entry.value.trim()) === issuer,
+  );
+  if (served) {
+    return `${named} stores ${served.key} as ${issuer}, the SSO issuer's origin, so it is the kit's project`;
+  }
+  return null;
+}
+
+/**
+ * Refuses a satellite config that points at the SSO issuer's project (F-50),
+ * with exit code 2 and nothing changed. No flag overrides it: `--yes` and
+ * `--skip-checks` skip the environment preflight, and this is not part of it.
+ */
+export function assertNotIssuerProject(profile: DeploymentProfile, evidence: IssuerProjectEvidence): void {
+  const problem = issuerProjectProblem(profile, evidence);
+  if (problem === null) return;
+  throw new CliError(
+    `This satellite config points at the SSO issuer's own Vercel project: ${problem}. Nothing was changed.`,
+    {
+      exitCode: 2,
+      hint: [
+        "A satellite is its own Vercel project, never the kit's. Acting on this one would promote the satellite's build over the primary, write the satellite's environment into the kit's, or remove the issuer's signing key, after which every handoff fails. No flag overrides this, not --yes and not --skip-checks.",
+        // Built with the file (F-50): printed bare under --config, this ran on
+        // the default file, the KIT's in the recommended layout, and saved the
+        // kit's config on the satellite's project.
+        `Point this config at the satellite's own project: \`${commandFor("init --project <its project> --domain <its host> --application-id <its id>")}\`. To act on the kit, use a config whose target is the kit, one file per deployment (\`drk-deploy --config <file>\`).`,
+      ].join(" "),
+    },
+  );
+}
+
+/**
+ * {@link assertNotIssuerProject} for a command with no project read of its
+ * own: `env:sync`, `env:check`, `env:prune` and `db:provision` (F-50). It
+ * reads the project for a satellite, and nothing for the kit. `env` is the
+ * listing the command has already made, when it made one. Call it after the
+ * reads and before anything is written or removed.
+ */
+export async function refuseIssuerProject(
+  client: Pick<VercelClient, "getProject">,
+  config: Pick<ProjectConfig, "projectId">,
+  profile: DeploymentProfile,
+  env?: ReadonlyArray<Pick<EnvVarSummary, "key" | "value">>,
+): Promise<void> {
+  if (profile.kind !== "satellite") return;
+  const project = await client.getProject(config.projectId);
+  assertNotIssuerProject(profile, { project, ...(env ? { env } : {}) });
 }

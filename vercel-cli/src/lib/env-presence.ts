@@ -1,3 +1,4 @@
+import { commandFor } from "./config-file.js";
 import type { EnvTarget, EnvVarSpec } from "./env-spec.js";
 import type { EnvVarSummary } from "./vercel-client.js";
 
@@ -164,7 +165,7 @@ export function storedProblems(spec: EnvVarSpec, presence: Presence, expected?: 
       fix:
         replaceHint(spec, where, expected) +
         (mismatch && !invalid
-          ? " If the stored value is the right one, the recorded config is wrong instead: correct it with `drk-deploy init`."
+          ? ` If the stored value is the right one, the recorded config is wrong instead: correct it with \`${commandFor("init")}\`.`
           : ""),
     });
   }
@@ -187,13 +188,14 @@ function replaceHint(
   const remove = where.map((t) => `vercel env rm ${spec.key} ${t}`).join(" and ");
   const target = where.length === 1 && where[0] === "production" ? "" : ` --target ${where.join(",")}`;
   const plain = spec.secret ? "" : " as plain";
+  const sync = commandFor(`env:sync${target}`);
   const refill =
     expected !== undefined
-      ? `\`drk-deploy env:sync${target}\` re-creates it${plain} from the recorded config`
+      ? `\`${sync}\` re-creates it${plain} from the recorded config`
       : spec.source === "derived"
         ? // Derived only as a default (see pinnedValuesFor): a supplied value wins.
-          `\`drk-deploy env:sync${target}\` writes it back${plain}: the value from \`--from-env <file>\` or the shell, or else the default the recorded config derives`
-        : `\`drk-deploy env:sync${target} --from-env <file>\` (or the value exported in the shell) writes it back${plain}`;
+          `\`${sync}\` writes it back${plain}: the value from \`--from-env <file>\` or the shell, or else the default the recorded config derives`
+        : `\`${sync} --from-env <file>\` (or the value exported in the shell) writes it back${plain}`;
   return `${lead}: remove it (\`${remove}\`, or delete it in the dashboard), then ${refill}. Redeploy for it to take effect.`;
 }
 

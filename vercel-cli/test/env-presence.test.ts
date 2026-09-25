@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
 
 // Tests run against the BUILT output, so they exercise exactly what ships.
-import { envCheck, envSync } from "../dist/commands/env.js";
+import { dbProvision } from "../dist/commands/db.js";
+import { envCheck, envPrune, envSync } from "../dist/commands/env.js";
 import { deploy, releaseRunner } from "../dist/commands/release.js";
+import { useConfigFile } from "../dist/lib/config.js";
 import { isPresent, presenceFor, readPublicValues, storedProblems } from "../dist/lib/env-presence.js";
 import {
   ENV_SPECS,
@@ -681,4 +683,287 @@ test("env:sync: a supplied NEXT_PUBLIC_APP_NAME is written, and the next sync an
   // Said as it is: readable, and no rule holds it to anything.
   assert.match(check.out, /NEXT_PUBLIC_APP_NAME\s+set production plain, readable, no rule\n/);
   assert.match(check.out, /SSO_HANDOFF_AUDIENCE_PREFIX\s+set production plain, value checked\n/);
+});
+
+/* ================================================================== */
+/*  F-50: nothing sends anyone to prune the issuer's own keys          */
+/* ================================================================== */
+
+/** The kit's origin, and so the satellite's SSO issuer, in these fixtures. */
+const ISSUER = "https://demo.example.com";
+
+/** A CLI root configured for an Option A satellite on project prj_sat, with the kit as its issuer. */
+function satelliteCli(database?: "own"): string {
+  const cliRoot = join(workspace, `cli-${++fixtures}`);
+  mkdirSync(cliRoot, { recursive: true });
+  writeFileSync(
+    join(cliRoot, ".drk-deploy.json"),
+    JSON.stringify({
+      ...KIT,
+      projectId: "prj_sat",
+      origin: "https://app1.example.net",
+      applicationId: "standalone",
+      kitRoot: join(cliRoot, "kit"),
+      target: "satellite",
+      satellite: {
+        option: "standalone",
+        appRoot: join(cliRoot, "app"),
+        issuerOrigin: ISSUER,
+        ...(database ? { database } : {}),
+      },
+    }),
+  );
+  return cliRoot;
+}
+
+/**
+ * A fake Vercel API for project prj_sat: the project itself (with `aliases`
+ * as its production aliases), its environment listing, and a record of every
+ * write and removal. Anything else throws.
+ */
+function fakeSatelliteVercel(listing: ReturnType<typeof raw>[], aliases: string[]) {
+  const writes: string[] = [];
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (url.hostname !== "api.vercel.com") throw new Error(`an F-50 test reached ${url.hostname}`);
+    if (request.method === "GET" && url.pathname === "/v9/projects/prj_sat") {
+      return json({
+        id: "prj_sat",
+        name: "app-standalone",
+        accountId: "team_test",
+        alias: aliases.map((domain) => ({
+          domain,
+          environment: "production",
+          target: "PRODUCTION",
+          deployment: null,
+        })),
+        nodeVersion: "24.x",
+        defaultResourceConfig: { functionDefaultRegions: [] },
+        resourceConfig: { functionDefaultRegions: [] },
+        deploymentExpiration: {},
+      });
+    }
+    if (request.method === "GET" && url.pathname === "/v10/projects/prj_sat/env") {
+      return json({ envs: listing, pagination: { count: listing.length, next: null, prev: null } });
+    }
+    if (request.method !== "GET") {
+      writes.push(`${request.method} ${url.pathname}`);
+      throw new Error(`an F-50 test wrote to Vercel: ${request.method} ${url.pathname}`);
+    }
+    throw new Error(`an F-50 test made an unexpected call: ${request.method} ${url.pathname}`);
+  }) as typeof fetch;
+  return { writes };
+}
+
+/** What the KIT's production holds, as a satellite config pointed at it would find it. */
+function kitsProduction() {
+  return [
+    raw("BETTER_AUTH_URL", "plain", ISSUER),
+    raw("SSO_HANDOFF_ISSUER", "plain", ISSUER),
+    raw("SSO_HANDOFF_PRIVATE_KEY", "sensitive"),
+    raw("SSO_HANDOFF_PREVIOUS_PRIVATE_KEY", "sensitive"),
+    raw("SSO_ALLOWED_ORIGIN_SUFFIXES", "plain", "example.com,example.net"),
+    raw("COOKIE_DOMAIN", "plain", ".example.com"),
+    raw("SEED_ADMIN_PASSWORD", "encrypted", CIPHERTEXT),
+  ];
+}
+
+const issuersProject = (evidence: RegExp) => (err: unknown) =>
+  err instanceof CliError &&
+  err.exitCode === 2 &&
+  /^This satellite config points at the SSO issuer's own Vercel project: app-standalone \(prj_sat\) /.test(
+    err.message,
+  ) &&
+  evidence.test(err.message) &&
+  /No flag overrides this/.test(err.hint ?? "") &&
+  !/env:prune/.test(`${err.message} ${err.hint}`);
+
+test("F-50: env:prune refuses the issuer's project, so its signing key and origin allow-list are never removed", async () => {
+  const byAlias = issuersProject(/serves demo\.example\.com, the SSO issuer's host/);
+  for (const options of [{ yes: true }, { dryRun: true }, { yes: true, dryRun: true }]) {
+    const vercel = fakeSatelliteVercel(kitsProduction(), ["demo.example.com", "kit.vercel.app"]);
+    const { error, out } = await run(() => envPrune(satelliteCli(), options));
+    assert.ok(byAlias(error), `${JSON.stringify(options)}: ${String(error)}\n${out}`);
+    assert.deepEqual(vercel.writes, [], "nothing removed");
+    // Not even listed as removable: a dry run used to present the issuer's
+    // keys as a satellite's strays.
+    assert.doesNotMatch(out, /^\s+SSO_HANDOFF_PRIVATE_KEY\s/m);
+    assert.doesNotMatch(out, /^\s+SSO_ALLOWED_ORIGIN_SUFFIXES\s/m);
+  }
+
+  // A project whose aliases the API left out is still recognised, by the
+  // origin its listing says it serves.
+  fakeSatelliteVercel(kitsProduction(), []);
+  const byListing = await run(() => envPrune(satelliteCli(), { yes: true }));
+  assert.ok(
+    issuersProject(/stores BETTER_AUTH_URL as https:\/\/demo\.example\.com, the SSO issuer's origin/)(
+      byListing.error,
+    ),
+    `${String(byListing.error)}\n${byListing.out}`,
+  );
+
+  // On the satellite's own project it still finds a stray signing key.
+  const own = fakeSatelliteVercel(
+    [
+      raw("BETTER_AUTH_URL", "plain", "https://app1.example.net"),
+      raw("SSO_HANDOFF_PRIVATE_KEY", "sensitive"),
+    ],
+    ["app1.example.net"],
+  );
+  const stray = await run(() => envPrune(satelliteCli(), { dryRun: true }));
+  assert.equal(stray.error, undefined, stray.out);
+  assert.match(stray.out, /^\s+SSO_HANDOFF_PRIVATE_KEY\s+ISSUER ONLY/m);
+  assert.match(stray.out, /--dry-run: nothing was removed/);
+  assert.deepEqual(own.writes, []);
+
+  // The kit's own prune list holds no issuer key: only the development-only
+  // variables, whatever its project holds.
+  fakeVercel([...healthy(), raw("SEED_ADMIN_PASSWORD", "encrypted", CIPHERTEXT)]);
+  const kit = await run(() => envPrune(kitCli(), { dryRun: true }));
+  assert.equal(kit.error, undefined, kit.out);
+  assert.match(kit.out, /^\s+SEED_ADMIN_PASSWORD\s/m);
+  assert.doesNotMatch(kit.out, /^\s+SSO_HANDOFF_PRIVATE_KEY\s/m);
+  assert.doesNotMatch(kit.out, /^\s+SSO_ALLOWED_ORIGIN_SUFFIXES\s/m);
+});
+
+test("F-50: env:check, env:sync and db:provision refuse the issuer's project, and never point at env:prune there", async () => {
+  const byAlias = issuersProject(/serves demo\.example\.com/);
+  const commands: [string, (cliRoot: string) => Promise<unknown>][] = [
+    ["env:check", (cliRoot) => envCheck(cliRoot)],
+    ["env:sync", (cliRoot) => envSync(cliRoot, {})],
+    ["env:sync --force --yes", (cliRoot) => envSync(cliRoot, { force: true, yes: true })],
+  ];
+  for (const [name, command] of commands) {
+    const vercel = fakeSatelliteVercel(kitsProduction(), ["demo.example.com"]);
+    const { error, out } = await run(() => command(satelliteCli()));
+    assert.ok(byAlias(error), `${name}: ${String(error)}\n${out}`);
+    assert.doesNotMatch(out, /env:prune/, `${name} says nothing about pruning`);
+    assert.doesNotMatch(out, /Must NOT be set/, `${name} lists none of the issuer's keys as strays`);
+    assert.deepEqual(vercel.writes, [], `${name} writes nothing`);
+  }
+
+  // A satellite that owns its database would connect a new store to the kit's project.
+  const provision = fakeSatelliteVercel(kitsProduction(), ["demo.example.com"]);
+  const store = await run(() => dbProvision(satelliteCli("own"), { dryRun: true }));
+  assert.ok(byAlias(store.error), `${String(store.error)}\n${store.out}`);
+  assert.deepEqual(provision.writes, []);
+
+  // The kit's own check, with its signing key set, never mentions a prune.
+  fakeVercel(healthy());
+  const kit = await run(() => envCheck(kitCli()));
+  assert.equal(kit.result, 0, kit.out);
+  assert.doesNotMatch(kit.out, /env:prune/);
+});
+
+test("F-50: on a satellite's own project, every prune hint names the project it acts on", async () => {
+  const listing = () => [
+    raw("BETTER_AUTH_URL", "plain", "https://app1.example.net"),
+    raw("SSO_HANDOFF_PRIVATE_KEY", "sensitive"),
+  ];
+  fakeSatelliteVercel(listing(), ["app1.example.net"]);
+  const check = await run(() => envCheck(satelliteCli()));
+  assert.ok((check.result as number) > 0, check.out);
+  assert.match(check.out, /SSO_HANDOFF_PRIVATE_KEY\s+present — ISSUER ONLY/);
+  assert.match(check.out, /Remove them from this satellite's project \(prj_sat\) with: drk-deploy env:prune/);
+
+  const vercel = fakeSatelliteVercel(listing(), ["app1.example.net"]);
+  const sync = await run(() => envSync(satelliteCli(), {}));
+  assert.ok(sync.error instanceof CliError, sync.out);
+  assert.equal(sync.error.message, "1 variable(s) must not exist on this deployment target.");
+  assert.match(
+    sync.error.hint ?? "",
+    /^Remove them from this satellite's project \(prj_sat\) with `drk-deploy env:prune`/,
+  );
+  assert.deepEqual(vercel.writes, []);
+
+  // And the post-deploy probe, which sees the key from the running app.
+  const config = JSON.parse(readFileSync(join(satelliteCli(), ".drk-deploy.json"), "utf8"));
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.pathname === "/api/sso/jwks.json") {
+      return new Response(JSON.stringify({ keys: [{ kty: "OKP", crv: "Ed25519", x: "x" }] }), {
+        status: 200,
+      });
+    }
+    return new Response("", { status: 404 });
+  }) as typeof fetch;
+  const verified = await run(() => releaseRunner.verify(config, resolveProfile(config)));
+  assert.ok(verified.error instanceof CliError, verified.out);
+  assert.match(verified.out, /This satellite PUBLISHES 1 signing key\(s\)/);
+  assert.match(
+    verified.out,
+    /Remove it from this satellite's project \(prj_sat\) with drk-deploy env:prune, then redeploy\./,
+  );
+});
+
+test("F-50: under --config, the prune hints and the issuer refusal print commands that name that file", async () => {
+  /** A satellite configured in its own file, selected as --config selects it. */
+  const selected = (database?: "own") => {
+    const cliRoot = satelliteCli(database);
+    const file = join(cliRoot, ".drk-deploy.app-standalone.json");
+    renameSync(join(cliRoot, ".drk-deploy.json"), file);
+    useConfigFile(file);
+    return { cliRoot, file };
+  };
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const named = (file: string, command: string) =>
+    new RegExp(escape(`drk-deploy --config "${file}" ${command}`));
+  const listing = () => [
+    raw("BETTER_AUTH_URL", "plain", "https://app1.example.net"),
+    raw("SSO_HANDOFF_PRIVATE_KEY", "sensitive"),
+  ];
+  try {
+    // Printed bare, each of these acted on the default file, which is the
+    // KIT's in the layout the README recommends: a prune there removed
+    // nothing of the satellite's, and an init re-pointed the kit's config.
+    fakeSatelliteVercel(kitsProduction(), ["demo.example.com"]);
+    const onKit = selected();
+    const refused = await run(() => envPrune(onKit.cliRoot, { yes: true }));
+    assert.ok(issuersProject(/serves demo\.example\.com/)(refused.error), String(refused.error));
+    assert.match(
+      (refused.error as CliError).hint ?? "",
+      named(onKit.file, "init --project <its project> --domain <its host> --application-id <its id>"),
+    );
+
+    fakeSatelliteVercel(listing(), ["app1.example.net"]);
+    const checked = selected();
+    const check = await run(() => envCheck(checked.cliRoot));
+    assert.ok((check.result as number) > 0, check.out);
+    assert.match(check.out, named(checked.file, "env:prune"));
+
+    const vercel = fakeSatelliteVercel(listing(), ["app1.example.net"]);
+    const synced = selected();
+    const sync = await run(() => envSync(synced.cliRoot, {}));
+    assert.ok(sync.error instanceof CliError, sync.out);
+    assert.match(sync.error.hint ?? "", named(synced.file, "env:prune"));
+    assert.deepEqual(vercel.writes, []);
+
+    // db:provision on a satellite that shares the kit's database names the
+    // init that would record its own.
+    const shared = selected();
+    const provision = await run(() => dbProvision(shared.cliRoot, { dryRun: true }));
+    assert.ok(provision.error instanceof CliError, provision.out);
+    assert.match(provision.error.hint ?? "", named(shared.file, "init --own-database"));
+
+    // And the post-deploy probe.
+    const probed = selected();
+    const config = JSON.parse(readFileSync(probed.file, "utf8"));
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === "/api/sso/jwks.json") {
+        return new Response(JSON.stringify({ keys: [{ kty: "OKP", crv: "Ed25519", x: "x" }] }), {
+          status: 200,
+        });
+      }
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+    const verified = await run(() => releaseRunner.verify(config, resolveProfile(config)));
+    assert.ok(verified.error instanceof CliError, verified.out);
+    assert.match(verified.out, named(probed.file, "env:prune"));
+  } finally {
+    useConfigFile(null);
+  }
 });

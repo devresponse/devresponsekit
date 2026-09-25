@@ -1,6 +1,14 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ProjectConfig, deployRoot, requireConfig, requireToken } from "../lib/config.js";
+import {
+  type ProjectConfig,
+  commandFor,
+  configPath,
+  deployRoot,
+  requireConfig,
+  requireToken,
+  sameDeploymentInit,
+} from "../lib/config.js";
 import { runOrThrow } from "../lib/exec.js";
 import {
   probe,
@@ -38,8 +46,14 @@ import {
   treeProblems,
 } from "../lib/release-tree.js";
 import { type DeploymentProfile, describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
-import type { ProjectGit } from "../lib/vercel-client.js";
-import { assertCheckoutLink, projectLinkFile, vercelEnvFor } from "../lib/vercel-project.js";
+import type { ProjectGit, ProjectSummary } from "../lib/vercel-client.js";
+import {
+  assertCheckoutLink,
+  assertNotIssuerProject,
+  issuerProjectProblem,
+  projectLinkFile,
+  vercelEnvFor,
+} from "../lib/vercel-project.js";
 import { envCheck, envSync, parseEnvFile, reportContainment } from "./env.js";
 
 // Kept importable from here, where it lived before F-47 moved it next to the
@@ -264,6 +278,12 @@ interface MigrationOptions {
  * kit's default branch (`releaseSources`): that gate is the kit's, not the
  * satellite's. Nothing here promotes, so the Vercel git integration is not
  * asked about either.
+ *
+ * A satellite's run also reads the project, before anything is linked or
+ * pulled, and refuses the SSO issuer's own (F-50): pulled from the kit's
+ * project, "production's database" is the kit's, and a satellite config would
+ * then migrate the primary under a satellite's name. The kit's run reads
+ * nothing more.
  */
 export async function migrateCommand(
   cliRoot: string,
@@ -284,6 +304,9 @@ export async function migrateCommand(
 
   const vercel = vercelInvocation(cliRoot, config, profile);
   const trees = await assertReleasableTree(runner, sources, { action: "migrate" });
+  if (profile.kind === "satellite") {
+    assertNotIssuerProject(profile, { project: await runner.project(vercel) });
+  }
   await withProductionEnv(vercel, runner, async (production) => {
     const target = checkMigrationTarget(migration, production(), options, commitOf(trees, config.kitRoot));
     await runner.migrate(cliRoot, migrationStep(migration, target, options));
@@ -401,11 +424,11 @@ export interface VercelInvocation {
  * what it writes, production's own variables, is what the migration URL and
  * schema are checked against before anything is migrated.
  *
- * `tree` and `gitIntegration` come before anything that writes (F-49): before
+ * `tree` and `project` come before anything that writes (F-49, F-50): before
  * `env:sync`, `vercel link`, the pull and the migration. Both only read. So
- * the order is: [env:check] → tree → git integration → [env:sync] → link →
- * pull → migrate → build → promote → verify. `migrate` runs tree → link →
- * pull → migrate.
+ * the order is: [env:check] → tree → project → [env:sync] → link → pull →
+ * migrate → build → promote → verify. `migrate` runs tree → link → pull →
+ * migrate, with `project` after `tree` for a satellite.
  */
 export interface ReleaseRunner {
   /**
@@ -414,8 +437,12 @@ export interface ReleaseRunner {
    * as the ref a promoted checkout's HEAD must be.
    */
   tree(root: string, allowRef?: string): Promise<TreeState>;
-  /** The project's git connection, read from the Vercel API: does Vercel deploy production by itself? */
-  gitIntegration(vercel: VercelInvocation): Promise<ProjectGit>;
+  /**
+   * The project as the Vercel API reports it, read once per run: its git
+   * connection (does Vercel deploy production by itself? F-49) and its
+   * production aliases (is it the SSO issuer's own project? F-50).
+   */
+  project(vercel: VercelInvocation): Promise<ProjectSummary>;
   /** `drk-deploy env:sync`. Only `up` runs it. */
   envSync: typeof envSync;
   /** `drk-deploy env:check`, the preflight: the number of problems found. */
@@ -443,9 +470,9 @@ export interface ReleaseRunner {
 /** The real steps. The commands use these unless a test passes its own. */
 export const releaseRunner: ReleaseRunner = {
   tree: inspectTree,
-  gitIntegration: async ({ config }) => {
+  project: async ({ config }) => {
     const { VercelClient } = await import("../lib/vercel-client.js");
-    return (await new VercelClient(requireToken(), config.teamId).getProject(config.projectId)).git;
+    return new VercelClient(requireToken(), config.teamId).getProject(config.projectId);
   },
   envSync,
   envCheck,
@@ -490,11 +517,14 @@ function vercelInvocation(
   if (!existsSync(root)) {
     // Caught here rather than as a confusing spawn error three steps later,
     // when `vercel pull` is handed a working directory that does not exist.
+    // A satellite's fix names the deployment in full (F-50): `init` refuses a
+    // bare new --app-root as another deployment, since another folder is far
+    // more often another app than a moved one. The kit has one checkout.
     throw new CliError(`The checkout to deploy does not exist: ${root}`, {
       hint:
         profile.kind === "satellite"
-          ? "Re-run `drk-deploy init --app-root <path-to-the-satellite-checkout>`."
-          : "Re-run `drk-deploy init --kit-root <path-to-the-kit-checkout>`.",
+          ? `Re-run \`${sameDeploymentInit({ ...config, satellite: config.satellite! }, "<path-to-the-satellite-checkout>")}\` if the app moved or was re-cloned.`
+          : `Re-run \`${commandFor("init --kit-root <path-to-the-kit-checkout>")}\`.`,
     });
   }
   const { env, orgId, ignored } = vercelEnvFor(config, token);
@@ -507,7 +537,7 @@ function vercelInvocation(
     // Still deployable: `vercel` then reads the checkout's link, which is
     // checked against the config before and after `vercel link` runs.
     warn(
-      "This config records no project owner (written before F-48), so .vercel/project.json picks the project. Re-run `drk-deploy init` to record it.",
+      `This config records no project owner (written before F-48), so .vercel/project.json picks the project. Re-run \`${commandFor("init")}\` to record it.`,
     );
   }
   assertCheckoutLink(root, config, { required: false });
@@ -700,27 +730,13 @@ async function assertReleasableTree(
  * promotes nothing, and migrating from the pull request's branch before the
  * merge is exactly the gate that path relies on.
  *
- * A real run that cannot read the project's git connection stops: this check
- * cannot be skipped by an API that is down. A dry run says it could not read
- * it and goes on, because it refuses nothing anyway and a plan with a gap is
- * more use than no plan.
+ * The git connection comes from the project read {@link readProject} made.
  */
-async function assertNoAutoDeployRace(
-  runner: ReleaseRunner,
+function assertNoAutoDeployRace(
+  git: ProjectGit,
   vercel: VercelInvocation,
   options: { migrates: boolean; allowGitIntegrationRace?: boolean; dryRun?: boolean },
-): Promise<void> {
-  let git: ProjectGit;
-  try {
-    git = await runner.gitIntegration(vercel);
-  } catch (err) {
-    if (!options.dryRun) throw err;
-    heading("Other deployers");
-    warn(
-      `[dry-run] could not read the project's git connection (${(err as Error).message}), so whether Vercel also deploys production is unknown. A real run reads it before anything writes, and stops if it cannot.`,
-    );
-    return;
-  }
+): void {
   const verdict = productionAutoDeploy(git, readVercelJson(vercel.root));
   heading("Other deployers");
   field(
@@ -746,7 +762,7 @@ async function assertNoAutoDeployRace(
   const refusal = new CliError(
     `Refusing to deploy: Vercel's git integration also deploys this project's production (${verdict.why}). Nothing was changed.`,
     {
-      hint: `Vercel promotes a push without migrating, so this run's migrate-then-promote order cannot hold: a merge goes live ahead of its migration whatever runs here. Turn production auto-deploy off (an Ignored Build Step of \`exit 0\` under Vercel → Project → Settings → Git, or \`"git": { "deploymentEnabled": { "${branch}": false } }\` in vercel.json), or pass --allow-git-integration-race to deploy anyway. \`drk-deploy migrate\` is not refused: it promotes nothing, and migrating production from a pull request's branch before it merges is how that path stays safe.`,
+      hint: `Vercel promotes a push without migrating, so this run's migrate-then-promote order cannot hold: a merge goes live ahead of its migration whatever runs here. Turn production auto-deploy off (an Ignored Build Step of \`exit 0\` under Vercel → Project → Settings → Git, or \`"git": { "deploymentEnabled": { "${branch}": false } }\` in vercel.json), or pass --allow-git-integration-race to deploy anyway. \`${commandFor("migrate")}\` is not refused: it promotes nothing, and migrating production from a pull request's branch before it merges is how that path stays safe.`,
       exitCode: 2,
     },
   );
@@ -762,7 +778,39 @@ interface PreparedRelease {
   trees: TreeState[];
 }
 
-/** The F-49 checks of a run that promotes: the commit, then the other deployer. */
+/**
+ * The project, read once for the checks a run that promotes makes of it
+ * (F-49, F-50).
+ *
+ * A real run that cannot read it stops: neither check can be skipped by an
+ * API that is down. A dry run says it could not read it and goes on, because
+ * it refuses nothing anyway and a plan with a gap is more use than no plan.
+ */
+async function readProject(
+  runner: ReleaseRunner,
+  vercel: VercelInvocation,
+  dryRun: boolean | undefined,
+): Promise<ProjectSummary | null> {
+  try {
+    return await runner.project(vercel);
+  } catch (err) {
+    if (!dryRun) throw err;
+    heading("Vercel project");
+    warn(
+      `[dry-run] could not read the project (${(err as Error).message}), so whether it is the SSO issuer's own project and whether Vercel also deploys production are unknown. A real run reads it before anything writes, and stops if it cannot.`,
+    );
+    return null;
+  }
+}
+
+/**
+ * The checks of a run that promotes, before anything writes: the commit
+ * (F-49), then the project. A satellite config on the SSO issuer's own
+ * project is refused (F-50): it would build the satellite and promote it over
+ * the primary. That runs here rather than in the environment preflight,
+ * because `--yes` and `--skip-checks` skip the preflight, and `up` always
+ * does. Then whether Vercel deploys production by itself (F-49).
+ */
 async function releaseGate(
   runner: ReleaseRunner,
   config: ProjectConfig,
@@ -779,7 +827,16 @@ async function releaseGate(
       ...(options.dryRun !== undefined ? { dryRun: options.dryRun } : {}),
     },
   );
-  await assertNoAutoDeployRace(runner, vercel, options);
+  const project = await readProject(runner, vercel, options.dryRun);
+  if (project === null) return trees;
+  const issuers = issuerProjectProblem(profile, { project });
+  if (issuers !== null) {
+    heading("Vercel project");
+    field("project", `${project.name} ${dim(project.id)}`);
+    if (!options.dryRun) assertNotIssuerProject(profile, { project });
+    warn(`[dry-run] a real run would refuse: this satellite config points at ${issuers}.`);
+  }
+  assertNoAutoDeployRace(project.git, vercel, options);
   return trees;
 }
 
@@ -821,6 +878,8 @@ export async function deploy(
   const vercel = prepared?.vercel ?? vercelInvocation(cliRoot, config, profile);
 
   heading("Preflight");
+  // Which deployment, by its file (F-50): each deployment has its own.
+  field("config", configPath(cliRoot));
   field("target", describeProfile(profile));
   field("checkout", vercel.root);
   field(
@@ -837,7 +896,7 @@ export async function deploy(
     const problems = await runner.envCheck(cliRoot);
     if (problems > 0 && !options.yes) {
       throw new CliError(`${problems} environment problem(s).`, {
-        hint: "Each WRONG line above names its fix, and `drk-deploy env:sync` fills in what is missing. Or re-run with --yes to deploy anyway.",
+        hint: `Each WRONG line above names its fix, and \`${commandFor("env:sync")}\` fills in what is missing. Or re-run with --yes to deploy anyway.`,
       });
     }
   }
@@ -980,7 +1039,7 @@ async function verify(config: ProjectConfig, profile: DeploymentProfile): Promis
   if (profile.kind === "satellite") {
     const report = await probeConsumer(config.origin);
     for (const line of describeConsumer(report)) info(`  ${line}`);
-    await reportSatelliteKeys(config.origin);
+    await reportSatelliteKeys(config);
     await reportIssuerKeys(profile.issuerOrigin);
 
     info("");
@@ -999,7 +1058,7 @@ async function verify(config: ProjectConfig, profile: DeploymentProfile): Promis
   if (keys === 0) {
     info("");
     warn("The SSO issuer publishes an EMPTY key set: no satellite can verify a handoff.");
-    info(`  Set a signing key with ${bold("drk-deploy env:sync")}, then redeploy.`);
+    info(`  Set a signing key with ${bold(commandFor("env:sync"))}, then redeploy.`);
   } else if (keys !== null) {
     info(`  ${green("✓")} SSO JWKS publishes ${keys} key(s)`);
   }
@@ -1020,15 +1079,22 @@ async function verify(config: ProjectConfig, profile: DeploymentProfile): Promis
  * fleet will trust — which `env:check` catches from the project's variables,
  * but this catches from the RUNNING deployment, including a key set by hand in
  * the dashboard or inherited from an earlier build.
+ *
+ * The fix it prints names the project the prune acts on (F-50). A run reaches
+ * this only once the project is shown not to be the issuer's (`releaseGate`),
+ * and `env:prune` refuses the issuer's project itself, so this never sends
+ * anyone to delete the kit's own key.
  */
-async function reportSatelliteKeys(origin: string): Promise<void> {
-  const keys = await jwksKeyCount(origin);
+async function reportSatelliteKeys(config: Pick<ProjectConfig, "origin" | "projectId">): Promise<void> {
+  const keys = await jwksKeyCount(config.origin);
   if (keys === null) return; // no JWKS route, or unreachable — nothing to claim
   if (keys > 0) {
     info("");
     warn(`This satellite PUBLISHES ${keys} signing key(s) — a consumer must publish none.`);
     info(`  It holds SSO_HANDOFF_PRIVATE_KEY and can mint handoff tokens the fleet will trust.`);
-    info(`  Remove it with ${bold("drk-deploy env:prune")}, then redeploy.`);
+    info(
+      `  Remove it from this satellite's project (${config.projectId}) with ${bold(commandFor("env:prune"))}, then redeploy.`,
+    );
   } else {
     info(`  ${green("✓")} publishes no signing keys (correct for a consumer)`);
   }
@@ -1060,6 +1126,8 @@ async function reportIssuerKeys(issuerOrigin: string): Promise<void> {
   if (keys === 0) {
     info("");
     warn(`The configured issuer ${issuerOrigin} publishes an EMPTY key set.`);
+    // Bare on purpose, unlike this deployment's own fixes (F-50): it is run
+    // with the KIT's config, which this satellite's --config is not.
     info(`  Set SSO_HANDOFF_PRIVATE_KEY on the KIT (${bold("drk-deploy env:sync")} there) and redeploy it.`);
     return;
   }
@@ -1102,7 +1170,8 @@ export async function up(
   // one (F-48).
   const vercel = vercelInvocation(cliRoot, config, profile);
   // And a checkout that is not a clean, pushed release commit, or a project
-  // Vercel deploys by itself on every push (F-49).
+  // Vercel deploys by itself on every push (F-49), or, for a satellite, the
+  // SSO issuer's own project (F-50).
   const trees = await releaseGate(runner, config, profile, vercel, { ...options, migrates });
 
   await runner.envSync(cliRoot, {
@@ -1129,6 +1198,10 @@ export async function status(cliRoot: string): Promise<void> {
   const project = await client.getProject(config.projectId);
   field("name", `${project.name} ${dim(project.id)}`);
   field("target", describeProfile(profile));
+  // Read-only, so said rather than refused: every command that would act on
+  // this project refuses it (F-50).
+  const issuers = issuerProjectProblem(profile, { project });
+  if (issuers !== null) warn(`This satellite config points at the SSO issuer's own project: ${issuers}.`);
   field("framework", project.framework ?? dim("(unset)"));
   field("origin", config.origin);
   if (profile.kind === "satellite") {

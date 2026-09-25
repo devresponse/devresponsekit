@@ -1,8 +1,9 @@
-import { requireConfig, requireToken } from "../lib/config.js";
+import { commandFor, requireConfig, requireToken } from "../lib/config.js";
 import { describeEntry } from "../lib/env-presence.js";
 import { CliError, bold, dim, field, heading, info, ok, step, warn } from "../lib/log.js";
 import { describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
 import { VercelClient } from "../lib/vercel-client.js";
+import { refuseIssuerProject } from "../lib/vercel-project.js";
 
 /**
  * Postgres provisioning through the Vercel Marketplace.
@@ -55,10 +56,14 @@ export async function dbProvision(
   if (!policy.allowed) {
     info("");
     throw new CliError("Refusing to provision: this deployment does not own a database.", {
-      hint: "It runs against the KIT's Postgres — a new store would point it at an empty one. Provision from the kit's own vercel-cli checkout (its DATABASE_URL is the value this app needs), or, if this satellite genuinely has its own database, record that first with `drk-deploy init --own-database`.",
+      hint: `It runs against the KIT's Postgres — a new store would point it at an empty one. Provision from the kit's own deployment config (its DATABASE_URL is the value this app needs), or, if this satellite genuinely has its own database, record that first with \`${commandFor("init --own-database")}\`.`,
       exitCode: 2,
     });
   }
+  // A satellite that owns its database, configured with the kit's project,
+  // would connect a new store to the KIT's project here, and the store
+  // injects its own DATABASE_URL into the primary's environment (F-50).
+  await refuseIssuerProject(client, config, profile);
 
   step("Looking for an installed storage integration");
   const configurations = await client.listIntegrationConfigurations();
@@ -69,7 +74,7 @@ export async function dbProvision(
   if (configurations.length === 0 || candidates.length === 0) {
     heading("No Postgres integration is installed");
     info("Installing a marketplace integration needs an interactive consent step, so it cannot");
-    info("be done with an API token. Run this once, then re-run `drk-deploy db:provision`:");
+    info(`be done with an API token. Run this once, then re-run \`${commandFor("db:provision")}\`:`);
     info("");
     info(`    ${bold("vercel integration add neon")}`);
     info("");
@@ -126,15 +131,15 @@ export async function dbProvision(
   info(`Migrations must use the ${bold("DIRECT (non-pooled)")} one: DDL and the advisory lock the`);
   info("migration runner takes cannot travel through a transaction pooler.");
   info("");
-  info(`Check what landed:  ${bold("drk-deploy env:check")}`);
+  info(`Check what landed:  ${bold(commandFor("env:check"))}`);
   // A satellite that reaches this point owns its database, and `migrate`
   // demands it NAME that database rather than inheriting the kit's
   // PRODUCTION_DIRECT_DATABASE_URL from the shell — so the two commands must
   // agree about which one to print.
   info(
     profile.kind === "satellite"
-      ? `Then migrate with:  ${bold("drk-deploy migrate --database-url <direct-url>")} ${dim("(a satellite must name its own database)")}`
-      : `Then migrate with:  ${bold("drk-deploy migrate --database-url <direct-url>")}`,
+      ? `Then migrate with:  ${bold(commandFor("migrate --database-url <direct-url>"))} ${dim("(a satellite must name its own database)")}`
+      : `Then migrate with:  ${bold(commandFor("migrate --database-url <direct-url>"))}`,
   );
 }
 
@@ -155,7 +160,7 @@ export async function dbStatus(cliRoot: string): Promise<void> {
     // schema must be handed the kit's connection string, not a new store.
     info(
       migrationPolicy(profile).allowed
-        ? `Provision one with ${bold("drk-deploy db:provision")}, or set DATABASE_URL yourself.`
+        ? `Provision one with ${bold(commandFor("db:provision"))}, or set DATABASE_URL yourself.`
         : `This deployment runs against the ${bold("KIT's")} database: set DATABASE_URL (and DB_SCHEMA) to the primary's values. ${dim("db:provision is refused here — a new store would be empty.")}`,
     );
     return;
@@ -164,5 +169,5 @@ export async function dbStatus(cliRoot: string): Promise<void> {
   // entry is not what the target's deployments read (F-46).
   for (const v of dbVars) field(v.key, `${dim(describeEntry(v))}  ${dim(v.type)}`, 32);
   info("");
-  info(dim(`  Values are not shown. ${bold("drk-deploy env:check")} checks what production reads.`));
+  info(dim(`  Values are not shown. ${bold(commandFor("env:check"))} checks what production reads.`));
 }

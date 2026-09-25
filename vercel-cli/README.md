@@ -40,9 +40,10 @@ The `.cmd` wrapper works from both `cmd.exe` and PowerShell. On macOS or Linux u
 
 ## Two targets
 
-Every command reads one field — `target` in `.drk-deploy.json` — and behaves accordingly. **A
-config with no `target` is the kit**, which is what every config written before satellites existed
-looks like, so nothing about the kit path changed.
+Every command reads one field — `target` in the deployment's config file (`.drk-deploy.json`
+unless `--config` names another) — and behaves accordingly. **A config with no `target` is the
+kit**, which is what every config written before satellites existed looks like, so nothing about
+the kit path changed.
 
 |                      | **kit** (devresponsekit)        | **satellite** (app-standalone / app-handoff / app-shared) |
 | -------------------- | ------------------------------- | --------------------------------------------------------- |
@@ -103,13 +104,29 @@ without the other (F-48).
 
 ### A satellite
 
+Each deployment has its own config file. The kit keeps the default `.drk-deploy.json`, and each
+satellite gets one named with `--config` (or `DRK_DEPLOY_CONFIG`), so configuring one never
+rewrites another's:
+
 ```cmd
-drk-deploy init --project app-standalone --domain app1.example.com ^
+drk-deploy --config .drk-deploy.app-standalone.json init ^
+                --project app-standalone --domain app1.example.com ^
+                --application-id standalone ^
                 --satellite standalone ^
                 --app-root C:\my\repos\devresponseapps\app-standalone ^
                 --issuer https://app.example.com
-drk-deploy up --from-env .env.app1
+drk-deploy --config .drk-deploy.app-standalone.json up --from-env .env.app1
 ```
+
+`--config` goes before or after the command, and it wins over `DRK_DEPLOY_CONFIG`. A relative path
+names a file **beside the CLI** (in `vercel-cli/`, next to `.drk-deploy.json`), whatever the current
+directory, so the same command finds the same file from the kit's root or anywhere else, and
+`vercel-cli/.gitignore` keeps it out of git (it ignores `.drk-deploy*.json`). An absolute path is
+used as given, and keeping that file out of git is up to you.
+`set DRK_DEPLOY_CONFIG=.drk-deploy.app-standalone.json` once makes every command in that shell act
+on that deployment. `doctor`, `init` and `deploy` print the file they used, and every command a
+message tells you to run on this deployment carries the same `--config`. (One that is about the
+kit's own config, such as the kit's `env:sync` a satellite's probe asks for, is printed bare.)
 
 `--issuer` is **the kit's** origin: the satellite fetches `${issuer}/api/sso/jwks.json` and
 verifies handoffs against it. `init` refuses an issuer equal to the satellite's own origin,
@@ -119,26 +136,53 @@ every handoff fails with what looks like the issuer's fault.
 Option C additionally needs the shared cookie domain and the kit's session secret:
 
 ```cmd
-drk-deploy init --project app-shared --domain app3.example.com ^
+drk-deploy --config .drk-deploy.app-shared.json init ^
+                --project app-shared --domain app3.example.com ^
+                --application-id shared ^
                 --satellite shared ^
                 --app-root C:\my\repos\devresponseapps\app-shared ^
                 --issuer https://app.example.com ^
                 --cookie-domain .example.com
 :: BETTER_AUTH_SECRET must be the KIT's — it is never generated for Option C
 set BETTER_AUTH_SECRET=<the kit's value>
-drk-deploy up --from-env .env.app3
+drk-deploy --config .drk-deploy.app-shared.json up --from-env .env.app3
 ```
 
 Re-running `init` on a satellite config keeps it a satellite. There is no flag that demotes one
-back to the kit; edit or delete `.drk-deploy.json` if that is genuinely what you want.
+back to the kit; edit or delete the config file if that is genuinely what you want.
 
-One config file describes **one** deployment, so a fleet means one `vercel-cli` checkout per
-deployment (or swapping `.drk-deploy.json`). Converting an existing **kit** config into a satellite
-in place is the one transition that refuses to inherit anything: it demands an explicit `--project`
-(and a `--domain`), and refuses a project id equal to the one already recorded. A satellite is
-never the kit's Vercel project — if it were, `env:check` would read the KIT's environment, report
-the issuer's real signing key under "must NOT be set on this satellite", and `env:prune` would
-delete it, breaking handoff verification for the whole fleet.
+One config file describes **one** deployment (F-50). Re-running `init` for the **same** deployment
+keeps every recorded value you do not pass again, which is what makes `init --yes` a safe refresh.
+The one exception is a new `--project`: the recorded domain belonged to the old project, so the
+domain comes from `--domain` or the new project, as on a first `init`. A run that names a
+**different** deployment keeps none of the recorded deployment's own values: a new `--satellite`
+option, a new `--app-root`, or a kit config turned into a satellite. Such a run is refused until it
+names the whole deployment: `--project`, `--domain`, `--application-id`, `--satellite`, `--app-root`,
+and under `--yes` `--kit-database` or `--own-database` (Option C needs neither). Only the fleet's
+settings carry over: the `--issuer`, the audience prefix, the team and the kit checkout. Before F-50
+a new option or app folder kept everything else, so app-handoff configured over app-standalone's
+file was built into app-standalone's project under its domain and application id, and `up` replaced
+app-standalone's production with it. A separate file per deployment (above) avoids the question
+entirely.
+
+A checkout that moved (a re-clone of the satellites' repository, say) is a new `--app-root` too,
+because another folder is far more often another app. `deploy` stops on a checkout that no longer
+exists and prints the `init` that names the deployment in full, every value taken from the file,
+with only the path left to fill in; a bare `init --app-root <new path>` is refused and, while the
+recorded checkout is gone, offers the same command with the path filled in. Naming the recorded
+project keeps the recorded product name (`--app-name`). A value the file does not record at all,
+such as a satellite block with no checkout, is filled in rather than changed.
+
+A satellite is never the kit's Vercel project, and nothing lets a satellite config act on it
+(F-50). The config names the kit only by its origin, so the kit's project is recognised by what it
+serves: a project whose production aliases include the issuer's host (or whose readable
+`BETTER_AUTH_URL` is the issuer's origin) is the issuer's. `init` refuses to save such a config, and
+`deploy`, `up`, `migrate`, `env:sync`, `env:check`, `env:prune` and `db:provision` refuse to act on
+one, with exit code 2 and nothing changed. `doctor` counts it and `status` warns. No flag overrides
+it: `deploy --yes` and `--skip-checks` skip the environment preflight, and this check is not part of
+it. Before F-50 such a config built the satellite and promoted it over the primary, and `env:check`
+reported the issuer's real signing key under "must NOT be set on this satellite" and pointed at
+`env:prune`, which deleted it and broke handoff verification for the whole fleet.
 
 ---
 
@@ -152,7 +196,7 @@ delete it, breaking handoff verification for the whole fleet.
 | `status`       | Project, latest production deployment, and a live health probe.                                                      |
 | `env:check`    | Reports what production is missing, has wrong, or must not have. Public values are read back. Exit 1 on a problem.   |
 | `env:sync`     | Creates every variable this target needs, generating the secrets it may.                                             |
-| `env:prune`    | Removes variables that must not exist here, including a satellite's stray signing key.                               |
+| `env:prune`    | Removes variables that must not exist here, including a satellite's stray signing key. Refuses the kit's project.    |
 | `db:provision` | Creates a marketplace Postgres store and connects it to the project. Refused unless this deployment owns a database. |
 | `db:status`    | Shows the database variables wired into the project.                                                                 |
 | `migrate`      | Applies the kit's migrations to production, checked first. Refused for a satellite that does not own its schema.     |
@@ -160,7 +204,8 @@ delete it, breaking handoff verification for the whole fleet.
 | `up`           | `env:sync` then `deploy`. The whole thing.                                                                           |
 
 Every command accepts `--dry-run`, every command is safe to re-run, and every command reads the
-recorded target first.
+recorded target first. Every command also takes `--config <file>`, the deployment's config file
+(default: `DRK_DEPLOY_CONFIG`, else `.drk-deploy.json`; a relative path is beside the CLI).
 
 ---
 
@@ -339,7 +384,10 @@ twin) are refused on a satellite, not merely omitted. A satellite ships the same
 fleet trusts — and the point of the EdDSA + JWKS design is that compromising a satellite lets an
 attacker forge no handoff token. `env:check` reports one, `env:sync` refuses to run while one is
 present, `env:prune` removes it, and the post-deploy probe checks the running app publishes **no**
-keys.
+keys. `env:check`, `env:sync` and `env:prune` first refuse a project that serves the kit's origin
+(and `deploy` does before it gets as far as the probe), and every hint that points at `env:prune`
+names the project it would act on, so none of them can send anyone to delete the kit's own key
+(F-50).
 
 **A satellite that does not own its schema cannot migrate.** The satellites disable their own
 `db:*` scripts for exactly this reason: they point at the primary's database and carry a truncated
@@ -454,6 +502,31 @@ delete it — nothing reads it.
 ---
 
 ## Upgrading
+
+### F-50: one config file per deployment, and never the kit's project
+
+Nothing changes for a config that already describes one deployment. Three things to expect:
+
+1. **Stop restoring the kit's config before each satellite's `init`.** Give each satellite its own
+   file instead: `drk-deploy --config .drk-deploy.<name>.json init ...` once, then the same
+   `--config` (or `DRK_DEPLOY_CONFIG`) on every later command for it. The kit keeps
+   `.drk-deploy.json`. To split a fleet that shares one file today, copy the file to the
+   satellite's name beside it in `vercel-cli/` (a relative `--config` is read from there, whatever
+   the current directory), then run `drk-deploy --config <that file> init --yes` to check it.
+2. **`init` that names another app or option is refused until it names the whole deployment.**
+   Pass `--project`, `--domain`, `--application-id`, `--satellite`, `--app-root` and, with `--yes`,
+   `--kit-database` or `--own-database`. The refusal lists what is missing. A moved or re-cloned
+   checkout counts as another app: `deploy` prints the full `init` for it, filled in from the file.
+   A re-run for the same deployment is unchanged, except that a new `--project` no longer keeps the
+   old project's domain.
+3. **A satellite config whose project serves the kit's origin is refused everywhere** (exit code 2),
+   by `init`, `deploy`, `up`, `migrate`, `env:sync`, `env:check`, `env:prune` and `db:provision`,
+   with no override. Run `drk-deploy doctor` once per config: it counts the problem as
+   `vercel project wrong`. Point the config at the satellite's own project with
+   `init --project <its project> --domain <its host> --application-id <its id>` and the config's own
+   `--config`, as the refusal prints it (bare, it would re-point the kit's default file). `deploy` and `up`
+   now read the project once before anything writes, as they already did for F-49. A satellite's
+   `migrate`, `env:sync`, `env:check`, `env:prune` and `db:provision` make one more read-only API call.
 
 ### F-49: only a clean, pushed commit is released
 
@@ -588,7 +661,8 @@ Set `VERCEL_TOKEN` and it takes precedence over any saved credential:
     PRODUCTION_DIRECT_DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
 ```
 
-`VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` are not needed: the project comes from `.drk-deploy.json`. A
+`VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` are not needed: the project comes from `.drk-deploy.json`
+(or the file `--config` names). A
 job that exports them anyway must name that project, or the run is refused (F-48).
 
 The job deploys the commit it checked out, so that commit must be releasable (F-49). A push to
@@ -620,7 +694,12 @@ kit's `src/lib/env.ts` or a satellite's changes. `src/lib/env-presence.ts` decid
 for a target and what is wrong with a stored value; every command that asks goes through it.
 `src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/lib/vercel-project.ts` builds the environment
 of every `vercel` child and checks the checkout's `.vercel/project.json` (F-48): nothing else sets
-`VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`, and `test/release.test.ts` asserts that from the source.
+`VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`, and `test/release.test.ts` asserts that from the source. It
+also holds the rule that a satellite config never acts on the SSO issuer's own project (F-50).
+`src/lib/config.ts` reads and writes the deployment's config file, the one `--config` or
+`DRK_DEPLOY_CONFIG` names (F-50). `src/lib/config-file.ts` holds which file that is, and
+`commandFor`, which every `drk-deploy` command a message prints goes through, so that it carries the
+same `--config`.
 `src/lib/release-tree.ts` reads a checkout's git state (`inspectTree`) and holds the rules for what
 may be released and whether Vercel's git integration also deploys production, as pure functions
 (F-49). `src/commands/` is one file per command group.
@@ -631,13 +710,19 @@ The test suite is the only thing standing between a refactor and a silently wron
 Everything worth relying on is written as a pure function for that reason: keep it that way when you
 add a rule. The part that cannot be pure, the release ORDER, goes through a runner instead: `deploy`,
 `up` and `migrate` reach every step that touches Vercel, a database or a subprocess (`tree`,
-`gitIntegration`, `envSync`, `envCheck`, `link`, `pull`, `migrate`, `build`, `promote`, `verify`)
+`project`, `envSync`, `envCheck`, `link`, `pull`, `migrate`, `build`, `promote`, `verify`)
 through `ReleaseRunner` in `src/commands/release.ts`. `test/release.test.ts` passes a recording fake
 and asserts that the checkout is read before anything writes, that production is pulled before
 anything migrates, that migrations run before the promotion, and that nothing runs after a failed
 step, so a new step belongs in the runner. The fake's `tree` answers for each checkout what a test
-describes (dirty, unpushed, on a pull request's branch), and its `gitIntegration` a project with or
-without a connected repository. `inspectTree` itself runs for real against throwaway repositories
+describes (dirty, unpushed, on a pull request's branch), and its `project` a project with or
+without a connected repository (F-49) and with the production aliases a test gives it, so a
+satellite config on the kit's project is shown refused by `deploy --yes`, `--skip-checks`, `up` and
+`migrate` before anything is linked (F-50). The rule itself, `issuerProjectProblem` in
+`src/lib/vercel-project.ts`, is table-tested there too, and `init`, `doctor` and the `env:*`
+commands run it against a fake Vercel API. The `--config` wiring is tested by running the built
+entry point with a scratch profile and no token, and the hints are run under a selected file to show
+each printed command carries it. `inspectTree` itself runs for real against throwaway repositories
 the test builds under the OS temp directory, with a bare repository as their remote and the user's
 git configuration left out. That shows it reads untracked files, fetches nothing, ignores a shell's
 `GIT_DIR` and sets aside only a `next-env.d.ts` a build rewrote. One `deploy` test runs it inside

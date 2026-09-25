@@ -9,6 +9,7 @@ import { init, login } from "./commands/init.js";
 import { deploy, migrateCommand, status, up } from "./commands/release.js";
 import { configFileFrom, useConfigFile } from "./lib/config.js";
 import { CliError, dim, fail, info, setQuiet } from "./lib/log.js";
+import { withRollbackOptions } from "./lib/rollback-options.js";
 
 /** The vercel-cli package root: `dist/index.js` → `..`. */
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -204,7 +205,7 @@ program
 /*  Release                                                          */
 /* ---------------------------------------------------------------- */
 
-program
+const deployCommand = program
   .command("deploy")
   .description(
     "From a clean, pushed checkout at origin's default branch: pull production's settings, migrate (checked against them), build, promote, then verify",
@@ -222,11 +223,13 @@ program
   .option(...ALLOW_GIT_INTEGRATION_RACE)
   .option("--skip-migrations", "promote without touching the schema")
   .option("--skip-checks", "skip the environment preflight")
-  .option("--dry-run", "show the plan without deploying")
-  .option("-y, --yes", "proceed despite environment warnings")
-  .action(async (options) => deploy(CLI_ROOT, options));
+  .option("--dry-run", "show the plan without deploying");
+withRollbackOptions(
+  deployCommand,
+  "proceed despite environment warnings, and roll back a build that fails its probe (unless --no-rollback-on-fail)",
+).action(async (options) => deploy(CLI_ROOT, options));
 
-program
+const upCommand = program
   .command("up")
   .description(
     "The whole pipeline: check the commit → env:sync → pull → migrate (checked against production) → build → promote → verify",
@@ -245,9 +248,11 @@ program
   .option(...FORCE_SCHEMA)
   .option(...ALLOW_REF)
   .option(...ALLOW_GIT_INTEGRATION_RACE)
-  .option("--dry-run", "show the plan without changing anything")
-  .option("-y, --yes", "do not stop for confirmations")
-  .action(async (options) => up(CLI_ROOT, options));
+  .option("--dry-run", "show the plan without changing anything");
+withRollbackOptions(
+  upCommand,
+  "do not stop for confirmations, and roll back a build that fails its probe (unless --no-rollback-on-fail)",
+).action(async (options) => up(CLI_ROOT, options));
 
 program.showHelpAfterError("(run `drk-deploy --help` for usage)");
 

@@ -890,8 +890,18 @@ test("F-50: on a satellite's own project, every prune hint names the project it 
     }
     return new Response("", { status: 404 });
   }) as typeof fetch;
-  const verified = await run(() => releaseRunner.verify(config, resolveProfile(config)));
-  assert.ok(verified.error instanceof CliError, verified.out);
+  const verified = await run(() =>
+    releaseRunner.verify(config, resolveProfile(config), { handoffSigning: null }),
+  );
+  assert.equal(verified.error, undefined, verified.out);
+  // The consumer probes 404 here as well, so `healthy` alone would hold
+  // without the key check. The key is its own problem: the issuer's stub
+  // publishes the same `x`, so it is the kit's key.
+  assert.equal(verified.result?.healthy, false, "a satellite publishing a key fails its probe (F-51)");
+  assert.ok(
+    verified.result?.problems.includes("it publishes the KIT's own SSO signing key"),
+    `the key is a problem of its own (F-51): ${JSON.stringify(verified.result?.problems)}`,
+  );
   assert.match(verified.out, /This satellite PUBLISHES 1 signing key\(s\)/);
   assert.match(
     verified.out,
@@ -960,8 +970,10 @@ test("F-50: under --config, the prune hints and the issuer refusal print command
       }
       return new Response("", { status: 404 });
     }) as typeof fetch;
-    const verified = await run(() => releaseRunner.verify(config, resolveProfile(config)));
-    assert.ok(verified.error instanceof CliError, verified.out);
+    const verified = await run(() =>
+      releaseRunner.verify(config, resolveProfile(config), { handoffSigning: null }),
+    );
+    assert.equal(verified.result?.healthy, false, verified.out);
     assert.match(verified.out, named(probed.file, "env:prune"));
   } finally {
     useConfigFile(null);

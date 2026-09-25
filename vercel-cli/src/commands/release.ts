@@ -11,6 +11,7 @@ import {
 } from "../lib/config.js";
 import { runOrThrow } from "../lib/exec.js";
 import {
+  type PublishedKey,
   probe,
   probeConsumer,
   describe,
@@ -18,6 +19,8 @@ import {
   isConsumerHealthy,
   isHealthy,
   jwksKeyCount,
+  keysTheIssuerPublishes,
+  publishedKeys,
 } from "../lib/health.js";
 import { applyMigrations, coreMigrations, ensureKitDependencies } from "../lib/kit.js";
 import { CliError, bold, dim, field, green, heading, info, ok, red, step, warn, yellow } from "../lib/log.js";
@@ -46,7 +49,7 @@ import {
   treeProblems,
 } from "../lib/release-tree.js";
 import { type DeploymentProfile, describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
-import type { ProjectGit, ProjectSummary } from "../lib/vercel-client.js";
+import type { ProjectGit, ProjectSummary, ServingDeployment } from "../lib/vercel-client.js";
 import {
   assertCheckoutLink,
   assertNotIssuerProject,
@@ -424,10 +427,12 @@ export interface VercelInvocation {
  * what it writes, production's own variables, is what the migration URL and
  * schema are checked against before anything is migrated.
  *
- * `tree` and `project` come before anything that writes (F-49, F-50): before
- * `env:sync`, `vercel link`, the pull and the migration. Both only read. So
- * the order is: [env:check] → tree → project → [env:sync] → link → pull →
- * migrate → build → promote → verify. `migrate` runs tree → link → pull →
+ * `tree`, `project` and `serving` come before anything that writes (F-49,
+ * F-50, F-51): before `env:sync`, `vercel link`, the pull and the migration.
+ * All three only read. So the order is: [env:check] → tree → project →
+ * serving → [env:sync] → link → pull → migrate → build → promote → verify,
+ * and on an unhealthy probe with a rollback, → rollback → verify, with
+ * nothing after a rollback that failed. `migrate` runs tree → link → pull →
  * migrate, with `project` after `tree` for a satellite.
  */
 export interface ReleaseRunner {
@@ -443,6 +448,12 @@ export interface ReleaseRunner {
    * production aliases (is it the SSO issuer's own project? F-50).
    */
   project(vercel: VercelInvocation): Promise<ProjectSummary>;
+  /**
+   * The deployment the production origin serves before anything is released
+   * (F-51), or null when it serves none yet: what a failed release is rolled
+   * back to. Read-only.
+   */
+  serving(vercel: VercelInvocation): Promise<ServingDeployment | null>;
   /** `drk-deploy env:sync`. Only `up` runs it. */
   envSync: typeof envSync;
   /** `drk-deploy env:check`, the preflight: the number of problems found. */
@@ -463,9 +474,49 @@ export interface ReleaseRunner {
   build(vercel: VercelInvocation): Promise<void>;
   /** `vercel deploy --prebuilt --prod`: the promotion. */
   promote(vercel: VercelInvocation): Promise<void>;
-  /** The post-deploy probes. */
-  verify(config: ProjectConfig, profile: DeploymentProfile): Promise<void>;
+  /**
+   * The post-deploy probes, as a verdict rather than a throw (F-51), so that
+   * an unhealthy one can be rolled back and probed again.
+   */
+  verify(config: ProjectConfig, profile: DeploymentProfile, expect: ProbeExpectations): Promise<Verdict>;
+  /**
+   * `vercel promote <deployment>`: points production back at the deployment
+   * `serving` recorded (F-51, `--rollback-on-fail`). A non-zero exit throws.
+   */
+  rollback(vercel: VercelInvocation, to: ServingDeployment): Promise<void>;
 }
+
+/** What the post-deploy probe found (F-51). */
+export interface Verdict {
+  healthy: boolean;
+  /** Why not, one clause per failed check, for the message that ends the run. */
+  problems: string[];
+}
+
+/**
+ * What the probe holds a deployment to, beyond what it can see for itself.
+ *
+ * `handoffSigning` is whether production sets `SSO_HANDOFF_PRIVATE_KEY`, from
+ * the variables `vercel pull` wrote for this build, or null when they were
+ * not read. Only the kit uses it: a kit that signs handoffs and publishes no
+ * key fails every satellite's handoff, while a kit that runs no SSO publishes
+ * an empty key set by design (the JWKS route always answers).
+ */
+export interface ProbeExpectations {
+  handoffSigning: boolean | null;
+}
+
+/**
+ * The exit codes of a release whose post-deploy probe failed (F-51). 3 is the
+ * one it always had: the new build is live, and no rollback ran. 4 and 5 are
+ * the outcomes of a rollback, so a CI step can tell a restored production
+ * from one that still needs a person.
+ */
+export const EXIT_UNHEALTHY = 3;
+/** Rolled back: the deployment production served before the run serves again and passes the probe. */
+export const EXIT_ROLLED_BACK = 4;
+/** The rollback failed, or the deployment it restored fails the probe too: production needs a person. */
+export const EXIT_ROLLBACK_FAILED = 5;
 
 /** The real steps. The commands use these unless a test passes its own. */
 export const releaseRunner: ReleaseRunner = {
@@ -473,6 +524,13 @@ export const releaseRunner: ReleaseRunner = {
   project: async ({ config }) => {
     const { VercelClient } = await import("../lib/vercel-client.js");
     return new VercelClient(requireToken(), config.teamId).getProject(config.projectId);
+  },
+  serving: async ({ config }) => {
+    const { VercelClient } = await import("../lib/vercel-client.js");
+    return new VercelClient(requireToken(), config.teamId).servingDeployment(
+      new URL(config.origin).hostname,
+      config.projectId,
+    );
   },
   envSync,
   envCheck,
@@ -482,6 +540,8 @@ export const releaseRunner: ReleaseRunner = {
   build: (vercel) => runVercel(vercel, ["build", "--prod"], "vercel build failed — nothing was promoted"),
   promote: (vercel) => runVercel(vercel, ["deploy", "--prebuilt", "--prod"], "vercel deploy failed"),
   verify,
+  rollback: (vercel, to) =>
+    runVercel(vercel, rollbackArgs(vercel, to), "vercel promote failed — the unhealthy build is still live"),
 };
 
 /**
@@ -495,6 +555,44 @@ async function runVercel(
   failureMessage: string,
 ): Promise<void> {
   await runOrThrow(process.execPath, [vercelJs, ...args], { cwd: root, env, failureMessage });
+}
+
+/**
+ * The rollback, as the pinned Vercel CLI takes it (F-51): `vercel promote
+ * <deployment id>`, scoped to the project's owner.
+ *
+ * `promote`, not `vercel rollback`. Both point the production domains back
+ * at an existing deployment without rebuilding it, and both wait for Vercel's
+ * alias job (3 minutes by default) and exit non-zero when it fails or runs
+ * out of time (vercel 59.x, `requestPromote` and `requestRollback`). But after
+ * an Instant Rollback Vercel turns OFF the automatic assignment of production
+ * domains until a deployment is promoted. The fix released next would then be
+ * built and deployed and never go live, and its probe would find the
+ * rolled-back build and call it healthy. `promote` leaves that assignment on
+ * (it is Vercel's documented way to undo a rollback), and "promote the previous
+ * deployment" is how the kit's own docs describe a rollback
+ * (docs/deployment.md, "Rollback"). The recorded deployment is a production
+ * one, which `promote` re-points rather than rebuilds. `--yes` is never
+ * passed: on a preview deployment it would build a NEW production deployment
+ * from it instead of asking.
+ *
+ * `promote` reads the project from the deployment, not from the checkout's
+ * link or VERCEL_ORG_ID, and refuses a deployment outside the CLI's current
+ * scope. So the recorded owner goes in `--scope`, where the Vercel CLI takes
+ * a team id and also a personal account's own id.
+ */
+function rollbackArgs(vercel: Pick<VercelInvocation, "orgId">, to: ServingDeployment): string[] {
+  return ["promote", to.id, ...(vercel.orgId ? [`--scope=${vercel.orgId}`] : [])];
+}
+
+/** The rollback as an operator types it, with the recorded deployment filled in (F-51). */
+function rollbackCommand(vercel: Pick<VercelInvocation, "orgId">, to: ServingDeployment): string {
+  return `vercel ${rollbackArgs(vercel, to).join(" ")}`;
+}
+
+/** A recorded deployment, as the operator reads it: its own URL when known, and its id. */
+function describeDeployment(deployment: ServingDeployment): string {
+  return deployment.url ? `https://${deployment.url} (${deployment.id})` : deployment.id;
 }
 
 /**
@@ -568,18 +666,20 @@ export function pulledEnvFile(root: string): string {
  * the local value of any key production stores `sensitive`. A stale file
  * could therefore vouch for a database production no longer reads (F-47).
  * Production's variables are read only on demand, so a run with no migration
- * step never parses them.
+ * step never parses them for the migration check. (The kit's run reads one
+ * key for its probe, `handoffSigningIn`, where a missing file means unknown,
+ * never a refusal.)
  *
  * What `link` linked is checked before `pull` (F-48). With no owner recorded,
  * the link file is the only thing naming the project for `pull`, `build` and
  * `deploy`, so it must exist and name the configured project. A link that went
  * wrong stops the run here, before anything is pulled or migrated.
  */
-async function withProductionEnv(
+async function withProductionEnv<T>(
   vercel: VercelInvocation,
   runner: ReleaseRunner,
-  body: (production: () => Record<string, string>) => Promise<void>,
-): Promise<void> {
+  body: (production: () => Record<string, string>) => Promise<T>,
+): Promise<T> {
   heading("Production settings");
   await runner.link(vercel);
   assertCheckoutLink(vercel.root, vercel.config, { required: vercel.orgId === null });
@@ -588,10 +688,22 @@ async function withProductionEnv(
   try {
     step("Pulling production environment and project settings (read-only)");
     await runner.pull(vercel);
-    await body(() => readPulledEnv(file));
+    return await body(() => readPulledEnv(file));
   } finally {
     rmSync(file, { force: true });
   }
+}
+
+/**
+ * Whether production sets `SSO_HANDOFF_PRIVATE_KEY`, from the file `vercel
+ * pull` wrote for this build (F-51), or null when it wrote none. A value stored
+ * `sensitive` comes back as a placeholder, which still says it is set. Only
+ * whether it is set is kept: the value is never printed or returned.
+ */
+function handoffSigningIn(file: string): boolean | null {
+  if (!existsSync(file)) return null;
+  const value = parseEnvFile(readFileSync(file, "utf8")).SSO_HANDOFF_PRIVATE_KEY;
+  return value !== undefined && value.trim() !== "";
 }
 
 /** Production's variables from the file `vercel pull` just wrote. Missing means unknown, never empty. */
@@ -776,6 +888,41 @@ interface PreparedRelease {
   vercel: VercelInvocation;
   /** The checkouts read and found releasable (F-49). */
   trees: TreeState[];
+  /**
+   * The deployment production served when the run started, which an
+   * unhealthy probe rolls back to (F-51). Null when it served none yet (or,
+   * in a dry run, could not be read).
+   */
+  previous: ServingDeployment | null;
+}
+
+/** Whether an unhealthy probe is rolled back, and what decided it (F-51). */
+interface RollbackPolicy {
+  enabled: boolean;
+  why: string;
+}
+
+/**
+ * `--rollback-on-fail` and `--no-rollback-on-fail` decide, and with neither
+ * a rollback runs under `--yes` (F-51).
+ *
+ * `--yes` is how this CLI runs with nobody watching (the README's CI job is
+ * `up --yes`), and `deploy --yes` is also how a build gets past a failing
+ * environment check, the likeliest way to promote one that then fails its
+ * probe. There an exit 3 leaves the broken build serving until someone reads
+ * the log. A rollback is safe to do unasked: it re-points the domains at the
+ * deployment production served minutes earlier in this same run, which had
+ * been serving against the migrated schema since the migrations ran, and
+ * reverts nothing in the database (`verifyOrRollBack`). An interactive run
+ * without `--yes` keeps the old behaviour and is handed the exact command.
+ */
+function rollbackPolicy(options: { rollbackOnFail?: boolean; yes?: boolean }): RollbackPolicy {
+  if (options.rollbackOnFail === true) return { enabled: true, why: "--rollback-on-fail" };
+  if (options.rollbackOnFail === false) return { enabled: false, why: "--no-rollback-on-fail" };
+  if (options.yes) {
+    return { enabled: true, why: "on by default under --yes; --no-rollback-on-fail turns it off" };
+  }
+  return { enabled: false, why: "pass --rollback-on-fail (or --yes) to have it run" };
 }
 
 /**
@@ -809,15 +956,23 @@ async function readProject(
  * project is refused (F-50): it would build the satellite and promote it over
  * the primary. That runs here rather than in the environment preflight,
  * because `--yes` and `--skip-checks` skip the preflight, and `up` always
- * does. Then whether Vercel deploys production by itself (F-49).
+ * does. Then whether Vercel deploys production by itself (F-49). Then, once
+ * the run may go ahead, which deployment production serves: what an unhealthy
+ * probe rolls back to (F-51).
  */
 async function releaseGate(
   runner: ReleaseRunner,
   config: ProjectConfig,
   profile: DeploymentProfile,
   vercel: VercelInvocation,
-  options: { migrates: boolean; allowRef?: string; allowGitIntegrationRace?: boolean; dryRun?: boolean },
-): Promise<TreeState[]> {
+  options: {
+    migrates: boolean;
+    rollback: RollbackPolicy;
+    allowRef?: string;
+    allowGitIntegrationRace?: boolean;
+    dryRun?: boolean;
+  },
+): Promise<{ trees: TreeState[]; previous: ServingDeployment | null }> {
   const trees = await assertReleasableTree(
     runner,
     releaseSources(config, profile, { promotes: true, migrates: options.migrates }),
@@ -828,16 +983,63 @@ async function releaseGate(
     },
   );
   const project = await readProject(runner, vercel, options.dryRun);
-  if (project === null) return trees;
-  const issuers = issuerProjectProblem(profile, { project });
-  if (issuers !== null) {
-    heading("Vercel project");
-    field("project", `${project.name} ${dim(project.id)}`);
-    if (!options.dryRun) assertNotIssuerProject(profile, { project });
-    warn(`[dry-run] a real run would refuse: this satellite config points at ${issuers}.`);
+  if (project !== null) {
+    const issuers = issuerProjectProblem(profile, { project });
+    if (issuers !== null) {
+      heading("Vercel project");
+      field("project", `${project.name} ${dim(project.id)}`);
+      if (!options.dryRun) assertNotIssuerProject(profile, { project });
+      warn(`[dry-run] a real run would refuse: this satellite config points at ${issuers}.`);
+    }
+    assertNoAutoDeployRace(project.git, vercel, options);
   }
-  assertNoAutoDeployRace(project.git, vercel, options);
-  return trees;
+  const previous = await recordRollbackTarget(runner, vercel, options);
+  return { trees, previous };
+}
+
+/**
+ * Records which deployment production serves before anything is released,
+ * and prints it with what an unhealthy probe will do about it (F-51).
+ *
+ * It is read here, with the other checks, before anything writes: once
+ * `promote` has run, "the deployment before this one" is a guess. It is the
+ * deployment the ORIGIN's host is aliased to (`servingDeployment`), the host
+ * the probe requests, and not the project's latest production deployment.
+ *
+ * A production that serves nothing yet (a first deployment) has nothing to
+ * roll back to, which is said and is not an error. One that cannot be read
+ * stops a real run, as an unreadable project does (`readProject`), rollback or
+ * not: an unhealthy probe would then have no deployment to roll back to or to
+ * name, and nothing has been written yet. A dry run says so and goes on.
+ */
+async function recordRollbackTarget(
+  runner: ReleaseRunner,
+  vercel: VercelInvocation,
+  options: { rollback: RollbackPolicy; dryRun?: boolean },
+): Promise<ServingDeployment | null> {
+  heading("Rollback target");
+  let previous: ServingDeployment | null;
+  try {
+    previous = await runner.serving(vercel);
+  } catch (err) {
+    if (!options.dryRun) throw err;
+    warn(
+      `[dry-run] could not read which deployment ${vercel.config.origin} serves (${(err as Error).message}), so there is no rollback target to show. A real run reads it before anything writes, and stops if it cannot.`,
+    );
+    return null;
+  }
+  field(
+    "serving now",
+    previous ? describeDeployment(previous) : dim("nothing yet: there is no deployment to roll back to"),
+  );
+  if (previous === null) return null;
+  field(
+    "if the probe fails",
+    options.rollback.enabled
+      ? `promote it back ${dim(`(${options.rollback.why})`)}`
+      : `the new build stays live, and the command that promotes this one back is printed ${dim(`(${options.rollback.why})`)}`,
+  );
+  return previous;
 }
 
 /**
@@ -858,6 +1060,11 @@ async function releaseGate(
  * pulled or migrated (F-49). A project that Vercel also deploys on every push
  * is refused unless `--allow-git-integration-race`, because that push wins
  * the race this order exists for.
+ *
+ * And a promoted build that fails its probe is not left serving unnamed
+ * (F-51): the deployment production served before the run is recorded before
+ * anything writes, and is promoted back under `--rollback-on-fail` (the
+ * default under `--yes`), or named in the exact command that would do it.
  */
 export async function deploy(
   cliRoot: string,
@@ -868,6 +1075,7 @@ export async function deploy(
     yes?: boolean;
     allowRef?: string;
     allowGitIntegrationRace?: boolean;
+    rollbackOnFail?: boolean;
   },
   runner: ReleaseRunner = releaseRunner,
   /** Built and checked by `up` before env:sync writes anything (F-48, F-49). */
@@ -920,10 +1128,16 @@ export async function deploy(
   }
 
   // F-49: the commit, and whether Vercel deploys production by itself, before
-  // anything is linked, pulled or migrated. `up` settled both before env:sync.
-  const trees =
-    prepared?.trees ??
-    (await releaseGate(runner, config, profile, vercel, { ...options, migrates: migration !== null }));
+  // anything is linked, pulled or migrated, and F-51: what production serves
+  // before this run replaces it. `up` settled all three before env:sync.
+  const rollback = rollbackPolicy(options);
+  const { trees, previous } =
+    prepared ??
+    (await releaseGate(runner, config, profile, vercel, {
+      ...options,
+      migrates: migration !== null,
+      rollback,
+    }));
 
   if (options.dryRun) {
     if (migration) {
@@ -931,12 +1145,17 @@ export async function deploy(
     }
     heading("Build and promote");
     step(
-      `[dry-run] would run: vercel pull → ${migration ? "check the migration target → migrate → " : ""}vercel build --prod → vercel deploy --prebuilt --prod`,
+      `[dry-run] would run: vercel pull → ${migration ? "check the migration target → migrate → " : ""}vercel build --prod → vercel deploy --prebuilt --prod → verify`,
     );
+    if (previous) {
+      step(
+        `[dry-run] on an unhealthy probe it would ${rollback.enabled ? "run" : "print"}: ${rollbackCommand(vercel, previous)}`,
+      );
+    }
     return;
   }
 
-  await withProductionEnv(vercel, runner, async (production) => {
+  const handoffSigning = await withProductionEnv(vercel, runner, async (production) => {
     if (migration) {
       const target = checkMigrationTarget(migration, production(), options, commitOf(trees, config.kitRoot));
       await runner.migrate(cliRoot, migrationStep(migration, target, options));
@@ -949,9 +1168,124 @@ export async function deploy(
     step("Promoting the prebuilt output to production");
     await runner.promote(vercel);
     ok("Promoted");
+    // What the probe holds the kit to, from the variables this build read.
+    return profile.kind === "satellite" ? null : handoffSigningIn(pulledEnvFile(vercel.root));
   });
 
-  await runner.verify(config, profile);
+  await verifyOrRollBack(runner, config, profile, vercel, {
+    previous,
+    rollback,
+    handoffSigning,
+    migrated: migration !== null,
+  });
+}
+
+/**
+ * The end of a release: probe what is serving, and when it is not healthy,
+ * put back the deployment production served before the run, or say exactly
+ * how (F-51).
+ *
+ * Before F-51 an unhealthy probe exited 3 and the broken build stayed live
+ * until someone found the previous deployment and promoted it by hand. Now:
+ *
+ * - With no rollback, or nothing to roll back to, it still exits 3, and the
+ *   message carries the `vercel promote` command with the recorded
+ *   deployment filled in.
+ * - With one, `vercel promote` runs, and the origin is probed again. Exit 4:
+ *   production serves the previous deployment and it passes. Exit 5: the
+ *   rollback failed, or what it restored fails too. Nothing runs after a
+ *   rollback that failed, not even the second probe.
+ *
+ * Rolling back the app after this run migrated the database is safe, and is
+ * the kit's documented rollback (docs/deployment.md, "Rollback"): migrations
+ * are forward-only and additive, and they run BEFORE the promotion so that
+ * the build already serving keeps working against the new schema. The
+ * deployment this restores IS that build. It served production against the
+ * migrated schema from the moment the migrations finished until the
+ * promotion, so the rollback returns production to a state this run had
+ * already put it in, and nothing in the database is reverted.
+ *
+ * The second probe does not hold the kit to `handoffSigning`: a key this run
+ * set (`up` generates one) is not in a deployment built before it, which is
+ * production as it was, not a failed rollback. A satellite's published key is
+ * held against it either way: a consumer holding signing material needs a
+ * person whichever build it is.
+ */
+async function verifyOrRollBack(
+  runner: ReleaseRunner,
+  config: ProjectConfig,
+  profile: DeploymentProfile,
+  vercel: VercelInvocation,
+  release: {
+    previous: ServingDeployment | null;
+    rollback: RollbackPolicy;
+    handoffSigning: boolean | null;
+    migrated: boolean;
+  },
+): Promise<void> {
+  const verdict = await runner.verify(config, profile, { handoffSigning: release.handoffSigning });
+  if (verdict.healthy) return;
+
+  const what = profile.kind === "satellite" ? "The satellite" : "The deployment";
+  const why = verdict.problems.join("; ");
+  const failed = `${what} is live but not healthy: ${why}.`;
+  const { previous } = release;
+  if (previous === null) {
+    throw new CliError(failed, {
+      exitCode: EXIT_UNHEALTHY,
+      hint: "Production served no earlier deployment this run could record, so there is nothing to roll back to. See the probe results above.",
+    });
+  }
+  const command = rollbackCommand(vercel, previous);
+  // Said wherever a rollback is offered or done, because it is the question
+  // an operator asks first after a migrating release.
+  const schema = release.migrated
+    ? " Leave the migrations applied: they are forward-only, and that deployment served against them until the promotion."
+    : "";
+  // The command is the only way back. A re-run with --rollback-on-fail is
+  // not: it records what the origin serves when IT starts, which is this
+  // build, so its rollback would promote this build again and blame the
+  // environment. The flag is named only for the next release.
+  if (!release.rollback.enabled) {
+    throw new CliError(failed, {
+      exitCode: EXIT_UNHEALTHY,
+      hint: `It is still serving. To put back the deployment production served before this run, ${describeDeployment(previous)}, run \`${command}\`. Re-running with --rollback-on-fail would not do it: a new run records this build as the one to roll back to. Pass --rollback-on-fail on later releases to have the rollback done for you.${schema}`,
+    });
+  }
+
+  heading("Rollback");
+  warn(failed);
+  step(`Promoting ${describeDeployment(previous)} back to production ${dim(`(${release.rollback.why})`)}`);
+  try {
+    await runner.rollback(vercel, previous);
+  } catch (err) {
+    throw new CliError(
+      `${failed} The rollback failed as well (${(err as Error).message}), so the unhealthy build is still live.`,
+      {
+        exitCode: EXIT_ROLLBACK_FAILED,
+        hint: `Run it by hand: \`${command}\`, or promote ${describeDeployment(previous)} from the project's Deployments page.`,
+      },
+    );
+  }
+  ok("Rolled back");
+
+  const restored = await runner.verify(config, profile, { handoffSigning: null });
+  if (!restored.healthy) {
+    throw new CliError(
+      `The new build failed its probe (${why}) and was rolled back to ${describeDeployment(previous)}, which fails the probe too: ${restored.problems.join("; ")}.`,
+      {
+        exitCode: EXIT_ROLLBACK_FAILED,
+        hint: "Production serves the earlier deployment and is still not healthy, so what fails is not only the new build: look at the environment and the database. See the probe results above.",
+      },
+    );
+  }
+  throw new CliError(
+    `The new build failed its probe (${why}) and was rolled back: ${describeDeployment(previous)} serves production again and passes the probe.`,
+    {
+      exitCode: EXIT_ROLLED_BACK,
+      hint: `The release failed and is no longer live. Fix it and deploy again.${schema}`,
+    },
+  );
 }
 
 /**
@@ -1027,77 +1361,150 @@ async function ensureLinked(vercel: VercelInvocation): Promise<void> {
  *
  * The two targets are asked different questions, because "healthy" means
  * different things. The kit is an issuer: it must serve, accept a sign-in
- * attempt, and publish a key. A satellite is a consumer: it must serve, reach
- * its database, and REFUSE a token it cannot verify. Probing a consumer for a
- * published key would report failure on a perfectly healthy deployment, which
- * is how a check stops being read.
+ * attempt, and, when production sets a signing key, publish it. A satellite is
+ * a consumer: it must serve, reach its database, REFUSE a token it cannot
+ * verify, and publish NO key. Probing a consumer for a published key would
+ * report failure on a perfectly healthy deployment, which is how a check stops
+ * being read.
+ *
+ * It returns a verdict rather than throwing (F-51), so the release can roll
+ * back and probe again. Before F-51 a key problem was only printed: a
+ * satellite publishing signing keys, and a kit that sets a signing key but
+ * publishes none, both ended "healthy" with exit 0, which is green in CI.
  */
-async function verify(config: ProjectConfig, profile: DeploymentProfile): Promise<void> {
+async function verify(
+  config: ProjectConfig,
+  profile: DeploymentProfile,
+  expect: ProbeExpectations,
+): Promise<Verdict> {
   heading("Verify");
   step(`Probing ${config.origin}`);
+  const problems: string[] = [];
 
   if (profile.kind === "satellite") {
     const report = await probeConsumer(config.origin);
     for (const line of describeConsumer(report)) info(`  ${line}`);
-    await reportSatelliteKeys(config);
-    await reportIssuerKeys(profile.issuerOrigin);
-
-    info("");
-    if (isConsumerHealthy(report)) ok(`${bold(config.origin)} is healthy.`);
-    else
-      throw new CliError("The satellite is live but not healthy — see the probe results above.", {
-        exitCode: 3,
-      });
-    return;
-  }
-
-  const report = await probe(config.origin);
-  for (const line of describe(report)) info(`  ${line}`);
-
-  const keys = await jwksKeyCount(config.origin);
-  if (keys === 0) {
-    info("");
-    warn("The SSO issuer publishes an EMPTY key set: no satellite can verify a handoff.");
-    info(`  Set a signing key with ${bold(commandFor("env:sync"))}, then redeploy.`);
-  } else if (keys !== null) {
-    info(`  ${green("✓")} SSO JWKS publishes ${keys} key(s)`);
+    if (!isConsumerHealthy(report)) problems.push("its consumer probes fail (see above)");
+    const own = await publishedKeys(config.origin);
+    const issuer = await publishedKeys(profile.issuerOrigin);
+    const keys = reportSatelliteKeys(config, own, issuer);
+    if (keys !== null) problems.push(keys);
+    reportIssuerKeys(profile.issuerOrigin, issuer);
+  } else {
+    const report = await probe(config.origin);
+    for (const line of describe(report)) info(`  ${line}`);
+    if (!isHealthy(report)) problems.push("its health probes fail (see above)");
+    const keys = reportKitKeys(await jwksKeyCount(config.origin), expect.handoffSigning);
+    if (keys !== null) problems.push(keys);
   }
 
   info("");
-  if (isHealthy(report)) ok(`${bold(config.origin)} is healthy.`);
-  else
-    throw new CliError("The deployment is live but not healthy — see the probe results above.", {
-      exitCode: 3,
-    });
+  if (problems.length === 0) ok(`${bold(config.origin)} is healthy.`);
+  return { healthy: problems.length === 0, problems };
+}
+
+/**
+ * The kit's own key set, held to whether production sets a signing key
+ * (F-51).
+ *
+ * The kit's JWKS route always answers, with an EMPTY set when
+ * `SSO_HANDOFF_PRIVATE_KEY` is unset, which is right for a kit that runs no
+ * SSO. So an empty set fails the probe only when production sets the key:
+ * then every satellite's handoff fails verification against this document,
+ * with what looks like a bad signature, while the kit itself serves and signs
+ * in. Before F-51 that was a warning under "healthy". A set that is not served
+ * at all fails the same way. When production's variables were not read,
+ * whether it should sign is unknown, and an empty set stays a warning.
+ */
+function reportKitKeys(keys: number | null, handoffSigning: boolean | null): string | null {
+  if (keys !== null && keys > 0) {
+    info(`  ${green("✓")} SSO JWKS publishes ${keys} key(s)`);
+    return null;
+  }
+  if (handoffSigning === true) {
+    const found = keys === 0 ? "publishes an EMPTY SSO key set" : "does not serve /api/sso/jwks.json";
+    info("");
+    warn(`The SSO issuer ${found}, although production sets SSO_HANDOFF_PRIVATE_KEY.`);
+    info("  Every satellite verifies its handoffs against that document, so every handoff fails.");
+    return `it ${found} although production sets SSO_HANDOFF_PRIVATE_KEY`;
+  }
+  if (keys === 0) {
+    info("");
+    warn("The SSO issuer publishes an EMPTY key set: no satellite can verify a handoff.");
+    info(
+      handoffSigning === false
+        ? "  Production sets no SSO_HANDOFF_PRIVATE_KEY, which is right only if this deployment issues no handoffs."
+        : "  Production's variables were not read, so whether it should sign handoffs is unknown.",
+    );
+    info(`  Set a signing key with ${bold(commandFor("env:sync"))}, then redeploy.`);
+  }
+  return null;
 }
 
 /**
  * The inverse of the kit's JWKS check, and the reason it is worth making.
  *
- * A satellite must publish ZERO keys. If it publishes one, it holds
- * `SSO_HANDOFF_PRIVATE_KEY` and has quietly become an issuer the rest of the
- * fleet will trust — which `env:check` catches from the project's variables,
- * but this catches from the RUNNING deployment, including a key set by hand in
- * the dashboard or inherited from an earlier build.
+ * A satellite must publish ZERO keys. One that publishes a key holds
+ * `SSO_HANDOFF_PRIVATE_KEY`, which `env:check` catches from the project's
+ * variables and this catches from the RUNNING deployment: a key set by hand in
+ * the dashboard, inherited from an earlier build, or deployed past the
+ * preflight with `deploy --yes` or `--skip-checks`. Since F-51 it fails the
+ * probe, and so the run and, when one is on, triggers a rollback.
+ *
+ * What the key can do depends on whose it is, so the two cases are told apart
+ * by the public key the issuer publishes (`keysTheIssuerPublishes`).
+ * Consumers verify a handoff against the ISSUER's key set, selecting the key
+ * by `kid` (the kit's jwt-handoff.server.ts), so a key of the satellite's own
+ * signs tokens every consumer refuses. The realistic way a key gets here,
+ * though, is an environment copied from the kit's, and then it IS the issuer's
+ * key: this satellite's `/api/sso/launch` can sign handoffs every consumer
+ * accepts, and the kit's private key sits on one more deployment, so it must
+ * be rotated on the kit and not only removed here. Either way it is signing
+ * material a consumer must not hold.
  *
  * The fix it prints names the project the prune acts on (F-50). A run reaches
  * this only once the project is shown not to be the issuer's (`releaseGate`),
  * and `env:prune` refuses the issuer's project itself, so this never sends
  * anyone to delete the kit's own key.
+ *
+ * Returns the problem, or null when there is none.
  */
-async function reportSatelliteKeys(config: Pick<ProjectConfig, "origin" | "projectId">): Promise<void> {
-  const keys = await jwksKeyCount(config.origin);
-  if (keys === null) return; // no JWKS route, or unreachable — nothing to claim
-  if (keys > 0) {
-    info("");
-    warn(`This satellite PUBLISHES ${keys} signing key(s) — a consumer must publish none.`);
-    info(`  It holds SSO_HANDOFF_PRIVATE_KEY and can mint handoff tokens the fleet will trust.`);
-    info(
-      `  Remove it from this satellite's project (${config.projectId}) with ${bold(commandFor("env:prune"))}, then redeploy.`,
-    );
-  } else {
+function reportSatelliteKeys(
+  config: Pick<ProjectConfig, "origin" | "projectId">,
+  own: readonly PublishedKey[] | null,
+  issuer: readonly PublishedKey[] | null,
+): string | null {
+  if (own === null) return null; // no JWKS route, or unreachable — nothing to claim
+  if (own.length === 0) {
     info(`  ${green("✓")} publishes no signing keys (correct for a consumer)`);
+    return null;
   }
+  const theKits = issuer === null ? null : keysTheIssuerPublishes(own, issuer).length > 0;
+  info("");
+  warn(`This satellite PUBLISHES ${own.length} signing key(s) — a consumer must publish none.`);
+  if (theKits === true) {
+    info("  It is the KIT's own signing key (the issuer publishes the same public key): this satellite can");
+    info(
+      "  sign handoffs every consumer accepts, and the kit's private key is exposed on one more deployment.",
+    );
+    info(
+      "  Rotate the kit's SSO_HANDOFF_PRIVATE_KEY as well (docs/configuration.md), with no previous-key overlap.",
+    );
+  } else if (theKits === false) {
+    info(
+      "  It is not the kit's key: consumers verify against the issuer's key set, so they refuse what it signs.",
+    );
+    info("  It is still signing material a consumer must not hold.");
+  } else {
+    info("  Whether it is the KIT's own key is unknown: the issuer's key set was not served.");
+    info("  If this satellite's environment was copied from the kit's, rotate the kit's key as well.");
+  }
+  info(
+    `  Remove it from this satellite's project (${config.projectId}) with ${bold(commandFor("env:prune"))}, then redeploy.`,
+  );
+  return theKits === true
+    ? "it publishes the KIT's own SSO signing key"
+    : `it publishes ${own.length} SSO signing key(s), which a consumer must never hold`;
 }
 
 /**
@@ -1112,10 +1519,10 @@ async function reportSatelliteKeys(config: Pick<ProjectConfig, "origin" | "proje
  * at actually an issuer?"
  *
  * Reported, never fatal: a transient network failure while probing the kit is
- * not a reason to fail a satellite's deploy that has otherwise succeeded.
+ * not a reason to fail a satellite's deploy that has otherwise succeeded, and
+ * rolling the satellite back would not fix the kit.
  */
-async function reportIssuerKeys(issuerOrigin: string): Promise<void> {
-  const keys = await jwksKeyCount(issuerOrigin);
+function reportIssuerKeys(issuerOrigin: string, keys: readonly PublishedKey[] | null): void {
   if (keys === null) {
     info("");
     warn(`The configured issuer ${issuerOrigin} did not serve /api/sso/jwks.json.`);
@@ -1123,7 +1530,7 @@ async function reportIssuerKeys(issuerOrigin: string): Promise<void> {
     info("  every handoff fails here with what looks like a bad signature.");
     return;
   }
-  if (keys === 0) {
+  if (keys.length === 0) {
     info("");
     warn(`The configured issuer ${issuerOrigin} publishes an EMPTY key set.`);
     // Bare on purpose, unlike this deployment's own fixes (F-50): it is run
@@ -1131,7 +1538,7 @@ async function reportIssuerKeys(issuerOrigin: string): Promise<void> {
     info(`  Set SSO_HANDOFF_PRIVATE_KEY on the KIT (${bold("drk-deploy env:sync")} there) and redeploy it.`);
     return;
   }
-  info(`  ${green("✓")} issuer ${issuerOrigin} publishes ${keys} key(s)`);
+  info(`  ${green("✓")} issuer ${issuerOrigin} publishes ${keys.length} key(s)`);
 }
 
 /**
@@ -1145,6 +1552,7 @@ export async function up(
     yes?: boolean;
     allowRef?: string;
     allowGitIntegrationRace?: boolean;
+    rollbackOnFail?: boolean;
   },
   runner: ReleaseRunner = releaseRunner,
 ): Promise<void> {
@@ -1171,8 +1579,14 @@ export async function up(
   const vercel = vercelInvocation(cliRoot, config, profile);
   // And a checkout that is not a clean, pushed release commit, or a project
   // Vercel deploys by itself on every push (F-49), or, for a satellite, the
-  // SSO issuer's own project (F-50).
-  const trees = await releaseGate(runner, config, profile, vercel, { ...options, migrates });
+  // SSO issuer's own project (F-50). And the deployment production serves
+  // now, which a failed probe rolls back to (F-51): read before env:sync, so
+  // nothing this run writes can change the answer.
+  const { trees, previous } = await releaseGate(runner, config, profile, vercel, {
+    ...options,
+    migrates,
+    rollback: rollbackPolicy(options),
+  });
 
   await runner.envSync(cliRoot, {
     ...(options.fromEnv !== undefined ? { fromEnv: options.fromEnv } : {}),
@@ -1183,7 +1597,7 @@ export async function up(
 
   // --from-env is passed on: it can name the migration URL
   // (PRODUCTION_DIRECT_DATABASE_URL) as well as the values env:sync writes.
-  await deploy(cliRoot, { ...options, skipChecks: true }, runner, { vercel, trees }); // env:sync just ran; checking again would only repeat itself
+  await deploy(cliRoot, { ...options, skipChecks: true }, runner, { vercel, trees, previous }); // env:sync just ran; checking again would only repeat itself
 }
 
 /** `drk-deploy status` — a short answer to "what is deployed, and is it well?". */

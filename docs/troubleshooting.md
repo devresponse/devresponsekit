@@ -276,7 +276,12 @@ build** and leave the additive migrations ahead — **never auto-down-migrate**
 (there are no down-migrations, and reverting schema risks data loss).
 
 - **Vercel:** promote the last-known-good deployment (dashboard → previous
-  deployment → "Promote to Production", or `vercel rollback`). Migrations
+  deployment → "Promote to Production", or `vercel promote <deployment>`).
+  Prefer that to `vercel rollback`: after an Instant Rollback Vercel stops
+  assigning production domains to new deployments until one is promoted, so
+  the next merge is built and never goes live. `drk-deploy deploy` and `up`
+  record the deployment to promote before they release, and promote it back
+  themselves under `--rollback-on-fail` (the default under `--yes`). Migrations
   always land *before* the build that needs them — by hand on the live path
   ([deployment.md §1.1](./deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)),
   by the tooling on the optional paths (deployment.md §1.2, §1.3) — so a

@@ -45,14 +45,14 @@ unless `--config` names another) — and behaves accordingly. **A config with no
 kit**, which is what every config written before satellites existed looks like, so nothing about
 the kit path changed.
 
-|                      | **kit** (devresponsekit)        | **satellite** (app-standalone / app-handoff / app-shared) |
-| -------------------- | ------------------------------- | --------------------------------------------------------- |
-| Role                 | SSO **issuer**                  | SSO **consumer**                                          |
-| Signing key          | holds `SSO_HANDOFF_PRIVATE_KEY` | holds **none** — refused                                  |
-| `SSO_HANDOFF_ISSUER` | itself                          | **the kit**                                               |
-| Database schema      | owns it, migrates it            | usually the kit's — migrations **fail closed**            |
-| Session              | its own                         | A/B their own; **C shares the kit's**                     |
-| Health check         | serves + publishes a key        | serves + reaches its DB + **refuses a bad token**         |
+|                      | **kit** (devresponsekit)        | **satellite** (app-standalone / app-handoff / app-shared)  |
+| -------------------- | ------------------------------- | ---------------------------------------------------------- |
+| Role                 | SSO **issuer**                  | SSO **consumer**                                           |
+| Signing key          | holds `SSO_HANDOFF_PRIVATE_KEY` | holds **none** — refused                                   |
+| `SSO_HANDOFF_ISSUER` | itself                          | **the kit**                                                |
+| Database schema      | owns it, migrates it            | usually the kit's — migrations **fail closed**             |
+| Session              | its own                         | A/B their own; **C shares the kit's**                      |
+| Health check         | serves + publishes its key      | serves + reaches its DB + **refuses a bad token** + no key |
 
 The same variable meaning the opposite thing on the two targets is the whole reason this
 distinction is recorded in the config rather than left to the operator to remember.
@@ -375,16 +375,55 @@ plain. `env:sync --force` is not the fix: it regenerates every secret it may.
 
 **The deployment is verified, not assumed.** After promoting, the CLI probes `/api/health`,
 `/api/health/ready` and a deliberately-wrong sign-in. A 401 on that last one means auth is alive;
-a 500 means the build is up but broken. It also checks that the SSO issuer publishes a key — an
-empty key set means no satellite can verify a handoff, which is invisible from the dashboard.
+a 500 means the build is up but broken. It also checks that the SSO issuer publishes a key: an
+empty key set means no satellite can verify a handoff, which is invisible from the dashboard. When
+production sets `SSO_HANDOFF_PRIVATE_KEY` (read from the variables `vercel pull` wrote for this
+build), an empty key set, or none served, fails the probe. When production sets no key it is a
+warning, because a kit that runs no SSO publishes an empty set by design (F-51).
+
+**A build that fails its probe is rolled back, or the rollback is named (F-51).** Before anything
+writes, `deploy` and `up` read which deployment the production origin serves (its alias, the host
+the probe requests, not the project's latest deployment) and print it under "Rollback target". A
+first deployment has none. If the probe then fails:
+
+- With `--rollback-on-fail`, which is the default under `--yes`, the CLI runs
+  `vercel promote <that deployment> --scope=<owner>` and probes again. It uses `promote` rather than
+  `vercel rollback` because an Instant Rollback turns off Vercel's automatic assignment of production
+  domains. The next release would then deploy without going live, and its probe would report the
+  rolled-back build healthy.
+- Without it, or with `--no-rollback-on-fail`, the build stays live and the error prints that exact
+  command with the recorded deployment filled in. Run that command. Re-running the release with
+  `--rollback-on-fail` does not restore it: the new run records the broken build as the one serving,
+  promotes it back, and reports an environment problem.
+
+Rolling back the app after a migration is safe: migrations are forward-only, and the deployment it
+restores was serving against the migrated schema from the migration to the promotion. Nothing in
+the database is reverted.
+
+| Exit | Meaning                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------- |
+| 0    | Healthy.                                                                                                            |
+| 3    | Not healthy, and still live: no rollback ran (none asked for, or production served nothing before this run).        |
+| 4    | Not healthy, rolled back: the previous deployment serves production again and passes the probe. The release failed. |
+| 5    | Not healthy, and the rollback failed, or the deployment it restored fails the probe too. Production needs a person. |
+
+A real run that cannot read the serving deployment stops before anything writes, as it does when it
+cannot read the project. A dry run says so and prints the command an unhealthy probe would run or
+print.
 
 **A satellite is never handed signing material.** `SSO_HANDOFF_PRIVATE_KEY` (and its rotation
 twin) are refused on a satellite, not merely omitted. A satellite ships the same
-`/api/sso/launch` route the kit does, so a key set there turns a consumer into an issuer the whole
-fleet trusts — and the point of the EdDSA + JWKS design is that compromising a satellite lets an
+`/api/sso/launch` route the kit does, so a key set there signs handoff tokens. Consumers verify
+against the kit's published keys, so tokens signed with a key of the satellite's own are refused.
+The realistic way a key gets there, though, is an environment copied from the kit's. With the kit's
+own key the satellite signs tokens every consumer accepts, and the kit's private key sits on one
+more deployment. The point of the EdDSA + JWKS design is that compromising a satellite lets an
 attacker forge no handoff token. `env:check` reports one, `env:sync` refuses to run while one is
-present, `env:prune` removes it, and the post-deploy probe checks the running app publishes **no**
-keys. `env:check`, `env:sync` and `env:prune` first refuse a project that serves the kit's origin
+present, `env:prune` removes it, and the post-deploy probe **fails** when the running app publishes
+any key (F-51; it used to print a note and exit 0, even after `deploy --yes` or `--skip-checks` had
+skipped the preflight). The probe compares the published public key with the kit's and says which
+case it is. When it is the kit's own key, rotate the kit's key as well, with no previous-key
+overlap. `env:check`, `env:sync` and `env:prune` first refuse a project that serves the kit's origin
 (and `deploy` does before it gets as far as the probe), and every hint that points at `env:prune`
 names the project it would act on, so none of them can send anyone to delete the kit's own key
 (F-50).
@@ -419,14 +458,16 @@ required for Option C (and validated against the deployment's own host) and refu
 where a parent-domain cookie would shadow the host cookie.
 
 **A consumer is probed as a consumer.** A satellite publishes no keys, so asking it for one would
-report failure forever. Its health is `/api/health`, `/api/health/ready`, and `/api/sso/consume`
-answering **401** to a deliberately garbage token. A 500 there is the interesting failure: it means
+report failure forever. Its health is `/api/health`, `/api/health/ready`, `/api/sso/consume`
+answering **401** to a deliberately garbage token, and a JWKS with **no** keys (above). A 500 from
+the consume route is the interesting failure: it means
 the audience variables are missing, which otherwise stays invisible until the first real handoff.
 It also probes the **issuer's** JWKS — the half a satellite cannot fix and cannot see from its own
 endpoints: a kit publishing an empty key set means every handoff fails here, looking like a bad
-signature. Note that the consume probe is audited by the app, so each `status` or `deploy` appends
-one `sso.consume.failure` row (on a shared database, to the primary's audit table). The probes send
-a `drk-deploy-probe` User-Agent so those rows are identifiable rather than alarming.
+signature. That is reported and never fails the satellite's probe: rolling the satellite back would
+not fix the kit. Note that the consume probe is audited by the app, so each `status` or `deploy`
+appends one `sso.consume.failure` row (on a shared database, to the primary's audit table). The
+probes send a `drk-deploy-probe` User-Agent so those rows are identifiable rather than alarming.
 
 ---
 
@@ -502,6 +543,24 @@ delete it — nothing reads it.
 ---
 
 ## Upgrading
+
+### F-51: a failed probe is rolled back, or named
+
+1. **`deploy --yes` and `up --yes` now roll back a build that fails its probe.** They run
+   `vercel promote` on the deployment production served before the run and probe again. They exit 4
+   when that restores a healthy production and 5 when it does not, where they used to exit 3 and
+   leave the broken build live. Pass `--no-rollback-on-fail` to keep the old behaviour. Without
+   `--yes`, pass `--rollback-on-fail` to get the new one. Exit 3 still means "not healthy, still
+   live", and its message now carries the `vercel promote` command that would roll it back.
+2. **A satellite that publishes a signing key now fails its probe.** It used to exit 0 with a
+   warning. Remove the key with `env:prune` and redeploy. If the probe says it is the kit's own key,
+   rotate the kit's key as well.
+3. **The kit fails its probe when production sets `SSO_HANDOFF_PRIVATE_KEY` but the build publishes
+   no key**, or serves no key set. A kit whose production sets no key is unaffected: an empty key set
+   there is still only a warning.
+4. **`deploy` and `up` make one more read-only API call** before anything writes: the alias of the
+   production origin (`GET /v4/aliases/<host>`). If it cannot be read, a real run stops with
+   nothing changed, as it does when the project cannot be read.
 
 ### F-50: one config file per deployment, and never the kit's project
 
@@ -661,6 +720,10 @@ Set `VERCEL_TOKEN` and it takes precedence over any saved credential:
     PRODUCTION_DIRECT_DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
 ```
 
+Under `--yes` a build that fails its post-deploy probe is rolled back to the deployment production
+served before the job (F-51). The step fails either way. Exit 4 means production was restored, and
+exit 3 or 5 means it still needs a person ([above](#what-it-does-about-the-things-that-go-wrong)).
+
 `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` are not needed: the project comes from `.drk-deploy.json`
 (or the file `--config` names). A
 job that exports them anyway must name that project, or the run is refused (F-48).
@@ -710,17 +773,23 @@ The test suite is the only thing standing between a refactor and a silently wron
 Everything worth relying on is written as a pure function for that reason: keep it that way when you
 add a rule. The part that cannot be pure, the release ORDER, goes through a runner instead: `deploy`,
 `up` and `migrate` reach every step that touches Vercel, a database or a subprocess (`tree`,
-`project`, `envSync`, `envCheck`, `link`, `pull`, `migrate`, `build`, `promote`, `verify`)
-through `ReleaseRunner` in `src/commands/release.ts`. `test/release.test.ts` passes a recording fake
-and asserts that the checkout is read before anything writes, that production is pulled before
-anything migrates, that migrations run before the promotion, and that nothing runs after a failed
-step, so a new step belongs in the runner. The fake's `tree` answers for each checkout what a test
-describes (dirty, unpushed, on a pull request's branch), and its `project` a project with or
-without a connected repository (F-49) and with the production aliases a test gives it, so a
-satellite config on the kit's project is shown refused by `deploy --yes`, `--skip-checks`, `up` and
-`migrate` before anything is linked (F-50). The rule itself, `issuerProjectProblem` in
-`src/lib/vercel-project.ts`, is table-tested there too, and `init`, `doctor` and the `env:*`
-commands run it against a fake Vercel API. The `--config` wiring is tested by running the built
+`project`, `serving`, `envSync`, `envCheck`, `link`, `pull`, `migrate`, `build`, `promote`,
+`verify`, `rollback`) through `ReleaseRunner` in `src/commands/release.ts`. `test/release.test.ts`
+passes a recording fake and asserts that the checkout is read before anything writes, that
+production is pulled before anything migrates, that migrations run before the promotion, and that
+nothing runs after a failed step, so a new step belongs in the runner. The fake's `tree` answers
+for each checkout what a test describes (dirty, unpushed, on a pull request's branch), and its
+`project` a project with or without a connected repository (F-49) and with the production aliases a
+test gives it, so a satellite config on the kit's project is shown refused by `deploy --yes`,
+`--skip-checks`, `up` and `migrate` before anything is linked (F-50). Its `serving` answers the
+deployment production serves before the run, and its `verify` a verdict a test chooses, so a failed
+probe is shown rolled back to exactly that deployment and probed again (exit 4), left live with the
+command printed (exit 3), or stopped after a rollback that failed with nothing run after it (exit 5)
+(F-51). The real `rollback` step runs against a stub Vercel CLI that records its arguments, and the
+real `serving` and `verify` against a fake API and fake probes, including a satellite whose key is
+or is not the kit's. The rule itself, `issuerProjectProblem` in `src/lib/vercel-project.ts`, is
+table-tested there too, and `init`, `doctor` and the `env:*` commands run it against a fake Vercel
+API. The `--config` wiring is tested by running the built
 entry point with a scratch profile and no token, and the hints are run under a selected file to show
 each printed command carries it. `inspectTree` itself runs for real against throwaway repositories
 the test builds under the OS temp directory, with a bare repository as their remote and the user's

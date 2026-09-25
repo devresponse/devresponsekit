@@ -67,6 +67,17 @@ export function projectGit(link: unknown, ignoreCommand: unknown): ProjectGit {
   };
 }
 
+/**
+ * The deployment a production host points at (F-51): what a failed release
+ * rolls back to.
+ */
+export interface ServingDeployment {
+  /** The deployment's id (`dpl_…`), which `vercel promote` takes. */
+  id: string;
+  /** Its own hostname (`<name>-<hash>.vercel.app`), for the operator, when the API names it. */
+  url: string | null;
+}
+
 export interface EnvVarSummary {
   id: string;
   key: string;
@@ -296,6 +307,32 @@ export class VercelClient {
       };
     } catch (err) {
       throw asCliError(err, "Could not list deployments");
+    }
+  }
+
+  /**
+   * The deployment `host` is aliased to right now (`GET /v4/aliases/{host}`),
+   * or null when the project has no such alias: a project never deployed to
+   * production, or a host it does not serve (F-51).
+   *
+   * This, and not {@link latestProductionDeployment} or the project's
+   * `targets.production`, is what production serves. The first is the LATEST
+   * production deployment, and the second is not documented as more than that
+   * (its deployments carry a `STAGED` substate). After an Instant Rollback, a
+   * staged build or a rolling release the latest is not the one the domain
+   * points at, and rolling back to it could restore a build someone had
+   * already rolled back from. The alias is also exactly the host the
+   * post-deploy probe requests.
+   */
+  async servingDeployment(host: string, projectId: string): Promise<ServingDeployment | null> {
+    try {
+      const alias = await this.sdk.aliases.getAlias(this.scope({ idOrAlias: host, projectId }));
+      const id = alias.deploymentId ?? alias.deployment?.id;
+      if (!id) return null;
+      return { id, url: alias.deployment?.url ?? null };
+    } catch (err) {
+      if ((err as { statusCode?: number }).statusCode === 404) return null;
+      throw asCliError(err, `Could not read which deployment ${host} serves`);
     }
   }
 

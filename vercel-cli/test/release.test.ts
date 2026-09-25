@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
+import { Command } from "commander";
 
 // Tests run against the BUILT output, so they exercise exactly what ships.
 import { doctor } from "../dist/commands/doctor.js";
@@ -28,6 +29,7 @@ import {
 import { configFileFrom, configPath, requireConfig, useConfigFile } from "../dist/lib/config.js";
 import { applyMigrations, migrationEnv } from "../dist/lib/kit.js";
 import { CliError, setQuiet } from "../dist/lib/log.js";
+import { withRollbackOptions } from "../dist/lib/rollback-options.js";
 import { verifyMigrationTarget } from "../dist/lib/migration-target.js";
 import {
   describeCommit,
@@ -54,6 +56,7 @@ import { assertCheckoutLink, issuerProjectProblem, vercelEnvFor } from "../dist/
 const STEPS = [
   "tree",
   "project",
+  "serving",
   "envSync",
   "envCheck",
   "link",
@@ -62,14 +65,21 @@ const STEPS = [
   "build",
   "promote",
   "verify",
+  "rollback",
 ];
 
 /**
  * The F-49 and F-50 checks of a run that promotes: the checkout's commit, then
  * the project (is it the SSO issuer's own? does Vercel deploy production by
- * itself?). Both only read, and both come before anything writes.
+ * itself?). Both only read, and a refusal stops the run here.
  */
-const GATE = ["tree", "project"];
+const CHECKS = ["tree", "project"];
+/**
+ * The whole gate of a run that goes ahead: the checks, then which deployment
+ * production serves, which an unhealthy probe rolls back to (F-51). All read,
+ * and all come before anything writes.
+ */
+const GATE = [...CHECKS, "serving"];
 
 /**
  * `deploy` with a preflight, on a target that owns its schema. `pull` comes
@@ -260,6 +270,13 @@ function vercelEnvFile(values: Record<string, string>): string {
  * with `git` as its git connection, by default none connected, so nothing
  * else deploys it, and `aliases` as its production aliases, by default none,
  * so it is nobody's issuer (F-50).
+ *
+ * Its `serving` answers `serving`, by default {@link PREVIOUS}, the
+ * deployment production serves before the run (F-51); `null` is a production
+ * that serves none yet. Its `verify` answers each verdict in `verdicts` in
+ * turn, and healthy once they run out, so `[UNHEALTHY]` is a promoted build
+ * that fails its probe and a rollback that restores a healthy one. Its
+ * `rollback` records the deployment it was handed.
  */
 function recordingRunner(
   options: {
@@ -270,10 +287,15 @@ function recordingRunner(
     trees?: Record<string, FakeTree>;
     git?: ProjectGit;
     aliases?: string[];
+    serving?: { id: string; url: string | null } | null;
+    verdicts?: { healthy: boolean; problems: string[] }[];
   } = {},
 ) {
+  const verdicts = [...(options.verdicts ?? [])];
   const calls: string[] = [];
   const args: Record<string, unknown[]> = {};
+  /** Every call's arguments, by step, where `args` keeps only the last. */
+  const every: Record<string, unknown[][]> = {};
   const inspected: { root: string; allowRef: string | undefined }[] = [];
   const seen: { staleAtPull: boolean; pulledAtBuild: boolean | null } = {
     staleAtPull: false,
@@ -285,6 +307,7 @@ function recordingRunner(
       async (...received: unknown[]) => {
         calls.push(name);
         args[name] = received;
+        (every[name] ??= []).push(received);
         if (name === "tree") {
           const [root, allowRef] = received as [string, string | undefined];
           inspected.push({ root, allowRef });
@@ -302,6 +325,14 @@ function recordingRunner(
             aliases: options.aliases ?? [],
             git: options.git ?? NO_GIT,
           };
+        }
+        if (name === "serving") {
+          if (options.failAt === name) throw new Error(`${name} failed`);
+          return options.serving === undefined ? PREVIOUS : options.serving;
+        }
+        if (name === "verify") {
+          if (options.failAt === name) throw new Error(`${name} failed`);
+          return verdicts.shift() ?? HEALTHY;
         }
         if (name === "build") {
           seen.pulledAtBuild = existsSync(pulledFile((received[0] as { root: string }).root));
@@ -346,8 +377,15 @@ function recordingRunner(
       },
     ]),
   );
-  return { runner: runner as never, calls, args, seen, inspected };
+  return { runner: runner as never, calls, args, every, seen, inspected };
 }
+
+/** The deployment the fake `serving` step says production serves before a run (F-51). */
+const PREVIOUS = { id: "dpl_previous123", url: "kit-previous123.vercel.app" };
+/** What the fake `verify` step answers unless a test says otherwise. */
+const HEALTHY = { healthy: true, problems: [] };
+/** A promoted build that fails its probe. */
+const UNHEALTHY = { healthy: false, problems: ["its health probes fail (see above)"] };
 
 /** The commits the fake `tree` step reports. */
 const MAIN_SHA = "1111111111111111111111111111111111111111";
@@ -900,7 +938,7 @@ test("F-47: a satellite that owns its database is checked against ITS production
   await assert.rejects(deploy(cliRoot, { databaseUrl: LOCAL }, runner), refusal(/not production's database/));
   // Two checkouts are read (F-49): the satellite's, which is built, and the
   // kit's, which the migrations come from.
-  assert.deepEqual(calls, ["envCheck", "tree", "tree", "project", "link", "pull"]);
+  assert.deepEqual(calls, ["envCheck", "tree", "tree", "project", "serving", "link", "pull"]);
   assert.equal((args.pull as [{ root: string }])[0].root, appRoot, "its own checkout's pull");
 
   const matched = recordingRunner();
@@ -2386,10 +2424,10 @@ test("F-49: a run that migrates is refused while Vercel's git integration deploy
     deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, deployed.runner),
     raced,
   );
-  assert.deepEqual(deployed.calls, ["envCheck", ...GATE], "nothing linked, pulled or migrated");
+  assert.deepEqual(deployed.calls, ["envCheck", ...CHECKS], "nothing linked, pulled or migrated");
   const upped = recordingRunner({ git: GIT_CONNECTED });
   await assert.rejects(up(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, upped.runner), raced);
-  assert.deepEqual(upped.calls, GATE, "refused before env:sync wrote anything");
+  assert.deepEqual(upped.calls, CHECKS, "refused before env:sync wrote anything");
 
   // Named, it runs in the usual order, and says what it is doing.
   const allowed = recordingRunner({ git: GIT_CONNECTED });
@@ -3078,8 +3116,8 @@ test("F-50: deploy, up and migrate refuse a satellite config on the issuer's pro
   const owned = { database: "own" } as const;
   const cases: [string, (runner: never) => Promise<void>, string[]][] = [
     // env:check finds 3 problems here, and --yes deploys past them.
-    ["deploy --yes", (r) => deploy(fixture("satellite").cliRoot, { yes: true }, r), ["envCheck", ...GATE]],
-    ["deploy --skip-checks", (r) => deploy(fixture("satellite").cliRoot, { skipChecks: true }, r), GATE],
+    ["deploy --yes", (r) => deploy(fixture("satellite").cliRoot, { yes: true }, r), ["envCheck", ...CHECKS]],
+    ["deploy --skip-checks", (r) => deploy(fixture("satellite").cliRoot, { skipChecks: true }, r), CHECKS],
     [
       "deploy with every flag that skips something",
       (r) =>
@@ -3088,9 +3126,9 @@ test("F-50: deploy, up and migrate refuse a satellite config on the issuer's pro
           { yes: true, skipChecks: true, skipMigrations: true, allowGitIntegrationRace: true },
           r,
         ),
-      GATE,
+      CHECKS,
     ],
-    ["up --yes", (r) => up(fixture("satellite").cliRoot, { yes: true }, r), GATE],
+    ["up --yes", (r) => up(fixture("satellite").cliRoot, { yes: true }, r), CHECKS],
     [
       "deploy, a satellite that owns its database",
       (r) => deploy(fixture("satellite", owned).cliRoot, { databaseUrl: PRODUCTION_DIRECT, yes: true }, r),
@@ -3321,7 +3359,7 @@ test("F-50: under --config, the commands the refusals print name that file, so t
       deploy(fleet.cliRoot, { skipChecks: true, skipMigrations: true }, gate.runner),
       refusal(/SSO issuer's own Vercel project/, named("init --project <its project>"), 2),
     );
-    assert.deepEqual(gate.calls, GATE);
+    assert.deepEqual(gate.calls, CHECKS);
     const preflight = recordingRunner({ envProblems: 2 });
     await assert.rejects(
       deploy(fleet.cliRoot, { skipMigrations: true }, preflight.runner),
@@ -3498,6 +3536,628 @@ test("F-50: a new deployment keeps only the fleet's issuer of the recorded satel
       refusal(/^An Option C satellite needs a cookie domain\.$/),
     );
     assert.equal(configText(fleet.cliRoot), recorded);
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+/* ================================================================== */
+/*  F-51: an unhealthy probe is rolled back, or the rollback is named  */
+/* ================================================================== */
+
+/** The command that promotes {@link PREVIOUS} back, for the fixture's team config. */
+const ROLLBACK_COMMAND = "vercel promote dpl_previous123 --scope=team_test";
+/** {@link PREVIOUS} as the operator reads it. */
+const PREVIOUS_SHOWN = "https://kit-previous123.vercel.app (dpl_previous123)";
+/** A kit production whose variables set the SSO signing key, stored sensitive as `vercel pull` shows it. */
+const SIGNING_PRODUCTION = { DATABASE_URL: PRODUCTION_POOLED, SSO_HANDOFF_PRIVATE_KEY: "[SENSITIVE]" };
+
+test("F-51: the deployment production serves is read before anything writes, and printed", async () => {
+  // deploy: after the checks, before anything is linked, pulled, migrated or promoted.
+  const kit = recordingRunner();
+  const shown = await captureOutput(() =>
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, kit.runner),
+  );
+  assert.equal(shown.error, undefined, shown.out);
+  assert.deepEqual(kit.calls, KIT_ORDER);
+  assert.ok(kit.calls.indexOf("serving") < kit.calls.indexOf("link"), "read before anything writes");
+  assert.match(shown.out, new RegExp(`Rollback target[\\s\\S]*serving now\\s+${literal(PREVIOUS_SHOWN)}`));
+  assert.match(
+    shown.out,
+    /if the probe fails\s+the new build stays live, and the command that promotes this one back is printed \(pass --rollback-on-fail \(or --yes\) to have it run\)/,
+  );
+  // With the deploy's own invocation: the recorded project, and the token in the environment.
+  const [invocation] = kit.args.serving as [{ config: { projectId: string }; env: Record<string, string> }];
+  assert.equal(invocation.config.projectId, "prj_test");
+  assert.equal(invocation.env.VERCEL_TOKEN, TOKEN);
+
+  // up: before env:sync writes anything.
+  const upped = recordingRunner();
+  await up(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, upped.runner);
+  assert.deepEqual(upped.calls, UP_ORDER);
+  assert.ok(upped.calls.indexOf("serving") < upped.calls.indexOf("envSync"), "read before env:sync");
+
+  // A production that serves nothing yet has nothing to roll back to, and deploys.
+  const first = recordingRunner({ serving: null });
+  const firstShown = await captureOutput(() =>
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, first.runner),
+  );
+  assert.equal(firstShown.error, undefined, firstShown.out);
+  assert.deepEqual(first.calls, KIT_ORDER);
+  assert.match(firstShown.out, /serving now\s+nothing yet: there is no deployment to roll back to/);
+
+  // One that cannot be read stops a real run, rollback or not, before anything writes.
+  for (const [name, run, flags] of [
+    ["deploy", deploy, {}],
+    ["deploy --yes", deploy, { yes: true }],
+    ["up --no-rollback-on-fail", up, { rollbackOnFail: false }],
+  ] as const) {
+    const real = recordingRunner({ failAt: "serving" });
+    await assert.rejects(
+      run(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, ...flags }, real.runner),
+      /^Error: serving failed$/,
+      name,
+    );
+    assert.equal(real.calls.at(-1), "serving", `${name}: nothing synced, linked, pulled or migrated`);
+  }
+  // A dry run says so and plans on.
+  const dry = recordingRunner({ failAt: "serving" });
+  const unread = await captureOutput(() =>
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true }, dry.runner),
+  );
+  assert.equal(unread.error, undefined, unread.out);
+  assert.match(
+    unread.out,
+    /\[dry-run\] could not read which deployment https:\/\/demo\.example\.com serves \(serving failed\)/,
+  );
+  // And a dry run that reads it shows what an unhealthy probe would do.
+  for (const [flags, verb] of [
+    [{ rollbackOnFail: true }, "run"],
+    [{}, "print"],
+  ] as const) {
+    const plan = recordingRunner();
+    const planned = await captureOutput(() =>
+      deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, dryRun: true, ...flags }, plan.runner),
+    );
+    assert.equal(planned.error, undefined, planned.out);
+    assert.match(
+      planned.out,
+      new RegExp(`\\[dry-run\\] on an unhealthy probe it would ${verb}: ${literal(ROLLBACK_COMMAND)}`),
+    );
+    assert.equal(plan.calls.includes("rollback"), false);
+  }
+});
+
+test("F-51: an unhealthy probe with no rollback exits 3, leaves the build live, and prints the exact rollback command", async () => {
+  // The printed command is the only way back. A re-run with
+  // --rollback-on-fail would record this build as the one serving and promote
+  // it again, so the hint names the flag only for later releases.
+  const onlyTheCommand =
+    "\\. Re-running with --rollback-on-fail would not do it: a new run records this build as the one to roll back to\\. Pass --rollback-on-fail on later releases to have the rollback done for you\\.";
+  const stillServing = new RegExp(
+    `^It is still serving\\. To put back the deployment production served before this run, ${literal(PREVIOUS_SHOWN)}, run \`${literal(ROLLBACK_COMMAND)}\`${onlyTheCommand} Leave the migrations applied: they are forward-only, and that deployment served against them until the promotion\\.$`,
+  );
+  for (const [name, flags] of [
+    ["no flag", {}],
+    ["--no-rollback-on-fail, even under --yes", { yes: true, rollbackOnFail: false }],
+  ] as const) {
+    const { runner, calls } = recordingRunner({ verdicts: [UNHEALTHY] });
+    await assert.rejects(
+      deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, ...flags }, runner),
+      refusal(
+        /^The deployment is live but not healthy: its health probes fail \(see above\)\.$/,
+        stillServing,
+        3,
+      ),
+      name,
+    );
+    assert.deepEqual(calls, KIT_ORDER, `${name}: nothing is rolled back`);
+  }
+
+  // The command names the project's owner as the Vercel CLI's scope, or none
+  // when no owner is recorded. A run with no migrate step says nothing of migrations.
+  const cases: [string, string, Record<string, unknown>, RegExp][] = [
+    [
+      "a personal account",
+      fixture("kit", { owner: "personal" }).cliRoot,
+      { databaseUrl: PRODUCTION_DIRECT },
+      new RegExp(
+        `run \`vercel promote dpl_previous123 --scope=Xq7personalAccount42\`${onlyTheCommand} Leave`,
+      ),
+    ],
+    [
+      "no owner recorded",
+      fixture("kit", { owner: "unrecorded" }).cliRoot,
+      { databaseUrl: PRODUCTION_DIRECT },
+      new RegExp(`run \`vercel promote dpl_previous123\`${onlyTheCommand} Leave`),
+    ],
+    [
+      "a satellite on the kit's database",
+      fixture("satellite").cliRoot,
+      {},
+      new RegExp(`run \`vercel promote dpl_previous123 --scope=team_test\`${onlyTheCommand}$`),
+    ],
+  ];
+  for (const [name, cliRoot, options, hint] of cases) {
+    const { runner, calls } = recordingRunner({ verdicts: [UNHEALTHY] });
+    await assert.rejects(deploy(cliRoot, options, runner), refusal(/live but not healthy/, hint, 3), name);
+    assert.equal(calls.includes("rollback"), false, name);
+  }
+  const satellite = recordingRunner({ verdicts: [UNHEALTHY] });
+  await assert.rejects(
+    deploy(fixture("satellite").cliRoot, {}, satellite.runner),
+    refusal(/^The satellite is live but not healthy: /),
+  );
+});
+
+test("F-51: --rollback-on-fail (on by default under --yes) promotes the recorded deployment back, probes again, and exits 4", async () => {
+  const rolledBack = refusal(
+    new RegExp(
+      `^The new build failed its probe \\(its health probes fail \\(see above\\)\\) and was rolled back: ${literal(PREVIOUS_SHOWN)} serves production again and passes the probe\\.$`,
+    ),
+    /^The release failed and is no longer live\. Fix it and deploy again\. Leave the migrations applied: they are forward-only, and that deployment served against them until the promotion\.$/,
+    4,
+  );
+  type Run = (cliRoot: string, runner: never) => Promise<void>;
+  const cases: [string, Run, string[]][] = [
+    [
+      "deploy --rollback-on-fail",
+      (cliRoot, r) => deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, rollbackOnFail: true }, r),
+      KIT_ORDER,
+    ],
+    [
+      "deploy --yes",
+      (cliRoot, r) => deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT, yes: true }, r),
+      KIT_ORDER,
+    ],
+    ["up --yes", (cliRoot, r) => up(cliRoot, { databaseUrl: PRODUCTION_DIRECT, yes: true }, r), UP_ORDER],
+  ];
+  for (const [name, run, order] of cases) {
+    const { cliRoot, kitRoot } = fixture("kit");
+    const fake = recordingRunner({ verdicts: [UNHEALTHY], production: SIGNING_PRODUCTION });
+    const shown = await captureOutput(() => run(cliRoot, fake.runner));
+    assert.ok(rolledBack(shown.error), `${name}: ${String(shown.error)}`);
+    assert.deepEqual(fake.calls, [...order, "rollback", "verify"], name);
+    // The deployment recorded before the promotion, through the run's own invocation.
+    const [invocation, to] = fake.args.rollback as [{ root: string; env: Record<string, string> }, unknown];
+    assert.deepEqual(to, PREVIOUS, name);
+    assert.equal(invocation.root, kitRoot, name);
+    assert.equal(invocation.env.VERCEL_TOKEN, TOKEN, name);
+    // The first probe holds the kit to production's signing key. The second,
+    // of a deployment built before this run's variables, does not.
+    assert.deepEqual(
+      fake.every.verify!.map((received) => received[2]),
+      [{ handoffSigning: true }, { handoffSigning: null }],
+      name,
+    );
+    assert.match(
+      shown.out,
+      new RegExp(`Rollback[\\s\\S]*Promoting ${literal(PREVIOUS_SHOWN)} back to production`),
+      name,
+    );
+  }
+
+  // A satellite is rolled back the same way, and its hint says nothing of migrations.
+  const satellite = recordingRunner({ verdicts: [UNHEALTHY] });
+  const satelliteShown = await captureOutput(() =>
+    deploy(fixture("satellite").cliRoot, { rollbackOnFail: true }, satellite.runner),
+  );
+  assert.ok(
+    refusal(
+      /^The new build failed its probe \(.*\) and was rolled back: /,
+      /^The release failed and is no longer live\. Fix it and deploy again\.$/,
+      4,
+    )(satelliteShown.error),
+    String(satelliteShown.error),
+  );
+  assert.match(satelliteShown.out, /Rollback[\s\S]*The satellite is live but not healthy: /);
+  assert.deepEqual(satellite.calls.slice(-3), ["verify", "rollback", "verify"]);
+});
+
+test("F-51: a rollback that fails, or restores a deployment that fails too, exits 5, and nothing runs after a failed rollback", async () => {
+  const failed = recordingRunner({ verdicts: [UNHEALTHY], failAt: "rollback" });
+  await assert.rejects(
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, rollbackOnFail: true }, failed.runner),
+    refusal(
+      /The rollback failed as well \(rollback failed\), so the unhealthy build is still live\.$/,
+      new RegExp(`^Run it by hand: \`${literal(ROLLBACK_COMMAND)}\`, or promote ${literal(PREVIOUS_SHOWN)}`),
+      5,
+    ),
+  );
+  assert.deepEqual(failed.calls, [...KIT_ORDER, "rollback"], "no second probe after a failed rollback");
+
+  const still = recordingRunner({
+    verdicts: [UNHEALTHY, { healthy: false, problems: ["its health probes fail (see above)"] }],
+  });
+  await assert.rejects(
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, yes: true }, still.runner),
+    refusal(
+      new RegExp(
+        `^The new build failed its probe \\(its health probes fail \\(see above\\)\\) and was rolled back to ${literal(PREVIOUS_SHOWN)}, which fails the probe too: its health probes fail \\(see above\\)\\.$`,
+      ),
+      /what fails is not only the new build/,
+      5,
+    ),
+  );
+  assert.deepEqual(still.calls, [...KIT_ORDER, "rollback", "verify"]);
+});
+
+test("F-51: nothing recorded means nothing to roll back to (exit 3), and a healthy probe ends the run as before", async () => {
+  const none = recordingRunner({ serving: null, verdicts: [UNHEALTHY] });
+  await assert.rejects(
+    deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, rollbackOnFail: true }, none.runner),
+    refusal(/^The deployment is live but not healthy/, /there is nothing to roll back to/, 3),
+  );
+  assert.deepEqual(none.calls, KIT_ORDER);
+
+  for (const flags of [{}, { rollbackOnFail: true }, { yes: true }, { rollbackOnFail: false }]) {
+    const healthy = recordingRunner();
+    await deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, ...flags }, healthy.runner);
+    assert.deepEqual(healthy.calls, KIT_ORDER, JSON.stringify(flags));
+    const satellite = recordingRunner();
+    await up(fixture("satellite").cliRoot, flags, satellite.runner);
+    assert.deepEqual(
+      satellite.calls,
+      UP_ORDER.filter((s) => s !== "migrate"),
+      JSON.stringify(flags),
+    );
+  }
+});
+
+test("F-51: --rollback-on-fail, --no-rollback-on-fail and --yes parse into the options rollbackPolicy reads, on deploy and up", async () => {
+  // Parsed as `deploy` and `up` declare them. Neither rollback flag given
+  // leaves `rollbackOnFail` undefined, so `--yes` decides. Were only
+  // `--no-rollback-on-fail` declared, commander would default it to true and
+  // every run would roll back.
+  const parse = (args: string[]) => {
+    const command = withRollbackOptions(new Command("deploy").exitOverride(), "the command's own help");
+    command.parse(args, { from: "user" });
+    return command.opts();
+  };
+  const cases: [string[], Record<string, boolean>, number][] = [
+    [[], {}, 3],
+    [["-y"], { yes: true }, 4],
+    [["-y", "--no-rollback-on-fail"], { yes: true, rollbackOnFail: false }, 3],
+    [["--no-rollback-on-fail", "--yes"], { yes: true, rollbackOnFail: false }, 3],
+    [["--rollback-on-fail"], { rollbackOnFail: true }, 4],
+    [["--no-rollback-on-fail"], { rollbackOnFail: false }, 3],
+  ];
+  for (const [args, parsed, exitCode] of cases) {
+    const name = args.join(" ") || "no flag";
+    const options = parse(args);
+    assert.deepEqual(options, parsed, name);
+    // And the release does with them what the flags say: 3 leaves the build
+    // live, 4 rolled it back.
+    const fake = recordingRunner({ verdicts: [UNHEALTHY] });
+    await assert.rejects(
+      deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT, ...options }, fake.runner),
+      refusal(/./, /./, exitCode),
+      name,
+    );
+    assert.equal(fake.calls.includes("rollback"), exitCode === 4, name);
+  }
+
+  // The built entry point declares all three on both commands that promote.
+  const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  for (const command of ["deploy", "up"]) {
+    const help = spawnSync(process.execPath, [entry, command, "--help"], {
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.equal(help.status, 0, `${help.stdout}${help.stderr}`);
+    for (const flag of ["--rollback-on-fail", "--no-rollback-on-fail", "-y, --yes"]) {
+      assert.match(help.stdout, new RegExp(`^\\s+${literal(flag)}\\s`, "m"), `${command} ${flag}`);
+    }
+  }
+});
+
+test("F-51: the kit's probe is told whether production sets SSO_HANDOFF_PRIVATE_KEY, from the pulled variables; a satellite's is not", async () => {
+  const cases: [
+    string,
+    "kit" | "satellite",
+    Record<string, unknown>,
+    Record<string, string> | null,
+    boolean | null,
+  ][] = [
+    ["the key, stored sensitive", "kit", { databaseUrl: PRODUCTION_DIRECT }, SIGNING_PRODUCTION, true],
+    ["no key", "kit", { databaseUrl: PRODUCTION_DIRECT }, { DATABASE_URL: PRODUCTION_POOLED }, false],
+    [
+      "an empty key",
+      "kit",
+      { databaseUrl: PRODUCTION_DIRECT },
+      { DATABASE_URL: PRODUCTION_POOLED, SSO_HANDOFF_PRIVATE_KEY: "" },
+      false,
+    ],
+    ["no file pulled", "kit", { skipMigrations: true }, null, null],
+    ["a satellite", "satellite", {}, { SSO_HANDOFF_PRIVATE_KEY: "[SENSITIVE]" }, null],
+  ];
+  for (const [name, target, options, production, handoffSigning] of cases) {
+    const fake = recordingRunner({ production });
+    await deploy(fixture(target).cliRoot, options, fake.runner);
+    assert.deepEqual((fake.args.verify as unknown[])[2], { handoffSigning }, name);
+  }
+});
+
+test("F-51: the real rollback step runs `vercel promote <id> --scope=<owner>` in the checkout, never --yes, and is the printed command", async () => {
+  const { cliRoot, kitRoot } = fixture("kit");
+  const record = join(cliRoot, "promote.json");
+  const stub = join(cliRoot, "record-vercel.cjs");
+  writeFileSync(
+    stub,
+    `require("node:fs").writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), token: process.env.VERCEL_TOKEN ?? null, cwd: process.cwd() }));\n`,
+  );
+  const invocation = {
+    vercelJs: stub,
+    config: requireConfig(cliRoot),
+    root: kitRoot,
+    env: { VERCEL_TOKEN: TOKEN },
+    orgId: "team_test",
+  };
+  await releaseRunner.rollback(invocation as never, PREVIOUS);
+  const ran = JSON.parse(readFileSync(record, "utf8"));
+  assert.deepEqual(ran.argv, ["promote", "dpl_previous123", "--scope=team_test"]);
+  assert.equal(`vercel ${ran.argv.join(" ")}`, ROLLBACK_COMMAND, "the printed command is the one that runs");
+  assert.equal(ran.token, TOKEN, "the token travels in the environment");
+  assert.equal(String(ran.cwd).toLowerCase(), kitRoot.toLowerCase(), "in the deployed checkout");
+
+  await releaseRunner.rollback({ ...invocation, orgId: null } as never, PREVIOUS);
+  assert.deepEqual(JSON.parse(readFileSync(record, "utf8")).argv, ["promote", "dpl_previous123"]);
+
+  writeFileSync(stub, "process.exit(1);\n");
+  await assert.rejects(
+    releaseRunner.rollback(invocation as never, PREVIOUS),
+    refusal(/^vercel promote failed — the unhealthy build is still live \(exit 1\)$/, /^$/),
+  );
+});
+
+test("F-51: the real serving step asks which deployment the origin's host is aliased to, in the recorded project", async () => {
+  const config = requireConfig(fixture("kit").cliRoot);
+  const requests: string[] = [];
+  const answer = (status: number, body: unknown) => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      requests.push(`${url.hostname}${url.pathname}${url.search}`);
+      return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+  };
+  try {
+    answer(200, {
+      alias: "demo.example.com",
+      created: "2026-09-01T00:00:00.000Z",
+      uid: "alias_1",
+      projectId: "prj_test",
+      deploymentId: "dpl_live",
+      deployment: { id: "dpl_live", url: "kit-live.vercel.app" },
+    });
+    assert.deepEqual(await releaseRunner.serving({ config } as never), {
+      id: "dpl_live",
+      url: "kit-live.vercel.app",
+    });
+    assert.equal(requests.length, 1);
+    const [path, search] = requests[0]!.split("?");
+    assert.equal(path, "api.vercel.com/v4/aliases/demo.example.com");
+    const query = new URLSearchParams(search);
+    assert.equal(query.get("projectId"), "prj_test", "only an alias of the recorded project");
+    assert.equal(query.get("teamId"), "team_test");
+
+    answer(404, { error: { code: "not_found", message: "The alias was not found" } });
+    assert.equal(
+      await releaseRunner.serving({ config } as never),
+      null,
+      "no alias yet: nothing to roll back to",
+    );
+
+    answer(403, { error: { code: "forbidden", message: "Not authorized" } });
+    await assert.rejects(
+      releaseRunner.serving({ config } as never),
+      refusal(/^Could not read which deployment demo\.example\.com serves/),
+    );
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+/** Answers the probes by host and path, as a deployment would; anything else is a 404. */
+function fakeProbes(routes: Record<string, { status: number; body?: unknown }>): void {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const route = routes[`${url.host}${url.pathname}`];
+    if (!route) return new Response("", { status: 404 });
+    return new Response(route.body === undefined ? "" : JSON.stringify(route.body), { status: route.status });
+  }) as typeof fetch;
+}
+
+/** The kit's probes answering as a healthy kit, and its JWKS publishing `keys` (unset: not served). */
+function kitAnswers(keys?: unknown[], signIn = 401): Record<string, { status: number; body?: unknown }> {
+  return {
+    "demo.example.com/api/health": { status: 200 },
+    "demo.example.com/api/health/ready": { status: 200 },
+    "demo.example.com/api/auth/sign-in/email": { status: signIn },
+    ...(keys ? { "demo.example.com/api/sso/jwks.json": { status: 200, body: { keys } } } : {}),
+  };
+}
+
+/** A satellite's probes answering as a healthy consumer, its JWKS `own`, and the issuer's `issuer`. */
+function satelliteAnswers(
+  own: unknown[],
+  issuer?: unknown[],
+): Record<string, { status: number; body?: unknown }> {
+  return {
+    "app1.example.net/api/health": { status: 200 },
+    "app1.example.net/api/health/ready": { status: 200 },
+    "app1.example.net/api/sso/consume": { status: 401 },
+    "app1.example.net/api/sso/jwks.json": { status: 200, body: { keys: own } },
+    ...(issuer ? { "demo.example.com/api/sso/jwks.json": { status: 200, body: { keys: issuer } } } : {}),
+  };
+}
+
+const KIT_KEY = { kty: "OKP", crv: "Ed25519", kid: "kit-kid", x: "KIT-PUBLIC-X" };
+
+test("F-51: the kit's probe fails on an empty or unserved key set only when production sets a signing key", async () => {
+  const config = requireConfig(fixture("kit").cliRoot);
+  const profile = resolveProfile(config);
+  const cases: [
+    string,
+    Record<string, { status: number; body?: unknown }>,
+    boolean | null,
+    string[],
+    RegExp,
+  ][] = [
+    [
+      "signing, empty key set",
+      kitAnswers([]),
+      true,
+      ["it publishes an EMPTY SSO key set although production sets SSO_HANDOFF_PRIVATE_KEY"],
+      /every handoff fails/,
+    ],
+    [
+      "signing, no key set served",
+      kitAnswers(),
+      true,
+      ["it does not serve /api/sso/jwks.json although production sets SSO_HANDOFF_PRIVATE_KEY"],
+      /every handoff fails/,
+    ],
+    [
+      "no SSO: an empty key set is right",
+      kitAnswers([]),
+      false,
+      [],
+      /EMPTY key set[\s\S]*Production sets no SSO_HANDOFF_PRIVATE_KEY, which is right only if this deployment issues no handoffs/,
+    ],
+    ["unknown: a warning", kitAnswers([]), null, [], /whether it should sign handoffs is unknown/],
+    ["signing, publishing", kitAnswers([KIT_KEY]), true, [], /SSO JWKS publishes 1 key\(s\)/],
+    [
+      "a failed sign-in, keys published",
+      kitAnswers([KIT_KEY], 500),
+      true,
+      ["its health probes fail (see above)"],
+      /sign-in \(bad creds\)\s+500/,
+    ],
+  ];
+  try {
+    for (const [name, answers, handoffSigning, problems, shown] of cases) {
+      fakeProbes(answers);
+      const verified = await captureOutput(() => releaseRunner.verify(config, profile, { handoffSigning }));
+      assert.equal(verified.error, undefined, `${name}: ${verified.out}`);
+      assert.deepEqual(verified.result, { healthy: problems.length === 0, problems }, name);
+      assert.match(verified.out, shown, name);
+    }
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-51: a satellite that publishes a signing key fails its probe, and is told whether it is the kit's own key", async () => {
+  const config = requireConfig(fixture("satellite").cliRoot);
+  const profile = resolveProfile(config);
+  const own = { kty: "OKP", crv: "Ed25519", kid: "sat-kid", x: "SATELLITE-PUBLIC-X" };
+  const cases: [string, Record<string, { status: number; body?: unknown }>, string[], RegExp][] = [
+    [
+      "no key: healthy",
+      satelliteAnswers([], [KIT_KEY]),
+      [],
+      /publishes no signing keys \(correct for a consumer\)/,
+    ],
+    [
+      "the kit's own key",
+      satelliteAnswers([{ ...KIT_KEY }], [KIT_KEY]),
+      ["it publishes the KIT's own SSO signing key"],
+      /It is the KIT's own signing key[\s\S]*Rotate the kit's SSO_HANDOFF_PRIVATE_KEY as well/,
+    ],
+    [
+      "a key of its own",
+      satelliteAnswers([own], [KIT_KEY]),
+      ["it publishes 1 SSO signing key(s), which a consumer must never hold"],
+      /It is not the kit's key: consumers verify against the issuer's key set, so they refuse what it signs\./,
+    ],
+    [
+      // SSO_HANDOFF_KID pins any id: only the public key says whose it is.
+      "its own key under the kit's kid",
+      satelliteAnswers([{ ...own, kid: KIT_KEY.kid }], [KIT_KEY]),
+      ["it publishes 1 SSO signing key(s), which a consumer must never hold"],
+      /It is not the kit's key/,
+    ],
+    [
+      "the issuer's key set unserved",
+      satelliteAnswers([own]),
+      ["it publishes 1 SSO signing key(s), which a consumer must never hold"],
+      /Whether it is the KIT's own key is unknown: the issuer's key set was not served\./,
+    ],
+    [
+      // The issuer's state is reported, never held against the satellite.
+      "an issuer publishing nothing",
+      satelliteAnswers([], []),
+      [],
+      /The configured issuer https:\/\/demo\.example\.com publishes an EMPTY key set/,
+    ],
+  ];
+  try {
+    for (const [name, answers, problems, shown] of cases) {
+      fakeProbes(answers);
+      const verified = await captureOutput(() =>
+        releaseRunner.verify(config, profile, { handoffSigning: null }),
+      );
+      assert.equal(verified.error, undefined, `${name}: ${verified.out}`);
+      assert.deepEqual(verified.result, { healthy: problems.length === 0, problems }, name);
+      assert.match(verified.out, shown, name);
+      if (problems.length > 0) {
+        assert.match(
+          verified.out,
+          /Remove it from this satellite's project \(prj_sat\) with drk-deploy env:prune, then redeploy\./,
+          name,
+        );
+        assert.doesNotMatch(verified.out, /mint handoff tokens the fleet will trust/, name);
+      }
+    }
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-51: `deploy --yes` of a satellite that publishes a key, and of a kit that signs but publishes none, ends non-zero with the real probe", async () => {
+  /** The recording fake, with the REAL probe in place of its verify. */
+  const withRealProbe = (fake: ReturnType<typeof recordingRunner>) =>
+    ({
+      ...(fake.runner as object),
+      verify: async (...received: Parameters<typeof releaseRunner.verify>) => {
+        fake.calls.push("verify");
+        return releaseRunner.verify(...received);
+      },
+    }) as never;
+  try {
+    // The finding's scenario: --yes skips the preflight that would have
+    // caught the key, and the run used to end "healthy" with exit 0. The
+    // rollback restores a build that publishes the same key (the probes
+    // answer the same), so production still needs a person: exit 5.
+    fakeProbes(satelliteAnswers([{ ...KIT_KEY }], [KIT_KEY]));
+    const satellite = recordingRunner({ envProblems: 1 });
+    const shown = await captureOutput(() =>
+      deploy(fixture("satellite").cliRoot, { yes: true }, withRealProbe(satellite)),
+    );
+    assert.ok(
+      refusal(
+        /^The new build failed its probe \(it publishes the KIT's own SSO signing key\) and was rolled back/,
+        /./,
+        5,
+      )(shown.error),
+      `${String(shown.error)}\n${shown.out}`,
+    );
+    assert.deepEqual(satellite.calls.slice(-3), ["verify", "rollback", "verify"]);
+    assert.doesNotMatch(shown.out, /is healthy\./);
+
+    // The kit: production sets the key, the build publishes none. With no
+    // rollback asked for, it stays live and exits 3 instead of 0.
+    fakeProbes(kitAnswers([]));
+    const kit = recordingRunner({ production: SIGNING_PRODUCTION });
+    await assert.rejects(
+      deploy(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, withRealProbe(kit)),
+      refusal(
+        /^The deployment is live but not healthy: it publishes an EMPTY SSO key set although production sets SSO_HANDOFF_PRIVATE_KEY\.$/,
+        new RegExp(literal(ROLLBACK_COMMAND)),
+        3,
+      ),
+    );
+    assert.deepEqual(kit.calls, KIT_ORDER);
   } finally {
     globalThis.fetch = offline;
   }

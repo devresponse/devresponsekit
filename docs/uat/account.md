@@ -95,13 +95,15 @@ i18n: The redirect preserves the requested supported locale; an unsupported one 
 User stories
 
 - UAT-ACCOUNT-DASHBOARD-S1 — As a Member, I want a dashboard landing page after sign-in, so that I know I am inside the secure app.
-  - Acceptance criteria: Given I sign in, when the app loads, then I see a page whose heading is the localized **Dashboard** label and a welcome line naming the product.
+  - Acceptance criteria: Given I sign in, when the app loads, then I see a page whose heading is the localized **Dashboard** label and a welcome line naming the product. At every window width the navigation can be reached: at 768 px and wider the sidebar is shown in the layout, and below 768 px the sidebar button in the brand bar opens it as a drawer.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `user5@orga.local`. | The main heading reads **Dashboard** (from the `shell.dashboard` label). |
     | 2 | Read the body text. | A single welcome line is shown ("Welcome to the secure … shell."), naming the configured product. |
     | 3 | Confirm the left sidebar and top bar are present. | The shell chrome (sidebar, brand bar, sign-out) surrounds the content. |
+    | 4 | Make the window exactly 768 px wide (browser dev tools → responsive mode, 768 × 1024, the iPad portrait size). | The left sidebar is still shown with its links; pressing the sidebar button collapses it to icons. |
+    | 5 | Make the window 767 px wide. | The left sidebar is gone from the layout; pressing the sidebar button in the brand bar opens a drawer listing the same links, and each link works. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ACCOUNT-DASHBOARD-S2 — As a Visitor, I want to be blocked from the dashboard, so that unauthenticated users never see shell content.
@@ -116,6 +118,7 @@ User stories
 Negative & edge cases
 - Pending user → `/app/dashboard` redirects to `pending-approval`; Blocked user → `blocked` (both via the layout guard, `src/lib/auth-guard.ts:67`).
 - No empty/loading/error state applies — the page is static text.
+- Breakpoint (F-36): "narrow" is one breakpoint, 48rem (768 px at the default font size), shared by the shell CSS, the drawer logic and Tailwind's `md` (`src/lib/breakpoints.ts`). It used to be one pixel apart: at exactly 768 px the sidebar was hidden and the button only collapsed it, so there was no way to the navigation. The breakpoint follows the browser's default font size: with a 20 px default font it moves to 960 px, so run steps 4–5 at 960 px and 959 px instead.
 
 Accessibility: One `<h1>`; keyboard focus lands on the shell skip-links first (`ShellSkipLinks`, `src/app/[locale]/(secure)/layout.tsx:75`). No axe violations expected on this minimal page.
 i18n: The heading uses the `shell.dashboard` message; in `uk`/`ja` it must be translated, not a raw key. The welcome line is currently hardcoded English (`src/app/[locale]/(secure)/app/dashboard/page.tsx:17`) — flag this as a known non-localized string.

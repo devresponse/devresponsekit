@@ -11,7 +11,6 @@ export { ApplicationShell } from "./application-shell";
 export { ApplicationSwitcherSheet } from "./application-switcher-sheet";
 export { CompactDensityWrapper } from "./compact-density-wrapper";
 export { CompactModeToggle } from "./compact-mode-toggle";
-export { MobileSidebarTrigger } from "./mobile-sidebar-trigger";
 export { NavigationMenuSkeleton } from "./navigation-menu-skeleton";
 export { ShellContainer } from "./shell-container";
 export { ShellDepthProvider, useShellDepth } from "./shell-depth-provider";

@@ -22,9 +22,21 @@ export interface ProjectSummary {
 export interface EnvVarSummary {
   id: string;
   key: string;
+  /** Always an array: the API answers a single target as a bare string. */
   target: string[];
   type: string;
   comment?: string;
+  /** Confines the entry to one Preview branch: the target's other deployments do not read it. */
+  gitBranch?: string;
+  /** Confines the entry to custom environments. */
+  customEnvironmentIds: string[];
+  /**
+   * The stored value, ONLY where Vercel hands it back in the clear: a `plain`
+   * entry, or a public one read back through {@link VercelClient.readEnvValue}
+   * (F-46). An `encrypted` entry lists ciphertext and a `sensitive` one lists
+   * nothing, so neither keeps a value here.
+   */
+  value?: string;
 }
 
 export class VercelClient {
@@ -95,22 +107,62 @@ export class VercelClient {
     }
   }
 
+  /**
+   * Every entry on the project, with the fields a presence check needs
+   * (F-46): each entry's targets and its branch or custom-environment
+   * scoping, which decide which deployments read it, and its type, which
+   * decides whether its value can be verified. The value itself is kept only
+   * for a `plain` entry, which the listing returns in the clear. Nothing is
+   * decrypted here.
+   */
   async listEnv(idOrName: string): Promise<EnvVarSummary[]> {
     try {
       const result = (await this.sdk.projects.filterProjectEnvs(this.scope({ idOrName }))) as {
-        envs?: EnvVarSummary[];
+        envs?: Array<{
+          id?: string;
+          key: string;
+          target?: string[] | string;
+          type: string;
+          comment?: string;
+          gitBranch?: string;
+          customEnvironmentIds?: string[];
+          value?: string;
+        }>;
       } & { key?: string };
       // The endpoint returns `{ envs: [...] }` for a project-wide read.
       const envs = Array.isArray(result.envs) ? result.envs : [];
       return envs.map((env) => ({
-        id: env.id,
+        id: env.id ?? "",
         key: env.key,
-        target: Array.isArray(env.target) ? env.target : [],
+        target: Array.isArray(env.target) ? env.target : typeof env.target === "string" ? [env.target] : [],
         type: env.type,
         comment: env.comment,
+        ...(env.gitBranch ? { gitBranch: env.gitBranch } : {}),
+        customEnvironmentIds: Array.isArray(env.customEnvironmentIds) ? env.customEnvironmentIds : [],
+        ...(env.type === "plain" && typeof env.value === "string" ? { value: env.value } : {}),
       }));
     } catch (err) {
       throw asCliError(err, `Could not list environment variables for \`${idOrName}\``);
+    }
+  }
+
+  /**
+   * One entry's value, decrypted by the API (`GET /v1/projects/{id}/env/{envId}`),
+   * or null when Vercel will not return it: a `sensitive` entry answers with
+   * no value at all. Called only for PUBLIC values (see `readPublicValues`),
+   * so no secret is ever fetched into this process.
+   */
+  async readEnvValue(idOrName: string, entry: { id: string; key: string }): Promise<string | null> {
+    try {
+      const env = (await this.sdk.projects.getProjectEnv(this.scope({ idOrName, id: entry.id }))) as {
+        type?: string;
+        value?: unknown;
+        decrypted?: boolean;
+      };
+      if (env.type === "sensitive" || typeof env.value !== "string") return null;
+      return env.type === "plain" || env.decrypted === true ? env.value : null;
+    } catch (err) {
+      throw asCliError(err, `Could not read ${entry.key} back to verify it`);
     }
   }
 

@@ -141,7 +141,7 @@ delete it, breaking handoff verification for the whole fleet.
 | `init`         | Links this checkout to a Vercel project and records the target and its settings.                                     |
 | `doctor`       | Checks Node, pnpm, the Vercel CLI, credentials and the project link. Changes nothing.                                |
 | `status`       | Project, latest production deployment, and a live health probe.                                                      |
-| `env:check`    | Reports missing and must-not-be-set variables (presence only). Exit 1 if anything needs attention.                   |
+| `env:check`    | Reports what production is missing, has wrong, or must not have. Public values are read back. Exit 1 on a problem.   |
 | `env:sync`     | Creates every variable this target needs, generating the secrets it may.                                             |
 | `env:prune`    | Removes variables that must not exist here, including a satellite's stray signing key.                               |
 | `db:provision` | Creates a marketplace Postgres store and connects it to the project. Refused unless this deployment owns a database. |
@@ -174,7 +174,35 @@ history; they travel in the child process's environment instead.
 
 **Re-running does not rotate anything.** `env:sync` leaves existing variables alone. Overwriting
 takes `--force`, and rotating a secret additionally takes `--yes`, because rotating
-`BETTER_AUTH_SECRET` signs out every active user.
+`BETTER_AUTH_SECRET` signs out every active user. A variable missing from some of the targets being
+synced is written only to those, so `--target all` fills in Preview and Development without touching
+the Production value, and without counting as a rotation.
+
+**"Set" means set where the deployment reads it, and a public value is read back.** A variable
+counts as present only when entries for every target being synced or deployed carry it (Production
+for `env:check` and `deploy`). An entry scoped to Development, a git branch or a custom environment
+does not count: a `DATABASE_URL` added with `vercel env add DATABASE_URL development` used to satisfy
+the preflight of a Production build that cannot boot without it. Each public value (`BETTER_AUTH_URL`,
+`SSO_HANDOFF_ISSUER`, the audience prefix and application id, `COOKIE_DOMAIN`, the `NEXT_PUBLIC_*`
+values…) is then read back: a `plain` one comes with the listing and an `encrypted` one is decrypted
+on request. It must pass the same rule the kit applies at boot. The origin and the SSO identity
+(`BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`, `SSO_HANDOFF_ISSUER`, the audience prefix and application
+id, and an Option C satellite's `COOKIE_DOMAIN`) must also equal what the recorded config derives, or
+they are reported with the value expected and the value found. `NEXT_PUBLIC_APP_NAME` and
+`NEXT_PUBLIC_PRODUCTION_HOST` are derived only as defaults, so a value you chose for them is left
+alone, and `env:check` reports such a value as `readable, no rule` rather than `value checked`. A
+public value stored `sensitive` is a problem on its own, because nothing can read it back: that is how
+the kit's production `SSO_HANDOFF_ISSUER` sat at `httsp://…` for a week while every check was green
+and every satellite handoff was refused. Secrets are checked for presence only and never fetched.
+`env:check` and `env:sync` both apply these rules. `env:sync` refuses to continue while any entry it
+would leave alone is wrong, including the Production entry of a key it is only filling in on Preview
+or Development, because `up` runs no separate check after it. It also refuses a value supplied with
+`--from-env` or the shell for the origin or the SSO identity when that value differs from the recorded
+config and would be written to Production or Preview, because the next check would reject it. Drop
+it to have the derived value written, or correct the config with `drk-deploy init`. (A localhost
+origin written to Development alone is fine.) Each problem names its fix: remove the entry
+(`vercel env rm <KEY> production`, or in the dashboard), then run `env:sync`, which re-creates it as
+plain. `env:sync --force` is not the fix: it regenerates every secret it may.
 
 **The deployment is verified, not assumed.** After promoting, the CLI probes `/api/health`,
 `/api/health/ready` and a deliberately-wrong sign-in. A 401 on that last one means auth is alive;
@@ -301,6 +329,40 @@ delete it — nothing reads it.
 
 ---
 
+## Upgrading
+
+### F-46: public values must be readable
+
+`env:check`, and therefore `deploy`, and `env:sync`, and therefore `up`, now fail on a public value
+stored as a Vercel **sensitive** variable. Before F-46 they checked only that a key existed. A project
+whose public values were typed into the dashboard as Sensitive will fail its first check after the
+upgrade. That is intended: those are the values nothing could verify. No flag exempts a key. `deploy
+--yes` still deploys past every `env:check` problem, as it always has, and `up` has no such escape.
+The one-time migration:
+
+1. Run `drk-deploy env:check`. Each `WRONG` key prints its own commands.
+2. Remove every flagged entry, not only the first one: `env:sync` refuses to run while any flagged
+   key is left. Use `vercel env rm <KEY> production` for each (add `preview` when the entry covers
+   it), or delete them in the dashboard.
+3. Run `drk-deploy env:sync`. It re-creates each derived value (`BETTER_AUTH_URL`,
+   `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, `COOKIE_DOMAIN`,
+   `NEXT_PUBLIC_*`) as plain from the recorded config. For a supplied one, such as
+   `SSO_ALLOWED_ORIGIN_SUFFIXES`, `EMAIL_FROM` or `DB_SCHEMA`, pass the value with `--from-env <file>`
+   or the shell. Pass `NEXT_PUBLIC_APP_NAME` the same way to keep a product name that differs from
+   the recorded `--app-name`, or the recorded one replaces it.
+4. Redeploy. An environment change takes effect only on the next deployment.
+
+Check the values the recorded config derives before step 2: `env:sync` writes those, so a wrong
+`--domain`, `--issuer` or application id in `.drk-deploy.json` would replace a correct value.
+Passing the correct value with `--from-env` does not override the config: for the origin and the SSO
+identity, `env:sync` refuses a supplied value that differs from it. A
+sensitive value cannot be read back to compare, so confirm it where it can be observed, for example
+the `iss` and `aud` of a freshly minted handoff token. Re-run `drk-deploy init` first if the config is
+wrong. Secrets stay `sensitive` (or `encrypted`). They are never read, and nothing here asks you to
+change them.
+
+---
+
 ## Postgres
 
 Vercel's Postgres is delivered by marketplace partners. Installing an integration is an
@@ -358,8 +420,11 @@ its own `tsconfig.json` and dependency tree, and the kit's required checks gate 
 Files: `src/lib/target.ts` decides WHAT is being deployed (kit or satellite) and holds the pure
 rules — the migration policy, the config sanity checks — so they can be asserted directly.
 `src/lib/env-spec.ts` is the environment contract for both targets, and the one to edit when the
-kit's `src/lib/env.ts` or a satellite's changes. `src/lib/vercel-client.ts` wraps `@vercel/sdk`.
-`src/commands/` is one file per command group.
+kit's `src/lib/env.ts` or a satellite's changes. `src/lib/env-presence.ts` decides what counts as set
+for a target and what is wrong with a stored value; every command that asks goes through it.
+`src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/commands/` is one file per command group.
+`test/env-presence.test.ts` runs `env:check`, `env:sync` and the `deploy` preflight for real against a
+fake Vercel API (`fetch` is replaced), so those tests never reach Vercel either.
 
 The test suite is the only thing standing between a refactor and a silently wrong deployment.
 Everything worth relying on is written as a pure function for that reason: keep it that way when you

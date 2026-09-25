@@ -1,4 +1,5 @@
 import { requireConfig, requireToken } from "../lib/config.js";
+import { describeEntry } from "../lib/env-presence.js";
 import { CliError, bold, dim, field, heading, info, ok, step, warn } from "../lib/log.js";
 import { describeProfile, migrationPolicy, resolveProfile } from "../lib/target.js";
 import { VercelClient } from "../lib/vercel-client.js";
@@ -159,7 +160,9 @@ export async function dbStatus(cliRoot: string): Promise<void> {
     );
     return;
   }
-  for (const v of dbVars) field(v.key, `${dim(v.target.join(",") || "no target")}  ${dim(v.type)}`, 32);
+  // `describeEntry` names a branch or custom-environment scoping too: such an
+  // entry is not what the target's deployments read (F-46).
+  for (const v of dbVars) field(v.key, `${dim(describeEntry(v))}  ${dim(v.type)}`, 32);
   info("");
-  info(dim("  Values are encrypted — Vercel does not return them, so only presence is shown."));
+  info(dim(`  Values are not shown. ${bold("drk-deploy env:check")} checks what production reads.`));
 }

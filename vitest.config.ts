@@ -1,5 +1,89 @@
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import tsconfigPaths from "vite-tsconfig-paths";
+
+/**
+ * A literal path as a coverage-threshold glob. To picomatch `[id]` is a
+ * character class (`i` or `d`), so each bracket is wrapped in a class of its
+ * own: `[id]` becomes `[[]id[]]`, which matches that directory and no other.
+ */
+function literalGlob(path: string): string {
+  return path.replace(/[[\]]/g, (bracket) => `[${bracket}]`);
+}
+
+/**
+ * F-42: a coverage floor PER ROUTE FILE for every `/api/v1` handler, and for
+ * the `/api/administrator` route files in which F-42 found a method that no
+ * test invoked.
+ *
+ * Vitest applies a glob threshold to the TOTAL of the files it matches
+ * (`perFile` is a global-only switch), so one `src/app/api/v1/**` key would let
+ * an untested handler hide behind fifteen tested ones. The review found
+ * `GET` and `DELETE /api/v1/admin/oauth-clients/[id]` in exactly that state,
+ * guarded only by a scan that sees the file import a scope helper. Each file
+ * therefore gets a key of its own. The v1 files are read from the tree, so a
+ * v1 route added later is floored as soon as it lands.
+ *
+ * `functions: 100` is the floor that matters. Since F-29 every exported method
+ * is its own named function (`withV1Route(async function GET(...))`), so a
+ * method no test calls takes its file below 100 and fails CI. The other three
+ * floors sit a few points below the lowest file measured when this landed.
+ *
+ * A floor proves only that each method is CALLED, not what it checks. The
+ * tenant boundary is pinned by tests/security/tenant-handler-reach.test.ts
+ * only for the methods F-42 found unexercised: `GET /api/v1/audit-events`,
+ * `/api/v1/admin/oauth-clients/[id]`, `DELETE /api/v1/admin/api-keys/[id]`,
+ * and the methods that suite calls in the five administrator files below. Every
+ * other floored method relies on its own route tests for that.
+ */
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
+const V1_ROUTES_DIR = "src/app/api/v1";
+const ROUTE_FLOOR = { lines: 82, statements: 78, functions: 100, branches: 62 };
+/**
+ * The `/api/administrator` files F-42 floors too. The rest of that tree has no
+ * per-file floor yet: about a third of its route files measure below
+ * `ROUTE_FLOOR`, so adding them means an exception each.
+ */
+const FLOORED_ADMIN_ROUTES = [
+  "src/app/api/administrator/api-keys/[id]/route.ts",
+  "src/app/api/administrator/email/templates/[id]/route.ts",
+  "src/app/api/administrator/groups/[id]/roles/route.ts",
+  "src/app/api/administrator/permissions/route.ts",
+  "src/app/api/administrator/users/[id]/route.ts",
+];
+/**
+ * Floored files measured below `ROUTE_FLOOR`, each pinned at its measured value
+ * with the reason. Raise an entry as its tests land and delete it at the shared
+ * floor. Never add one to let a new handler in untested.
+ */
+const ROUTE_FLOOR_EXCEPTIONS: Record<string, Partial<typeof ROUTE_FLOOR>> = {
+  // POST is invoked, but three inline callbacks are not: the two body-parse
+  // `.catch` fallbacks and the down-scoping filter (a request whose `scope`
+  // asks for more than the credential holds is refused with `invalid_scope`).
+  "src/app/api/v1/auth/token/route.ts": { functions: 50 },
+  // GET, PATCH and DELETE are invoked. DELETE's body-parse `.catch` fallback
+  // is not, nor are most failure branches (a failed Better Auth mirror or ban,
+  // a failed compensating unban, a failed cascade).
+  "src/app/api/administrator/users/[id]/route.ts": { functions: 80, branches: 55 },
+};
+const flooredRouteFiles = [
+  ...readdirSync(join(ROOT, V1_ROUTES_DIR), { recursive: true })
+    .map((entry) => `${V1_ROUTES_DIR}/${String(entry).replace(/\\/g, "/")}`)
+    .filter((path) => path.endsWith("/route.ts")),
+  ...FLOORED_ADMIN_ROUTES,
+];
+for (const path of [...FLOORED_ADMIN_ROUTES, ...Object.keys(ROUTE_FLOOR_EXCEPTIONS)]) {
+  // A path that names no file would silently floor nothing; fail loudly instead.
+  if (!existsSync(join(ROOT, path))) throw new Error(`F-42 route floor: no file at ${path}`);
+}
+const routeFloors = Object.fromEntries(
+  flooredRouteFiles.map((path) => [
+    literalGlob(path),
+    { ...ROUTE_FLOOR, ...ROUTE_FLOOR_EXCEPTIONS[path] },
+  ]),
+);
 
 /**
  * Vitest configuration.
@@ -258,6 +342,8 @@ export default defineConfig({
           functions: 52,
           branches: 72,
         },
+        // F-42: one floor per route file (see `routeFloors` above).
+        ...routeFloors,
       },
     },
   },

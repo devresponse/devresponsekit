@@ -22,6 +22,16 @@ import { fileURLToPath } from "node:url";
  * Each surface has its own tiny EXEMPT list (platform-global / public
  * surfaces with no tenant column). Adding to one should be a conscious,
  * reviewed decision — not a reflex to make the test pass.
+ *
+ * F-42: this is a TRIPWIRE, not proof. It reads source text per FILE, so it
+ * still passes when one method of a multi-method route drops its
+ * `canAccessOrg` check or its org predicate: the import stays behind for the
+ * sibling methods. What pins the behaviour is the route tests, notably
+ * tests/security/tenant-handler-reach.test.ts, which calls the methods F-42
+ * found unexercised through the real guard and fails when a guard line it pins
+ * is removed, and the per-file coverage floors in vitest.config.ts, which fail
+ * CI when a floored handler method has no test calling it. Keep this scan: it
+ * is cheap, and it catches the new route that forgets the boundary altogether.
  */
 
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));

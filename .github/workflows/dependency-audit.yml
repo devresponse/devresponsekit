@@ -91,8 +91,9 @@ jobs:
         run: pnpm audit --audit-level high
 
       # The deploy CLI's own lockfile (F-28), at the same threshold. `pnpm
-      # audit` reads only the lockfile, so this needs no install — and none is
-      # wanted: nothing in CI runs that package, so nothing should install it.
+      # audit` reads only the lockfile, so this needs no install. Installing,
+      # building and testing the package is ci.yml's `Deploy CLI (drk-deploy)`
+      # job (F-45), which in turn leaves the audit to this one.
       # `!cancelled()` runs it even after the app's install or audit failed, so
       # a red run reports both trees instead of hiding the second behind the
       # first. It still needs the checkout and pnpm itself: without them it

@@ -23,8 +23,10 @@ import { CliError } from "./log.js";
  *     database, so the CLI warns rather than refuses: see
  *     `containmentWarnings`.
  *
- * Everything in this file is pure so the rules can be tested directly: this
- * package has no CI, so anything not covered here is unverified forever.
+ * Everything in this file is pure so the rules can be tested directly: the
+ * package's own suite is the only check on it (run in CI by ci.yml's
+ * `Deploy CLI (drk-deploy)` job since F-45), so a rule it does not cover is
+ * unverified.
  *
  * BACKWARD COMPATIBILITY: a config with no `target` is the kit. That is the
  * shape every existing `.drk-deploy.json` has, and it must keep behaving

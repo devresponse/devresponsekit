@@ -378,3 +378,59 @@ jobs:
             git --no-pager diff -- src/db/migrations/better-auth-schema.sql
             exit 1
           fi
+
+  vercel-cli:
+    name: Deploy CLI (drk-deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # F-45: `vercel-cli/` (drk-deploy) is the only tool that applies production
+    # migrations BEFORE it promotes a build, and it handles VERCEL_TOKEN and the
+    # production direct database URL. It is its own pnpm package with its own
+    # toolchain, so the kit's typecheck, lint and format skip it
+    # (tsconfig.json, eslint.config.mjs, .prettierignore), and until this job
+    # nothing built or tested it: a Dependabot bump that broke its build, or a
+    # refactor that promoted before migrating, merged green and surfaced as a
+    # failed or mis-ordered production deploy. Its suite asserts the release
+    # order through an injected runner (vercel-cli/test/release.test.ts) and
+    # never reaches Vercel or a database.
+    #
+    # Deliberately NOT path-filtered and with no job-level `if:`. A required
+    # check whose workflow a `paths:` filter skips never reports, and GitHub
+    # leaves it pending forever, so every PR that does not touch vercel-cli/
+    # could not merge. The job is small enough to run on every change.
+    #
+    # No cron: every version this job exercises is pinned by vercel-cli's
+    # lockfile, so an idle `main` cannot change its result. The one thing that
+    # does change under an idle tree, a new advisory, is the `Dependency audit`
+    # job's: it audits this lockfile on every run and weekly
+    # (dependency-audit.yml, F-28), so no audit step is repeated here.
+    #
+    # Branch protection must list this job's `name` as a REQUIRED check on
+    # `main`, which is a repository setting (docs/testing.md §9). Until then a
+    # red run is visible but does not block the merge.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        # Version comes from the packageManager field in the ROOT package.json;
+        # `--dir` below points that pnpm at the CLI's own lockfile.
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: vercel-cli/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm --dir vercel-cli install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --dir vercel-cli typecheck
+
+      # `test` builds dist/ first and the suite imports the BUILT output, so
+      # this step is the build check as well.
+      - name: Build and test
+        run: pnpm --dir vercel-cli test
+
+      - name: Format check
+        run: pnpm --dir vercel-cli format:check

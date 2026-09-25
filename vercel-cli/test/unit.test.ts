@@ -77,6 +77,11 @@ test("the env spec validators mirror the kit's rules", () => {
 });
 
 test("every required key is one the kit refuses to boot without", () => {
+  // A snapshot, so a change to the set is deliberate here too. What ties it to
+  // the kit is the kit's own suite, which imports both this spec and
+  // src/lib/env.ts and derives the set from the schema
+  // (tests/unit/drk-deploy-required-keys.test.ts, F-45): this package cannot
+  // import the kit across its `rootDir`.
   assert.deepEqual(
     [...REQUIRED_KEYS].sort(),
     [

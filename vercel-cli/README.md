@@ -361,9 +361,36 @@ rules — the migration policy, the config sanity checks — so they can be asse
 kit's `src/lib/env.ts` or a satellite's changes. `src/lib/vercel-client.ts` wraps `@vercel/sdk`.
 `src/commands/` is one file per command group.
 
-Because nothing in CI builds this package, the test suite is the only thing standing between a
-refactor and a silently wrong deployment. Everything worth relying on is written as a pure
-function for that reason: keep it that way when you add a rule.
+The test suite is the only thing standing between a refactor and a silently wrong deployment.
+Everything worth relying on is written as a pure function for that reason: keep it that way when you
+add a rule. The part that cannot be pure, the release ORDER, goes through a runner instead: `deploy`
+and `up` reach every step that touches Vercel, a database or a subprocess (`envSync`, `envCheck`,
+`migrate`, `link`, `pull`, `build`, `promote`, `verify`) through `ReleaseRunner` in
+`src/commands/release.ts`. `test/release.test.ts` passes a recording fake and asserts that migrations
+run before the promotion and that nothing runs after a failed step, so a new step belongs in the
+runner. The fake stands in for every step, so the tests never reach Vercel or a database.
+`drk-deploy migrate` calls `migrate` directly, not through `deploy`, so the same file also calls the
+real `migrate` and asserts both of its refusals: a satellite on the kit's database, and a satellite
+that would inherit the kit's `PRODUCTION_DIRECT_DATABASE_URL` from the shell. Each refuses before
+anything connects or spawns.
+
+The required keys in `src/lib/env-spec.ts` are checked against the kit's own schema by the kit's
+suite, not this one (`tests/unit/drk-deploy-required-keys.test.ts`, which can import both): a key
+`src/lib/env.ts` starts requiring fails the kit's required checks until the spec requires it too.
+
+### CI
+
+The kit's CI runs this package's checks in a job of its own, **`Deploy CLI (drk-deploy)`** in
+`.github/workflows/ci.yml` (F-45): `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`
+(which builds first) and `pnpm format:check`, on every pull request and every push to `main`. It is
+deliberately not path-filtered, because a required check that a path filter skips never reports and
+blocks every merge. Before F-45 nothing in CI built this package, so a dependency bump that broke it
+merged green.
+
+**Operator step:** add `Deploy CLI (drk-deploy)` to the required status checks in `main`'s branch
+protection. That is a repository setting no workflow can make; until it is set, a red run is visible
+but does not block a merge. The advisory audit of this lockfile is not repeated in that job: it runs
+in the required `Dependency audit` check ([below](#dependency-override-floors)).
 
 ---
 

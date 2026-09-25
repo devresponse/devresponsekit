@@ -39,28 +39,36 @@ function vercelEntry(cliRoot: string): string {
  * lock must use the DIRECT one. Getting this wrong fails in a confusing way
  * (the lock silently does nothing through a transaction pooler), so the pooled
  * shape is refused up front unless explicitly allowed.
+ *
+ * Exported, with the environment injectable, so this helper's precedence, its
+ * satellite branch and the pooled check are table-tested without touching
+ * `process.env` (F-45). That `migrate` turns the satellite branch ON is a
+ * separate fact, pinned by the tests that call the real `migrate`.
  */
-function resolveMigrationUrl(options: {
-  databaseUrl?: string;
-  allowPooled?: boolean;
-  /**
-   * A satellite must NAME the database it migrates.
-   *
-   * The ambient fallbacks below are the kit's: a shell set up to deploy the
-   * primary has PRODUCTION_DIRECT_DATABASE_URL pointing at the primary's
-   * database. Letting a satellite inherit that would migrate the KIT's
-   * database from a satellite's config — the exact confusion this target
-   * split exists to prevent — and it would look like it worked, because the
-   * migrations are the kit's either way.
-   */
-  requireExplicit?: boolean;
-}): string {
+export function resolveMigrationUrl(
+  options: {
+    databaseUrl?: string;
+    allowPooled?: boolean;
+    /**
+     * A satellite must NAME the database it migrates.
+     *
+     * The ambient fallbacks below are the kit's: a shell set up to deploy the
+     * primary has PRODUCTION_DIRECT_DATABASE_URL pointing at the primary's
+     * database. Letting a satellite inherit that would migrate the KIT's
+     * database from a satellite's config — the exact confusion this target
+     * split exists to prevent — and it would look like it worked, because the
+     * migrations are the kit's either way.
+     */
+    requireExplicit?: boolean;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   const url = options.requireExplicit
-    ? (options.databaseUrl ?? process.env.SATELLITE_DIRECT_DATABASE_URL)
+    ? (options.databaseUrl ?? env.SATELLITE_DIRECT_DATABASE_URL)
     : (options.databaseUrl ??
-      process.env.PRODUCTION_DIRECT_DATABASE_URL ??
-      process.env.DIRECT_DATABASE_URL ??
-      process.env.DATABASE_URL);
+      env.PRODUCTION_DIRECT_DATABASE_URL ??
+      env.DIRECT_DATABASE_URL ??
+      env.DATABASE_URL);
 
   if (!url) {
     throw new CliError("No database URL for migrations.", {
@@ -127,6 +135,71 @@ export async function migrate(
 }
 
 /**
+ * One run of the pinned Vercel CLI: the entry point, the project it acts on,
+ * the checkout it runs in, and the environment the token travels in.
+ */
+export interface VercelInvocation {
+  vercelJs: string;
+  config: ProjectConfig;
+  root: string;
+  env: Record<string, string>;
+}
+
+/**
+ * Every step `deploy` and `up` put in order, behind one seam (F-45).
+ *
+ * The order is this CLI's safety property: environment, then migrations, then
+ * build and promote, then verify, with nothing after a failure. It used to
+ * live only in straight-line calls to functions that spawn `vercel` or open
+ * the production database, which no test could run, so a refactor that
+ * promoted before migrating, or carried on past a failed migration, passed
+ * every check. The commands now reach each step through this interface:
+ * {@link releaseRunner} is the real one, and the CLI's tests pass a recording
+ * fake and assert the order itself. Anything the two commands do that reaches
+ * Vercel, a database or a subprocess belongs here, so a test of the ordering
+ * can never reach one.
+ */
+export interface ReleaseRunner {
+  /** `drk-deploy env:sync`. Only `up` runs it. */
+  envSync: typeof envSync;
+  /** `drk-deploy env:check`, the preflight: the number of problems found. */
+  envCheck: typeof envCheck;
+  /** `drk-deploy migrate`. */
+  migrate: typeof migrate;
+  /** `vercel link`, when the checkout has no `.vercel/project.json` yet. */
+  link(vercel: VercelInvocation): Promise<void>;
+  /** `vercel pull`: the production environment and project settings. */
+  pull(vercel: VercelInvocation): Promise<void>;
+  /** `vercel build --prod`. */
+  build(vercel: VercelInvocation): Promise<void>;
+  /** `vercel deploy --prebuilt --prod`: the promotion. */
+  promote(vercel: VercelInvocation): Promise<void>;
+  /** The post-deploy probes. */
+  verify(config: ProjectConfig, profile: DeploymentProfile): Promise<void>;
+}
+
+/** The real steps. `deploy` and `up` use these unless a test passes its own. */
+export const releaseRunner: ReleaseRunner = {
+  envSync,
+  envCheck,
+  migrate,
+  link: ensureLinked,
+  pull: (vercel) => runVercel(vercel, ["pull", "--yes", "--environment=production"], "vercel pull failed"),
+  build: (vercel) => runVercel(vercel, ["build", "--prod"], "vercel build failed — nothing was promoted"),
+  promote: (vercel) => runVercel(vercel, ["deploy", "--prebuilt", "--prod"], "vercel deploy failed"),
+  verify,
+};
+
+/** Runs the pinned Vercel CLI in the deployed checkout. A non-zero exit throws. */
+async function runVercel(
+  { vercelJs, root, env }: VercelInvocation,
+  args: string[],
+  failureMessage: string,
+): Promise<void> {
+  await runOrThrow(process.execPath, [vercelJs, ...args], { cwd: root, env, failureMessage });
+}
+
+/**
  * `drk-deploy deploy` — migrate, then build, then promote.
  *
  * The order is the whole point. Migrations run BEFORE the new build is
@@ -146,6 +219,7 @@ export async function deploy(
     dryRun?: boolean;
     yes?: boolean;
   },
+  runner: ReleaseRunner = releaseRunner,
 ): Promise<void> {
   const config = requireConfig(cliRoot);
   const token = requireToken();
@@ -173,7 +247,7 @@ export async function deploy(
     // the one warning that is about the topology rather than a variable.
     reportContainment(profile, config.origin);
   } else {
-    const problems = await envCheck(cliRoot);
+    const problems = await runner.envCheck(cliRoot);
     if (problems > 0 && !options.yes) {
       throw new CliError(`${problems} environment problem(s).`, {
         hint: "Fix with `drk-deploy env:sync`, or re-run with --yes to deploy anyway.",
@@ -193,7 +267,7 @@ export async function deploy(
     info(`  ${dim(policy.why)}`);
     if (policy.hint) info(`  ${dim(policy.hint)}`);
   } else {
-    await migrate(cliRoot, {
+    await runner.migrate(cliRoot, {
       ...(options.databaseUrl !== undefined ? { databaseUrl: options.databaseUrl } : {}),
       ...(options.schema !== undefined ? { schema: options.schema } : {}),
       ...(options.allowPooled !== undefined ? { allowPooled: options.allowPooled } : {}),
@@ -215,31 +289,20 @@ export async function deploy(
     return;
   }
 
-  await ensureLinked(vercelJs, config, root, env);
+  const vercel: VercelInvocation = { vercelJs, config, root, env };
+  await runner.link(vercel);
 
   step("Pulling production environment and project settings");
-  await runOrThrow(process.execPath, [vercelJs, "pull", "--yes", "--environment=production"], {
-    cwd: root,
-    env,
-    failureMessage: "vercel pull failed",
-  });
+  await runner.pull(vercel);
 
   step("Building");
-  await runOrThrow(process.execPath, [vercelJs, "build", "--prod"], {
-    cwd: root,
-    env,
-    failureMessage: "vercel build failed — nothing was promoted",
-  });
+  await runner.build(vercel);
 
   step("Promoting the prebuilt output to production");
-  await runOrThrow(process.execPath, [vercelJs, "deploy", "--prebuilt", "--prod"], {
-    cwd: root,
-    env,
-    failureMessage: "vercel deploy failed",
-  });
+  await runner.promote(vercel);
   ok("Promoted");
 
-  await verify(config, profile);
+  await runner.verify(config, profile);
 }
 
 /**
@@ -253,12 +316,7 @@ export async function deploy(
  * Each satellite is its own Vercel project, so each gets its own link file and
  * they cannot be confused for one another.
  */
-async function ensureLinked(
-  vercelJs: string,
-  config: ProjectConfig,
-  root: string,
-  env: Record<string, string>,
-): Promise<void> {
+async function ensureLinked({ vercelJs, config, root, env }: VercelInvocation): Promise<void> {
   if (existsSync(join(root, ".vercel", "project.json"))) return;
   step("Linking the checkout to the Vercel project");
   await runOrThrow(
@@ -391,6 +449,7 @@ export async function up(
     dryRun?: boolean;
     yes?: boolean;
   },
+  runner: ReleaseRunner = releaseRunner,
 ): Promise<void> {
   const profile = resolveProfile(requireConfig(cliRoot));
   const migrates = migrationPolicy(profile).allowed;
@@ -402,21 +461,25 @@ export async function up(
   // announces it did nothing.
   info(dim(`  env:sync → ${migrates ? "migrate → " : ""}build → promote → verify`));
 
-  await envSync(cliRoot, {
+  await runner.envSync(cliRoot, {
     ...(options.fromEnv !== undefined ? { fromEnv: options.fromEnv } : {}),
     target: "production",
     ...(options.dryRun !== undefined ? { dryRun: options.dryRun } : {}),
     ...(options.yes !== undefined ? { yes: options.yes } : {}),
   });
 
-  await deploy(cliRoot, {
-    ...(options.databaseUrl !== undefined ? { databaseUrl: options.databaseUrl } : {}),
-    ...(options.schema !== undefined ? { schema: options.schema } : {}),
-    ...(options.allowPooled !== undefined ? { allowPooled: options.allowPooled } : {}),
-    ...(options.dryRun !== undefined ? { dryRun: options.dryRun } : {}),
-    ...(options.yes !== undefined ? { yes: options.yes } : {}),
-    skipChecks: true, // env:sync just ran; checking again would only repeat itself
-  });
+  await deploy(
+    cliRoot,
+    {
+      ...(options.databaseUrl !== undefined ? { databaseUrl: options.databaseUrl } : {}),
+      ...(options.schema !== undefined ? { schema: options.schema } : {}),
+      ...(options.allowPooled !== undefined ? { allowPooled: options.allowPooled } : {}),
+      ...(options.dryRun !== undefined ? { dryRun: options.dryRun } : {}),
+      ...(options.yes !== undefined ? { yes: options.yes } : {}),
+      skipChecks: true, // env:sync just ran; checking again would only repeat itself
+    },
+    runner,
+  );
 }
 
 /** Hides credentials in a connection string before it is printed. */

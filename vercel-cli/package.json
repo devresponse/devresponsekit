@@ -22,11 +22,11 @@
   "dependencies": {
     "@vercel/sdk": "1.28.35",
     "commander": "15.0.0",
-    "vercel": "59.23.2"
+    "vercel": "59.26.0"
   },
   "devDependencies": {
     "@types/node": "26.6.2",
-    "prettier": "3.9.8",
+    "prettier": "3.9.9",
     "typescript": "7.0.2"
   },
   "pnpm": {

@@ -212,6 +212,30 @@ describe("dependency governance: lockfile floors from the 2026-09 sweep", () => 
   it("the direct next / eslint-config-next pins agree", () => {
     expect(pkg.devDependencies["eslint-config-next"]).toBe(pkg.dependencies["next"]);
   });
+
+  it("Dependabot proposes next and eslint-config-next in ONE group, so the pin above can hold", () => {
+    // Otherwise the prod and dev groups split every Next bump into two PRs
+    // that each fail the pin above (#478 + #479). Groups are assigned
+    // first-match-wins, so the pair's group must precede both of them, and it
+    // must carry no dependency-type (next is prod, eslint-config-next is dev).
+    const dependabot = read(".github/dependabot.yml");
+    const start = dependabot.indexOf("- package-ecosystem: npm\n    directory: /\n");
+    expect(start, "dependabot.yml has the root npm entry").toBeGreaterThan(-1);
+    const end = dependabot.indexOf("\n  - package-ecosystem:", start);
+    const rootNpm = dependabot.slice(start, end === -1 ? undefined : end);
+    const groups = rootNpm.slice(rootNpm.indexOf("\n    groups:\n"));
+    const names = [...groups.matchAll(/^ {6}([a-z0-9-]+):$/gm)].map((m) => m[1]);
+    expect(names[0], "the next group is listed first").toBe("next");
+    expect(names).toEqual(expect.arrayContaining(["dev-minor-patch", "prod-minor-patch"]));
+    const nextGroup = groups.slice(
+      groups.indexOf("\n      next:\n"),
+      groups.indexOf("\n      dev-minor-patch:\n"),
+    );
+    expect(nextGroup).toContain('patterns: ["next", "eslint-config-next"]');
+    expect(nextGroup).toContain('update-types: ["major", "minor", "patch"]');
+    expect(nextGroup).toContain("applies-to: version-updates");
+    expect(nextGroup).not.toContain("dependency-type");
+  });
 });
 
 /**

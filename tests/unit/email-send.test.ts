@@ -321,7 +321,7 @@ describe("sendAppEmail — secret redaction (review #21)", () => {
       html: string;
       text: string | null;
     };
-    expect(payload.html).toContain(`href="${RESET_URL.replace("&", "&amp;")}"`);
+    expect(payload.html).toContain(`href="${RESET_URL.replaceAll("&", "&amp;")}"`);
     expect(payload.text).toContain(RESET_URL);
     expect(payload.subject).toBe("Reset your password");
 

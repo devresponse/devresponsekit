@@ -20,8 +20,8 @@ importers:
   .:
     dependencies:
       '@vercel/sdk':
-        specifier: 1.28.35
-        version: 1.28.35
+        specifier: 1.28.36
+        version: 1.28.36
       commander:
         specifier: 15.0.0
         version: 15.0.0
@@ -33,8 +33,8 @@ importers:
         specifier: 26.6.2
         version: 26.6.2
       prettier:
-        specifier: 3.9.8
-        version: 3.9.8
+        specifier: 3.9.9
+        version: 3.9.9
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -990,8 +990,8 @@ packages:
   '@vercel/sandbox@3.1.0':
     resolution: {integrity: sha512-z124E4rsmNpwGtTnLImiYzEXk972bWniQyhlvkEt35UtwKTdfBAFXcNG2OvqYqwzAsdQaP3B7teQ2pqA9B5Viw==}
 
-  '@vercel/sdk@1.28.35':
-    resolution: {integrity: sha512-+htFlMraI28WZffhYFMe68JspTwA9v0QD5IcEaMmDBShJLlvxw0M8mo/vUiUkAu/v3Gp8XrXIOVWanP8/wAdyQ==}
+  '@vercel/sdk@1.28.36':
+    resolution: {integrity: sha512-A5aAU9DQ24D/sGPmpUmMz5zpt15WBbtiCXBSfin9/Y48FZNe1SovRFiKmyY65Vkm6rVHfjERNayQIPq6KzlqlQ==}
 
   '@vercel/static-build@10.0.1':
     resolution: {integrity: sha512-uoECEpg+cuF57/i59pQSFMHVQGwUttKnuTJMW2v1TE42aDZY8eI2lHN2WwgMKlfoWzXR0Sy/M6s0dTN4181kTQ==}
@@ -1571,8 +1571,8 @@ packages:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
 
-  prettier@3.9.8:
-    resolution: {integrity: sha512-WRFq3Wn3WId7LLROfMLdH7xaFr2jR62wU8nLO6rQUOLOxNZUviyJQs1M0iIhLexSFy+L+w0ch66wtoO2jRjG0A==}
+  prettier@3.9.9:
+    resolution: {integrity: sha512-Z/CJHIkdujO/OtN7nXUii0Rf3VT5SRuhjBA82Xvu2XhBUgX3nhP67T0LHceBdQLex7OOFGTox+Q5Yg8Jk2Qivg==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -2685,12 +2685,12 @@ snapshots:
       tar-stream: 3.1.7
       undici: 6.28.1
       xdg-app-paths: 5.1.0
-      zod: 4.1.11
+      zod: 4.6.5
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/sdk@1.28.35':
+  '@vercel/sdk@1.28.36':
     dependencies:
       zod: 4.6.5
 
@@ -3250,7 +3250,7 @@ snapshots:
 
   picomatch@4.0.7: {}
 
-  prettier@3.9.8: {}
+  prettier@3.9.9: {}
 
   pretty-ms@7.0.1:
     dependencies:
@@ -3320,7 +3320,7 @@ snapshots:
       async-retry: 1.3.3
       debug: 4.4.3
       ws: 8.21.3
-      zod: 4.1.11
+      zod: 4.6.5
     transitivePeerDependencies:
       - bare-abort-controller
       - bufferutil

@@ -723,10 +723,14 @@ export function satelliteEnvSpecs(context: DeploymentContext & { profile: Satell
  *
  * The first two are the security ones, and they are not theoretical: a
  * satellite ships the SAME `/api/sso/launch` route the kit does. Give it
- * `SSO_HANDOFF_PRIVATE_KEY` and it stops being a consumer — it starts minting
- * handoff tokens the whole fleet will verify and trust. The EdDSA + JWKS
- * design exists so that compromising a satellite lets an attacker forge NO
- * handoff token; a stray private key on a consumer hands that property back.
+ * `SSO_HANDOFF_PRIVATE_KEY` and it stops being a consumer: it signs handoff
+ * tokens. Consumers verify against the ISSUER's published keys, so a key of
+ * the satellite's own signs tokens they refuse. But the realistic way a key
+ * gets there is an environment copied from the kit's, and with the kit's own
+ * key it signs tokens every consumer accepts, while the kit's private key sits
+ * on one more deployment (F-51). The EdDSA + JWKS design exists so that
+ * compromising a satellite lets an attacker forge NO handoff token; a copy of
+ * the issuer's key on a consumer hands that property back.
  * (Forging no token is not the same as being contained: on the kit's database
  * or under its cookie domain a satellite is not, key or no key. See
  * `containmentWarnings` in target.ts, F-24.)
@@ -739,7 +743,7 @@ export function satelliteEnvSpecs(context: DeploymentContext & { profile: Satell
 export const SATELLITE_ISSUER_ONLY: ReadonlyArray<{ key: string; why: string }> = [
   {
     key: "SSO_HANDOFF_PRIVATE_KEY",
-    why: "ISSUER ONLY. A consumer holds no signing material — with this set, THIS app's /api/sso/launch mints tokens the fleet trusts, so compromising a satellite becomes enough to forge a session anywhere",
+    why: "ISSUER ONLY. A consumer holds no signing material — with this set, THIS app's /api/sso/launch signs handoffs, and with the kit's own key (a copied .env) every consumer accepts them, so compromising a satellite becomes enough to forge a session anywhere",
   },
   {
     key: "SSO_HANDOFF_PREVIOUS_PRIVATE_KEY",

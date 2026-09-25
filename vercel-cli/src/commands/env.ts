@@ -615,10 +615,10 @@ export async function envPrune(cliRoot: string, options: { dryRun?: boolean; yes
  * `env:sync` only ever writes variables that are in the active spec list, so a
  * refused key could not be written by accident — but "could not be written" is
  * not the same as "is not there". A satellite that already holds
- * SSO_HANDOFF_PRIVATE_KEY can mint handoff tokens the whole fleet trusts, and
- * topping up its other variables would leave that in place while reporting
- * success. Fail closed, name the variable, point at the one command that
- * removes it.
+ * SSO_HANDOFF_PRIVATE_KEY holds signing material, and when it is a copy of the
+ * kit's (the realistic case) it signs handoffs every consumer accepts. Topping
+ * up its other variables would leave that in place while reporting success.
+ * Fail closed, name the variable, point at the one command that removes it.
  *
  * `supplied` covers the shell and the --from-env file (see
  * `loadSuppliedValues`), which is what lets the hint below honestly tell the

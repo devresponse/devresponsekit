@@ -194,16 +194,53 @@ export function describeConsumer(report: ConsumerHealthReport): string[] {
   return lines;
 }
 
-/** The SSO issuer's published keys — empty means handoffs cannot be verified. */
-export async function jwksKeyCount(origin: string): Promise<number | null> {
+/**
+ * One key an SSO JWKS publishes, by what identifies it: its `kid`, and `x`,
+ * the Ed25519 public key itself. Public by design: it is what the document
+ * exists to hand out.
+ */
+export interface PublishedKey {
+  kid: string | null;
+  x: string | null;
+}
+
+/**
+ * The keys `/api/sso/jwks.json` publishes, or null when it is not served (or
+ * is not a key set). An empty list means the deployment signs no handoffs.
+ */
+export async function publishedKeys(origin: string): Promise<PublishedKey[] | null> {
   const { code, body } = await statusOf(probeOrigin(origin), "/api/sso/jwks.json");
   if (code !== 200) return null;
   try {
     const parsed = JSON.parse(body) as { keys?: unknown[] };
-    return Array.isArray(parsed.keys) ? parsed.keys.length : null;
+    if (!Array.isArray(parsed.keys)) return null;
+    return parsed.keys.map((key) => {
+      const { kid, x } = (key ?? {}) as { kid?: unknown; x?: unknown };
+      return { kid: typeof kid === "string" ? kid : null, x: typeof x === "string" ? x : null };
+    });
   } catch {
     return null;
   }
+}
+
+/** The SSO issuer's published keys — empty means handoffs cannot be verified. */
+export async function jwksKeyCount(origin: string): Promise<number | null> {
+  return (await publishedKeys(origin))?.length ?? null;
+}
+
+/**
+ * The keys in `own` that `issuer` publishes as well (F-51), matched on the
+ * public key `x`, never on `kid` alone: `SSO_HANDOFF_KID` pins any id at all,
+ * so a fresh key can carry the issuer's kid, and a consumer that selects the
+ * issuer's key by that kid still fails the signature. Only the same `x` means
+ * the same private key.
+ */
+export function keysTheIssuerPublishes(
+  own: readonly PublishedKey[],
+  issuer: readonly PublishedKey[],
+): PublishedKey[] {
+  const issuers = new Set(issuer.map((key) => key.x).filter((x): x is string => x !== null));
+  return own.filter((key) => key.x !== null && issuers.has(key.x));
 }
 
 /** True when the probe shows a deployment that is actually serving correctly. */

@@ -223,6 +223,68 @@ refused before anything runs, `env:sync` included, because whoever exported it m
 Only a name `vercel` would read is checked: any casing on Windows, where a variable's name has none,
 and the exact name elsewhere. `doctor` reports the same refusal.
 
+**A release is a clean, pushed commit, and each run names it (F-49).** `deploy`, `up` and `migrate`
+used to release whatever the checkout held, and the kit's migration runner ledgers every file it
+applies under a checksum. An uncommitted `0007-foo.sql` run from a feature branch stayed applied in
+production, and once review changed it, every later migrate against production aborted on the
+checksum mismatch until someone rewrote the ledger by hand. Now, before anything writes (`env:sync`,
+`vercel link`, the pull, a migration), each command reads the checkouts it releases from with
+read-only `git` and refuses the run unless:
+
+- **The tree is clean.** `git status --porcelain` is empty, untracked files included, whatever
+  `status.showUntrackedFiles` says. No flag overrides this. Commit and push, or set the changes aside
+  with `git stash --include-untracked`. One change is set aside instead, and named on its own
+  line: a `next-env.d.ts` modified in the working tree, in any folder. `next build` rewrites that
+  file on every run (the kit commits the `next dev` form, and a build writes its own), and that
+  includes the build `deploy` runs. Next regenerates it from the app's config before anything reads
+  it, and it emits no code. A staged, deleted or untracked `next-env.d.ts` still counts.
+- **HEAD is pushed.** A remote-tracking branch points at it, so review can see exactly what ran.
+- **For `deploy` and `up`, HEAD is origin's default branch.** That is `origin/HEAD` as a clone
+  records it, or `origin/main` when there is none (a CI checkout). `--allow-ref <ref>` names another
+  pushed ref to promote, such as `origin/hotfix`. HEAD must then be that ref, and the first two rules
+  still apply.
+- **For a satellite that owns its database, the kit checkout is at the kit's default branch.**
+  `deploy`, `up` and `migrate` all hold it there, and no flag moves it: `--allow-ref` names the
+  satellite's ref, never the kit's. The migrations it applies are ledgered in the satellite's
+  production under their checksums, and no document describes migrating that database ahead of a
+  kit merge.
+
+The kit's own `migrate` does not need the default branch.
+[docs/deployment.md §1.1](../docs/deployment.md#11-the-live-path-vercel-git-integration--hand-applied-migrations)
+has the kit's production migrated from the open pull request's branch before it merges.
+`drk-deploy migrate` run from that branch, clean and pushed, does that with the target checked.
+Nothing is fetched, because a fetch writes refs: "pushed" and "origin/main" are the remote-tracking
+refs as the checkout last fetched them, and the output says so. Run `git fetch` first if the branch
+moved elsewhere.
+
+The kit checkout is read whenever the run migrates (the migrations are always the kit's) or deploys
+the kit. A satellite's app folder is read when it is the one built. A satellite on the kit's
+database never reads the kit checkout. The shell's `GIT_DIR`, `GIT_WORK_TREE` and the other variables
+that point `git` at another repository are removed first, in any casing. Each run prints the commit,
+its branch, the tree's state and where it is pushed before anything writes, and prints them again next
+to the database it migrates. That line is the record of what ran: the migration ledger has no column
+for it, and `vercel deploy --prebuilt` records the promoted build's own commit already. After the
+build, `deploy` and `up` put the checkout's `next-env.d.ts` back byte for byte, whether or not the
+build succeeded, so a run leaves the checkout as it found it. A `--dry-run` reads and reports the same
+and refuses nothing. If it cannot read the project's git connection, it says so and goes on. A real
+run stops. `doctor` counts as a problem a dirty, unpushed or non-git checkout, and a satellite's kit
+checkout that is off the kit's default branch. It notes a deployed checkout's HEAD
+that is not origin's default branch without counting it, because the kit's `migrate` allows one.
+
+**Vercel's git integration is a second deployer, and a run that migrates refuses it (F-49).** While
+the project's git integration builds and promotes every push to its production branch, `deploy` and
+`up` cannot keep their order: a merge goes live ahead of its migration whatever runs afterwards.
+Before anything writes, they read the project's git connection from the Vercel API. A run that would
+migrate is refused while production auto-deploys. It counts as off only where the CLI can tell: no
+repository connected, `"git": { "deploymentEnabled": false }` (or `{ "<production branch>": false }`)
+in the checkout's `vercel.json`, or an Ignored Build Step of exactly `exit 0`. Any other Ignored
+Build Step is a program the CLI cannot run, so it is named in the refusal and counts as on.
+`--allow-git-integration-race` deploys anyway, with a warning. A run with no migrate step
+(`--skip-migrations`, or a satellite on the kit's database) has no order to lose, so it is only
+warned. `migrate` never asks, because it promotes nothing. The kit's own production is deployed by
+the git integration today (docs/deployment.md §1.1), so `deploy` and `up` refuse to migrate it until
+auto-deploy is off or the flag is passed.
+
 **A pooled connection string is refused.** Migrations need the _direct_ endpoint: DDL and the
 advisory lock the migration runner takes do not survive a transaction pooler, and the failure is
 silent rather than loud. Neon's `-pooler` host, a `.pooler.` host (Supabase), port 6543 and
@@ -393,6 +455,31 @@ delete it — nothing reads it.
 
 ## Upgrading
 
+### F-49: only a clean, pushed commit is released
+
+`deploy`, `up` and `migrate` now refuse a checkout with uncommitted or untracked changes, or whose
+HEAD is not pushed ([above](#what-it-does-about-the-things-that-go-wrong)). Four things to expect
+on the first run:
+
+1. **Files that tools write into the checkout count.** A file that is neither committed nor
+   ignored stops the run, for example the `AGENTS.md` block `next dev` re-adds, or a report left at
+   the repository root. Commit it, ignore it, or move it out. The exception is `next-env.d.ts`
+   modified in the working tree. `next build` flips it from the committed `next dev` form
+   (`./.next/dev/types/…`) to its own (`./.next/types/…`) every time it runs, so it is set aside and
+   named rather than refused. Committing the build form only flips it back the next time `next dev`
+   runs. To clear it, run `git checkout -- next-env.d.ts`. The build `deploy` and `up` run puts it
+   back by itself.
+2. **`deploy` and `up` from anything but origin's default branch need `--allow-ref`.** To migrate
+   the kit's production from a pull request's branch before it merges, run `drk-deploy migrate` from
+   that branch instead. It needs the branch pushed, not merged.
+3. **A satellite that owns its database needs the kit checkout at the kit's default branch.** That
+   holds for `deploy`, `up` and `migrate`, with no flag. Merge the kit's migration first, pull the kit
+   checkout, then migrate or deploy the satellite.
+4. **A project that Vercel deploys on every push refuses `deploy` and `up` when they would migrate.**
+   The kit's production is one. Keep migrating from the pull request's branch with
+   `drk-deploy migrate` and let the git integration promote the merge, as docs/deployment.md §1.1
+   describes, or turn production auto-deploy off (§1.2), or pass `--allow-git-integration-race`.
+
 ### F-48: the project's owner is recorded
 
 A config that an earlier `init` wrote for a personal account has no `orgId`. It still deploys:
@@ -504,9 +591,13 @@ Set `VERCEL_TOKEN` and it takes precedence over any saved credential:
 `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` are not needed: the project comes from `.drk-deploy.json`. A
 job that exports them anyway must name that project, or the run is refused (F-48).
 
+The job deploys the commit it checked out, so that commit must be releasable (F-49). A push to
+`main` checked out by `actions/checkout` is: HEAD is `origin/main`, and the install and build above
+write only ignored paths. A job for any other ref needs `--allow-ref origin/<branch>`.
+
 If this becomes the deployment path, turn off Vercel's automatic production deploys for the
-project — otherwise a push promotes a build before this has migrated anything, which is the exact
-race the ordering above exists to prevent.
+project. Otherwise a push promotes a build before this has migrated anything, which is the exact race
+the ordering above exists to prevent, and `up` refuses to migrate while they are on (F-49).
 
 ---
 
@@ -530,18 +621,28 @@ for a target and what is wrong with a stored value; every command that asks goes
 `src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/lib/vercel-project.ts` builds the environment
 of every `vercel` child and checks the checkout's `.vercel/project.json` (F-48): nothing else sets
 `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`, and `test/release.test.ts` asserts that from the source.
-`src/commands/` is one file per command group.
+`src/lib/release-tree.ts` reads a checkout's git state (`inspectTree`) and holds the rules for what
+may be released and whether Vercel's git integration also deploys production, as pure functions
+(F-49). `src/commands/` is one file per command group.
 `test/env-presence.test.ts` runs `env:check`, `env:sync` and the `deploy` preflight for real against a
 fake Vercel API (`fetch` is replaced), so those tests never reach Vercel either.
 
 The test suite is the only thing standing between a refactor and a silently wrong deployment.
 Everything worth relying on is written as a pure function for that reason: keep it that way when you
 add a rule. The part that cannot be pure, the release ORDER, goes through a runner instead: `deploy`,
-`up` and `migrate` reach every step that touches Vercel, a database or a subprocess (`envSync`,
-`envCheck`, `link`, `pull`, `migrate`, `build`, `promote`, `verify`) through `ReleaseRunner` in
-`src/commands/release.ts`. `test/release.test.ts` passes a recording fake and asserts that production
-is pulled before anything migrates, that migrations run before the promotion, and that nothing runs
-after a failed step, so a new step belongs in the runner. The fake stands in for every step, so the
+`up` and `migrate` reach every step that touches Vercel, a database or a subprocess (`tree`,
+`gitIntegration`, `envSync`, `envCheck`, `link`, `pull`, `migrate`, `build`, `promote`, `verify`)
+through `ReleaseRunner` in `src/commands/release.ts`. `test/release.test.ts` passes a recording fake
+and asserts that the checkout is read before anything writes, that production is pulled before
+anything migrates, that migrations run before the promotion, and that nothing runs after a failed
+step, so a new step belongs in the runner. The fake's `tree` answers for each checkout what a test
+describes (dirty, unpushed, on a pull request's branch), and its `gitIntegration` a project with or
+without a connected repository. `inspectTree` itself runs for real against throwaway repositories
+the test builds under the OS temp directory, with a bare repository as their remote and the user's
+git configuration left out. That shows it reads untracked files, fetches nothing, ignores a shell's
+`GIT_DIR` and sets aside only a `next-env.d.ts` a build rewrote. One `deploy` test runs it inside
+the release with a fake `build` that rewrites that file, to show the run puts it back and the next
+run is not refused. The fake stands in for every step, so the
 tests never reach Vercel or a database. Its `pull` writes a production env file where `vercel pull`
 would, which is how the production-target refusals (F-47) are asserted: a URL that is not
 production's database, a `--schema` production does not read, a value stored `sensitive`, a stale

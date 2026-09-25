@@ -23,6 +23,48 @@ export interface ProjectSummary {
   framework: string | null;
   /** Production alias(es), when Vercel reports them. */
   aliases: string[];
+  /** The project's git connection, which may deploy production on its own (F-49). */
+  git: ProjectGit;
+}
+
+/**
+ * What decides whether Vercel deploys production by itself on a push (F-49):
+ * a connected repository (`link`) promotes every push to its production
+ * branch, unless an Ignored Build Step skips the build.
+ */
+export interface ProjectGit {
+  /** The connected repository, e.g. `github:acme/kit`, or null when none is. */
+  repository: string | null;
+  /** The branch whose pushes Vercel builds and promotes to production. */
+  productionBranch: string | null;
+  /** The project's Ignored Build Step command, when one is set. */
+  ignoreCommand: string | null;
+}
+
+/** The project's `link`, in the one shape {@link ProjectGit} needs, whichever provider it is. */
+export function projectGit(link: unknown, ignoreCommand: unknown): ProjectGit {
+  const ignore = typeof ignoreCommand === "string" && ignoreCommand.trim() ? ignoreCommand : null;
+  if (!link || typeof link !== "object")
+    return { repository: null, productionBranch: null, ignoreCommand: ignore };
+  const l = link as {
+    type?: string;
+    org?: string;
+    repo?: string;
+    owner?: string;
+    slug?: string;
+    projectNameWithNamespace?: string;
+    productionBranch?: string;
+  };
+  // github / github-limited / github-custom-host / vercel / v0 name org + repo;
+  // gitlab its namespace; bitbucket owner + slug.
+  const name =
+    l.projectNameWithNamespace ??
+    (l.owner && l.slug ? `${l.owner}/${l.slug}` : l.org && l.repo ? `${l.org}/${l.repo}` : (l.repo ?? l.org));
+  return {
+    repository: `${l.type ?? "git"}:${name ?? "a connected repository"}`,
+    productionBranch: l.productionBranch || null,
+    ignoreCommand: ignore,
+  };
 }
 
 export interface EnvVarSummary {
@@ -77,6 +119,8 @@ export class VercelClient {
         framework?: string | null;
         alias?: Array<{ domain?: string }> | undefined;
         targets?: { production?: { alias?: string[] } };
+        link?: unknown;
+        commandForIgnoringBuildStep?: string | null;
       };
       const aliases = [
         ...(project.alias ?? []).map((a) => a.domain).filter((d): d is string => typeof d === "string"),
@@ -88,6 +132,7 @@ export class VercelClient {
         accountId: project.accountId || null,
         framework: project.framework ?? null,
         aliases: [...new Set(aliases)],
+        git: projectGit(project.link, project.commandForIgnoringBuildStep),
       };
     } catch (err) {
       throw asCliError(err, `Could not read project \`${idOrName}\``);
@@ -115,6 +160,7 @@ export class VercelClient {
         accountId: created.accountId || null,
         framework: created.framework ?? null,
         aliases: [],
+        git: projectGit(null, null),
       };
     } catch (err) {
       throw asCliError(err, `Could not create project \`${name}\``);

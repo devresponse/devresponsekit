@@ -26,6 +26,20 @@ const FORCE_SCHEMA = [
   "migrate a --schema that production's DB_SCHEMA does not name",
 ] as const;
 
+/**
+ * The two overrides of the release checks of a command that promotes (F-49).
+ * Neither lets a dirty or unpushed checkout through: that has no override,
+ * because the fix is a commit and a push.
+ */
+const ALLOW_REF = [
+  "--allow-ref <ref>",
+  "promote HEAD when it is this pushed ref (e.g. origin/hotfix) instead of origin's default branch; the tree must still be clean and HEAD pushed. It names the checkout that is built: the kit checkout a satellite's own database is migrated from stays at the kit's default branch",
+] as const;
+const ALLOW_GIT_INTEGRATION_RACE = [
+  "--allow-git-integration-race",
+  "migrate and promote even though Vercel's git integration also deploys production on every push, and so can promote a build ahead of its migration",
+] as const;
+
 const program = new Command();
 
 program
@@ -157,7 +171,7 @@ program
 program
   .command("migrate")
   .description(
-    "Pull production's settings, check the migration target against them, then apply the kit's migrations (direct endpoint)",
+    "Pull production's settings, check the migration target against them, then apply the kit's migrations (direct endpoint) from a clean, pushed kit checkout: any pushed branch for the kit's own production (a pull request's, before it merges), the kit's default branch for a satellite's own database",
   )
   .option(
     "--database-url <url>",
@@ -180,7 +194,9 @@ program
 
 program
   .command("deploy")
-  .description("Pull production's settings, migrate (checked against them), build, promote, then verify")
+  .description(
+    "From a clean, pushed checkout at origin's default branch: pull production's settings, migrate (checked against them), build, promote, then verify",
+  )
   .option(
     "--database-url <url>",
     "the DIRECT connection string for migrations (default: PRODUCTION_DIRECT_DATABASE_URL)",
@@ -190,6 +206,8 @@ program
   .option("--allow-pooled", "permit a pooled connection string")
   .option(...ALLOW_UNVERIFIED_TARGET)
   .option(...FORCE_SCHEMA)
+  .option(...ALLOW_REF)
+  .option(...ALLOW_GIT_INTEGRATION_RACE)
   .option("--skip-migrations", "promote without touching the schema")
   .option("--skip-checks", "skip the environment preflight")
   .option("--dry-run", "show the plan without deploying")
@@ -199,7 +217,7 @@ program
 program
   .command("up")
   .description(
-    "The whole pipeline: env:sync → pull → migrate (checked against production) → build → promote → verify",
+    "The whole pipeline: check the commit → env:sync → pull → migrate (checked against production) → build → promote → verify",
   )
   .option(
     "--from-env <file>",
@@ -213,6 +231,8 @@ program
   .option("--allow-pooled", "permit a pooled connection string")
   .option(...ALLOW_UNVERIFIED_TARGET)
   .option(...FORCE_SCHEMA)
+  .option(...ALLOW_REF)
+  .option(...ALLOW_GIT_INTEGRATION_RACE)
   .option("--dry-run", "show the plan without changing anything")
   .option("-y, --yes", "do not stop for confirmations")
   .action(async (options) => up(CLI_ROOT, options));

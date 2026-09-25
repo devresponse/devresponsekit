@@ -1,12 +1,16 @@
 "use client";
 
 import * as React from "react";
-
-const MOBILE_BREAKPOINT = 768;
-const MOBILE_QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
+import { MOBILE_MEDIA_QUERY } from "@/lib/breakpoints";
 
 /**
  * `true` when the viewport is narrower than the `md` breakpoint.
+ *
+ * The query is the shared `MOBILE_MEDIA_QUERY`, the same string
+ * `app-shell.css` hides the side columns with and the complement of
+ * Tailwind's `md:` (F-36). It used to be its own `(max-width: 767px)`,
+ * one pixel off the CSS, so at exactly 768px the rail was hidden while this
+ * hook kept the desktop branch and the trigger had no drawer to open.
  *
  * Implemented with `useSyncExternalStore` rather than a lazy
  * `useState(getIsMobile)` (review #102): a lazy initializer runs again on
@@ -27,7 +31,7 @@ function subscribe(onStoreChange: () => void): () => void {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return () => {};
   }
-  const mql = window.matchMedia(MOBILE_QUERY);
+  const mql = window.matchMedia(MOBILE_MEDIA_QUERY);
   mql.addEventListener("change", onStoreChange);
   return () => mql.removeEventListener("change", onStoreChange);
 }
@@ -36,7 +40,7 @@ function getSnapshot(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return false;
   }
-  return window.matchMedia(MOBILE_QUERY).matches;
+  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
 }
 
 /** Server (and first hydration) snapshot — `window` is unknowable there. */

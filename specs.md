@@ -178,7 +178,6 @@ ShellFooter
 ShellSkipLinks
 ShellDepthProvider
 ShellVisibilityToggle
-MobileSidebarTrigger
 ApplicationSwitcherSheet
 NavigationMenuSkeleton
 SignInForm
@@ -260,7 +259,6 @@ Create `src/components/app-shell/index.ts`:
 export { ApplicationShell } from "./application-shell";
 export { ApplicationSwitcherSheet } from "./application-switcher-sheet";
 export { CompactModeToggle } from "./compact-mode-toggle";
-export { MobileSidebarTrigger } from "./mobile-sidebar-trigger";
 export { NavigationMenuSkeleton } from "./navigation-menu-skeleton";
 export { ShellContainer } from "./shell-container";
 export { ShellDepthProvider, useShellDepth } from "./shell-depth-provider";
@@ -467,7 +465,6 @@ src/
       application-shell.tsx
       application-switcher-sheet.tsx
       compact-mode-toggle.tsx
-      mobile-sidebar-trigger.tsx
       navigation-menu-skeleton.tsx
       shell-container.tsx
       shell-depth-provider.tsx
@@ -2049,7 +2046,15 @@ Use only these classes for shell structure:
 4. `.sh-main` and `.sh-scroll` use `overflow: auto` and `scrollbar-gutter: stable`.
 5. Long content must not resize grid rows or columns.
 6. Footer is visible by default and hidden only by `footerVisible={false}` or `footerMode="hidden"`.
-7. Sidebars are drawer-mode by default on secure mobile layouts.
+7. Sidebars are drawer-mode by default on secure mobile layouts. "Mobile" is one breakpoint,
+   Tailwind's `md` (`48rem`). Below it `.sh-left` / `.sh-right` are hidden, and every `FlexSidebar`
+   rail (the root navigation and the Account, Administrator, Docs and Help rails, each under a
+   `SidebarProvider`) is a Sheet drawer opened by its shadcn `SidebarTrigger`; at `md` and wider the
+   rail is in-flow. A `left` / `right` region that is not a `FlexSidebar` has no drawer and is simply
+   hidden below `md` (the Workspace demo's column is one), so it must never be the only route to a
+   page. The shell CSS, `useIsMobile` and `md:` all use the two queries in `src/lib/breakpoints.ts`
+   (`(width < 48rem)` / `(width >= 48rem)`). Any other width query leaves a width where the rail
+   is hidden and the trigger has no drawer to open (F-36).
 
 ### 17.5 Visibility contract
 

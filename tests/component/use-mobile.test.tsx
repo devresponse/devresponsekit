@@ -4,6 +4,7 @@ import { act } from "react";
 import { renderToString } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { MOBILE_MEDIA_QUERY } from "@/lib/breakpoints";
 
 /**
  * `useIsMobile` hydration contract (review #102).
@@ -27,11 +28,13 @@ import { useIsMobile } from "@/hooks/use-mobile";
 type Listener = () => void;
 
 const listeners = new Set<Listener>();
+const queries: string[] = [];
 let matches = false;
 
 function installMatchMedia() {
-  window.matchMedia = ((query: string) =>
-    ({
+  window.matchMedia = ((query: string) => {
+    queries.push(query);
+    return {
       get matches() {
         return matches;
       },
@@ -42,7 +45,8 @@ function installMatchMedia() {
       addListener: () => {},
       removeListener: () => {},
       dispatchEvent: () => false,
-    }) as unknown as MediaQueryList) as typeof window.matchMedia;
+    } as unknown as MediaQueryList;
+  }) as typeof window.matchMedia;
 }
 
 function Probe() {
@@ -53,6 +57,7 @@ const originalMatchMedia = window.matchMedia;
 
 beforeEach(() => {
   listeners.clear();
+  queries.length = 0;
   matches = true; // a NARROW viewport — the case that used to mismatch
   installMatchMedia();
 });
@@ -103,6 +108,19 @@ describe("useIsMobile", () => {
     expect(container.querySelector('[data-testid="probe"]')!.textContent).toBe("desktop");
 
     await act(async () => root!.unmount());
+    container.remove();
+  });
+
+  it("asks the browser the shared breakpoint query, and no other (F-36)", async () => {
+    // The query used to be a private `(max-width: 767px)`, one pixel off
+    // app-shell.css. It must be the string the CSS hides the rail with.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<Probe />));
+    expect(queries.length).toBeGreaterThan(0);
+    expect(new Set(queries)).toEqual(new Set([MOBILE_MEDIA_QUERY]));
+    await act(async () => root.unmount());
     container.remove();
   });
 

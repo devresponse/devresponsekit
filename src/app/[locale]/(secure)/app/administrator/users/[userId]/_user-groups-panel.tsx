@@ -182,6 +182,7 @@ export function UserGroupsPanel({
               <DialogDescription>{t("dialog.description")}</DialogDescription>
             </DialogHeader>
             <GroupPicker
+              userId={userId}
               value={selected}
               onChange={setSelected}
               excludeIds={groups?.map((g) => g.id) ?? []}

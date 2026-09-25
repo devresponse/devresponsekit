@@ -147,6 +147,7 @@ User stories
     | 1 | As `superuser@orga.local`, open **New role** | The form shows an Organization picker including a **Global** option |
     | 2 | Choose **Global**, fill Key/Name, submit | The new role's detail header shows a **Global** badge |
     | 3 | Create another role, pick ORG B in the picker, submit | The role is created scoped to ORG B |
+    | 4 | Open the picker again and type part of an org's name or slug | The list shows the server's matches for what you typed, whichever org it is and however many exist; while more orgs match than are listed, "Showing N of M. Type to narrow the list." appears under the list (F-41) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -220,6 +221,8 @@ User stories
 
 Negative & edge cases
 - Permissions editor initial catalog load failure → inline `role="alert"` error instead of a stuck skeleton.
+- More than 200 permissions in the catalog → Available lists all of them (the editor reads every page, F-41); a key that sorts last can be found and added. If the catalog could not be read in full, "Showing N of M" appears under the lists.
+- A key assigned to the role but missing from the loaded catalog, moved to Available → it stays listed in Available and can be moved back (F-41).
 - Read-only viewer without `admin.roles.update`: `TODO: verify` — `page.tsx` guards on `admin.roles.read`; with `canUpdate=false` the editor's move/Save buttons and Settings inputs are disabled, but confirm a plausible persona can reach this state (the seed `admin.platform` holds both read and update, so this needs a custom role to exercise).
 - Members tab empty state / loading skeleton.
 - Settings: Name required; 400 → localized invalid-body message; 403 → localized forbidden message.
@@ -312,6 +315,7 @@ User stories
     | 1 | As Superadmin, open **New group** | The form shows an Organization picker with **no** Global option |
     | 2 | Fill Key/Name, leave the org unset, submit | An "organization required" error appears on the picker; no navigation |
     | 3 | Choose ORG B, submit | The group is created in ORG B and you land on its detail page |
+    | 4 | Create another group; in the picker type the name or slug of an org that sorts last | It is listed and can be chosen: the picker searches the server, so an org past the first 200 is never out of reach (F-41) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
@@ -363,7 +367,8 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-- Initial load failure → inline `role="alert"` error instead of a stuck skeleton (`_group-roles-editor.tsx:216`).
+- Initial load failure → inline `role="alert"` error instead of a stuck skeleton (`_group-roles-editor.tsx`).
+- An org with more than 200 roles → Available lists all of them (every page is read, F-41); "Showing N of M" appears only if the catalog could not be read in full. A bundled role missing from the loaded catalog stays in Available when moved out.
 - Save with no change: Save button disabled until dirty.
 - 403 on either write → the localized "only roles whose permissions you hold" message; other failures → the generic error. Additions are sent before removals, so a refused addition removes nothing, and a refused removal leaves the addition in place, visible in the lists; after any failure the lists are reloaded from the server (F-38).
 - A failed save whose reload also fails → the error plus "Reload the page before making more changes.", and the editor stays locked until the page is reloaded.

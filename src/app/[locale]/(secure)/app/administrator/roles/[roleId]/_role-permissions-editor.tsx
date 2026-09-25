@@ -13,6 +13,8 @@ import {
   type DualListSaveError,
 } from "@/lib/admin/dual-list-save.client";
 import { diffPermissions } from "@/lib/admin/roles.client";
+import { fetchAllPages } from "@/lib/admin/admin-list.client";
+import { ListLimitNotice } from "../../_components/list-limit-notice";
 
 /**
  * Dual-list permissions editor (docs/admin-manager.md §8.4).
@@ -42,6 +44,15 @@ import { diffPermissions } from "@/lib/admin/roles.client";
  *
  * Search inputs filter each column independently. Results show a count
  * indicator so the operator knows the filter is active.
+ *
+ * F-41: the catalog is read in full (`fetchAllPages`), not as one page. It was
+ * one `pageSize=200` request under a comment claiming it paged through
+ * everything, so with more than 200 permissions every key sorting after the
+ * 200th (`shell.*`, `superuser`) could not be added. A catalog the reader
+ * could not finish shows "Showing N of M". Available lists the catalog plus
+ * every key the editor has seen assigned (the page's set and each re-read),
+ * so an assigned key the catalog does not hold, moved out of Assigned, stays
+ * listed and can be moved back; it used to vanish from both columns.
  */
 interface CatalogRow {
   id: string;
@@ -64,8 +75,21 @@ export function RolePermissionsEditor({
   const router = useRouter();
 
   const [catalog, setCatalog] = useState<CatalogRow[] | null>(null);
+  // The server's count of the catalog (F-41), for the notice.
+  const [catalogTotal, setCatalogTotal] = useState(0);
   const [assigned, setAssigned] = useState<string[]>([...initialAssigned].sort());
   const [serverAssigned, setServerAssigned] = useState<string[]>([...initialAssigned].sort());
+  // Every key the server has reported assigned (F-41), so one outside the
+  // loaded catalog is still offered in Available once it is moved out.
+  const [seenAssigned, setSeenAssigned] = useState<ReadonlySet<string>>(
+    () => new Set(initialAssigned),
+  );
+  const adoptServerSet = useCallback((next: string[]) => {
+    setServerAssigned(next);
+    setSeenAssigned((prev) =>
+      next.every((k) => prev.has(k)) ? prev : new Set([...prev, ...next]),
+    );
+  }, []);
   // The `initialAssigned` the lists were last seeded from (F-39), by content.
   const initialKey = JSON.stringify([...initialAssigned].sort());
   const [seededFrom, setSeededFrom] = useState(initialKey);
@@ -91,22 +115,18 @@ export function RolePermissionsEditor({
   // the move) or once the server's set is unknown.
   const locked = !canUpdate || saving || stale;
 
-  // Initial catalog load. We page through everything (capped at 200 by
-  // the server). The catalog is small enough that doing this once is
-  // cheaper than per-keystroke server-side search.
+  // Initial catalog load: every page (F-41), since the server answers at
+  // most 200 rows a request. The catalog is small enough that loading it
+  // once is cheaper than a server search per keystroke, and both columns
+  // filter it locally.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/administrator/permissions?pageSize=200", {
-          credentials: "same-origin",
-        });
-        if (!res.ok) {
-          setError(tErr("generic"));
-          return;
-        }
-        const body = (await res.json()) as { items: CatalogRow[] };
-        if (!cancelled) setCatalog(body.items);
+        const all = await fetchAllPages<CatalogRow>("/api/administrator/permissions");
+        if (cancelled) return;
+        setCatalog(all.items);
+        setCatalogTotal(all.total);
       } catch {
         if (!cancelled) setError(tErr("generic"));
       }
@@ -121,10 +141,14 @@ export function RolePermissionsEditor({
   const availableFiltered = useMemo(() => {
     if (!catalog) return [];
     const q = availableQ.trim().toLowerCase();
-    return catalog
-      .filter((p) => !assignedSet.has(p.key))
-      .filter((p) => (q ? p.key.toLowerCase().includes(q) : true));
-  }, [catalog, assignedSet, availableQ]);
+    // The catalog in its (server) order, then any key seen assigned that the
+    // catalog does not hold (F-41).
+    const inCatalog = new Set(catalog.map((p) => p.key));
+    const extra = [...seenAssigned].filter((k) => !inCatalog.has(k)).sort();
+    return [...catalog.map((p) => p.key), ...extra]
+      .filter((k) => !assignedSet.has(k))
+      .filter((k) => (q ? k.toLowerCase().includes(q) : true));
+  }, [catalog, seenAssigned, assignedSet, availableQ]);
 
   const assignedFiltered = useMemo(() => {
     const q = assignedQ.trim().toLowerCase();
@@ -145,7 +169,7 @@ export function RolePermissionsEditor({
     if (!dirty && !saving) {
       const next = JSON.parse(initialKey) as string[];
       setAssigned(next);
-      setServerAssigned(next);
+      adoptServerSet(next);
     }
   }
 
@@ -170,7 +194,7 @@ export function RolePermissionsEditor({
     if (!result) return;
     if (result.synced) {
       setAssigned(result.synced);
-      setServerAssigned(result.synced);
+      adoptServerSet(result.synced);
       setAvailableSelected([]);
       setAssignedSelected([]);
     }
@@ -188,13 +212,24 @@ export function RolePermissionsEditor({
       failed: t("errorToast"),
     };
     setError(messages[result.error]);
-  }, [save, serverAssigned, assigned, router, t, tErr]);
+  }, [save, serverAssigned, assigned, adoptServerSet, router, t, tErr]);
 
   if (!catalog) {
+    // A failed catalog load (any page, F-41) sets `error` and leaves the
+    // catalog null: say so instead of showing the skeleton forever, as the
+    // group roles editor does.
     return (
       <div className="space-y-2">
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-48 w-full" />
+        {error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {error}
+          </p>
+        ) : (
+          <>
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-48 w-full" />
+          </>
+        )}
       </div>
     );
   }
@@ -217,7 +252,7 @@ export function RolePermissionsEditor({
         <DualListColumn
           titleKey="available"
           searchKey="searchAvailable"
-          items={availableFiltered.map((p) => p.key)}
+          items={availableFiltered}
           selected={availableSelected}
           onSelectedChange={setAvailableSelected}
           q={availableQ}
@@ -235,6 +270,7 @@ export function RolePermissionsEditor({
           disabled={locked}
         />
       </div>
+      <ListLimitNotice shown={catalog.length} total={catalogTotal} kind="catalog" />
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

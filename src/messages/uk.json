@@ -1238,7 +1238,12 @@
       "searchPlaceholder": "Пошук груп…",
       "noResults": "Груп не знайдено.",
       "loading": "Завантаження…",
-      "loadError": "Не вдалося завантажити групи."
+      "loadError": "Не вдалося завантажити групи.",
+      "alreadyMember": "Вже є членом"
+    },
+    "listLimit": {
+      "searchTruncated": "Показано {shown} з {total}. Введіть текст, щоб звузити список.",
+      "catalogTruncated": "Показано {shown} з {total}. Решту не вдалося завантажити, тому їх немає в списку."
     },
     "agents": {
       "title": "MCP agents",

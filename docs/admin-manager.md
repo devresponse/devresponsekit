@@ -370,13 +370,21 @@ string for every list endpoint into `{ page, pageSize, sort, q, filters }`:
 
 - **`page`** — defaults to 1, clamped to ≥ 1.
 - **`pageSize`** — per-endpoint default (commonly 25; audit 50), clamped to
-  `[1, maxPageSize]` (commonly 200).
+  `[1, maxPageSize]` (commonly 200). The clamp is silent (the envelope echoes
+  the clamped `pageSize`), so one request is never "the whole list": see
+  §7.3.
 - **`sort`** — repeated `field.dir` values (the separator is `.`, not `:`, to
   keep bookmarked URLs readable); a bare `field` sorts ascending. **Unknown sort
   fields are dropped**, and so is a value whose direction is not exactly `asc` /
   `desc` — it is never read as `asc`, which turned a comma-joined
   `created_at.desc,status.asc` into an ascending sort (F-34). A per-endpoint
-  `defaultSort` applies otherwise.
+  `defaultSort` applies otherwise. Every list then orders by a unique
+  **tiebreaker**, `id` (the membership lists, whose rows have no `id`, use
+  their own key), so the OFFSET pages slice one total order: rows that tie on
+  the sort (every org's `admin` role under the roles default `key`, most users
+  under `status`) used to come back in any order from one page query to the
+  next, repeating some rows and skipping others (F-41). The tiebreaker is not
+  a sort parameter and is not echoed in the envelope's `sort`.
 - **`q`** — trimmed global search; empty becomes `null`. Bound via Kysely
   parameters (never string-concatenated) and matched case-insensitively against
   each endpoint's documented columns.
@@ -453,6 +461,55 @@ Consequently a sortable column **must** render text. Row-action columns have no
 (name, description and `aria-sort` per state) and
 `tests/unit/admin-grid-column-label-invariant.test.ts` statically checks every
 sortable column definition in every Administrator grid.
+
+### 7.3 Pickers and catalogs read past the first page
+
+The console's pickers and catalog editors read the same list endpoints, and
+one request returns at most `maxPageSize` rows. They used to read a single
+`pageSize=200` page and ignore `total`, so past 200 organizations a
+superadmin could not pick a later org in **New role** or **New group** (a group
+requires one), and roles, groups and permission keys past the 200th could not
+be assigned (F-41). Every one now goes through
+`src/lib/admin/admin-list.client.ts`:
+
+- **Pickers search the server.** The organization, role, group and user
+  pickers send what is typed as `q` (`useAdminSearch`, 50 rows an answer) and
+  show the server's matches as they are (`shouldFilter={false}` on the cmdk
+  list). A monotonic request sequence drops a slow answer to an earlier
+  keystroke. The role picker asks for org-scoped roles only
+  (`filter[scope]=org`), and `GET /roles?q=` also matches the owning org's
+  name, so typing an org's name lists that org's roles. `GET /groups?q=`
+  matches the owning org's name too.
+- **The user-detail group picker lists the user's orgs' groups.** A user can
+  join only a group in an org they hold a membership in, so the picker reads
+  the user's memberships and sends each org as a repeated
+  `filter[organization]` (up to 100 orgs; past that it searches the caller's
+  whole scope). With 60 orgs each holding an `engineering` group named
+  "Engineering", a search across every org could not single out the right
+  one; scoped to the user's orgs, it lists theirs. When the user belongs to
+  more than one org, each option names its org. Groups the user already
+  belongs to are listed but cannot be chosen ("Already a member"), so the
+  list never reads "No groups found" while more are counted.
+- **Catalog editors read every page.** The role **Permissions** dual-list, the
+  group **Roles** dual-list, the invitation role select and the "Roles using
+  this permission" sheet page until they hold `total` rows (`fetchAllPages`,
+  capped at 5,000 rows). An item the server reports assigned but the loaded
+  catalog does not hold stays listed in **Available** after it is moved out.
+- **A list that changes while it is read is read again.** Each page is its
+  own OFFSET query. A row inserted ahead of the page boundary between two
+  reads makes the next page repeat a row and hides the new one; a row
+  deleted ahead makes the next page skip a live row, while the deleted row,
+  already read, is still held. Held rows then match the new count, so the
+  counts alone cannot show a delete. Both change the count, so when a page's
+  `total` differs from the first page's, `fetchAllPages` starts over from
+  page 1, up to three walks. An insert and a delete between the same two
+  reads leave the count unchanged and are not detected: a row can be missing
+  and a deleted row listed with no notice. Only keyset pagination would close
+  that.
+- **A short list says so.** When fewer rows are on screen than the endpoint
+  counts (more search matches than one answer carries, a catalog cut short by
+  the cap, or a count that moved on every one of the three walks, where the
+  largest count seen is shown), the control shows "Showing N of M".
 
 ---
 
@@ -964,7 +1021,7 @@ nullable; `NULL` = a global/platform role, superadmin-only).
 
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
-| `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization`, `scope`, `permission` |
+| `GET /roles` | `admin.roles.read` | List with permission/member counts; filters `organization`, `scope`, `permission`; `q` matches key, name and the owning org's name (§7.3) |
 | `POST /roles` | `admin.roles.create` | Org admin may create only within their own org; `admin.role.created` |
 | `GET/PATCH/DELETE /roles/[id]` | `.read` / `.update` / `.delete` | Detail / edit / delete |
 | `GET/POST/DELETE /roles/[id]/permissions` | `.read` / `.update` | Dual-list permission editor; `admin.role.permissions_changed`. BOTH directions carry the AUTHZ-3 subset test (403 `forbidden`; REVOKE-1 added it to DELETE), and detaching `superuser` from the last role that carries it returns 409 `last_superadmin` (REVOKE-2) |
@@ -1051,7 +1108,7 @@ permissions directly, so they add zero new authority primitives.
 
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
-| `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped) |
+| `GET /groups` | `admin.groups.read` | List with role/member counts (org-scoped); `filter[organization]` may be repeated; `q` matches key, name and the owning org's name (§7.3) |
 | `POST /groups` | `admin.groups.create` | Org admin creates only in their org; `admin.group.created` |
 | `GET/PATCH/DELETE /groups/[id]` | `.read` / `.update` / `.delete` | `admin.group.updated` / `.deleted`. DELETE carries the AUTHZ-3 subset test against everything the group confers (REVOKE-1, F-11): 403 `forbidden` and an `admin.group.delete_denied` row |
 | `GET/POST/DELETE /groups/[id]/roles` | `.read` / `admin.groups.assign` | Bundle roles; `admin.group.roles_changed` (records the applied delta, F-38). A role must belong to the group's org; bundling a `superuser`-granting role is superadmin-only. **Both** directions carry the AUTHZ-3 subset test (REVOKE-1). The Roles editor saves POST-then-DELETE, as described in §8.4 |

@@ -24,7 +24,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * GET /api/administrator/groups
  *
  * Paginated list of `app_groups` with role/member counts (ADR-0002).
- * `q` matches `key` and `name`. Caller MUST hold `admin.groups.read`.
+ * Caller MUST hold `admin.groups.read`.
+ *
+ * `q` matches `key`, `name` and the owning organization's name, as it does
+ * for roles (F-41): every org may hold an `engineering` group, and searching
+ * `engineering` cannot single out one org's, but typing the org's name can.
+ * `filter[organization]` takes an org UUID and may be repeated (the
+ * documented `explode` form); a value that is not a UUID is dropped. The
+ * user-detail group picker lists the target user's orgs' groups this way. A
+ * repeated value used to be ignored as a whole, which listed every org's.
  *
  * ADR-0001: an org admin sees only their org's groups; a null scope yields
  * an empty page (groups are always tenant-scoped, so there is no global set).
@@ -46,17 +54,26 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     return NextResponse.json(buildListResponse([], 0, query));
   }
 
-  let base = db.selectFrom("app_groups as g");
+  // LEFT JOIN for `q` to match the owning org's name. 1:1 on the org PK, so
+  // the row count (reused for the COUNT(*) total) is unchanged.
+  let base = db
+    .selectFrom("app_groups as g")
+    .leftJoin("app_organizations as o", "o.id", "g.organization_id");
   if (scope.kind === "org") {
     base = base.where("g.organization_id", "=", scope.organizationId);
   }
   const orgFilter = query.filters.organization;
-  if (typeof orgFilter === "string" && UUID_RE.test(orgFilter)) {
-    base = base.where("g.organization_id", "=", orgFilter);
+  const orgIds = (
+    typeof orgFilter === "string" ? [orgFilter] : Array.isArray(orgFilter) ? orgFilter : []
+  ).filter((v) => UUID_RE.test(v));
+  if (orgIds.length > 0) {
+    base = base.where("g.organization_id", "in", orgIds);
   }
   if (query.q) {
     const like = likeContains(query.q);
-    base = base.where((eb) => eb.or([eb("g.key", "ilike", like), eb("g.name", "ilike", like)]));
+    base = base.where((eb) =>
+      eb.or([eb("g.key", "ilike", like), eb("g.name", "ilike", like), eb("o.name", "ilike", like)]),
+    );
   }
 
   const itemsQuery = applySortAndPagination(

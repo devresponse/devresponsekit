@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAdminSearch } from "@/lib/admin/admin-list.client";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -15,6 +16,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ListLimitNotice } from "./list-limit-notice";
 
 /**
  * Shared organization picker for Administrator "new" forms (ADR-0002).
@@ -27,10 +29,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
  *
  * An ORG ADMIN never sees this control — the server forces their own org.
  *
- * A Shadcn combobox (Popover + cmdk Command) backs it so the org list can be
- * filtered client-side by name or slug — far better than a flat <select>
- * once an installation has more than a handful of organizations. `value`
- * is the org id, or `null` for the Global / unselected scope.
+ * A Shadcn combobox (Popover + cmdk Command) that searches SERVER-SIDE by
+ * name or slug (`useAdminSearch`, F-41). It used to load one page of 200 orgs
+ * and filter that client-side, so on a platform with more orgs every later
+ * slug answered "No results": a superadmin could not create a group there at
+ * all (the group form requires an org), and a new role fell back to Global.
+ * `value` is the org id, or `null` for the Global / unselected scope.
  */
 interface OrgOption {
   id: string;
@@ -52,33 +56,16 @@ export function OrganizationPicker({
   id?: string;
 }) {
   const t = useTranslations("administrator.organizationPicker");
-  const [orgs, setOrgs] = useState<OrgOption[] | null>(null);
-  const [error, setError] = useState(false);
+  const search = useAdminSearch<OrgOption>("/api/administrator/organizations");
+  const orgs = search.items;
   const [open, setOpen] = useState(false);
+  // The chosen org, kept for the trigger label: a later search may no longer
+  // return it (F-41: the results are one search's answer, not every org).
+  const [picked, setPicked] = useState<OrgOption | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/administrator/organizations?pageSize=200", {
-          credentials: "same-origin",
-        });
-        if (!res.ok) {
-          if (!cancelled) setError(true);
-          return;
-        }
-        const body = (await res.json()) as { items: OrgOption[] };
-        if (!cancelled) setOrgs(body.items);
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (error) {
+  // A failed INITIAL load (nothing ever returned) makes the picker unusable.
+  // A later search error keeps the prior results and says so in the list.
+  if (search.error && orgs === null) {
     return (
       <div className="space-y-2">
         <Label htmlFor={id}>{t("label")}</Label>
@@ -89,7 +76,8 @@ export function OrganizationPicker({
     );
   }
 
-  const selected = orgs?.find((o) => o.id === value) ?? null;
+  const selected =
+    orgs?.find((o) => o.id === value) ?? (picked !== null && picked.id === value ? picked : null);
   const triggerLabel =
     orgs === null
       ? t("loading")
@@ -101,8 +89,14 @@ export function OrganizationPicker({
           ? `${selected.name} (${selected.slug})`
           : t("placeholder");
 
-  const select = (next: string | null) => {
-    onChange(next);
+  // The Global choice is local, not a server row: offer it while the search
+  // is empty or matches its label, as cmdk's own filter used to.
+  const q = search.query.trim().toLowerCase();
+  const showGlobal = includeGlobal && (q === "" || t("global").toLowerCase().includes(q));
+
+  const select = (next: OrgOption | null) => {
+    setPicked(next);
+    onChange(next?.id ?? null);
     setOpen(false);
   };
 
@@ -127,12 +121,16 @@ export function OrganizationPicker({
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
-          <Command>
-            <CommandInput placeholder={t("searchPlaceholder")} />
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder={t("searchPlaceholder")}
+              value={search.query}
+              onValueChange={search.setQuery}
+            />
             <CommandList>
               <CommandEmpty>{t("noResults")}</CommandEmpty>
               <CommandGroup>
-                {includeGlobal ? (
+                {showGlobal ? (
                   <CommandItem value="global" onSelect={() => select(null)}>
                     <Check
                       className={cn("mr-2 h-4 w-4", value === null ? "opacity-100" : "opacity-0")}
@@ -141,11 +139,7 @@ export function OrganizationPicker({
                   </CommandItem>
                 ) : null}
                 {(orgs ?? []).map((o) => (
-                  <CommandItem
-                    key={o.id}
-                    value={`${o.name} ${o.slug}`}
-                    onSelect={() => select(o.id)}
-                  >
+                  <CommandItem key={o.id} value={o.id} onSelect={() => select(o)}>
                     <Check
                       className={cn("mr-2 h-4 w-4", value === o.id ? "opacity-100" : "opacity-0")}
                     />
@@ -154,6 +148,17 @@ export function OrganizationPicker({
                 ))}
               </CommandGroup>
             </CommandList>
+            {search.error ? (
+              <p className="text-destructive px-2 py-1.5 text-xs" role="alert">
+                {t("loadError")}
+              </p>
+            ) : null}
+            <ListLimitNotice
+              shown={orgs?.length ?? 0}
+              total={search.total}
+              kind="search"
+              className="border-t px-2 py-1.5"
+            />
           </Command>
         </PopoverContent>
       </Popover>

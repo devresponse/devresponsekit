@@ -46,9 +46,20 @@ export interface ParseListQueryOptions {
   allowedSortFields: ReadonlyArray<string>;
   /** Allowed filter keys. Unknown keys are silently dropped. */
   allowedFilters?: ReadonlyArray<string>;
-  /** Default sort applied when no `sort` query param is present. */
+  /**
+   * Default sort applied when no `sort` query param is present. It need not
+   * be unique: {@link applySortAndPagination} appends the `id` tiebreaker to
+   * every sort, default or requested (F-41).
+   */
   defaultSort?: SortSpec[];
-  /** Maximum allowed page size. Caps oversize pageSize requests. */
+  /**
+   * Maximum rows one request returns. A larger `pageSize` is clamped to it
+   * SILENTLY, with no error and no marker other than the clamped `pageSize`
+   * echoed in the envelope, so one request is never "the whole list": a
+   * client that needs every row pages until it holds `total` rows
+   * (`fetchAllPages` in src/lib/admin/admin-list.client.ts), and a picker
+   * searches with `q` instead (F-41).
+   */
   maxPageSize?: number;
   /** Default page size when not provided. */
   defaultPageSize?: number;
@@ -351,19 +362,45 @@ export function buildListResponse<TItem>(
   };
 }
 
+/** The unique column {@link applySortAndPagination} orders by last, by default. */
+const DEFAULT_TIEBREAKER: ReadonlyArray<string> = ["id"];
+
 /**
  * Applies parsed `sort` and pagination to a Kysely select query. Sort
  * fields are validated against `allowedSortFields` by the parser, so
  * passing them straight to `orderBy` is safe — we still wrap in
  * `sql.ref` to make the safety obvious.
+ *
+ * After the requested (or default) sort it orders by `tiebreaker`, a key
+ * unique per row, `id` unless the list says otherwise (F-41). Each page is a
+ * separate `LIMIT … OFFSET` query, and Postgres returns rows that tie on the
+ * sort in no particular order, and not always the same order twice. Sorting
+ * users by `status`, where most rows tie, page 2 could repeat a row page 1
+ * showed and never show another; the roles default (`key`) ties across every
+ * org holding an `admin` role. A client that pages a catalog to completion
+ * (`fetchAllPages`) then misses rows while its count looks right. The sort
+ * params and the `sort` echoed in the envelope are unchanged: the tiebreaker
+ * is an implementation detail of the order, as it is for the export's keyset
+ * sort ({@link buildKeysetSort}).
+ *
+ * The tiebreaker is referenced by OUTPUT column name, like the sort fields,
+ * so it must name exactly one column of the SELECT: every list selects its
+ * row's `id`, except the membership lists, which pass their own unique key
+ * (a user appears once per group, and once per org for a role). A column the
+ * sort already names is not repeated.
  */
 export function applySortAndPagination<DB, TB extends keyof DB, O>(
   qb: SelectQueryBuilder<DB, TB, O>,
   query: ListQuery,
+  tiebreaker: ReadonlyArray<string> = DEFAULT_TIEBREAKER,
 ): SelectQueryBuilder<DB, TB, O> {
   let next = qb;
   for (const s of query.sort) {
     next = next.orderBy(sql.ref(s.field), s.direction);
+  }
+  const sorted = new Set(query.sort.map((s) => s.field));
+  for (const field of tiebreaker) {
+    if (!sorted.has(field)) next = next.orderBy(sql.ref(field), "asc");
   }
   return next.limit(query.pageSize).offset(offsetFor(query));
 }

@@ -11,6 +11,8 @@ import {
   type DualListEndpoint,
   type DualListSaveError,
 } from "@/lib/admin/dual-list-save.client";
+import { fetchAllPages } from "@/lib/admin/admin-list.client";
+import { ListLimitNotice } from "../../_components/list-limit-notice";
 
 /**
  * Dual-list ROLES editor for a group (ADR-0002).
@@ -26,6 +28,13 @@ import {
  * lists, after a failure too. The server rejects a foreign/global role (404)
  * and, in either direction, a role conferring a permission a non-superadmin
  * does not hold (403, AUTHZ-3 / REVOKE-1).
+ *
+ * F-41: the org's role catalog is read in full (`fetchAllPages`); it was one
+ * `pageSize=200` request, so an org with more roles could not bundle the rest,
+ * and nothing said so. A catalog the reader could not finish shows "Showing N
+ * of M". The group's assigned roles are merged into the catalog, so one the
+ * catalog does not hold, moved out of Assigned, stays in Available (it used
+ * to vanish from both columns).
  */
 interface RoleOption {
   id: string;
@@ -50,6 +59,8 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
   const tErr = useTranslations("administrator.errors");
 
   const [catalog, setCatalog] = useState<RoleOption[] | null>(null);
+  // Catalog rows read vs. the server's count of them (F-41), for the notice.
+  const [catalogRead, setCatalogRead] = useState({ shown: 0, total: 0 });
   const [assigned, setAssigned] = useState<string[]>([]);
   const [serverAssigned, setServerAssigned] = useState<string[]>([]);
   const [availableSelected, setAvailableSelected] = useState<string[]>([]);
@@ -92,27 +103,37 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
           return;
         }
         const detailBody = (await detailRes.json()) as { group: { organization_id: string } };
-        const assignedBody = (await assignedRes.json()) as { roles: Array<{ id: string }> };
+        const assignedBody = (await assignedRes.json()) as {
+          roles: Array<{ id: string; key?: string; name?: string }>;
+        };
         const groupOrgId = detailBody.group.organization_id;
 
         // Scope the catalog to the group's OWN org: the assignment endpoint
         // rejects foreign-org / global roles (404), so only same-org roles are
         // assignable. Scoping the list means it never shows a role that would
         // fail on save, and drops the cross-org "duplicate" noise. Server-side
-        // scoping is required because of the pageSize cap — a client-only filter
-        // could miss the group's roles if other orgs' filled the first page.
-        const rolesRes = await fetch(
-          `/api/administrator/roles?filter[organization]=${groupOrgId}&pageSize=200`,
-          { credentials: "same-origin" },
+        // scoping also keeps other orgs' roles from filling the pages read.
+        const all = await fetchAllPages<RoleOption>(
+          `/api/administrator/roles?filter[organization]=${groupOrgId}`,
         );
-        if (!rolesRes.ok) {
-          if (!cancelled) setError(tErr("generic"));
-          return;
-        }
-        const rolesBody = (await rolesRes.json()) as { items: RoleOption[] };
         if (cancelled) return;
+        // An assigned role the catalog does not hold (F-41) joins it, so it
+        // can be moved out of Assigned and back. It is the group's own org's
+        // (the server refuses any other), which the `orgId` guard below needs.
+        const inCatalog = new Set(all.items.map((r) => r.id));
+        const orgName = all.items[0]?.organization_name ?? null;
+        const outside: RoleOption[] = assignedBody.roles
+          .filter((r) => !inCatalog.has(r.id))
+          .map((r) => ({
+            id: r.id,
+            key: r.key ?? r.id,
+            name: r.name ?? r.key ?? r.id,
+            organization_id: groupOrgId,
+            organization_name: orgName,
+          }));
         setOrgId(groupOrgId);
-        setCatalog(rolesBody.items);
+        setCatalog([...all.items, ...outside]);
+        setCatalogRead({ shown: all.items.length, total: all.total });
         const ids = assignedBody.roles.map((r) => r.id).sort();
         setAssigned(ids);
         setServerAssigned(ids);
@@ -275,6 +296,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
           disabled={locked}
         />
       </div>
+      <ListLimitNotice shown={catalogRead.shown} total={catalogRead.total} kind="catalog" />
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

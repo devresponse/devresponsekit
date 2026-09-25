@@ -32,7 +32,11 @@ export const dynamic = "force-dynamic";
  *   - `scope` — `global` or `org`.
  *   - `permission` — permission key; returns roles holding that key.
  *
- * `q` matches case-insensitively against `key` and `name`.
+ * `q` matches case-insensitively against `key`, `name` and the owning
+ * organization's name. F-41: the superadmin role picker searches here, and
+ * when every org holds an `admin` role, searching `admin` cannot single out
+ * one org's; typing the org's name lists that org's roles, as the picker's
+ * old client-side filter (over the first 200 roles only) did.
  *
  * Caller MUST hold `admin.roles.read`.
  */
@@ -97,7 +101,9 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
 
   if (query.q) {
     const like = likeContains(query.q);
-    base = base.where((eb) => eb.or([eb("r.key", "ilike", like), eb("r.name", "ilike", like)]));
+    base = base.where((eb) =>
+      eb.or([eb("r.key", "ilike", like), eb("r.name", "ilike", like), eb("o.name", "ilike", like)]),
+    );
   }
 
   // ADR-0001: an org admin sees only roles owned by their org; global

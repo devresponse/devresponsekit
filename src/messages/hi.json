@@ -1238,7 +1238,12 @@
       "searchPlaceholder": "समूह खोजें…",
       "noResults": "कोई समूह नहीं मिला।",
       "loading": "लोड हो रहा है…",
-      "loadError": "समूह लोड नहीं हो सके।"
+      "loadError": "समूह लोड नहीं हो सके।",
+      "alreadyMember": "पहले से सदस्य"
+    },
+    "listLimit": {
+      "searchTruncated": "{total} में से {shown} दिखाए जा रहे हैं। सूची छोटी करने के लिए टाइप करें।",
+      "catalogTruncated": "{total} में से {shown} दिखाए जा रहे हैं। बाकी लोड नहीं हो सके, इसलिए सूची में नहीं हैं।"
     },
     "agents": {
       "title": "MCP agents",

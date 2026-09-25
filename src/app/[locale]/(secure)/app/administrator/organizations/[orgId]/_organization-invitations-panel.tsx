@@ -33,7 +33,9 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useZodForm } from "@/lib/forms/use-zod-form";
 import { createInvitationSchema, type CreateInvitationInput } from "@/lib/validation/invitations";
+import { fetchAllPages } from "@/lib/admin/admin-list.client";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
+import { ListLimitNotice } from "../../_components/list-limit-notice";
 
 /**
  * Invitations panel on the organization detail's Members tab (0008).
@@ -43,6 +45,10 @@ import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
  * "Invite member" dialog (email + optional org-scoped role). Row actions:
  * resend (rotates the token + expiry in place — the old link dies) and
  * revoke, both pending-only.
+ *
+ * The role select lists EVERY role of the org (`fetchAllPages`, F-41); it
+ * read one `pageSize=100` page, so an org with more roles could not invite
+ * into the rest, and nothing said so.
  */
 interface InvitationRow {
   id: string;
@@ -79,6 +85,8 @@ export function OrganizationInvitationsPanel({
   );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  // The server's count of the org's roles (F-41), for the notice.
+  const [rolesTotal, setRolesTotal] = useState(0);
   const [rolesLoading, setRolesLoading] = useState(false);
   const [rolesError, setRolesError] = useState(false);
 
@@ -89,22 +97,18 @@ export function OrganizationInvitationsPanel({
   const openDialog = useCallback(async () => {
     form.reset({ email: "", roleId: null });
     setRoles([]);
+    setRolesTotal(0);
     setRolesError(false);
     setRolesLoading(true);
     setDialogOpen(true);
     // Best-effort role options; the dialog works without them, but surface a
     // hint on failure so an empty dropdown doesn't read as "this org has none".
     try {
-      const res = await fetch(
-        `/api/administrator/roles?filter[organization]=${orgId}&pageSize=100`,
-        { credentials: "same-origin" },
+      const all = await fetchAllPages<RoleOption>(
+        `/api/administrator/roles?filter[organization]=${orgId}`,
       );
-      if (!res.ok) {
-        setRolesError(true);
-        return;
-      }
-      const body = (await res.json()) as { items: Array<{ id: string; name: string }> };
-      setRoles(body.items.map((r) => ({ id: r.id, name: r.name })));
+      setRoles(all.items.map((r) => ({ id: r.id, name: r.name })));
+      setRolesTotal(all.total);
     } catch {
       setRolesError(true);
     } finally {
@@ -350,7 +354,9 @@ export function OrganizationInvitationsPanel({
                       <FormDescription role="status" className="text-destructive">
                         {t("rolesError")}
                       </FormDescription>
-                    ) : null}
+                    ) : (
+                      <ListLimitNotice shown={roles.length} total={rolesTotal} kind="catalog" />
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}

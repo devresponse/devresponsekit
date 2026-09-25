@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAdminSearch } from "@/lib/admin/admin-list.client";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -15,6 +16,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ListLimitNotice } from "../../_components/list-limit-notice";
 
 /**
  * Role picker for the user-detail "Assign role" dialog.
@@ -25,8 +27,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
  * role — no separate org picker needed. Global roles (no org) are omitted: they
  * need an explicit org context to assign and are out of scope here.
  *
- * Mirrors `organization-picker.tsx` (Shadcn Popover + cmdk Command) so search
- * and a11y behave identically. `onChange` hands back the full option (or null).
+ * Searches SERVER-SIDE (`useAdminSearch`, F-41) by role key, role name or the
+ * owning org's name, asking only for org-scoped roles (`filter[scope]=org`).
+ * It used to load one page of 200 roles across every org, sorted by key, and
+ * filter that client-side: with each org holding `admin` and `member`, keys
+ * such as `support` never loaded and could not be assigned. The client-side
+ * global-role filter below stays as defense in depth.
  */
 export interface RoleOption {
   id: string;
@@ -56,24 +62,25 @@ export function RolePicker({
   id?: string;
 }) {
   const t = useTranslations("administrator.rolePicker");
-  const [roles, setRoles] = useState<RoleOption[] | null>(null);
-  const [error, setError] = useState(false);
+  const search = useAdminSearch<RoleListItem>("/api/administrator/roles?filter[scope]=org");
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/administrator/roles?pageSize=200", {
-          credentials: "same-origin",
-        });
-        if (!res.ok) {
-          if (!cancelled) setError(true);
-          return;
-        }
-        const body = (await res.json()) as { items: RoleListItem[] };
-        // Only org-scoped roles are directly assignable here.
-        const assignable: RoleOption[] = body.items
+  if (search.error && search.items === null) {
+    return (
+      <div className="space-y-2">
+        <Label htmlFor={id}>{t("label")}</Label>
+        <p className="text-destructive text-sm" role="alert">
+          {t("loadError")}
+        </p>
+      </div>
+    );
+  }
+
+  // Only org-scoped roles are directly assignable here.
+  const roles: RoleOption[] | null =
+    search.items === null
+      ? null
+      : search.items
           .filter(
             (r): r is RoleListItem & { organization_id: string } => r.organization_id !== null,
           )
@@ -84,26 +91,6 @@ export function RolePicker({
             key: r.key,
             name: r.name,
           }));
-        if (!cancelled) setRoles(assignable);
-      } catch {
-        if (!cancelled) setError(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (error) {
-    return (
-      <div className="space-y-2">
-        <Label htmlFor={id}>{t("label")}</Label>
-        <p className="text-destructive text-sm" role="alert">
-          {t("loadError")}
-        </p>
-      </div>
-    );
-  }
 
   const triggerLabel =
     roles === null
@@ -140,17 +127,17 @@ export function RolePicker({
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
-          <Command>
-            <CommandInput placeholder={t("searchPlaceholder")} />
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder={t("searchPlaceholder")}
+              value={search.query}
+              onValueChange={search.setQuery}
+            />
             <CommandList>
               <CommandEmpty>{t("noResults")}</CommandEmpty>
               <CommandGroup>
                 {(roles ?? []).map((r) => (
-                  <CommandItem
-                    key={r.id}
-                    value={`${r.name} ${r.key} ${r.organization_name ?? ""}`}
-                    onSelect={() => select(r)}
-                  >
+                  <CommandItem key={r.id} value={r.id} onSelect={() => select(r)}>
                     <Check
                       className={cn(
                         "mr-2 h-4 w-4",
@@ -167,6 +154,17 @@ export function RolePicker({
                 ))}
               </CommandGroup>
             </CommandList>
+            {search.error ? (
+              <p className="text-destructive px-2 py-1.5 text-xs" role="alert">
+                {t("loadError")}
+              </p>
+            ) : null}
+            <ListLimitNotice
+              shown={search.items?.length ?? 0}
+              total={search.total}
+              kind="search"
+              className="border-t px-2 py-1.5"
+            />
           </Command>
         </PopoverContent>
       </Popover>

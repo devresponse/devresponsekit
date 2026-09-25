@@ -136,6 +136,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     const column = SORT_COLUMNS[s.field];
     if (column) itemsQuery = itemsQuery.orderBy(sql.ref(column), s.direction);
   }
+  // F-41: the key id last, as `applySortAndPagination` does for the other
+  // lists, so OFFSET pages slice one total order (keys minted in one
+  // transaction share `created_at`, and every revoked key ties on `status`).
+  itemsQuery = itemsQuery.orderBy("k.id", "asc");
   itemsQuery = itemsQuery.limit(query.pageSize).offset(offsetFor(query));
 
   const { items, total } = await executeListWithTotal(

@@ -92,6 +92,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
       "ur.created_at as created_at",
     ]),
     query,
+    // F-41: the rows carry no `id`; for one role a user appears once per org
+    // (the PK is (app_user_id, organization_id, role_id)), so that pair is the
+    // unique tiebreaker.
+    ["app_user_id", "organization_id"],
   );
 
   const { items, total } = await executeListWithTotal(

@@ -78,6 +78,9 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
       "gm.created_at as created_at",
     ]),
     query,
+    // F-41: the rows carry no `id`; a user is in a group once (the PK is
+    // (group_id, app_user_id)), so the user id is the unique tiebreaker.
+    ["app_user_id"],
   );
 
   const [items, totalRow] = await Promise.all([

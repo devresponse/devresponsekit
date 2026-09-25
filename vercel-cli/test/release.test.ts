@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 
 // Tests run against the BUILT output, so they exercise exactly what ships.
+import { doctor } from "../dist/commands/doctor.js";
+import { init } from "../dist/commands/init.js";
 import {
   deploy,
   migrate,
@@ -16,6 +27,7 @@ import {
 import { applyMigrations, migrationEnv } from "../dist/lib/kit.js";
 import { CliError, setQuiet } from "../dist/lib/log.js";
 import { verifyMigrationTarget } from "../dist/lib/migration-target.js";
+import { assertCheckoutLink, vercelEnvFor } from "../dist/lib/vercel-project.js";
 
 /* ================================================================== */
 /*  F-45 / F-47: the release ORDER, asserted rather than read          */
@@ -41,12 +53,16 @@ const UP_ORDER = ["envSync", "link", "pull", "migrate", "build", "promote", "ver
 const MIGRATE_ORDER = ["link", "pull", "migrate"];
 
 const TOKEN = "test-token-that-never-leaves-this-process";
+/** A personal account's own id, which is what a personal project's `accountId` is. */
+const PERSONAL_OWNER = "Xq7personalAccount42";
 
 /** Every variable the release path reads from the shell, scrubbed for the run. */
 const AMBIENT = [
   "VERCEL_TOKEN",
   "VERCEL_ORG_ID",
   "VERCEL_PROJECT_ID",
+  "NOW_ORG_ID",
+  "NOW_PROJECT_ID",
   "PRODUCTION_DIRECT_DATABASE_URL",
   "DIRECT_DATABASE_URL",
   "DATABASE_URL",
@@ -66,10 +82,15 @@ const LOCAL = "postgresql://postgres:postgres@localhost:5432/devresponse";
 
 /** Where the pinned Vercel CLI writes production's variables. Hard-coded: it is Vercel's contract. */
 const pulledFile = (root: string) => join(root, ".vercel", ".env.production.local");
+/** Where `vercel link` records a checkout's project. Vercel's contract too. */
+const linkFile = (root: string) => join(root, ".vercel", "project.json");
 
 let workspace = "";
 const savedEnv: Record<string, string | undefined> = {};
 const savedFetch = globalThis.fetch;
+const offline = (async () => {
+  throw new Error("a release test reached the network");
+}) as typeof fetch;
 
 before(() => {
   workspace = mkdtempSync(join(tmpdir(), "drk-deploy-release-"));
@@ -83,9 +104,7 @@ before(() => {
   process.env.VERCEL_TOKEN = TOKEN;
   // Every network call belongs to a faked step. One that escapes the runner
   // fails here, loudly, instead of reaching Vercel or a probe target.
-  globalThis.fetch = (async () => {
-    throw new Error("a release test reached the network");
-  }) as typeof fetch;
+  globalThis.fetch = offline;
   setQuiet(true);
 });
 
@@ -112,10 +131,15 @@ let fixtures = 0;
  * enough (a package.json with both migrate scripts, a migrations directory,
  * tsx "installed") for a DRY-RUN `migrate` to finish: its scripts exit
  * non-zero, so a run that was not dry still migrates nothing.
+ *
+ * `owner` is how the config names the project's owner (F-48): `team` (the
+ * default) records a team id, `personal` a personal account with the owner
+ * `init` now records, and `unrecorded` a personal account configured before
+ * it did, with neither.
  */
 function fixture(
   target: "kit" | "satellite",
-  options: { database?: "own"; migratableKit?: boolean } = {},
+  options: { database?: "own"; migratableKit?: boolean; owner?: "team" | "personal" | "unrecorded" } = {},
 ): { cliRoot: string; kitRoot: string; appRoot: string } {
   const cliRoot = join(workspace, `cli-${++fixtures}`);
   const kitRoot = join(cliRoot, "kit");
@@ -135,9 +159,11 @@ function fixture(
     );
   }
 
+  const owner = options.owner ?? "team";
   const base = {
     projectId: "prj_test",
-    teamId: "team_test",
+    ...(owner === "team" ? { teamId: "team_test" } : {}),
+    ...(owner === "personal" ? { orgId: PERSONAL_OWNER } : {}),
     origin: "https://demo.example.com",
     appName: "Example",
     audiencePrefix: "devresponse-app",
@@ -184,12 +210,21 @@ function vercelEnvFile(values: Record<string, string>): string {
  * reads production's variables from it, and a missing file is only a debug
  * line there, so a build without them (no NEXT_PUBLIC_* values inlined)
  * would be promoted with every step green.
+ *
+ * Its `link` does what the pinned `vercel link --project=<id>` does to a
+ * checkout that has no link yet (F-48). Handed the pair VERCEL_ORG_ID +
+ * VERCEL_PROJECT_ID, it takes the project from them and writes nothing
+ * (`setupAndLink` returns before `linkFolderToProject`). Handed neither, it
+ * writes `.vercel/project.json` naming the configured project, or with
+ * `linked` another project's id, or (`null`) nothing at all. Its `pull`, like
+ * the real one, writes that file for the project the pair names.
  */
 function recordingRunner(
   options: {
     failAt?: string;
     envProblems?: number;
     production?: Record<string, string> | null;
+    linked?: string | null;
   } = {},
 ) {
   const calls: string[] = [];
@@ -206,6 +241,31 @@ function recordingRunner(
         args[name] = received;
         if (name === "build") {
           seen.pulledAtBuild = existsSync(pulledFile((received[0] as { root: string }).root));
+        }
+        // A Vercel step's invocation. Other steps get other arguments, and
+        // read none of this.
+        const vercel = received[0] as {
+          root: string;
+          config: { projectId: string };
+          env: Record<string, string | undefined>;
+        };
+        const paired = Boolean(vercel?.env?.VERCEL_ORG_ID && vercel.env.VERCEL_PROJECT_ID);
+        if (name === "link" && !paired) {
+          const file = linkFile(vercel.root);
+          if (!existsSync(file) && options.linked !== null) {
+            mkdirSync(join(file, ".."), { recursive: true });
+            writeFileSync(
+              file,
+              JSON.stringify({ projectId: options.linked ?? vercel.config.projectId, orgId: "x" }),
+            );
+          }
+        }
+        if (name === "pull" && paired) {
+          mkdirSync(join(linkFile(vercel.root), ".."), { recursive: true });
+          writeFileSync(
+            linkFile(vercel.root),
+            JSON.stringify({ projectId: vercel.env.VERCEL_PROJECT_ID, orgId: vercel.env.VERCEL_ORG_ID }),
+          );
         }
         if (name === "pull") {
           const file = pulledFile((received[0] as { root: string }).root);
@@ -1038,6 +1098,406 @@ test("F-47: a stale pulled file never vouches for production, and a missing one 
     ),
   );
   assert.deepEqual(nothing.calls, ["envCheck", "link", "pull"]);
+});
+
+/* ================================================================== */
+/*  F-48: which project `vercel` acts on                               */
+/* ================================================================== */
+
+/** A fixture's config, read back. */
+const configOf = (cliRoot: string) => JSON.parse(readFileSync(join(cliRoot, ".drk-deploy.json"), "utf8"));
+
+/**
+ * Removed from the child: present in the overlay as `undefined`, which drops
+ * the shell's copy (`run` layers the overlay over `process.env`, and spawn
+ * skips an undefined value). Absent from the overlay would inherit it.
+ */
+const removed = (env: Record<string, string | undefined>, key: string) =>
+  key in env && env[key] === undefined;
+
+/** The refusal for a shell that names another project than the config. */
+const disagrees = (key: string) =>
+  refusal(
+    /^The shell names a different Vercel project than this config\. Nothing was run\.$/,
+    new RegExp(`${key}=`),
+    2,
+  );
+
+/** The refusal for a checkout whose link names another project. */
+const mislinked = (named: string, deploys: string) =>
+  refusal(
+    new RegExp(
+      `^This checkout is linked to another Vercel project: .*project\\.json names ${named}, and this config deploys ${deploys}\\. Nothing was linked, pulled or deployed\\.$`,
+    ),
+    /delete .*project\.json and re-run[\s\S]*re-run `drk-deploy init`/,
+    2,
+  );
+
+const COMMANDS = { deploy, up, migrate: migrateCommand } as const;
+
+test("F-48: every vercel child gets VERCEL_PROJECT_ID only together with VERCEL_ORG_ID, or neither", () => {
+  const project = { ...configOf(fixture("kit", { owner: "unrecorded" }).cliRoot) };
+  const cases: [string, Record<string, unknown>, string | null][] = [
+    ["a team", { ...project, teamId: "team_test" }, "team_test"],
+    ["a team, owner recorded by init", { ...project, teamId: "team_test", orgId: "team_test" }, "team_test"],
+    // The reviewed case: no --team, so VERCEL_PROJECT_ID used to be set with
+    // no VERCEL_ORG_ID, and `vercel pull` exited 1 on every run.
+    ["a personal account, owner recorded by init", { ...project, orgId: PERSONAL_OWNER }, PERSONAL_OWNER],
+    ["a personal account configured before F-48", project, null],
+    ["a blank owner is no owner", { ...project, orgId: "  " }, null],
+  ];
+  for (const [name, config, owner] of cases) {
+    const { env, orgId, ignored } = vercelEnvFor(config, TOKEN, {});
+    assert.equal(orgId, owner, name);
+    assert.equal(env.VERCEL_TOKEN, TOKEN, `${name}: the token travels in the environment`);
+    if (owner) {
+      assert.equal(env.VERCEL_ORG_ID, owner, name);
+      assert.equal(env.VERCEL_PROJECT_ID, "prj_test", name);
+    } else {
+      // The Vercel CLI then reads the checkout's link, which is checked.
+      assert.ok(removed(env, "VERCEL_ORG_ID") && removed(env, "VERCEL_PROJECT_ID"), name);
+    }
+    assert.equal(
+      env.VERCEL_ORG_ID === undefined,
+      env.VERCEL_PROJECT_ID === undefined,
+      `${name}: both or neither, never the one \`vercel\` refuses`,
+    );
+    assert.ok(
+      removed(env, "NOW_ORG_ID") && removed(env, "NOW_PROJECT_ID"),
+      `${name}: the legacy names, which pick a project too, never reach the child`,
+    );
+    assert.deepEqual(ignored, [], name);
+  }
+});
+
+test("F-48: a personal account deploys, with the pair when its owner is recorded and through its checked link when not", async () => {
+  // The reviewed case first: a personal account configured with no --team.
+  for (const owner of ["unrecorded", "personal", "team"] as const) {
+    const { cliRoot, kitRoot } = fixture("kit", { owner });
+    const { runner, calls, args } = recordingRunner();
+    await deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner);
+    assert.deepEqual(calls, KIT_ORDER, owner);
+    // Every Vercel step is handed exactly what the builder makes, so no step
+    // can have built an environment of its own.
+    const built = vercelEnvFor(configOf(cliRoot), TOKEN, {});
+    for (const name of ["link", "pull", "build", "promote"]) {
+      const [invocation] = args[name] as [{ env: Record<string, string | undefined>; orgId: string | null }];
+      assert.equal(
+        invocation.env.VERCEL_ORG_ID === undefined,
+        invocation.env.VERCEL_PROJECT_ID === undefined,
+        `${owner}: ${name} gets VERCEL_PROJECT_ID only with VERCEL_ORG_ID, the pair \`vercel\` requires`,
+      );
+      assert.deepEqual(invocation.env, built.env, `${owner}: ${name}`);
+      assert.equal(invocation.orgId, built.orgId, `${owner}: ${name}`);
+    }
+    // Written by `vercel link` when no owner is recorded, and by `vercel pull`
+    // when the pair names the project: either way, the configured one.
+    assert.equal(JSON.parse(readFileSync(linkFile(kitRoot), "utf8")).projectId, "prj_test", owner);
+  }
+
+  const upped = recordingRunner();
+  await up(fixture("kit", { owner: "personal" }).cliRoot, { databaseUrl: PRODUCTION_DIRECT }, upped.runner);
+  assert.deepEqual(upped.calls, UP_ORDER);
+  const [pulled] = upped.args.pull as [{ env: Record<string, string | undefined> }];
+  assert.equal(pulled.env.VERCEL_ORG_ID, PERSONAL_OWNER);
+  assert.equal(pulled.env.VERCEL_PROJECT_ID, "prj_test");
+});
+
+test("F-48: a shell VERCEL_PROJECT_ID or VERCEL_ORG_ID never reaches vercel, and one that disagrees is refused", async () => {
+  const team = configOf(fixture("kit").cliRoot);
+  const unrecorded = configOf(fixture("kit", { owner: "unrecorded" }).cliRoot);
+  const refused: [string, Record<string, unknown>, Record<string, string>, string][] = [
+    ["another project", team, { VERCEL_PROJECT_ID: "prj_kit" }, "VERCEL_PROJECT_ID"],
+    ["another owner", team, { VERCEL_ORG_ID: "team_other" }, "VERCEL_ORG_ID"],
+    [
+      "the legacy spelling, which the Vercel CLI still reads",
+      team,
+      { NOW_PROJECT_ID: "prj_kit" },
+      "NOW_PROJECT_ID",
+    ],
+    // A project id is checkable with no owner recorded.
+    ["another project, no owner recorded", unrecorded, { VERCEL_PROJECT_ID: "prj_kit" }, "VERCEL_PROJECT_ID"],
+  ];
+  for (const [name, config, shell, key] of refused) {
+    for (const platform of ["win32", "linux", "darwin"] as const) {
+      assert.throws(
+        () => vercelEnvFor(config, TOKEN, shell, platform),
+        disagrees(key),
+        `${name}, ${platform}`,
+      );
+    }
+  }
+
+  // Another casing is the same variable on Windows, so it is checked there.
+  // Elsewhere it is another variable, which `vercel` never reads: scrubbed all
+  // the same, but no reason to refuse a deploy or to warn.
+  const lower = { vercel_project_id: "prj_kit" };
+  assert.throws(() => vercelEnvFor(team, TOKEN, lower, "win32"), disagrees("vercel_project_id"));
+  assert.deepEqual(vercelEnvFor(unrecorded, TOKEN, { vercel_org_id: PERSONAL_OWNER }, "win32").ignored, [
+    "vercel_org_id",
+  ]);
+  for (const platform of ["linux", "darwin"] as const) {
+    const other = vercelEnvFor(team, TOKEN, lower, platform);
+    assert.ok(removed(other.env, "vercel_project_id"), platform);
+    assert.equal(other.env.VERCEL_PROJECT_ID, "prj_test", platform);
+    assert.deepEqual(
+      vercelEnvFor(unrecorded, TOKEN, { vercel_org_id: PERSONAL_OWNER }, platform).ignored,
+      [],
+      platform,
+    );
+  }
+
+  // Values that agree are not refused, and are still replaced, however spelled.
+  const agreed = vercelEnvFor(team, TOKEN, {
+    vercel_org_id: "team_test",
+    VERCEL_PROJECT_ID: "prj_test",
+    NOW_ORG_ID: "",
+  });
+  assert.equal(agreed.env.VERCEL_ORG_ID, "team_test");
+  assert.equal(agreed.env.VERCEL_PROJECT_ID, "prj_test");
+  assert.ok(removed(agreed.env, "vercel_org_id") && removed(agreed.env, "NOW_ORG_ID"));
+  assert.doesNotThrow(
+    () => vercelEnvFor(team, TOKEN, { VERCEL_PROJECT_ID: "", VERCEL_ORG_ID: "  " }),
+    "blank is unset",
+  );
+
+  // The old workaround for this bug, an exported VERCEL_ORG_ID, cannot be
+  // checked against a config with no owner: dropped, and reported.
+  const workaround = vercelEnvFor(unrecorded, TOKEN, { VERCEL_ORG_ID: PERSONAL_OWNER });
+  assert.deepEqual(workaround.ignored, ["VERCEL_ORG_ID"]);
+  assert.ok(removed(workaround.env, "VERCEL_ORG_ID") && removed(workaround.env, "VERCEL_PROJECT_ID"));
+
+  // End to end: a shell set up to deploy the KIT, running a satellite's
+  // config, is refused before anything runs, env:sync included.
+  for (const [command, run] of Object.entries(COMMANDS)) {
+    const { runner, calls } = recordingRunner();
+    await withEnv({ VERCEL_PROJECT_ID: "prj_test" }, () =>
+      assert.rejects(
+        run(fixture("satellite", { database: "own" }).cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner),
+        disagrees("VERCEL_PROJECT_ID"),
+        command,
+      ),
+    );
+    assert.deepEqual(calls, [], `${command}: nothing ran`);
+  }
+});
+
+test("F-48: doctor reports the shell refusal deploy, up and migrate stop on, and counts it", async () => {
+  /**
+   * `doctor` run in `shell`, with what it printed. Only strings are taken,
+   * which is how this CLI writes: `doctor` spawns pnpm, so the test runner
+   * gets to flush earlier tests' results (binary frames on stdout) meanwhile,
+   * and swallowing those would drop them from the report.
+   */
+  const report = async (cliRoot: string, shell: Record<string, string>) => {
+    const chunks: string[] = [];
+    const { write: stdout } = process.stdout;
+    const { write: stderr } = process.stderr;
+    const sink = (original: typeof process.stdout.write, stream: NodeJS.WriteStream) =>
+      ((chunk: unknown, ...rest: unknown[]) => {
+        if (typeof chunk !== "string")
+          return (original as (...args: unknown[]) => boolean).call(stream, chunk, ...rest);
+        chunks.push(chunk);
+        return true;
+      }) as typeof process.stdout.write;
+    process.stdout.write = sink(stdout, process.stdout);
+    process.stderr.write = sink(stderr, process.stderr);
+    setQuiet(false);
+    try {
+      const problems = await withEnv(shell, () => doctor(cliRoot));
+      return { problems, out: chunks.join("") };
+    } finally {
+      setQuiet(true);
+      process.stdout.write = stdout;
+      process.stderr.write = stderr;
+    }
+  };
+
+  // The fixture has no Vercel CLI installed and the API is offline, so the
+  // count is never zero: what matters is what the shell adds to it.
+  const team = fixture("kit").cliRoot;
+  const clean = await report(team, {});
+  assert.match(clean.out, /shell project ids\s+ok none name another project/, clean.out);
+
+  const refused = await report(team, { VERCEL_PROJECT_ID: "prj_kit" });
+  assert.equal(refused.problems, clean.problems + 1, refused.out);
+  assert.match(
+    refused.out,
+    /shell project ids\s+wrong — The shell names a different Vercel project than this config\. Nothing was run\./,
+  );
+  assert.match(refused.out, /VERCEL_PROJECT_ID=prj_kit, where this config has prj_test/);
+
+  // An unchecked VERCEL_ORG_ID is a warning, as it is for deploy: not counted.
+  const unrecorded = fixture("kit", { owner: "unrecorded" }).cliRoot;
+  const baseline = await report(unrecorded, {});
+  const ignored = await report(unrecorded, { VERCEL_ORG_ID: PERSONAL_OWNER });
+  assert.equal(ignored.problems, baseline.problems, ignored.out);
+  assert.match(ignored.out, /shell project ids\s+ignored VERCEL_ORG_ID — not passed to vercel/);
+});
+
+test("F-48: a checkout linked to another project is refused before anything runs, and never re-linked over", async () => {
+  for (const owner of ["team", "personal", "unrecorded"] as const) {
+    for (const [command, run] of Object.entries(COMMANDS)) {
+      // The case the review names: a satellite checkout linked to the kit's
+      // project. With no owner recorded, `vercel` would have deployed there.
+      const { cliRoot, appRoot } = fixture("satellite", { database: "own", owner });
+      mkdirSync(join(appRoot, ".vercel"), { recursive: true });
+      writeFileSync(linkFile(appRoot), JSON.stringify({ projectId: "prj_test", orgId: "team_test" }));
+      const { runner, calls } = recordingRunner();
+      await assert.rejects(
+        run(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner),
+        mislinked("prj_test", "prj_sat"),
+        `${owner}, ${command}`,
+      );
+      assert.deepEqual(calls, [], `${owner}, ${command}: nothing ran`);
+      assert.equal(JSON.parse(readFileSync(linkFile(appRoot), "utf8")).projectId, "prj_test", "left alone");
+    }
+  }
+
+  const root = join(workspace, `link-${++fixtures}`);
+  mkdirSync(join(root, ".vercel"), { recursive: true });
+  const named = { projectId: "my-app" };
+  writeFileSync(linkFile(root), JSON.stringify({ projectId: "prj_1", projectName: "my-app" }));
+  assert.doesNotThrow(
+    () => assertCheckoutLink(root, named, { required: true }),
+    "a config naming its project by name, as `vercel` itself matches it",
+  );
+  writeFileSync(linkFile(root), "{not json");
+  assert.throws(
+    () => assertCheckoutLink(root, named, { required: false }),
+    refusal(/project\.json is not valid JSON/, /Delete it and re-run/, 2),
+  );
+  writeFileSync(linkFile(root), "null");
+  assert.throws(
+    () => assertCheckoutLink(root, named, { required: false }),
+    refusal(/names no project id, and this config deploys my-app/),
+  );
+  rmSync(linkFile(root));
+  assert.doesNotThrow(() => assertCheckoutLink(root, named, { required: false }));
+  assert.throws(
+    () => assertCheckoutLink(root, named, { required: true }),
+    refusal(/^vercel link wrote no .*project\.json/, /drk-deploy init/, 2),
+  );
+});
+
+test("F-48: with no owner recorded, what `vercel link` wrote is checked before anything is pulled", async () => {
+  const cases: [string, string | null, (err: unknown) => boolean][] = [
+    ["wrote nothing", null, refusal(/^vercel link wrote no .*project\.json/, /drk-deploy init/, 2)],
+    ["linked another project", "prj_other", mislinked("prj_other", "prj_test")],
+  ];
+  for (const [name, linked, refused] of cases) {
+    const { runner, calls } = recordingRunner({ linked });
+    await assert.rejects(
+      deploy(fixture("kit", { owner: "unrecorded" }).cliRoot, { databaseUrl: PRODUCTION_DIRECT }, runner),
+      refused,
+      name,
+    );
+    assert.deepEqual(calls, ["envCheck", "link"], `${name}: nothing pulled, migrated, built or promoted`);
+  }
+
+  // With an owner recorded the pair names the project, and `vercel link`
+  // writes nothing, so no link file is needed after it.
+  const { cliRoot, kitRoot } = fixture("kit", { owner: "personal" });
+  const paired = recordingRunner();
+  await deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, paired.runner);
+  assert.deepEqual(paired.calls, KIT_ORDER);
+
+  // Nor can `vercel link` then point the checkout at another project. A file
+  // naming one can only have been there already, and is refused before
+  // anything runs, as it is for every owner and command above.
+  writeFileSync(linkFile(kitRoot), JSON.stringify({ projectId: "prj_other" }));
+  const wrong = recordingRunner();
+  await assert.rejects(
+    deploy(cliRoot, { databaseUrl: PRODUCTION_DIRECT }, wrong.runner),
+    mislinked("prj_other", "prj_test"),
+  );
+  assert.deepEqual(wrong.calls, []);
+});
+
+test("F-48: init records the project's owner from the project itself, for a personal account too", async () => {
+  // What `GET /v9/projects/{id}` answers for a personal account's project,
+  // trimmed to the fields the SDK insists on.
+  const project = (accountId: string) => ({
+    id: "prj_personal",
+    name: "mine",
+    accountId,
+    alias: [],
+    nodeVersion: "24.x",
+    defaultResourceConfig: { functionDefaultRegions: [] },
+    resourceConfig: { functionDefaultRegions: [] },
+    deploymentExpiration: {},
+  });
+  const requests: string[] = [];
+  let answer = project(PERSONAL_OWNER);
+  globalThis.fetch = (async (input: RequestInfo | URL, request?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    requests.push(
+      `${request?.method ?? (input instanceof Request ? input.method : "GET")} ${url.pathname}${url.search}`,
+    );
+    if (url.hostname === "api.vercel.com" && url.pathname === "/v9/projects/prj_personal") {
+      return new Response(JSON.stringify(answer), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    throw new Error(`init made an unexpected call: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    // A first `init` from a personal account: no --team.
+    const { cliRoot, kitRoot } = fixture("kit", { migratableKit: true, owner: "unrecorded" });
+    rmSync(join(cliRoot, ".drk-deploy.json"));
+    const options = { project: "prj_personal", domain: "mine.example.com", kitRoot, yes: true };
+    await init(cliRoot, options);
+    const config = configOf(cliRoot);
+    assert.equal(config.orgId, PERSONAL_OWNER);
+    assert.equal("teamId" in config, false);
+    assert.deepEqual(requests, ["GET /v9/projects/prj_personal"], "read in the personal scope: no teamId");
+    assert.equal(vercelEnvFor(config, TOKEN, {}).env.VERCEL_ORG_ID, PERSONAL_OWNER);
+
+    // Re-running it re-reads the owner rather than inheriting the recorded one.
+    answer = project("team_moved");
+    await init(cliRoot, options);
+    assert.equal(configOf(cliRoot).orgId, "team_moved");
+
+    // And an answer without one records none, rather than keeping a stale one.
+    answer = project("");
+    await init(cliRoot, options);
+    assert.equal("orgId" in configOf(cliRoot), false);
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-48: every vercel child is spawned in one place, with the environment the builder made", () => {
+  // Read from source: the question is where the code BUILDS an environment
+  // and spawns `vercel`, which comments may mention freely.
+  const src = fileURLToPath(new URL("../src/", import.meta.url));
+  const files = readdirSync(src, { recursive: true })
+    .map((file) => String(file).replace(/\\/g, "/"))
+    .filter((file) => file.endsWith(".ts"));
+  const code = (file: string) =>
+    readFileSync(join(src, file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+
+  const spawning = files.filter((file) => /\[\s*vercelJs\b/.test(code(file)));
+  assert.deepEqual(spawning, ["commands/release.ts"]);
+  const release = code("commands/release.ts");
+  assert.equal(release.match(/\[\s*vercelJs\b/g)?.length, 1, "one spawn site");
+  assert.match(
+    release,
+    /async function runVercel\(\s*\{ vercelJs, root, env \}: VercelInvocation,[\s\S]*?runOrThrow\(process\.execPath, \[vercelJs, \.\.\.args\], \{ cwd: root, env, failureMessage \}\)/,
+    "it is runVercel's, which spawns with the invocation's env",
+  );
+  assert.match(
+    release,
+    /const \{ env, orgId, ignored \} = vercelEnvFor\(config, token\);/,
+    "and the invocation's env is the builder's",
+  );
+
+  const writing = files.filter((file) => /\b(?:VERCEL|NOW)_(?:ORG|PROJECT)_ID\s*:/.test(code(file)));
+  assert.deepEqual(writing, ["lib/vercel-project.ts"], "the pair is set in one place");
 });
 
 /* ================================================================== */

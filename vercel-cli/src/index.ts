@@ -64,7 +64,10 @@ program
   .command("init")
   .description("Link this checkout to a Vercel project and record its settings")
   .option("--project <nameOrId>", "Vercel project name or id")
-  .option("--team <teamId>", "team id, for a project owned by a team")
+  .option(
+    "--team <teamId>",
+    "team id, for a project owned by a team (a personal account needs none: init records the project's owner)",
+  )
   .option("--domain <host>", "production domain, e.g. app.example.com")
   .option("--app-name <name>", "product name for NEXT_PUBLIC_APP_NAME")
   .option("--kit-root <path>", "path to the devresponsekit checkout (defaults to the parent directory)")

@@ -24,6 +24,16 @@ export interface ProjectConfig {
   projectId: string;
   /** Vercel team id (team_…). Omitted for a personal account. */
   teamId?: string;
+  /**
+   * The project's owner, as the Vercel CLI's VERCEL_ORG_ID names it: the
+   * project's `accountId`, which `init` reads from the project itself. It is
+   * the team id for a team and the account's own id for a personal account.
+   * Every `vercel` child is handed VERCEL_PROJECT_ID only together with it
+   * (F-48). A config written before F-48 has none, and falls back to
+   * `teamId`, or else to the checkout's `.vercel/project.json`, checked
+   * against `projectId` (`lib/vercel-project.ts`).
+   */
+  orgId?: string;
   /** The production origin, e.g. https://demo.example.com. */
   origin: string;
   /** Product name for NEXT_PUBLIC_APP_NAME. */

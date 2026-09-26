@@ -113,7 +113,9 @@ describe("vercel-cli CI job: a gate that can be required (F-45)", () => {
     // The suite imports ../dist, so `test` must build first: without the build
     // it would run against a stale dist locally, and fail to import in CI.
     expect(scripts.test).toMatch(/^pnpm build && node --test .*test\/\*\.test\.ts$/);
-    expect(scripts.build).toMatch(/^tsc -p tsconfig\.json$/);
+    // I-14: the build ends by stamping dist/ with the source it was built
+    // from; without the stamp the CLI refuses to run the build it made.
+    expect(scripts.build).toMatch(/^tsc -p tsconfig\.json && node dist\/write-build-stamp\.js$/);
     expect(scripts["format:check"]).toMatch(
       /^prettier --check .*"src\/\*\*\/\*\.ts" "test\/\*\*\/\*\.ts"/,
     );

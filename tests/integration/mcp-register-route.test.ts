@@ -117,7 +117,8 @@ describe("POST /api/mcp/register (Phase 2)", () => {
   });
 
   it("registers a scopeless client (201) with a pending account in approval mode", async () => {
-    const res = await POST(post({ client_name: "My Agent", organization: "acme" }));
+    const req = post({ client_name: "My Agent", organization: "acme" }, "203.0.113.7");
+    const res = await POST(req);
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.client_id).toBe("drkc_abc");
@@ -129,8 +130,18 @@ describe("POST /api/mcp/register (Phase 2)", () => {
       status: "pending_approval",
       maxPerOrg: 50,
     });
+    // I-03: the Agents console reads an agent's source IP from THIS row, joined
+    // on the service account's app_user_id, and audit derives `ip_address`
+    // from the request's headers. Attributed to the actor only, or written
+    // without the request, the row still exists but every real agent shows
+    // "source IP not recorded".
     expect(auditEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ eventType: "mcp.client.registered" }),
+      expect.objectContaining({
+        eventType: "mcp.client.registered",
+        appUserId: "svc-1",
+        organizationId: ORGS.acme!.id,
+        request: req,
+      }),
     );
   });
 

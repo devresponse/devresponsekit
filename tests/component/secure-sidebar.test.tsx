@@ -157,6 +157,8 @@ describe("SecureSidebar", () => {
     fetchMock.mockResolvedValueOnce(new Response("forbidden", { status: 403 }));
     renderSidebar(<SecureSidebar locale="en" hasPermissions />);
     expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
+    // F-118: the failure arrives after the page loaded, so it is announced.
+    expect(screen.getByRole("alert")).toHaveTextContent(/permission/i);
   });
 
   it("retries the fetch when the retry button is clicked", async () => {

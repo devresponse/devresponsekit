@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { db, pgPool } from "@/db/database";
 import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
-import { listMcpAgents, parseMcpAgentListQuery } from "@/lib/mcp/agents.server";
+import {
+  listMcpAgents,
+  parseMcpAgentListQuery,
+  withMcpAgentProvenance,
+} from "@/lib/mcp/agents.server";
 import { provisionMcpAgent } from "@/lib/mcp/registration.server";
 
 /**
@@ -15,7 +19,9 @@ import { provisionMcpAgent } from "@/lib/mcp/registration.server";
  *   - pages are disjoint and complete (deterministic tiebreaker) and `total`
  *     is the filtered count,
  *   - `pendingCount` is scope-wide (independent of page AND filter),
- *   - an org admin sees only their org.
+ *   - an org admin sees only their org,
+ *   - the console's approval context (I-03) carries the bound org and the
+ *     source IP of the agent's `mcp.client.registered` audit row, in scope only.
  *
  * Driven by `pnpm test:db`. Fixtures use `__dbtest_` and self-clean.
  */
@@ -24,6 +30,7 @@ const createdUserIds: string[] = [];
 let orgId: string;
 let otherOrgId: string;
 let pendingId: string; // the one legitimate pending agent, oldest of all
+let otherPendingId: string; // the other org's pending agent
 
 const superadmin = { permissions: [SUPERADMIN_PERMISSION], organizationId: null } as never;
 const orgAdmin = () => ({ permissions: ["admin.clients.read"], organizationId: orgId }) as never;
@@ -71,11 +78,17 @@ beforeAll(async () => {
         .execute();
     }
   }
-  await provision(otherOrgId, "pending_approval", "other-org-pending", 5);
+  otherPendingId = await provision(otherOrgId, "pending_approval", "other-org-pending", 5);
 });
 
 afterAll(async () => {
   if (createdUserIds.length > 0) {
+    // Audit rows are append-only; the sanctioned retention GUC removes them,
+    // and first, since `app_audit_events.app_user_id` references the users.
+    await db.transaction().execute(async (trx) => {
+      await sql`set local app.audit_retention = 'on'`.execute(trx);
+      await trx.deleteFrom("app_audit_events").where("app_user_id", "in", createdUserIds).execute();
+    });
     await db.deleteFrom("app_oauth_clients").where("app_user_id", "in", createdUserIds).execute();
     await db
       .deleteFrom("app_organization_memberships")
@@ -162,5 +175,71 @@ describe("listMcpAgents (DB-backed, review #13)", () => {
         .map((i) => i.organizationId)
         .sort(),
     ).toEqual([orgId, otherOrgId].sort());
+  });
+});
+
+describe("withMcpAgentProvenance (DB-backed, I-03)", () => {
+  /**
+   * Writes the row the register route writes, with the given source address.
+   * It mirrors `auditEvent` in src/app/api/mcp/register/route.ts: that call's
+   * `appUserId` (the service account) and `request` (the source of
+   * `ip_address`) are what the provenance lookup reads, and
+   * tests/integration/mcp-register-route.test.ts pins both.
+   */
+  async function registrationAudit(clientRowId: string, ip: string): Promise<void> {
+    const client = await db
+      .selectFrom("app_oauth_clients")
+      .select(["app_user_id", "organization_id", "client_id"])
+      .where("id", "=", clientRowId)
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto("app_audit_events")
+      .values({
+        event_type: "mcp.client.registered",
+        outcome: "success",
+        app_user_id: client.app_user_id,
+        organization_id: client.organization_id,
+        ip_address: ip,
+        metadata: JSON.stringify({ clientId: client.client_id }),
+      })
+      .execute();
+  }
+
+  beforeAll(async () => {
+    await registrationAudit(pendingId, "203.0.113.7");
+    await registrationAudit(otherPendingId, "198.51.100.9");
+  });
+
+  it("adds the bound organization and the registration's source IP", async () => {
+    const page = await listMcpAgents(orgAdmin(), q("pageSize=200"));
+    const rows = await withMcpAgentProvenance(orgAdmin(), ours(page.items));
+    const pending = rows.find((row) => row.clientRowId === pendingId);
+    expect(pending).toMatchObject({
+      organizationName: "DBTest main",
+      organizationSlug: `${PREFIX}main`,
+      registeredIp: "203.0.113.7",
+      status: "pending",
+    });
+    // No audit row → no address, and every row still names its org.
+    const others = rows.filter((row) => row.clientRowId !== pendingId);
+    expect(others.length).toBe(12);
+    expect(others.every((row) => row.registeredIp === null)).toBe(true);
+    expect(others.every((row) => row.organizationName === "DBTest main")).toBe(true);
+  });
+
+  it("adds nothing for an agent outside the caller's scope", async () => {
+    const all = await listMcpAgents(superadmin, q("filter[status]=pending&pageSize=200"));
+    const foreign = ours(all.items).find((row) => row.clientRowId === otherPendingId)!;
+    const [asOrgAdmin] = await withMcpAgentProvenance(orgAdmin(), [foreign]);
+    expect(asOrgAdmin).toMatchObject({
+      organizationName: null,
+      organizationSlug: null,
+      registeredIp: null,
+    });
+    const [asSuperadmin] = await withMcpAgentProvenance(superadmin, [foreign]);
+    expect(asSuperadmin).toMatchObject({
+      organizationName: "DBTest other",
+      registeredIp: "198.51.100.9",
+    });
   });
 });

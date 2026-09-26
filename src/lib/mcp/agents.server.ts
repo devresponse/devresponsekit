@@ -12,7 +12,12 @@ import {
   type ListResponse,
 } from "@/lib/admin/list-query.server";
 import type { UserAccessContext } from "@/lib/auth-status";
-import { isMcpAgentStatus, type McpAgentStatus, type McpAgentSummary } from "./agents";
+import {
+  isMcpAgentStatus,
+  type McpAgentConsoleRow,
+  type McpAgentStatus,
+  type McpAgentSummary,
+} from "./agents";
 
 /**
  * Admin-plane queries + lifecycle for self-registered MCP agents (Phase 4,
@@ -26,7 +31,12 @@ import { isMcpAgentStatus, type McpAgentStatus, type McpAgentSummary } from "./a
  * the agent-membership guard, and service-account activation.
  */
 
-export type { McpAgentStatus, McpAgentSummary } from "./agents";
+export type {
+  McpAgentConsoleRow,
+  McpAgentProvenance,
+  McpAgentStatus,
+  McpAgentSummary,
+} from "./agents";
 export { MCP_AGENT_STATUSES } from "./agents";
 
 /** Standard list envelope plus the scope-wide pending count (review #13). */
@@ -143,6 +153,59 @@ export async function listMcpAgents(
     ...buildListResponse(page.items, page.total, query),
     pendingCount: Number(pendingRow?.count ?? 0),
   };
+}
+
+/**
+ * I-03: adds the approval context to one page of {@link listMcpAgents} rows —
+ * the bound organization and the source IP of the registration. The name is
+ * whatever the unauthenticated registrant sent, so on its own it lets a
+ * look-alike ("Acme CI Agent" beside the real one), or an agent bound to the
+ * wrong tenant, be approved by mistake. The console pairs these with the
+ * server-issued client id, which the agent's operator can quote back.
+ *
+ * The IP comes from the `mcp.client.registered` audit row the register route
+ * writes for the agent's service user (one per agent, found through the
+ * `app_user_id` index), rather than from a new column. Re-scoped through
+ * {@link agentBase}, so ids outside the caller's scope get nothing extra.
+ */
+export async function withMcpAgentProvenance(
+  access: UserAccessContext,
+  agents: McpAgentSummary[],
+): Promise<McpAgentConsoleRow[]> {
+  const base = agents.length > 0 ? agentBase(access) : null;
+  const rows = base
+    ? await base
+        .leftJoin("app_organizations as o", "o.id", "c.organization_id")
+        .select((eb) => [
+          "c.id as clientRowId",
+          "o.name as organizationName",
+          "o.slug as organizationSlug",
+          eb
+            .selectFrom("app_audit_events as a")
+            .select(sql<string>`host(a.ip_address)`.as("ip"))
+            .whereRef("a.app_user_id", "=", "c.app_user_id")
+            .where("a.event_type", "=", "mcp.client.registered")
+            .orderBy("a.created_at", "asc")
+            .limit(1)
+            .as("registeredIp"),
+        ])
+        .where(
+          "c.id",
+          "in",
+          agents.map((agent) => agent.clientRowId),
+        )
+        .execute()
+    : [];
+  const byId = new Map(rows.map((row) => [row.clientRowId, row]));
+  return agents.map((agent) => {
+    const row = byId.get(agent.clientRowId);
+    return {
+      ...agent,
+      organizationName: row?.organizationName ?? null,
+      organizationSlug: row?.organizationSlug ?? null,
+      registeredIp: row?.registeredIp ?? null,
+    };
+  });
 }
 
 /**

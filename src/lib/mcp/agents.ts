@@ -33,3 +33,19 @@ export interface McpAgentSummary {
   createdAt: string;
   status: McpAgentStatus;
 }
+
+/**
+ * I-03: what the console shows an approver beside the registrant-chosen name:
+ * the tenant the agent is bound to and the address its registration came
+ * from (the trusted-hop IP on its `mcp.client.registered` audit row; null when
+ * no row carries one, e.g. after audit retention removed it). Console-only:
+ * `GET /api/administrator/mcp-agents` keeps returning plain
+ * {@link McpAgentSummary} items.
+ */
+export interface McpAgentProvenance {
+  organizationName: string | null;
+  organizationSlug: string | null;
+  registeredIp: string | null;
+}
+
+export type McpAgentConsoleRow = McpAgentSummary & McpAgentProvenance;

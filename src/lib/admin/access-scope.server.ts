@@ -342,8 +342,9 @@ export async function userHasMembershipOutsideOrg(
 
 /**
  * Whether an ACCOUNT-GLOBAL action (Better Auth ban/unban, soft-delete/
- * restore — actions that lock a user out of, or back into, EVERY org) is
- * forbidden for this actor against this target (AUTHZ-2).
+ * restore, a password set, a session revoke — one or all — and the profile
+ * edit (F-60/F-61): actions whose effect reaches EVERY org) is forbidden for
+ * this actor against this target (AUTHZ-2).
  *
  * A SUPERADMIN may always act account-globally. A non-SUPERADMIN may only do
  * so when the target is NOT shared with other orgs — otherwise the action

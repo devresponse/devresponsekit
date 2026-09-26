@@ -544,7 +544,7 @@ i18n: run `en` + `uk`; column headers, the status badge, and the joined date loc
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Sessions tab is **not rendered** (the `admin` role lacks `admin.users.sessions`, which gates the trigger); a direct call to the sessions API answers 403, so revoke is impossible either way.
-  - Org Admin / Superadmin → list + revoke. "Revoke all" is account-global, so for a user shared across tenants it is Superadmin-only; an org admin may revoke-all only for a user confined to their org (`api/.../sessions/route.ts:90`, `access-scope.server.ts:133`).
+  - Org Admin / Superadmin → list + revoke. A session is not tied to an org, so both revokes ("Revoke all" and the per-row **Revoke**) are account-global: for a user shared across tenants they are Superadmin-only, and an org admin may revoke only the sessions of a user confined to their org (`api/.../sessions/route.ts:113`, `api/.../sessions/[sessionId]/route.ts:75`, F-60; `access-scope.server.ts:358`).
 - Preconditions & test data: sign the target user in on a second browser/device first so there is a live session to list and revoke.
 
 User stories
@@ -570,7 +570,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-1. Shared-target guard → an org admin clicking "Revoke all" on a cross-org user (`multi1@shared.local`) gets 403 (account-global action reserved for Superadmin, `api/.../sessions/route.ts:92`); the panel shows its error.
+1. Shared-target guard → an org admin clicking "Revoke all", or **Revoke** on one session, on a cross-org user (`multi1@shared.local`) gets 403 (account-global action reserved for Superadmin, `api/.../sessions/route.ts:113`, `api/.../sessions/[sessionId]/route.ts:75`, F-60); the panel shows its error and the sessions stay.
 2. Empty state → a user with no active sessions shows the "no sessions" message; "Revoke all" is disabled (`_user-sessions-panel.tsx:118`).
 3. Loading skeleton → shown while the list fetches (`_user-sessions-panel.tsx:130`).
 

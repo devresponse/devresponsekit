@@ -19,11 +19,12 @@ import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
  * audit writer and every read path are real, against Postgres; only the caller
  * (a cookie session and its access context) and the rate limiter are stubbed.
  *
- *   1. An org-A delegated admin edits a member who also belongs to org B,
- *      assigns them an org-A role, edits and revokes org-A resources (an
- *      enterprise app, an API key) and exports the users. Every row is stamped
- *      org A: the acting org for the user actions, the resource's org for the
- *      rest.
+ *   1. An org-A delegated admin edits the profile of a member of org A only
+ *      (a shared member's profile is account-global, so SUPERADMIN-only:
+ *      F-61), assigns an org-A role to a member who also belongs to org B,
+ *      edits and revokes org-A resources (an enterprise app, an API key) and
+ *      exports the users. Every row is stamped org A: the acting org for the
+ *      user actions, the resource's org for the rest.
  *   2. Org A's admin sees all of it in the explorer, on the member's Audit tab,
  *      in `/api/v1/audit-events` and in the audit CSV. Org B's admin, who can
  *      open the same member's Audit tab, sees none of it anywhere.
@@ -99,6 +100,8 @@ const BA = {
   adminB: `${PREFIX}ba_admin_b_${RUN}`,
   superadmin: `${PREFIX}ba_super_${RUN}`,
   member: `${PREFIX}ba_member_${RUN}`,
+  /** In org A only, so org A's admin may edit their profile (F-61). */
+  localMember: `${PREFIX}ba_local_member_${RUN}`,
   newcomer: `${PREFIX}ba_newcomer_${RUN}`,
   /** In org A and org B, with a role in each; a superadmin removes both. */
   leaver: `${PREFIX}ba_leaver_${RUN}`,
@@ -126,6 +129,7 @@ const ids = {
   adminB: "",
   superadmin: "",
   member: "",
+  localMember: "",
   newcomer: "",
   leaver: "",
   impersonator: "",
@@ -311,6 +315,7 @@ beforeAll(async () => {
   ids.superadmin = await newUser(BA.superadmin, [ids.orgA]);
   // Shared by both tenants: org B's admin can open this member's Audit tab.
   ids.member = await newUser(BA.member, [ids.orgA, ids.orgB]);
+  ids.localMember = await newUser(BA.localMember, [ids.orgA]);
   ids.newcomer = await newUser(BA.newcomer, []);
   ids.leaver = await newUser(BA.leaver, [ids.orgA, ids.orgB]);
   ids.impersonator = await newUser(BA.impersonator, [ids.orgA]);
@@ -376,6 +381,9 @@ beforeAll(async () => {
     BA.impersonator,
     context(BA.impersonator, ids.impersonator, ids.orgA, ["admin.users.impersonate"]),
   );
+  // Plain members, as the profile edit's rank guard resolves them in org A.
+  contexts.set(BA.member, context(BA.member, ids.member, ids.orgA, []));
+  contexts.set(BA.localMember, context(BA.localMember, ids.localMember, ids.orgA, []));
   accessGetter.mockImplementation(async (ba: string) => {
     const found = contexts.get(ba);
     if (!found) throw new Error(`no access context stubbed for ${ba}`);
@@ -395,9 +403,17 @@ afterAll(async () => {
 describe("F-32: a delegated admin's actions are stamped with their org", () => {
   it("stamps the acting org on user actions and the resource's org on key, app and export events", async () => {
     as("adminA");
-    const updated = await userRoute.PATCH(
+    // F-61: the shared member's profile is account-global, so SUPERADMIN-only
+    // (AUTHZ-2, the real shared-target lookup). Refused with no write and no row.
+    const refused = await userRoute.PATCH(
       request("PATCH", `/api/administrator/users/${ids.member}`, { preferredLocale: "fr" }),
       params({ id: ids.member }),
+    );
+    expect(refused.status, await refused.clone().text()).toBe(403);
+
+    const updated = await userRoute.PATCH(
+      request("PATCH", `/api/administrator/users/${ids.localMember}`, { preferredLocale: "fr" }),
+      params({ id: ids.localMember }),
     );
     expect(updated.status, await updated.clone().text()).toBe(200);
 
@@ -443,8 +459,16 @@ describe("F-32: a delegated admin's actions are stamped with their org", () => {
     for (const row of rows) {
       expect(row.organization_id, `${row.event_type} must be stamped org A`).toBe(ids.orgA);
     }
-    expect(byType["admin.user.updated"]!.app_user_id).toBe(ids.member);
+    expect(byType["admin.user.updated"]!.app_user_id).toBe(ids.localMember);
     expect(byType["admin.user.role_assigned"]!.app_user_id).toBe(ids.member);
+    // Exactly one edit landed: the refused one wrote nothing.
+    expect(rows.filter((r) => r.event_type === "admin.user.updated")).toHaveLength(1);
+    const member = await db
+      .selectFrom("app_users")
+      .select("preferred_locale")
+      .where("id", "=", ids.member)
+      .executeTakeFirstOrThrow();
+    expect(member.preferred_locale).not.toBe("fr");
   });
 
   it("shows those rows to org A's auditors on every read path", async () => {
@@ -458,16 +482,19 @@ describe("F-32: a delegated admin's actions are stamped with their org", () => {
     const inExplorer = await explorer("adminA", { actor: BA.adminA });
     expect(inExplorer.map((r) => r.event_type).sort()).toEqual(expected);
 
-    // The member's Audit tab: the events ABOUT them, including the revocation
-    // of the key they own.
+    // Each member's Audit tab: the events ABOUT them, including the revocation
+    // of the key the shared member owns.
     const tab = (await userAuditTab("adminA", ids.member)).filter(
       (r) => r.actor_better_auth_user_id === BA.adminA,
     );
     expect(tab.map((r) => r.event_type).sort()).toEqual([
       "admin.api_key.revoked",
       "admin.user.role_assigned",
-      "admin.user.updated",
     ]);
+    const localTab = (await userAuditTab("adminA", ids.localMember)).filter(
+      (r) => r.actor_better_auth_user_id === BA.adminA,
+    );
+    expect(localTab.map((r) => r.event_type)).toEqual(["admin.user.updated"]);
 
     const v1 = (await v1AuditEvents("adminA")).filter(
       (r) => r.actor_better_auth_user_id === BA.adminA,

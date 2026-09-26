@@ -98,9 +98,9 @@ type ActorAccess = AccessLike;
  * (`requiresSuperadminForSharedTarget`) says nothing about *rank*: a
  * single-org SUPERADMIN passes both, so without this check an org admin
  * holding `admin.users.setPassword` / `.ban` / `.delete` / `.sessions` /
- * `.manage` could set that superadmin's password (and sign in with global
- * authority), ban them, soft-delete them, revoke their sessions, or change
- * their status.
+ * `.manage` / `.update` could set that superadmin's password (and sign in with
+ * global authority), ban them, soft-delete them, revoke their sessions, change
+ * their status, or rename them / switch their email language (F-61).
  *
  * Rule — the same subset test the impersonate route applies:
  *   - a SUPERADMIN actor is exempt (they already hold every power);

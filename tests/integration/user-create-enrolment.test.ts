@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as ResolveCallerModule from "@/lib/api-auth/resolve-caller.server";
 
 /**
  * Tenant-aware user creation, on both create routes.
@@ -16,23 +17,36 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  * initial status; a superadmin's cookie session still creates the user in no
  * org.
  *
+ * F-480: that enrolment is a membership add, and an `active` one an approval,
+ * so a confined creator also needs `admin.users.update` or `admin.orgs.update`,
+ * and `admin.users.manage` for `active`, each as permission AND scope. A key
+ * scoped to `admin.users.create` alone used to mint an active member of its org
+ * with a password it chose. An address on a domain bound to another org is
+ * refused as well. Every refusal is a 403 before anything is written.
+ *
  * The routes, `canAccessUser` and the admin permission guard are real. Only the
  * caller, Better Auth and the audit writer are stubbed, and the database is a
  * small in-memory fake that keeps rows, the membership unique key and
  * transaction rollback. That is what makes the follow-up GET mean something: it
  * answers 200 only because the create wrote a membership row, and the control
- * cases show the same GET answering 404 for a user with none.
+ * cases show the same GET answering 404 for a user with none. A write through
+ * the pool while a transaction is open throws, so a statement moved off the
+ * transaction fails here too; tests/db/user-create-enrolment.db.test.ts proves
+ * the rollback against real Postgres.
  */
 const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
 const auditMock = vi.fn();
 const createBetterAuthUser = vi.fn();
 const requireApiPermission = vi.fn();
+/** A bearer caller for the admin guard; `null` resolves the cookie session. */
+const bearer = vi.hoisted(() => ({ caller: null as Record<string, unknown> | null }));
 
 const store = vi.hoisted(() => {
   type Row = Record<string, unknown>;
   const tables = new Map<string, Row[]>();
   const failing = new Set<string>();
+  let openTransactions = 0;
 
   function rows(table: string): Row[] {
     const found = tables.get(table);
@@ -48,7 +62,10 @@ const store = vi.hoisted(() => {
   class Query {
     private readonly predicates: Array<(row: Row) => boolean> = [];
     private insertValues: Row | null = null;
-    constructor(private readonly table: string) {}
+    constructor(
+      private readonly table: string,
+      private readonly viaPool: boolean,
+    ) {}
     select() {
       return this;
     }
@@ -80,6 +97,12 @@ const store = vi.hoisted(() => {
       return row;
     }
     private insert(values: Row): Row {
+      // A write on the pool commits on its own connection, whatever happens
+      // to the transaction open beside it; the snapshot below would erase it
+      // anyway. So the fake refuses one, and a moved statement fails loudly.
+      if (this.viaPool && openTransactions > 0) {
+        throw new Error(`fake db: pool insert into "${this.table}" during an open transaction`);
+      }
       if (failing.delete(this.table)) {
         throw new Error(`fake db: insert into "${this.table}" failed`);
       }
@@ -101,21 +124,25 @@ const store = vi.hoisted(() => {
     }
   }
 
-  const executor = {
-    selectFrom: (table: string) => new Query(table),
-    insertInto: (table: string) => new Query(table),
-  };
+  const executor = (viaPool: boolean) => ({
+    selectFrom: (table: string) => new Query(table, viaPool),
+    insertInto: (table: string) => new Query(table, viaPool),
+  });
+  const trx = executor(false);
   const db = {
-    ...executor,
+    ...executor(true),
     transaction: () => ({
-      async execute<T>(callback: (trx: typeof executor) => Promise<T>): Promise<T> {
+      async execute<T>(callback: (handle: typeof trx) => Promise<T>): Promise<T> {
         const snapshot = new Map([...tables].map(([name, list]) => [name, [...list]]));
+        openTransactions += 1;
         try {
-          return await callback(executor);
+          return await callback(trx);
         } catch (err) {
           tables.clear();
           for (const [name, list] of snapshot) tables.set(name, list);
           throw err;
+        } finally {
+          openTransactions -= 1;
         }
       },
     }),
@@ -124,7 +151,7 @@ const store = vi.hoisted(() => {
   return {
     db,
     rows,
-    reset(organizations: Row[]) {
+    reset(organizations: Row[], emailDomainBindings: Row[] = []) {
       tables.clear();
       tables.set("app_users", []);
       tables.set("app_organization_memberships", []);
@@ -132,7 +159,12 @@ const store = vi.hoisted(() => {
         "app_organizations",
         organizations.map((org) => ({ ...org })),
       );
+      tables.set(
+        "app_provider_organizations",
+        emailDomainBindings.map((row) => ({ provider: "email", ...row })),
+      );
       failing.clear();
+      openTransactions = 0;
     },
     /** The next insert into `table` throws, as a failed statement would. */
     failNextInsertInto(table: string) {
@@ -146,6 +178,16 @@ vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() })
 vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return { ...actual, getUserAccessContext: (...a: unknown[]) => accessGetter(...a) };
+});
+vi.mock("@/lib/api-auth/resolve-caller.server", async () => {
+  const actual = await vi.importActual<typeof ResolveCallerModule>(
+    "@/lib/api-auth/resolve-caller.server",
+  );
+  return {
+    ...actual,
+    resolveCaller: async (...a: Parameters<typeof actual.resolveCaller>) =>
+      bearer.caller ?? actual.resolveCaller(...a),
+  };
 });
 vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMock(...a) }));
 vi.mock("@/lib/admin/auth-admin.server", () => ({
@@ -161,7 +203,19 @@ vi.mock("@/lib/api-auth/v1-guard.server", () => ({
 
 const ORG_A = { id: "0a0a0a0a-0000-4000-8000-00000000000a", slug: "org-a" };
 const ORG_B = { id: "0b0b0b0b-0000-4000-8000-00000000000b", slug: "org-b" };
-const PERMISSIONS = ["admin.users.create", "admin.users.read"];
+/**
+ * What a confined creator needs for every case that succeeds: create, read (the
+ * follow-up GET), and the membership and approval permissions its enrolment
+ * stands in for (F-480).
+ */
+const PERMISSIONS = [
+  "admin.users.create",
+  "admin.users.read",
+  "admin.users.update",
+  "admin.users.manage",
+];
+/** Create and read only: the caller F-480 is about. */
+const CREATE_ONLY = ["admin.users.create", "admin.users.read"];
 
 type Access = Pick<
   AuthStatusModule.UserAccessContext,
@@ -169,11 +223,14 @@ type Access = Pick<
 >;
 
 /** An org admin's cookie session in org A. */
-const orgAdmin = (): Access => ({ permissions: PERMISSIONS, organizationId: ORG_A.id });
+const orgAdmin = (permissions = PERMISSIONS): Access => ({
+  permissions,
+  organizationId: ORG_A.id,
+});
 /**
  * An API key or JWT bound to org A, here owned by a global superuser: bound, it
  * still has no cross-org reach (MACHINE-2), so it is confined like an org
- * admin.
+ * admin. Its owner holds every permission, so only its scopes limit it.
  */
 const boundCredential = (): Access => ({
   permissions: [...PERMISSIONS, "superuser"],
@@ -202,14 +259,35 @@ const auditRows = (eventType: string) =>
     .map(([row]) => row as Record<string, unknown>)
     .filter((row) => row.eventType === eventType);
 
+/** Nothing was written and no identity was created: the refusal came first. */
+function expectNothingWritten() {
+  expect(createBetterAuthUser).not.toHaveBeenCalled();
+  expect(store.rows("app_users")).toEqual([]);
+  expect(store.rows("app_organization_memberships")).toEqual([]);
+  expect(auditRows("admin.user.created")).toEqual([]);
+}
+
 let seq = 0;
-function nextEmail(): string {
+function nextEmail(domain = "example.com"): string {
   seq += 1;
-  return `created.${seq}@example.com`;
+  return `created.${seq}@${domain}`;
+}
+
+/** An `app_users` row for a fresh address, as an earlier create leaves one. */
+function seedExistingUser(): string {
+  const email = nextEmail();
+  store.rows("app_users").push({
+    id: crypto.randomUUID(),
+    better_auth_user_id: `ba-existing-${seq}`,
+    primary_email: email,
+    status: "active",
+  });
+  return email;
 }
 
 beforeEach(() => {
   store.reset([ORG_A, ORG_B]);
+  bearer.caller = null;
   for (const mock of [sessionGetter, accessGetter, auditMock, createBetterAuthUser])
     mock.mockReset();
   requireApiPermission.mockReset();
@@ -231,6 +309,30 @@ describe("POST /api/administrator/users: a confined creator enrols the user in i
       preferredLocale: "en",
       ...access,
     });
+  }
+
+  /**
+   * Every admin call is this API key instead, as `resolveCaller` would resolve
+   * it: bound to org A, owned by a superuser, limited by `scopes` alone.
+   */
+  function actAsKey(scopes: string[]) {
+    bearer.caller = {
+      kind: "api_key",
+      betterAuthUserId: "ba-actor",
+      access: {
+        appUserId: "u-actor",
+        primaryEmail: "actor@example.com",
+        status: "active",
+        membershipStatus: "active",
+        preferredLocale: "en",
+        ...boundCredential(),
+      },
+      grantedScopes: scopes,
+      isBearer: true,
+      credentialId: "key-1",
+      boundOrganizationId: ORG_A.id,
+      impersonatorId: null,
+    };
   }
 
   async function create(body: Record<string, unknown>) {
@@ -273,6 +375,9 @@ describe("POST /api/administrator/users: a confined creator enrols the user in i
           status: initialAppStatus,
         }),
       ]);
+      // F-480: no sign-up source, so the org's sign-up policy never
+      // activates it at sign-in (`reevaluatePendingActivation`).
+      expect(memberships[0]!.source_provider).toBeUndefined();
       const membershipId = memberships[0]!.id;
 
       // Audited as `POST /users/{id}/memberships` audits an added membership,
@@ -320,13 +425,157 @@ describe("POST /api/administrator/users: a confined creator enrols the user in i
     expect((await readBack(created.id)).status).toBe(404);
   });
 
-  it("a confined caller with no org is refused before anything is written", async () => {
+  describe("F-480: the enrolment needs the permissions it stands in for", () => {
+    it.each([
+      ["an org admin's session holding only create", () => actAs(orgAdmin(CREATE_ONLY))],
+      ['an API key scoped to ["admin.users.create"]', () => actAsKey(["admin.users.create"])],
+    ])("%s is refused with 403 before anything is written", async (_label, arrange) => {
+      arrange();
+      const email = nextEmail();
+      const res = await create({ email, initialAppStatus: "active" });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "forbidden" });
+      expectNothingWritten();
+      expect(auditRows("admin.user.create_denied")).toEqual([
+        expect.objectContaining({
+          outcome: "denied",
+          reason: "enrolment_not_permitted",
+          appUserId: null,
+          organizationId: ORG_A.id,
+          email,
+          metadata: { required: ["admin.users.update", "admin.orgs.update"] },
+        }),
+      ]);
+    });
+
+    it.each([
+      [
+        "admin.users.update",
+        "org admin",
+        () => actAs(orgAdmin(["admin.users.create", "admin.users.update"])),
+      ],
+      [
+        "admin.orgs.update",
+        "org admin",
+        () => actAs(orgAdmin(["admin.users.create", "admin.orgs.update"])),
+      ],
+      [
+        "admin.users.update",
+        "API key",
+        () => actAsKey(["admin.users.create", "admin.users.update"]),
+      ],
+    ])("with %s (%s) it enrols a pending user", async (_permission, _caller, arrange) => {
+      arrange();
+      const res = await create({ email: nextEmail() });
+      expect(res.status).toBe(201);
+      expect(store.rows("app_organization_memberships")).toEqual([
+        expect.objectContaining({ organization_id: ORG_A.id, status: "pending_approval" }),
+      ]);
+    });
+
+    it.each([
+      [
+        "an org admin's session without admin.users.manage",
+        () => actAs(orgAdmin(["admin.users.create", "admin.users.update"])),
+      ],
+      [
+        "an API key whose owner holds it but whose scopes do not",
+        () => actAsKey(["admin.users.create", "admin.users.update"]),
+      ],
+    ])("an Active user is an approval: %s is refused, not downgraded", async (_label, arrange) => {
+      arrange();
+      const res = await create({ email: nextEmail(), initialAppStatus: "active" });
+      expect(res.status).toBe(403);
+      expectNothingWritten();
+      expect(auditRows("admin.user.create_denied")).toEqual([
+        expect.objectContaining({
+          reason: "activation_not_permitted",
+          metadata: { required: ["admin.users.manage"], initialAppStatus: "active" },
+        }),
+      ]);
+    });
+
+    // The refusal comes before the duplicate check, so a caller that may not
+    // create learns nothing about which addresses already have an account.
+    it.each([
+      ["an org admin's session holding only create", () => actAs(orgAdmin(CREATE_ONLY))],
+      ['an API key scoped to ["admin.users.create"]', () => actAsKey(["admin.users.create"])],
+    ])("%s gets 403, not 409, for an address that already exists", async (_label, arrange) => {
+      const existing = seedExistingUser();
+      arrange();
+      const res = await create({ email: existing });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "forbidden" });
+      expect(auditRows("admin.user.create_denied")).toEqual([
+        expect.objectContaining({ reason: "enrolment_not_permitted", email: existing }),
+      ]);
+      expect(createBetterAuthUser).not.toHaveBeenCalled();
+      expect(store.rows("app_users")).toHaveLength(1);
+
+      // CONTROL: a caller that may create gets the 409, so the seed is a hit.
+      bearer.caller = null;
+      actAs(orgAdmin());
+      const taken = await create({ email: existing });
+      expect(taken.status).toBe(409);
+      expect(await taken.json()).toMatchObject({ error: "email_taken" });
+    });
+
+    it("an API key scoped to admin.users.manage as well creates an active member", async () => {
+      actAsKey(["admin.users.create", "admin.users.update", "admin.users.manage"]);
+      const res = await create({ email: nextEmail(), initialAppStatus: "active" });
+      expect(res.status).toBe(201);
+      expect(store.rows("app_organization_memberships")).toEqual([
+        expect.objectContaining({ organization_id: ORG_A.id, status: "active" }),
+      ]);
+    });
+
+    it("an address on a domain bound to ANOTHER org is refused; its own org's domain is not", async () => {
+      store.reset(
+        [ORG_A, ORG_B],
+        [
+          { organization_id: ORG_B.id, provider_organization_key: "orgb.example" },
+          { organization_id: ORG_A.id, provider_organization_key: "orga.example" },
+        ],
+      );
+      actAs(orgAdmin());
+      const claimed = nextEmail("orgb.example");
+      const refused = await create({ email: claimed });
+      expect(refused.status).toBe(403);
+      expectNothingWritten();
+      expect(auditRows("admin.user.create_denied")).toEqual([
+        expect.objectContaining({
+          reason: "email_domain_claimed",
+          email: claimed,
+          organizationId: ORG_A.id,
+          // The domain only; the row must not name the org that claims it.
+          metadata: { domain: "orgb.example" },
+        }),
+      ]);
+
+      expect((await create({ email: nextEmail("orga.example") })).status).toBe(201);
+    });
+
+    it("a superadmin's session needs none of it: it enrols nobody", async () => {
+      store.reset(
+        [ORG_A, ORG_B],
+        [{ organization_id: ORG_B.id, provider_organization_key: "orgb.example" }],
+      );
+      actAs({ permissions: ["superuser"], organizationId: ORG_A.id, orgBound: false });
+      const res = await create({ email: nextEmail("orgb.example"), initialAppStatus: "active" });
+      expect(res.status).toBe(201);
+      expect(store.rows("app_organization_memberships")).toEqual([]);
+    });
+  });
+
+  // Defence in depth, past the guard: the real guard admits only an active
+  // member, whose context always names an org, so this state comes only from
+  // a hand-built context. The route must still refuse it before writing.
+  it("a context with no org (which the guard never admits) is refused before anything is written", async () => {
     actAs({ permissions: PERMISSIONS, organizationId: null });
     const res = await create({ email: nextEmail() });
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: "forbidden" });
-    expect(createBetterAuthUser).not.toHaveBeenCalled();
-    expect(store.rows("app_users")).toEqual([]);
+    expectNothingWritten();
   });
 
   it("a failed membership insert rolls the user row back: 500, audited as db_insert_failed", async () => {
@@ -352,11 +601,18 @@ describe("POST /api/administrator/users: a confined creator enrols the user in i
 });
 
 describe("POST /api/v1/users (the MCP `createUser` tool calls it): the same rule", () => {
-  /** Every v1 call is this caller, as the v1 guard would resolve it. */
-  function actAs(access: Access) {
+  /**
+   * Every v1 call is this caller, as the v1 guard would resolve it: the guard
+   * admits any caller holding `admin.users.create` as permission and scope,
+   * so a create-only key gets here. `null` scopes is a cookie session.
+   */
+  function actAs(access: Access, grantedScopes: string[] | null = null) {
     requireApiPermission.mockResolvedValue({
       ok: true,
-      grant: { caller: { betterAuthUserId: "ba-actor", access }, requestId: "req-1" },
+      grant: {
+        caller: { betterAuthUserId: "ba-actor", access, grantedScopes },
+        requestId: "req-1",
+      },
     });
   }
 
@@ -384,7 +640,7 @@ describe("POST /api/v1/users (the MCP `createUser` tool calls it): the same rule
   ] as const)(
     "%s creating a %s user: a membership of that status in its org, and GET /users/{id} is 200",
     async (_label, initialAppStatus, caller) => {
-      actAs(caller());
+      actAs(caller(), caller === boundCredential ? PERMISSIONS : null);
       const email = nextEmail();
       const res = await create({ email, initialAppStatus });
       expect(res.status).toBe(201);
@@ -429,20 +685,111 @@ describe("POST /api/v1/users (the MCP `createUser` tool calls it): the same rule
     expect(auditRows("admin.user.membership_added")).toEqual([]);
 
     expect((await readBack(created.id)).status).toBe(200);
-    actAs(boundCredential());
+    actAs(boundCredential(), PERMISSIONS);
     expect((await readBack(created.id)).status).toBe(404);
   });
 
-  it("a confined caller with no org is refused before anything is written", async () => {
-    actAs({ permissions: PERMISSIONS, organizationId: null, orgBound: true });
+  describe("F-480: a key's scopes bound the enrolment, whatever its owner holds", () => {
+    it.each(["pending_approval", "active"])(
+      'a key scoped to ["admin.users.create"] creating a %s user: 403 with a detail, nothing written',
+      async (initialAppStatus) => {
+        actAs(boundCredential(), ["admin.users.create"]);
+        const email = nextEmail();
+        const res = await create({ email, initialAppStatus });
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({
+          detail: expect.stringContaining("admin.users.update or admin.orgs.update"),
+        });
+        expectNothingWritten();
+        expect(auditRows("admin.user.create_denied")).toEqual([
+          expect.objectContaining({
+            outcome: "denied",
+            reason: "enrolment_not_permitted",
+            appUserId: null,
+            organizationId: ORG_A.id,
+            email,
+            requestId: "req-1",
+            metadata: {
+              required: ["admin.users.update", "admin.orgs.update"],
+              via: "api.v1",
+            },
+          }),
+        ]);
+      },
+    );
+
+    // Refused before the duplicate check, as on the admin twin: no 409 tells
+    // such a caller that the address has an account.
+    it.each([
+      [
+        'a key scoped to ["admin.users.create"]',
+        () => actAs(boundCredential(), ["admin.users.create"]),
+      ],
+      ["an org admin's session holding only create", () => actAs(orgAdmin(CREATE_ONLY))],
+    ])("%s gets 403, not 409, for an address that already exists", async (_label, arrange) => {
+      const existing = seedExistingUser();
+      arrange();
+      const res = await create({ email: existing });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        detail: expect.stringContaining("admin.users.update or admin.orgs.update"),
+      });
+      expect(auditRows("admin.user.create_denied")).toEqual([
+        expect.objectContaining({ reason: "enrolment_not_permitted", email: existing }),
+      ]);
+      expect(createBetterAuthUser).not.toHaveBeenCalled();
+      expect(store.rows("app_users")).toHaveLength(1);
+
+      // CONTROL: a caller that may create gets the 409, so the seed is a hit.
+      actAs(boundCredential(), PERMISSIONS);
+      const taken = await create({ email: existing });
+      expect(taken.status).toBe(409);
+      expect(await taken.json()).toMatchObject({
+        detail: "A user with this email already exists.",
+      });
+    });
+
+    it("a key scoped to create and update may enrol a pending user but not an active one", async () => {
+      actAs(boundCredential(), ["admin.users.create", "admin.users.update"]);
+      const refused = await create({ email: nextEmail(), initialAppStatus: "active" });
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({
+        detail: expect.stringContaining("admin.users.manage"),
+      });
+      expectNothingWritten();
+
+      const res = await create({ email: nextEmail() });
+      expect(res.status).toBe(201);
+      expect(store.rows("app_organization_memberships")).toEqual([
+        expect.objectContaining({ organization_id: ORG_A.id, status: "pending_approval" }),
+      ]);
+    });
+
+    it("an address on a domain bound to another org is refused", async () => {
+      store.reset(
+        [ORG_A, ORG_B],
+        [{ organization_id: ORG_B.id, provider_organization_key: "orgb.example" }],
+      );
+      actAs(boundCredential(), PERMISSIONS);
+      const res = await create({ email: nextEmail("orgb.example") });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({
+        detail: expect.stringContaining("bound to another organization"),
+      });
+      expectNothingWritten();
+    });
+  });
+
+  // Defence in depth past the guard, as on the admin twin.
+  it("a context with no org (which the guard never admits) is refused before anything is written", async () => {
+    actAs({ permissions: PERMISSIONS, organizationId: null, orgBound: true }, PERMISSIONS);
     const res = await create({ email: nextEmail() });
     expect(res.status).toBe(403);
-    expect(createBetterAuthUser).not.toHaveBeenCalled();
-    expect(store.rows("app_users")).toEqual([]);
+    expectNothingWritten();
   });
 
   it("a failed membership insert rolls the user row back: 502, audited as db_insert_failed", async () => {
-    actAs(boundCredential());
+    actAs(boundCredential(), PERMISSIONS);
     store.failNextInsertInto("app_organization_memberships");
     const res = await create({ email: nextEmail() });
     expect(res.status).toBe(502);

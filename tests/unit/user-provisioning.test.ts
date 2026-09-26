@@ -1049,6 +1049,76 @@ describe("reevaluatePendingActivation", () => {
     expect(auditMock).not.toHaveBeenCalled();
   });
 
+  // F-480: the sign-up policy re-decides only what a sign-up decided. A
+  // membership an administrator placed pending (the confined create, or
+  // `POST …/memberships`) has no sign-up source, and used to be judged by THIS
+  // sign-in's provider instead: an `auto_active` org then activated a user
+  // nobody had approved, at its first sign-in.
+  it.each([
+    ["no source (an admin-placed membership)", null],
+    ["a non-sign-up source (mcp)", "mcp"],
+    ["a non-sign-up source (invitation)", "invitation"],
+  ])(
+    "leaves a pending membership with %s alone, even in an auto_active org",
+    async (_label, source) => {
+      stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
+      stubs.membershipList = () => [
+        { id: "m-1", organization_id: "org-default", source_provider: source },
+      ];
+      stubs.policyRows = () => [
+        {
+          organization_id: "org-default",
+          require_email_verification: false,
+          signup_approval_mode: "auto_active",
+          allowed_auth_methods: null,
+          auto_approve_email_domains: null,
+        },
+      ];
+
+      await reevaluatePendingActivation({
+        betterAuthUserId: "ba-1",
+        email: "ada@example.com",
+        emailVerified: true,
+        provider: "email",
+      });
+
+      expect(updateCalls).toEqual([]);
+      expect(auditMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("activates the sign-up membership and leaves an admin-placed one pending", async () => {
+    stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "pending_approval" });
+    stubs.membershipList = () => [
+      { id: "m-admin", organization_id: "org-a", source_provider: null },
+      { id: "m-signup", organization_id: "org-b", source_provider: "email" },
+    ];
+    stubs.policyRows = () =>
+      ["org-a", "org-b"].map((organization_id) => ({
+        organization_id,
+        require_email_verification: false,
+        signup_approval_mode: "auto_active",
+        allowed_auth_methods: null,
+        auto_approve_email_domains: null,
+      }));
+
+    await reevaluatePendingActivation({
+      betterAuthUserId: "ba-1",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+    });
+
+    // One membership flips (org-b's), then the user; the audit names org-b.
+    expect(updateCalls.map((c) => c.table)).toEqual(["app_organization_memberships", "app_users"]);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.auto_activated",
+        organizationId: "org-b",
+      }),
+    );
+  });
+
   it("never touches non-pending users (blocked stays blocked)", async () => {
     stubs.userSelect = () => Promise.resolve({ id: "user-1", status: "blocked" });
     stubs.membershipList = () => {

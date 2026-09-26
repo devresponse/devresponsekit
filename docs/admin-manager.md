@@ -590,7 +590,7 @@ Manages the application user lifecycle and per-user administration.
 | Method & path | Permission | Notes / audit |
 | --- | --- | --- |
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
-| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). A superadmin's cookie session creates the user in no org, as before. A confined caller with no org is refused with 403 `forbidden` before anything is written. The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
+| `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). It is a membership add, and an `active` one an approval, so a confined caller also needs `admin.users.update` or `admin.orgs.update`, plus `admin.users.manage` for `initialAppStatus: "active"`, each as permission and (bearer) scope; an address whose email domain is bound to another org is refused too. Each refusal is 403 `forbidden` before anything is written, audited `admin.user.create_denied` (reason `enrolment_not_permitted`, `activation_not_permitted` or `email_domain_claimed`; F-480, below). The enrolled membership carries no sign-up source, so the org's sign-up policy never activates it at sign-in. A superadmin's cookie session creates the user in no org, as before. A context with no org is refused with 403 `forbidden` before anything is written (defence in depth: the guard admits only an active member, whose context always names an org). The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself); `admin.user.banned` |
@@ -631,6 +631,75 @@ used to go to the self-service `/update-user` endpoint, which never touched
 the target. Impersonation is the exception: it acts on the caller's own
 cookie session and hands back a cookie session, so `POST
 /users/[id]/impersonate` refuses a caller without one (403, §19).
+
+**A confined create grants no more than the explicit paths would (F-480).** A
+caller without cross-org reach (an org admin, any API key or JWT, the MCP
+`createUser` tool) enrols the user it creates in its own org, so the create is
+also a membership add, and with `initialAppStatus: "active"` an approval.
+Before that enrolment existed, such a caller could make someone a member only
+with `admin.orgs.update` (`POST /organizations/[id]/members`) or
+`admin.users.update` (`POST /users/[id]/memberships`), and activate a pending
+user only by approving it (`admin.users.manage`). A key scoped to
+`admin.users.create` alone therefore minted an active member of its org with a
+password its holder chose. Both create routes now call
+`refuseConfinedCreation` (`src/lib/admin/user-create.server.ts`) before
+anything is written, the Better Auth identity included:
+
+- **Enrolling** needs `admin.users.update` or `admin.orgs.update`;
+- **an `active` user** needs `admin.users.manage` as well. Pending stays the
+  default and is never silently substituted: the request is refused;
+- each counts only when held as a permission and, for a bearer credential,
+  granted as a scope, exactly as the guards decide it. A superuser-owned key
+  scoped to `admin.users.create` is refused like any other;
+- **an address whose email domain a superadmin bound to another org**
+  (provider `email`, F-04) is refused, because that binding says the domain's
+  people belong to that org, and an account pre-created in this one would stay
+  here after its owner turns up (provisioning never re-places an existing
+  account by domain). Invite such an address instead: acceptance proves the
+  mailbox. The refusal tells the creator that *some* other org bound the
+  domain, never which one. That is accepted: any refusal differs from a 201, so
+  a vaguer answer would hide nothing, and only a caller that already holds a
+  membership permission gets this far.
+
+A refusal is 403 `forbidden` (on `/api/v1`, a problem whose `detail` names what
+is missing) with an `admin.user.create_denied` (`denied`) row naming no user,
+the address in `email`, the creator's org, and `metadata.required` (or
+`metadata.domain`, never the org that claims it). A superadmin's cookie session
+enrols nobody and needs none of this. The New user page asks the same
+permission rules (`mayCreateUser`): a confined caller without a membership
+permission sees a notice naming them in place of the form, since every create
+it could submit would be refused, and the **Active** status is offered only to
+a caller the API lets approve. The page's guard stays `admin.users.create`, the
+key of the nav link and the list's **New user** button. The `/api/v1` contract
+(`docs/openapi.json`) lists the two scope sets as `createUser`'s security
+alternatives and states the rest in its description, so the MCP `createUser`
+tool advertises all of it.
+
+**A pending user a confined creator made stays pending until someone approves
+it.** The creation membership carries no sign-up source (`source_provider` is
+NULL), and the sign-in re-evaluation (`reevaluatePendingActivation`,
+[Sign-up Policy §5](./auth-signup-policy.md#5-activation-re-evaluation-at-sign-in))
+re-decides only memberships a sign-up created. It used to judge a sourceless
+membership by the sign-in's own provider, so in an `auto_active` org (the seeded
+platform default) the user's first sign-in activated both rows with nobody
+approving it. The same now holds for a pending membership added by hand with
+`POST /users/[id]/memberships` or `POST /organizations/[id]/members`.
+
+**What is still open.** A confined creator with `admin.users.create` and a
+membership permission can still create a pre-verified account for an address on
+an unbound domain, one it does not control, and keep reach over it: a created
+account is marked `emailVerificationWaived` (F-03), which refuses provider
+linking until the owner resets the password, but the reset does not detach the
+membership. If the real owner later resets the password and links Google, that
+org's admin can still reach the account through the membership, and, holding
+`admin.users.setPassword`, set its password while it belongs to no other org
+(the AUTHZ-2 shared-target rule applies only to a user in several orgs). The
+same end state was reachable before the create enrolled anyone, with
+`admin.orgs.update` and a second request (`POST /organizations/[id]/members`
+does not check `canAccessUser`). Closing it means not letting a confined creator
+choose a password at all (a set-password invitation instead), or treating a
+creation-enrolled account as shared for AUTHZ-2 until its owner proves the
+mailbox; both change the create contract and are left to a separate change.
 
 **Target outranks actor (privilege ordering).** Every action that reaches into
 *another* user's account — `POST …/password` (both `mode: "set"` and
@@ -901,7 +970,13 @@ counting authority held in suspended tenants.
 `GET /api/administrator/memberships` (`admin.orgs.read`) is a read-only cross-org
 search of `app_organization_memberships` joined to users and organizations,
 scoped to the actor's org. Membership **mutations** happen through the
-organization-members and user-memberships sub-routes (§8.2).
+organization-members and user-memberships sub-routes (§8.2), and a create by a
+caller without cross-org reach inserts one too: `POST /users` (and
+`POST /api/v1/users`) enrols the new user in that caller's org, which takes
+`admin.users.update` or `admin.orgs.update` besides `admin.users.create`
+(§8.1, F-480). A later `POST /users/[id]/memberships` for that same org is
+therefore a 409 `membership_exists`; approve the user
+(`POST /users/[id]/status` `approve`) or `PATCH …/memberships` instead.
 
 **A membership's status affects only its own org (F-33).** Setting a member to
 `suspended`, `blocked` or `pending_approval` in one org is something an org

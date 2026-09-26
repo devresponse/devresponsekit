@@ -482,7 +482,8 @@
         "cancel": "Cancel",
         "passwordHint": "Minimum 8 characters. The password is forwarded to Better Auth and never logged.",
         "successToast": "User {email} created.",
-        "errorToast": "Could not create user."
+        "errorToast": "Could not create user.",
+        "enrolmentNotPermitted": "Creating a user also adds them to your organization, which needs a membership permission as well: admin.users.update or admin.orgs.update. Ask an administrator to add one of them to your role."
       },
       "actions": {
         "viewDetail": "View",

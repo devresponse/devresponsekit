@@ -482,7 +482,8 @@
         "cancel": "キャンセル",
         "passwordHint": "8文字以上。このパスワードは Better Auth に転送され、ログに記録されることは決してありません。",
         "successToast": "ユーザー {email} を作成しました。",
-        "errorToast": "ユーザーを作成できませんでした。"
+        "errorToast": "ユーザーを作成できませんでした。",
+        "enrolmentNotPermitted": "ユーザーを作成すると、そのユーザーはあなたの組織にも追加されるため、メンバー管理の権限 (admin.users.update または admin.orgs.update) も必要です。いずれかをあなたのロールに追加するよう管理者に依頼してください。"
       },
       "actions": {
         "viewDetail": "表示",

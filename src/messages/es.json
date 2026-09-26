@@ -482,7 +482,8 @@
         "cancel": "Cancelar",
         "passwordHint": "Mínimo 8 caracteres. La contraseña se envía a Better Auth y nunca se registra.",
         "successToast": "Usuario {email} creado.",
-        "errorToast": "No se pudo crear el usuario."
+        "errorToast": "No se pudo crear el usuario.",
+        "enrolmentNotPermitted": "Crear un usuario también lo añade a su organización, lo que requiere además un permiso de membresía: admin.users.update o admin.orgs.update. Pida a un administrador que añada uno de ellos a su rol."
       },
       "actions": {
         "viewDetail": "Ver",

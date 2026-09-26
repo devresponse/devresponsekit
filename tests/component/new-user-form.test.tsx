@@ -108,4 +108,23 @@ describe("NewUserForm", () => {
     const options = Array.from((role as HTMLSelectElement).options).map((o) => o.value);
     expect(options).toEqual(["user", "admin"]);
   });
+
+  // F-480: a confined creator's user joins its org, so an Active one is an
+  // approval, which the API refuses (403) without `admin.users.manage`. The form
+  // offers Active only when the page says the caller may approve.
+  const statusOptions = () =>
+    Array.from(
+      (screen.getByRole("combobox", { name: /Initial application status/ }) as HTMLSelectElement)
+        .options,
+    ).map((o) => o.value);
+
+  it("offers only Pending approval by default", () => {
+    renderWithIntl(<NewUserForm locale="en" />);
+    expect(statusOptions()).toEqual(["pending_approval"]);
+  });
+
+  it("offers Active to a creator the API lets approve", () => {
+    renderWithIntl(<NewUserForm locale="en" canCreateActive />);
+    expect(statusOptions()).toEqual(["pending_approval", "active"]);
+  });
 });

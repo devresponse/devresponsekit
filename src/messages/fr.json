@@ -482,7 +482,8 @@
         "cancel": "Annuler",
         "passwordHint": "Au moins 8 caractères. Le mot de passe est transmis à Better Auth et n'est jamais journalisé.",
         "successToast": "Utilisateur {email} créé.",
-        "errorToast": "Impossible de créer l'utilisateur."
+        "errorToast": "Impossible de créer l'utilisateur.",
+        "enrolmentNotPermitted": "Créer un utilisateur l'ajoute aussi à votre organisation, ce qui exige en plus une autorisation sur les membres : admin.users.update ou admin.orgs.update. Demandez à un administrateur d'ajouter l'une d'elles à votre rôle."
       },
       "actions": {
         "viewDetail": "Voir",

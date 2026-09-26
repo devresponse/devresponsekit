@@ -482,7 +482,8 @@
         "cancel": "取消",
         "passwordHint": "至少 8 个字符。该密码会转发给 Better Auth，且绝不会被记录。",
         "successToast": "已创建用户 {email}。",
-        "errorToast": "无法创建用户。"
+        "errorToast": "无法创建用户。",
+        "enrolmentNotPermitted": "创建用户会同时将其加入您的组织，因此还需要一项成员管理权限：admin.users.update 或 admin.orgs.update。请让管理员将其中之一添加到您的角色。"
       },
       "actions": {
         "viewDetail": "查看",

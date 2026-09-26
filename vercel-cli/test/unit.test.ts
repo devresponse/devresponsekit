@@ -96,7 +96,7 @@ test("every required key is one the kit refuses to boot without", () => {
   );
 });
 
-test("secrets are marked secret, so they are stored encrypted and never printed", () => {
+test("secrets are marked secret, so they are never printed or stored readable", () => {
   for (const key of ["BETTER_AUTH_SECRET", "DATABASE_URL", "SSO_HANDOFF_PRIVATE_KEY", "CRON_SECRET"]) {
     assert.equal(specFor(key)?.secret, true, `${key} must be treated as a secret`);
   }
@@ -241,6 +241,8 @@ import {
   refusedFor,
   requiredKeysFor,
   satelliteEnvSpecs,
+  vercelTypeFor,
+  writableTargets,
 } from "../dist/lib/env-spec.js";
 import {
   describe as describeHealth,
@@ -377,6 +379,8 @@ test("the Option C secret must be supplied, and the refusal explains itself", ()
   assert.ok(spec.noValueHint, "the operator needs to be told WHY it cannot be generated");
   assert.match(spec.noValueHint, /byte-identical/);
   assert.match(spec.noValueHint, /kit/i);
+  // F-138: the kit stores it sensitive, so the hint says which copy to use.
+  assert.match(spec.noValueHint, /the copy kept when it was supplied to the kit/);
 
   // A and B are the opposite: their secret is their own, so it is generated.
   const ownSecret = envSpecsFor(contextFor(satelliteConfig()) as never).find(
@@ -550,7 +554,7 @@ test("every satellite spec carries the text an operator actually reads", () => {
       assert.ok(spec.consequence.length > 0, `${spec.key} needs a consequence for env:check`);
     }
     for (const key of ["BETTER_AUTH_SECRET", "DATABASE_URL", "CRON_SECRET", "METRICS_TOKEN"]) {
-      assert.equal(specs.find((s) => s.key === key)?.secret, true, `${key} must be stored encrypted`);
+      assert.equal(specs.find((s) => s.key === key)?.secret, true, `${key} must be treated as a secret`);
     }
     for (const key of ["BETTER_AUTH_URL", "SSO_HANDOFF_ISSUER", "NEXT_PUBLIC_APP_URL"]) {
       assert.equal(specs.find((s) => s.key === key)?.secret, false);
@@ -697,6 +701,60 @@ test("the database variables follow database OWNERSHIP, not session sharing", ()
   const ownSpecs = envSpecsFor(ownDb as never);
   assert.match(ownSpecs.find((s) => s.key === "DATABASE_URL")?.comment ?? "", /OWN Postgres/);
   assert.equal(ownSpecs.find((s) => s.key === "DB_SCHEMA")?.level, "optional");
+});
+
+test("F-138: a secret is stored sensitive, except the ones something must read back", () => {
+  // `encrypted` is readable by every member and token that may read the
+  // project's Production variables: the signing key among them mints handoffs
+  // every satellite accepts. Two kinds stay readable. The F-47 check reads a
+  // migrating deployment's DATABASE_URL back through `vercel pull`, where a
+  // sensitive one is a placeholder (a satellite on the kit's database never
+  // migrates). And a bearer token a caller outside Vercel presents is
+  // generated here and printed masked, so the dashboard is the only place its
+  // caller's copy can come from: the scraper's METRICS_TOKEN, and a
+  // satellite's CRON_SECRET, which no Vercel Cron attaches.
+  const cases: [string, ReturnType<typeof contextFor>, string[]][] = [
+    // Vercel Cron, scheduled by the kit's vercel.json, attaches its CRON_SECRET.
+    ["the kit", contextFor(LEGACY_KIT_CONFIG), ["DATABASE_URL", "METRICS_TOKEN"]],
+    [
+      "a satellite that owns its database",
+      contextFor(satelliteConfig({ satellite: { database: "own" } })),
+      ["DATABASE_URL", "CRON_SECRET", "METRICS_TOKEN"],
+    ],
+    ["an A satellite on the kit's database", contextFor(satelliteConfig()), ["CRON_SECRET", "METRICS_TOKEN"]],
+    [
+      "an Option C satellite",
+      contextFor(satelliteConfig({ satellite: { option: "shared", cookieDomain: ".example.com" } })),
+      ["CRON_SECRET", "METRICS_TOKEN"],
+    ],
+  ];
+  for (const [name, context, readable] of cases) {
+    const specs = envSpecsFor(context as never);
+    const secrets = specs.filter((s) => s.secret).map((s) => s.key);
+    for (const key of readable) assert.ok(secrets.includes(key), `${name}: ${key} is a secret here`);
+    assert.ok(secrets.includes("BETTER_AUTH_SECRET"), name);
+    for (const spec of specs) {
+      const expected = !spec.secret ? "plain" : readable.includes(spec.key) ? "encrypted" : "sensitive";
+      assert.equal(vercelTypeFor(spec, context.profile), expected, `${name}: ${spec.key}`);
+    }
+  }
+  assert.equal(
+    vercelTypeFor(specFor("SSO_HANDOFF_PRIVATE_KEY") as never, contextFor(LEGACY_KIT_CONFIG).profile),
+    "sensitive",
+  );
+});
+
+test("F-138: a secret is never written to Development; a public value goes wherever it is asked", () => {
+  const all = ["production", "preview", "development"];
+  for (const spec of ENV_SPECS) {
+    assert.deepEqual(
+      writableTargets(spec, all),
+      spec.secret ? ["production", "preview"] : all,
+      `${spec.key} (secret: ${spec.secret})`,
+    );
+  }
+  assert.deepEqual(writableTargets(specFor("DATABASE_URL") as never, ["development"]), []);
+  assert.deepEqual(writableTargets(specFor("DATABASE_URL") as never, ["preview"]), ["preview"]);
 });
 
 test("CRON_SECRET is never generated for a satellite on the kit's database", () => {

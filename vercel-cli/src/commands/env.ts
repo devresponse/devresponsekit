@@ -12,6 +12,7 @@ import {
   pinnedValuesFor,
   refusedFor,
   vercelTypeFor,
+  writableTargets,
 } from "../lib/env-spec.js";
 import {
   CONTAINMENT_DOC,
@@ -130,10 +131,18 @@ interface PlannedVar {
 /**
  * `drk-deploy env:sync` — brings the project's environment up to the contract.
  *
- * Idempotent by construction: every write is an upsert, and a variable that
- * already exists on Vercel is left alone unless `--force` is given. That
- * matters for secrets — re-running this must never silently rotate
- * BETTER_AUTH_SECRET and sign every user out.
+ * Idempotent by construction: a variable that already exists on Vercel is
+ * left alone unless `--force` is given. That matters for secrets — re-running
+ * this must never silently rotate BETTER_AUTH_SECRET and sign every user out.
+ * So "exists" is read from a listing that is refused unless it is the whole
+ * environment, and only `--force` writes with `upsert` (F-142). Without it
+ * each write is a create, which Vercel itself refuses for a key already set
+ * on the target, so a key the listing missed is never regenerated over the
+ * live one.
+ *
+ * Secrets are written `sensitive` (the exceptions are in `vercelTypeFor`)
+ * and never to Development (F-138, `writableTargets`), so `--target all`
+ * no longer copies them to every laptop that runs `vercel env pull`.
  *
  * "Already exists" means set for EVERY requested target (F-46, see
  * `presenceFor`): a DATABASE_URL created for Development only is missing
@@ -212,9 +221,17 @@ export async function envSync(
   /** Already set, and wrong: a public value stored write-only, or a value that
    *  fails the kit's rule or differs from the one the recorded config pins (F-46). */
   const wrong: Array<{ key: string } & StoredProblem> = [];
+  /** Secrets asked for on Development, and kept off it (F-138). */
+  const offDevelopment: string[] = [];
 
   for (const spec of specs) {
-    const presence = presenceFor(listing, spec.key, targets);
+    // A secret is synced for Production and Preview only (F-138): under
+    // `--target all` it is set without a Development entry, and
+    // `--target development` writes none.
+    const specTargets = writableTargets(spec, targets);
+    if (specTargets.length < targets.length) offDevelopment.push(spec.key);
+    if (specTargets.length === 0) continue;
+    const presence = presenceFor(listing, spec.key, specTargets);
     if (!options.force) {
       // Every entry this sync keeps, and not only when the key is fully
       // present: a key missing from Preview is still kept on Production, and
@@ -228,7 +245,7 @@ export async function envSync(
         continue;
       }
     }
-    const writeTo = options.force ? targets : presence.missing;
+    const writeTo = options.force ? specTargets : presence.missing;
 
     let value = supplied[spec.key];
     let origin: PlannedVar["origin"] = "supplied";
@@ -365,6 +382,30 @@ export async function envSync(
     info(dim(`  not set (no value supplied, and not required): ${noValue.join(", ")}`));
     info(dim("  supply them with --from-env or as shell variables if the feature is wanted"));
   }
+  if (offDevelopment.length > 0) {
+    info("");
+    info(dim(`  kept off development (secrets): ${offDevelopment.join(", ")}`));
+    info(
+      dim(
+        "  Vercel stores no sensitive value there, and `vercel env pull` copies development to every laptop: local work uses its own .env",
+      ),
+    );
+  }
+  // Stored sensitive and printed masked, a generated value exists nowhere
+  // else (F-138). The kit's session secret is the one another deployment must
+  // hold: an Option C satellite validates the kit's cookie with it.
+  if (
+    context.profile.kind === "kit" &&
+    planned.some((p) => p.spec.key === "BETTER_AUTH_SECRET" && p.origin === "generated")
+  ) {
+    info("");
+    warn("BETTER_AUTH_SECRET is generated and stored sensitive: nothing can read it back.");
+    info(
+      dim(
+        "  An Option C satellite must hold the kit's value. If one will, supply the secret with --from-env instead and keep that copy: replacing it later signs every user out.",
+      ),
+    );
+  }
 
   if (planned.length === 0) {
     info("");
@@ -392,13 +433,19 @@ export async function envSync(
 
   heading("Writing");
   for (const item of planned) {
-    await client.upsertEnv(config.projectId, {
-      key: item.spec.key,
-      value: item.value,
-      type: vercelTypeFor(item.spec),
-      target: item.targets,
-      comment: item.spec.comment,
-    });
+    // Without --force every target here was missing from the listing, so a
+    // create that Vercel refuses means the listing was wrong (F-142).
+    await client.createEnv(
+      config.projectId,
+      {
+        key: item.spec.key,
+        value: item.value,
+        type: vercelTypeFor(item.spec, context.profile),
+        target: item.targets,
+        comment: item.spec.comment,
+      },
+      { upsert: options.force === true },
+    );
     ok(`${item.spec.key} ${item.spec.secret ? mask(item.value) : dim(item.value)}`);
   }
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { after, afterEach, before, test } from "node:test";
 
 // Tests run against the BUILT output, so they exercise exactly what ships.
-import { dbProvision } from "../dist/commands/db.js";
+import { dbProvision, dbStatus } from "../dist/commands/db.js";
 import { envCheck, envPrune, envSync } from "../dist/commands/env.js";
 import { deploy, releaseRunner } from "../dist/commands/release.js";
 import { useConfigFile } from "../dist/lib/config.js";
@@ -412,18 +412,40 @@ function replace(listing: ReturnType<typeof healthy>, ...entries: ReturnType<typ
   return [...listing.filter((e) => !keys.has(e.key)), ...entries];
 }
 
+/** The listing's response body as Vercel sends it: every entry, one page. */
+const onePage = (envs: ReturnType<typeof raw>[]) => ({
+  envs,
+  pagination: { count: envs.length, next: null, prev: null },
+});
+
 /**
  * A fake Vercel API: the listing, the read-back of an encrypted value, and the
  * writes. `stateful` lists every write afterwards, as Vercel does, so a second
  * run sees what the first one wrote.
+ *
+ * A create is refused with ENV_ALREADY_EXISTS for a key already held for one
+ * of its targets, unless it carries `upsert=true`, as Vercel does (F-142).
+ * `unlisted` are entries Vercel holds that the listing does not show,
+ * `listed` the listing's response body, and `conflict` whether a refusal is
+ * a 400 or a 201 that names it under `failed`.
  */
 function fakeVercel(
   listing: ReturnType<typeof raw>[],
   decrypted: Record<string, string> = { env_SSO_HANDOFF_APPLICATION_ID: "portal" },
   stateful = false,
+  {
+    listed = onePage,
+    unlisted = [],
+    conflict = "400",
+  }: {
+    listed?: (envs: ReturnType<typeof raw>[]) => unknown;
+    unlisted?: ReturnType<typeof raw>[];
+    conflict?: "400" | "201";
+  } = {},
 ) {
   const reads: string[] = [];
-  const writes: Array<{ key: string; type: string; target: string[]; value: string }> = [];
+  const writes: Array<{ key: string; type: string; target: string[]; value: string; upsert: string | null }> =
+    [];
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -431,7 +453,7 @@ function fakeVercel(
     const url = new URL(request.url);
     if (url.hostname !== "api.vercel.com") throw new Error(`an env test reached ${url.hostname}`);
     if (request.method === "GET" && /^\/v10\/projects\/prj_kit\/env$/.test(url.pathname)) {
-      return json({ envs: listing, pagination: { count: listing.length, next: null, prev: null } });
+      return json(listed(listing));
     }
     const one = /^\/v1\/projects\/prj_kit\/env\/([^/]+)$/.exec(url.pathname);
     if (request.method === "GET" && one) {
@@ -448,7 +470,22 @@ function fakeVercel(
       );
     }
     if (request.method === "POST" && /^\/v10\/projects\/prj_kit\/env$/.test(url.pathname)) {
-      const written = JSON.parse(await request.text()) as (typeof writes)[number];
+      const written = {
+        ...(JSON.parse(await request.text()) as Omit<(typeof writes)[number], "upsert">),
+        upsert: url.searchParams.get("upsert"),
+      };
+      const held = [...listing, ...unlisted].find(
+        (e) => e.key === written.key && [e.target].flat().some((t) => written.target.includes(t)),
+      );
+      if (held && written.upsert !== "true") {
+        const error = {
+          code: "ENV_ALREADY_EXISTS",
+          message: `A variable with the name \`${written.key}\` already exists for the target ${written.target.join(",")} on branch undefined`,
+          key: written.key,
+          envVarId: held.id,
+        };
+        return conflict === "400" ? json({ error }, 400) : json({ failed: [{ error }] }, 201);
+      }
       writes.push(written);
       if (stateful) {
         // The listing returns a plain value in the clear, ciphertext for an encrypted one.
@@ -589,20 +626,210 @@ test("env:sync --force: a secret set only for Development is not a rotation; one
   assert.deepEqual(live.writes, []);
 });
 
-test("env:sync --target all: a key already set for Production is written only where it is missing", async () => {
+test("env:sync --target all: a key already set for Production is written only where it is missing, and a secret never to Development", async () => {
   const vercel = fakeVercel(healthy());
   const { error, out } = await run(() => envSync(kitCli(), { target: "all", fromEnv: databaseUrlFile() }));
   assert.equal(error, undefined, out);
   assert.doesNotMatch(out, /ROTATE/, "filling in Preview and Development rotates nothing");
   const onProduction = new Set(healthy().map((e) => e.key));
   for (const write of vercel.writes) {
+    const secret = spec(write.key).secret;
+    // F-138: `vercel env pull` hands Development to every laptop, and Vercel
+    // stores nothing sensitive there.
+    const asked = secret ? ["production", "preview"] : ALL;
     assert.deepEqual(
       write.target,
-      onProduction.has(write.key) ? ["preview", "development"] : ALL,
+      onProduction.has(write.key) ? asked.filter((t) => t !== "production") : asked,
       `${write.key} keeps its Production value`,
     );
+    // Readable only where something must read it back: the DATABASE_URL the
+    // kit's migration check reads, and the METRICS_TOKEN its scraper is given.
+    const readable = ["DATABASE_URL", "METRICS_TOKEN"].includes(write.key);
+    const type = !secret ? "plain" : readable ? "encrypted" : "sensitive";
+    assert.equal(write.type, type, `${write.key} is stored ${write.type}`);
   }
   assert.ok(vercel.writes.some((w) => w.key === "BETTER_AUTH_SECRET"));
+  assert.ok(
+    vercel.writes.some((w) => w.key === "METRICS_TOKEN"),
+    "a secret missing everywhere, too",
+  );
+  assert.match(
+    out,
+    /kept off development \(secrets\): BETTER_AUTH_SECRET, DATABASE_URL, SSO_HANDOFF_PRIVATE_KEY, CRON_SECRET, METRICS_TOKEN\n/,
+  );
+});
+
+test("F-138: env:sync --target development writes no secret, and a missing one is not unresolved", async () => {
+  const vercel = fakeVercel([]);
+  const { error, out } = await run(() => envSync(kitCli(), { target: "development" }));
+  assert.equal(error, undefined, out);
+  assert.ok(vercel.writes.length > 0, out);
+  for (const write of vercel.writes) {
+    assert.equal(spec(write.key).secret, false, `${write.key} is a secret, written to development`);
+    assert.deepEqual(write.target, ["development"]);
+  }
+  assert.doesNotMatch(out, /DATABASE_URL\s+no value available/, "not asked for, so not missing");
+  assert.match(out, /kept off development \(secrets\): BETTER_AUTH_SECRET, DATABASE_URL/);
+});
+
+test("F-138: env:sync writes secrets sensitive, except the ones something must read back", async () => {
+  const vercel = fakeVercel([]);
+  const { error, out } = await run(() => envSync(kitCli(), { fromEnv: databaseUrlFile() }));
+  assert.equal(error, undefined, out);
+  const types = Object.fromEntries(vercel.writes.map((w) => [w.key, w.type]));
+  assert.deepEqual(
+    {
+      BETTER_AUTH_SECRET: types.BETTER_AUTH_SECRET,
+      SSO_HANDOFF_PRIVATE_KEY: types.SSO_HANDOFF_PRIVATE_KEY,
+      CRON_SECRET: types.CRON_SECRET,
+      METRICS_TOKEN: types.METRICS_TOKEN,
+      DATABASE_URL: types.DATABASE_URL,
+      BETTER_AUTH_URL: types.BETTER_AUTH_URL,
+    },
+    {
+      BETTER_AUTH_SECRET: "sensitive",
+      SSO_HANDOFF_PRIVATE_KEY: "sensitive",
+      // Vercel Cron, which the kit's vercel.json schedules, attaches it by itself.
+      CRON_SECRET: "sensitive",
+      // A scraper presents it, and a masked value is all this run prints.
+      METRICS_TOKEN: "encrypted",
+      // The kit migrates, and the F-47 check reads it back through `vercel pull`.
+      DATABASE_URL: "encrypted",
+      BETTER_AUTH_URL: "plain",
+    },
+  );
+});
+
+test("F-138: a kit that generates its BETTER_AUTH_SECRET says no copy exists, before anything is written", async () => {
+  // Stored sensitive and printed masked, a generated session secret exists
+  // nowhere else, and an Option C satellite must be given the kit's value.
+  const warning =
+    /BETTER_AUTH_SECRET is generated and stored sensitive: nothing can read it back\.\n.*An Option C satellite must hold the kit's value\. If one will, supply the secret with --from-env instead/;
+  const dry = fakeVercel([]);
+  const planned = await run(() => envSync(kitCli(), { fromEnv: databaseUrlFile(), dryRun: true }));
+  assert.equal(planned.error, undefined, planned.out);
+  assert.match(planned.out, warning, "in the plan, so a dry run shows it");
+  assert.deepEqual(dry.writes, []);
+
+  fakeVercel([]);
+  const generated = await run(() => envSync(kitCli(), { fromEnv: databaseUrlFile() }));
+  assert.equal(generated.error, undefined, generated.out);
+  assert.match(generated.out, warning);
+
+  // Supplied, the operator holds the copy; already set, nothing is generated.
+  const secret = "s".repeat(44);
+  const vercel = fakeVercel([]);
+  const supplied = await run(() =>
+    envSync(kitCli(), { fromEnv: databaseUrlFile({ BETTER_AUTH_SECRET: secret }) }),
+  );
+  assert.equal(supplied.error, undefined, supplied.out);
+  assert.equal(vercel.writes.find((w) => w.key === "BETTER_AUTH_SECRET")?.value, secret);
+  assert.doesNotMatch(supplied.out, /nothing can read it back/);
+  fakeVercel(healthy());
+  const unchanged = await run(() => envSync(kitCli(), {}));
+  assert.equal(unchanged.error, undefined, unchanged.out);
+  assert.doesNotMatch(unchanged.out, /nothing can read it back/);
+});
+
+test("F-138: env:sync --force --target all still writes no secret to Development", async () => {
+  // Under --force nothing is kept, so the targets each spec may be written to
+  // are all that keeps a secret off Development.
+  const vercel = fakeVercel(healthy());
+  const { error, out } = await run(() =>
+    envSync(kitCli(), { force: true, yes: true, target: "all", fromEnv: databaseUrlFile() }),
+  );
+  assert.equal(error, undefined, out);
+  const written = new Set(vercel.writes.map((w) => w.key));
+  for (const key of ["BETTER_AUTH_SECRET", "DATABASE_URL", "SSO_HANDOFF_PRIVATE_KEY", "BETTER_AUTH_URL"]) {
+    assert.ok(written.has(key), `${key} is overwritten: ${out}`);
+  }
+  for (const write of vercel.writes) {
+    assert.deepEqual(
+      write.target,
+      spec(write.key).secret ? ["production", "preview"] : ALL,
+      `${write.key} (secret: ${spec(write.key).secret})`,
+    );
+    assert.equal(write.upsert, "true");
+  }
+  assert.match(
+    out,
+    /kept off development \(secrets\): BETTER_AUTH_SECRET, DATABASE_URL, SSO_HANDOFF_PRIVATE_KEY/,
+  );
+});
+
+/* ================================================================== */
+/*  F-142: nothing is read as missing, or written over, on a guess     */
+/* ================================================================== */
+
+test("F-142: a listing that is not the whole environment is refused by every command, and nothing is written", async () => {
+  const bodies: [string, (envs: ReturnType<typeof raw>[]) => unknown, RegExp][] = [
+    [
+      "one page of several",
+      (envs) => ({ envs: envs.slice(0, 2), pagination: { count: 2, next: 1758844800000, prev: null } }),
+      /one page of several/,
+    ],
+    [
+      "Production entries hidden from the token",
+      (envs) => ({ envs: [], hiddenProductionEnvCount: envs.length }),
+      /10 Production variable\(s\) are hidden from this token/,
+    ],
+    // One variable, the shape the endpoint answers when it reads a single one.
+    ["no envs list", (envs) => envs[1], /answered without an `envs` list/],
+  ];
+  const commands: [string, (cliRoot: string) => Promise<unknown>][] = [
+    // With DATABASE_URL supplied, this used to generate and write every secret.
+    ["env:sync", (cliRoot) => envSync(cliRoot, { fromEnv: databaseUrlFile() })],
+    ["env:check", (cliRoot) => envCheck(cliRoot)],
+    ["env:prune --yes", (cliRoot) => envPrune(cliRoot, { yes: true })],
+    ["db:status", (cliRoot) => dbStatus(cliRoot)],
+  ];
+  for (const [shape, listed, why] of bodies) {
+    for (const [name, command] of commands) {
+      const vercel = fakeVercel(healthy(), undefined, false, { listed });
+      const { error, out } = await run(() => command(kitCli()));
+      assert.ok(error instanceof CliError, `${shape}, ${name}: ${out}`);
+      assert.match(error.message, /^Could not list environment variables for `prj_kit`: /);
+      assert.match(error.message, why, `${shape}, ${name}`);
+      assert.match(error.hint ?? "", /Nothing was read as missing, and nothing was written/);
+      assert.deepEqual(vercel.writes, [], `${shape}, ${name} writes nothing`);
+    }
+  }
+});
+
+test("F-142: without --force a write is a create, so a key the listing missed stops the sync; --force upserts", async () => {
+  // Vercel holds the live session secret, and the listing does not show it.
+  const listing = () => healthy().filter((e) => e.key !== "BETTER_AUTH_SECRET");
+  for (const conflict of ["400", "201"] as const) {
+    const vercel = fakeVercel(listing(), undefined, false, {
+      unlisted: [raw("BETTER_AUTH_SECRET", "sensitive")],
+      conflict,
+    });
+    const { error, out } = await run(() => envSync(kitCli(), {}));
+    assert.ok(error instanceof CliError, `${conflict}: ${out}`);
+    assert.equal(
+      error.message,
+      "Refusing to overwrite BETTER_AUTH_SECRET: Vercel already holds it for production, although the listing this run read did not show it.",
+    );
+    assert.match(error.hint ?? "", /^Nothing was overwritten\./);
+    assert.deepEqual(vercel.writes, [], `${conflict}: the live secret was not regenerated over`);
+  }
+
+  // A sync that writes only what is missing never asks to overwrite.
+  const plain = fakeVercel(listing());
+  const filled = await run(() => envSync(kitCli(), {}));
+  assert.equal(filled.error, undefined, filled.out);
+  assert.ok(
+    plain.writes.some((w) => w.key === "BETTER_AUTH_SECRET"),
+    filled.out,
+  );
+  assert.deepEqual(new Set(plain.writes.map((w) => w.upsert)), new Set([null]));
+
+  // --force is the one path that overwrites, and it says so.
+  const forced = fakeVercel(healthy());
+  const rotated = await run(() => envSync(kitCli(), { force: true, yes: true, fromEnv: databaseUrlFile() }));
+  assert.equal(rotated.error, undefined, rotated.out);
+  assert.ok(forced.writes.length > 0);
+  assert.deepEqual(new Set(forced.writes.map((w) => w.upsert)), new Set(["true"]));
 });
 
 test("env:sync --target all or production,preview: an entry kept on Production is checked though the key is missing elsewhere", async () => {

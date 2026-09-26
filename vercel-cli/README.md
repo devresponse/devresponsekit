@@ -174,6 +174,13 @@ set BETTER_AUTH_SECRET=<the kit's value>
 drk-deploy --config .drk-deploy.app-shared.json up --from-env .env.app3
 ```
 
+The kit's value is the copy you kept when you supplied it to the kit's `env:sync`: the kit stores it
+`sensitive` ([F-138](#f-138-secrets-are-stored-sensitive-and-kept-off-development)), and Vercel
+never returns a sensitive value. So when a fleet will run an Option C app, supply the kit's
+`BETTER_AUTH_SECRET` with `--from-env` on its first `up` rather than letting it be generated, and
+keep that copy in your secret store. A kit that generated its own holds the only copy, and replacing
+it with one you keep signs every user out.
+
 Re-running `init` on a satellite config keeps it a satellite. There is no flag that demotes one
 back to the kit; edit or delete the config file if that is genuinely what you want.
 
@@ -391,7 +398,33 @@ validates when it loads), so they keep the shell's variables, but never the toke
 takes `--force`, and rotating a secret additionally takes `--yes`, because rotating
 `BETTER_AUTH_SECRET` signs out every active user. A variable missing from some of the targets being
 synced is written only to those, so `--target all` fills in Preview and Development without touching
-the Production value, and without counting as a rotation.
+the Production value, and without counting as a rotation. What exists is read from the project's
+listing, and every command refuses a listing that is not the whole environment (one page of several,
+Production entries hidden from the token, or a shape this CLI does not read) rather than reading it
+as missing keys. Such a listing used to make `up` regenerate `BETTER_AUTH_SECRET` and the signing
+key over the live ones (F-142). Only `--force` writes with `upsert`. Without it every write is a
+create, so Vercel itself refuses a key the listing did not show, and nothing is overwritten.
+
+**Secrets are stored `sensitive`, and never in Development (F-138).** `env:sync` writes the secrets
+it sets (`BETTER_AUTH_SECRET`, `SSO_HANDOFF_PRIVATE_KEY`, the kit's `CRON_SECRET`, and a satellite's
+copy of the kit's `DATABASE_URL`) as Vercel sensitive variables: once written, no dashboard, API call
+or `vercel pull` returns them. They used to be `encrypted`, which every member and token that may
+read the project's Production variables can decrypt, and the signing key mints handoffs every
+satellite accepts. Two kinds stay `encrypted`, because something must read them afterwards: the
+`DATABASE_URL` of a deployment that migrates (the kit, or a satellite that owns its database), which
+the migration check above reads back through `vercel pull`, and a bearer token a caller outside
+Vercel presents. That is `METRICS_TOKEN` for your scraper, and a satellite's `CRON_SECRET` for the
+scheduler that calls its drain route (no satellite ships a cron): `env:sync` generates them and
+prints them masked, so you copy them from the dashboard. The kit's `CRON_SECRET` is sensitive,
+because Vercel Cron attaches it by itself (supply your own if another scheduler calls the kit too).
+A generated sensitive value is known to nobody, so supply any secret you will need again with
+`--from-env`, and keep that copy: the kit's `BETTER_AUTH_SECRET` if an Option C app will share its
+session (`env:sync` warns when it generates that one), and the signing key if a zero-downtime
+rotation will move it to `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY`. No secret is written to Development:
+Vercel stores nothing sensitive there, and `vercel env pull` copies Development to every developer's
+disk. `--target all` and `--target development` name the secrets they kept off it, and local work
+runs on its own `.env`. Public values stay `plain`, so they can be read back and checked. Secrets
+already on the project are not rewritten: see [Upgrading](#f-138-secrets-are-stored-sensitive-and-kept-off-development).
 
 **"Set" means set where the deployment reads it, and a public value is read back.** A variable
 counts as present only when entries for every target being synced or deployed carry it (Production
@@ -571,7 +604,8 @@ deliberately quieter than the kit's:
   app's provider credentials and read `delivery_payload` — the unredacted copy carrying live
   password-reset and invitation tokens. 401 forever is the correct state, so the CLI leaves it
   that way. A satellite that owns its own database gets the token, with the note that it must
-  schedule the route itself.
+  schedule the route itself. It is stored `encrypted`, so you can copy it from the dashboard to that
+  scheduler.
 - `ADMIN_TRUSTED_ORIGINS` is optional, and is **not** a place to put the kit's origin. It gates
   unsafe methods only; the handoff is a GET redirect and the confirm POST is same-origin, so a
   cross-origin request from the kit never arrives — listing it only widens the CSRF allow-list.
@@ -591,6 +625,41 @@ delete it — nothing reads it.
 ---
 
 ## Upgrading
+
+### F-138: secrets are stored sensitive, and kept off Development
+
+`env:sync` now writes a secret as **sensitive**, but for the two kinds something must read back, and
+to Production and Preview only ([above](#what-it-does-about-the-things-that-go-wrong)). It changes
+nothing already on the project:
+a secret an earlier version wrote is still `encrypted`, and still on Development where `--target
+all` put it. `env:check` prints each one's type (`BETTER_AUTH_SECRET  set production encrypted`).
+Re-storing them is a one-time operator step, by hand, because this CLI never rewrites a stored
+secret on its own:
+
+1. **Take them off Development.** Run `vercel env rm <KEY> development` for each secret there.
+   Nothing replaces them: local work uses its own `.env`. Ask each developer to delete any file
+   `vercel env pull` wrote them to.
+2. **Re-store Production and Preview as sensitive, keeping each value.** Copy the current value
+   first (the dashboard still reveals an `encrypted` one) into a `--from-env` file. Remove the entry
+   (`vercel env rm <KEY> production`, and `preview` when it covers Preview), then run
+   `drk-deploy env:sync --from-env <file>` (with `--target production,preview` when it covered
+   Preview). A supplied value wins over a generated one, so the value does not change. Move the
+   values into your secret store before you delete the file, then redeploy: once they are sensitive
+   that is the only copy. The kit's `BETTER_AUTH_SECRET` is what every Option C satellite must be
+   given, and the signing key is what a zero-downtime rotation moves to
+   `SSO_HANDOFF_PREVIOUS_PRIVATE_KEY`. Removing a secret without supplying it back **rotates** it: a
+   new `BETTER_AUTH_SECRET` signs every user out, and on the kit it also breaks every Option C
+   satellite's shared session until they hold the same value. A new `SSO_HANDOFF_PRIVATE_KEY`
+   replaces the key every satellite verifies against. Do not use `env:sync --force` for this: it
+   regenerates every other secret it may.
+3. **Leave `DATABASE_URL` as it is** on the kit and on a satellite that owns its database. It stays
+   `encrypted` so the migration check can read it. A satellite on the kit's database can re-store
+   its copy as in step 2. Do not re-store `METRICS_TOKEN`, or a satellite's `CRON_SECRET`, either:
+   they stay `encrypted`, so the scraper's and the scheduler's copy can be read from the dashboard.
+
+Every command now also refuses a listing that is not the whole environment (F-142). `… Production
+variable(s) are hidden from this token` means the token's account may not read Production
+variables: run it with a token whose account may.
 
 ### F-139: the build reads production's variables, not your shell's
 
@@ -759,8 +828,8 @@ Passing the correct value with `--from-env` does not override the config: for th
 identity, `env:sync` refuses a supplied value that differs from it. A
 sensitive value cannot be read back to compare, so confirm it where it can be observed, for example
 the `iss` and `aud` of a freshly minted handoff token. Re-run `drk-deploy init` first if the config is
-wrong. Secrets stay `sensitive` (or `encrypted`). They are never read, and nothing here asks you to
-change them.
+wrong. Secrets are never read, and this migration leaves them as they are.
+[F-138](#f-138-secrets-are-stored-sensitive-and-kept-off-development) is the one that re-stores them.
 
 ---
 
@@ -849,7 +918,9 @@ same `--config`.
 may be released and whether Vercel's git integration also deploys production, as pure functions
 (F-49). `src/commands/` is one file per command group.
 `test/env-presence.test.ts` runs `env:check`, `env:sync` and the `deploy` preflight for real against a
-fake Vercel API (`fetch` is replaced), so those tests never reach Vercel either.
+fake Vercel API (`fetch` is replaced), so those tests never reach Vercel either. Like Vercel, the
+fake refuses a create for a key already set on its target unless it carries `upsert`, which is how
+the F-142 backstop is asserted.
 
 The test suite is the only thing standing between a refactor and a silently wrong deployment.
 Everything worth relying on is written as a pure function for that reason: keep it that way when you

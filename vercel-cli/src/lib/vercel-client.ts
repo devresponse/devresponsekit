@@ -185,36 +185,54 @@ export class VercelClient {
    * decides whether its value can be verified. The value itself is kept only
    * for a `plain` entry, which the listing returns in the clear. Nothing is
    * decrypted here.
+   *
+   * The whole environment, or a refusal (F-142). Every decision the `env:*`
+   * commands make rests on this listing, and a key it leaves out reads as
+   * missing: `env:sync` used to regenerate BETTER_AUTH_SECRET, the signing
+   * key and CRON_SECRET over the live values when the listing came back in a
+   * shape it did not expect (read as `[]`), and the issuer-project refusal
+   * (F-50) and the rotation guard saw nothing either. So a listing that is
+   * not an `envs` array, is one page of several, or hides Production entries
+   * from this token is refused, never read as an empty project. The endpoint
+   * takes no cursor, so the rest of a paginated listing cannot be fetched.
    */
   async listEnv(idOrName: string): Promise<EnvVarSummary[]> {
+    type Listed = {
+      id?: string;
+      key: string;
+      target?: string[] | string;
+      type: string;
+      comment?: string;
+      gitBranch?: string;
+      customEnvironmentIds?: string[];
+      value?: string;
+    };
+    let result: {
+      envs?: unknown;
+      pagination?: { next?: unknown } | null;
+      hiddenProductionEnvCount?: unknown;
+    };
     try {
-      const result = (await this.sdk.projects.filterProjectEnvs(this.scope({ idOrName }))) as {
-        envs?: Array<{
-          id?: string;
-          key: string;
-          target?: string[] | string;
-          type: string;
-          comment?: string;
-          gitBranch?: string;
-          customEnvironmentIds?: string[];
-          value?: string;
-        }>;
-      } & { key?: string };
-      // The endpoint returns `{ envs: [...] }` for a project-wide read.
-      const envs = Array.isArray(result.envs) ? result.envs : [];
-      return envs.map((env) => ({
-        id: env.id ?? "",
-        key: env.key,
-        target: Array.isArray(env.target) ? env.target : typeof env.target === "string" ? [env.target] : [],
-        type: env.type,
-        comment: env.comment,
-        ...(env.gitBranch ? { gitBranch: env.gitBranch } : {}),
-        customEnvironmentIds: Array.isArray(env.customEnvironmentIds) ? env.customEnvironmentIds : [],
-        ...(env.type === "plain" && typeof env.value === "string" ? { value: env.value } : {}),
-      }));
+      result = (await this.sdk.projects.filterProjectEnvs(this.scope({ idOrName }))) as typeof result;
     } catch (err) {
       throw asCliError(err, `Could not list environment variables for \`${idOrName}\``);
     }
+    const incomplete = incompleteListing(result);
+    if (incomplete) {
+      throw new CliError(`Could not list environment variables for \`${idOrName}\`: ${incomplete.why}.`, {
+        hint: `Nothing was read as missing, and nothing was written. ${incomplete.hint}`,
+      });
+    }
+    return (result.envs as Listed[]).map((env) => ({
+      id: env.id ?? "",
+      key: env.key,
+      target: Array.isArray(env.target) ? env.target : typeof env.target === "string" ? [env.target] : [],
+      type: env.type,
+      comment: env.comment,
+      ...(env.gitBranch ? { gitBranch: env.gitBranch } : {}),
+      customEnvironmentIds: Array.isArray(env.customEnvironmentIds) ? env.customEnvironmentIds : [],
+      ...(env.type === "plain" && typeof env.value === "string" ? { value: env.value } : {}),
+    }));
   }
 
   /**
@@ -238,11 +256,15 @@ export class VercelClient {
   }
 
   /**
-   * Creates or overwrites one variable. `upsert: "true"` makes this idempotent,
-   * which is what lets `env:sync` be re-run safely — the alternative is a 403
-   * "already exists" on the second run.
+   * Creates one variable, and overwrites one that exists only under `upsert`
+   * (F-142), which only `env:sync --force` asks for. Without it Vercel refuses
+   * a key already set for one of the targets (`ENV_ALREADY_EXISTS`), so a key
+   * the listing missed stops the sync instead of being regenerated over the
+   * live value: a new BETTER_AUTH_SECRET signs every user out, and a new
+   * signing key replaces the one every satellite trusts. A refusal Vercel
+   * reports inside a 201 (`failed`) is a refusal too.
    */
-  async upsertEnv(
+  async createEnv(
     idOrName: string,
     variable: {
       key: string;
@@ -251,12 +273,14 @@ export class VercelClient {
       target: EnvTarget[];
       comment?: string;
     },
+    options: { upsert: boolean },
   ): Promise<void> {
+    let result: { failed?: Array<{ error?: { code?: string; message?: string } }> };
     try {
-      await this.sdk.projects.createProjectEnv(
+      result = (await this.sdk.projects.createProjectEnv(
         this.scope({
           idOrName,
-          upsert: "true",
+          ...(options.upsert ? { upsert: "true" } : {}),
           requestBody: {
             key: variable.key,
             value: variable.value,
@@ -265,10 +289,14 @@ export class VercelClient {
             ...(variable.comment ? { comment: variable.comment.slice(0, 500) } : {}),
           },
         }) as Parameters<Vercel["projects"]["createProjectEnv"]>[0],
-      );
+      )) as typeof result;
     } catch (err) {
+      if (apiErrorCode(err) === ALREADY_EXISTS) throw alreadyExists(variable.key, variable.target);
       throw asCliError(err, `Could not set ${variable.key}`);
     }
+    const failure = result.failed?.find((f) => f.error)?.error;
+    if (failure?.code === ALREADY_EXISTS) throw alreadyExists(variable.key, variable.target);
+    if (failure) throw new CliError(`Could not set ${variable.key}: ${failure.message ?? failure.code}`);
   }
 
   async removeEnv(idOrName: string, envId: string): Promise<void> {
@@ -436,6 +464,62 @@ function normalizeProjects(response: unknown): Array<{ id: string; name: string 
   return (list as Array<{ id?: unknown; name?: unknown }>)
     .filter((p): p is { id: string; name: string } => typeof p.id === "string" && typeof p.name === "string")
     .map((p) => ({ id: p.id, name: p.name }));
+}
+
+/**
+ * Why an env listing is not the project's whole environment, or null (F-142).
+ * `hiddenProductionEnvCount` is how the API says the token may not see the
+ * Production entries, which a sync would then write over.
+ */
+function incompleteListing(result: {
+  envs?: unknown;
+  pagination?: { next?: unknown } | null;
+  hiddenProductionEnvCount?: unknown;
+}): { why: string; hint: string } | null {
+  if (!Array.isArray(result.envs)) {
+    return {
+      why: "the API answered without an `envs` list",
+      hint: "The response shape is not the one this CLI reads, most likely after an @vercel/sdk or API change.",
+    };
+  }
+  if (result.pagination?.next != null) {
+    return {
+      why: "the API answered with one page of several, and the endpoint takes no cursor to fetch the rest",
+      hint: "Remove variables the project no longer uses, or extend this CLI to page the listing.",
+    };
+  }
+  const hidden = result.hiddenProductionEnvCount;
+  if (typeof hidden === "number" && hidden > 0) {
+    return {
+      why: `${hidden} Production variable(s) are hidden from this token`,
+      hint: "Use a token whose account may read the project's Production variables (not a Developer role), then re-run.",
+    };
+  }
+  return null;
+}
+
+/** The API's refusal of a create for a key already set on one of its targets. */
+const ALREADY_EXISTS = "ENV_ALREADY_EXISTS";
+
+function alreadyExists(key: string, target: readonly string[]): CliError {
+  return new CliError(
+    `Refusing to overwrite ${key}: Vercel already holds it for ${target.join(", ")}, although the listing this run read did not show it.`,
+    {
+      hint: "Nothing was overwritten. Re-run to plan against a fresh listing. Replacing a stored value takes --force, and a secret also --yes (F-142).",
+    },
+  );
+}
+
+/** The `error.code` of an API error's JSON body, or undefined. */
+function apiErrorCode(err: unknown): string | undefined {
+  const body = (err as { body?: unknown }).body;
+  if (typeof body !== "string") return undefined;
+  try {
+    const code = (JSON.parse(body) as { error?: { code?: unknown } } | null)?.error?.code;
+    return typeof code === "string" ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Turns an SDK error into a CliError with the API's own message preserved. */

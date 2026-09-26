@@ -1,10 +1,12 @@
 import { commandFor } from "./config-file.js";
+import { REFERENCE_KEYS } from "./migration-target.js";
 import { ed25519PrivateJwkProblem } from "./secrets.js";
 import {
   type DeploymentProfile,
   type SatelliteProfile,
   hostSitsUnder,
   isCookieDomainShaped,
+  migrationPolicy,
   optionLabel,
   originOf,
 } from "./target.js";
@@ -44,7 +46,12 @@ export interface EnvVarSpec {
    * `optional` — has a working default.
    */
   level: "required" | "recommended" | "optional";
-  /** Secrets are stored `encrypted` on Vercel and never printed by this CLI. */
+  /**
+   * Secrets are never printed by this CLI, are stored `sensitive` on Vercel
+   * but for the few something must read back (see {@link vercelTypeFor}),
+   * and are never written to Development (see
+   * {@link writableTargets}).
+   */
   secret: boolean;
   source: EnvSource;
   /**
@@ -403,12 +410,58 @@ export function derivedValues(options: {
   };
 }
 
-/** The Vercel env-var `type` for a spec — secrets are stored encrypted. */
-export function vercelTypeFor(spec: EnvVarSpec): "encrypted" | "plain" {
-  return spec.secret ? "encrypted" : "plain";
+/**
+ * The Vercel env-var `type` `env:sync` writes a spec as (F-138).
+ *
+ * A public value is `plain`, so it can be read back and checked (F-46). A
+ * secret is `sensitive`: once written, no dashboard, API call or `vercel pull`
+ * returns it. It used to be `encrypted`, which every member and token allowed
+ * to read the project's Production variables can decrypt, the kit's
+ * SSO_HANDOFF_PRIVATE_KEY included, and that key mints handoffs every
+ * satellite accepts.
+ *
+ * Two kinds of secret stay `encrypted`, because something must read them
+ * after they are written:
+ * - The database URL of a deployment that migrates. Before anything
+ *   migrates, the F-47 check proves the migration URL is production's
+ *   database by reading production's DATABASE_URL back through `vercel pull`.
+ *   A sensitive one comes back as a placeholder, which refuses every
+ *   migration unless a readable DATABASE_URL_UNPOOLED, holding the same
+ *   credentials, stands in for it. A satellite on the kit's database never
+ *   migrates, so its copy of the kit's URL is sensitive.
+ * - A bearer token a caller outside Vercel presents. `env:sync` generates it
+ *   and prints it only masked, so the operator copies it to that caller from
+ *   the dashboard: METRICS_TOKEN (the scraper), and a satellite's
+ *   CRON_SECRET (no satellite ships a `crons` entry, so a satellite that owns
+ *   its database schedules the drain externally). A sensitive one could
+ *   never be presented by anyone. The kit's CRON_SECRET is sensitive: the
+ *   Vercel Cron its `vercel.json` schedules attaches it by itself.
+ */
+export function vercelTypeFor(
+  spec: EnvVarSpec,
+  profile: DeploymentProfile,
+): "sensitive" | "encrypted" | "plain" {
+  if (!spec.secret) return "plain";
+  const migrationReadsIt =
+    (REFERENCE_KEYS as readonly string[]).includes(spec.key) && migrationPolicy(profile).allowed;
+  const presentedFromOutside =
+    spec.key === "METRICS_TOKEN" || (spec.key === "CRON_SECRET" && profile.kind === "satellite");
+  return migrationReadsIt || presentedFromOutside ? "encrypted" : "sensitive";
 }
 
 export const ALL_TARGETS: readonly EnvTarget[] = ["production", "preview", "development"];
+
+/**
+ * The targets `env:sync` writes a spec to, of those asked for (F-138): a
+ * secret never goes to Development. Vercel offers no `sensitive` type there,
+ * and `vercel env pull` copies Development's variables to every developer's
+ * disk, where a production DATABASE_URL, session secret or signing key does
+ * not belong. `--target all` used to put all three there. Local development
+ * runs on its own `.env`.
+ */
+export function writableTargets(spec: EnvVarSpec, targets: readonly EnvTarget[]): EnvTarget[] {
+  return spec.secret ? targets.filter((t) => t !== "development") : [...targets];
+}
 
 /* ================================================================== */
 /*  Satellite profile                                                  */
@@ -469,7 +522,9 @@ export function mayGenerateAuthSecret(profile: DeploymentProfile): boolean {
 const SHARED_SECRET_HINT = [
   "cannot be generated for an Option C satellite: it must be byte-identical to the KIT's BETTER_AUTH_SECRET,",
   "because this app validates the kit's session cookie directly. A freshly generated secret would boot cleanly",
-  "and then log users out at random. Copy the kit's value (--from-env, or the shell) and re-run.",
+  "and then log users out at random. Copy the kit's value (--from-env, or the shell) and re-run: the copy kept",
+  "when it was supplied to the kit, since Vercel returns none stored sensitive. A kit that generated its own",
+  "holds the only copy, and replacing it with one you keep signs every user out.",
 ].join(" ");
 
 /** The satellite's variables, in the order an operator reads them. */

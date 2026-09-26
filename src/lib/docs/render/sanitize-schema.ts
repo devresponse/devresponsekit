@@ -39,8 +39,25 @@ type Schema = typeof defaultSchema;
 
 const baseProtocols = defaultSchema.protocols ?? {};
 
+/**
+ * The namespace every id in a rendered document lives in (F-91), and the
+ * upstream default spelled out so the pipeline can share it.
+ *
+ * The article is injected into the shell's own DOM, so a bare heading id
+ * collides with the shell's: `## Navigation` became a second
+ * `id="navigation"`, and the skip link and the TOC both jumped to the root
+ * sidebar. Sanitize already clobbers author ids with this prefix; the pipeline
+ * gives heading ids the same prefix (rehype-slug) and rewrites every
+ * in-document `#fragment` link to match, so one prefix is applied exactly once
+ * to ids and links alike. remark-rehype's own footnote prefix is turned off
+ * for the same reason: sanitize prefixed its already-prefixed ids a second
+ * time (`user-content-user-content-fn-1`) but not the links to them.
+ */
+export const DOC_ID_PREFIX = "user-content-";
+
 export const docsSanitizeSchema: Schema = {
   ...defaultSchema,
+  clobberPrefix: DOC_ID_PREFIX,
   protocols: {
     ...baseProtocols,
     // https only (review #215) — see the note above.

@@ -115,6 +115,7 @@ Slower, browser-based suites (also run in CI):
 
 ```bash
 pnpm build          # next build  (catches config/server errors early)
+node scripts/check-docs-trace.mjs  # after a build: the docs/help functions carry their content only (F-88)
 pnpm test:e2e       # Playwright end-to-end
 pnpm test:a11y      # Playwright + axe-core accessibility
 ```

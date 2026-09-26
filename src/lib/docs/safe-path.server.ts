@@ -105,8 +105,16 @@ export async function getDocsRoot(space: DocSpace = "docs"): Promise<string> {
   if (cached) return cached;
   const env = getServerEnv();
   const configured = space === "help" ? env.HELP_ROOT : env.DOCS_ROOT;
-  const base = configured ? path.resolve(configured) : path.resolve(process.cwd(), space);
-  const root = await fs.realpath(base);
+  // F-88: literal defaults. `path.resolve(process.cwd(), space)` is a path
+  // the build cannot know, so the tracer shipped the whole working tree in
+  // every docs and help function. A configured root is a runtime value the
+  // build cannot see either, so that call is left out of the trace; the
+  // content itself is declared in next.config.mjs.
+  const root = configured
+    ? await fs.realpath(/* turbopackIgnore: true */ path.resolve(configured))
+    : await fs.realpath(
+        space === "help" ? path.join(process.cwd(), "help") : path.join(process.cwd(), "docs"),
+      );
   cachedRoots.set(space, root);
   return root;
 }

@@ -330,6 +330,18 @@ export default defineConfig({
         },
         // The pure impersonation-marker reader shared by both guards (review #28).
         "**/lib/impersonation.ts": { lines: 100, statements: 100, functions: 100, branches: 100 },
+        // F-92: the docs/help viewers' authorization: the image route's gate
+        // (session, membership, `shell.view`) and the per-document gate the
+        // doc pages ask (`canViewDoc`, `getViewableDocument`). Pinned a few
+        // points below the measured actuals (asset route 95/100/100/93,
+        // catalog 91/93/93/92); raise, never lower.
+        "**/lib/docs/asset-route.server.ts": {
+          lines: 90,
+          statements: 90,
+          functions: 100,
+          branches: 95,
+        },
+        "**/lib/docs/catalog.server.ts": { lines: 88, statements: 88, functions: 90, branches: 90 },
         // The shared Administrator grid. Not a security module — it is here
         // because it is the single render path behind all ~18 Administrator
         // list views, so a regression in it is the widest UI blast radius in

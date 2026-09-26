@@ -74,6 +74,50 @@ const apiNoStore = {
   headers: [{ key: "Cache-Control", value: "private, no-store" }],
 };
 
+/**
+ * F-88: what the docs and help viewers read from disk at request time, per
+ * route, so it travels with those server functions (Vercel) and into
+ * `.next/standalone` (Docker).
+ *
+ * The content roots used to reach the functions only by accident: the dynamic
+ * `path.resolve(process.cwd(), space)` in safe-path.server.ts made the tracer
+ * ship the WHOLE working tree in each of the six functions, including a
+ * developer checkout's gitignored coverage report, Playwright traces and
+ * `.vercel` env file when `drk-deploy release` builds locally. The roots are
+ * literal now, and the content is declared here so that narrowing the trace
+ * can never drop it. `scripts/check-docs-trace.mjs` (CI, after `next build`)
+ * proves both halves on the real build output.
+ *
+ * The route keys match every form a bundler may name a route by
+ * (`/[locale]/app/docs/[...slug]`, `…/(secure)/app/docs/[...slug]/page`)
+ * without spelling `[locale]`, which a route glob reads as a character class.
+ * The image extensions are the asset route's allow-list (IMAGE_CONTENT_TYPES
+ * in src/lib/docs/safe-path.server.ts; tests/unit/docs-trace.test.ts
+ * keeps them equal).
+ */
+export const DOC_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "avif", "svg"];
+const docText = (space) => [`${space}/**/*.md`, `${space}/**/*.mdx`];
+const docImages = (space) => DOC_IMAGE_EXTENSIONS.map((ext) => `${space}/**/*.${ext}`);
+const docsTracingIncludes = {
+  "**/app/docs": docText("docs"),
+  "**/app/docs/**": docText("docs"),
+  "**/app/help": docText("help"),
+  "**/app/help/**": docText("help"),
+  "**/api/docs/asset/**": docImages("docs"),
+  "**/api/help/asset/**": docImages("help"),
+};
+/** Local, gitignored artifacts that must never ride along, whatever the trace finds. */
+const LOCAL_ARTIFACTS = [
+  ".vercel/**",
+  "coverage/**",
+  "test-results/**",
+  "playwright-report/**",
+  ".stryker-tmp/**",
+];
+const docsTracingExcludes = Object.fromEntries(
+  Object.keys(docsTracingIncludes).map((route) => [route, LOCAL_ARTIFACTS]),
+);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -87,6 +131,9 @@ const nextConfig = {
   // an ADDITIONAL build artifact: `next start` and serverless targets are
   // unaffected. See the Dockerfile and docs/docker.md.
   output: "standalone",
+  // F-88: the docs/help content, declared per route (see above).
+  outputFileTracingIncludes: docsTracingIncludes,
+  outputFileTracingExcludes: docsTracingExcludes,
   // Local subdomain-SSO testing: the dev server may be reached via a
   // non-localhost hostname (devresponse.local via the hosts file, or
   // *.localtest.me via public DNS), which Next's dev cross-origin protection

@@ -303,10 +303,13 @@ to confirm both localize.
 ## Auth screens
 
 > **Shared context for all auth screens.** They live in the `(auth)` route group,
-> which has **no dedicated layout** (verified: no `src/app/[locale]/(auth)/layout.tsx`);
-> they render under the root locale layout only, so the secure navigation shell
-> never mounts. There is **no server-side session check** on these pages — a
-> signed-in user visiting `/sign-in` still sees the form. Only `sign-in`,
+> whose layout (`src/app/[locale]/(auth)/layout.tsx`) adds **no markup**: it only
+> mounts `ClientMessagesProvider` with the `auth` scope (the locale scope plus
+> `auth` and `validation`), so the group's client components and
+> `(auth)/error.tsx` read their messages from it, not from the locale layout's
+> provider (F-123). The secure navigation shell never mounts. There is **no
+> server-side session check** on these pages — a signed-in user visiting
+> `/sign-in` still sees the form. Only `sign-in`,
 > `sign-up`, `forgot-password`, `reset-password`, `pending-approval`, and
 > `blocked` are classified as `auth` routes; `sso/confirm` (also under the
 > `(auth)` folder) is classified as `public` by the route-region map

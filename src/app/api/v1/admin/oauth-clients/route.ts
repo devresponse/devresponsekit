@@ -148,6 +148,22 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
     }
   } else {
     organizationId = parsed.data.organizationId ?? null;
+    // F-63 (#95): checked like the service principal above. A well-formed id
+    // naming no org (a deleted one, say) used to reach the insert and fail its
+    // foreign key, a 500 instead of this 400.
+    if (organizationId !== null) {
+      const org = await db
+        .selectFrom("app_organizations")
+        .select(["id"])
+        .where("id", "=", organizationId)
+        .executeTakeFirst();
+      if (!org) {
+        return problemResponse("invalid_request", 400, request, {
+          detail: "organizationId does not reference an existing organization.",
+          requestId: grant.requestId,
+        });
+      }
+    }
   }
 
   const scopes = normalizeScopes(parsed.data.scopes);

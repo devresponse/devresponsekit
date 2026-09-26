@@ -15,7 +15,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const createGroupSchema = z
   .object({
     key: z.string().min(1, "required").max(120, "max").regex(GROUP_KEY_RE, "key"),
-    name: z.string().min(1, "required").max(200, "max"),
+    // Trimmed before the required check, so a name of spaces is empty (F-157).
+    name: z.string().trim().min(1, "required").max(200, "max"),
     description: z.string().max(1000, "max").optional(),
     organizationId: z.string().regex(UUID_RE, "uuid").optional(),
   })
@@ -26,7 +27,7 @@ export type CreateGroupInput = z.input<typeof createGroupSchema>;
 /** Partial update contract for `PATCH /api/administrator/groups/[id]` (key immutable). */
 export const updateGroupSchema = z
   .object({
-    name: z.string().min(1, "required").max(200, "max").optional(),
+    name: z.string().trim().min(1, "required").max(200, "max").optional(),
     description: z.string().max(1000, "max").nullable().optional(),
   })
   .strict();

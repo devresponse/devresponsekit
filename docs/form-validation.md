@@ -84,6 +84,14 @@ below). Auth schemas are form-only — those forms call the Better Auth client
 directly rather than an app route. The sign-up name is the exception: Better
 Auth applies the same rule on the server (next section).
 
+A resource's display name (a role's, group's or organization's name, an
+enterprise app's label, an email template's subject) is `.trim()`med before its
+required check, as the API-key name and the invitation email already were. A
+value of spaces is then empty: the form shows `validation.required` on the
+field, the API answers 400, and a route stores the trimmed text. The forms used
+to trim only after validating, so a name of spaces passed the form and came
+back as a banner, and a direct API call stored a blank-looking name (F-157).
+
 #### A person's name
 
 Every field that sets a person's name uses one of two shared fields from

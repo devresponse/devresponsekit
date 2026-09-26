@@ -2,6 +2,7 @@ import "server-only";
 import { unstable_rethrow } from "next/navigation";
 import { NextResponse } from "next/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
+import { InvalidListQueryError } from "@/lib/admin/list-query.server";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { problemResponse } from "@/lib/api-auth/problem";
 
@@ -33,6 +34,9 @@ import { problemResponse } from "@/lib/api-auth/problem";
  *      problem+json — carrying the same id in the body and the header. The
  *      envelope helper logs it (`admin.internal_error` / `v1.internal_error`,
  *      OPS-OBS-2) and captures the cause to Sentry tagged `request_id` (D4).
+ *      The one throw that is the CLIENT's fault, a list query `parseListQuery`
+ *      refuses (`InvalidListQueryError`), answers the surface's 400 instead
+ *      (F-63).
  *
  * Next's own control-flow throws (`redirect()`, `notFound()`, dynamic-usage
  * bailouts) are re-thrown untouched via `unstable_rethrow`, so wrapping never
@@ -102,6 +106,11 @@ function wrapRoute<Args extends unknown[], R extends Response>(
     requestId: string,
     cause: unknown,
   ) => NextResponse,
+  renderInvalidQuery: (
+    request: RequestCarrier | undefined,
+    requestId: string,
+    detail: string,
+  ) => NextResponse,
 ): (...args: Args) => Promise<R | NextResponse> {
   return async (...args: Args): Promise<R | NextResponse> => {
     const request = requestCarrier(args[0]);
@@ -111,6 +120,13 @@ function wrapRoute<Args extends unknown[], R extends Response>(
       response = await handler(...args);
     } catch (err) {
       unstable_rethrow(err);
+      // F-63: `parseListQuery` refuses a page past MAX_PAGE or a malformed id
+      // in a uuid filter by throwing, so every list route answers the same 400
+      // here instead of each handling a parse result. It is a client error:
+      // no log line, no Sentry event.
+      if (err instanceof InvalidListQueryError) {
+        return renderInvalidQuery(request, requestId, err.detail);
+      }
       return renderThrow(request, requestId, err);
     }
     return stampRequestId(response, requestId);
@@ -121,24 +137,35 @@ function wrapRoute<Args extends unknown[], R extends Response>(
  * Wraps a handler on a surface that speaks the admin envelope: the
  * administrator console and the first-party JSON routes (`/api/account/*`,
  * `/api/preferences/*`, `/api/invitations/*`, `/api/navigation/*`, the SSO
- * launch/consume pair). A throw answers `500 internal_error`.
+ * launch/consume pair). A throw answers `500 internal_error`, and an
+ * {@link InvalidListQueryError} `400 invalid_query` with its `detail`.
  */
 export function withAdminRoute<Args extends unknown[], R extends Response>(
   handler: (...args: Args) => R | Promise<R>,
 ): (...args: Args) => Promise<R | NextResponse> {
-  return wrapRoute(handler, (request, requestId, cause) =>
-    adminErrorResponse("internal_error", 500, request, { requestId, cause }),
+  return wrapRoute(
+    handler,
+    (request, requestId, cause) =>
+      adminErrorResponse("internal_error", 500, request, { requestId, cause }),
+    (request, requestId, detail) =>
+      adminErrorResponse("invalid_query", 400, request, { requestId, extra: { detail } }),
   );
 }
 
 /**
  * Wraps an `/api/v1` handler: a throw answers an RFC 7807 problem+json
- * `500 internal_error` (`problemResponse`, design §8.1).
+ * `500 internal_error` (`problemResponse`, design §8.1), and an
+ * {@link InvalidListQueryError} the `400 invalid_request` problem every other
+ * v1 query refusal is.
  */
 export function withV1Route<Args extends unknown[], R extends Response>(
   handler: (...args: Args) => R | Promise<R>,
 ): (...args: Args) => Promise<R | NextResponse> {
-  return wrapRoute(handler, (request, requestId, cause) =>
-    problemResponse("internal_error", 500, request, { requestId, cause }),
+  return wrapRoute(
+    handler,
+    (request, requestId, cause) =>
+      problemResponse("internal_error", 500, request, { requestId, cause }),
+    (request, requestId, detail) =>
+      problemResponse("invalid_request", 400, request, { requestId, detail }),
   );
 }

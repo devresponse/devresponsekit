@@ -1298,6 +1298,7 @@
     "audience_taken": "この SSO オーディエンスはすでに使用されています。",
     "invalid_body": "リクエスト本文が無効です。",
     "invalid_id": "指定された id は有効な UUID ではありません。",
+    "invalid_query": "クエリパラメーターが無効です。",
     "invalid_origin": "リクエストのオリジンは許可されていません。",
     "invalid_session_id": "セッション id が無効です。",
     "key_taken": "このキーはすでに使用されています。",

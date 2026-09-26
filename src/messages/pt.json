@@ -1298,6 +1298,7 @@
     "audience_taken": "Esta audiência SSO já está a ser utilizada.",
     "invalid_body": "O corpo do pedido é inválido.",
     "invalid_id": "O id fornecido não é um UUID válido.",
+    "invalid_query": "Os parâmetros da consulta são inválidos.",
     "invalid_origin": "A origem do pedido não é permitida.",
     "invalid_session_id": "O id da sessão é inválido.",
     "key_taken": "Esta chave já está a ser utilizada.",

@@ -16,8 +16,13 @@ const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
 const auditMock = vi.fn();
 
-const state: { role: { id: string; organization_id: string | null; key: string } | undefined } = {
+const state: {
+  role: { id: string; organization_id: string | null; key: string } | undefined;
+  /** F-63: what the role insert throws, when set. */
+  insertError: Error | undefined;
+} = {
   role: undefined,
+  insertError: undefined,
 };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
@@ -45,7 +50,10 @@ function makeChain(table: string): unknown {
       get(_t, prop) {
         if (prop === "executeTakeFirst") return async () => firstFor(table);
         if (prop === "executeTakeFirstOrThrow")
-          return async () => ({ id: "role-new", key: "new-role" });
+          return async () => {
+            if (state.insertError) throw state.insertError;
+            return { id: "role-new", key: "new-role" };
+          };
         if (prop === "execute") return async () => [];
         return (...args: unknown[]) => {
           const cb = args[0];
@@ -113,6 +121,7 @@ let DELETE: typeof IdRoute.DELETE;
 beforeEach(async () => {
   for (const m of [sessionGetter, accessGetter, auditMock]) m.mockReset();
   state.role = { id: ROLE, organization_id: ORG_A, key: "editor" };
+  state.insertError = undefined;
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ POST } = await import("@/app/api/administrator/roles/route"));
   ({ PATCH, DELETE } = await import("@/app/api/administrator/roles/[id]/route"));
@@ -142,6 +151,23 @@ describe("POST /roles — create scoping", () => {
     state.role = undefined; // dup-check returns none
     accessGetter.mockResolvedValue(superadmin(["admin.roles.create"]));
     expect((await POST(req("", { method: "POST", body: mk(null) }))).status).toBe(201);
+  });
+
+  // F-63 (#95): a SUPERADMIN naming an org that does not exist (a deleted one)
+  // failed the insert's foreign key, a 500. It is the groups create's 404.
+  it("F-63: 404 organization_not_found when a SUPERADMIN names an org that does not exist", async () => {
+    state.role = undefined;
+    state.insertError = Object.assign(
+      new Error(
+        'insert or update on table "app_roles" violates foreign key constraint "app_roles_organization_id_fkey"',
+      ),
+      { code: "23503" },
+    );
+    accessGetter.mockResolvedValue(superadmin(["admin.roles.create"]));
+    const res = await POST(req("", { method: "POST", body: mk(ORG_B) }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "organization_not_found" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });
 

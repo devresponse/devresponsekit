@@ -47,6 +47,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
   const query = parseListQuery(request.nextUrl.searchParams, {
     allowedSortFields: ["role_name", "role_key", "organization_name", "created_at"],
     allowedFilters: ["organization_id"],
+    uuidFilters: { organization_id: [] },
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,
     maxPageSize: 200,

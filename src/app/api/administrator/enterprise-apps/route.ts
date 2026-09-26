@@ -54,6 +54,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       "organization_slug",
     ],
     allowedFilters: ["status", "organization_id"],
+    uuidFilters: { organization_id: ["null"] },
     defaultSort: [
       { field: "sort_order", direction: "asc" },
       { field: "label", direction: "asc" },

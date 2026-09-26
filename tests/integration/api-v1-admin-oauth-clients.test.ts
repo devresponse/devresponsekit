@@ -56,11 +56,14 @@ const state: {
    * `userHoldsSuperuserGrant`) still does — exactly the real SQL's split.
    */
   serviceGrantOrgActive: boolean;
+  /** F-63: the `app_organizations` row a superadmin's `organizationId` names. */
+  organization: { id: string } | undefined;
 } = {
   serviceUser: undefined,
   membership: undefined,
   serviceIsSuperuser: false,
   serviceGrantOrgActive: true,
+  organization: undefined,
 };
 
 vi.mock("@/lib/api-auth/v1-guard.server", () => ({
@@ -91,11 +94,13 @@ vi.mock("@/db/database", () => {
                 ? state.serviceUser
                 : table === "app_organization_memberships"
                   ? state.membership
-                  : table === "app_user_roles"
-                    ? state.serviceIsSuperuser && (state.serviceGrantOrgActive || !joinsOrgs)
-                      ? { id: "perm-superuser" }
-                      : undefined
-                    : undefined;
+                  : table === "app_organizations"
+                    ? state.organization
+                    : table === "app_user_roles"
+                      ? state.serviceIsSuperuser && (state.serviceGrantOrgActive || !joinsOrgs)
+                        ? { id: "perm-superuser" }
+                        : undefined
+                      : undefined;
           if (prop === "execute") return async () => [];
           if (prop === "innerJoin")
             return (target: unknown) =>
@@ -196,6 +201,7 @@ beforeEach(async () => {
   state.membership = { id: "m1" };
   state.serviceIsSuperuser = false;
   state.serviceGrantOrgActive = true;
+  state.organization = { id: "o-existing" };
   ({ GET, POST } = await import("@/app/api/v1/admin/oauth-clients/route"));
   ({ POST: ROTATE_SECRET } =
     await import("@/app/api/v1/admin/oauth-clients/[id]/rotate-secret/route"));
@@ -432,6 +438,35 @@ describe("POST /api/v1/admin/oauth-clients", () => {
     const res = await POST(req({ method: "POST", body: body() }));
     expect(res.status).toBe(201);
     expect(createOauthClient).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * F-63 (#95): a SUPERADMIN names the client's org. A well-formed id that
+   * names no org (a deleted one) reached the insert and failed its foreign
+   * key, a 500. It is now refused like an unknown service principal.
+   */
+  const NAMED_ORG = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+
+  it("F-63: 400 invalid_request, before any insert, when a SUPERADMIN names an org that does not exist", async () => {
+    state.organization = undefined;
+    requireApiPermission.mockResolvedValue(superadmin());
+    const res = await POST(req({ method: "POST", body: body({ organizationId: NAMED_ORG }) }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      code: "invalid_request",
+      detail: "organizationId does not reference an existing organization.",
+    });
+    expect(createOauthClient).not.toHaveBeenCalled();
+    expect(auditEvent).not.toHaveBeenCalled();
+  });
+
+  it("F-63: a SUPERADMIN still registers a client in an org that exists (201)", async () => {
+    requireApiPermission.mockResolvedValue(superadmin());
+    const res = await POST(req({ method: "POST", body: body({ organizationId: NAMED_ORG }) }));
+    expect(res.status).toBe(201);
+    expect(createOauthClient).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: NAMED_ORG }),
+    );
   });
 });
 

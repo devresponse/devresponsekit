@@ -61,7 +61,8 @@ const SORT_COLUMNS: Record<string, string> = {
  * organizations. Caller MUST hold `admin.apikeys.read`.
  *
  * Filters: `filter[status]` (`active` | `revoked`),
- * `filter[app_user_id]`, `filter[organization_id]`. `q` matches
+ * `filter[app_user_id]`, `filter[organization_id]` (UUIDs; anything else is a
+ * 400, F-63). `q` matches
  * case-insensitively against the key name, display prefix, and owner
  * email.
  */
@@ -72,6 +73,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const query = parseListQuery(request.nextUrl.searchParams, {
     allowedSortFields: Object.keys(SORT_COLUMNS),
     allowedFilters: ["status", "app_user_id", "organization_id"],
+    uuidFilters: { app_user_id: [], organization_id: [] },
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,
     maxPageSize: 200,

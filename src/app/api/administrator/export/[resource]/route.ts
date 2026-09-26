@@ -136,6 +136,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
   const query = parseListQuery(request.nextUrl.searchParams, {
     allowedSortFields: ALLOWED_SORT_BY_RESOURCE[resource],
     allowedFilters: ALLOWED_FILTERS_BY_RESOURCE[resource],
+    uuidFilters: UUID_FILTERS_BY_RESOURCE[resource],
     defaultSort: DEFAULT_SORT_BY_RESOURCE[resource],
     // Page size is overridden below — we stream in PAGE_SIZE chunks.
     defaultPageSize: PAGE_SIZE,
@@ -313,6 +314,11 @@ const ALLOWED_SORT_BY_RESOURCE: Record<Resource, string[]> = {
   "enterprise-apps": ["id", "label", "subdomain", "status", "sort_order", "created_at"],
 };
 
+/** The `filter[organization]` keyword for global roles, as on `GET /roles`. */
+const ROLES_GLOBAL_ORGANIZATION = "global";
+/** The `filter[organization_id]` keyword for global apps, as on `GET /enterprise-apps`. */
+const ENTERPRISE_APPS_GLOBAL_ORGANIZATION = "null";
+
 const ALLOWED_FILTERS_BY_RESOURCE: Record<Resource, string[]> = {
   users: ["status"],
   audit: [
@@ -329,6 +335,24 @@ const ALLOWED_FILTERS_BY_RESOURCE: Record<Resource, string[]> = {
   permissions: [],
   memberships: ["status", "organization_id", "source_provider"],
   "enterprise-apps": ["status", "organization_id"],
+};
+
+/**
+ * The filters compared with a `uuid` column, with the keyword each list route
+ * also takes (F-63). A malformed id is a 400 before the preflight, as on the
+ * list, where it was a 502 `export_failed`: Postgres refused the cast. And a
+ * keyword the list reads as "no organization" (`global` on roles, `null` on
+ * enterprise apps) was compared with `organization_id` as an id, so the grid's
+ * view of global rows could not be exported at all.
+ */
+const UUID_FILTERS_BY_RESOURCE: Record<Resource, Record<string, readonly string[]>> = {
+  users: {},
+  audit: { app_user_id: [], organization_id: [] },
+  organizations: {},
+  roles: { organization: [ROLES_GLOBAL_ORGANIZATION] },
+  permissions: {},
+  memberships: { organization_id: [] },
+  "enterprise-apps": { organization_id: [ENTERPRISE_APPS_GLOBAL_ORGANIZATION] },
 };
 
 const DEFAULT_SORT_BY_RESOURCE: Record<Resource, ListQuery["sort"]> = {
@@ -621,7 +645,8 @@ function buildRolesExporter(query: ListQuery, scope: OrgScope | null): Exporter 
       // roles are platform config, superadmin-only).
       if (scope.kind === "org") q = q.where("organization_id", "=", scope.organizationId);
       const org = query.filters.organization;
-      if (typeof org === "string") q = q.where("organization_id", "=", org);
+      if (org === ROLES_GLOBAL_ORGANIZATION) q = q.where("organization_id", "is", null);
+      else if (typeof org === "string") q = q.where("organization_id", "=", org);
       const scopeFilter = query.filters.scope;
       if (scopeFilter === "global") q = q.where("organization_id", "is", null);
       else if (scopeFilter === "org") q = q.where("organization_id", "is not", null);
@@ -759,7 +784,11 @@ function buildEnterpriseAppsExporter(query: ListQuery, scope: OrgScope | null): 
       const status = query.filters.status;
       if (typeof status === "string") q = q.where("a.status", "=", status);
       const orgId = query.filters.organization_id;
-      if (typeof orgId === "string") q = q.where("a.organization_id", "=", orgId);
+      if (orgId === ENTERPRISE_APPS_GLOBAL_ORGANIZATION) {
+        q = q.where("a.organization_id", "is", null);
+      } else if (typeof orgId === "string") {
+        q = q.where("a.organization_id", "=", orgId);
+      }
       if (query.q) {
         const like = likeContains(query.q);
         q = q.where((eb) => eb.or([eb("a.id", "ilike", like), eb("a.label", "ilike", like)]));

@@ -16,7 +16,8 @@ export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 export const createOrganizationSchema = z
   .object({
     slug: z.string().min(1, "required").max(64, "max").regex(SLUG_RE, "slug"),
-    name: z.string().min(1, "required").max(200, "max"),
+    // Trimmed before the required check, so a name of spaces is empty (F-157).
+    name: z.string().trim().min(1, "required").max(200, "max"),
     isDefault: z.boolean().optional(),
   })
   .strict();
@@ -46,7 +47,7 @@ export const ACTIVE_ORGANIZATION_STATUS = "active" satisfies OrganizationStatus;
 export const updateOrganizationSchema = z
   .object({
     slug: z.string().min(1, "required").max(64, "max").regex(SLUG_RE, "slug").optional(),
-    name: z.string().min(1, "required").max(200, "max").optional(),
+    name: z.string().trim().min(1, "required").max(200, "max").optional(),
     status: z.enum(ORGANIZATION_STATUSES).optional(),
     isDefault: z.boolean().optional(),
   })

@@ -23,6 +23,10 @@ import { sql, type SelectQueryBuilder, type SqlBool } from "kysely";
  *     parses through {@link parseListQueryStrict}, which answers the same
  *     inputs with a 400 instead (F-34). The allow-lists are published in the
  *     OpenAPI document, so naming them is no oracle.
+ *   - What it can neither drop nor clamp without answering a different
+ *     question, it refuses on both surfaces: a `page` past {@link MAX_PAGE}
+ *     and a malformed id in a `uuid` filter throw
+ *     {@link InvalidListQueryError}, a 400 (F-63).
  */
 
 export interface SortSpec {
@@ -63,12 +67,54 @@ export interface ParseListQueryOptions {
   maxPageSize?: number;
   /** Default page size when not provided. */
   defaultPageSize?: number;
+  /**
+   * Filters the endpoint compares with a `uuid` column, each with the keywords
+   * it also accepts in place of an id (`["global"]` where a keyword means "no
+   * organization"; `[]` for none). Every other value must be a UUID, or the
+   * parse throws {@link InvalidListQueryError} (F-63): Postgres cannot cast
+   * `filter[app_user_id]=abc` to `uuid` and fails the query with 22P02, which
+   * reached the caller as a 500 (a 502 on the export). An empty value is
+   * dropped: every list already read it as "no filter".
+   */
+  uuidFilters?: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
 const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_MAX_PAGE_SIZE = 200;
 /** Hard cap on the free-text `q` length — bounds pattern size / scan cost. */
 const MAX_Q_LENGTH = 200;
+/** The `uuid` text form {@link ParseListQueryOptions.uuidFilters} accepts (any version). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The deepest `page` a list serves (F-63). There was no upper bound, so
+ * `page=99999999999999999999` made `(page - 1) * pageSize` an OFFSET past
+ * Postgres's `bigint` (a longer page is sent as `2.4999999999999997e+24`,
+ * which does not even parse as one), and every OFFSET list answered 500. At
+ * the largest `pageSize` (the export's 1,000) the deepest offset stays below
+ * 2^31, and no one pages a million pages deep: a client that needs every row
+ * pages to `total`, and a picker searches with `q`.
+ */
+export const MAX_PAGE = 1_000_000;
+
+/**
+ * A list query refused rather than normalized (F-63): a `page` above
+ * {@link MAX_PAGE}, or a value of a {@link ParseListQueryOptions.uuidFilters}
+ * filter that is not a UUID. Both used to reach Postgres and come back as a
+ * 500. {@link parseListQuery} throws it, the route wrappers (`withAdminRoute`,
+ * `withV1Route`) answer it as a 400 carrying `detail`, and
+ * {@link parseListQueryStrict} returns it as its failure. Throwing lets every
+ * list route share that one answer instead of each handling a parse result.
+ */
+export class InvalidListQueryError extends Error {
+  /** Which parameter is wrong and what it accepts; safe to send to the caller. */
+  readonly detail: string;
+  constructor(detail: string) {
+    super(detail);
+    this.name = "InvalidListQueryError";
+    this.detail = detail;
+  }
+}
 
 /**
  * Escapes LIKE/ILIKE metacharacters in a user-supplied search term and wraps
@@ -92,7 +138,8 @@ export function likeContains(term: string): string {
  * `request.nextUrl.searchParams`) into a normalized {@link ListQuery}.
  *
  * Parsing rules:
- *   - `page` defaults to 1 and is clamped to >= 1.
+ *   - `page` defaults to 1 and is clamped to >= 1; above {@link MAX_PAGE} it
+ *     throws {@link InvalidListQueryError}.
  *   - `pageSize` defaults to {@link ParseListQueryOptions.defaultPageSize}
  *     (or 25), clamped to `[1, maxPageSize]`.
  *   - `sort` accepts repeated `field.dir` values (e.g. `created_at.desc`
@@ -103,15 +150,25 @@ export function likeContains(term: string): string {
  *   - `filter[<name>]=v` becomes `filters[name]=v`. Repeated values
  *     become an array. `filter[name][from]` / `[to]` produce a range.
  *   - Unknown filters (not in `allowedFilters`) are dropped.
+ *   - A {@link ParseListQueryOptions.uuidFilters} value that is neither a UUID
+ *     nor one of that filter's keywords throws {@link InvalidListQueryError};
+ *     an empty one is dropped.
  */
 export function parseListQuery(params: URLSearchParams, options: ParseListQueryOptions): ListQuery {
   const allowedSort = new Set(options.allowedSortFields);
   const allowedFilters = options.allowedFilters ? new Set(options.allowedFilters) : null;
+  const uuidFilters = options.uuidFilters ?? {};
   const maxPageSize = options.maxPageSize ?? DEFAULT_MAX_PAGE_SIZE;
   const defaultPageSize = options.defaultPageSize ?? DEFAULT_PAGE_SIZE;
 
   const pageRaw = Number.parseInt(params.get("page") ?? "1", 10);
-  const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
+  // Not `Number.isFinite`: a 400-digit page parses to Infinity, which must hit
+  // the bound below rather than quietly become page 1 (F-63). NaN (`abc`) and
+  // anything below 1 still read as page 1 (review #47).
+  const page = pageRaw >= 1 ? pageRaw : 1;
+  if (page > MAX_PAGE) {
+    throw new InvalidListQueryError(`\`page\` must be at most ${MAX_PAGE}.`);
+  }
 
   const pageSizeRaw = Number.parseInt(params.get("pageSize") ?? String(defaultPageSize), 10);
   const pageSize = Number.isFinite(pageSizeRaw)
@@ -141,6 +198,18 @@ export function parseListQuery(params: URLSearchParams, options: ParseListQueryO
     const sub = match[2];
     if (!name) continue;
     if (allowedFilters && !allowedFilters.has(name)) continue;
+
+    // Checked on every value stored as the filter itself, not just the bare
+    // `filter[name]` form: an unknown suffix (`filter[name][x]`) lands there
+    // too. A range (`[from]` / `[to]`) is an object no uuid filter reads.
+    const uuidKeywords = Object.hasOwn(uuidFilters, name) ? uuidFilters[name] : undefined;
+    if (uuidKeywords && sub !== "from" && sub !== "to") {
+      if (value.length === 0) continue;
+      if (!UUID_RE.test(value) && !uuidKeywords.includes(value)) {
+        const keywords = uuidKeywords.map((k) => ` or \`${k}\``).join("");
+        throw new InvalidListQueryError(`\`filter[${name}]\` must be a UUID${keywords}.`);
+      }
+    }
 
     if (sub === "from" || sub === "to") {
       const existing = filters[name];
@@ -220,7 +289,9 @@ export type StrictListQueryResult =
  *     `[from]` / `[to]` range form, which no v1 filter supports);
  *   - an empty filter value, or one outside the filter's `values`;
  *   - a `q` on a list that does not search (`search: false`), even empty;
- *   - a `page`, `pageSize` or `q` given more than once.
+ *   - a `page`, `pageSize` or `q` given more than once;
+ *   - what {@link parseListQuery} throws {@link InvalidListQueryError} for: a
+ *     `page` above {@link MAX_PAGE}, or a malformed `uuidFilters` value (F-63).
  *
  * The lenient parser drops every one of these (a repeated scalar keeps its
  * first value), and for a filter or `q` that widens the answer:
@@ -240,9 +311,10 @@ export type StrictListQueryResult =
  * free-text filter (`event_type`) cannot tell a separator from a comma in
  * the value it matches. The detail says to repeat the parameter.
  *
- * `page`, `pageSize` and `q` keep the shared clamping (review #47). A column
- * repeated in `sort` is kept at its first occurrence: a later key on a column
- * already ordered by cannot change the order.
+ * `page`, `pageSize` and `q` keep the shared clamping (review #47) and the
+ * shared page bound. A column repeated in `sort` is kept at its first
+ * occurrence: a later key on a column already ordered by cannot change the
+ * order.
  */
 export function parseListQueryStrict(
   params: URLSearchParams,
@@ -250,7 +322,14 @@ export function parseListQueryStrict(
 ): StrictListQueryResult {
   const specs = options.filters ?? {};
   const filterNames = Object.keys(specs);
-  const base = parseListQuery(params, { ...options, allowedFilters: filterNames });
+  let base: ListQuery;
+  try {
+    base = parseListQuery(params, { ...options, allowedFilters: filterNames });
+  } catch (err) {
+    // F-63: the shared parser's refusals are this parser's 400s too.
+    if (err instanceof InvalidListQueryError) return { ok: false, detail: err.detail };
+    throw err;
+  }
 
   for (const name of ["page", "pageSize", "q"]) {
     if (params.getAll(name).length > 1) {

@@ -77,6 +77,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
       "source_provider",
     ],
     allowedFilters: ["status", "organization_id"],
+    uuidFilters: { organization_id: [] },
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 25,
     maxPageSize: 200,

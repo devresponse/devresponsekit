@@ -108,8 +108,10 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           name: "page",
           in: "query",
           required: false,
-          schema: { type: "integer", minimum: 1, default: 1 },
-          description: "1-indexed page number.",
+          // `maximum` is MAX_PAGE (list-query.server.ts, which this pure module
+          // cannot import); a deeper page is a 400 (F-63).
+          schema: { type: "integer", minimum: 1, maximum: 1_000_000, default: 1 },
+          description: "1-indexed page number, at most 1,000,000.",
         },
         PageSize: {
           name: "pageSize",

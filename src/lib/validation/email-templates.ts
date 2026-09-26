@@ -12,7 +12,9 @@ import { z } from "zod";
  */
 export const updateEmailTemplateSchema = z
   .object({
-    subject: z.string().min(1, "required").max(500, "max"),
+    // Trimmed before the required check, so a subject of spaces is empty
+    // (F-157). The bodies are not: their whitespace is the template's.
+    subject: z.string().trim().min(1, "required").max(500, "max"),
     body_html: z.string().min(1, "required").max(100_000, "max"),
     body_text: z.string().max(100_000, "max").nullable().optional(),
     description: z.string().max(1000, "max").nullable().optional(),

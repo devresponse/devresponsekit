@@ -10,6 +10,7 @@ import { isSessionPastLifetime } from "@/lib/session-lifetime";
 import { readImpersonatorId } from "@/lib/impersonation";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
+import { REQUEST_TARGET_HEADER } from "@/lib/request-id";
 
 /**
  * Per-request memoization of the Better Auth session lookup (review #75).
@@ -172,13 +173,17 @@ export function getImpersonatorId(
  *
  * Any failure short-circuits with a redirect — never returns to the
  * caller — so calling code can rely on the returned access context.
+ *
+ * The sign-in bounce returns to the page actually requested (F-70); the
+ * caller's `fallbackReturnTo` is used only when that is unavailable. See
+ * {@link signInReturnTo}.
  */
-export async function requireSecureSession(locale: string, returnTo?: string) {
+export async function requireSecureSession(locale: string, fallbackReturnTo?: string) {
   const session = await getCurrentSession();
 
   if (!session) {
     const params = new URLSearchParams();
-    params.set("returnTo", getSafeReturnTo(returnTo, locale));
+    params.set("returnTo", await signInReturnTo(locale, fallbackReturnTo));
     redirect(`/${locale}/sign-in?${params.toString()}`);
   }
 
@@ -197,4 +202,26 @@ export async function requireSecureSession(locale: string, returnTo?: string) {
   }
 
   return { session, access };
+}
+
+/**
+ * The `returnTo` for `requireSecureSession`'s sign-in bounce (F-70).
+ *
+ * That bounce fires when the browser still holds a session cookie that no
+ * longer names a live session: revoked by "sign out other sessions", a
+ * password change or an admin, or past `SESSION_ABSOLUTE_LIFETIME_HOURS`.
+ * With no cookie at all the proxy bounces first and keeps the path and
+ * query. Here, every caller passed a fixed value (the secure layout the
+ * dashboard, the account/docs/help pages their section root), so a
+ * bookmarked deep link came back as the dashboard or a section root.
+ *
+ * The requested page is the proxy-stamped `REQUEST_TARGET_HEADER` (path +
+ * query), used only when `getSafeReturnTo` accepts it unchanged, so it can
+ * never point anywhere a hand-typed `returnTo` could not. Otherwise the
+ * caller's fallback applies, sanitized as before.
+ */
+async function signInReturnTo(locale: string, fallback: string | undefined): Promise<string> {
+  const requested = (await headers()).get(REQUEST_TARGET_HEADER);
+  if (requested && getSafeReturnTo(requested, locale) === requested) return requested;
+  return getSafeReturnTo(fallback, locale);
 }

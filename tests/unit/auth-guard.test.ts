@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AuthGuardModule from "@/lib/auth-guard";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import { CLIENT_IP_HEADER } from "@/lib/client-ip";
+import { REQUEST_TARGET_HEADER } from "@/lib/request-id";
 
 /**
  * Unit tests for `auth-guard.ts` (`getCurrentSession` and
@@ -232,6 +233,64 @@ describe("requireSecureSession", () => {
     await expect(mod.requireSecureSession("en", "https://evil.example.com")).rejects.toThrow(
       /__REDIRECT__:\/en\/sign-in\?returnTo=%2Fen%2Fapp%2Fdashboard/,
     );
+  });
+
+  /**
+   * F-70: a cookie that no longer names a live session (revoked, past the
+   * absolute-lifetime cap) passes the proxy's cookie check, so the bounce
+   * happens HERE — and every caller passed a fixed value, so a bookmarked deep
+   * link came back as the dashboard. The page actually requested, stamped by
+   * the proxy with its query, now wins; the caller's value is the fallback.
+   */
+  describe("returns to the requested page (F-70)", () => {
+    const DEEP = "/en/app/administrator/users/u-42?tab=roles&page=2";
+
+    it("prefers the proxy-stamped request target, query included, over the caller's value", async () => {
+      getSessionMock.mockResolvedValue(null);
+      ambient.headers = new Headers({ [REQUEST_TARGET_HEADER]: DEEP });
+      await expect(mod.requireSecureSession("en", "/en/app/dashboard")).rejects.toThrow(
+        `__REDIRECT__:/en/sign-in?${new URLSearchParams({ returnTo: DEEP }).toString()}`,
+      );
+    });
+
+    it("does the same with no caller value at all (the secure layout)", async () => {
+      getSessionMock.mockResolvedValue(null);
+      ambient.headers = new Headers({ [REQUEST_TARGET_HEADER]: DEEP });
+      await expect(mod.requireSecureSession("en")).rejects.toThrow(
+        `__REDIRECT__:/en/sign-in?${new URLSearchParams({ returnTo: DEEP }).toString()}`,
+      );
+    });
+
+    it.each([
+      ["an absolute URL", "https://evil.example.com/en/app"],
+      ["a protocol-relative URL", "//evil.example.com/en/app"],
+      ["a backslash-smuggled path", "/\\evil.example.com"],
+      ["an API path", "/api/auth/sign-out"],
+      ["an auth page (a loop)", "/en/sign-in"],
+      ["an unsupported locale", "/xx/app/dashboard"],
+    ])("ignores %s in the header and uses the caller's fallback", async (_label, value) => {
+      getSessionMock.mockResolvedValue(null);
+      ambient.headers = new Headers({ [REQUEST_TARGET_HEADER]: value });
+      await expect(mod.requireSecureSession("en", "/en/app/account")).rejects.toThrow(
+        /__REDIRECT__:\/en\/sign-in\?returnTo=%2Fen%2Fapp%2Faccount$/,
+      );
+    });
+
+    it("does not bounce a live session, header or not", async () => {
+      getSessionMock.mockResolvedValue({ user: { id: "ba-1" } });
+      accessGetter.mockResolvedValue({
+        appUserId: "u",
+        primaryEmail: "u@x.com",
+        status: "active",
+        organizationId: "o",
+        membershipStatus: "active",
+        preferredLocale: "en",
+        permissions: ["shell.view"],
+      });
+      ambient.headers = new Headers({ [REQUEST_TARGET_HEADER]: DEEP });
+      await expect(mod.requireSecureSession("en")).resolves.toBeDefined();
+      expect(redirectMock).not.toHaveBeenCalled();
+    });
   });
 
   it("redirects pending users to /pending-approval", async () => {

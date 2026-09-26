@@ -11,12 +11,14 @@ import { useZodForm } from "./use-zod-form";
  * props: the organization, role and group Settings tabs and the organization
  * Authentication tab (docs/form-validation.md).
  *
- * Radix Tabs unmount an inactive panel, so every tab switch remounts the form
- * from the props the page was rendered with, and nothing moved those props
- * after a save. A superadmin suspended an org, looked at Members, came back to
- * Settings and saw Active again; they fixed a typo in the name and saved, and
- * the PATCH, which re-sent every field, silently un-suspended the org (with an
- * audit row recording a status change). Three rules close that here:
+ * Radix Tabs unmounted an inactive panel, so every tab switch remounted the
+ * form from the props the page was rendered with, and nothing moved those
+ * props after a save. A superadmin suspended an org, looked at Members, came
+ * back to Settings and saw Active again; they fixed a typo in the name and
+ * saved, and the PATCH, which re-sent every field, silently un-suspended the
+ * org (with an audit row recording a status change). Three rules close that
+ * here. Since F-158 these panels stay mounted across a tab switch
+ * (`useKeptTabs`); the rules still govern a form rebuilt from the page's props.
  *
  *   1. `commitSaved` runs after a successful save. It moves React Hook Form's
  *      baseline to what was saved and calls `router.refresh()`, so the RSC

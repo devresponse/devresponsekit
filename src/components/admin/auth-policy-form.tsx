@@ -108,8 +108,9 @@ function toFormValues(settings: AuthPolicySettingsJson | null): AuthPolicyFormIn
  * the real defaults back, so the summary appears on its own.
  *
  * F-39: on the organization detail this form lives in a Radix tab panel, which
- * unmounts when another tab is opened and remounts from the page's props. A
- * successful Save only used to flip local state, so after a tab switch an org
+ * unmounted when another tab was opened and remounted from the page's props
+ * (the panel stays mounted since F-158). A successful Save only used to flip
+ * local state, so after a tab switch an org
  * that had just been given an override showed the "inherits the platform
  * default" view (misstating its live sign-in policy), and an edited override
  * showed its pre-save values. Save now goes through `useSavedFormBaseline`

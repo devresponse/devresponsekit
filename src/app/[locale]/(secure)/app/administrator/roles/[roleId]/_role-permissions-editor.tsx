@@ -33,7 +33,8 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  * and a committed grant can never hide behind a stale baseline.
  *
  * F-39: the editor is seeded from the page's `initialAssigned`, and the
- * Permissions tab panel unmounts when another tab is opened. After a save,
+ * Permissions tab panel unmounted when another tab was opened (it stays mounted
+ * since F-158, so staged moves survive a look at Members). After a save,
  * switching to Members and back re-seeded it from the pre-save set, so a
  * removed key showed as Assigned again and an added one as Available. Every
  * save therefore ends with `router.refresh()`, which makes the page's set the

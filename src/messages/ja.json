@@ -25,7 +25,21 @@
       "close": "閉じる"
     },
     "switchToLightTheme": "ライトテーマに切り替える",
-    "switchToDarkTheme": "ダークテーマに切り替える"
+    "switchToDarkTheme": "ダークテーマに切り替える",
+    "status": {
+      "active": "アクティブ",
+      "pending": "保留中",
+      "pending_approval": "承認待ち",
+      "blocked": "ブロック済み",
+      "suspended": "停止済み",
+      "deactivated": "無効化済み",
+      "archived": "アーカイブ済み",
+      "available": "利用可能",
+      "disabled": "無効",
+      "accepted": "承諾済み",
+      "revoked": "取り消し済み",
+      "expired": "期限切れ"
+    }
   },
   "auth": {
     "verifyEmailTitle": "メールアドレスを確認",
@@ -551,7 +565,12 @@
         "revokeAll": "すべてのセッションを取り消し",
         "expiresAt": "{value} に期限切れ",
         "ipAddress": "IP",
-        "userAgent": "ユーザーエージェント"
+        "userAgent": "ユーザーエージェント",
+        "revokeOneConfirm": "このセッションを取り消しますか？",
+        "revokeOneSelfDescription": "これはご自身のアカウントです。使用中のセッションの場合は、サインアウトされます。",
+        "revokeAllConfirm": "このユーザーのすべてのセッションを取り消しますか？",
+        "revokeAllDescription": "すべてのデバイスでサインアウトされ、再度サインインが必要になります。",
+        "revokeAllSelfDescription": "これはご自身のアカウントです。このデバイスを含むすべてのデバイスでサインアウトされます。"
       },
       "memberships": {
         "columns": {

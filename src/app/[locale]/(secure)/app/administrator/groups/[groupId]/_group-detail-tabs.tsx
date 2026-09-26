@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger, useKeptTabs } from "@/components/ui/tabs";
 import { GroupRolesEditor } from "./_group-roles-editor";
 import { GroupMembersGrid } from "./_group-members-grid";
 import { GroupSettingsForm } from "./_group-settings-form";
@@ -17,10 +17,11 @@ export interface GroupDetailJson {
  * Tab container for the group detail (ADR-0002): Roles (the roles the group
  * confers), Members (users in the group), Settings (name/description).
  *
- * Radix unmounts an inactive panel. Roles and Members fetch on mount; the
- * Settings form is seeded from these props, so it saves through
- * `useSavedFormBaseline` (F-39), which refreshes the page after a save and
- * follows the refreshed props.
+ * Roles and Members fetch on mount; the Settings form is seeded from these
+ * props, so it saves through `useSavedFormBaseline` (F-39), which refreshes the
+ * page after a save and follows the refreshed props. The Roles editor and the
+ * Settings form stay mounted while another tab is open (`useKeptTabs`,
+ * F-158): Radix used to unmount them and discard staged moves and typed edits.
  *
  * `canReadRoles` and `canReadUsers` are the permissions of the OTHER areas
  * these tabs read or link to (F-67); the server page derives them.
@@ -39,16 +40,17 @@ export function GroupDetailTabs({
   canReadUsers: boolean;
 }) {
   const t = useTranslations("administrator.groups");
+  const tabs = useKeptTabs("roles");
 
   return (
-    <Tabs defaultValue="roles" className="w-full">
+    <Tabs {...tabs.root} className="w-full">
       <TabsList>
         <TabsTrigger value="roles">{t("tabs.roles")}</TabsTrigger>
         <TabsTrigger value="members">{t("tabs.members")}</TabsTrigger>
         <TabsTrigger value="settings">{t("tabs.settings")}</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="roles" className="mt-4">
+      <TabsContent value="roles" className="mt-4" {...tabs.keep("roles")}>
         <GroupRolesEditor groupId={group.id} canAssign={canAssign} canReadRoles={canReadRoles} />
       </TabsContent>
 
@@ -56,7 +58,7 @@ export function GroupDetailTabs({
         <GroupMembersGrid groupId={group.id} canAssign={canAssign} canReadUsers={canReadUsers} />
       </TabsContent>
 
-      <TabsContent value="settings" className="mt-4">
+      <TabsContent value="settings" className="mt-4" {...tabs.keep("settings")}>
         <GroupSettingsForm
           groupId={group.id}
           initialKey={group.key}

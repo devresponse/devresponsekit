@@ -25,7 +25,21 @@
       "close": "Закрити"
     },
     "switchToLightTheme": "Перейти до світлої теми",
-    "switchToDarkTheme": "Перейти до темної теми"
+    "switchToDarkTheme": "Перейти до темної теми",
+    "status": {
+      "active": "Активний",
+      "pending": "Очікує",
+      "pending_approval": "Очікує підтвердження",
+      "blocked": "Заблоковано",
+      "suspended": "Призупинено",
+      "deactivated": "Деактивовано",
+      "archived": "Заархівовано",
+      "available": "Доступний",
+      "disabled": "Вимкнено",
+      "accepted": "Прийнято",
+      "revoked": "Відкликано",
+      "expired": "Прострочено"
+    }
   },
   "auth": {
     "verifyEmailTitle": "Підтвердьте свою електронну пошту",
@@ -524,7 +538,12 @@
         "revokeAll": "Скасувати всі сесії",
         "expiresAt": "Закінчується {value}",
         "ipAddress": "IP",
-        "userAgent": "User agent"
+        "userAgent": "User agent",
+        "revokeOneConfirm": "Скасувати цю сесію?",
+        "revokeOneSelfDescription": "Це ваш власний обліковий запис. Якщо це сесія, якою ви зараз користуєтеся, вас буде виведено з системи.",
+        "revokeAllConfirm": "Скасувати всі сесії цього користувача?",
+        "revokeAllDescription": "Користувача буде виведено з системи на всіх пристроях, і йому доведеться увійти знову.",
+        "revokeAllSelfDescription": "Це ваш власний обліковий запис: вас буде виведено з системи тут і на всіх інших пристроях."
       },
       "memberships": {
         "columns": {

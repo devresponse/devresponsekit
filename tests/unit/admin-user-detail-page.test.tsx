@@ -329,11 +329,15 @@ describe("administrator/users/[userId] page — per-tab permission gating (revie
  * that click, so it is now offered for an ACTIVE account only.
  */
 describe("administrator/users/[userId] page — Impersonate button (F-148)", () => {
-  /** Depth-first search for the props handed to ImpersonateUserButton. */
+  /**
+   * Depth-first search for the props handed to ImpersonateUserButton. The
+   * tabs also take `isSelf` (F-158), so the button is the element with
+   * `isSelf` AND `email`.
+   */
   function findImpersonateProps(node: unknown): Record<string, unknown> | undefined {
     if (!node || typeof node !== "object") return undefined;
     const el = node as { props?: Record<string, unknown> };
-    if (el.props && "isSelf" in el.props) return el.props;
+    if (el.props && "isSelf" in el.props && "email" in el.props) return el.props;
     const children = el.props?.children;
     for (const child of Array.isArray(children) ? children : [children]) {
       const found = findImpersonateProps(child);
@@ -377,5 +381,34 @@ describe("administrator/users/[userId] page — Impersonate button (F-148)", () 
       primary_email: "mcp-agent-1@agents.mcp.invalid",
     });
     expect(findImpersonateProps(await Page(params(USER_ID)))).toBeUndefined();
+  });
+});
+
+/**
+ * F-158: the Sessions tab warns an admin who is about to revoke their OWN
+ * sessions, so the page must tell the tabs whether the target is the viewer.
+ */
+describe("administrator/users/[userId] page — isSelf for the Sessions tab (F-158)", () => {
+  function findTabsProps(node: unknown): Record<string, unknown> | undefined {
+    if (!node || typeof node !== "object") return undefined;
+    const el = node as { props?: Record<string, unknown> };
+    if (el.props && "canReadAudit" in el.props) return el.props;
+    const children = el.props?.children;
+    for (const child of Array.isArray(children) ? children : [children]) {
+      const found = findTabsProps(child);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  beforeEach(() => canAccessUser.mockResolvedValue(true));
+
+  it("is false when the viewer opens someone else's user", async () => {
+    expect(findTabsProps(await Page(params(USER_ID)))!.isSelf).toBe(false);
+  });
+
+  it("is true when the viewer opens their own user", async () => {
+    checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-target", access: ACCESS });
+    expect(findTabsProps(await Page(params(USER_ID)))!.isSelf).toBe(true);
   });
 });

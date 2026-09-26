@@ -119,6 +119,13 @@ export async function requireApiPermission(
  * Every other reason (no credential, bad signature, expired, path disabled,
  * banned owner) stays the generic `unauthorized`, so the response does not
  * distinguish an unknown credential from a disabled path.
+ *
+ * The challenge still says `error="invalid_token"` whenever a token was
+ * presented and refused (RFC 6750 §3.1; I-04, the family of the MCP
+ * gateway's bare challenge): an expired token used to get a bare realm, which
+ * a strict OAuth client does not read as "fetch a new token". Only a request
+ * with no credential at all keeps the bare realm, and the refusals still read
+ * alike.
  */
 function unauthenticatedResponse(
   request: NextRequest,
@@ -144,7 +151,9 @@ function unauthenticatedResponse(
   }
   return problemResponse("unauthorized", 401, request, {
     requestId,
-    headers: { "WWW-Authenticate": realm },
+    headers: {
+      "WWW-Authenticate": reason === "no_credential" ? realm : `${realm}, error="invalid_token"`,
+    },
   });
 }
 

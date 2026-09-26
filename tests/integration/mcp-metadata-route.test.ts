@@ -15,6 +15,7 @@ const env = vi.hoisted(() => ({
 vi.mock("@/lib/env", () => ({ getServerEnv: () => env }));
 
 import { GET as protectedResourceGet } from "@/app/.well-known/oauth-protected-resource/route";
+import { GET as pathSuffixedProtectedResourceGet } from "@/app/.well-known/oauth-protected-resource/api/mcp/route";
 import { GET as authServerGet } from "@/app/.well-known/oauth-authorization-server/route";
 
 beforeEach(() => {
@@ -24,10 +25,26 @@ beforeEach(() => {
 });
 
 describe("MCP discovery routes", () => {
-  it("404s both metadata documents when MCP is disabled", async () => {
+  it("404s every metadata document when MCP is disabled", async () => {
     env.MCP_ENABLED = false;
     expect((await protectedResourceGet()).status).toBe(404);
+    expect((await pathSuffixedProtectedResourceGet()).status).toBe(404);
     expect((await authServerGet()).status).toBe(404);
+  });
+
+  /**
+   * I-04: `/.well-known/oauth-protected-resource/api/mcp` is where RFC 9728
+   * §3.1 puts the document for the `<origin>/api/mcp` resource, and where the
+   * 401 challenge now points; it did not exist. The root copy stays for
+   * clients of older MCP revisions.
+   */
+  it("serves the same document at the path-suffixed RFC 9728 location", async () => {
+    const res = await pathSuffixedProtectedResourceGet();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = await res.json();
+    expect(body.resource).toBe("https://app.example.com/api/mcp");
+    expect(body).toEqual(await (await protectedResourceGet()).json());
   });
 
   it("serves protected-resource metadata when enabled", async () => {

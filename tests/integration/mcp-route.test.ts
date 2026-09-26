@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
+import { deriveMcpTools } from "@/lib/mcp/openapi-tools";
 
 /**
  * Integration tests for the `/api/mcp` endpoint. Env, caller resolution, and
@@ -33,13 +35,16 @@ vi.mock("@/lib/api-auth/resolve-caller.server", () => ({
   resolveCallerDetailed: async (...args: unknown[]) => {
     const r = (await resolveCaller(...args)) as unknown;
     if (r && typeof r === "object" && "ok" in r) return r;
-    return r ? { ok: true, caller: r } : { ok: false, reason: "invalid_credential" };
+    // A bare `null` is what a request with NO credential resolves to.
+    return r ? { ok: true, caller: r } : { ok: false, reason: "no_credential" };
   },
 }));
 vi.mock("@/lib/api-auth/jwt.server", () => ({
   mintAccessToken: (...args: unknown[]) => mintAccessToken(...args),
 }));
 
+import { __resetRateLimitForTests } from "@/lib/admin/rate-limit.server";
+import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { GET, POST } from "@/app/api/mcp/route";
 
 function post(body: unknown, headers?: Record<string, string>): NextRequest {
@@ -68,9 +73,28 @@ function apiKeyCaller(over: Record<string, unknown> = {}) {
     credentialId: "key-1",
     boundOrganizationId: "org-1",
     grantedScopes: ["account.read"],
-    access: { organizationId: "org-1" },
+    access: { organizationId: "org-1", permissions: [] },
     ...over,
   };
+}
+
+/**
+ * An API-key caller whose scopes AND permissions cover the whole generated
+ * surface, for the tests that call admin tools (`tools/list` offers a caller
+ * only the tools it holds the scopes for, I-04).
+ */
+function adminKeyCaller() {
+  const everything = [
+    ...new Set(
+      deriveMcpTools(buildOpenApiDocument("https://x.example")).flatMap((tool) =>
+        tool.scopeSets.flat(),
+      ),
+    ),
+  ];
+  return apiKeyCaller({
+    grantedScopes: everything,
+    access: { organizationId: "org-1", permissions: everything },
+  });
 }
 
 /** A resolved MCP-audience JWT caller, as resolveCallerDetailed returns it. */
@@ -81,7 +105,7 @@ function jwtCaller(audience: string[], over: Record<string, unknown> = {}) {
     isBearer: true,
     credentialId: "jti-1",
     grantedScopes: ["account.read"],
-    access: { organizationId: "org-1" },
+    access: { organizationId: "org-1", permissions: [] },
     jwt: {
       organizationId: "org-1",
       expiresAt: new Date(Date.now() + 600_000),
@@ -104,6 +128,7 @@ beforeEach(() => {
   env.MCP_FORWARD_CLIENT_IP = true;
   env.MCP_DISPATCH_BASE_URL = undefined;
   env.API_JWT_ENABLED = true;
+  __resetRateLimitForTests();
   resolveCaller.mockReset().mockResolvedValue(apiKeyCaller());
   mintAccessToken.mockReset().mockResolvedValue({ token: "eyJ.exchanged.v1", audience: "x" });
   fetchMock = vi.fn().mockResolvedValue(apiResponse(200, { ok: true }));
@@ -142,11 +167,35 @@ describe("/api/mcp audience binding (RFC 8707, review #50/#53)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("does not add the invalid_token challenge for other rejections", async () => {
-    resolveCaller.mockResolvedValue({ ok: false, reason: "credential_revoked" });
-    const res = await call({ authorization: "Bearer eyJ.dead" });
-    expect(res.status).toBe(401);
-    expect(res.headers.get("WWW-Authenticate")).not.toContain("error=");
+  /**
+   * I-04: only a wrong audience used to carry `error="invalid_token"`; an
+   * expired, garbage or revoked token got a bare challenge, so a strict
+   * client never learned it had to fetch a new one (RFC 6750 §3.1).
+   */
+  it("401s every refused token with invalid_token, and no token at all without an error", async () => {
+    for (const reason of [
+      "invalid_credential",
+      "credential_revoked",
+      "principal_banned",
+      "path_disabled",
+    ]) {
+      resolveCaller.mockResolvedValue({ ok: false, reason });
+      const res = await call({ authorization: "Bearer eyJ.dead" });
+      expect(res.status, reason).toBe(401);
+      const wwwAuth = res.headers.get("WWW-Authenticate") ?? "";
+      expect(wwwAuth, reason).toContain("resource_metadata=");
+      expect(wwwAuth, reason).toContain('error="invalid_token"');
+      // The reasons read alike: nothing tells a disabled path from a ban.
+      expect(wwwAuth, reason).toContain(
+        'error_description="The access token is invalid, expired or revoked"',
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    resolveCaller.mockResolvedValue({ ok: false, reason: "no_credential" });
+    const anon = await call();
+    expect(anon.status).toBe(401);
+    expect(anon.headers.get("WWW-Authenticate")).not.toContain("error=");
   });
 
   it("exchanges an MCP-audience JWT for a short v1-audience token on the self-call (same sub/scopes/org/jti/cid)", async () => {
@@ -306,6 +355,7 @@ describe("/api/mcp", () => {
   });
 
   it("lists the generated tool surface (excluding public/special ops)", async () => {
+    resolveCaller.mockResolvedValue(adminKeyCaller());
     const body = await (await POST(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }))).json();
     const names = body.result.tools.map((t: { name: string }) => t.name);
     expect(names).toEqual(
@@ -314,6 +364,60 @@ describe("/api/mcp", () => {
     expect(names.length).toBeGreaterThanOrEqual(15);
     expect(names).not.toContain("issueToken");
     expect(names).not.toContain("getJwks");
+  });
+
+  /**
+   * I-04: `tools/list` returned every tool whatever the credential held, so a
+   * zero-scope agent was offered the whole admin surface.
+   */
+  it("lists only the tools the credential's scopes and permissions allow", async () => {
+    const list = async () =>
+      (
+        (await (await POST(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }))).json()) as {
+          result: { tools: Array<{ name: string }> };
+        }
+      ).result.tools.map((tool) => tool.name);
+
+    resolveCaller.mockResolvedValue(apiKeyCaller({ grantedScopes: [] }));
+    expect(await list()).toEqual([]);
+
+    resolveCaller.mockResolvedValue(apiKeyCaller());
+    expect(await list()).toEqual(["getMe", "listMyApiKeys"]);
+
+    // A scope the principal holds no permission for is not effective.
+    resolveCaller.mockResolvedValue(
+      apiKeyCaller({ grantedScopes: ["account.read", "admin.users.read"] }),
+    );
+    expect(await list()).toEqual(["getMe", "listMyApiKeys"]);
+    resolveCaller.mockResolvedValue(
+      apiKeyCaller({
+        grantedScopes: ["account.read", "admin.users.read"],
+        access: { organizationId: "org-1", permissions: ["admin.users.read"] },
+      }),
+    );
+    expect(await list()).toEqual(["getMe", "getUser", "listMyApiKeys", "listUsers"]);
+  });
+
+  it("mints the v1 exchange token only for tools/call", async () => {
+    // I-04: every request minted one, including those that never reach v1.
+    for (const [id, method] of [
+      [1, "initialize"],
+      [2, "tools/list"],
+      [3, "ping"],
+    ] as const) {
+      const res = await POST(
+        post({ jsonrpc: "2.0", id, method, params: {} }, { authorization: "Bearer drk_live_x" }),
+      );
+      expect(res.status, method).toBe(200);
+    }
+    expect(mintAccessToken).not.toHaveBeenCalled();
+    await POST(
+      post(
+        { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "getMe", arguments: {} } },
+        { authorization: "Bearer drk_live_x" },
+      ),
+    );
+    expect(mintAccessToken).toHaveBeenCalledTimes(1);
   });
 
   it("dispatches tools/call getMe to the v1 API as the resolved caller", async () => {
@@ -588,6 +692,16 @@ describe("/api/mcp", () => {
       expect(resolveCaller).not.toHaveBeenCalled();
     });
 
+    it("400s a null request id, which MCP forbids (I-04)", async () => {
+      const res = await POST(post({ jsonrpc: "2.0", id: null, method: "ping" }));
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.id).toBeNull();
+      expect(json.error.code).toBe(-32600);
+      expect(json.error.message).toContain('"id" must be a string or an integer');
+      expect(resolveCaller).not.toHaveBeenCalled();
+    });
+
     it("400s a non-scalar id rather than reflecting it", async () => {
       const res = await POST(post({ jsonrpc: "2.0", id: { evil: true }, method: "ping" }));
       expect(res.status).toBe(400);
@@ -640,5 +754,73 @@ describe("/api/mcp", () => {
       await POST(post({ jsonrpc: "2.0", id: 7, method: "does/not/exist" }))
     ).json();
     expect(unknownMethod.error.code).toBe(-32601);
+  });
+});
+
+/**
+ * F-76: the design doc promised that every tool call is rate-limited per
+ * credential, but v1 limits only its mutations, so an agent could page
+ * through the user directory and the audit log as fast as it liked.
+ */
+describe("/api/mcp tools/call rate limit (F-76)", () => {
+  // The clock stands still, so no token refills while a test drains the burst.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-26T12:00:00Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** A call that never reaches v1 (unknown tool) still spends the budget. */
+  const callNothing = (id: number) =>
+    POST(
+      post(
+        { jsonrpc: "2.0", id, method: "tools/call", params: { name: "nope" } },
+        { authorization: "Bearer x" },
+      ),
+    );
+  const drain = async (n: number) => {
+    for (let i = 0; i < n; i++) expect((await callNothing(i)).status).toBe(200);
+  };
+
+  /** The process-wide denial counter for this scope (other tests also 429). */
+  const denials = async () =>
+    (await rateLimitDenialsTotal.get()).values.find((v) => v.labels.scope === "mcp.tools.call")
+      ?.value ?? 0;
+
+  it("429s the call after the credential's burst, as a JSON-RPC error with Retry-After", async () => {
+    await drain(60);
+    const before = await denials();
+    const res = await callNothing(61);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("1");
+    const body = await res.json();
+    expect(body.id).toBe(61);
+    expect(body.error).toEqual({ code: -32029, message: "Rate limited", data: { retryAfter: 1 } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Visible to operators on the metrics scrape, like every other limiter (F-130).
+    expect(await denials()).toBe(before + 1);
+  });
+
+  it("does not charge initialize, tools/list or ping", async () => {
+    await drain(60);
+    for (const method of ["initialize", "tools/list", "ping"]) {
+      const res = await POST(post({ jsonrpc: "2.0", id: 1, method, params: {} }));
+      expect(res.status, method).toBe(200);
+    }
+    expect((await callNothing(61)).status).toBe(429);
+  });
+
+  it("charges tokens minted from one client to ONE bucket, whatever their jti", async () => {
+    // Keyed on the jti, each re-mint would have brought a fresh budget.
+    for (let i = 0; i < 60; i++) {
+      resolveCaller.mockResolvedValue(jwtCaller([MCP_AUD], { credentialId: `jti-${i}` }));
+      expect((await callNothing(i)).status).toBe(200);
+    }
+    resolveCaller.mockResolvedValue(jwtCaller([MCP_AUD], { credentialId: "jti-fresh" }));
+    expect((await callNothing(61)).status).toBe(429);
+
+    // Another credential keeps its own budget.
+    resolveCaller.mockResolvedValue(apiKeyCaller({ credentialId: "key-2" }));
+    expect((await callNothing(62)).status).toBe(200);
   });
 });

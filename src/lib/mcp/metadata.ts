@@ -48,9 +48,18 @@ export function mcpDiscoveryConfig(env: {
   return { baseUrl, issuer: trimTrailingSlash(env.API_JWT_ISSUER ?? baseUrl) };
 }
 
-/** URL of the protected-resource metadata document (RFC 9728). */
+/**
+ * URL of the protected-resource metadata document (RFC 9728 §3.1): the
+ * well-known prefix goes BEFORE the resource identifier's path, so the
+ * document for `<origin>/api/mcp` lives at
+ * `<origin>/.well-known/oauth-protected-resource/api/mcp` (I-04). That is the
+ * one location whose `resource` a strict client can validate against the URL
+ * it fetched (RFC 9728 §3.3), and the one a client probes when no
+ * `WWW-Authenticate` challenge told it where to look. The bare root document
+ * is still served for clients of older MCP revisions, which look only there.
+ */
 export function protectedResourceMetadataUrl(baseUrl: string): string {
-  return `${trimTrailingSlash(baseUrl)}/.well-known/oauth-protected-resource`;
+  return `${trimTrailingSlash(baseUrl)}/.well-known/oauth-protected-resource/api/mcp`;
 }
 
 /**

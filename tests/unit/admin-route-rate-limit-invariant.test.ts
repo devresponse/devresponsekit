@@ -84,14 +84,8 @@ const OTHER_EXEMPT: Record<string, string> = {
   // Better Auth's lifecycle deadlocks (documented in the route).
   "api/auth/[...all]/route.ts":
     "Better Auth catch-all: the plugin applies its own per-IP limiter; wrapping the handler is forbidden",
-  // MCP JSON-RPC transport (Phase 0, dark unless MCP_ENABLED). Bearer-only:
-  // a cookie session is refused, so every call is a credential-bound
-  // principal whose minting is already throttled at /api/v1/auth/token and
-  // whose tool calls are bounded by permission ∩ scope. A per-call bucket
-  // on the transport itself is a gateway design decision (per credential vs
-  // per tool) tracked with the RFC 8707 audience work, not a drive-by here.
-  "api/mcp/route.ts":
-    "bearer-only MCP transport (dark unless MCP_ENABLED); credential minting is throttled at /v1/auth/token, per-call bucket tracked with the RFC 8707 rollout",
+  // (`api/mcp/route.ts` was exempt until F-76 gave `tools/call` a
+  // per-credential bucket; it is scanned like any other route now.)
 };
 
 function walk(dir: string): string[] {

@@ -157,9 +157,11 @@ export function resolveMigrationUrl(
     throw new CliError("No database URL for migrations.", {
       hint: [
         ...empty,
+        // The variable first, and the flag only as the deprecated fallback it
+        // is: a URL passed as an argument lands in shell history (F-143).
         options.satellite
-          ? `A satellite must name its own database: pass --database-url <direct-url>, or set SATELLITE_DIRECT_DATABASE_URL ${where}. The kit's PRODUCTION_DIRECT_DATABASE_URL is deliberately NOT used here.`
-          : `Pass --database-url <direct-url>, or set PRODUCTION_DIRECT_DATABASE_URL ${where}. Use the DIRECT (non-pooled) endpoint.`,
+          ? `A satellite must name its own database: set SATELLITE_DIRECT_DATABASE_URL ${where} (or pass --database-url, deprecated). The kit's PRODUCTION_DIRECT_DATABASE_URL is deliberately NOT used here.`
+          : `Set PRODUCTION_DIRECT_DATABASE_URL ${where} (or pass --database-url, deprecated). Use the DIRECT (non-pooled) endpoint.`,
         ...(passedOver.length > 0
           ? [
               `${passedOver.join(" and ")} ${passedOver.length > 1 ? "are" : "is"} set but deliberately NOT used (F-47): on the machine a deploy runs from it is usually a local or test database, and migrating that would let the new build be promoted over an unmigrated production.`,

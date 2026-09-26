@@ -51,23 +51,37 @@ import { generateAuthSecret, generateHandoffKeypair, generateOperatorSecret } fr
 import { VercelClient } from "../lib/vercel-client.js";
 import { refuseIssuerProject } from "../lib/vercel-project.js";
 
-/** Minimal .env reader: `KEY=value`, optional quotes, `#` comments, no interpolation. */
+/**
+ * dotenv 16's line rule, the one `@next/env` applies to the kit's own `.env`
+ * files: an optional `export `, the key, then a quoted value or an unquoted
+ * one that ends at the first `#`, then an optional comment.
+ */
+const ENV_LINE =
+  /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/gm;
+
+/**
+ * Reads a `.env` file the way the kit reads the same file (F-144): dotenv's
+ * rules, as `@next/env` bundles them, with no interpolation. The reader this
+ * replaced kept an inline comment in the value, so `BETTER_AUTH_SECRET=<the
+ * kit's> # from the kit` passed the length check and wrote an Option C secret
+ * that differed from the kit's, which signs users out at random. It also
+ * stored `export KEY=v` under the key `export KEY`.
+ *
+ * Not node:util's `parseEnv`, although it strips both as well: it ends a
+ * double-quoted value at the first inner quote, and `vercel pull` writes a
+ * JSON value unescaped (`SSO_HANDOFF_PRIVATE_KEY="{"kty":…}"`, the shape the
+ * kit's `.env.example` invites too), which would read as `{`.
+ */
 export function parseEnvFile(contents: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const rawLine of contents.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq === -1) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"') && value.length > 1) ||
-      (value.startsWith("'") && value.endsWith("'") && value.length > 1)
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (key) out[key] = value;
+  const lines = contents.replace(/\r\n?/g, "\n");
+  for (const match of lines.matchAll(ENV_LINE)) {
+    const key = match[1]!;
+    const value = (match[2] ?? "").trim();
+    const unquoted = value.replace(/^(['"`])([\s\S]*)\1$/gm, "$2");
+    // As dotenv does, and as `vercel pull` expects: it escapes a newline in a
+    // value as `\n` inside double quotes.
+    out[key] = value.startsWith('"') ? unquoted.replace(/\\n/g, "\n").replace(/\\r/g, "\r") : unquoted;
   }
   return out;
 }

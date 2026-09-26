@@ -1,6 +1,7 @@
-import { createInterface } from "node:readline/promises";
+import { type Interface, createInterface } from "node:readline";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { Writable } from "node:stream";
 import {
   type ProjectConfig,
   commandFor,
@@ -30,13 +31,79 @@ import { VercelClient } from "../lib/vercel-client.js";
 import { assertNotIssuerProject } from "../lib/vercel-project.js";
 import { reportContainment } from "./env.js";
 
-async function ask(question: string, fallback?: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+/** Where a prompt reads and writes: the terminal, unless a test says otherwise. */
+export interface PromptIo {
+  input: NodeJS.ReadableStream & { isTTY?: boolean; readableEnded?: boolean };
+  output: NodeJS.WritableStream;
+}
+
+const TERMINAL: PromptIo = { input: process.stdin, output: process.stdout };
+
+/**
+ * Writes the prompt and settles with the first line read, or with null once
+ * the input has ended without one. Not `rl.question()`, which never settles
+ * when the input ends first: readline hands a last line with no newline (a
+ * token file saved by Notepad, `drk-deploy login < token.txt`) to a 'line'
+ * event, never to a pending question, and an empty input answers nothing, so
+ * Node exited 13 on an unsettled top-level await and no error was printed.
+ */
+function readLine(rl: Interface, input: PromptIo["input"], prompt: string): Promise<string | null> {
+  const line = new Promise<string | null>((settle) => {
+    rl.once("line", settle);
+    rl.once("close", () => settle(null));
+  });
+  rl.setPrompt(prompt);
+  rl.prompt();
+  // An input an earlier prompt read to its end never ends again.
+  if (input.readableEnded) rl.close();
+  return line;
+}
+
+/** Exported for the tests, which pass their own streams. */
+export async function ask(question: string, fallback?: string, io: PromptIo = TERMINAL): Promise<string> {
+  const rl = createInterface({ input: io.input, output: io.output });
   try {
     const suffix = fallback ? ` ${dim(`[${fallback}]`)}` : "";
-    const answer = (await rl.question(`  ${question}${suffix}: `)).trim();
-    return answer || fallback || "";
+    const answer = await readLine(rl, io.input, `  ${question}${suffix}: `);
+    // Input that closes unanswered (it ended, or Ctrl+C) is not Enter: a
+    // default ("never guessed for you", as the cookie domain puts it) is
+    // taken only when someone takes it.
+    if (answer === null) {
+      throw new CliError(`No answer to "${question}": the input closed first.`, {
+        hint: "Run this at a terminal, or pass the answer as an option (see --help).",
+      });
+    }
+    return answer.trim() || fallback || "";
   } finally {
+    rl.close();
+  }
+}
+
+/**
+ * A prompt for a secret, which never shows what is typed (F-143): `login`
+ * used the plain `ask`, so the Vercel token was echoed to the screen and to
+ * any recording of it. At a terminal readline echoes each keystroke itself,
+ * so its output is muted once the prompt is written. Piped input (`Get-Content
+ * token.txt | drk-deploy login`, `drk-deploy login < token.txt`) is read the
+ * same way and never echoed; input that ends with nothing is "", which the
+ * caller refuses. The streams are injectable for the tests.
+ */
+export async function askSecret(question: string, io: PromptIo = TERMINAL): Promise<string> {
+  let muted = false;
+  const sink = new Writable({
+    write(chunk: Buffer | string, _encoding, callback) {
+      if (!muted) io.output.write(chunk);
+      callback();
+    },
+  });
+  const rl = createInterface({ input: io.input, output: sink, terminal: io.input.isTTY === true });
+  try {
+    const answer = readLine(rl, io.input, `  ${question}: `);
+    muted = true;
+    return ((await answer) ?? "").trim();
+  } finally {
+    muted = false;
+    io.output.write("\n");
     rl.close();
   }
 }
@@ -52,12 +119,14 @@ async function confirm(question: string, defaultYes: boolean): Promise<boolean> 
  *
  * The token is written to the user profile, never the repo. A token that
  * cannot list projects is rejected here rather than at the first deploy.
+ * It is read with the input hidden, or from stdin; `--token` still works but
+ * is warned about, because an argument lands in shell history (F-143).
  */
-export async function login(options: { token?: string }): Promise<void> {
+export async function login(options: { token?: string }, io?: PromptIo): Promise<void> {
   heading("Vercel authentication");
 
   const token =
-    options.token ?? (await ask("Paste a Vercel access token (https://vercel.com/account/tokens)"));
+    options.token ?? (await askSecret("Paste a Vercel access token (https://vercel.com/account/tokens)", io));
   if (!token) throw new CliError("No token supplied.");
 
   step("Verifying the token against the Vercel API");

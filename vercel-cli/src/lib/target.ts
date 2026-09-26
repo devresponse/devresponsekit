@@ -250,7 +250,7 @@ export function migrationPolicy(profile: DeploymentProfile): MigrationPolicy {
   return {
     allowed: false,
     why: "Refusing to migrate: this satellite runs against the KIT's database and does not own its schema.",
-    hint: `Run migrations from the kit's deployment instead (a \`drk-deploy\` config for the kit). If this satellite genuinely has its OWN database, re-run \`${commandFor("init --own-database")}\` so the decision is recorded, then migrate with an explicit --database-url.`,
+    hint: `Run migrations from the kit's deployment instead (a \`drk-deploy\` config for the kit). If this satellite genuinely has its OWN database, re-run \`${commandFor("init --own-database")}\` so the decision is recorded, then migrate with its direct URL in SATELLITE_DIRECT_DATABASE_URL.`,
   };
 }
 

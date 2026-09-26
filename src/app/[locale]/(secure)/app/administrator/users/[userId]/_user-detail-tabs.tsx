@@ -51,6 +51,7 @@ export function UserDetailTabs({
   canManageGroups,
   canUpdateMemberships,
   canReadAudit,
+  isSelf,
 }: {
   user: UserDetailJson;
   canReadSessions: boolean;
@@ -59,6 +60,8 @@ export function UserDetailTabs({
   canManageGroups: boolean;
   canUpdateMemberships: boolean;
   canReadAudit: boolean;
+  /** The viewer is looking at their own user (F-158: the Sessions tab warns). */
+  isSelf: boolean;
 }) {
   const t = useTranslations("administrator.users");
   // F-37: the viewer's zone and date format.
@@ -128,7 +131,7 @@ export function UserDetailTabs({
 
       {canReadSessions ? (
         <TabsContent value="sessions" className="mt-4">
-          <UserSessionsPanel userId={user.id} />
+          <UserSessionsPanel userId={user.id} isSelf={isSelf} />
         </TabsContent>
       ) : null}
 

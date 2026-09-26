@@ -167,7 +167,7 @@ i18n: labels + validation messages localize.
 - Access matrix: Member / Limited Admin → 404; Org Admin → their org's roles editable; Superadmin → any role including Global; a role in another org → 404 for the org admin.
 - Preconditions & test data: know a role UUID (click through from the list).
 
-Tabs: **Permissions** (default), **Members**, **Settings** (`_role-detail-tabs.tsx:35`).
+Tabs: **Permissions** (default), **Members**, **Settings** (`_role-detail-tabs.tsx:37`). The Permissions editor and the Settings form stay mounted while another tab is open, so staged moves and typed edits survive a look at **Members** (F-158): stage a move without saving, open **Members**, come back, and the move is still staged with **Save** enabled.
 
 User stories
 
@@ -335,7 +335,7 @@ i18n: labels + messages localize.
 - Access matrix: Member / Limited Admin → 404; Org Admin → their group, fully manageable; Superadmin → any group; another org's group → 404 for the org admin.
 - Preconditions & test data: use the ORG A seed groups; Engineering already confers `admin` with members user1/user2.
 
-Tabs default to **Roles** (`_group-detail-tabs.tsx:37`).
+Tabs default to **Roles** (`_group-detail-tabs.tsx:39`). The Roles editor and the Settings form stay mounted while another tab is open, so unsaved edits survive a tab switch (F-158).
 
 #### UAT-ADMIN-RGP-GROUPS-DETAIL-ROLES: Roles tab (dual-list editor)
 

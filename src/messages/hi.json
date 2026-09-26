@@ -26,7 +26,21 @@
       "close": "बंद करें"
     },
     "switchToLightTheme": "लाइट थीम पर स्विच करें",
-    "switchToDarkTheme": "डार्क थीम पर स्विच करें"
+    "switchToDarkTheme": "डार्क थीम पर स्विच करें",
+    "status": {
+      "active": "सक्रिय",
+      "pending": "लंबित",
+      "pending_approval": "अनुमोदन लंबित",
+      "blocked": "अवरुद्ध",
+      "suspended": "निलंबित",
+      "deactivated": "निष्क्रिय",
+      "archived": "संग्रहीत",
+      "available": "उपलब्ध",
+      "disabled": "अक्षम",
+      "accepted": "स्वीकृत",
+      "revoked": "निरस्त",
+      "expired": "समय-सीमा समाप्त"
+    }
   },
   "auth": {
     "verifyEmailTitle": "अपना ईमेल सत्यापित करें",
@@ -556,7 +570,12 @@
         "revokeAll": "सभी सत्र निरस्त करें",
         "expiresAt": "समय-सीमा समाप्त होती है {value}",
         "ipAddress": "IP",
-        "userAgent": "उपयोगकर्ता एजेंट"
+        "userAgent": "उपयोगकर्ता एजेंट",
+        "revokeOneConfirm": "यह सत्र निरस्त करें?",
+        "revokeOneSelfDescription": "यह आपका अपना खाता है। यदि आप इसी सत्र का उपयोग कर रहे हैं, तो आप साइन आउट हो जाएंगे।",
+        "revokeAllConfirm": "इस उपयोगकर्ता के सभी सत्र निरस्त करें?",
+        "revokeAllDescription": "वे हर डिवाइस से साइन आउट हो जाएंगे और उन्हें फिर से साइन इन करना होगा।",
+        "revokeAllSelfDescription": "यह आपका अपना खाता है: आप यहाँ और अपने अन्य सभी डिवाइस पर साइन आउट हो जाएंगे।"
       },
       "memberships": {
         "columns": {

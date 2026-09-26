@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger, useKeptTabs } from "@/components/ui/tabs";
 import { AuthPolicyForm, type AuthPolicySettingsJson } from "@/components/admin/auth-policy-form";
 import { OrganizationInvitationsPanel } from "./_organization-invitations-panel";
 import { OrganizationMembersGrid } from "./_organization-members-grid";
@@ -14,10 +14,11 @@ import { OrganizationSettingsForm } from "./_organization-settings-form";
  * Each tab owns its own data fetch; the Authentication tab receives its
  * initial policy rows from the server page (0007).
  *
- * Radix unmounts an inactive panel, so the Authentication and Settings forms
- * remount from these props on every tab switch. Both save through
- * `useSavedFormBaseline` (F-39), which refreshes the page after a save and
- * follows the refreshed props; a new panel seeded from props must do the same.
+ * The Authentication and Settings forms stay mounted while another tab is open
+ * (`useKeptTabs`, F-158): Radix used to unmount them, so a tab switch discarded
+ * any unsaved edit. Both save through `useSavedFormBaseline` (F-39), which
+ * refreshes the page after a save and follows the refreshed props; a new panel
+ * seeded from props must do the same.
  */
 export interface OrganizationDetailJson {
   id: string;
@@ -43,9 +44,10 @@ export function OrganizationDetailTabs({
   platformAuthDefaults: AuthPolicySettingsJson | null;
 }) {
   const t = useTranslations("administrator.orgs");
+  const tabs = useKeptTabs("members");
 
   return (
-    <Tabs defaultValue="members" className="w-full">
+    <Tabs {...tabs.root} className="w-full">
       <TabsList>
         <TabsTrigger value="members">{t("tabs.members")}</TabsTrigger>
         <TabsTrigger value="providers">{t("tabs.providers")}</TabsTrigger>
@@ -64,7 +66,7 @@ export function OrganizationDetailTabs({
         <OrganizationProvidersGrid orgId={org.id} canUpdate={canUpdate} />
       </TabsContent>
 
-      <TabsContent value="authentication" className="mt-4">
+      <TabsContent value="authentication" className="mt-4" {...tabs.keep("authentication")}>
         <div className="space-y-2">
           <p className="text-muted-foreground text-sm">{t("authPolicy.description")}</p>
           <AuthPolicyForm
@@ -77,7 +79,7 @@ export function OrganizationDetailTabs({
         </div>
       </TabsContent>
 
-      <TabsContent value="settings" className="mt-4">
+      <TabsContent value="settings" className="mt-4" {...tabs.keep("settings")}>
         <OrganizationSettingsForm
           orgId={org.id}
           initialSlug={org.slug}

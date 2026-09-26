@@ -138,12 +138,15 @@ An edit form whose starting values come from the server page (RSC props)
 builds its form with `useSavedFormBaseline(schema, serverValues, toBody)`
 (`src/lib/forms/use-saved-form-baseline.ts`), a wrapper around `useZodForm`.
 The organization, role and group **Settings** tabs and the organization
-**Authentication** tab use it. Those forms sit in Radix tab panels, which
-unmount when another tab opens, so each tab switch remounts the form from the
-props the page was rendered with. Before this hook a save did not change those
-props, and every save re-sent every field. An admin who suspended an org,
+**Authentication** tab use it. Those forms sat in Radix tab panels, which
+unmounted when another tab opened, so each tab switch remounted the form from
+the props the page was rendered with. Before this hook a save did not change
+those props, and every save re-sent every field. An admin who suspended an org,
 opened Members and came back saw Active again, and the next save of an
-unrelated fix quietly reactivated the org. The hook applies three rules:
+unrelated fix quietly reactivated the org. Since F-158 those panels stay
+mounted across a tab switch (`useKeptTabs`), which also keeps unsaved edits;
+the rules still hold for a form rebuilt from the page's props (a page that is
+opened again). The hook applies three rules:
 
 - **`commitSaved(values)` after a successful save** moves the form's baseline
   to what was saved and calls `router.refresh()`, so the page re-renders and
@@ -274,7 +277,8 @@ reset-password (the `sign-in` / `sign-up` wrappers compose these).
   mapping, and the happy path.
   `tests/component/settings-tab-remount.test.tsx` drives the real tab
   containers through save → tab switch → refresh for every form on
-  `useSavedFormBaseline` and for the role Permissions editor (F-39).
+  `useSavedFormBaseline` and for the role Permissions editor (F-39), and
+  pins that a tab switch keeps an unsaved edit in each of them (F-158).
 - **Security:** the shared Zod schemas are exercised at the API boundary
   (`tests/security/handler-input-validation.test.ts`) to reject unknown keys,
   oversized, and malformed input — the same schemas the forms use.

@@ -57,8 +57,9 @@ function toOrganizationPatch(values: OrganizationSettingsInput) {
  *
  * F-39: saves through `useSavedFormBaseline`. The PATCH carries only the
  * fields the admin changed, and a successful save moves the form's baseline
- * and refreshes the page, so coming back from another tab (which remounts
- * this form) can neither show nor re-send the pre-save status or name.
+ * and refreshes the page, so a form rebuilt from the page's props (a tab switch
+ * did that before F-158) can neither show nor re-send the pre-save status or
+ * name.
  */
 export function OrganizationSettingsForm({
   orgId,

@@ -312,7 +312,7 @@ User stories
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | Sign in as `orgadmin@orga.local` and open `org-a` → **Settings**. | The Settings form renders. Because this persona holds `admin.orgs.update`, the fields are editable. |
-    | 2 | Change **Name** to anything and click **Save**. | The save is rejected: a root inline error `role="alert"` shows the localized "forbidden" message (mapped from the 403 at `_organization-settings-form.tsx:143`). |
+    | 2 | Change **Name** to anything and click **Save**. | The save is rejected: a root inline error `role="alert"` shows the localized "forbidden" message (mapped from the 403 at `_organization-settings-form.tsx:145`). |
     | 3 | Reload the page. | The name is unchanged — the edit did not persist. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
@@ -332,14 +332,16 @@ Negative & edge cases
 1. Cross-tenant 404 (not 403): a foreign `orgId` returns Not Found for the page and a 404 envelope for the members/providers endpoints (`members/route.ts:54`, `provider-bindings/route.ts:53`).
 2. Invalid id: a non-UUID `orgId` returns 404 on the page and `invalid_id` (400) on the API.
 3. Settings required validation: clearing Slug or Name shows the `*` marker, a red border, and a localized "required" message; Slug also enforces the lowercase slug pattern.
-4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:136`).
+4. Slug conflict on save: changing the slug to one already taken returns **409**, mapped onto the Slug field as "slug taken" (`_organization-settings-form.tsx:138`).
 5. Member add errors: adding a non-existent `appUserId` returns `user_not_found` (404); adding an existing membership returns `membership_exists` (409).
-6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:160,264`).
+6. Disabled-when-read-only: if a persona holds `admin.orgs.read` but not `admin.orgs.update`, every Settings field and the Save button are disabled, and the required legend is hidden (`_organization-settings-form.tsx:162,269`).
 7. Rate-limit: rapid member/binding mutations hit the admin mutation limit and return a friendly rate-limited response (`members/route.ts:126`).
 8. Removing a member whose roles or groups in the org confer a permission the caller cannot confer is refused with **403** `forbidden` and an `admin.membership.revocation_denied` audit row, and nothing is removed (REVOKE-1, F-12). An Org Admin at a browser is normally stopped earlier by the rank guard; the case to try is a bearer key scoped only to `admin.orgs.update`, removing a member who holds an `admin.*` role. The same key removes a plain member (`user1..5`, the `member` role) with **200**: `shell.view` goes with the membership and is not measured.
+9. Invitation refusals name their reason (F-156): inviting with a role that confers a permission you cannot confer shows "You do not have permission to perform this action." (403 `forbidden`); a role deleted after the dialog listed it shows "Role not found." under **Role**; the rate limit shows its own message. **Resend** or **Revoke** on a row that another browser revoked meanwhile shows "Invitation not found." and the list reloads to show the row as it is now. A dropped connection shows the resend or revoke error instead of doing nothing. Only a server fault (5xx) keeps the generic "Could not send / resend / revoke" text.
+10. A tab switch keeps unsaved edits (F-158): on **Settings** change the name without saving (or on **Authentication** click Customize and untick a box), open **Members**, come back: the edit is still there and nothing was saved.
 
 Accessibility: tab through the three tabs (arrow-key tab navigation), the grids, and the Settings form; dialogs (Remove confirm) trap focus and close on Esc; the success message uses `role="status"`, errors use `role="alert"`.
-i18n: in `uk`/`ja`, tab labels (Members / Providers / Settings), status options, buttons, and dates localize; no raw keys.
+i18n: in `uk`/`ja`, tab labels (Members / Providers / Settings), status options, the member and invitation status badges (F-116: they showed the raw `pending_approval` / `expired` before), buttons, and dates localize; no raw keys.
 
 ---
 

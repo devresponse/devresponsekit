@@ -149,7 +149,7 @@ i18n: run `en` + `uk`; sidebar group and item labels come from the `administrato
 
 ## ADMIN-OVERVIEW — Administrator console overview
 
-- Route: `/app/administrator` · Example URL: `/en/app/administrator` · Code: `src/app/[locale]/(secure)/app/administrator/page.tsx:72`
+- Route: `/app/administrator` · Example URL: `/en/app/administrator` · Code: `src/app/[locale]/(secure)/app/administrator/page.tsx:73`
 - Purpose: The console landing dashboard — metric cards (Users, Organizations, Roles, Permissions, Enterprise Apps), trend charts, and recent-activity lists. Each card/list is gated by its own read permission and its query only runs when the caller can see it.
 - Guard / who can access: reachable by any admin (enforced by the layout). Per-card gating: each metric descriptor names a read permission — Users card = `admin.users.read`, Organizations = `admin.orgs.read`, Roles/Permissions = `admin.roles.read`, Enterprise Apps = `admin.apps.read` (`page.tsx:37`–`:68`). Cards the caller cannot read are hidden and their queries never run (`page.tsx:92`). The recent-sessions list is gated on `admin.users.sessions` and audit activity on `admin.audit.read` (`page.tsx:119`–`:123`).
 - Access matrix:
@@ -170,7 +170,7 @@ User stories
     | 2 | Read the metric cards. | Cards for Users, Organizations, Roles, Permissions, Enterprise Apps appear with numeric values. |
     | 3 | Note the Users card value. | It reflects only ORG A members (not org-b/org-c users). |
     | 4 | Click the **Users** card. | Navigates to `/en/app/administrator/users`. |
-    | 5 | Return to the overview; find the "Recent registrations" list. | It lists recent ORG A users with a status badge and a localized date. |
+    | 5 | Return to the overview; find the "Recent registrations" list. | It lists recent ORG A users with a localized status badge ("Pending approval", not `pending_approval`, F-116) and a localized date. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - ADMIN-OVERVIEW-S2 — As a Superadmin, I want system-wide insight charts, so that I can compare organizations and spot platform-level trends.
@@ -333,7 +333,7 @@ i18n: run `en` + `uk`; labels, the password hint, status options, and error mess
 
 - Route: `/app/administrator/users/[userId]` · Example URL: `/en/app/administrator/users/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/users/[userId]/page.tsx:28`
 - Purpose: The per-user workspace: a metadata header (name, email, status badge, optional Impersonate button) plus a tabbed container — Overview, Roles, Groups, Memberships, Sessions, and (permission-gated) Audit.
-- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:35`); the `userId` must be a UUID (`:40`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:69`, `access-scope.server.ts:96`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.users.impersonate` (Impersonate button) — `[userId]/page.tsx:87`–`:98`. A tab whose API demands MORE than `admin.users.read` is rendered only for a caller who holds that key (review #76): **Groups** needs `admin.groups.read`, **Sessions** needs `admin.users.sessions`, **Audit** needs `admin.audit.read` (`_user-detail-tabs.tsx:73`,`:75`,`:76`). No tab in the bar leads to a 403.
+- Guard / who can access: page guard `admin.users.read` → `notFound()` (`[userId]/page.tsx:35`); the `userId` must be a UUID (`:40`) and the target must resolve within the caller's org via `canAccessUser`, else `notFound()` (`:69`, `access-scope.server.ts:96`). Per-tab affordances are gated by additional keys the page reads: `admin.roles.assign` (Roles actions), `admin.groups.assign` (Groups actions), `admin.users.update` (Memberships remove), `admin.users.impersonate` (Impersonate button) — `[userId]/page.tsx:87`–`:98`. A tab whose API demands MORE than `admin.users.read` is rendered only for a caller who holds that key (review #76): **Groups** needs `admin.groups.read`, **Sessions** needs `admin.users.sessions`, **Audit** needs `admin.audit.read` (`_user-detail-tabs.tsx:76`,`:78`,`:79`). No tab in the bar leads to a 403.
 - Access matrix:
   - Member → **404**.
   - Limited Admin → header + Overview/Roles/Memberships tabs, **plus** the Audit tab (holds `admin.audit.read`). The **Groups** and **Sessions** tabs are **absent** — the `admin` role holds neither `admin.groups.read` nor `admin.users.sessions` (review #76). Roles/Memberships show **no** mutate buttons; the Impersonate button is absent.
@@ -366,7 +366,7 @@ User stories
 Negative & edge cases
 1. Non-UUID or unknown id → 404 (`page.tsx:40`, `:63`).
 2. Cross-tenant id → 404 via `canAccessUser` (`page.tsx:69`), not 403.
-3. A soft-deleted (`deactivated`) user shows a warning panel on Overview with the deactivation timestamp/actor/reason (`_user-detail-tabs.tsx:85`).
+3. A soft-deleted (`deactivated`) user shows a warning panel on Overview with the deactivation timestamp/actor/reason (`_user-detail-tabs.tsx:101`).
 
 Accessibility: tabs follow the tablist pattern (arrow-key navigation, roving focus); the header actions are reachable by keyboard. No axe violations.
 i18n: run `en` + `uk`; tab labels, field labels, and dates localize; status uses the `status.*` catalog (unknown enum values render verbatim, `page.tsx:144`).
@@ -375,7 +375,7 @@ i18n: run `en` + `uk`; tab labels, field labels, and dates localize; status uses
 
 ## ADMIN-USERS-DETAIL-OVERVIEW — User detail: Overview tab
 
-- Route: `/app/administrator/users/[userId]` (Overview tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-detail-tabs.tsx:79`
+- Route: `/app/administrator/users/[userId]` (Overview tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-detail-tabs.tsx:82`
 - Purpose: Read-only account metadata streamed by the parent RSC (no client fetch): email, display name, preferred locale, the app-user id and Better Auth id, optional status reason, created/updated timestamps, and a deactivation panel when applicable.
 - Guard / who can access: same as the detail page (`admin.users.read`); no extra permission — the data is already on the page.
 - Access matrix: Member → 404; Limited Admin / Org Admin / Superadmin → visible.
@@ -395,7 +395,7 @@ User stories
 
 Negative & edge cases
 1. Missing display name → shows an em dash placeholder, not an empty cell.
-2. Deactivated user → a warning panel shows the deactivation date, actor, and reason (`_user-detail-tabs.tsx:85`).
+2. Deactivated user → a warning panel shows the deactivation date, actor, and reason (`_user-detail-tabs.tsx:101`).
 
 Accessibility: the metadata is a `<dl>`; ids are in `<code>` for easy copy. No axe violations.
 i18n: run `en` + `uk`; field labels and the created/updated line localize; the ids are locale-neutral.
@@ -451,7 +451,7 @@ i18n: run `en` + `uk`; column headers, buttons, dialog text, and error messages 
 
 - Route: `/app/administrator/users/[userId]` (Groups tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-groups-panel.tsx:37`
 - Purpose: Lists the groups the user belongs to and, with permission, lets the operator add the user to a group (dialog + picker) or remove them. Group membership confers the union of the group's roles' permissions (ADR-0002).
-- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:35`), and the tab TRIGGER is gated on the same key so a caller without it never reaches the panel (`_user-detail-tabs.tsx:73`, review #76). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:76`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:82`, `:152`).
+- Guard / who can access: the list fetch `GET /api/administrator/users/[id]/groups` requires `admin.groups.read` (`api/.../users/[id]/groups/route.ts:35`), and the tab TRIGGER is gated on the same key so a caller without it never reaches the panel (`_user-detail-tabs.tsx:76`, review #76). Add/remove render only when the page passed `canManage` = `admin.groups.assign` (`[userId]/page.tsx:76`, `_user-groups-panel.tsx:132`); those hit `POST`/`DELETE …/groups`, both requiring `admin.groups.assign` (`api/.../groups/route.ts:82`, `:152`).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Groups tab is **not rendered** at all: the `admin` role lacks `admin.groups.read`, which now gates the tab trigger (review #76). The API is still the boundary — a hand-made `GET …/groups` for that user answers 403.
@@ -538,9 +538,9 @@ i18n: run `en` + `uk`; column headers, the status badge, and the joined date loc
 
 ## ADMIN-USERS-DETAIL-SESSIONS — User detail: Sessions tab
 
-- Route: `/app/administrator/users/[userId]` (Sessions tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-sessions-panel.tsx:29`
+- Route: `/app/administrator/users/[userId]` (Sessions tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-sessions-panel.tsx:35`
 - Purpose: Lists the user's active Better Auth sessions (expiry, IP, user agent) and lets the operator revoke one session or all of them (force sign-out everywhere).
-- Guard / who can access: both the list `GET` and the revoke `DELETE` (single + all) require `admin.users.sessions` (`api/.../users/[id]/sessions/route.ts:32`, `:70`; single-session `DELETE` at `api/.../users/[id]/sessions/[sessionId]/route.ts:27`). The tab TRIGGER is gated on the same key (`_user-detail-tabs.tsx:75`, review #76), so a caller without `admin.users.sessions` is never offered the tab; the API stays the boundary for anyone who calls it directly.
+- Guard / who can access: both the list `GET` and the revoke `DELETE` (single + all) require `admin.users.sessions` (`api/.../users/[id]/sessions/route.ts:32`, `:70`; single-session `DELETE` at `api/.../users/[id]/sessions/[sessionId]/route.ts:27`). The tab TRIGGER is gated on the same key (`_user-detail-tabs.tsx:78`, review #76), so a caller without `admin.users.sessions` is never offered the tab; the API stays the boundary for anyone who calls it directly.
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → the Sessions tab is **not rendered** (the `admin` role lacks `admin.users.sessions`, which gates the trigger); a direct call to the sessions API answers 403, so revoke is impossible either way.
@@ -550,14 +550,15 @@ i18n: run `en` + `uk`; column headers, the status badge, and the joined date loc
 User stories
 
 - ADMIN-USERS-DETAIL-SESSIONS-S1 — As an Org Admin, I want to revoke a user's sessions, so that I can cut off access immediately if a device is compromised.
-  - Acceptance criteria: Given the target has an active session, when I click Revoke on it (or Revoke all), then the list refreshes without that session.
+  - Acceptance criteria: Given the target has an active session, when I click Revoke on it (or Revoke all) and confirm, then the list refreshes without that session. Both ask first, and Cancel changes nothing (F-158).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | In a second browser, sign in as `user1@orga.local`. | The user has a live session. |
     | 2 | As `orgadmin@orga.local`, open that user's detail; click **Sessions**. | The active session(s) list with expiry, IP, and user agent. |
-    | 3 | Click **Revoke** on a session. | The list reloads without it. |
-    | 4 | Click **Revoke all**. | All sessions are cleared; the empty-state message shows. In the second browser, the user is signed out on next navigation. |
+    | 3 | Click **Revoke** on a session. | A destructive confirm dialog "Revoke this session?" shows the session's expiry. Confirm: the list reloads without it. |
+    | 4 | Click **Revoke all sessions**, then **Cancel**. | The dialog "Revoke all of this user's sessions?" says they will be signed out on every device; Cancel closes it and the list is unchanged. |
+    | 5 | Click **Revoke all sessions** again and confirm. | All sessions are cleared; the empty-state message shows. In the second browser, the user is signed out on next navigation. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - ADMIN-USERS-DETAIL-SESSIONS-S2 — As a Limited Admin, I want session data to stay hidden, so that IPs and devices are not exposed without the sessions permission.
@@ -571,11 +572,12 @@ User stories
 
 Negative & edge cases
 1. Shared-target guard → an org admin clicking "Revoke all" on a cross-org user (`multi1@shared.local`) gets 403 (account-global action reserved for Superadmin, `api/.../sessions/route.ts:92`); the panel shows its error.
-2. Empty state → a user with no active sessions shows the "no sessions" message; "Revoke all" is disabled (`_user-sessions-panel.tsx:118`).
-3. Loading skeleton → shown while the list fetches (`_user-sessions-panel.tsx:130`).
+2. Empty state → a user with no active sessions shows the "no sessions" message; "Revoke all" is disabled (`_user-sessions-panel.tsx:144`).
+3. Loading skeleton → shown while the list fetches (`_user-sessions-panel.tsx:156`).
+4. Your own user page (F-158) → as `superuser@orga.local`, open your own user detail → **Sessions** and click **Revoke all sessions**: the dialog says this is your own account and you will be signed out here and on every other device. Cancel changes nothing. A single **Revoke** warns that you are signed out if it is the session you are using.
 
-Accessibility: the session list is a labelled `<ul>`; revoke buttons are disabled while a request is in flight; errors use `role="alert"`. No axe violations.
-i18n: run `en` + `uk`; expiry/IP/user-agent labels and the empty message localize; the expiry time uses the active locale.
+Accessibility: the session list is a labelled `<ul>`; revoke buttons are disabled while a request is in flight; the confirm dialogs trap focus and close on Esc (Esc cancels); errors use `role="alert"`. No axe violations.
+i18n: run `en` + `uk`; expiry/IP/user-agent labels, the empty message and both confirm dialogs localize; the expiry time uses the active locale.
 
 ---
 
@@ -583,7 +585,7 @@ i18n: run `en` + `uk`; expiry/IP/user-agent labels and the empty message localiz
 
 - Route: `/app/administrator/users/[userId]` (Audit tab) · Example URL: `/en/app/administrator/users/<uuid>` · Code: `_user-audit-panel.tsx:12`
 - Purpose: The user-scoped audit trail — `app_audit_events` rows about this user — rendered by the shared audit grid with its global filter toolbar hidden (the view is already scoped). Each row opens a detail sheet with full metadata.
-- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:79`, `_user-detail-tabs.tsx:76`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:38`).
+- Guard / who can access: the Audit **tab is shown only when the page passed `canReadAudit` = `admin.audit.read`** (`[userId]/page.tsx:79`, `_user-detail-tabs.tsx:79`). The endpoint `GET /api/administrator/users/[id]/audit` also requires `admin.audit.read` — a stricter gate than the page's own `admin.users.read` (`api/.../users/[id]/audit/route.ts:38`).
 - Access matrix:
   - Member → 404 (page).
   - Limited Admin → **Audit tab present and working** (the `admin` role holds `admin.audit.read`), scoped to ORG A.

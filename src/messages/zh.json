@@ -26,7 +26,21 @@
       "close": "关闭"
     },
     "switchToLightTheme": "切换到浅色主题",
-    "switchToDarkTheme": "切换到深色主题"
+    "switchToDarkTheme": "切换到深色主题",
+    "status": {
+      "active": "活跃",
+      "pending": "待处理",
+      "pending_approval": "待审批",
+      "blocked": "已封禁",
+      "suspended": "已暂停",
+      "deactivated": "已停用",
+      "archived": "已归档",
+      "available": "可用",
+      "disabled": "已禁用",
+      "accepted": "已接受",
+      "revoked": "已吊销",
+      "expired": "已过期"
+    }
   },
   "auth": {
     "verifyEmailTitle": "验证您的电子邮件",
@@ -556,7 +570,12 @@
         "revokeAll": "吊销所有会话",
         "expiresAt": "{value} 过期",
         "ipAddress": "IP",
-        "userAgent": "用户代理"
+        "userAgent": "用户代理",
+        "revokeOneConfirm": "吊销此会话？",
+        "revokeOneSelfDescription": "这是您自己的账户。如果这是您正在使用的会话，您将被退出登录。",
+        "revokeAllConfirm": "吊销该用户的所有会话？",
+        "revokeAllDescription": "该用户将在所有设备上退出登录，需要重新登录。",
+        "revokeAllSelfDescription": "这是您自己的账户：您将在此设备及所有其他设备上退出登录。"
       },
       "memberships": {
         "columns": {

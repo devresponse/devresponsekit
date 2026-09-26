@@ -26,7 +26,21 @@
       "close": "Close"
     },
     "switchToLightTheme": "Switch to light theme",
-    "switchToDarkTheme": "Switch to dark theme"
+    "switchToDarkTheme": "Switch to dark theme",
+    "status": {
+      "active": "Active",
+      "pending": "Pending",
+      "pending_approval": "Pending approval",
+      "blocked": "Blocked",
+      "suspended": "Suspended",
+      "deactivated": "Deactivated",
+      "archived": "Archived",
+      "available": "Available",
+      "disabled": "Disabled",
+      "accepted": "Accepted",
+      "revoked": "Revoked",
+      "expired": "Expired"
+    }
   },
   "auth": {
     "verifyEmailTitle": "Verify your email",
@@ -556,7 +570,12 @@
         "revokeAll": "Revoke all sessions",
         "expiresAt": "Expires {value}",
         "ipAddress": "IP",
-        "userAgent": "User agent"
+        "userAgent": "User agent",
+        "revokeOneConfirm": "Revoke this session?",
+        "revokeOneSelfDescription": "This is your own account. If this is the session you are using, you will be signed out.",
+        "revokeAllConfirm": "Revoke all of this user's sessions?",
+        "revokeAllDescription": "They will be signed out on every device and must sign in again.",
+        "revokeAllSelfDescription": "This is your own account: you will be signed out here and on every other device."
       },
       "memberships": {
         "columns": {

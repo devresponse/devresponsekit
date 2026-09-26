@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger, useKeptTabs } from "@/components/ui/tabs";
 import { RolePermissionsEditor } from "./_role-permissions-editor";
 import { RoleMembersGrid } from "./_role-members-grid";
 import { RoleSettingsForm } from "./_role-settings-form";
@@ -13,10 +13,11 @@ import { RoleSettingsForm } from "./_role-settings-form";
  * which is hydrated from the server-rendered initial set so the dual-
  * list editor renders the assigned column immediately.
  *
- * Radix unmounts an inactive panel, so the Permissions editor and the Settings
- * form remount from these props on every tab switch. Both refresh the page
- * after a save and follow the refreshed props (F-39); a new panel seeded from
- * props must do the same.
+ * The Permissions editor and the Settings form stay mounted while another tab
+ * is open (`useKeptTabs`, F-158), so staged moves and typed edits survive a
+ * look at Members; Radix used to unmount them and discard both. Both still
+ * refresh the page after a save and follow the refreshed props (F-39); a new
+ * panel seeded from props must do the same.
  */
 export interface RoleDetailJson {
   id: string;
@@ -30,16 +31,17 @@ export interface RoleDetailJson {
 
 export function RoleDetailTabs({ role, canUpdate }: { role: RoleDetailJson; canUpdate: boolean }) {
   const t = useTranslations("administrator.roles");
+  const tabs = useKeptTabs("permissions");
 
   return (
-    <Tabs defaultValue="permissions" className="w-full">
+    <Tabs {...tabs.root} className="w-full">
       <TabsList>
         <TabsTrigger value="permissions">{t("tabs.permissions")}</TabsTrigger>
         <TabsTrigger value="members">{t("tabs.members")}</TabsTrigger>
         <TabsTrigger value="settings">{t("tabs.settings")}</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="permissions" className="mt-4">
+      <TabsContent value="permissions" className="mt-4" {...tabs.keep("permissions")}>
         <RolePermissionsEditor
           roleId={role.id}
           initialAssigned={role.permissionKeys}
@@ -51,7 +53,7 @@ export function RoleDetailTabs({ role, canUpdate }: { role: RoleDetailJson; canU
         <RoleMembersGrid roleId={role.id} />
       </TabsContent>
 
-      <TabsContent value="settings" className="mt-4">
+      <TabsContent value="settings" className="mt-4" {...tabs.keep("settings")}>
         <RoleSettingsForm
           roleId={role.id}
           initialKey={role.key}

@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
   getAdministratorOverviewActivity,
   getAdministratorOverviewMetrics,
@@ -311,9 +312,9 @@ function buildActivityLists(
           <span key="user" className="block max-w-48 truncate" title={r.email}>
             {r.displayName ?? r.email}
           </span>,
-          <Badge key="status" variant="outline">
-            {r.status}
-          </Badge>,
+          // F-116: the shared badge translates the status; this printed the raw
+          // enum (`pending_approval`) in every locale.
+          <StatusBadge key="status" status={r.status} />,
           time(r.createdAt),
         ],
       })),

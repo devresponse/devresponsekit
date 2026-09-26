@@ -26,7 +26,21 @@
       "close": "Fechar"
     },
     "switchToLightTheme": "Mudar para o tema claro",
-    "switchToDarkTheme": "Mudar para o tema escuro"
+    "switchToDarkTheme": "Mudar para o tema escuro",
+    "status": {
+      "active": "Ativo",
+      "pending": "Pendente",
+      "pending_approval": "A aguardar aprovação",
+      "blocked": "Bloqueado",
+      "suspended": "Suspenso",
+      "deactivated": "Desativado",
+      "archived": "Arquivado",
+      "available": "Disponível",
+      "disabled": "Desativado",
+      "accepted": "Aceite",
+      "revoked": "Revogado",
+      "expired": "Expirado"
+    }
   },
   "auth": {
     "verifyEmailTitle": "Confirme o seu e-mail",
@@ -556,7 +570,12 @@
         "revokeAll": "Revogar todas as sessões",
         "expiresAt": "Expira {value}",
         "ipAddress": "IP",
-        "userAgent": "Agente de utilizador"
+        "userAgent": "Agente de utilizador",
+        "revokeOneConfirm": "Revogar esta sessão?",
+        "revokeOneSelfDescription": "Esta é a sua própria conta. Se for a sessão que está a utilizar, a sua sessão será terminada.",
+        "revokeAllConfirm": "Revogar todas as sessões deste utilizador?",
+        "revokeAllDescription": "A sessão será terminada em todos os dispositivos e terá de iniciar sessão novamente.",
+        "revokeAllSelfDescription": "Esta é a sua própria conta: a sua sessão será terminada aqui e em todos os outros dispositivos."
       },
       "memberships": {
         "columns": {

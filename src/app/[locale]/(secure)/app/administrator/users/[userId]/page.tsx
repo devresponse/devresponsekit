@@ -144,6 +144,7 @@ export default async function AdministratorUserDetailPage({
         canManageGroups={canManageGroups}
         canUpdateMemberships={canUpdateMemberships}
         canReadAudit={canReadAudit}
+        isSelf={isSelfTarget}
       />
     </section>
   );

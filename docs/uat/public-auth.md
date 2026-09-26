@@ -350,7 +350,7 @@ User stories
   - Acceptance criteria: Given valid credentials for an `active` account, when I
     submit, then Better Auth signs me in and the `callbackURL` (sanitized
     `returnTo`, defaulting to `/<locale>/app/dashboard` —
-    `src/lib/safe-return-to.ts:17`) is honored.
+    `src/lib/safe-return-to.ts:67`) is honored.
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -405,8 +405,14 @@ Negative & edge cases
   `src/components/ui/form.tsx:144-151`).
 - Malicious `returnTo`: an absolute URL, `//evil.com`, a backslash-smuggled path,
   an `/api/*` path, or an auth/status page all fall back to
-  `/<locale>/app/dashboard` (`src/lib/safe-return-to.ts:23-44`). Expected: no
-  open redirect off-site.
+  `/<locale>/app/dashboard` (`src/lib/safe-return-to.ts:62-97`). So does a path
+  with a dot segment that the browser would resolve onto one of those
+  (`/en/../api/…`, `/en/%2e%2e/api/…`, `/en/./sign-in`), an auth page followed
+  by a query, a fragment, or a trailing space or control character
+  (`/en/sign-in?x`, `/en/sign-in#x`, or `returnTo=%2Fen%2Fsign-in%20` /
+  `%2Fen%2Fsign-in%00`), and a path with an encoded `/` or `\` (I-17).
+  Expected: no open redirect off-site, and no landing on an API route or an
+  auth page.
 - Language switch keeps the query (F-35): on
   `/en/sign-in?returnTo=%2Fen%2Fapp%2Fworkspace`, choose **Français** in the
   switcher. Expected: the URL becomes `/fr/sign-in?returnTo=%2Fen%2Fapp%2Fworkspace`,

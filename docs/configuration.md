@@ -434,7 +434,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 
 | File | Purpose |
 | --- | --- |
-| `next.config.mjs` | Static security headers (X-Frame-Options, HSTS, Reporting-Endpoints, …), next-intl plugin, opt-in Sentry plugin. The enforcing nonce-based CSP is minted per request in `src/proxy.ts`. |
+| `next.config.mjs` | Static security headers (X-Frame-Options, HSTS, Reporting-Endpoints, …), `Cache-Control: private, no-store` on every `/api` route that does not set its own caching (I-07), next-intl plugin, opt-in Sentry plugin. The enforcing nonce-based CSP is minted per request in `src/proxy.ts`. |
 | `vitest.config.ts` | Test config + coverage thresholds (the ratchet). |
 | `playwright.config.ts` | E2E/accessibility browser test config. |
 | `tsconfig.json` | TypeScript (strict; path aliases). |

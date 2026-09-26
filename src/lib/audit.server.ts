@@ -93,6 +93,11 @@ export interface AuditEventInput {
  *     changes, and denied navigation. Suppressing failures here would
  *     hide attacks, so this function intentionally surfaces errors to
  *     the caller — log them but never include secrets in the metadata.
+ *     Two denial rows are sampled per actor (≈once a minute) through
+ *     `shouldAuditDenial` rather than written per request: the rate
+ *     limiter's `administrator.rate_limited` and the navigation menus'
+ *     `navigation.menu.denied` (F-105). Per-probe forensic rows such as
+ *     `administrator.access.denied` are not sampled.
  *   - F-15: only for a request whose caller something has VERIFIED (a
  *     session, a credential, a signed SSO token). A refusal decided before
  *     that — the CSRF origin guard, a garbage handoff token, a signed-out

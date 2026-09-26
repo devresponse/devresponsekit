@@ -197,3 +197,79 @@ describe("GET /api/navigation/nested-apps", () => {
     expect(loadNestedAppsMenu).toHaveBeenCalledWith(ACTIVE_ACCESS, "portal", "en");
   });
 });
+
+/**
+ * F-105 family: like the scoped sign-in applicator, these GETs wrote an
+ * append-only row on every hit. A blocked or pending session is still refused
+ * every time, but its `navigation.menu.denied` row is sampled per actor
+ * (at most about once a minute, across all three menus), so a loop cannot grow
+ * the audit table by a row per request.
+ */
+describe("navigation.menu.denied is sampled per actor (F-105)", () => {
+  const ROUTES = [
+    {
+      load: () => import("@/app/api/navigation/applications/route"),
+      url: "http://localhost/api/navigation/applications?locale=en",
+    },
+    {
+      load: () => import("@/app/api/navigation/shell-menu/route"),
+      url: "http://localhost/api/navigation/shell-menu?scope=primary",
+    },
+    {
+      load: () => import("@/app/api/navigation/nested-apps/route"),
+      url: "http://localhost/api/navigation/nested-apps?applicationId=portal",
+    },
+  ];
+
+  async function hitEveryMenu(times: number): Promise<number[]> {
+    const statuses: number[] = [];
+    for (let i = 0; i < times; i++) {
+      for (const route of ROUTES) {
+        const { GET } = await route.load();
+        statuses.push((await GET(makeRequest(route.url))).status);
+      }
+    }
+    return statuses;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-26T12:00:00Z"));
+    accessGetter.mockResolvedValue(PENDING_ACCESS);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("refuses every request but audits the loop once", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    const statuses = await hitEveryMenu(5);
+    expect(statuses).toEqual(Array(15).fill(403));
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "navigation.menu.denied",
+        actorBetterAuthUserId: "ba-1",
+        reason: "pending_approval",
+      }),
+    );
+  });
+
+  it("samples each actor on its own", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    await hitEveryMenu(2);
+    sessionGetter.mockResolvedValue({ user: { id: "ba-2" } });
+    await hitEveryMenu(2);
+    expect(
+      auditMock.mock.calls.map(
+        ([input]) => (input as { actorBetterAuthUserId: string }).actorBetterAuthUserId,
+      ),
+    ).toEqual(["ba-1", "ba-2"]);
+  });
+
+  it("audits the same actor again once the window has passed", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    await hitEveryMenu(2);
+    vi.setSystemTime(new Date("2026-09-26T12:01:00Z"));
+    await hitEveryMenu(2);
+    expect(auditMock).toHaveBeenCalledTimes(2);
+  });
+});

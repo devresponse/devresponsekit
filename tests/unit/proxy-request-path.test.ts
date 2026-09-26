@@ -1,5 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type * as NextTesting from "next/experimental/testing/server";
 import type * as ProxyModule from "@/proxy";
 import type * as RouteRegionsModule from "@/config/route-regions";
 import { REQUEST_PATH_HEADER } from "@/lib/request-id";
@@ -119,5 +124,86 @@ describe("proxy — the matcher covers the localized secure tree", () => {
   it("stamps the real path for a dotted admin URL, forged header and all", () => {
     proxy(req(DOTTED, { [REQUEST_PATH_HEADER]: FORGED }));
     expect(intlState.captured?.headers.get(REQUEST_PATH_HEADER)).toBe(DOTTED);
+  });
+});
+
+/**
+ * F-106: the dot-excluding page entry skipped `/en/sign-in/a.b`, and
+ * `sign-in/[org]` renders the full password form for any segment, so that URL
+ * served the credential form with no CSP and no proxy headers. The matcher is
+ * judged by Next's own matcher (`unstable_doesMiddlewareMatch`; the docs call
+ * it `unstable_doesProxyMatch`, a name this Next release does not export yet),
+ * not by a hand-rolled regex. It loads Next's request-storage singletons,
+ * which need the host's `AsyncLocalStorage`.
+ */
+describe("proxy — the matcher covers every localized page that takes a dynamic segment", () => {
+  let doesMatch: typeof NextTesting.unstable_doesMiddlewareMatch;
+
+  beforeAll(async () => {
+    (globalThis as { AsyncLocalStorage?: unknown }).AsyncLocalStorage ??= AsyncLocalStorage;
+    ({ unstable_doesMiddlewareMatch: doesMatch } =
+      await import("next/experimental/testing/server"));
+  });
+
+  const LOCALIZED_DIR = fileURLToPath(new URL("../../src/app/[locale]", import.meta.url));
+
+  function pages(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) out.push(...pages(full));
+      else if (entry === "page.tsx") out.push(full);
+    }
+    return out;
+  }
+
+  /**
+   * `(auth)/sign-in/[org]/page.tsx` → `/en/sign-in/a.b`: route groups dropped,
+   * every dynamic segment filled with a DOTTED value, the shape the general
+   * entry excludes. `null` for a page with no dynamic segment.
+   */
+  function dottedUrl(page: string): string | null {
+    const segments = page
+      .slice(LOCALIZED_DIR.length)
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter((s) => s !== "" && s !== "page.tsx" && !/^\(.*\)$/.test(s));
+    if (!segments.some((s) => s.startsWith("["))) return null;
+    return `/en/${segments.map((s) => (s.startsWith("[") ? "a.b" : s)).join("/")}`;
+  }
+
+  it("matches /:locale/sign-in/:path*", () => {
+    expect(config.matcher).toContain("/:locale/sign-in/:path*");
+    expect(doesMatch({ config, url: "/en/sign-in/a.b" })).toBe(true);
+    expect(doesMatch({ config, url: "/fr/sign-in/acme.corp?returnTo=%2Ffr%2Fapp" })).toBe(true);
+  });
+
+  it("runs the proxy on a dotted URL for EVERY dynamic localized page", () => {
+    const urls = pages(LOCALIZED_DIR)
+      .map(dottedUrl)
+      .filter((u): u is string => u !== null);
+    // sign-in/[org] plus the secure tree's detail and docs pages today.
+    expect(urls).toContain("/en/sign-in/a.b");
+    expect(urls.length).toBeGreaterThanOrEqual(9);
+    for (const url of urls) {
+      expect(doesMatch({ config, url }), url).toBe(true);
+    }
+  });
+
+  it("still skips static assets and the API routes it never needed", () => {
+    for (const url of [
+      "/brand/logo.png",
+      "/_next/static/chunks/app.js",
+      "/favicon.ico",
+      "/api/administrator/users",
+    ]) {
+      expect(doesMatch({ config, url }), url).toBe(false);
+    }
+  });
+
+  it("sets an enforcing CSP on the dotted sign-in URL it now sees", () => {
+    const res = proxy(req("/en/sign-in/a.b"));
+    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    expect(intlState.captured?.headers.get(REQUEST_PATH_HEADER)).toBe("/en/sign-in/a.b");
   });
 });

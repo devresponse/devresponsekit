@@ -230,6 +230,14 @@ export const config = {
     // holds no static assets, so matching it unconditionally closes that gap
     // (a dotted segment there is a user-supplied id, never a file).
     "/:locale/app/:path*",
+    // F-106: the same gap on the one localized page OUTSIDE the secure tree
+    // that takes a dynamic segment. `sign-in/[org]` renders the full password
+    // form for any segment, so `/en/sign-in/a.b` served it with no CSP and no
+    // proxy headers. Every other page there is static, so a dotted path under
+    // it is a 404 with nothing to reflect. A new dynamic page outside
+    // `/app` needs an entry like this one; tests/unit/proxy-request-path.test.ts
+    // walks every localized page and fails until it has one.
+    "/:locale/sign-in/:path*",
     // Better Auth's catch-all must pass through the proxy so the trusted
     // client-IP header is set before its rate limiter runs (review #35).
     "/api/auth/:path*",

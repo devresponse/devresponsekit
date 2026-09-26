@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
+import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as RouteModule from "@/app/api/preferences/active-org/apply/route";
 
 /**
@@ -21,9 +22,12 @@ vi.mock("@/lib/auth-guard", () => ({
   getImpersonatorId: (s: unknown) =>
     (s as { session?: { impersonatedBy?: string | null } } | null)?.session?.impersonatedBy ?? null,
 }));
-vi.mock("@/lib/auth-status", () => ({
-  getUserAccessContext: (id: string) => accessGetter(id),
-}));
+// The real rest of the module: POST /api/preferences/active-org's guard, driven
+// below to drain the shared bucket, also reads `decideSecureAccess`.
+vi.mock("@/lib/auth-status", async () => {
+  const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
+  return { ...actual, getUserAccessContext: (id: string) => accessGetter(id) };
+});
 vi.mock("@/lib/active-org.server", () => ({
   ACTIVE_ORG_COOKIE: "active_org",
   userHasActiveMembership: (...a: unknown[]) => hasMembership(...a),
@@ -35,17 +39,37 @@ vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMoc
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 
-function req(org: string | null, next: string | null, staleHint = false): NextRequest {
+function req(
+  org: string | null,
+  next: string | null,
+  staleHint = false,
+  activeOrgCookie: string | null = null,
+): NextRequest {
   const url = new URL("http://localhost:3000/api/preferences/active-org/apply");
   if (org !== null) url.searchParams.set("org", org);
   if (next !== null) url.searchParams.set("next", next);
+  const cookies: Record<string, string | null> = {
+    org_signup_hint: staleHint ? "acme" : null,
+    active_org: activeOrgCookie,
+  };
   return {
     nextUrl: url,
     url: url.toString(),
     headers: new Headers(),
     method: "GET",
-    cookies: { has: (name: string) => (name === "org_signup_hint" ? staleHint : false) },
+    cookies: {
+      has: (name: string) => cookies[name] != null,
+      get: (name: string) => (cookies[name] != null ? { name, value: cookies[name] } : undefined),
+    },
   } as unknown as NextRequest;
+}
+
+/** The success rows this route writes (the limiter's own denial sample is another type). */
+function switchAudits(): unknown[] {
+  return auditMock.mock.calls.filter(
+    ([input]) =>
+      (input as { eventType?: string }).eventType === "account.active_organization.changed",
+  );
 }
 
 let GET: typeof RouteModule.GET;
@@ -130,6 +154,72 @@ describe("GET /api/preferences/active-org/apply", () => {
     // A deletion surfaces as an empty-value Set-Cookie.
     expect(res.cookies.get("org_signup_hint")?.value).toBe("");
   });
+
+  it("writes no audit row and no cookie when the org is already the active one (F-105)", async () => {
+    const res = await GET(req("acme", "/en/app/workspace", false, ORG_ID));
+    expect(res.headers.get("location")).toBe("http://localhost:3000/en/app/workspace");
+    expect(res.cookies.get("active_org")).toBeUndefined();
+    expect(switchAudits()).toHaveLength(0);
+  });
+
+  it("still switches when the browser's cookie names a different org", async () => {
+    const res = await GET(req("acme", "/en/app/workspace", false, "another-org-id"));
+    expect(res.cookies.get("active_org")?.value).toBe(ORG_ID);
+    expect(switchAudits()).toHaveLength(1);
+  });
+
+  it("stops auditing a scripted loop once the per-user bucket is empty (F-105)", async () => {
+    // DEFAULT_ADMIN_MUTATION_LIMIT: a 30-token burst, and the test is far
+    // faster than the 1/s refill.
+    for (let i = 0; i < 30; i++) {
+      const res = await GET(req("acme", "/en/app/workspace"));
+      expect(res.cookies.get("active_org")?.value).toBe(ORG_ID);
+    }
+    expect(switchAudits()).toHaveLength(30);
+
+    const limited = await GET(req("acme", "/en/app/workspace"));
+    // A browser landing: the refusal is the same plain redirect, never a 429.
+    expect(limited.status).toBe(307);
+    expect(limited.headers.get("location")).toBe("http://localhost:3000/en/app/workspace");
+    expect(limited.cookies.get("active_org")).toBeUndefined();
+    expect(switchAudits()).toHaveLength(30);
+    // Charged before the lookups, so a refused hit costs no org query either.
+    expect(resolveOrg).toHaveBeenCalledTimes(30);
+  });
+
+  it("draws on the same bucket as POST /api/preferences/active-org (F-105)", async () => {
+    // Drain this user's bucket through the real switcher, so a scope or key
+    // that drifts in either route fails here.
+    const { POST } = await import("@/app/api/preferences/active-org/route");
+    const post = () =>
+      POST({
+        json: async () => ({ organizationId: ORG_ID }),
+        headers: new Headers(),
+        method: "POST",
+      } as unknown as NextRequest);
+    let status = 200;
+    for (let i = 0; i < 100 && status !== 429; i++) status = (await post()).status;
+    expect(status).toBe(429);
+    auditMock.mockClear();
+
+    const res = await GET(req("acme", "/en/app/workspace"));
+    expect(res.headers.get("location")).toBe("http://localhost:3000/en/app/workspace");
+    expect(res.cookies.get("active_org")).toBeUndefined();
+    expect(switchAudits()).toHaveLength(0);
+
+    // Another user's bucket is untouched.
+    sessionGetter.mockResolvedValue({ user: { id: "ba-2" } });
+    const other = await GET(req("acme", "/en/app/workspace"));
+    expect(other.cookies.get("active_org")?.value).toBe(ORG_ID);
+  });
+
+  it.each(["/en/sign-in\u0000", "/en/sign-in ", "/en/sign-in?x", "/en/../api/x"])(
+    "never redirects to where the URL parser would take a refused `next` (I-17): %j",
+    async (next) => {
+      const res = await GET(req("acme", next));
+      expect(res.headers.get("location")).toBe("http://localhost:3000/en/app/dashboard");
+    },
+  );
 
   it("sanitizes an off-origin `next` to the safe default, even for a member", async () => {
     const res = await GET(req("acme", "https://evil.com/steal"));

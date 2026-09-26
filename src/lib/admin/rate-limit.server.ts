@@ -339,6 +339,22 @@ const DENIAL_AUDIT_LIMIT: RateLimitOptions = {
 };
 
 /**
+ * Whether a denial of `actorId` on `scope` should be written to the audit log
+ * now: at most ≈once a minute per (scope, actor), from the
+ * {@link DENIAL_AUDIT_LIMIT} bucket. The caller still refuses every request;
+ * only the ROW is sampled. It gates the rate-limit denial audit below and the
+ * navigation menus' `navigation.menu.denied` row (F-105), which a signed-in
+ * but blocked or pending session could otherwise write on every GET.
+ */
+export function shouldAuditDenial(scope: string, actorId: string, nowMs?: number): boolean {
+  return consumeToken(
+    rateLimitKey("ratelimit.audit", `${scope}:${actorId}`),
+    DENIAL_AUDIT_LIMIT,
+    nowMs,
+  ).ok;
+}
+
+/**
  * Convenience for route handlers: enforces a rate limit and returns
  * either `null` (allow — keep going) or a ready-to-return
  * `NextResponse` (deny). Adds the `Retry-After` header on deny.
@@ -398,10 +414,7 @@ export function rateLimitDeniedResponse(
   // is lazy-imported (keeps `audit.server` → `db` out of this module's static
   // graph — the edge-adjacent CSP sink imports this file) and fire-and-forget
   // so it never blocks or fails the 429.
-  if (
-    consumeToken(rateLimitKey("ratelimit.audit", `${scope}:${actorId}`), DENIAL_AUDIT_LIMIT, nowMs)
-      .ok
-  ) {
+  if (shouldAuditDenial(scope, actorId, nowMs)) {
     const isUserId = !actorId.startsWith("ip:") && actorId !== "anon";
     void import("@/lib/audit.server")
       .then(({ auditEvent }) =>

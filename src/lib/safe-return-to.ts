@@ -1,5 +1,48 @@
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 
+/** A `.` or `..` path segment, literal or percent-encoded, in any case. */
+const DOT_SEGMENT = /^(?:\.|%2e){1,2}$/i;
+
+/**
+ * Better Auth's `CONTROL_CHARACTER_PATTERN` (C0, DEL and C1). Built from an
+ * escaped string so the source holds no literal control byte and needs no
+ * `no-control-regex` suppression.
+ */
+const CONTROL_CHARACTER = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f]");
+
+/** A percent-encoded `/` or `\`, which Better Auth refuses in a relative path. */
+const ENCODED_PATH_SEPARATOR = /%2f|%5c/i;
+
+/**
+ * I-17: whether the browser would navigate to a different path than the one
+ * {@link getSafeReturnTo} inspects, or Better Auth would refuse the value.
+ * The checks read the string as written, but a browser parses it as a URL
+ * first, and the URL parser:
+ *   - strips a trailing space or C0 control and deletes every tab, LF and CR,
+ *     so `/en/sign-in `, `/en/sign-in\u0000` and `/en/sign\t-in` all land on
+ *     `/en/sign-in`;
+ *   - drops `.` segments and resolves `..` against the one before it, so
+ *     `/en/../api/x` is `/api/x` and `/en/./sign-in` is `/en/sign-in`;
+ *   - reads `%2e` as a dot while doing so (`/en/%2e%2e/api/x`).
+ * Each of them let a value the checks accepted land on an `/api/` route or an
+ * auth page that they refuse. An accepted value also becomes the sign-in
+ * form's `callbackURL`, and Better Auth's `isSafeRelativeURL` refuses any
+ * control character (DEL and C1 included) and an encoded `/` or `\` in the
+ * path: that would fail the sign-in with a 403 instead of landing on the
+ * fallback, so those are refused here too.
+ *
+ * Such a value is rejected outright rather than canonicalized: the sanitizer
+ * keeps returning what the caller sent, byte-for-byte, which
+ * `getSafeReturnToInLocale` relies on, and no path the app itself mints
+ * contains one. Dot segments and encoded separators are looked for in the
+ * path only: the parser resolves none in the query or the fragment.
+ */
+function resolvesElsewhere(value: string, path: string): boolean {
+  if (CONTROL_CHARACTER.test(value) || value.endsWith(" ")) return true;
+  if (ENCODED_PATH_SEPARATOR.test(path)) return true;
+  return path.split("/").some((segment) => DOT_SEGMENT.test(segment));
+}
+
 /**
  * Sanitizes a `returnTo` value before redirecting after sign-in.
  *
@@ -9,6 +52,10 @@ import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
  *   - Backslash smuggling (`/\\evil.com`) which some browsers normalize.
  *   - Returning to API or auth/status pages, which would create loops or
  *     leak unintended privileges.
+ *   - Dot segments (`/en/../api/…`, `/en/%2e%2e/api/…`, `/en/./sign-in`),
+ *     control characters and a trailing space, which the browser resolves or
+ *     deletes before it navigates, so the checks below would judge the wrong
+ *     path (I-17).
  *
  * Only same-origin localized browser paths are allowed.
  */
@@ -25,12 +72,17 @@ export function getSafeReturnTo(
   if (value.startsWith("//")) return fallback;
   if (value.includes("\\")) return fallback;
   if (value.startsWith("/api/")) return fallback;
+  // The query and the fragment choose nothing the browser routes on:
+  // `/en/sign-in?x` and `/en/sign-in#x` are the sign-in page (I-17).
+  const path = value.split(/[?#]/, 1)[0] ?? "";
+  if (resolvesElsewhere(value, path)) return fallback;
 
-  // First two path segments are `["", locale, segment]` because of the
-  // leading slash. Validate the locale segment and reject auth/status pages.
-  const parts = value.split("/");
-  const maybeLocale = parts[1] ?? "";
-  const segment = parts[2] ?? "";
+  // `["", locale, segment]` because of the leading slash. The locale must be a
+  // whole segment of the value as written, so no query or fragment follows it
+  // directly and re-pointing it (`getSafeReturnToInLocale`) leaves both
+  // untouched; the auth/status rule reads the page segment of the path.
+  const maybeLocale = value.split("/")[1] ?? "";
+  const segment = path.split("/")[2] ?? "";
 
   if (!isSupportedLocale(maybeLocale)) return fallback;
   if (

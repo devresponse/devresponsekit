@@ -32,9 +32,53 @@ const attackish = fc.oneof(
     // one path a caller now deliberately round-trips through the sanitizer.
     "/en/sso/launch?applicationId=x&locale=en",
     "/api/sso/launch?applicationId=x&locale=en",
+    // I-17: dot segments and the tab the URL parser deletes. The raw string
+    // of each starts with a locale and a harmless segment, so only the
+    // resolved-path assertions below can tell them apart.
+    "/en/../api/preferences/active-org/apply?org=x",
+    "/en/%2e%2e/api/administrator/users",
+    "/en/./sign-in",
+    "/en/.\t./api/x",
+    "/en/sign\t-in",
+    // …and a query, a fragment or a trailing character the parser strips,
+    // none of which changes the page the browser lands on.
+    "/en/sign-in?x=1",
+    "/en/sign-in#x",
+    "/en/blocked?y",
+    "/en/sign-in ",
+    "/en/sign-in\u0000",
   ),
   fc.tuple(fc.constantFrom("//", "/\\", "\\/"), fc.domain()).map(([p, d]) => p + d),
+  fc
+    .tuple(
+      fc.constantFrom(...SUPPORTED),
+      fc.array(fc.constantFrom(".", "..", "%2e", "%2E%2e", ".%2e", "%2e.", "app", "x"), {
+        minLength: 1,
+        maxLength: 4,
+      }),
+      fc.constantFrom("api/x", "sign-in", "sign-up", "blocked", "app/dashboard", "/evil.com"),
+      fc.constantFrom("", "?x", "#x", " ", "\u0000", "\u001f", "?next=/en/../api/y"),
+    )
+    .map(([locale, middle, tail, suffix]) => `/${locale}/${middle.join("/")}/${tail}${suffix}`),
+  // A page segment the auth rule refuses, reached with no dot segment at all.
+  fc
+    .tuple(
+      fc.constantFrom(...SUPPORTED),
+      fc.constantFrom("sign-in", "sign-up", "forgot-password", "blocked", "app"),
+      fc.constantFrom("?x", "#x", " ", "\u0000", "\u001f", "\t", "?", "#"),
+    )
+    .map(([locale, page, suffix]) => `/${locale}/${page}${suffix}`),
 );
+
+/**
+ * Where a browser actually lands for a sanitized value: the checks read the raw
+ * string, so the properties assert on the path the URL parser resolves it to
+ * (I-17). The base only has to be a special-scheme origin.
+ */
+const BASE = "https://app.invalid";
+function resolved(value: string): URL {
+  return new URL(value, BASE);
+}
 
 describe("getSafeReturnTo — open-redirect fuzzing", () => {
   it("NEVER returns a value that could leave the origin, for ANY input", () => {
@@ -45,6 +89,11 @@ describe("getSafeReturnTo — open-redirect fuzzing", () => {
         expect(r.startsWith("//")).toBe(false); // protocol-relative
         expect(r.includes("\\")).toBe(false); // backslash smuggling
         expect(r.startsWith("/api/")).toBe(false); // no API/auth loop
+        // …and the same holds for where the browser really goes (I-17).
+        const landing = resolved(r);
+        expect(landing.origin).toBe(BASE);
+        expect(landing.pathname.startsWith("//")).toBe(false);
+        expect(landing.pathname.startsWith("/api/")).toBe(false);
       }),
     );
   });
@@ -68,6 +117,10 @@ describe("getSafeReturnTo — open-redirect fuzzing", () => {
           const seg = input.split("/");
           expect(SUPPORTED).toContain(seg[1]);
           expect(AUTH.has(seg[2] ?? "")).toBe(false);
+          // The resolved path passes the same rules as the raw one (I-17).
+          const landed = resolved(input).pathname.split("/");
+          expect(SUPPORTED).toContain(landed[1]);
+          expect(AUTH.has(landed[2] ?? "")).toBe(false);
         }
       }),
     );

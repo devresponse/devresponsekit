@@ -42,6 +42,38 @@ const securityHeaders = [
   { key: "Reporting-Endpoints", value: 'csp-endpoint="/api/security/csp-report"' },
 ];
 
+/**
+ * I-07 (review #116): every `/api` response defaults to `Cache-Control:
+ * private, no-store`. Cookie-authenticated JSON (the administrator grids, a
+ * user's sessions with their IPs and user agents, the navigation menus, Better
+ * Auth's own endpoints) otherwise went out with no caching policy at all, so
+ * whether a browser or an intermediary kept a copy was left to heuristics.
+ *
+ * The routes that publish their OWN cacheable policy are left out of the
+ * pattern rather than trusted to override it. A header from this list is
+ * written to the response before the route runs, and on a self-hosted
+ * `next start` Next then skips any route header of the same name
+ * (`next/dist/server/send-response.js`), so the config value would silently
+ * replace the route's `max-age`. Other platforms may merge the two
+ * differently. Leaving those routes out makes the route the only writer,
+ * wherever it runs. Each entry is a path relative to `/api/`: the public key sets and
+ * OpenAPI document (`public, max-age=300`) and the docs/help image streams
+ * (`private, max-age=300`). `tests/unit/api-cache-control.test.ts` walks every
+ * route file and fails when one that sets a `max-age` is missing here, or when
+ * any other route would go without `no-store`.
+ */
+const API_SELF_CACHED = [
+  "sso/jwks\\.json$",
+  "v1/jwks\\.json$",
+  "v1/openapi\\.json$",
+  "docs/asset/",
+  "help/asset/",
+];
+const apiNoStore = {
+  source: `/api/:path((?!${API_SELF_CACHED.join("|")}).*)`,
+  headers: [{ key: "Cache-Control", value: "private, no-store" }],
+};
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -62,7 +94,7 @@ const nextConfig = {
   // See docs/integration-satellite-apps.md §6.6.
   allowedDevOrigins: ["devresponse.local", "*.devresponse.local", "*.localtest.me"],
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [{ source: "/:path*", headers: securityHeaders }, apiNoStore];
   },
 };
 

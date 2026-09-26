@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { auditEvent } from "@/lib/audit.server";
 import { userHasActiveMembership } from "@/lib/active-org.server";
-import { setActiveOrgCookie } from "@/lib/active-org-cookie";
+import { ACTIVE_ORG_COOKIE, setActiveOrgCookie } from "@/lib/active-org-cookie";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { getSessionAccessContext } from "@/lib/session-access.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
@@ -28,8 +30,18 @@ export const dynamic = "force-dynamic";
  * forged or prefetched hit can at worst switch a user to one of their own orgs.
  *
  * Every branch degrades to a plain redirect to `next`: a missing session, an
- * unknown org, or a non-membership never errors and never leaks whether an org
- * exists.
+ * unknown org, a non-membership or an exhausted rate limit never errors and
+ * never leaks whether an org exists.
+ *
+ * F-105: a switch writes an append-only audit row, so the GET draws on the
+ * same per-user bucket as the POST switcher (`preferences.active_org`). A real
+ * sign-in spends one token; a scripted loop, or a cross-site top-level
+ * navigation replayed against a victim (the cookies are SameSite=Lax), stops
+ * adding switch rows once the bucket is empty; the limiter itself samples an
+ * `administrator.rate_limited` row, about once a minute per user, as it does
+ * for every refusal. A hit that would change nothing (the
+ * browser already holds this org's cookie) writes neither the row nor the
+ * cookie.
  */
 export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const nextParam = request.nextUrl.searchParams.get("next");
@@ -61,6 +73,19 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   if (getImpersonatorId(session)) {
     return redirect;
   }
+  // F-105: charged before the lookups, so a loop also stops costing the org
+  // and membership queries. The 429 itself is discarded: this is a browser
+  // landing, so a refusal degrades to the plain redirect like every branch.
+  const limited = enforceRateLimit(
+    "preferences.active_org",
+    session.user.id,
+    DEFAULT_ADMIN_MUTATION_LIMIT,
+    request,
+    getOrCreateRequestId(request),
+  );
+  if (limited) {
+    return redirect;
+  }
   const access = await getSessionAccessContext(session);
   if (!access.appUserId) {
     return redirect;
@@ -68,6 +93,11 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
 
   const org = await resolveOrganizationByIdentifier(orgParam);
   if (!org || !(await userHasActiveMembership(access.appUserId, org.id))) {
+    return redirect;
+  }
+  // F-105: already the active org. Re-auditing it would record a change that
+  // did not happen.
+  if (request.cookies.get(ACTIVE_ORG_COOKIE)?.value === org.id) {
     return redirect;
   }
 

@@ -208,7 +208,7 @@ The token endpoint, MCP registration and the CSP sink keep their budgets next to
 
 | Budget | Capacity | Refill | Applies to |
 | --- | --- | --- | --- |
-| `DEFAULT_ADMIN_MUTATION_LIMIT` | 30 | 1 / sec | Standard `POST`/`PATCH`/`DELETE` |
+| `DEFAULT_ADMIN_MUTATION_LIMIT` | 30 | 1 / sec | Standard `POST`/`PATCH`/`DELETE`, and `GET /api/preferences/active-org/apply`, which shares the org switcher's per-user bucket and, once it is empty, redirects without switching (F-105) |
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 / sec | Bulk operations |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 / sec | CSV export |
 | `DEFAULT_SSO_LAUNCH_LIMIT` (signed in) | 30 | 1 / sec | `GET /api/sso/launch` with a session, per session user id |

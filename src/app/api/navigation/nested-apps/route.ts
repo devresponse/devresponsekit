@@ -6,6 +6,7 @@ import { decideSecureAccess } from "@/lib/auth-status";
 import { getSessionAccessContext } from "@/lib/session-access.server";
 import { loadNestedAppsMenu } from "@/lib/navigation.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
+import { shouldAuditDenial } from "@/lib/admin/rate-limit.server";
 import { auditEvent } from "@/lib/audit.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -42,13 +43,17 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const access = await getSessionAccessContext(session);
   const decision = decideSecureAccess(access.status, access.membershipStatus);
   if (decision !== "allow") {
-    await auditEvent({
-      eventType: "navigation.menu.denied",
-      outcome: "denied",
-      actorBetterAuthUserId: session.user.id,
-      reason: decision,
-      request,
-    });
+    // F-105: the row is sampled per actor (≈once a minute) so a blocked or
+    // pending session cannot write one per GET; the 403 is unconditional.
+    if (shouldAuditDenial("navigation.menu", session.user.id)) {
+      await auditEvent({
+        eventType: "navigation.menu.denied",
+        outcome: "denied",
+        actorBetterAuthUserId: session.user.id,
+        reason: decision,
+        request,
+      });
+    }
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

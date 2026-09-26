@@ -472,11 +472,11 @@ i18n: The landing title/description use `docs.index.*`; the empty line uses `doc
 ### UAT-ACCOUNT-DOCS-ARTICLE — Documentation article
 
 - Route: `/app/docs/[...slug]`  ·  Example URL: `/en/app/docs/architecture`  ·  Code: `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:28`
-- Purpose: Renders a single document: breadcrumbs, the sanitized article body, an "On this page" table of contents, and a "Last updated" line. The body is rendered server-side through the sanitizing pipeline; document JavaScript is never evaluated (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:27`).
-- Guard / who can access: Layered — (1) `requireSecureSession`; (2) `canViewDoc(slug, access.permissions)` → `notFound()` if the doc is hidden (internal-with-flag-off, or unmet `requires`), so a hidden doc 404s even if its URL is known; (3) the slug resolves through a path-safe resolver, and a traversal/missing slug returns null → `notFound()` (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:35`).
+- Purpose: Renders a single document: breadcrumbs, the sanitized article body, an "On this page" table of contents, and a "Last updated" line. The body is rendered server-side through the sanitizing pipeline; document JavaScript is never evaluated (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:26`).
+- Guard / who can access: Layered — (1) `requireSecureSession`; (2) `getViewableDocument(slug, access.permissions)` → `notFound()` if the doc is hidden (internal-with-flag-off, or unmet `requires`), so a hidden doc 404s even if its URL is known. It checks the catalog entry before reading the file and the entry it read afterwards, so what renders is what was authorized (I-18); (3) the slug resolves through a path-safe resolver, and a traversal/missing slug returns null → `notFound()` (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:39`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away.
-  - Member: can open any doc `canViewDoc` allows (non-internal, no unmet `requires`); a hidden/unknown slug → 404.
+  - Member: can open any doc `getViewableDocument` allows (non-internal, no unmet `requires`); a hidden/unknown slug → 404.
   - Limited Admin / Org Admin / Superadmin: can additionally open docs whose `requires` keys they hold.
 - Preconditions & test data: Know a visible slug (e.g. `architecture`). For the hidden-doc 404, use an internal doc's slug while `DOCS_INTERNAL_VISIBLE` is false.
 
@@ -506,13 +506,14 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
-- Out-of-scope / hidden doc → **404, not 403** (existence is never leaked; `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:39`).
-- Traversal/missing slug → 404 via the path-safe resolver (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:41`).
+- Out-of-scope / hidden doc → **404, not 403** (existence is never leaked; `src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:40`).
+- Traversal/missing slug → 404 via the path-safe resolver (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:40`).
+- A doc whose `visibility` or `requires` is malformed, or whose frontmatter cannot be parsed (or is fenced as anything but YAML, e.g. `---js`), is hidden from everyone → 404, and the server logs a `docs-frontmatter` warning (F-87, F-86). Two files on one slug (`guide.md` + `guide.mdx`) → neither is listed, 404, and a `docs-duplicate-slug` warning (I-18).
 - A doc with no headings shows an empty/absent table of contents; a doc with no updated date omits the "Last updated" line.
 - Rendered HTML is sanitized — embedded scripts do not execute. `TODO: verify` a fixture doc containing a `<script>` renders inert (relates to the Mermaid/DOMPurify handling noted in project memory).
 
 Accessibility: Breadcrumbs are a labelled navigation; the ToC is a list of in-page anchors with visible focus; headings give the article a logical outline. `TODO: verify` no axe violations on a representative article (tables/code blocks/diagrams).
-i18n: Page chrome (breadcrumb home `docs.breadcrumbHome`, "On this page" `docs.onThisPage`, "Last updated {date}" `docs.lastUpdated`) localizes; the updated date is the app formatter's long date (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:53`), or the date format saved in Preferences. Document body text is the source-language Markdown — same `TODO: verify` on per-locale content as the landing.
+i18n: Page chrome (breadcrumb home `docs.breadcrumbHome`, "On this page" `docs.onThisPage`, "Last updated {date}" `docs.lastUpdated`) localizes; the updated date is the app formatter's long date (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:51`), or the date format saved in Preferences. Document body text is the source-language Markdown — same `TODO: verify` on per-locale content as the landing.
 
 ---
 

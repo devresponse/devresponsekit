@@ -83,9 +83,9 @@ const EXEMPT: Record<string, string> = {
   "api/security/csp-report/route.ts":
     "cookieless browser CSP report sink: always 204 and nothing reads its response headers",
   "api/docs/asset/[...path]/route.ts":
-    "docs-viewer image stream: no audit row and no JSON envelope; the browser caches it (private, max-age=300)",
+    "docs-viewer image stream the browser caches (private, max-age=300): a served image writes no audit row; its one JSON answer, the per-user 429 (I-06), stamps its own x-request-id through adminErrorResponse",
   "api/help/asset/[...path]/route.ts":
-    "help-viewer image stream: no audit row and no JSON envelope; the browser caches it (private, max-age=300)",
+    "help-viewer image stream the browser caches (private, max-age=300): a served image writes no audit row; its one JSON answer, the per-user 429 (I-06), stamps its own x-request-id through adminErrorResponse",
   // Public, cacheable documents: a shared cache (CDN, reverse proxy) would
   // store the header with the body and replay one request's id to every later
   // client, the very collision review #224 warns about. None writes an audit

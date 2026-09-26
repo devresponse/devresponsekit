@@ -3,8 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
 import { requireSecureSession } from "@/lib/auth-guard";
 import { getAppFormatter } from "@/lib/format/viewer-format.server";
-import { canViewDoc } from "@/lib/docs/catalog.server";
-import { getDocumentSource } from "@/lib/docs/source/index.server";
+import { getViewableDocument } from "@/lib/docs/catalog.server";
 import { renderDocument } from "@/lib/docs/render/pipeline.server";
 import { DocArticle } from "@/components/docs-viewer/doc-article";
 import { DocsBreadcrumbs } from "@/components/docs-viewer/docs-breadcrumbs";
@@ -17,9 +16,10 @@ export const dynamic = "force-dynamic";
  *
  * Renders a single document. Security is layered:
  *   1. `requireSecureSession` — active user + membership (user-level).
- *   2. `canViewDoc` — per-doc visibility / `requires` filtering, so a
- *      hidden document 404s even if its URL is known.
- *   3. `getDocument` resolves the slug through the path-safe resolver;
+ *   2. `getViewableDocument` — per-doc visibility / `requires` filtering,
+ *      so a hidden document 404s even if its URL is known. It checks the
+ *      catalog entry before reading and the entry it read after (I-18).
+ *   3. The read resolves the slug through the path-safe resolver;
  *      traversal/missing slugs return null → `notFound()`.
  *
  * The body is rendered server-side through the sanitizing pipeline; the
@@ -36,9 +36,7 @@ export default async function DocPage({
 
   const slug = slugParts.join("/");
 
-  if (!(await canViewDoc(slug, access.permissions))) notFound();
-
-  const doc = await getDocumentSource().getDocument(slug);
+  const doc = await getViewableDocument(slug, access.permissions);
   if (!doc) notFound();
 
   const { html, headings } = await renderDocument(doc.body, {

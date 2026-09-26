@@ -11,9 +11,9 @@ export const dynamic = "force-dynamic";
  * `serveSpaceAsset` handler (also used by `/api/help/asset`).
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
-  return serveSpaceAsset("docs", path);
+  return serveSpaceAsset("docs", path, request);
 }

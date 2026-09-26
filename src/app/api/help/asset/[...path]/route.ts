@@ -11,9 +11,9 @@ export const dynamic = "force-dynamic";
  * and header hardening live in the shared `serveSpaceAsset` handler.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
-  return serveSpaceAsset("help", path);
+  return serveSpaceAsset("help", path, request);
 }

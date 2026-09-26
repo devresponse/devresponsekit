@@ -417,7 +417,7 @@ For the request/response shapes and the scope catalog see [api.md](./api.md); fo
 
 | Variable | Controls |
 | --- | --- |
-| `DOCS_SOURCE`, `DOCS_ROOT`, `DOCS_ALLOW_MDX_EXECUTION`, `DOCS_INTERNAL_VISIBLE` | In-app docs viewer (all optional; defaults serve the repo `docs/` read-only). |
+| `DOCS_SOURCE`, `DOCS_ROOT`, `DOCS_INTERNAL_VISIBLE` | In-app docs viewer (all optional; defaults serve the repo `docs/` read-only). No setting makes the viewer execute document code: MDX renders as Markdown, and frontmatter is parsed as YAML only. |
 | `HELP_ROOT` | Content root for the in-app help viewer (`/app/help`), the docs viewer's identical sibling. Optional; defaults to the repo `help/` folder. Shares `DOCS_SOURCE` / `DOCS_INTERNAL_VISIBLE`. |
 | `AUTH_RATE_LIMIT_DISABLED` | **Test only** — disables Better Auth's built-in sign-in rate limiter (whose counters live in the database-backed `rateLimit` table, shared across instances — review #199), and with it the per-account sign-in budget (10 attempts per address per 15 minutes, in `app_rate_limits`, F-55). Never set in production. |
 

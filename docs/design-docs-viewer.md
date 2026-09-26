@@ -36,7 +36,7 @@ These were chosen up front; the rest of the spec assumes them.
 | Decision | Choice | Why |
 | --- | --- | --- |
 | **Access gate** | Baseline **`shell.view`** (user-level, no `admin.*`). | Docs are for every active member, same posture as the Account app. Per-doc `visibility` can tighten this later. |
-| **MDX execution** | **OFF by default.** Content is rendered through a sanitizing Markdown pipeline; no author-supplied JavaScript is ever evaluated. | MDX compiles to server-side JS — executing untrusted MDX is remote code execution. Safe-by-default keeps the Phase-2 external source secure by construction. |
+| **MDX execution** | **Never executed.** No setting enables it: `.md` and `.mdx` both render as Markdown through the sanitizing pipeline, and no author-supplied JavaScript is ever evaluated. | MDX compiles to server-side JS — executing untrusted MDX is remote code execution. Safe-by-default keeps the Phase-2 external source secure by construction. |
 | **Content delivery** | **RSC (server components) only** for document text. A single narrow, path-safe route serves images. | No public content API to secure; the page reads the source server-side. |
 
 ---
@@ -77,14 +77,21 @@ defends it:
 4. Any failure → `notFound()`. Never echo the attempted path back.
 
 ### 2b. Code execution (MDX)
-MDX compiles to JavaScript that runs on the server. Default posture:
+MDX compiles to JavaScript that runs on the server, so the viewer never compiles it:
 
 - **No content JS is executed.** Both `.md` and `.mdx` go through the same
   remark → rehype → **sanitize** pipeline. JSX/expression/import/export nodes are
   not evaluated (in Phase 1 they are dropped by `remark-rehype`).
-- Full MDX evaluation stays **off** behind `DOCS_ALLOW_MDX_EXECUTION` and may
-  only ever be enabled for the trusted filesystem source — **never** for the
-  Phase-2 external source.
+- There is no switch that turns MDX evaluation on: the viewer has no MDX
+  compiler. (A `DOCS_ALLOW_MDX_EXECUTION` flag was once parsed and read
+  nowhere; it was removed, I-06.) Curated MDX components are a Phase-2 item and
+  may only ever be enabled for the trusted filesystem source — **never** for
+  the Phase-2 external source.
+- Frontmatter is parsed as **YAML only** (F-86). gray-matter's built-in
+  `javascript` engine, which a `---js` fence selects, runs the block through
+  `eval`; `src/lib/docs/frontmatter.ts` replaces it, and the JSON and
+  CoffeeScript engines, with one that refuses, so a document fenced in any
+  other language is hidden (see 2d) and never evaluated.
 
 ### 2c. XSS (rendered HTML)
 Server-render only; no client-side eval. The pipeline **sanitizes untrusted
@@ -99,7 +106,20 @@ input. `<script>` / `<style>` / event handlers / `javascript:` URLs are stripped
   (permission keys) in frontmatter. The catalog filters documents the caller may
   not see **before** they reach the sidebar or a route — a hidden doc is
   `notFound()`, not merely unlinked.
-- The image route is auth-guarded and rate-limited.
+- Frontmatter fails **closed** (F-87). Each field is validated on its own: a
+  bad cosmetic field (`title`, `description`, `group`, `order`, `tags`) is
+  dropped alone, while a bad `visibility` or `requires`, a block that cannot
+  be parsed, or a file that cannot be read, hides the document from every
+  viewer (even with `DOCS_INTERNAL_VISIBLE` on) until it is fixed. Each problem
+  is logged as a `docs-frontmatter` warning when the catalog is built, and no
+  single file can fail the catalog. An empty file is an ordinary public doc.
+- One file per slug (I-18). `guide.md` and `guide.mdx` map to the same URL, so
+  when both exist neither is listed or served, and a `docs-duplicate-slug`
+  warning names the slug. The document page authorizes the catalog entry
+  before it reads the file and the entry it read afterwards, so what renders
+  is always what was authorized.
+- The image route is auth-guarded and rate-limited per user
+  (`DEFAULT_DOCS_ASSET_LIMIT`: a 60-request burst, then 2 per second; I-06).
 
 ---
 
@@ -223,7 +243,7 @@ are dropped (no execution). Curated MDX-component rendering is a Phase-2 item.
   `@tailwindcss/typography` (added via `@plugin` in `globals.css`). `zod` (already
   present) validates frontmatter.
 - **Env** (`src/lib/env.ts`): `DOCS_SOURCE` (`filesystem` default), `DOCS_ROOT`
-  (default repo `docs/`), `DOCS_ALLOW_MDX_EXECUTION` (default false),
+  (default repo `docs/`), `HELP_ROOT` (default repo `help/`),
   `DOCS_INTERNAL_VISIBLE` (default false).
 - **Navigation**: add a "Documentation" entry to `DEFAULT_SHELL_MENU` in
   `src/lib/navigation.server.ts` (icon `book-open`, `requiredPermissions:

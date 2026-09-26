@@ -319,3 +319,20 @@ describe("POST /api/v1/users/[id]/status — last superadmin (REVOKE-2)", () => 
     expect((await POST(req(USER), ctx(USER))).status).toBe(404);
   });
 });
+
+/**
+ * F-57: the machine surface carries the console's refusal of a soft-deleted
+ * user (the shared core decides it); only the console's restore brings one back.
+ */
+describe("POST /api/v1/users/[id]/status — a soft-deleted user (F-57)", () => {
+  it("maps the core's use_restore refusal to a 409 problem document", async () => {
+    requireApiPermission.mockResolvedValue(superadmin());
+    performAdminStatusChange.mockResolvedValue({ ok: false, error: "use_restore" });
+    const res = await POST(req(USER), ctx(USER));
+    expect(res.status).toBe(409);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    const body = (await res.json()) as { code?: string; title?: string };
+    expect(body.code).toBe("use_restore");
+    expect(body.title).toBe("Restore required");
+  });
+});

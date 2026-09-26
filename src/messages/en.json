@@ -509,7 +509,7 @@
         "ban": "Ban selected…",
         "softDelete": "Delete selected (soft)…",
         "reasonPrompt": "Reason (recorded in audit log):",
-        "confirmDelete": "Soft-delete the selected users? This bans them in Better Auth and deactivates the application record.",
+        "confirmDelete": "Soft-delete the selected users? This bans them in Better Auth, deactivates the application record and revokes their API keys and OAuth clients. Restore does not bring revoked credentials back.",
         "successToast": "{action} applied to {succeeded} user(s).",
         "partialFailureToast": "{action} applied to {succeeded}/{attempted} user(s); {failed} failed.",
         "errorToast": "Bulk action failed.",
@@ -536,7 +536,7 @@
         },
         "softDelete": {
           "title": "Delete user (soft)",
-          "description": "Soft delete bans the user in Better Auth and marks the application record as deactivated. The Restore action reverses this."
+          "description": "Soft delete bans the user in Better Auth, marks the application record as deactivated and revokes the user's API keys and OAuth clients. The Restore action reverses the ban and the deactivation; revoked credentials stay revoked."
         },
         "setPassword": {
           "title": "Set password",
@@ -1306,6 +1306,7 @@
     "membership_not_found": "Membership not found.",
     "no_changes": "No changes were provided.",
     "not_deactivated": "The user is not deactivated.",
+    "use_restore": "This user is soft-deleted. Restore the user first.",
     "not_found": "Not found.",
     "organization_not_found": "Organization not found.",
     "permission_in_use": "This permission is in use.",

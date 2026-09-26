@@ -642,6 +642,9 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
             "400": errRef("BadRequest"),
             "403": errRef("Forbidden"),
             "404": errRef("NotFound"),
+            // `last_superadmin` (REVOKE-2), or `use_restore` for a soft-deleted
+            // user (F-57).
+            "409": errRef("Conflict"),
             "412": errRef("PreconditionFailed"),
             "429": errRef("RateLimited"),
           },

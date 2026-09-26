@@ -896,9 +896,9 @@ export async function membershipCascadeStripsLastGlobalSuperuser(
  * superadmins at least one sees the other's and is refused and undone.
  *
  * A refused ban has already signed the target out (`banBetterAuthUser` deletes
- * their sessions), and undoing it lifts the ban whatever it replaced. Neither
- * matters in practice: with a signed-in superadmin actor holding their own
- * direct grant, the set cannot empty except in a race.
+ * their sessions); undoing it puts back the ban it replaced (F-57). That
+ * rarely matters in practice: with a signed-in superadmin actor holding their
+ * own direct grant, the set cannot empty except in a race.
  */
 export async function banStripsLastGlobalSuperuser(
   target: { appUserId: string; betterAuthUserId: string },

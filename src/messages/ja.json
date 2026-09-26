@@ -509,7 +509,7 @@
         "ban": "選択項目を禁止…",
         "softDelete": "選択項目を削除（ソフト）…",
         "reasonPrompt": "理由（監査ログに記録されます）：",
-        "confirmDelete": "選択したユーザーをソフト削除しますか？この操作により、Better Auth で禁止され、アプリケーションレコードが無効化されます。",
+        "confirmDelete": "選択したユーザーをソフト削除しますか？この操作により、Better Auth で禁止され、アプリケーションレコードが無効化され、API キーと OAuth クライアントが取り消されます。復元しても、取り消された資格情報は戻りません。",
         "successToast": "{succeeded} 名のユーザーに「{action}」を適用しました。",
         "partialFailureToast": "{succeeded}/{attempted} 名のユーザーに「{action}」を適用しました。{failed} 件が失敗しました。",
         "errorToast": "一括操作に失敗しました。",
@@ -536,7 +536,7 @@
         },
         "softDelete": {
           "title": "ユーザーを削除（ソフト）",
-          "description": "ソフト削除は、Better Auth でユーザーを禁止し、アプリケーションレコードを無効化済みとしてマークします。「復元」操作でこれを元に戻せます。"
+          "description": "ソフト削除は、Better Auth でユーザーを禁止し、アプリケーションレコードを無効化済みとしてマークし、ユーザーの API キーと OAuth クライアントを取り消します。「復元」操作で禁止と無効化は元に戻せますが、取り消された資格情報は取り消されたままです。"
         },
         "setPassword": {
           "title": "パスワードを設定",
@@ -1306,6 +1306,7 @@
     "membership_not_found": "メンバーシップが見つかりません。",
     "no_changes": "変更が指定されていません。",
     "not_deactivated": "このユーザーは無効化されていません。",
+    "use_restore": "このユーザーはソフト削除されています。先にユーザーを復元してください。",
     "not_found": "見つかりません。",
     "organization_not_found": "組織が見つかりません。",
     "permission_in_use": "この権限は使用中です。",

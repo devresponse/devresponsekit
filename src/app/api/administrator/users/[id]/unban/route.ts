@@ -7,6 +7,11 @@ import {
 } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import {
+  mustUseRestore,
+  USE_RESTORE_ERROR,
+  USE_RESTORE_STATUS,
+} from "@/lib/admin/deactivated-user";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -25,7 +30,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * POST /api/administrator/users/[id]/unban
  *
  * Inverse of {@link ./../ban}. No body required. Caller MUST hold
- * `admin.users.ban`.
+ * `admin.users.ban`. A soft-deleted user is 409 `use_restore` (F-57).
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.ban");
@@ -56,6 +61,15 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
     return adminErrorResponse("forbidden", 403, request);
+  }
+
+  // F-57: lifting a soft-deleted account's ban would let Better Auth issue it
+  // sessions again while the app still reads it as deleted. Restore lifts it,
+  // together with the deactivation.
+  if (mustUseRestore(target)) {
+    return adminErrorResponse(USE_RESTORE_ERROR, USE_RESTORE_STATUS, request, {
+      requestId: guard.requestId,
+    });
   }
 
   try {

@@ -27,6 +27,13 @@ const sharedExecuteTakeFirst = vi.fn(); // app_organization_memberships "outside
 const trxMembershipRows = vi.fn(); // app_organization_memberships rows in the trx
 const trxGrantRows = vi.fn(); // activeGlobalSuperuserGrants rows in the trx
 const trxClaim = vi.fn(); // the If-Match compare-and-swap claim (review #44)
+/**
+ * F-57: the account status the core reads back under the row lock, inside the
+ * transaction, before it writes. Default `active`; `deactivated` is refused.
+ */
+const trxAccountRow = vi.fn();
+/** The builder calls made on that locked read, so the lock itself is pinned. */
+const trxAccountCalls: string[] = [];
 
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
@@ -52,7 +59,24 @@ function selectChain(table: string): unknown {
   );
   return proxy;
 }
+function trxAccountChain(): unknown {
+  // F-57: .select("status").where(...).forUpdate().executeTakeFirst().
+  const p: unknown = new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        if (prop === "executeTakeFirst") return trxAccountRow;
+        return () => {
+          trxAccountCalls.push(String(prop));
+          return p;
+        };
+      },
+    },
+  );
+  return p;
+}
 function trxSelectChain(table: string): unknown {
+  if (table === "app_users") return trxAccountChain();
   // Any-length .select().innerJoin().where()....forUpdate().execute().
   const rows = table === "app_user_roles" ? trxGrantRows : trxMembershipRows;
   const p: unknown = new Proxy(
@@ -123,6 +147,9 @@ beforeEach(async () => {
   trxGrantRows.mockResolvedValue([]); // no superuser grant to protect by default
   trxClaim.mockReset();
   trxClaim.mockResolvedValue({ numUpdatedRows: 1n }); // the claim wins by default
+  trxAccountRow.mockReset();
+  trxAccountRow.mockResolvedValue({ status: "active" });
+  trxAccountCalls.length = 0;
   ({ performAdminStatusChange } = await import("@/lib/admin-status.server"));
 });
 afterEach(() => vi.resetModules());
@@ -411,5 +438,88 @@ describe("performAdminStatusChange — last superadmin (REVOKE-2)", () => {
       eventType: "admin.user.blocked",
     });
     expect(result).toEqual({ ok: true, status: "blocked" });
+  });
+});
+
+/**
+ * F-57 — a soft-deleted account leaves `deactivated` only through restore.
+ * Approving one used to make it `active` while its Better Auth ban, its
+ * `deactivated_*` columns and its membership snapshot stayed (a user who
+ * still could not sign in, and whom restore then refused); block and suspend
+ * left the same stale state behind. The core decides it inside its own
+ * transaction, from the account row it locks, so both status routes and the
+ * bulk status actions refuse it the same way.
+ */
+describe("performAdminStatusChange — a soft-deleted target (F-57)", () => {
+  beforeEach(() => {
+    userExecuteTakeFirst.mockResolvedValue({ id: TARGET_ID, primary_email: "target@x.com" });
+    trxAccountRow.mockResolvedValue({ status: "deactivated" });
+  });
+
+  it.each([
+    ["active", "active", "admin.user.approved"],
+    ["blocked", "blocked", "admin.user.blocked"],
+    ["suspended", "suspended", "admin.user.suspended"],
+    ["active", "active", "admin.user.reactivated"],
+  ] as const)(
+    "refuses a move to %s (%s) with use_restore and writes nothing",
+    async (newStatus, newMembershipStatus, eventType) => {
+      const result = await performAdminStatusChange({
+        actorBetterAuthUserId: ACTOR_ID,
+        scope: ALL,
+        targetAppUserId: TARGET_ID,
+        newStatus,
+        newMembershipStatus,
+        eventType,
+      });
+      expect(result).toEqual({ ok: false, error: "use_restore" });
+      expect(trxRun).not.toHaveBeenCalled();
+      expect(auditMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses it for an org admin confined to their org too", async () => {
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: { kind: "org", organizationId: ORG_A },
+      targetAppUserId: TARGET_ID,
+      newStatus: "active",
+      newMembershipStatus: "active",
+      eventType: "admin.user.approved",
+    });
+    expect(result).toEqual({ ok: false, error: "use_restore" });
+    expect(trxRun).not.toHaveBeenCalled();
+  });
+
+  it("reads the status under the row lock, after the grant read and the claim", async () => {
+    await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
+      targetAppUserId: TARGET_ID,
+      newStatus: "blocked",
+      newMembershipStatus: "blocked",
+      eventType: "admin.user.blocked",
+      expectedUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
+    });
+    // A plain read would miss a soft-delete committing meanwhile, and the
+    // write below would then overwrite it.
+    expect(trxAccountCalls).toContain("forUpdate");
+    const read = trxAccountRow.mock.invocationCallOrder[0]!;
+    expect(trxMembershipRows.mock.invocationCallOrder[0]).toBeLessThan(read);
+    expect(trxClaim.mock.invocationCallOrder[0]).toBeLessThan(read);
+  });
+
+  it("a stale If-Match still answers 412 ahead of the 409", async () => {
+    trxClaim.mockResolvedValue({ numUpdatedRows: 0n });
+    const result = await performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
+      targetAppUserId: TARGET_ID,
+      newStatus: "active",
+      newMembershipStatus: "active",
+      eventType: "admin.user.approved",
+      expectedUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
+    });
+    expect(result).toEqual({ ok: false, error: "precondition_failed" });
   });
 });

@@ -7,10 +7,15 @@ import { userNameSchema } from "@/lib/user-name";
 import { db } from "@/db/database";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
-  banBetterAuthUser,
-  unbanBetterAuthUser,
+  restoreBetterAuthBan,
   updateBetterAuthUser,
+  type BanSnapshot,
 } from "@/lib/admin/auth-admin.server";
+import {
+  banForSoftDelete,
+  carriedPriorBan,
+  finishSoftDelete,
+} from "@/lib/admin/user-actions.server";
 import {
   actingOrganizationId,
   requiresSuperadminForSharedTarget,
@@ -207,12 +212,15 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
 /**
  * DELETE /api/administrator/users/[id]
  *
- * Soft-delete only (docs/admin-manager.md §8.1). Two steps (review #137):
+ * Soft-delete only (docs/admin-manager.md §8.1). Three steps (review #137):
  *   1. Indefinite Better Auth ban — an auth-API call, NOT transactional;
  *      a failure aborts with 502 before anything app-side changes.
  *   2. App-side bookkeeping (`app_users.status = 'deactivated'` +
  *      `deactivated_*` columns) and the membership cascade in ONE Kysely
- *      tx, with a compensating unban if that tx fails (#B6).
+ *      tx, with a compensating unban if that tx fails (#B6), which puts
+ *      back any ban step 1 replaced (F-57).
+ *   3. Once that commits, the user's API keys and OAuth clients are revoked
+ *      (I-19), and the audit row records the ban restore puts back (F-57).
  *
  * Hard delete via `auth.api.removeUser` is intentionally NOT exposed in
  * v1: soft-delete keeps the row restorable and its audit trail intact. A
@@ -270,16 +278,18 @@ export const DELETE = withAdminRoute(async function DELETE(
 
   // Step 1 — Better Auth indefinite ban. Failures here abort the soft
   // delete so we don't leave the auth record signed-in-able while the
-  // app row says "deactivated".
+  // app row says "deactivated". It reports the ban it replaced (F-57). A
+  // repeated soft-delete carries the first one's record forward; reading it
+  // is a database read, so it stays outside the `auth_ban_failed` handling
+  // and a failure is the generic 500.
+  const carried = await carriedPriorBan(target);
+  let bans: { previousBan: BanSnapshot | null; priorBan: BanSnapshot | null };
   try {
-    await banBetterAuthUser({
-      userId: target.betterAuthUserId,
-      banReason: reason ?? "deleted",
-      // Omit `banExpiresIn` for indefinite per Better Auth semantics.
-      // A caller soft-deleting themselves is refused here, before anything
-      // app-side changes.
-      actorBetterAuthUserId: guard.betterAuthUserId,
-    });
+    bans = await banForSoftDelete(
+      target,
+      { banReason: reason ?? "deleted", actorBetterAuthUserId: guard.betterAuthUserId },
+      carried,
+    );
   } catch (err) {
     await auditUserAction("admin.user.soft_delete_failed", "error", {
       request,
@@ -356,12 +366,12 @@ export const DELETE = withAdminRoute(async function DELETE(
         .execute();
     });
   } catch (err) {
-    // Compensate the Better Auth ban so the two systems stay in sync.
-    // Failure of the compensation itself is audited but does not
-    // change the response status — the caller still needs to know the
-    // operation failed.
+    // Compensate the Better Auth ban so the two systems stay in sync: back to
+    // the ban it replaced, not to no ban at all (F-57). Failure of the
+    // compensation itself is audited but does not change the response
+    // status — the caller still needs to know the operation failed.
     try {
-      await unbanBetterAuthUser(target.betterAuthUserId);
+      await restoreBetterAuthBan(target.betterAuthUserId, bans.previousBan);
     } catch (unbanErr) {
       await auditUserAction("admin.user.soft_delete_compensation_failed", "error", {
         request,
@@ -411,14 +421,23 @@ export const DELETE = withAdminRoute(async function DELETE(
     });
   }
 
-  await auditUserAction("admin.user.soft_deleted", "success", {
+  // Step 3 — revoke the user's API keys and OAuth clients, so a restore never
+  // re-arms them (I-19), and write the audit row that records the ban restore
+  // must put back (F-57). A failed revocation is a 500 the operator retries.
+  const finished = await finishSoftDelete(target, bans.priorBan, {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
-    appUserId: target.appUserId,
     organizationId: actingOrganizationId(guard.access),
-    email: target.primaryEmail,
+    revokedByAppUserId: guard.access.appUserId,
+    requestId: guard.requestId,
     reason,
   });
+  if (!finished.ok) {
+    return adminErrorResponse("soft_delete_failed", 500, request, {
+      cause: finished.cause,
+      requestId: guard.requestId,
+    });
+  }
 
   return NextResponse.json({ ok: true });
 });

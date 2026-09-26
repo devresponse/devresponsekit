@@ -49,8 +49,9 @@ import { auditEvent } from "@/lib/audit.server";
  *     and that revoke wrote its own audit row, so nothing is audited twice.
  *
  * The callers end the account's sessions BEFORE calling this (the reset hook
- * in `src/lib/auth.ts`, `setBetterAuthUserPassword`), so the fence's re-check
- * refuses a mint that authenticated with one of them.
+ * in `src/lib/auth.ts`, `setBetterAuthUserPassword`, and the soft-delete's
+ * ban, I-19), so the fence's re-check refuses a mint that authenticated with
+ * one of them.
  *
  * What it deliberately leaves alone:
  *
@@ -62,8 +63,9 @@ import { auditEvent } from "@/lib/audit.server";
  *     through the `api_key.created` / `oauth_client.created` audit rows, whose
  *     actor is the account.
  *   - MCP agent principals. They have no Better Auth user and no password, so
- *     neither trigger can name one: a reset finds no account for the address,
- *     and set-password fails inside Better Auth before this runs.
+ *     no trigger can name one: a reset finds no account for the address, and
+ *     set-password and the soft-delete's ban fail inside Better Auth before
+ *     this runs.
  *   - Self-service change-password. The caller must know the current password,
  *     which a cookie thief does not, and the form sends `revokeOtherSessions`
  *     on every change. Revoking keys there would break the user's integrations
@@ -75,8 +77,14 @@ import { auditEvent } from "@/lib/audit.server";
  * password has already changed and cannot be un-reset.
  */
 
-/** What replaced the password; recorded as the revoke reason. */
-export type CredentialEvictionTrigger = "password_reset" | "password_set";
+/**
+ * What replaced the password, recorded as the revoke reason. `owner_deleted`
+ * is the one trigger that is not a password: an admin soft-delete of the
+ * account (I-19, `finishSoftDelete` in `src/lib/admin/user-actions.server.ts`),
+ * after which restore must not re-arm the account's credentials. The ban it
+ * applies first has already ended the account's sessions.
+ */
+export type CredentialEvictionTrigger = "password_reset" | "password_set" | "owner_deleted";
 
 export interface RevokeBearerCredentialsInput {
   /** Better Auth id of the account whose password was replaced. */

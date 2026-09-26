@@ -11,6 +11,7 @@ import {
   LAST_SUPERADMIN_REASON,
   type OrgScope,
 } from "@/lib/admin/access-scope.server";
+import { mustUseRestore, USE_RESTORE_ERROR } from "@/lib/admin/deactivated-user";
 import { auditEvent } from "@/lib/audit.server";
 
 /**
@@ -44,6 +45,9 @@ import { auditEvent } from "@/lib/audit.server";
  *     SUPERADMIN — whom `targetOutranksActor` exempts outright — from blocking
  *     or suspending the platform's last superadmin, including themselves, and
  *     leaving nobody able to administer it.
+ *   - It refuses every transition of a soft-deleted (`deactivated`) target
+ *     with `use_restore` (F-57): only restore undoes a soft-delete's ban and
+ *     deactivation together. The callers answer 409.
  *   - The `reason` field is optional and surfaces in audit metadata so
  *     ops teams can answer "who blocked this user and why". Callers
  *     validate its length (max 500) at the route schema.
@@ -91,10 +95,16 @@ export interface AdminStatusChangeInput {
 
 export type AdminStatusChangeResult =
   | { ok: true; status: AdminStatusChangeInput["newStatus"] }
-  | { ok: false; error: "not_found" | "precondition_failed" | "last_superadmin" };
+  | {
+      ok: false;
+      error: "not_found" | "precondition_failed" | "last_superadmin" | typeof USE_RESTORE_ERROR;
+    };
 
 /** Internal signal used to roll the transaction back on a lost CAS (#44). */
 class PreconditionFailedError extends Error {}
+
+/** Internal signal used to roll the transaction back for a soft-deleted target (F-57). */
+class UseRestoreError extends Error {}
 
 /**
  * Internal signal used to roll the transaction back on a REVOKE-2 refusal
@@ -186,6 +196,20 @@ export async function performAdminStatusChange(
         if (Number(claim.numUpdatedRows ?? 0) === 0) throw new PreconditionFailedError();
       }
 
+      // F-57: a soft-deleted account leaves `deactivated` only through restore
+      // (`deactivated-user.ts`). Approving one used to make it `active` while
+      // its Better Auth ban, `deactivated_*` columns and membership snapshot
+      // stayed, and restore then refused it. Read under the row lock, after
+      // the grant read and the claim (the lock order above), so a soft-delete
+      // committing meanwhile is seen here rather than overwritten.
+      const current = await trx
+        .selectFrom("app_users")
+        .select("status")
+        .where("id", "=", target.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (current && mustUseRestore(current)) throw new UseRestoreError();
+
       // The refusal waits for the claim, so a stale version still answers 412
       // ahead of a 409.
       if (stripsLast) throw new LastSuperadminError();
@@ -235,6 +259,8 @@ export async function performAdminStatusChange(
     // A lost CAS is an expected outcome, not a fault: the transaction rolled
     // back untouched and the caller answers 412 (review #44).
     if (err instanceof PreconditionFailedError) return { ok: false, error: "precondition_failed" };
+    // F-57: likewise expected; the caller answers 409 `use_restore`.
+    if (err instanceof UseRestoreError) return { ok: false, error: USE_RESTORE_ERROR };
     // REVOKE-2: likewise an expected refusal. The audit row is written HERE so
     // every caller of this core — both status routes and the bulk helper —
     // records the denial with the same event/reason the four revocation routes

@@ -266,6 +266,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       {
         betterAuthUserId: guard.betterAuthUserId,
         impersonatorId: guard.impersonatorId,
+        appUserId: guard.access.appUserId,
         request,
         scope,
         access: guard.access,

@@ -7,8 +7,10 @@ import * as Sentry from "@sentry/nextjs";
  * Root error boundary — the last resort for errors thrown in the root
  * layout itself, *outside* the locale + i18n providers. It must render
  * its own `<html>`/`<body>`, so it cannot use `next-intl` and is
- * intentionally minimal and English-only. The localized, in-shell
- * fallback lives in `(secure)/app/error.tsx`.
+ * intentionally minimal and English-only. The localized fallbacks are the
+ * `error.tsx` boundaries under `[locale]/`; the outermost,
+ * `[locale]/error.tsx`, also catches the route-group layouts (F-68), so only
+ * a throw from `[locale]/layout.tsx` or above lands here.
  *
  * Still captures to Sentry (no-op when disabled) so even a catastrophic
  * boot/layout error is observable.

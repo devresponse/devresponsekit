@@ -54,10 +54,9 @@ export default async function SecureLayout({
 }) {
   const { locale: rawLocale } = await params;
   const safeLocale: SupportedLocale = isSupportedLocale(rawLocale) ? rawLocale : "en";
-  const { session, access } = await requireSecureSession(
-    safeLocale,
-    `/${safeLocale}/app/dashboard`,
-  );
+  // No fixed returnTo (F-70): a sign-in bounce returns to the page that was
+  // requested, deep link and query included, else to the dashboard.
+  const { session, access } = await requireSecureSession(safeLocale);
 
   const cookieStore = await cookies();
   const sidebarDefaultOpen = cookieStore.get("sidebar_state")?.value !== "false";

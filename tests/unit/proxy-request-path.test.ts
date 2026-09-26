@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
 import type * as NextTesting from "next/experimental/testing/server";
 import type * as ProxyModule from "@/proxy";
 import type * as RouteRegionsModule from "@/config/route-regions";
-import { REQUEST_PATH_HEADER } from "@/lib/request-id";
+import { REQUEST_PATH_HEADER, REQUEST_TARGET_HEADER } from "@/lib/request-id";
 
 /**
  * `x-drk-pathname` provenance in `proxy.ts` (the follow-up finding to review
@@ -205,5 +205,51 @@ describe("proxy — the matcher covers every localized page that takes a dynamic
     const res = proxy(req("/en/sign-in/a.b"));
     expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
     expect(intlState.captured?.headers.get(REQUEST_PATH_HEADER)).toBe("/en/sign-in/a.b");
+  });
+});
+
+/**
+ * F-70: `requireSecureSession` bounces a present-but-dead session cookie to
+ * sign-in, and needs the page that was requested — query included, exactly as
+ * the proxy's own no-cookie redirect keeps it — to send the user back there.
+ * `x-drk-pathname` is path-only (it lands in audit rows), so the request
+ * target rides a header of its own, with the same provenance rules.
+ */
+describe("proxy — x-drk-request-target (F-70)", () => {
+  const DEEP = "/en/app/administrator/users/u-42?tab=roles&page=2";
+
+  it("stamps path AND query on a secure page", () => {
+    guard.secure = true;
+    proxy(req(DEEP));
+    expect(intlState.captured?.headers.get(REQUEST_TARGET_HEADER)).toBe(DEEP);
+    // The audit header stays path-only.
+    expect(intlState.captured?.headers.get(REQUEST_PATH_HEADER)).toBe(
+      "/en/app/administrator/users/u-42",
+    );
+  });
+
+  it("OVERWRITES a client-supplied value with the real target", () => {
+    guard.secure = true;
+    proxy(req(DEEP, { [REQUEST_TARGET_HEADER]: "https://evil.example/x" }));
+    expect(intlState.captured?.headers.get(REQUEST_TARGET_HEADER)).toBe(DEEP);
+  });
+
+  it("stamps nothing outside the secure tree, where queries carry invite and reset tokens", () => {
+    proxy(req("/en/invite?token=example-invite-token", { [REQUEST_TARGET_HEADER]: FORGED }));
+    expect(intlState.captured?.headers.get(REQUEST_TARGET_HEADER)).toBeNull();
+  });
+
+  it("DELETES a client-supplied value on the /api/* branch", () => {
+    const res = proxy(req("/api/auth/sign-in/email", { [REQUEST_TARGET_HEADER]: FORGED }));
+    expect(forwardedHeader(res, REQUEST_TARGET_HEADER)).toBeNull();
+  });
+
+  it("keeps the no-cookie redirect's returnTo in the same shape", () => {
+    guard.secure = true;
+    guard.session = null;
+    const res = proxy(req(DEEP, { [REQUEST_TARGET_HEADER]: FORGED }));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location") ?? "").searchParams.get("returnTo")).toBe(DEEP);
+    expect(forwardedHeader(res, REQUEST_TARGET_HEADER)).toBeNull();
   });
 });

@@ -51,6 +51,11 @@ const SENSITIVE_HEADERS = new Set([
   "proxy-authorization",
   "referer",
   "referrer",
+  // The proxy-stamped request target, path AND query (F-70;
+  // `REQUEST_TARGET_HEADER` in src/lib/request-id.ts). Denied for the same
+  // reason as `referer`: query collection is off, so the query must not
+  // travel in a header instead.
+  "x-drk-request-target",
 ]);
 
 /**

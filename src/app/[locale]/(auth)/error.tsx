@@ -4,9 +4,8 @@ import { RouteError } from "@/components/observability/route-error";
 
 /**
  * Error boundary for the (auth) route group (sign-in, sign-up, password
- * reset, …). Without it, a render error here escapes to the English-only
- * root global-error.tsx; this keeps the failure localized and captured to
- * Sentry with a quotable Support ID, inside the locale shell (P2-13).
+ * reset, …). It keeps a render error here localized and captured to Sentry
+ * with a quotable Support ID, inside the locale shell (P2-13).
  */
 export default function AuthError(props: {
   error: Error & { digest?: string };

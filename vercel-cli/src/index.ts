@@ -170,7 +170,10 @@ program
     "Create every variable THIS target needs, generating only the secrets it may (never an Option C session secret, never a satellite signing key)",
   )
   .option("--from-env <file>", "read supplied values (DATABASE_URL, …) from a .env file")
-  .option("--target <targets>", 'production | preview | development | all (default "production")')
+  .option(
+    "--target <targets>",
+    'production | preview | development | all (default "production"; secrets never go to development)',
+  )
   .option("--force", "overwrite variables that already exist (rotates secrets)")
   .option("--dry-run", "show the plan without writing anything")
   .option("-y, --yes", "confirm a rotation")

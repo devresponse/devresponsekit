@@ -3349,6 +3349,60 @@ test("F-50: the CLI entry point hands --config (before or after the command) and
   assert.match(empty.out, /--config was given an EMPTY value/);
 });
 
+test("F-143: a secret passed as a flag still works, and every use is warned about without printing it", () => {
+  const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  const dir = join(workspace, `secret-flags-${++fixtures}`);
+  mkdirSync(join(dir, "home"), { recursive: true });
+  // No config file, so every command stops at reading it, before any token,
+  // database or network is touched: far enough to show the flag was taken.
+  const cli = (args: string[]) => {
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => ![...AMBIENT, "DRK_DEPLOY_CONFIG"].includes(key.toUpperCase()),
+      ),
+    );
+    const result = spawnSync(process.execPath, [entry, ...args], {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...env,
+        HOME: join(dir, "home"),
+        USERPROFILE: join(dir, "home"),
+        NO_COLOR: "1",
+        DRK_DEPLOY_CONFIG: join(dir, "nowhere.json"),
+      },
+    });
+    return { status: result.status, stderr: result.stderr, out: `${result.stdout}${result.stderr}` };
+  };
+  const deprecated = (flag: string) => new RegExp(`${literal(flag)} is deprecated: .*shell history`);
+
+  for (const command of ["migrate", "deploy", "up"]) {
+    const flagged = cli([command, "--database-url", PRODUCTION_DIRECT]);
+    assert.equal(flagged.status, 1, flagged.out);
+    assert.match(flagged.stderr, deprecated("--database-url"), command);
+    assert.match(
+      flagged.stderr,
+      /Set PRODUCTION_DIRECT_DATABASE_URL \(a satellite: SATELLITE_DIRECT_DATABASE_URL\)/,
+    );
+    assert.match(flagged.out, /there is no .+nowhere\.json/, `${command}: the flag is still accepted`);
+    assert.doesNotMatch(
+      flagged.out,
+      /prod-password/,
+      `${command}: the warning names the flag, never the value`,
+    );
+  }
+  const plain = cli(["migrate"]);
+  assert.match(plain.out, /there is no .+nowhere\.json/, plain.out);
+  assert.doesNotMatch(plain.out, /is deprecated/, "without the flag there is no warning");
+
+  // `login --token ""` stops at the empty token, before the API is called.
+  const login = cli(["login", "--token", ""]);
+  assert.equal(login.status, 1, login.out);
+  assert.match(login.stderr, deprecated("--token"));
+  assert.match(login.stderr, /prompted with the input hidden, pipe the token on stdin, or set VERCEL_TOKEN/);
+  assert.match(login.out, /No token supplied\./);
+});
+
 test("F-50: under --config, the commands the refusals print name that file, so they act on the same deployment", async () => {
   fakeProjects(FLEET);
   const fleet = fleetRoot();

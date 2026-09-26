@@ -185,6 +185,34 @@ test("the .env reader handles the shapes a real file contains", () => {
   assert.equal(parsed["not-a-pair"], undefined);
 });
 
+test("F-144: the .env reader drops inline comments and `export` the way the kit's own reader does", () => {
+  const SECRET = "0123456789abcdef0123456789abcdef";
+  const JWK = '{"kty":"OKP","crv":"Ed25519","x":"a","d":"b"}';
+  const parsed = parseEnvFile(
+    [
+      `BETTER_AUTH_SECRET=${SECRET} # copied from the kit`,
+      'QUOTED_THEN_COMMENT="value with spaces" # a note',
+      `export EXPORTED=${SECRET}`,
+      "HASH=abc#def",
+      'QUOTED_HASH="abc#def"',
+      // How `vercel pull` writes a JSON value, and the shape the kit's
+      // .env.example invites: unescaped quotes inside double quotes.
+      `SSO_HANDOFF_PRIVATE_KEY="${JWK}"`,
+      'ESCAPED="line1\\nline2"',
+      "WINDOWS=crlf\r",
+    ].join("\n"),
+  );
+  assert.equal(parsed.BETTER_AUTH_SECRET, SECRET, "a trailing comment is not part of the secret");
+  assert.equal(parsed.QUOTED_THEN_COMMENT, "value with spaces", "nor of a quoted value");
+  assert.equal(parsed.EXPORTED, SECRET, "`export KEY=` is the key KEY");
+  assert.equal(parsed["export EXPORTED"], undefined);
+  assert.equal(parsed.HASH, "abc", "an unquoted # starts a comment, as it does for @next/env");
+  assert.equal(parsed.QUOTED_HASH, "abc#def", "quoting keeps it");
+  assert.equal(parsed.SSO_HANDOFF_PRIVATE_KEY, JWK, "node:util parseEnv would stop at the first inner quote");
+  assert.equal(parsed.ESCAPED, "line1\nline2", "vercel pull escapes a newline as \\n");
+  assert.equal(parsed.WINDOWS, "crlf");
+});
+
 test("every spec carries the operator-facing text the commands print", () => {
   for (const spec of ENV_SPECS) {
     assert.ok(spec.comment.length > 0, `${spec.key} needs a comment for the Vercel dashboard`);
@@ -971,3 +999,154 @@ test("the containment warning survives --quiet and points at a heading that exis
   );
   assert.ok(slugs.includes(anchor!), `${file} has no heading for #${anchor}`);
 });
+
+/* ================================================================== */
+/*  F-143 / F-145: secrets stay off the screen, and pnpm runs from a   */
+/*  path with a space in it                                            */
+/* ================================================================== */
+
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter } from "node:path";
+import { PassThrough, Writable } from "node:stream";
+
+import { ask, login } from "../dist/commands/init.js";
+import { pnpmCommand, run } from "../dist/lib/exec.js";
+
+/**
+ * Stands in for the Vercel API, refusing every token so that nothing is
+ * saved: these tests are about the prompt, and about the token reaching the
+ * client intact. Returns the Authorization header of the last request.
+ */
+function refusingVercel(): { authorization: () => string; restore: () => void } {
+  let authorization = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    authorization = new Request(input, init).headers.get("authorization") ?? "";
+    return new Response(JSON.stringify({ error: { code: "forbidden", message: "Not authorized" } }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  return {
+    authorization: () => authorization,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+test("F-143: login reads the token without echoing it, at a terminal or from a pipe", async () => {
+  const TOKEN_TYPED = "vcp_typed-token-never-shown";
+  const vercel = refusingVercel();
+  setQuiet(true);
+  try {
+    for (const terminal of [true, false]) {
+      const input = Object.assign(new PassThrough(), terminal ? { isTTY: true } : {});
+      let shown = "";
+      const output = new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          shown += chunk.toString();
+          callback();
+        },
+      });
+      const pending = login({}, { input, output });
+      // At a terminal readline echoes each keystroke itself; Enter is "\r".
+      input.write(`${TOKEN_TYPED}${terminal ? "\r" : "\n"}`);
+      await assert.rejects(pending, /Could not authenticate/);
+      const mode = terminal ? "at a terminal" : "from a pipe";
+      assert.match(shown, /Paste a Vercel access token/, `the prompt is shown ${mode}`);
+      assert.ok(!shown.includes(TOKEN_TYPED), `the token is not echoed ${mode}: ${JSON.stringify(shown)}`);
+      assert.equal(
+        vercel.authorization(),
+        `Bearer ${TOKEN_TYPED}`,
+        `the typed token is the one verified ${mode}`,
+      );
+    }
+  } finally {
+    vercel.restore();
+    setQuiet(false);
+  }
+});
+
+test(
+  "F-143: a piped token needs no trailing newline, and an empty pipe is refused by name",
+  // A prompt that never settles leaves nothing to keep the process alive:
+  // Node exits 13 ("unsettled top-level await"), so fail rather than wait.
+  { timeout: 10_000 },
+  async () => {
+    const vercel = refusingVercel();
+    setQuiet(true);
+    try {
+      // Notepad and `Set-Content -NoNewline` save the token with no newline
+      // after it, and `drk-deploy login < token.txt` then ends on that line.
+      const TOKEN = "vcp_saved-with-no-newline";
+      let input = new PassThrough();
+      let pending = login({}, { input, output: new PassThrough() });
+      input.end(TOKEN);
+      await assert.rejects(pending, /Could not authenticate/);
+      assert.equal(vercel.authorization(), `Bearer ${TOKEN}`, "the unterminated line is the token");
+
+      // `drk-deploy login < NUL`: the CLI's own refusal, not a silent exit.
+      input = new PassThrough();
+      pending = login({}, { input, output: new PassThrough() });
+      input.end();
+      await assert.rejects(pending, /No token supplied/);
+    } finally {
+      vercel.restore();
+      setQuiet(false);
+    }
+  },
+);
+
+test(
+  "F-143: init's prompts settle when their input ends, and never take a default nobody chose",
+  { timeout: 10_000 },
+  async () => {
+    const output = new PassThrough();
+    let input = new PassThrough();
+    let pending = ask("Project name or id", undefined, { input, output });
+    input.end("my-app");
+    assert.equal(await pending, "my-app", "an unterminated last line is the answer");
+
+    input = new PassThrough();
+    pending = ask("Production domain", "app.example.com", { input, output });
+    input.end("\n");
+    assert.equal(await pending, "app.example.com", "a blank line is Enter, which takes the default");
+
+    // Ended input is not Enter: the cookie domain is "never guessed for you".
+    input = new PassThrough();
+    pending = ask("Cookie domain", ".example.com", { input, output });
+    input.end();
+    await assert.rejects(pending, /No answer to "Cookie domain": the input closed first/);
+    // Nor is an input an earlier prompt already read to its end.
+    await assert.rejects(
+      ask("Satellite option", "standalone", { input, output }),
+      /No answer to "Satellite option"/,
+    );
+  },
+);
+
+test(
+  "F-145: a pnpm .cmd shim under a folder with a space in it still runs",
+  { skip: process.platform !== "win32" && "only Windows runs pnpm through a .cmd shim and cmd.exe" },
+  async () => {
+    // A corepack install puts its shim at C:\Program Files\nodejs\pnpm.cmd,
+    // with no pnpm.cjs beside it, so the shim itself is what runs.
+    const dir = mkdtempSync(join(tmpdir(), "drk deploy pnpm "));
+    const path = process.env.PATH;
+    try {
+      writeFileSync(join(dir, "pnpm.cmd"), "@echo off\r\necho pnpm-shim %*\r\n");
+      process.env.PATH = `${dir}${delimiter}${path ?? ""}`;
+      const pnpm = pnpmCommand();
+      assert.equal(pnpm.command, join(dir, "pnpm.cmd"), "the shim is the command, spaces and all");
+      // What `doctor` runs, and what `migrate` runs through runPnpm.
+      const result = await run(pnpm.command, [...pnpm.prefix, "--version"], { cwd: dir, capture: true });
+      assert.equal(result.code, 0, `${result.stdout}${result.stderr}`);
+      assert.equal(result.stdout.trim(), "pnpm-shim --version");
+    } finally {
+      process.env.PATH = path;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);

@@ -253,11 +253,11 @@ export function verifyMigrationTarget(input: TargetCheckInput): MigrationTarget 
         "The host (with Neon's `-pooler` removed), the port (5432 when none is given) and the database name",
         "must match one of production's. On Supabase's shared pooler (`*.pooler.supabase.com`), every project",
         "in the region shares the host and database, so the project in the username (`postgres.<ref>`) must",
-        "match instead of the port. Point --database-url or PRODUCTION_DIRECT_DATABASE_URL (a satellite:",
-        "SATELLITE_DIRECT_DATABASE_URL) at production's DIRECT endpoint. If production's pooled URL is not the",
-        "direct one with `-pooler` removed (another host or port: Supabase, PgBouncer), store the direct URL on",
-        "the project as DATABASE_URL_UNPOOLED (encrypted, not sensitive) so it can be matched. There is no",
-        "override for a mismatch.",
+        "match instead of the port. Point PRODUCTION_DIRECT_DATABASE_URL (a satellite:",
+        "SATELLITE_DIRECT_DATABASE_URL), or the deprecated --database-url, which wins over both, at production's",
+        "DIRECT endpoint. If production's pooled URL is not the direct one with `-pooler` removed (another host",
+        "or port: Supabase, PgBouncer), store the direct URL on the project as DATABASE_URL_UNPOOLED (encrypted,",
+        "not sensitive) so it can be matched. There is no override for a mismatch.",
       ].join("\n  "),
     });
   }

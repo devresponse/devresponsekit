@@ -135,11 +135,12 @@ export async function dbProvision(
   // A satellite that reaches this point owns its database, and `migrate`
   // demands it NAME that database rather than inheriting the kit's
   // PRODUCTION_DIRECT_DATABASE_URL from the shell — so the two commands must
-  // agree about which one to print.
+  // agree about which one to print. The variable, not `--database-url`: a
+  // URL passed as an argument lands in shell history (F-143).
   info(
     profile.kind === "satellite"
-      ? `Then migrate with:  ${bold(commandFor("migrate --database-url <direct-url>"))} ${dim("(a satellite must name its own database)")}`
-      : `Then migrate with:  ${bold(commandFor("migrate --database-url <direct-url>"))}`,
+      ? `Then set SATELLITE_DIRECT_DATABASE_URL to the direct URL and migrate:  ${bold(commandFor("migrate"))} ${dim("(a satellite must name its own database)")}`
+      : `Then set PRODUCTION_DIRECT_DATABASE_URL to the direct URL and migrate:  ${bold(commandFor("migrate"))}`,
   );
 }
 

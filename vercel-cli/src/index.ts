@@ -8,7 +8,7 @@ import { envCheck, envPrune, envSync } from "./commands/env.js";
 import { init, login } from "./commands/init.js";
 import { deploy, migrateCommand, status, up } from "./commands/release.js";
 import { configFileFrom, useConfigFile } from "./lib/config.js";
-import { CliError, dim, fail, info, setQuiet } from "./lib/log.js";
+import { CliError, dim, fail, info, setQuiet, warn } from "./lib/log.js";
 import { withRollbackOptions } from "./lib/rollback-options.js";
 
 /** The vercel-cli package root: `dist/index.js` → `..`. */
@@ -42,6 +42,30 @@ const ALLOW_GIT_INTEGRATION_RACE = [
   "migrate and promote even though Vercel's git integration also deploys production on every push, and so can promote a build ahead of its migration",
 ] as const;
 
+/**
+ * The flags that take a secret as an argument (F-143), and where the secret
+ * belongs instead. An argument lands in shell history (PSReadLine keeps
+ * every line in ConsoleHost_history.txt) and in the process list any local
+ * user can read, and from PowerShell cmd.exe re-parses it on the way into
+ * `drk-deploy.cmd`, splitting a URL at `&` and dropping `^`. The flags keep
+ * working, because scripts use them, but every use is warned about. The
+ * warning names the flag, never the value.
+ */
+const SECRET_FLAGS = [
+  {
+    option: "token",
+    flag: "--token",
+    instead:
+      "Leave it off to be prompted with the input hidden, pipe the token on stdin, or set VERCEL_TOKEN.",
+  },
+  {
+    option: "databaseUrl",
+    flag: "--database-url",
+    instead:
+      "Set PRODUCTION_DIRECT_DATABASE_URL (a satellite: SATELLITE_DIRECT_DATABASE_URL) in the shell or the --from-env file instead.",
+  },
+] as const;
+
 const program = new Command();
 
 program
@@ -72,19 +96,29 @@ program
     "--config <file>",
     "this deployment's config file (default: DRK_DEPLOY_CONFIG, else .drk-deploy.json); a relative path is beside this CLI, whatever the current directory; one file per deployment",
   )
-  .hook("preAction", (thisCommand) => {
+  .hook("preAction", (thisCommand, actionCommand) => {
     const options = thisCommand.opts<{ quiet?: boolean; config?: string }>();
     setQuiet(Boolean(options.quiet));
     // F-50: each deployment (the kit, each satellite) has its own file, so
     // configuring one never rewrites another's. A relative one is beside the
     // CLI, where the default file is and where .gitignore covers it.
     useConfigFile(configFileFrom(options.config, process.env, CLI_ROOT));
+    const given = actionCommand.opts<Record<string, unknown>>();
+    for (const secret of SECRET_FLAGS) {
+      if (given[secret.option] === undefined) continue;
+      warn(
+        `${secret.flag} is deprecated: a secret passed as an argument lands in shell history and the process list. ${secret.instead}`,
+      );
+    }
   });
 
 program
   .command("login")
   .description("Store a Vercel access token (verified before it is saved)")
-  .option("--token <token>", "the token, instead of being prompted for it")
+  .option(
+    "--token <token>",
+    "deprecated: lands in shell history. Leave it off to be prompted (input hidden), or pipe the token on stdin",
+  )
   .action(async (options: { token?: string }) => login(options));
 
 program
@@ -188,7 +222,7 @@ program
   )
   .option(
     "--database-url <url>",
-    "the DIRECT connection string. Kit: defaults to PRODUCTION_DIRECT_DATABASE_URL (shell, then --from-env), never DATABASE_URL. A satellite must NAME its own: this flag, or SATELLITE_DIRECT_DATABASE_URL — the kit's variables are deliberately not inherited",
+    "deprecated: lands in shell history. The DIRECT connection string, which belongs in PRODUCTION_DIRECT_DATABASE_URL (shell, then --from-env; never DATABASE_URL). A satellite must NAME its own: SATELLITE_DIRECT_DATABASE_URL or this flag — the kit's variables are deliberately not inherited",
   )
   .option(
     "--from-env <file>",
@@ -212,7 +246,7 @@ const deployCommand = program
   )
   .option(
     "--database-url <url>",
-    "the DIRECT connection string for migrations (default: PRODUCTION_DIRECT_DATABASE_URL)",
+    "deprecated: lands in shell history. The DIRECT connection string for migrations; set PRODUCTION_DIRECT_DATABASE_URL (a satellite: SATELLITE_DIRECT_DATABASE_URL) instead",
   )
   .option("--from-env <file>", "read the migration URL (PRODUCTION_DIRECT_DATABASE_URL) from a .env file")
   .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
@@ -240,7 +274,7 @@ const upCommand = program
   )
   .option(
     "--database-url <url>",
-    "the DIRECT connection string for migrations (default: PRODUCTION_DIRECT_DATABASE_URL)",
+    "deprecated: lands in shell history. The DIRECT connection string for migrations; set PRODUCTION_DIRECT_DATABASE_URL (a satellite: SATELLITE_DIRECT_DATABASE_URL) instead",
   )
   .option("--schema <name>", 'target schema (default: production\'s DB_SCHEMA, or "auth" when it sets none)')
   .option("--allow-pooled", "permit a pooled connection string")

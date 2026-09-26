@@ -33,8 +33,30 @@ Then call it by path, or put this folder on your `PATH`:
 C:\my\repos\devresponsekit\vercel-cli\drk-deploy.cmd --help
 ```
 
-The `.cmd` wrapper works from both `cmd.exe` and PowerShell. On macOS or Linux use
+The `.cmd` wrapper works from both `cmd.exe` and PowerShell, but its arguments reach the CLI as
+`cmd.exe` parses them, and nothing in the wrapper can change that (F-143). From `cmd.exe`, a value
+inside double quotes keeps its `&` and `^`. From PowerShell it does not: PowerShell drops the quotes
+around an argument with no space in it, and `cmd.exe` parses the line before the wrapper runs, so a
+Neon URL's `&channel_binding=require` becomes a second command, `^` disappears and `%VAR%` expands.
+From PowerShell, run `node C:\my\repos\devresponsekit\vercel-cli\dist\index.js` for such a value.
+Secrets never need to be arguments at all:
+[Secrets stay off the command line](#secrets-stay-off-the-command-line). On macOS or Linux use
 `node dist/index.js` (or `npm link`).
+
+### Secrets stay off the command line
+
+An argument lands in shell history (PowerShell's PSReadLine keeps every line in
+`ConsoleHost_history.txt`) and in the process list any local user can read. So the two secrets
+this CLI is given come from elsewhere (F-143):
+
+- **The Vercel token.** `drk-deploy login` prompts for it with the input hidden, or reads it from
+  stdin (`Get-Content token.txt | drk-deploy login` in PowerShell, `drk-deploy login < token.txt` in
+  `cmd.exe`). CI sets `VERCEL_TOKEN`, which wins over a saved token.
+- **The migration URL.** `PRODUCTION_DIRECT_DATABASE_URL` (a satellite that owns its database:
+  `SATELLITE_DIRECT_DATABASE_URL`), in the shell or the `--from-env` file.
+
+`login --token` and `--database-url` on `migrate`, `deploy` and `up` still work, because scripts
+use them, but they are deprecated and every use prints a warning naming the flag (never the value).
 
 ---
 
@@ -190,7 +212,7 @@ reported the issuer's real signing key under "must NOT be set on this satellite"
 
 | Command        | What it does                                                                                                         |
 | -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `login`        | Stores a Vercel token, after proving it works. Saved to your user profile, never the repo.                           |
+| `login`        | Stores a Vercel token (typed with the input hidden), after proving it works. Saved to your user profile.             |
 | `init`         | Links this checkout to a Vercel project and records the target and its settings.                                     |
 | `doctor`       | Checks Node, pnpm, the Vercel CLI, credentials and the project link. Changes nothing.                                |
 | `status`       | Project, latest production deployment, and a live health probe.                                                      |
@@ -217,10 +239,11 @@ understands, and nothing is promoted. This is the ordering the repo's own deploy
 documents, and the reason it is documented is that the reverse has caused outages.
 
 **Migrations run against production, checked rather than assumed (F-47).** The migration URL is
-named explicitly: `--database-url`, or `PRODUCTION_DIRECT_DATABASE_URL` in the shell or the
-`--from-env` file (a satellite that owns its database: `SATELLITE_DIRECT_DATABASE_URL`). The shell
-wins over the file, and an empty shell value counts as unset, as it does for `env:sync`: a CI step
-exporting a secret that is not defined exports an empty string. A shell's
+named explicitly: `PRODUCTION_DIRECT_DATABASE_URL` in the shell or the `--from-env` file (a
+satellite that owns its database: `SATELLITE_DIRECT_DATABASE_URL`), or the deprecated
+`--database-url`, which wins over both (F-143). The shell wins over the file, and an empty shell
+value counts as unset, as it does for `env:sync`: a CI step exporting a secret that is not defined
+exports an empty string. A shell's
 `DATABASE_URL` or `DIRECT_DATABASE_URL` is never used, because on the machine a deploy runs from it
 is usually a local database: `up` used to migrate that, report success, and promote a build that
 expected the new schema over a production without it. Before migrating, `deploy`, `up` and
@@ -337,9 +360,11 @@ silent rather than loud. Neon's `-pooler` host, a `.pooler.` host (Supabase), po
 
 **Secrets are never printed.** Values reach the terminal only through a mask that shows a length
 and a short fingerprint (`(set, 44 chars, fp 3f8a1c2d)`) — enough to compare two runs, useless to
-anyone reading over your shoulder or scrolling a CI log. Secrets are never passed as command-line
-arguments either, because an argument list is visible to other processes and lands in shell
-history; they travel in the child process's environment instead.
+anyone reading over your shoulder or scrolling a CI log. This CLI never passes a secret to a child
+process (pnpm, the migration runner, `vercel`) as an argument either, because an argument list is
+visible to other processes and lands in shell history; secrets travel in the child's environment
+instead. Hand them to the CLI the same way:
+[Secrets stay off the command line](#secrets-stay-off-the-command-line).
 
 **Re-running does not rotate anything.** `env:sync` leaves existing variables alone. Overwriting
 takes `--force`, and rotating a secret additionally takes `--yes`, because rotating
@@ -434,7 +459,7 @@ names the project it would act on, so none of them can send anyone to delete the
 `db:*` scripts for exactly this reason: they point at the primary's database and carry a truncated
 migration set. `drk-deploy migrate` mirrors that refusal, with no `--force`. The escape is to
 record in the config that this satellite genuinely has its own database (`init --own-database`),
-after which `migrate` demands an explicit `--database-url` (or `SATELLITE_DIRECT_DATABASE_URL`)
+after which `migrate` demands `SATELLITE_DIRECT_DATABASE_URL` (or the deprecated `--database-url`)
 rather than inheriting the kit's `PRODUCTION_DIRECT_DATABASE_URL` from your shell. `db:provision`
 refuses on the same policy, and so does the advice `env:sync` prints when `DATABASE_URL` is
 missing: on a shared database the answer is the kit's connection string, not a new store.
@@ -546,6 +571,19 @@ delete it — nothing reads it.
 
 ## Upgrading
 
+### F-143 and F-144: secrets off the command line, and `.env` files read as the kit reads them
+
+1. **`login --token` and `--database-url` print a deprecation warning.** They still work. Move the
+   token to the hidden prompt, stdin or `VERCEL_TOKEN`, and the migration URL to
+   `PRODUCTION_DIRECT_DATABASE_URL` (a satellite: `SATELLITE_DIRECT_DATABASE_URL`)
+   ([above](#secrets-stay-off-the-command-line)). The `login` prompt no longer echoes the token.
+2. **A `--from-env` file is read with dotenv's rules, as the kit's own `@next/env` reads it.** An
+   unquoted value now ends at `#`, so `BETTER_AUTH_SECRET=<value> # from the kit` is the value alone,
+   where the comment used to be written to Vercel as part of the secret, and `export KEY=value` is
+   `KEY` (it used to be skipped as a key named `export KEY`). A value that really contains `#` has to
+   be quoted, as it already had to be for the kit: check any unquoted password with a `#` in it.
+   Inside double quotes `\n` is a newline, which is how `vercel pull` writes one.
+
 ### F-51: a failed probe is rolled back, or named
 
 1. **`deploy --yes` and `up --yes` now roll back a build that fails its probe.** They run
@@ -631,7 +669,8 @@ project.
 
 `deploy`, `up` and `migrate` no longer fall back to `DIRECT_DATABASE_URL` or `DATABASE_URL`. If a
 deploy of the kit relied on either, set `PRODUCTION_DIRECT_DATABASE_URL` to production's DIRECT
-connection string instead, exported in the shell, in the `--from-env` file, or as `--database-url`.
+connection string instead, exported in the shell or in the `--from-env` file (`--database-url` also
+works, but is deprecated: F-143).
 The refusal names the variables it passed over. A satellite is unchanged: it already had to name
 `SATELLITE_DIRECT_DATABASE_URL` or `--database-url`.
 

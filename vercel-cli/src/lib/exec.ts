@@ -31,13 +31,17 @@ export interface RunResult {
  */
 export function run(command: string, args: string[], options: RunOptions): Promise<RunResult> {
   if (options.echo) info(dim(`  $ ${command} ${args.join(" ")}`));
+  // Only a .cmd/.bat shim needs the shell; a real executable never does.
+  const shell = process.platform === "win32" && /\.(cmd|bat)$/i.test(command);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    // Quoted, because the shell splits the command line at spaces: a corepack
+    // shim at C:\Program Files\nodejs\pnpm.cmd ran `C:\Program`, so `migrate`
+    // failed and `doctor` reported a working pnpm as missing (F-145).
+    const child = spawn(shell ? `"${command}"` : command, args, {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
-      // Only a .cmd/.bat shim needs the shell; a real executable never does.
-      shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
+      shell,
       stdio: options.capture ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"],
       windowsHide: true,
     });
@@ -89,7 +93,8 @@ export async function runOrThrow(
  * exactly that. The shim is a thin wrapper around `pnpm.cjs`, so when that file
  * can be found this runs it with `node` directly: no shell, no warning, and
  * arguments passed as a real vector. Falls back to the shim when the layout is
- * unfamiliar (a Homebrew or corepack install), which still works.
+ * unfamiliar (a Homebrew or corepack install), which still works: `run` quotes
+ * the shim's path for the shell, spaces and all (F-145).
  */
 export function pnpmCommand(): { command: string; prefix: string[] } {
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {

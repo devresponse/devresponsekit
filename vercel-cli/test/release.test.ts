@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { devNull, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
@@ -47,7 +47,8 @@ import {
   up,
 } from "../dist/commands/release.js";
 import { configFileFrom, configPath, requireConfig, useConfigFile } from "../dist/lib/config.js";
-import { applyMigrations, migrationEnv } from "../dist/lib/kit.js";
+import { applyMigrations } from "../dist/lib/kit.js";
+import { AUTH_MIGRATION_PLACEHOLDERS, migrationEnv } from "../dist/lib/migration-env.js";
 import { CliError, setQuiet } from "../dist/lib/log.js";
 import { withRollbackOptions } from "../dist/lib/rollback-options.js";
 import { verifyMigrationTarget } from "../dist/lib/migration-target.js";
@@ -1697,10 +1698,13 @@ test("F-48: every vercel child is spawned in one place, with the environment the
 // reaching a database. That is also a rejection, which is why each assertion
 // names the refusal it expects.
 
-/** Runs `fn` with these variables in the shell, then puts the shell back. */
-async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+/** Runs `fn` with these variables in the shell (`undefined` removes one), then puts the shell back. */
+async function withEnv<T>(vars: Record<string, string | undefined>, fn: () => Promise<T>): Promise<T> {
   const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
-  Object.assign(process.env, vars);
+  for (const [key, value] of Object.entries(vars)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   try {
     return await fn();
   } finally {
@@ -4349,4 +4353,353 @@ test("F-51: `deploy --yes` of a satellite that publishes a key, and of a kit tha
   } finally {
     globalThis.fetch = offline;
   }
+});
+
+/* ================================================================== */
+/*  F-137: `up` refuses what the deploy preflight refuses              */
+/* ================================================================== */
+
+/**
+ * A fake Vercel API for the REAL env:sync inside `up`: `listing` as project
+ * `projectId`'s environment, and the project itself with `aliases`, which a
+ * satellite's issuer check reads. Every public value in these listings is
+ * plain, so nothing is read back, and anything else (a write included)
+ * throws.
+ */
+function fakeEnvironment(
+  projectId: string,
+  listing: { key: string; type: string; value?: string; target?: string[] }[],
+  aliases: string[] = [],
+): void {
+  const json = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === `/v10/projects/${projectId}/env`) {
+      const envs = listing.map((e) => ({
+        id: `env_${e.key}`,
+        value: "",
+        target: ["production"],
+        securityIssues: [],
+        ...e,
+      }));
+      return json({ envs, pagination: { count: envs.length, next: null, prev: null } });
+    }
+    if (request.method === "GET" && url.pathname === `/v9/projects/${projectId}`) {
+      return json({
+        id: projectId,
+        name: projectId.replace(/^prj_/, ""),
+        accountId: "team_test",
+        alias: aliases.map((domain) => ({
+          domain,
+          environment: "production",
+          target: "PRODUCTION",
+          deployment: null,
+        })),
+        nodeVersion: "24.x",
+        defaultResourceConfig: { functionDefaultRegions: [] },
+        resourceConfig: { functionDefaultRegions: [] },
+        deploymentExpiration: {},
+      });
+    }
+    throw new Error(`an F-137 test made an unexpected call: ${request.method} ${url.pathname}`);
+  }) as typeof fetch;
+}
+
+/** The kit fixture's production, every variable of its contract set and right: env:sync has nothing to do. */
+const KIT_ENVIRONMENT = [
+  { key: "BETTER_AUTH_SECRET", type: "sensitive" },
+  { key: "BETTER_AUTH_URL", type: "plain", value: "https://demo.example.com" },
+  { key: "DATABASE_URL", type: "encrypted", value: "v2:ciphertext" },
+  { key: "SSO_HANDOFF_ISSUER", type: "plain", value: "https://demo.example.com" },
+  { key: "SSO_HANDOFF_AUDIENCE_PREFIX", type: "plain", value: "devresponse-app" },
+  { key: "SSO_HANDOFF_APPLICATION_ID", type: "plain", value: "portal" },
+  { key: "SSO_HANDOFF_PRIVATE_KEY", type: "sensitive" },
+  { key: "SSO_ALLOWED_ORIGIN_SUFFIXES", type: "plain", value: "example.com" },
+  { key: "CRON_SECRET", type: "sensitive" },
+  { key: "METRICS_TOKEN", type: "encrypted", value: "v2:ciphertext" },
+  { key: "NEXT_PUBLIC_APP_URL", type: "plain", value: "https://demo.example.com" },
+  { key: "NEXT_PUBLIC_PRODUCTION_HOST", type: "plain", value: "demo.example.com" },
+  { key: "NEXT_PUBLIC_APP_NAME", type: "plain", value: "Example" },
+];
+
+/** The recording fake, with the REAL env:sync in place of its own: `up`'s only preflight. */
+const withRealSync = (fake: ReturnType<typeof recordingRunner>) =>
+  ({
+    ...(fake.runner as object),
+    envSync: async (...received: Parameters<typeof releaseRunner.envSync>) => {
+      fake.calls.push("envSync");
+      return releaseRunner.envSync(...received);
+    },
+  }) as never;
+
+test("F-137: up refuses a project holding a variable no deployment may hold, --yes or not, before anything is linked", async () => {
+  // The finding's scenario: AUTH_RATE_LIMIT_DISABLED, added for an e2e run
+  // against a deployment. `deploy` stopped on it in env:check, but `up` skips
+  // env:check, so it synced, migrated, built and promoted a production that
+  // refuses to boot on it. Set for Preview only it counts too: Vercel runs
+  // Preview with NODE_ENV=production, so the kit refuses it there as well.
+  try {
+    for (const [name, target, options] of [
+      ["up", ["production"], { databaseUrl: PRODUCTION_DIRECT }],
+      ["up --yes", ["production"], { databaseUrl: PRODUCTION_DIRECT, yes: true }],
+      ["up, the key on Preview only", ["preview"], { databaseUrl: PRODUCTION_DIRECT }],
+    ] as const) {
+      fakeEnvironment("prj_test", [
+        ...KIT_ENVIRONMENT,
+        { key: "AUTH_RATE_LIMIT_DISABLED", type: "plain", value: "1", target: [...target] },
+      ]);
+      const fake = recordingRunner();
+      const shown = await captureOutput(() => up(fixture("kit").cliRoot, options, withRealSync(fake)));
+      assert.ok(
+        refusal(
+          /^1 variable\(s\) must never be set on a deployment\.$/,
+          /^Remove them from this project \(prj_test\) with `drk-deploy env:prune`, then re-run\. --yes does not skip this\.$/,
+        )(shown.error),
+        `${name}: ${String(shown.error)}\n${shown.out}`,
+      );
+      assert.match(shown.out, /Should not be set on a deployment/, name);
+      assert.match(
+        shown.out,
+        /AUTH_RATE_LIMIT_DISABLED\s+present — disables sign-in brute-force protection/,
+        name,
+      );
+      assert.deepEqual(
+        fake.calls,
+        [...GATE, "envSync"],
+        `${name}: nothing linked, pulled, migrated or promoted`,
+      );
+    }
+
+    // The same project without it: env:sync has nothing to do, and up goes on.
+    fakeEnvironment("prj_test", KIT_ENVIRONMENT);
+    const fake = recordingRunner();
+    const shipped = await captureOutput(() =>
+      up(fixture("kit").cliRoot, { databaseUrl: PRODUCTION_DIRECT }, withRealSync(fake)),
+    );
+    assert.equal(shipped.error, undefined, shipped.out);
+    assert.match(shipped.out, /Nothing to do — the environment already matches the contract\./);
+    assert.deepEqual(fake.calls, UP_ORDER);
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+test("F-137 / F-146: up refuses an Option C config whose cookie domain leaves out the kit's host, --yes or not", async () => {
+  // The satellite on app1.example.net, the kit on demo.example.com: a cookie
+  // domain of .example.net covers the satellite alone, so the kit's session
+  // cookie never reaches it. No variable can fix the config, and env:sync,
+  // `up`'s only preflight, now says so before it plans anything.
+  try {
+    for (const options of [{}, { yes: true }]) {
+      const { cliRoot, appRoot } = fixture("satellite");
+      const file = join(cliRoot, ".drk-deploy.json");
+      const config = JSON.parse(readFileSync(file, "utf8"));
+      config.satellite = { option: "shared", appRoot, issuerOrigin: ISSUER, cookieDomain: ".example.net" };
+      writeFileSync(file, JSON.stringify(config));
+      fakeEnvironment("prj_sat", [], ["app1.example.net"]);
+      const fake = recordingRunner();
+      const shown = await captureOutput(() => up(cliRoot, options, withRealSync(fake)));
+      const name = JSON.stringify(options);
+      assert.ok(
+        refusal(
+          /^1 problem\(s\) in the recorded configuration\.$/,
+          /^Correct them with `drk-deploy init`/,
+        )(shown.error),
+        `${name}: ${String(shown.error)}\n${shown.out}`,
+      );
+      assert.match(
+        shown.out,
+        /COOKIE_DOMAIN\s+wrong — the kit's host \(demo\.example\.com, the SSO issuer\) is not under `\.example\.net`/,
+        name,
+      );
+      assert.deepEqual(fake.calls, [...GATE, "envSync"], `${name}: nothing linked, pulled or promoted`);
+    }
+  } finally {
+    globalThis.fetch = offline;
+  }
+});
+
+/* ================================================================== */
+/*  F-141: Better Auth's migrations first, needing only the URL        */
+/* ================================================================== */
+
+/**
+ * Kit scripts that are a probe: each run appends which script it was
+ * (`auth` or `app`) and the listed variables as the child saw them, and the
+ * auth script exits with `authExit`.
+ */
+function probeKit(
+  keys: string[],
+  authExit = 0,
+): { kitRoot: string; runs: () => Record<string, string | null>[] } {
+  const { kitRoot } = fixture("kit", { migratableKit: true });
+  const out = join(kitRoot, "probe-out.jsonl");
+  writeFileSync(
+    join(kitRoot, "probe.cjs"),
+    `const keys = ${JSON.stringify(keys)};\n` +
+      `const seen = Object.fromEntries(keys.map((k) => [k, process.env[k] ?? null]));\n` +
+      `require("node:fs").appendFileSync(${JSON.stringify(out)}, JSON.stringify({ script: process.argv[2], ...seen }) + "\\n");\n` +
+      `process.exit(Number(process.argv[3] ?? 0));\n`,
+  );
+  writeFileSync(
+    join(kitRoot, "package.json"),
+    JSON.stringify({
+      scripts: {
+        "db:auth:migrate": `node probe.cjs auth ${authExit}`,
+        "db:app:migrate": "node probe.cjs app 0",
+      },
+    }),
+  );
+  const runs = () =>
+    existsSync(out)
+      ? readFileSync(out, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+      : [];
+  return { kitRoot, runs };
+}
+
+test("F-141: Better Auth's migrations run first, and a failed one leaves the application's unapplied", async () => {
+  // The order was app, then auth: on a CI run the auth step failed for want
+  // of the server environment AFTER the application's migrations had
+  // committed, so production held schema changes for a release that was
+  // never promoted.
+  const done = probeKit([]);
+  await applyMigrations({
+    kitRoot: done.kitRoot,
+    databaseUrl: PRODUCTION_DIRECT,
+    schema: "auth",
+    dryRun: false,
+  });
+  assert.deepEqual(
+    done.runs().map((run) => run.script),
+    ["auth", "app"],
+  );
+
+  const failed = probeKit([], 1);
+  await assert.rejects(
+    applyMigrations({
+      kitRoot: failed.kitRoot,
+      databaseUrl: PRODUCTION_DIRECT,
+      schema: "auth",
+      dryRun: false,
+    }),
+    refusal(
+      /^Better Auth migrations failed — the application migrations did not run, and production was NOT promoted \(exit 1\)$/,
+      /^$/,
+    ),
+  );
+  assert.deepEqual(
+    failed.runs().map((run) => run.script),
+    ["auth"],
+    "the application's migrations never ran",
+  );
+
+  const dry = await captureOutput(() =>
+    applyMigrations({ kitRoot: done.kitRoot, databaseUrl: PRODUCTION_DIRECT, schema: "auth", dryRun: true }),
+  );
+  assert.match(dry.out, /\[dry-run\] would run `pnpm db:auth:migrate` then `pnpm db:app:migrate`/);
+});
+
+test("F-141: the auth runner gets a placeholder for each required value the shell lacks, and no .env; the app runner neither", async () => {
+  // `@/lib/auth` validates the whole server environment when the auth runner
+  // imports it. The README's CI job exports only the token and the URL, so
+  // every run failed; on an operator's machine a stale kit `.env` could fail
+  // production's migrations. Neither shapes the Better Auth schema.
+  const placeholders = Object.keys(AUTH_MIGRATION_PLACEHOLDERS);
+  const keys = [
+    ...placeholders,
+    "DATABASE_URL",
+    "DB_SCHEMA",
+    "DB_MIGRATE_LOCALES",
+    "DOTENV_CONFIG_PATH",
+    "DOTENV_CONFIG_QUIET",
+    "DOTENV_PATH",
+  ];
+  const { kitRoot, runs } = probeKit(keys);
+  const elsewhere = join(kitRoot, "elsewhere.env");
+  const shell = {
+    // Unset, or exported empty as a CI step exports an undefined secret:
+    // either way a placeholder stands in.
+    ...Object.fromEntries(placeholders.map((key) => [key, undefined])),
+    BETTER_AUTH_SECRET: "",
+    // Set: kept, and validated by the kit as it always was.
+    BETTER_AUTH_URL: "https://app.example.com",
+    // The kit's own configuration still reaches both runners.
+    DB_MIGRATE_LOCALES: "0",
+    // A .env the shell names is not read by the auth runner either.
+    DOTENV_PATH: elsewhere,
+    DOTENV_CONFIG_PATH: undefined,
+    DOTENV_CONFIG_QUIET: undefined,
+  };
+  await withEnv(shell, () =>
+    applyMigrations({ kitRoot, databaseUrl: PRODUCTION_DIRECT, schema: "tenant_a", dryRun: false }),
+  );
+  const [auth, app] = runs();
+  assert.deepEqual(auth, {
+    script: "auth",
+    ...AUTH_MIGRATION_PLACEHOLDERS,
+    BETTER_AUTH_URL: "https://app.example.com",
+    DATABASE_URL: PRODUCTION_DIRECT,
+    DB_SCHEMA: "tenant_a",
+    DB_MIGRATE_LOCALES: "0",
+    DOTENV_CONFIG_PATH: devNull,
+    DOTENV_CONFIG_QUIET: "true",
+    DOTENV_PATH: null,
+  });
+  // The app runner is handed what it always was, and still reads the kit's
+  // `.env` for its own settings (DB_MIGRATE_LOCALES): it validates nothing.
+  assert.deepEqual(app, {
+    script: "app",
+    ...Object.fromEntries(placeholders.map((key) => [key, null])),
+    BETTER_AUTH_SECRET: "",
+    BETTER_AUTH_URL: "https://app.example.com",
+    DATABASE_URL: PRODUCTION_DIRECT,
+    DB_SCHEMA: "tenant_a",
+    DB_MIGRATE_LOCALES: "0",
+    DOTENV_CONFIG_PATH: null,
+    DOTENV_CONFIG_QUIET: null,
+    DOTENV_PATH: elsewhere,
+  });
+});
+
+test("F-141: beside the placeholder BETTER_AUTH_URL the auth runner gets no COOKIE_DOMAIN or API_JWT_ISSUER; beside a real one it does", async () => {
+  // The kit checks both against BETTER_AUTH_URL (the cookie domain must cover
+  // its host, the JWT issuer must equal it under MCP_ENABLED), so a real one
+  // in the shell failed the auth step against the placeholder. Neither shapes
+  // the Better Auth schema. The app runner is handed what it always was.
+  const keys = ["BETTER_AUTH_URL", "COOKIE_DOMAIN", "API_JWT_ISSUER"];
+  const shell = { COOKIE_DOMAIN: ".example.com", API_JWT_ISSUER: "https://kit.example.com" };
+  const migrateWith = async (vars: Record<string, string | undefined>) => {
+    const { kitRoot, runs } = probeKit(keys);
+    await withEnv(vars, () =>
+      applyMigrations({ kitRoot, databaseUrl: PRODUCTION_DIRECT, schema: "auth", dryRun: false }),
+    );
+    return runs();
+  };
+
+  for (const unsetUrl of [undefined, ""]) {
+    assert.deepEqual(
+      await migrateWith({ ...shell, BETTER_AUTH_URL: unsetUrl }),
+      [
+        {
+          script: "auth",
+          BETTER_AUTH_URL: AUTH_MIGRATION_PLACEHOLDERS.BETTER_AUTH_URL,
+          COOKIE_DOMAIN: null,
+          API_JWT_ISSUER: null,
+        },
+        { script: "app", ...shell, BETTER_AUTH_URL: unsetUrl ?? null },
+      ],
+      `BETTER_AUTH_URL=${JSON.stringify(unsetUrl)}`,
+    );
+  }
+
+  const kit = { ...shell, BETTER_AUTH_URL: "https://kit.example.com" };
+  assert.deepEqual(await migrateWith(kit), [
+    { script: "auth", ...kit },
+    { script: "app", ...kit },
+  ]);
 });

@@ -534,6 +534,53 @@ test("the satellite config problems are the ones that look fine until a user hit
   assert.ok(satelliteConfigProblems(wrongCookie as never).some((p) => p.what === "COOKIE_DOMAIN"));
 });
 
+test("F-146: an Option C cookie domain must cover the kit's host as well as this app's", () => {
+  // The satellite on app1.example.com, the kit on kit.other.com. `.example.com`
+  // covers the satellite, so every check used to pass, but the kit issues the
+  // session cookie and cannot scope it to a domain it is not under: the
+  // shared session silently never works.
+  const kitElsewhere = contextFor(
+    satelliteConfig({
+      satellite: { option: "shared", issuerOrigin: "https://kit.other.com", cookieDomain: ".example.com" },
+    }),
+  );
+  const problems = satelliteConfigProblems(kitElsewhere as never);
+  assert.equal(problems.length, 1, JSON.stringify(problems));
+  assert.equal(problems[0].what, "COOKIE_DOMAIN");
+  assert.match(
+    problems[0].why,
+    /^the kit's host \(kit\.other\.com, the SSO issuer\) is not under `\.example\.com`/,
+  );
+  assert.match(problems[0].hint ?? "", /set the same COOKIE_DOMAIN on the kit/);
+
+  // env:sync's rule for the value it writes, and for one already stored.
+  const spec = envSpecsFor(kitElsewhere as never).find((s) => s.key === "COOKIE_DOMAIN");
+  assert.match(
+    spec?.validate?.(".example.com") ?? "",
+    /^the kit's host \(kit\.other\.com, the SSO issuer\) does not sit under `\.example\.com`/,
+  );
+
+  // Both hosts under it: nothing, from either check. A port is not part of
+  // the host a cookie is scoped to.
+  for (const issuerOrigin of [
+    "https://demo.example.com",
+    "https://example.com",
+    "https://demo.example.com:8443",
+  ]) {
+    const both = contextFor(
+      satelliteConfig({ satellite: { option: "shared", issuerOrigin, cookieDomain: ".example.com" } }),
+    );
+    assert.deepEqual(satelliteConfigProblems(both as never), [], issuerOrigin);
+    assert.equal(
+      envSpecsFor(both as never)
+        .find((s) => s.key === "COOKIE_DOMAIN")
+        ?.validate?.(".example.com"),
+      null,
+      issuerOrigin,
+    );
+  }
+});
+
 test("every satellite spec carries the text an operator actually reads", () => {
   for (const option of ["standalone", "handoff", "shared"]) {
     const profile = resolveProfile(

@@ -182,6 +182,12 @@ export async function envSync(
   // satellite's environment over the issuer's, and the refusal below would
   // name the issuer's own signing key as a stray one (F-50).
   await refuseIssuerProject(client, config, context.profile, existing);
+  // F-137: `up` runs no env:check, so this sync is its preflight, and the
+  // refusals env:check makes that no variable this sync writes could fix are
+  // made here too, before anything is planned: a satellite config that is
+  // wrong in itself, and a variable no deployment may hold. `--yes` skips
+  // neither: it confirms a rotation, it does not waive the contract.
+  assertNoConfigProblems(context);
   const supplied = loadSuppliedValues(
     specs,
     options.fromEnv,
@@ -196,7 +202,9 @@ export async function envSync(
   // property in place while printing a page of green ticks. Deliberately
   // target-blind (F-46): a refused key set for ANY target is reported, which
   // over-reports and so fails safe.
-  assertNoRefusedVariables(refused, new Set(existing.map((e) => e.key)), supplied, config.projectId);
+  const present = new Set(existing.map((e) => e.key));
+  assertNoRefusedVariables(refused, present, supplied, config.projectId);
+  assertNoForbiddenVariables(present, config.projectId);
 
   // The public values Vercel lists as ciphertext, read back so the ones left
   // alone below are verified rather than assumed. Nothing is left alone
@@ -285,6 +293,12 @@ export async function envSync(
     }
 
     if (!value) {
+      // A `recommended` key with no value is listed below, not refused
+      // (F-137). The app boots without one, and its default suits some
+      // deployments (a kit with no satellites needs no origin allow-list, a
+      // satellite on a kit in `auth` no DB_SCHEMA), so env:check counts it
+      // only as a problem `deploy --yes` deploys past. Refusing here would
+      // make `up` demand --yes, which also arms the rollback.
       if (spec.level === "required") {
         // `noValueHint` exists for the values that are deliberately not
         // generatable — an Option C satellite's shared session secret, its
@@ -704,6 +718,46 @@ function assertNoRefusedVariables(
   // the prune this names removes a satellite's stray key, not the kit's.
   throw new CliError(`${offenders.length} variable(s) must not exist on this deployment target.`, {
     hint: `Remove them from this satellite's project (${projectId}) with \`${commandFor("env:prune")}\`, and drop them from any --from-env file or shell environment, then re-run.`,
+  });
+}
+
+/**
+ * Refuses to sync while a variable no deployment may hold (FORBIDDEN_ON_VERCEL)
+ * is set on the project, for any target (F-137).
+ *
+ * env:check reports them and `deploy` stops on them, but `up` skips env:check,
+ * so AUTH_RATE_LIMIT_DISABLED, added for an e2e run against a deployment,
+ * went through `up` to a production that refuses to boot on it and served
+ * 500s until someone read the probe. Only the project is looked at: this
+ * command writes none of them (none is in a spec), so a --from-env file that
+ * also feeds the seed (SEED_ADMIN_PASSWORD) is harmless here.
+ */
+function assertNoForbiddenVariables(present: ReadonlySet<string>, projectId: string): void {
+  const offenders = FORBIDDEN_ON_VERCEL.filter((f) => present.has(f.key));
+  if (offenders.length === 0) return;
+
+  heading("Should not be set on a deployment");
+  for (const f of offenders) field(f.key, `${red("present")} — ${f.why}`, 32);
+  info("");
+  // Reached on a satellite only once its project is shown not to be the
+  // issuer's (F-50), and on the kit env:prune removes these and nothing else.
+  throw new CliError(`${offenders.length} variable(s) must never be set on a deployment.`, {
+    hint: `Remove them from this project (${projectId}) with \`${commandFor("env:prune")}\`, then re-run. --yes does not skip this.`,
+  });
+}
+
+/**
+ * Refuses to sync a satellite whose recorded config is wrong in itself
+ * (F-137): the mistakes `satelliteConfigProblems` names, which env:check
+ * reports and no variable can fix, such as an issuer that is this app's own
+ * origin or a cookie domain one of the two hosts does not sit under.
+ */
+function assertNoConfigProblems(context: DeploymentContext): void {
+  const problems = reportConfigProblems(context);
+  if (problems === 0) return;
+  info("");
+  throw new CliError(`${problems} problem(s) in the recorded configuration.`, {
+    hint: `Correct them with \`${commandFor("init")}\` (each line above names the fix), then re-run.`,
   });
 }
 

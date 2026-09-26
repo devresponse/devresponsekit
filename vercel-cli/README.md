@@ -122,6 +122,14 @@ the DIRECT connection string of the same database, is what migrations run agains
 locally and never written to Vercel. `DATABASE_URL` is never used for migrations, from the file or
 the shell (F-47). Anything the CLI _can_ generate (signing keys, cron tokens) it generates.
 
+`up` seeds nothing. It applies both of the kit's migrators, but neither creates the baseline
+organisation, roles or first administrator, so a production on a fresh database has no one who can
+sign in until the kit's
+[one-time database bootstrap](../docs/deployment.md#2-one-time-database-bootstrap) has run against
+it. Run it once, after the first `up` onto a new database (for example one `db:provision` created).
+It is idempotent: the migrations `up` has already applied are a no-op there, and only the seed does
+anything (F-141).
+
 A team and a personal account are set up the same way. Pass `--team <team_id>` only for a project
 a team owns. Either way `init` reads the project's owner from the project itself (its `accountId`:
 the team's id, or the personal account's own id) and records it as `orgId`. The Vercel CLI takes its
@@ -390,9 +398,25 @@ account-wide token and every secret exported in the shell. A shell's value no lo
 production's in the build either: a `NEXT_PUBLIC_APP_URL=http://localhost:3000` exported for local
 work used to be inlined into the production client bundle. A variable the build needs belongs on the
 project, where `vercel pull` finds it. The one exception is the migration runners
-(`pnpm db:app:migrate` and `db:auth:migrate`). They are the kit's own scripts and read its
+(`pnpm db:auth:migrate` and `db:app:migrate`). They are the kit's own scripts and read its
 configuration from the shell (`DB_MIGRATE_LOCALES`, and the server environment the auth runner
 validates when it loads), so they keep the shell's variables, but never the token.
+
+**Better Auth's migrations run first, and need only the migration URL (F-141).** `db:auth:migrate`
+runs before `db:app:migrate`, the order `pnpm db:provision` and the kit's deploy workflow use. It
+used to run second, so an auth step that failed left the application's migrations applied under a
+build that was never promoted. The auth runner imports the kit's `@/lib/auth` for Better Auth's
+options, and that import validates the kit's whole server environment, which used to have to come
+from your shell or the kit checkout's `.env`. Now each required value the shell does not set
+(`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `SSO_HANDOFF_ISSUER`, `SSO_HANDOFF_AUDIENCE_PREFIX` and
+`SSO_HANDOFF_APPLICATION_ID`) is handed to it as the CI-only placeholder the kit's deploy workflow
+uses. None of them shapes the Better Auth schema, and none reaches the database. A value your shell
+does set is kept, and checked as before, but for one case: when `BETTER_AUTH_URL` is the placeholder,
+the step also leaves out your shell's `COOKIE_DOMAIN` and `API_JWT_ISSUER`. The kit checks both
+against `BETTER_AUTH_URL`, so a real one could only fail next to the placeholder, and neither shapes
+the schema either. That step does not read the kit checkout's `.env` at all
+(dotenv is pointed at the null device), so a stale local file can no longer fail production's
+migrations. The application runner still reads it, for `DB_MIGRATE_LOCALES`.
 
 **Re-running does not rotate anything.** `env:sync` leaves existing variables alone. Overwriting
 takes `--force`, and rotating a secret additionally takes `--yes`, because rotating
@@ -451,6 +475,20 @@ it to have the derived value written, or correct the config with `drk-deploy ini
 origin written to Development alone is fine.) Each problem names its fix: remove the entry
 (`vercel env rm <KEY> production`, or in the dashboard), then run `env:sync`, which re-creates it as
 plain. `env:sync --force` is not the fix: it regenerates every secret it may.
+
+**`up` refuses what the `deploy` preflight refuses (F-137).** `up` runs no `env:check`, so `env:sync`
+is its preflight. Before it plans anything it now also refuses the two things `env:check` reports
+that no variable it writes could fix: a variable that must never be set on a deployment
+(`FORBIDDEN_ON_VERCEL` in `src/lib/env-spec.ts`: `AUTH_RATE_LIMIT_DISABLED`, `SKIP_ENV_VALIDATION`,
+the `SEED_*` variables, `DEV_SEED_PASSWORD`, `DATABASE_TEST_URL`, `SSO_VERIFY_*` and `TEST_SHARDS`),
+set on the project for any target, and, for a satellite, a recorded config that is wrong in itself
+(such as an issuer that is its own origin, or a cookie domain one of the two hosts does not sit
+under). `--yes` does not skip either: it confirms, it does not waive the contract. `up` used to promote past both, and the kit refuses to boot on
+`AUTH_RATE_LIMIT_DISABLED` in production. `env:prune` removes the variables. One supplied with
+`--from-env` or the shell is not refused, because `env:sync` never writes one. A missing
+_recommended_ variable (`SSO_ALLOWED_ORIGIN_SUFFIXES`, a satellite's `DB_SCHEMA`) is still listed,
+not refused: the app boots without it, and `env:check` counts it only as a problem `deploy --yes`
+deploys past.
 
 **The deployment is verified, not assumed.** After promoting, the CLI probes `/api/health`,
 `/api/health/ready` and a deliberately-wrong sign-in. A 401 on that last one means auth is alive;
@@ -535,8 +573,11 @@ the kit's under another database name.
 which works only when both hold the identical `BETTER_AUTH_SECRET`. Generating a fresh one would
 not fail loudly — the app boots, serves, and passes every probe, while users bounce between signed
 in and signed out. So it must be supplied, and the error says why. Conversely `COOKIE_DOMAIN` is
-required for Option C (and validated against the deployment's own host) and refused for A and B,
-where a parent-domain cookie would shadow the host cookie.
+required for Option C and refused for A and B, where a parent-domain cookie would shadow the host
+cookie. For Option C both hosts must sit under it: the deployment's own, and the kit's (the
+`--issuer` host). Only the deployment's own used to be checked, so a cookie domain that left out the
+kit passed every check while the kit's session cookie never reached the app (F-146). The kit must
+set the same `COOKIE_DOMAIN`; this CLI cannot read the kit's value from a satellite's config.
 
 **A consumer is probed as a consumer.** A satellite publishes no keys, so asking it for one would
 report failure forever. Its health is `/api/health`, `/api/health/ready`, `/api/sso/consume`
@@ -625,6 +666,26 @@ delete it — nothing reads it.
 ---
 
 ## Upgrading
+
+### F-137, F-141 and F-146: `up` refuses more, and migrates auth first
+
+1. **`env:sync`, and so `up`, refuses a project that holds a variable no deployment may hold**
+   ([above](#what-it-does-about-the-things-that-go-wrong)), set for any target, `--yes` or not. Run
+   `drk-deploy env:check` to see whether yours holds one (it lists them under "Should not be set on a
+   deployment"), and `drk-deploy env:prune --yes` to remove them. `deploy` already stopped on them
+   without `--yes`.
+2. **`env:sync` and `up` refuse a satellite config that `env:check` reports as wrong.** That now
+   includes an Option C cookie domain the kit's host does not sit under (F-146). Such a config never
+   worked: the kit's session cookie did not reach the app. Record a domain both hosts sit under with
+   `drk-deploy --config <its file> init --cookie-domain .<domain>`, and set the same `COOKIE_DOMAIN` on
+   the kit.
+3. **Better Auth's migrations run before the application's, and without the kit checkout's `.env`**
+   (F-141). A required value your shell exports is still what the auth runner validates; one it does
+   not is a CI-only placeholder, where it used to come from the `.env`. Without a `BETTER_AUTH_URL`
+   in your shell, that step also ignores its `COOKIE_DOMAIN` and `API_JWT_ISSUER`, which the kit
+   checks against that URL. Nothing else changes: the
+   Better Auth schema does not depend on any of them, and the application runner still reads the
+   `.env`.
 
 ### F-138: secrets are stored sensitive, and kept off Development
 
@@ -862,12 +923,27 @@ Set `VERCEL_TOKEN` and it takes precedence over any saved credential:
 ```yaml
 - run: pnpm install && pnpm build
   working-directory: vercel-cli
+- run: node dist/index.js init --project my-app --domain app.example.com --yes
+  working-directory: vercel-cli
+  env:
+    VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 - run: node dist/index.js up --yes
   working-directory: vercel-cli
   env:
     VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     PRODUCTION_DIRECT_DATABASE_URL: ${{ secrets.PRODUCTION_DIRECT_DATABASE_URL }}
 ```
+
+The `init` step records the deployment in the job (add `--team <team_id>` for a team's project).
+`.drk-deploy.json` is gitignored machine-local state, so a fresh checkout has none, and without the
+step every command stops at "This deployment is not configured yet". The migrations need nothing
+more than the two variables above: the Better Auth runner gets CI-only placeholders for the server
+environment it validates, and the job has no `.env` to read
+([F-141](#f-137-f-141-and-f-146-up-refuses-more-and-migrates-auth-first)). Before F-141 the recipe
+had no `init` step, so it stopped at the missing config, and past that every run failed in
+`db:auth:migrate`, after the application's migrations had been applied. The job seeds nothing: a
+fresh database needs the kit's
+[one-time bootstrap](../docs/deployment.md#2-one-time-database-bootstrap) once, by hand.
 
 Under `--yes` a build that fails its post-deploy probe is rolled back to the deployment production
 served before the job (F-51). The step fails either way. Exit 4 means production was restored, and
@@ -905,7 +981,9 @@ rules — the migration policy, the config sanity checks — so they can be asse
 kit's `src/lib/env.ts` or a satellite's changes. `src/lib/env-presence.ts` decides what counts as set
 for a target and what is wrong with a stored value; every command that asks goes through it.
 `src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/lib/exec.ts` spawns every child process and
-decides what each inherits from the shell (F-139). `src/lib/vercel-project.ts` builds the
+decides what each inherits from the shell (F-139). `src/lib/migration-env.ts` builds what the kit's
+migration runners are handed on top of that (F-47, F-141), and imports nothing of the CLI's, so the
+kit's own suite can hold it to the kit's schema. `src/lib/vercel-project.ts` builds the
 environment of every `vercel` child and checks the checkout's `.vercel/project.json` (F-48):
 nothing else sets `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`, and `test/release.test.ts` asserts that
 from the source. It also holds the rule that a satellite config never acts on the SSO issuer's own
@@ -960,15 +1038,24 @@ called for real, and both of its refusals are asserted: a satellite on the kit's
 satellite that would inherit the kit's `PRODUCTION_DIRECT_DATABASE_URL` from the shell. Each refuses
 before anything connects or spawns. `applyMigrations` runs for real, against kit scripts that
 are a probe, to assert that the runner is handed the URL and the schema and none of the shell's
-`PG*` fallbacks, and keeps the rest of the shell but never the Vercel token (F-139). The real
-`build`, `link`, `pull`, `deploy` and rollback steps run against a stub Vercel CLI that records its
+`PG*` fallbacks, and keeps the rest of the shell but never the Vercel token (F-139). The same probes
+show that the Better Auth runner goes first, that its failure leaves the application's unrun, and
+that it alone gets a placeholder for each required value the shell lacks and no `.env`, and none of the
+shell's `COOKIE_DOMAIN` or `API_JWT_ISSUER` beside the placeholder `BETTER_AUTH_URL` (F-141). The
+real `build`, `link`, `pull`, `deploy` and rollback steps run against a stub Vercel CLI that records its
 environment, to show that `build` is the one without the token and that none of them sees a secret
 exported in the shell. A source check pins the migration runners as the only children that keep
-the shell.
+the shell. `up` also runs with the real `env:sync` against a fake API, to show that a variable no
+deployment may hold, or a satellite config that is wrong in itself, stops it before anything is
+linked, `--yes` or not (F-137).
 
 The required keys in `src/lib/env-spec.ts` are checked against the kit's own schema by the kit's
 suite, not this one (`tests/unit/drk-deploy-required-keys.test.ts`, which can import both): a key
 `src/lib/env.ts` starts requiring fails the kit's required checks until the spec requires it too.
+The auth migration's placeholders are held to the same schema by
+`tests/unit/drk-deploy-auth-migration-env.test.ts`, which also shows that a shell's `COOKIE_DOMAIN`
+and `API_JWT_ISSUER` no longer fail that step beside the placeholder URL, and runs the kit's own
+`dotenv/config` under that step's environment to show it reads nothing from a checkout's `.env`.
 
 ### CI
 

@@ -18,9 +18,11 @@ Governance for AI agents that self-register through the Model Context Protocol g
 ## Key elements
 - Explanatory header: "AI agents that self-registered through the Model Context Protocol. Approve pending agents, set their scope ceiling, or revoke access."
 - Empty state on the demo: "No MCP agents have registered yet."
+- Once agents register, each row shows the agent's name and client ID, its organization, when it registered and from which IP, its status and its scopes.
+- For administrators who can act, a reminder above the table: an agent's name is whatever its registrant typed, so confirm the client ID, organization and source IP with the agent's operator before approving.
 
 ## Actions available
-- Once agents register: approve pending agents, set the maximum scopes they may hold, revoke access — *nothing to exercise on the demo.*
+- Once agents register: approve pending agents, set the maximum scopes they may hold, revoke access — *nothing to exercise on the demo.* Set scopes and Revoke open in-app dialogs that name the agent.
 
 ## Navigation
 - Reached from: admin sidebar (APIs → Agents).

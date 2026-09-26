@@ -49,8 +49,9 @@ describe("ApplicationSwitcherSheet", () => {
     renderWithIntl(<ApplicationSwitcherSheet locale="en" />);
     await user.click(screen.getByRole("button", { name: /switch application/i }));
 
+    // F-118: announced, since the list fails after the sheet opened.
     await waitFor(() => {
-      expect(screen.getByText(/permission/i)).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(/permission/i);
     });
     // A retry button is offered (§25 skeleton + retry pattern).
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();

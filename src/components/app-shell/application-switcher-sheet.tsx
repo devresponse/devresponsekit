@@ -100,7 +100,8 @@ export function ApplicationSwitcherSheet({ locale }: ApplicationSwitcherSheetPro
         {loading || items === null ? (
           errorStatus ? (
             <div className="space-y-2">
-              <p className="text-destructive text-sm">
+              {/* F-118: announced, since the list fails after the sheet opened. */}
+              <p className="text-destructive text-sm" role="alert">
                 {errorStatus === 401 || errorStatus === 403
                   ? t("unauthorized")
                   : tCommon("unexpectedError")}

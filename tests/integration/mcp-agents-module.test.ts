@@ -52,7 +52,9 @@ import {
   listMcpAgents,
   mcpAgentStatusFilter,
   parseMcpAgentListQuery,
+  withMcpAgentProvenance,
 } from "@/lib/mcp/agents.server";
+import type { McpAgentSummary } from "@/lib/mcp/agents";
 
 const access = { permissions: [] } as never;
 const q = (qs = "") => parseMcpAgentListQuery(new URLSearchParams(qs));
@@ -173,5 +175,56 @@ describe("agents.server", () => {
     dbState.takeFirst = { numUpdatedRows: 0 };
     expect(await activateMcpAgent("u1")).toBe(false);
     expect(dbState.calls.filter((c) => c === "updateTable")).toHaveLength(1);
+  });
+
+  describe("withMcpAgentProvenance (I-03)", () => {
+    const summary = (clientRowId: string) =>
+      ({ clientRowId, name: clientRowId }) as McpAgentSummary;
+
+    it("adds the org and registration IP by client row id, null where the scoped query found none", async () => {
+      dbState.execute = [
+        {
+          clientRowId: "c1",
+          organizationName: "Acme",
+          organizationSlug: "acme",
+          registeredIp: "203.0.113.7",
+        },
+      ];
+      const rows = await withMcpAgentProvenance(access, [summary("c1"), summary("c2")]);
+      expect(rows).toEqual([
+        {
+          clientRowId: "c1",
+          name: "c1",
+          organizationName: "Acme",
+          organizationSlug: "acme",
+          registeredIp: "203.0.113.7",
+        },
+        {
+          clientRowId: "c2",
+          name: "c2",
+          organizationName: null,
+          organizationSlug: null,
+          registeredIp: null,
+        },
+      ]);
+      // Re-scoped by the same base query as the list, then narrowed to the page.
+      expect(dbState.calls).toEqual(expect.arrayContaining(["innerJoin", "leftJoin", "where"]));
+    });
+
+    it("queries nothing for an empty page or a caller with no org scope", async () => {
+      expect(await withMcpAgentProvenance(access, [])).toEqual([]);
+      expect(dbState.calls).toEqual([]);
+      resolveOrgScope.mockReturnValue(null);
+      expect(await withMcpAgentProvenance(access, [summary("c1")])).toEqual([
+        {
+          clientRowId: "c1",
+          name: "c1",
+          organizationName: null,
+          organizationSlug: null,
+          registeredIp: null,
+        },
+      ]);
+      expect(dbState.calls).toEqual([]);
+    });
   });
 });

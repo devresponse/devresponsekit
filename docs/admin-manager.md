@@ -1586,6 +1586,20 @@ at `/app/administrator/agents`; nav-gated on `admin.clients.read`.
 | `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority — and, for a bearer caller, against the calling credential's own scopes, so a narrowly-scoped key or agent token can never lift a ceiling beyond itself (`422` on over-grant). A lowered ceiling also binds the agent's outstanding tokens from their next request (F-71); `admin.mcp_agent.scopes_updated` |
 | `DELETE /mcp-agents/[id]` | `admin.clients.manage` | Revoke the client (idempotent — leaves the service account for the audit trail); `admin.mcp_agent.revoked` |
 
+**Approving an agent (I-03).** A registration is unauthenticated and its
+`client_name` is whatever the caller typed, so a look-alike ("Acme CI Agent"
+beside the real one) is cheap. Each console row therefore also shows the
+organization the agent is bound to, when it registered, and the source IP of
+that registration: the trusted-hop address on its `mcp.client.registered` audit
+row, or "source IP not recorded" when no row has one (for example after audit
+retention). Before approving, confirm the server-issued client id, the
+organization and the source with the agent's operator instead of going by the
+name. Names are shown with control and bidi characters removed, as
+`POST /api/mcp/register` has required since F-21, so a row stored before that
+cannot render as another name either. Revoke and Set scopes open the shared
+in-app dialogs, which name the agent they act on. These fields are console-only;
+the `GET /mcp-agents` item shape is unchanged.
+
 Scopes are a **ceiling**, not a grant: per the `permission ∩ scope` invariant a
 granted scope is usable only where the service account _also_ holds the matching
 permission — assign the service user a role via §8.1 (Users) to make it

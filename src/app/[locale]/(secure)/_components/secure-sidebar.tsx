@@ -82,7 +82,8 @@ export function SecureSidebar({
   } else if (errorStatus !== null) {
     body = (
       <div className="space-y-2 p-3 text-sm">
-        <p className="text-destructive">
+        {/* F-118: announced, since the menu fails after the page has loaded. */}
+        <p className="text-destructive" role="alert">
           {errorStatus === 401 || errorStatus === 403 ? t("unauthorized") : t("menuLoadError")}
         </p>
         <button

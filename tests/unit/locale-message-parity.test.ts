@@ -122,6 +122,26 @@ const LOCALES: Array<[string, unknown]> = [
 ];
 const ITEM_GROUPS = ["stats", "features", "why", "stack"] as const;
 
+/**
+ * Messages that legitimately read the same in English and in EVERY other
+ * locale (F-118): product and brand names, a URL, and the "IP" / "ID"
+ * abbreviations. Anything else identical to `en` in all of them was copied,
+ * not translated.
+ */
+const SAME_IN_EVERY_LOCALE = new Set([
+  ...Array.from({ length: 8 }, (_, i) => `public.stack.items[${i}]`), // Next.js, React, ...
+  "public.cta.repoLabel", // github.com/devresponse/devresponsekit
+  "public.footer.githubLink", // GitHub
+  "administrator.orgs.authPolicy.methodGoogle",
+  "administrator.orgs.authPolicy.methodMicrosoft",
+  "administrator.orgs.authPolicy.methodGithub",
+  "administrator.users.sessions.ipAddress", // IP
+  "account.security.ipAddress", // IP
+  "administrator.enterpriseApps.columns.id", // ID
+  "administrator.enterpriseApps.fields.id", // ID
+  "account.dateFormats.iso8601", // ISO 8601 (2026-06-13)
+]);
+
 describe("locale message parity (vs en)", () => {
   const enPaths = leafPaths(en).sort();
 
@@ -160,6 +180,34 @@ describe("locale message parity (vs en)", () => {
       }))
       .filter((row) => row.en.join(",") !== row.locale.join(","));
     expect({ locale: name, drift }).toEqual({ locale: name, drift: [] });
+  });
+
+  // F-118: the MCP agents console shipped its strings copied verbatim from
+  // `en` into all seven catalogs, and the checks above cannot see that: the
+  // keys exist and the placeholders match. A message that is the same as
+  // English in ONE locale is often a real cognate ("Actions" in French), but
+  // one that is the same in EVERY locale was not translated. Messages with no
+  // letters (the landing page's "958" and "80+") have nothing to translate.
+  it("leaves no message untranslated in every other locale", () => {
+    const localeValues = LOCALES.map(([, messages]) => leafValues(messages));
+    const untranslated = Object.entries(enValues)
+      .filter(([, value]) => typeof value === "string" && /\p{L}/u.test(value))
+      .filter(([path, value]) => localeValues.every((values) => values[path] === value))
+      .map(([path]) => path)
+      .filter((path) => !SAME_IN_EVERY_LOCALE.has(path));
+    expect(untranslated).toEqual([]);
+  });
+
+  it("allows only messages that really are the same in every locale", () => {
+    // A stale allow-list entry would silently exempt a key that is later
+    // turned into real copy; each entry must still exist and still match.
+    const localeValues = LOCALES.map(([, messages]) => leafValues(messages));
+    const stale = [...SAME_IN_EVERY_LOCALE].filter(
+      (path) =>
+        typeof enValues[path] !== "string" ||
+        !localeValues.every((values) => values[path] === enValues[path]),
+    );
+    expect(stale).toEqual([]);
   });
 
   it("extracts ICU argument names without mistaking plural option bodies for arguments", () => {

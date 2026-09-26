@@ -6,6 +6,7 @@ import {
   listMcpAgents,
   mcpAgentStatusFilter,
   parseMcpAgentListQuery,
+  withMcpAgentProvenance,
 } from "@/lib/mcp/agents.server";
 import { AgentsTable } from "./_agents-table";
 import { AgentsToolbar } from "./_agents-toolbar";
@@ -57,6 +58,8 @@ export default async function AdministratorAgentsPage({
     throw err;
   }
   const result = await listMcpAgents(guard.access, query);
+  // I-03: the org and registration source beside each registrant-chosen name.
+  const agents = await withMcpAgentProvenance(guard.access, result.items);
   const activeStatus = mcpAgentStatusFilter(query);
 
   const t = await getTranslations({ locale, namespace: "administrator.agents" });
@@ -74,7 +77,7 @@ export default async function AdministratorAgentsPage({
         pageSize={result.pageSize}
         total={result.total}
       />
-      <AgentsTable agents={result.items} canManage={canManage} filtered={activeStatus !== null} />
+      <AgentsTable agents={agents} canManage={canManage} filtered={activeStatus !== null} />
     </section>
   );
 }

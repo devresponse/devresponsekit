@@ -14,6 +14,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/flexsidebar";
+import { installMatchMedia } from "../helpers/media-query";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
 /**
@@ -81,13 +82,33 @@ describe("FlexSidebar", () => {
     const { container } = renderSidebar();
     const column = container.querySelector("[data-state] > div")!;
     const cls = column.getAttribute("class") ?? "";
-    expect(cls).toContain("w-[--sidebar-width]");
-    expect(cls).toContain("group-data-[collapsible=icon]:w-[--sidebar-width-icon]");
+    // Tailwind 4 spelling (F-119): `w-[--x]` compiled to invalid CSS.
+    // tests/unit/tailwind-v4-classes.test.ts pins what these compile to.
+    const tokens = cls.split(/\s+/);
+    expect(tokens).toContain("w-(--sidebar-width)");
+    expect(tokens).toContain("group-data-[collapsible=icon]:w-(--sidebar-width-icon)");
+    // Capped at the host: `.sh-left` is exactly --sidebar-width wide but
+    // draws a 1px border inside it, so an uncapped column overflows it.
+    expect(tokens).toContain("max-w-full");
     expect(cls).toContain("transition-[width]");
     // Exactly one child under the group wrapper — the original's
     // bg-transparent gap/spacer div must be gone.
     const root = container.querySelector("[data-state]")!;
     expect(root.children).toHaveLength(1);
+  });
+
+  it("caps the static (collapsible=none) column at its host the same way (F-119)", () => {
+    const { container } = renderWithIntl(
+      <SidebarProvider>
+        <FlexSidebar collapsible="none">
+          <SidebarContent />
+        </FlexSidebar>
+      </SidebarProvider>,
+    );
+    const column = container.querySelector(".bg-sidebar")!;
+    expect(column.getAttribute("class")!.split(/\s+/)).toEqual(
+      expect.arrayContaining(["w-(--sidebar-width)", "max-w-full"]),
+    );
   });
 
   it("persists state under a custom cookie name for nested providers", async () => {
@@ -154,5 +175,27 @@ describe("FlexSidebar", () => {
     expect(screen.getByRole("link", { name: "Sub here" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Sub other" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("link", { name: "Elsewhere" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("sizes the phone drawer from --sidebar-width-mobile, not its content (F-119)", async () => {
+    // The drawer's width was `w-[--sidebar-width]`, which Tailwind 4 compiles
+    // to invalid CSS; the browser dropped it, and the fixed-position sheet
+    // shrank to its longest label. It must now carry the v4 form, which
+    // cn() keeps over the sheet's own `w-3/4`, and the 18rem mobile token.
+    const restore = installMatchMedia({ width: 375 });
+    try {
+      renderSidebar();
+      await userEvent.setup().click(screen.getByRole("button", { name: /toggle sidebar/i }));
+      const drawer = await screen.findByRole("dialog");
+      const tokens = (drawer.getAttribute("class") ?? "").split(/\s+/);
+      expect(tokens).toContain("w-(--sidebar-width)");
+      expect(tokens).not.toContain("w-3/4");
+      expect(tokens.filter((t) => t.includes("[--"))).toEqual([]);
+      expect(drawer.style.getPropertyValue("--sidebar-width")).toBe(
+        "var(--sidebar-width-mobile, 18rem)",
+      );
+    } finally {
+      restore();
+    }
   });
 });

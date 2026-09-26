@@ -105,7 +105,13 @@ const FlexSidebar = React.forwardRef<
         */}
         <div
           className={cn(
-            "relative flex h-full w-[--sidebar-width] flex-col transition-[width] duration-200 ease-linear",
+            // `max-w-full` (F-119): the width tokens now compile (the v3
+            // `w-[--x]` spelling emitted invalid CSS, so the column simply
+            // filled its host). The shell's `.sh-left` track is exactly
+            // --sidebar-width but draws a 1px border inside it, so an
+            // uncapped column would overflow it by that pixel and give the
+            // region a horizontal scrollbar.
+            "relative flex h-full w-(--sidebar-width) max-w-full flex-col transition-[width] duration-200 ease-linear",
             // Offcanvas collapses the column itself to zero width; clip
             // the content while it slides shut (the fixed original
             // slides off-screen instead).
@@ -113,7 +119,7 @@ const FlexSidebar = React.forwardRef<
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
-              : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
+              : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
             className,
           )}
           {...props}

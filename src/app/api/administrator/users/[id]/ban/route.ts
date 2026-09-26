@@ -5,12 +5,15 @@ import {
   actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
+  LAST_SUPERADMIN_ERROR,
+  LAST_SUPERADMIN_STATUS,
 } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { guardAppliedBan } from "@/lib/admin/user-actions.server";
 import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
@@ -30,7 +33,8 @@ type RouteContext = { params: Promise<{ id: string }> };
  * justification is the kind of action ops will want to look up later);
  * `expiresInSeconds` is optional — omit for indefinite per Better Auth
  * semantics. The reason is persisted in the audit row's `reason` column
- * (docs/admin-manager.md §12).
+ * (docs/admin-manager.md §12). A ban that would leave no superadmin able to
+ * sign in is undone and answered 409 `last_superadmin` (REVOKE-2, F-56).
  *
  * Caller MUST hold `admin.users.ban`.
  */
@@ -106,6 +110,27 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       metadata: { message: err instanceof Error ? err.message : "unknown" },
     });
     return adminErrorResponse("auth_ban_failed", 502, request, { cause: err });
+  }
+
+  // REVOKE-2 (F-56): banning the last superadmin who can still sign in would
+  // leave nobody able to administer the platform, and the rank guard above
+  // exempts a SUPERADMIN actor outright. The check follows the ban (see
+  // `guardAppliedBan`), which undoes it and audits the refusal.
+  const guarded = await guardAppliedBan(target, {
+    request,
+    actorBetterAuthUserId: guard.betterAuthUserId,
+    organizationId: actingOrganizationId(guard.access),
+    requestId: guard.requestId,
+  });
+  if (!guarded.ok) {
+    return guarded.error === LAST_SUPERADMIN_ERROR
+      ? adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+          requestId: guard.requestId,
+        })
+      : adminErrorResponse("internal_error", 500, request, {
+          cause: guarded.cause,
+          requestId: guard.requestId,
+        });
   }
 
   await auditUserAction("admin.user.banned", "success", {

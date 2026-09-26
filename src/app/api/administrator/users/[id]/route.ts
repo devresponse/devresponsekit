@@ -15,7 +15,7 @@ import {
   actingOrganizationId,
   requiresSuperadminForSharedTarget,
   resolveOrgScope,
-  membershipCascadeStripsLastGlobalSuperuser,
+  banStripsLastGlobalSuperuser,
   LastSuperadminCascadeError,
   LAST_SUPERADMIN_ERROR,
   LAST_SUPERADMIN_EVENT,
@@ -312,8 +312,11 @@ export const DELETE = withAdminRoute(async function DELETE(
       // inside the transaction that performs the cascade so it shares the row
       // locks that serialize it against the four revocation routes; the throw
       // rolls the transaction back and the saga's compensating unban (below)
-      // undoes the Better Auth ban we already applied.
-      if (await membershipCascadeStripsLastGlobalSuperuser(target.appUserId, trx)) {
+      // undoes the Better Auth ban we already applied. F-56: a grant counts
+      // only for an account that can sign in, so the check is measured as the
+      // ban applied in step 1 — read as a membership cascade, the ban would
+      // already have emptied the set and nothing would be refused.
+      if (await banStripsLastGlobalSuperuser(target, trx)) {
         throw new LastSuperadminCascadeError();
       }
 

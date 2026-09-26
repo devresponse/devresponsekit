@@ -5,6 +5,7 @@ import { db } from "@/db/database";
 import {
   scopeOrganizationId,
   userHasMembershipOutsideOrg,
+  activeGlobalSuperuserGrants,
   membershipCascadeStripsLastGlobalSuperuser,
   LAST_SUPERADMIN_EVENT,
   LAST_SUPERADMIN_REASON,
@@ -125,7 +126,45 @@ export async function performAdminStatusChange(
 
   try {
     await db.transaction().execute(async (trx) => {
-      // review #44: CLAIM the row before touching anything else. This UPDATE
+      // REVOKE-2 (review #444): decide before writing anything whether this
+      // transition would leave the platform with no global superuser at all.
+      // Only a move AWAY from `active` can destroy a grant — `approve` /
+      // `reactivate` can only ever ADD one, so they are never refused, exactly
+      // as the membership PATCH route treats a status of `active`.
+      //
+      // The affected (user, org) pairs are read INSIDE the transaction and with
+      // the SAME org confinement the membership UPDATE below applies, so the
+      // predicate measures precisely the rows that are about to move: every org
+      // for an account-global actor, only the actor's own org for an org admin
+      // (AUTHZ-1). The grant read takes its row locks here, inside this
+      // transaction, so a status change racing one of the four revocation
+      // routes cannot have both sides conclude that the other's superadmin
+      // survives.
+      //
+      // Lock order (F-56): this read runs FIRST, ahead of the claim below and
+      // of every write, for a grant too. Per grant it locks the assignment,
+      // membership, org and role-permission rows and only then the holder's
+      // `app_users` and Better Auth `user` rows, and every other guarded path
+      // reads before its transaction writes. Claiming or writing the target's
+      // `app_users` row first, as this function did before F-56 added that
+      // relation to the lock list, inverted the order: a concurrent guarded
+      // read holding the target's membership (or the shared org row) waited on
+      // that row, this function then waited on the read's rows, and Postgres
+      // killed one side as a deadlock (a 500). An approve or reactivate is
+      // never refused but writes the same two rows, so it takes the same locks
+      // first.
+      let stripsLast = false;
+      if (input.newMembershipStatus === "active") {
+        await activeGlobalSuperuserGrants(trx); // for its locks only
+      } else {
+        stripsLast = await membershipCascadeStripsLastGlobalSuperuser(
+          target.id,
+          trx,
+          input.scope.kind === "org" ? input.scope.organizationId : undefined,
+        );
+      }
+
+      // review #44: CLAIM the row before writing anything. This UPDATE
       // is the compare-and-swap — the expected version rides in its WHERE, so
       // Postgres, not application code, decides the winner:
       //
@@ -147,28 +186,9 @@ export async function performAdminStatusChange(
         if (Number(claim.numUpdatedRows ?? 0) === 0) throw new PreconditionFailedError();
       }
 
-      // REVOKE-2 (review #444): refuse before writing anything when this
-      // transition would leave the platform with no global superuser at all.
-      // Only a move AWAY from `active` can destroy a grant — `approve` /
-      // `reactivate` can only ever ADD one, so they are never gated, exactly as
-      // the membership PATCH route treats a status of `active`.
-      //
-      // The affected (user, org) pairs are read INSIDE the transaction and with
-      // the SAME org confinement the membership UPDATE below applies, so the
-      // predicate measures precisely the rows that are about to move: every org
-      // for an account-global actor, only the actor's own org for an org admin
-      // (AUTHZ-1). `wouldStripLastGlobalSuperuser` then takes its row locks on
-      // the grant relations here, inside this transaction, so a status change
-      // racing one of the four revocation routes cannot have both sides
-      // conclude that the other's superadmin survives.
-      if (input.newMembershipStatus !== "active") {
-        const stripsLast = await membershipCascadeStripsLastGlobalSuperuser(
-          target.id,
-          trx,
-          input.scope.kind === "org" ? input.scope.organizationId : undefined,
-        );
-        if (stripsLast) throw new LastSuperadminError();
-      }
+      // The refusal waits for the claim, so a stale version still answers 412
+      // ahead of a 409.
+      if (stripsLast) throw new LastSuperadminError();
 
       // Account-global status:
       //  - SUPERADMIN, or a single-org user managed by their org admin → the

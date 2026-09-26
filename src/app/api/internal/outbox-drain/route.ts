@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isCronAuthorized } from "@/lib/cron-auth.server";
+import { isOperatorBearerAuthorized } from "@/lib/operator-bearer.server";
 import { drainOutbox } from "@/lib/email/outbox-worker.server";
 import { getServerEnv } from "@/lib/env";
 import { logServerError, logger } from "@/lib/observability/logger.server";
@@ -22,7 +22,7 @@ export const maxDuration = 60;
  * `pending` rows `sendAppEmail` left for retry (see `outbox-worker.server.ts`).
  *
  * It is NOT user-facing: it is gated by the shared `CRON_SECRET` bearer
- * (see `src/lib/cron-auth.server.ts` — constant-time compare, FAILS CLOSED
+ * (see `src/lib/operator-bearer.server.ts` — constant-time compare, FAILS CLOSED
  * when the secret is unset, ≥32 chars enforced at boot; review #92). Vercel
  * Cron attaches `Authorization: Bearer <CRON_SECRET>` automatically when that
  * env var is set.
@@ -32,7 +32,7 @@ function noStore(body: unknown, status: number): NextResponse {
 }
 
 export async function GET(request: Request): Promise<NextResponse> {
-  if (!isCronAuthorized(request, getServerEnv().CRON_SECRET)) {
+  if (!isOperatorBearerAuthorized(request, getServerEnv().CRON_SECRET)) {
     return noStore({ error: "unauthorized" }, 401);
   }
 

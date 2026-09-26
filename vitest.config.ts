@@ -94,15 +94,19 @@ const routeFloors = Object.fromEntries(
  *   of each test file, so we don't pay the DOM cost for pure helpers.
  * - Coverage thresholds enforce the §29.2 gates.
  *
- * JSX is transformed natively by esbuild (the default Vitest pipeline);
- * we intentionally do not depend on @vitejs/plugin-react because Vitest 4
- * is locked to Vite 7 while plugin-react@6 requires Vite 8. Native esbuild
- * is sufficient for Testing Library coverage of our components.
+ * JSX is transformed by Vite 8's built-in Oxc transform with the automatic
+ * runtime; no @vitejs/plugin-react is needed for Testing Library coverage of
+ * our components. The option is `oxc` (I-12): Vitest injects its own `oxc`
+ * options, so Vite 8 ignored the old `esbuild: { jsx: "automatic" }` block
+ * with a "Both esbuild and oxc options were set" warning. The runtime is set
+ * under `oxc` instead, which Vitest's `oxc.target` deep-merges with, and is
+ * pinned here rather than inherited from tsconfig's `jsx`, which `next dev`
+ * and `next build` write for Next's own needs.
  */
 export default defineConfig({
   plugins: [tsconfigPaths()],
-  esbuild: {
-    jsx: "automatic",
+  oxc: {
+    jsx: { runtime: "automatic" },
   },
   resolve: {
     alias: {

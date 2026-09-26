@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isCronAuthorized } from "@/lib/cron-auth.server";
+import { isOperatorBearerAuthorized } from "@/lib/operator-bearer.server";
 import { getServerEnv } from "@/lib/env";
 import { expireStalePendingMcpRegistrations } from "@/lib/mcp/reaper.server";
 import { logServerError, logger } from "@/lib/observability/logger.server";
@@ -22,7 +22,7 @@ export const maxDuration = 60;
  * route daily; elsewhere run `pnpm mcp:reap` from a cron / CronJob.
  *
  * NOT user-facing: gated by the shared `CRON_SECRET` bearer
- * (`src/lib/cron-auth.server.ts` — constant-time, FAILS CLOSED when unset).
+ * (`src/lib/operator-bearer.server.ts` — constant-time, FAILS CLOSED when unset).
  * It runs even while registration is dark: leftovers from an earlier open
  * window are exactly what it exists to clean up.
  */
@@ -32,7 +32,7 @@ function noStore(body: unknown, status: number): NextResponse {
 
 export async function GET(request: Request): Promise<NextResponse> {
   const env = getServerEnv();
-  if (!isCronAuthorized(request, env.CRON_SECRET)) {
+  if (!isOperatorBearerAuthorized(request, env.CRON_SECRET)) {
     return noStore({ error: "unauthorized" }, 401);
   }
 

@@ -14,8 +14,12 @@
  * Later phases make `getBrand()` request-scoped (resolved by host/organization)
  * and DB-backed; call sites do not change shape — only the resolver behind them.
  * This module is intentionally free of `server-only` and Node APIs so it is
- * importable from both Server and Client Components (`NEXT_PUBLIC_APP_NAME` is
- * inlined into client bundles, so the resolved name matches on both sides).
+ * importable from both Server and Client Components. But `NEXT_PUBLIC_APP_NAME`
+ * reaches a client bundle only when it is set during `next build`, and the
+ * Docker image deliberately does not bake it (F-108): there the server reads
+ * it at run time, while a Client Component would render the build's default.
+ * Every consumer today is a Server Component; pass the name down as a prop
+ * rather than resolving it on the client.
  */
 
 /** Full display name, e.g. "DevResponse Enterprise". */

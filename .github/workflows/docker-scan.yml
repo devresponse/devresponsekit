@@ -10,6 +10,16 @@ name: Docker image scan
 # CVEs are excluded (`--ignore-unfixed`); accepted, non-runtime-reachable
 # findings are documented in `.trivyignore`. A weekly run catches newly
 # disclosed CVEs in an otherwise-unchanged image.
+#
+# F-108: the same job then BOOTS the image it scanned. A module or native file
+# the standalone trace dropped builds, scans clean, and answers 500 only once
+# the server runs, and until F-108 nothing ever ran this image. The smoke run
+# migrates and seeds a throwaway Postgres from the Dockerfile's `builder`
+# stage, starts the image against it, and probes readiness, sign-in and an
+# authenticated docs page. It lives in this job, not one of its own, so that
+# it is part of the required `trivy` check: a new job would be a new check
+# that branch protection does not list, and its red run would not block a
+# merge. Keep the job NAME `trivy`.
 
 on:
   push:
@@ -31,15 +41,54 @@ jobs:
   trivy:
     name: trivy
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
       security-events: write
+
+    # F-108: the database the smoke run boots the image against. Same image
+    # and throwaway credentials as ci.yml's jobs.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: devresponse
+          POSTGRES_PASSWORD: devresponse
+          POSTGRES_DB: devresponse_db
+        ports:
+          - 5444:5432
+        options: >-
+          --health-cmd "pg_isready -U devresponse -d devresponse_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # CI-only values, the same as ci.yml's; no secret is involved. The
+    # containers below get them by name (`-e NAME` copies this environment's
+    # value), and `docker build` sees none of them.
+    env:
+      DATABASE_URL: postgresql://devresponse:devresponse@localhost:5444/devresponse_db
+      DB_SCHEMA: auth
+      BETTER_AUTH_SECRET: ci-only-better-auth-secret-not-for-production
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SSO_HANDOFF_ISSUER: http://localhost:3000
+      SSO_HANDOFF_AUDIENCE_PREFIX: devresponse-app
+      SSO_HANDOFF_APPLICATION_ID: portal
+      SEED_ADMIN_EMAIL: admin@devresponse.local
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # F-108: one public value goes in as a build argument, so the smoke run
+      # can prove the builder hands it to `next build`. Inert on its own: with
+      # no DSN, Sentry stays off. The second build tags the `builder` stage,
+      # the migrator below, from the first build's cache; it needs the same
+      # argument or it misses that cache and builds again.
       - name: Build production image
-        run: docker build -t devresponsekit:scan .
+        run: |
+          docker build --build-arg NEXT_PUBLIC_SENTRY_RELEASE="$GITHUB_SHA" -t devresponsekit:scan .
+          docker build --build-arg NEXT_PUBLIC_SENTRY_RELEASE="$GITHUB_SHA" --target builder -t devresponsekit:builder .
 
       # Publish findings to the Security tab (best-effort; the hard gate is the
       # next step). Mirrors the gitleaks job's SARIF flow.
@@ -74,3 +123,70 @@ jobs:
           trivyignores: .trivyignore
           exit-code: "1"
           format: table
+
+      # F-108: the runtime image has no migration tooling (docs/docker.md §4);
+      # the `builder` stage has all of it. Auth first, then the app, the order
+      # deploy.yml and drk-deploy apply them in (F-141); the seed creates the
+      # admin the docs probe signs in as. Its password is minted per run: the
+      # documented seed default may appear only where .gitleaks.toml allows it,
+      # and nothing here needs a known value.
+      - name: Migrate and seed the smoke database
+        run: |
+          SEED_ADMIN_PASSWORD=$(openssl rand -hex 24)
+          echo "::add-mask::$SEED_ADMIN_PASSWORD"
+          echo "SEED_ADMIN_PASSWORD=$SEED_ADMIN_PASSWORD" >> "$GITHUB_ENV"
+          export SEED_ADMIN_PASSWORD
+          docker run --rm --network host \
+            -e DATABASE_URL -e DB_SCHEMA -e BETTER_AUTH_SECRET -e BETTER_AUTH_URL \
+            -e SSO_HANDOFF_ISSUER -e SSO_HANDOFF_AUDIENCE_PREFIX -e SSO_HANDOFF_APPLICATION_ID \
+            -e SEED_ADMIN_EMAIL -e SEED_ADMIN_PASSWORD \
+            devresponsekit:builder \
+            sh -c "pnpm db:auth:migrate && pnpm db:app:migrate && pnpm db:seed"
+
+      # The scanned image itself, with only runtime configuration, as
+      # docs/docker.md §5 runs it. Ready means the environment parsed, the
+      # database answered and both schemas are current (F-26).
+      - name: Start the image
+        run: |
+          docker run -d --name smoke --network host \
+            -e DATABASE_URL -e DB_SCHEMA -e BETTER_AUTH_SECRET -e BETTER_AUTH_URL \
+            -e NEXT_PUBLIC_APP_URL -e SSO_HANDOFF_ISSUER -e SSO_HANDOFF_AUDIENCE_PREFIX \
+            -e SSO_HANDOFF_APPLICATION_ID \
+            devresponsekit:scan
+          timeout 90 bash -c 'until curl -fsS http://localhost:3000/api/health/ready > /dev/null; do sleep 2; done'
+
+      - name: Smoke-test the running image
+        run: |
+          base=http://localhost:3000
+          curl -fsS -o /dev/null "$base/api/health"
+          curl -fsS -o /dev/null "$base/en/sign-in"
+          # A wrong password must get Better Auth's own refusal, not a 500 from
+          # a module the trace dropped.
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "origin: $BETTER_AUTH_URL" -H 'content-type: application/json' \
+            -d "{\"email\":\"$SEED_ADMIN_EMAIL\",\"password\":\"not-the-password\"}" \
+            "$base/api/auth/sign-in/email")
+          if [ "$status" != 401 ]; then
+            echo "::error::a wrong password answered $status, expected 401"
+            exit 1
+          fi
+          curl -fsS -o /dev/null -c "$RUNNER_TEMP/cookies" \
+            -H "origin: $BETTER_AUTH_URL" -H 'content-type: application/json' \
+            -d "{\"email\":\"$SEED_ADMIN_EMAIL\",\"password\":\"$SEED_ADMIN_PASSWORD\"}" \
+            "$base/api/auth/sign-in/email"
+          # docs/docker.md holds ```bash blocks, which the viewer highlights
+          # through Shiki: its grammars load dynamically, where a trace gap hides.
+          curl -fsS -o "$RUNNER_TEMP/doc.html" -b "$RUNNER_TEMP/cookies" "$base/en/app/docs/docker"
+          if ! grep -q 'data-language="bash"' "$RUNNER_TEMP/doc.html"; then
+            echo "::error::the docs page rendered no highlighted code block"
+            exit 1
+          fi
+          # The build argument reached the browser bundle (F-108).
+          if ! docker exec smoke grep -rqF "$GITHUB_SHA" /app/.next/static; then
+            echo "::error::NEXT_PUBLIC_SENTRY_RELEASE is not in the browser bundle"
+            exit 1
+          fi
+
+      - name: Container log
+        if: failure()
+        run: docker logs smoke || true

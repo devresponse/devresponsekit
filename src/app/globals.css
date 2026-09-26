@@ -6,6 +6,17 @@
 @plugin "@tailwindcss/typography";
 
 /*
+ * Enter/exit animations for the Radix overlays (F-119): `animate-in`,
+ * `fade-in-0`, `zoom-in-95`, `slide-in-from-top-2` and friends on dialogs,
+ * sheets, menus, popovers and tooltips. The shadcn primitives were written
+ * for this v3 plugin; Tailwind 4 loads no plugin it is not told about here,
+ * so until it was registered those classes compiled to nothing and every
+ * overlay appeared and vanished without its transition. The reduced-motion
+ * guard is under "Motion" below.
+ */
+@plugin "tailwindcss-animate";
+
+/*
  * Design tokens for the enterprise shell.
  *
  * Architecture (in preparation for global theme changes):
@@ -218,6 +229,65 @@
       "Helvetica Neue",
       Arial,
       sans-serif;
+  }
+}
+
+/*
+ * Motion.
+ *
+ * The accordion and one-time-code caret animations shadcn's v3
+ * `tailwind.config` used to define (F-119). Tailwind 4 reads animations from
+ * the theme, so without these `animate-accordion-down` / `-up` and
+ * `animate-caret-blink` compiled to nothing.
+ */
+@theme {
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-caret-blink: caret-blink 1.25s ease-out infinite;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes caret-blink {
+    0%,
+    70%,
+    100% {
+      opacity: 1;
+    }
+    20%,
+    50% {
+      opacity: 0;
+    }
+  }
+}
+
+/*
+ * Reduced motion (F-119): the overlay enter/exit and accordion animations
+ * are decoration, so an OS "reduce motion" setting turns them off. `none`
+ * rather than a zero duration, because Radix Presence reads
+ * `animation-name`: on `none` a closing overlay unmounts at once instead of
+ * waiting for an `animationend`. The rule is unlayered, so it outranks every
+ * utility (they live in `@layer utilities`) whatever the variant's
+ * specificity, without `!important`.
+ */
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-in"],
+  [class*="animate-out"],
+  [class*="animate-accordion-"] {
+    animation: none;
   }
 }
 

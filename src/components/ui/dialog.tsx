@@ -53,7 +53,14 @@ const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] fixed top-[50%] left-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border p-6 shadow-lg duration-200 sm:rounded-lg",
+          // No slide-in/out offsets (F-119). The v3 `slide-*-left-1/2` /
+          // `-top-[48%]` pair restated the centring translate inside the
+          // keyframe's `transform`; Tailwind 4 centres with the separate
+          // `translate` property, which ADDS to that transform, so the
+          // dialog would fly in from the top-left. Fade + zoom only. The
+          // duration is state-prefixed so it outranks the 150ms that the
+          // `data-[state=*]:animate-in/out` rules set after a bare class.
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border p-6 shadow-lg data-[state=closed]:duration-200 data-[state=open]:duration-200 sm:rounded-lg",
           className,
         )}
         {...props}

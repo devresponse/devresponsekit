@@ -15,6 +15,11 @@ import { parseFrontmatter } from "@/lib/docs/frontmatter";
  *    image in a shipped doc can never load. The renderer degrades it to a
  *    visible external link, but the right place to notice is authoring time —
  *    this test is that lint.
+ *  - F-87 / I-18: at runtime a bad frontmatter field is dropped (or, for an
+ *    access field, hides the doc) and two files on one slug are both
+ *    withheld, each with only a log line to show for it. For shipped content
+ *    CI is the place to notice, so every file must parse clean and own its
+ *    slug.
  */
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const APP_DIR = path.join(REPO_ROOT, "src", "app");
@@ -124,6 +129,41 @@ describe("documentation content hygiene", () => {
       "`visibility: internal`",
     ];
     expect(parseFrontmatter(proseOnly.join("\n")).data.visibility).toBe("public");
+  });
+
+  it("ships only frontmatter that parses with no issues (F-87)", () => {
+    const offenders: string[] = [];
+    for (const dir of CONTENT_DIRS) {
+      for (const file of walk(path.join(REPO_ROOT, dir), isMarkdown)) {
+        const { issues } = parseFrontmatter(readFileSync(file, "utf8"));
+        if (issues.length > 0) {
+          const rel = path.relative(REPO_ROOT, file).split(path.sep).join("/");
+          offenders.push(`${rel}: ${issues.join("; ")}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      "Fix these fields: the viewer ignores a bad field and hides a doc whose " +
+        "`visibility`/`requires` it cannot read.",
+    ).toEqual([]);
+  });
+
+  it("ships one file per slug in docs/ and help/ (I-18)", () => {
+    const offenders: string[] = [];
+    for (const dir of CONTENT_DIRS) {
+      const root = path.join(REPO_ROOT, dir);
+      const bySlug = new Map<string, string[]>();
+      for (const file of walk(root, isMarkdown)) {
+        const rel = path.relative(root, file).split(path.sep).join("/");
+        const slug = rel.replace(/\.mdx?$/i, "");
+        bySlug.set(slug, [...(bySlug.get(slug) ?? []), rel]);
+      }
+      for (const [slug, files] of bySlug) {
+        if (files.length > 1) offenders.push(`${dir}/${slug}: ${files.join(", ")}`);
+      }
+    }
+    expect(offenders, "Neither file is listed or served: keep one of them.").toEqual([]);
   });
 
   it("ships no remote image references in docs/ or help/ (review #215)", () => {

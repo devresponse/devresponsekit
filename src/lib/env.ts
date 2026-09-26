@@ -550,15 +550,10 @@ const serverEnvSchema = z
      * `DOCS_SOURCE` / `DOCS_INTERNAL_VISIBLE` with the docs space.
      */
     HELP_ROOT: z.string().optional(),
-    /**
-     * Gates full MDX evaluation (executing author JS). OFF by default and
-     * only ever safe for the trusted filesystem source — never for an
-     * external/CMS source. Phase 1 ignores it (MDX renders as Markdown).
-     */
-    DOCS_ALLOW_MDX_EXECUTION: z
-      .string()
-      .optional()
-      .transform((value) => value === "1" || value === "true"),
+    // I-06: DOCS_ALLOW_MDX_EXECUTION is gone. It was parsed here and read
+    // nowhere, while the docs described it as the switch for executing author
+    // MDX; nothing in the viewer can execute document code, whatever it held.
+    // A deployment that still sets it is unaffected (unknown keys are ignored).
     /** When false, documents marked `visibility: internal` never render. */
     DOCS_INTERNAL_VISIBLE: z
       .string()

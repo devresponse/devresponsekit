@@ -1,7 +1,7 @@
 import "server-only";
 import { getServerEnv } from "@/lib/env";
 import { getDocumentSource } from "./source/index.server";
-import type { DocCatalogEntry, DocSpace } from "./source/types";
+import type { DocCatalogEntry, DocContent, DocSpace } from "./source/types";
 
 /**
  * Catalog assembly: caching, visibility filtering, and grouping.
@@ -115,4 +115,30 @@ export async function canViewDoc(
   const match = entries.find((entry) => entry.slug === slug);
   if (!match) return false;
   return filterCatalogForViewer([match], permissions, internalVisible).length === 1;
+}
+
+/**
+ * The document at `slug` when the viewer may see it, else `null`: the one
+ * read the doc pages make.
+ *
+ * I-18: `canViewDoc` answers from the cached catalog, so on its own it
+ * authorizes a catalog ENTRY, not the file `getDocument` then reads: a doc
+ * flipped to `internal` on a writable root rendered its new body for up to
+ * the cache TTL, and a second file on the same slug could stand in for the
+ * listed one. So the entry actually read is authorized again, and the doc is
+ * returned only when both agree. `canViewDoc` stays first as the cheap
+ * pre-check: a hidden doc is never read at all.
+ */
+export async function getViewableDocument(
+  slug: string,
+  permissions: ReadonlyArray<string>,
+  space: DocSpace = "docs",
+): Promise<DocContent | null> {
+  if (!(await canViewDoc(slug, permissions, space))) return null;
+  const doc = await getDocumentSource(space).getDocument(slug);
+  if (!doc) return null;
+  const internalVisible = getServerEnv().DOCS_INTERNAL_VISIBLE;
+  return filterCatalogForViewer([doc.entry], permissions, internalVisible).length === 1
+    ? doc
+    : null;
 }

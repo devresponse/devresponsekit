@@ -8,7 +8,7 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 /**
  * In-memory token-bucket rate limiter for AUTHENTICATED per-actor limits
  * (Administrator mutations, bulk, export, the v1 per-credential buckets, a
- * signed-in SSO launch).
+ * signed-in SSO launch, the docs and help image route).
  *
  * Why an in-memory bucket?
  *   - The plan explicitly calls for an in-memory token bucket as the v1
@@ -332,6 +332,19 @@ export const DEFAULT_SSO_LAUNCH_LIMIT: RateLimitOptions = {
 export const DEFAULT_SSO_CONSUME_LIMIT: RateLimitOptions = {
   capacity: 30,
   refillPerSec: 1,
+};
+
+/**
+ * The docs and help viewers' image route (`/api/<space>/asset`), per session
+ * user (I-06). A read, unlike the tiers above, so looser: the densest page
+ * embeds four images and the browser keeps each for five minutes, so a person
+ * reading at any pace stays far inside it, while a loop pulling files off the
+ * disk is held to two a second. Its design document promised this limit; the
+ * route never had one.
+ */
+export const DEFAULT_DOCS_ASSET_LIMIT: RateLimitOptions = {
+  capacity: 60,
+  refillPerSec: 2,
 };
 
 /**

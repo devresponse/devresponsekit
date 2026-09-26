@@ -212,6 +212,7 @@ The token endpoint, MCP registration and the CSP sink keep their budgets next to
 | `DEFAULT_ADMIN_BULK_LIMIT` | 6 | 0.2 / sec | Bulk operations |
 | `DEFAULT_ADMIN_EXPORT_LIMIT` | 3 | 0.05 / sec | CSV export |
 | `DEFAULT_SSO_LAUNCH_LIMIT` (signed in) | 30 | 1 / sec | `GET /api/sso/launch` with a session, per session user id |
+| `DEFAULT_DOCS_ASSET_LIMIT` | 60 | 2 / sec | `GET /api/docs/asset/*` and `GET /api/help/asset/*`, per session user id (I-06) |
 
 This per-actor store is in-process (resets on restart, per instance under horizontal scaling) — see [Deployment §5](./deployment.md#5-operations--gotchas) for the topology statement.
 

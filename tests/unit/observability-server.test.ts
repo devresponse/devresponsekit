@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * adminErrorResponse / problemResponse paths exercise the real wiring.
  */
 const captureException = vi.hoisted(() => vi.fn(() => "evt-1" as string));
-vi.mock("@sentry/nextjs", () => ({ captureException }));
+const isEnabled = vi.hoisted(() => vi.fn(() => true));
+vi.mock("@sentry/nextjs", () => ({ captureException, isEnabled }));
 
 import { captureServerError } from "@/lib/observability/server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -18,6 +19,8 @@ import { problemResponse } from "@/lib/api-auth/problem";
 beforeEach(() => {
   captureException.mockReset();
   captureException.mockReturnValue("evt-1");
+  isEnabled.mockReset();
+  isEnabled.mockReturnValue(true);
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -31,9 +34,13 @@ describe("captureServerError", () => {
     });
   });
 
-  it("returns null when Sentry is disabled (empty event id)", () => {
-    captureException.mockReturnValue("");
+  it("returns null when Sentry is disabled, though the SDK still hands back an id", () => {
+    // The real SDK's captureException returns a fresh random id with no client
+    // and with `enabled: false` alike (F-110, tests/component/route-error.test.tsx),
+    // so that id names no event anywhere.
+    isEnabled.mockReturnValue(false);
     expect(captureServerError(new Error("x"))).toBeNull();
+    expect(captureException).toHaveBeenCalledTimes(1);
   });
 
   it("omits tags that are absent", () => {

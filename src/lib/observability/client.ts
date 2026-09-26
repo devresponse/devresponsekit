@@ -27,10 +27,14 @@ function tagsFor(context?: ClientErrorContext): Record<string, string> {
 
 /**
  * Captures a client-side exception with correlation tags. Returns the
- * Sentry event id (usable as a user-facing "Support ID"), or `null`.
+ * Sentry event id (usable as a user-facing "Support ID"), or `null` when
+ * Sentry is disabled. `captureException` returns a fresh random id even then
+ * (no client, or `enabled: false` without a DSN), and that id names no event
+ * anywhere, so it is dropped here (F-110).
  */
 export function captureClientError(error: unknown, context?: ClientErrorContext): string | null {
-  return Sentry.captureException(error, { tags: tagsFor(context) }) || null;
+  const eventId = Sentry.captureException(error, { tags: tagsFor(context) });
+  return Sentry.isEnabled() ? eventId || null : null;
 }
 
 /** Reads the correlation id off a Response (header is the source of truth). */

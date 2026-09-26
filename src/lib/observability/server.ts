@@ -36,8 +36,11 @@ function tagsFor(context?: ServerErrorContext): Record<string, string> {
 
 /**
  * Captures a server-side exception with correlation tags. Returns the Sentry
- * event id, or `null` when Sentry is disabled or capture failed.
+ * event id, or `null` when Sentry is disabled. `captureException` returns a
+ * fresh random id even then, which names no event anywhere (F-110; see
+ * `captureClientError`).
  */
 export function captureServerError(error: unknown, context?: ServerErrorContext): string | null {
-  return Sentry.captureException(error, { tags: tagsFor(context) }) || null;
+  const eventId = Sentry.captureException(error, { tags: tagsFor(context) });
+  return Sentry.isEnabled() ? eventId || null : null;
 }

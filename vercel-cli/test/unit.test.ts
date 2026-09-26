@@ -1011,7 +1011,7 @@ import { delimiter } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 
 import { ask, login } from "../dist/commands/init.js";
-import { pnpmCommand, run } from "../dist/lib/exec.js";
+import { inheritedEnv, pnpmCommand, run } from "../dist/lib/exec.js";
 
 /**
  * Stands in for the Vercel API, refusing every token so that nothing is
@@ -1150,3 +1150,125 @@ test(
     }
   },
 );
+
+/* ================================================================== */
+/*  F-139: a child inherits an allow-list, never the Vercel token      */
+/* ================================================================== */
+
+/** A shell as an operator's (or a CI job's) looks: the toolchain's variables, and secrets. */
+const OPERATOR_SHELL: Record<string, string> = {
+  // What the toolchain needs, in the spellings Windows and POSIX shells use.
+  Path: "C:\tools;C:\Windows\system32",
+  SystemRoot: "C:\Windows",
+  ComSpec: "C:\Windows\system32\cmd.exe",
+  PATHEXT: ".COM;.EXE;.BAT;.CMD",
+  USERPROFILE: "C:\Users\operator",
+  LOCALAPPDATA: "C:\Users\operator\AppData\Local",
+  HOME: "/home/operator",
+  TEMP: "C:\Temp",
+  https_proxy: "http://proxy.internal:8080",
+  NODE_EXTRA_CA_CERTS: "/etc/ssl/corporate.pem",
+  NODE_OPTIONS: "--max-old-space-size=8192",
+  npm_config_registry: "https://registry.internal/",
+  COREPACK_HOME: "/home/operator/.cache/node/corepack",
+  LC_ALL: "C.UTF-8",
+  XDG_CACHE_HOME: "/home/operator/.cache",
+  CI: "true",
+  // What no child may inherit: credentials, and values that would beat
+  // production's own in a build.
+  VERCEL_TOKEN: "vcp_account-wide-token",
+  vercel_token: "vcp_lower-case-token",
+  NOW_TOKEN: "legacy-token",
+  PRODUCTION_DIRECT_DATABASE_URL: "postgresql://owner:prod-password@ep-prod.neon.tech/neondb",
+  DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/devresponse",
+  NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+  BETTER_AUTH_SECRET: "a-local-secret-that-is-long-enough-to-pass",
+  AWS_SECRET_ACCESS_KEY: "aws-secret",
+  GITHUB_TOKEN: "ghs_token",
+  // Registry logins ride in the npm/pnpm/corepack families the toolchain's
+  // settings come from, and stay behind all the same.
+  COREPACK_NPM_TOKEN: "npm_corepack-token",
+  COREPACK_NPM_PASSWORD: "corepack-password",
+  npm_config__authToken: "npm_legacy-token",
+  "npm_config_//registry.internal/:_authToken": "npm_registry-token",
+  pnpm_config__password: "cGFzc3dvcmQ=",
+  VERCEL_ORG_ID: "team_other",
+  NODE_ENV: "production",
+};
+
+const TOOLCHAIN = [
+  "Path",
+  "SystemRoot",
+  "ComSpec",
+  "PATHEXT",
+  "USERPROFILE",
+  "LOCALAPPDATA",
+  "HOME",
+  "TEMP",
+  "https_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_OPTIONS",
+  "npm_config_registry",
+  "COREPACK_HOME",
+  "LC_ALL",
+  "XDG_CACHE_HOME",
+  "CI",
+];
+
+test("F-139: a child inherits what runs the toolchain, and no credential or application value", () => {
+  const inherited = inheritedEnv(OPERATOR_SHELL);
+  assert.deepEqual(Object.keys(inherited).sort(), [...TOOLCHAIN].sort());
+  for (const key of TOOLCHAIN) assert.equal(inherited[key], OPERATOR_SHELL[key], `${key} is passed as it is`);
+
+  // The migration runners keep the rest of the shell, but never the token,
+  // in any casing or under its legacy name.
+  const whole = inheritedEnv(OPERATOR_SHELL, true);
+  assert.deepEqual(
+    Object.keys(whole).sort(),
+    Object.keys(OPERATOR_SHELL)
+      .filter((key) => !["VERCEL_TOKEN", "vercel_token", "NOW_TOKEN"].includes(key))
+      .sort(),
+  );
+});
+
+test("F-139: run hands a child the allow-list plus what the caller names, never the shell", async () => {
+  const shell = {
+    DRK_TEST_SHELL_SECRET: "exported-in-the-shell",
+    VERCEL_TOKEN: "vcp_exported-by-ci",
+    NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+  };
+  const saved = Object.fromEntries(Object.keys(shell).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, shell);
+  // The child reports its whole environment: only the spawned process shows
+  // what actually reached it.
+  const seen = async (options: { env?: Record<string, string | undefined>; inheritShell?: boolean }) => {
+    const result = await run(process.execPath, ["-e", "process.stdout.write(JSON.stringify(process.env))"], {
+      cwd: tmpdir(),
+      capture: true,
+      ...options,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    return JSON.parse(result.stdout) as Record<string, string>;
+  };
+  const has = (env: Record<string, string>, name: string) =>
+    Object.keys(env).some((key) => key.toUpperCase() === name);
+  try {
+    const child = await seen({ env: { HANDED_ON_PURPOSE: "yes" } });
+    for (const key of Object.keys(shell)) assert.equal(has(child, key), false, `${key} stays in the shell`);
+    assert.equal(child.HANDED_ON_PURPOSE, "yes", "what the caller names reaches the child");
+    assert.ok(has(child, "PATH"), "the toolchain's variables are inherited");
+
+    // A `vercel` step that needs the token is handed it by name.
+    assert.equal((await seen({ env: { VERCEL_TOKEN: "vcp_handed" } })).VERCEL_TOKEN, "vcp_handed");
+
+    // The migration runners keep the shell, still without the token.
+    const runner = await seen({ inheritShell: true });
+    assert.equal(runner.DRK_TEST_SHELL_SECRET, "exported-in-the-shell");
+    assert.equal(has(runner, "VERCEL_TOKEN"), false, "the token never rides along with the shell");
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});

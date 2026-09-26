@@ -32,12 +32,24 @@ help/capture-lib.mjs
 *.log
 tsconfig.tsbuildinfo
 
-# Secrets and local env — NEVER copy these into the image.
+# Secrets and local env — NEVER copy these into the image, at any depth: a
+# root-anchored `.env.*` let a `--from-env` file under vercel-cli/ through.
+# `.env*` also covers `.env` itself and direnv's `.envrc`.
 # .env.example is intentionally allowed so the build context documents the
 # expected variables, but it is not consumed by the build.
-.env
-.env.*
+**/.env*
 !.env.example
+
+# Vercel CLI state (F-140): the project link, `vercel build` output, and the
+# file `vercel pull` writes production's secrets to in plain text. drk-deploy
+# deletes that file after each run, but a hand-run `vercel pull` leaves it,
+# and `COPY . .` would put it in the builder stage's layer and build cache.
+**/.vercel
+
+# The deploy CLI (drk-deploy): its own package, never part of the image. Its
+# node_modules and its .drk-deploy.json configs passed the root-anchored
+# patterns above.
+vercel-cli
 
 # The Docker files themselves
 Dockerfile

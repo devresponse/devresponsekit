@@ -3986,6 +3986,118 @@ test("F-51: the real rollback step runs `vercel promote <id> --scope=<owner>` in
   );
 });
 
+test("F-139: the real `vercel build` gets neither the token nor the shell; link, pull, deploy and rollback get the token and nothing else of the shell's", async () => {
+  // `vercel build` runs the checkout's `next build`, every dependency's code
+  // included, with whatever the Vercel CLI was handed. The shell here is
+  // what the README's CI recipe exports (the token, which the suite's
+  // `before` puts in process.env, and the migration URL), plus a secret of
+  // the operator's own and a public value that would beat production's.
+  const { cliRoot, kitRoot } = fixture("kit");
+  const config = requireConfig(cliRoot);
+  const record = join(cliRoot, "vercel-env.json");
+  const stub = join(cliRoot, "record-vercel.cjs");
+  writeFileSync(
+    stub,
+    `require("node:fs").writeFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), env: process.env }));\n`,
+  );
+  const invocation = { vercelJs: stub, config, root: kitRoot, ...vercelEnvFor(config, TOKEN, {}) };
+  const shell = {
+    PRODUCTION_DIRECT_DATABASE_URL: PRODUCTION_DIRECT,
+    DRK_TEST_SHELL_SECRET: "exported-in-the-shell",
+    NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+  };
+  const ran = async (step: () => Promise<void>) => {
+    rmSync(record, { force: true });
+    await withEnv(shell, step);
+    const { argv, env } = JSON.parse(readFileSync(record, "utf8")) as {
+      argv: string[];
+      env: Record<string, string>;
+    };
+    const names = Object.keys(env).map((key) => key.toUpperCase());
+    for (const key of Object.keys(shell)) {
+      assert.ok(!names.includes(key), `${argv[0]}: ${key} stays in the shell`);
+    }
+    assert.equal(env.VERCEL_ORG_ID, "team_test", `${argv[0]} still acts on the recorded project (F-48)`);
+    assert.equal(env.VERCEL_PROJECT_ID, "prj_test");
+    return { argv, env, names };
+  };
+
+  const build = await ran(() => releaseRunner.build(invocation as never));
+  assert.deepEqual(build.argv, ["build", "--prod"]);
+  assert.ok(!build.names.includes("VERCEL_TOKEN"), "the build never holds the token");
+  assert.ok(!build.names.includes("NOW_TOKEN"));
+  assert.equal(invocation.env.VERCEL_TOKEN, TOKEN, "the invocation itself keeps it for the steps after");
+
+  for (const [name, step] of [
+    ["link", () => releaseRunner.link(invocation as never)],
+    ["pull", () => releaseRunner.pull(invocation as never)],
+    ["deploy", () => releaseRunner.promote(invocation as never)],
+    ["promote", () => releaseRunner.rollback(invocation as never, PREVIOUS)],
+  ] as const) {
+    const { argv, env } = await ran(step);
+    assert.equal(argv[0], name);
+    assert.equal(env.VERCEL_TOKEN, TOKEN, `${name} is handed the token, in its environment`);
+  }
+});
+
+test("F-139: the migration runners keep the shell's environment, and never the Vercel token", async () => {
+  // They are the kit's own scripts and read the kit's configuration from the
+  // shell (DB_MIGRATE_LOCALES, the server environment the auth runner
+  // validates), so they are the one child that is not allow-listed. The
+  // token is still not theirs.
+  const { kitRoot } = fixture("kit", { migratableKit: true });
+  const out = join(kitRoot, "probe-out.jsonl");
+  const keys = ["DATABASE_URL", "DB_SCHEMA", "DB_MIGRATE_LOCALES", "VERCEL_TOKEN", "NOW_TOKEN"];
+  writeFileSync(
+    join(kitRoot, "probe.cjs"),
+    `const keys = ${JSON.stringify(keys)};\n` +
+      `require("node:fs").appendFileSync(process.env.DRK_PROBE_OUT, JSON.stringify(Object.fromEntries(keys.map((k) => [k, process.env[k] ?? null]))) + "\\n");\n`,
+  );
+  writeFileSync(
+    join(kitRoot, "package.json"),
+    JSON.stringify({ scripts: { "db:app:migrate": "node probe.cjs", "db:auth:migrate": "node probe.cjs" } }),
+  );
+  await withEnv({ DRK_PROBE_OUT: out, DB_MIGRATE_LOCALES: "0", NOW_TOKEN: "legacy-token" }, () =>
+    applyMigrations({ kitRoot, databaseUrl: PRODUCTION_DIRECT, schema: "auth", dryRun: false }),
+  );
+  const runs = readFileSync(out, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const expected = {
+    DATABASE_URL: PRODUCTION_DIRECT,
+    DB_SCHEMA: "auth",
+    DB_MIGRATE_LOCALES: "0",
+    VERCEL_TOKEN: null,
+    NOW_TOKEN: null,
+  };
+  assert.deepEqual(runs, [expected, expected]);
+});
+
+test("F-139: no child but the migration runners inherits the whole shell", () => {
+  // Read from source, as the F-48 test above does: `inheritShell` is the one
+  // way past the allow-list, so where it is passed is the whole of the rule.
+  const src = fileURLToPath(new URL("../src/", import.meta.url));
+  const code = (file: string) =>
+    readFileSync(join(src, file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+  const passing = readdirSync(src, { recursive: true })
+    .map((file) => String(file).replace(/\\/g, "/"))
+    .filter((file) => file.endsWith(".ts") && file !== "lib/exec.ts")
+    .filter((file) => /\binheritShell\b/.test(code(file)));
+  assert.deepEqual(passing, ["lib/kit.ts"]);
+  const kit = code("lib/kit.ts");
+  const start = kit.indexOf("export async function applyMigrations");
+  const end = kit.indexOf("\n}\n", start);
+  assert.ok(start !== -1 && end !== -1, "applyMigrations is where it was");
+  assert.doesNotMatch(
+    kit.slice(0, start) + kit.slice(end),
+    /\binheritShell\b/,
+    "and only in applyMigrations",
+  );
+});
+
 test("F-51: the real serving step asks which deployment the origin's host is aliased to, in the recorded project", async () => {
   const config = requireConfig(fixture("kit").cliRoot);
   const requests: string[] = [];

@@ -51,7 +51,11 @@ this CLI is given come from elsewhere (F-143):
 
 - **The Vercel token.** `drk-deploy login` prompts for it with the input hidden, or reads it from
   stdin (`Get-Content token.txt | drk-deploy login` in PowerShell, `drk-deploy login < token.txt` in
-  `cmd.exe`). CI sets `VERCEL_TOKEN`, which wins over a saved token.
+  `cmd.exe`). CI sets `VERCEL_TOKEN`, which wins over a saved token. Create it scoped to the team
+  (or personal account) that owns the project rather than to your whole account, and with an expiry
+  date: it can read and deploy everything in its scope. Only the `vercel` steps that need it are
+  handed it ([below](#what-it-does-about-the-things-that-go-wrong), "No child process inherits
+  your shell").
 - **The migration URL.** `PRODUCTION_DIRECT_DATABASE_URL` (a satellite that owns its database:
   `SATELLITE_DIRECT_DATABASE_URL`), in the shell or the `--from-env` file.
 
@@ -273,8 +277,10 @@ production reads:
 
 The pulled file, `.vercel/.env.production.local`, holds production's secrets in plain text. It is
 deleted before the pull (`vercel pull` keeps a stale copy's local values, so an old file could vouch
-for the wrong database) and again when the run ends, successful or not. The kit's `.gitignore`
-ignores `.vercel/` as well. A `--dry-run` pulls nothing, so it checks nothing, and says so.
+for the wrong database) and again when the run ends, successful or not. The kit's `.gitignore`,
+`.dockerignore` and ESLint config ignore `.vercel/` as well (F-140), so neither a commit, a
+`docker build` nor `pnpm lint` in the checkout picks it up. A `--dry-run` pulls nothing, so it
+checks nothing, and says so.
 
 **`vercel` acts on the recorded project, and only that one (F-48).** Every `vercel link`, `pull`,
 `build` and `deploy` is handed `VERCEL_ORG_ID` together with `VERCEL_PROJECT_ID`, both from
@@ -365,6 +371,21 @@ process (pnpm, the migration runner, `vercel`) as an argument either, because an
 visible to other processes and lands in shell history; secrets travel in the child's environment
 instead. Hand them to the CLI the same way:
 [Secrets stay off the command line](#secrets-stay-off-the-command-line).
+
+**No child process inherits your shell (F-139).** `git`, pnpm and the Vercel CLI each get the
+variables that run the toolchain on this machine (`PATH`, the home, profile and temp folders, the
+Windows system variables, locale, terminal, `CI`, proxy and CA settings such as `HTTPS_PROXY` and
+`NODE_EXTRA_CA_CERTS`, `NODE_OPTIONS`, and npm, pnpm and corepack configuration, minus the registry
+logins in it), plus what this CLI hands each one by name. The Vercel token goes to `vercel link`, `pull`, `deploy` and `promote`, and
+to nothing else. `vercel build` does not get it: it builds from what `pull` has just written, and it
+runs the checkout's own `next build`, every dependency's code included. That build used to hold the
+account-wide token and every secret exported in the shell. A shell's value no longer beats
+production's in the build either: a `NEXT_PUBLIC_APP_URL=http://localhost:3000` exported for local
+work used to be inlined into the production client bundle. A variable the build needs belongs on the
+project, where `vercel pull` finds it. The one exception is the migration runners
+(`pnpm db:app:migrate` and `db:auth:migrate`). They are the kit's own scripts and read its
+configuration from the shell (`DB_MIGRATE_LOCALES`, and the server environment the auth runner
+validates when it loads), so they keep the shell's variables, but never the token.
 
 **Re-running does not rotate anything.** `env:sync` leaves existing variables alone. Overwriting
 takes `--force`, and rotating a secret additionally takes `--yes`, because rotating
@@ -570,6 +591,24 @@ delete it — nothing reads it.
 ---
 
 ## Upgrading
+
+### F-139: the build reads production's variables, not your shell's
+
+**`vercel build` no longer sees the shell's variables or the token**
+([above](#what-it-does-about-the-things-that-go-wrong)). A variable a local build used to pick up
+from the shell, such as a `SENTRY_AUTH_TOKEN` for source-map upload, now has to be set on the
+project, where `vercel pull` fetches it for the build: stored `encrypted`, since a `sensitive` value
+comes back as a placeholder. The migration runners still read the shell.
+
+Every other child gets the same allow-list too: `git`, pnpm and each `vercel` step. Two things it
+leaves out on purpose can break a run that used to work:
+
+- **`NODE_TLS_REJECT_UNAUTHORIZED`.** A shell that set it to `0` to get past a corporate proxy no
+  longer passes it on. Trust the proxy's CA instead: `NODE_EXTRA_CA_CERTS=<path to its PEM>`, or
+  `NODE_USE_SYSTEM_CA=1` when the CA is already in the system store. Both are inherited.
+- **Registry logins** in `npm_config_*`, `pnpm_config_*` or `COREPACK_NPM_*` variables
+  (`_authToken`, `_auth`, `_password`, `COREPACK_NPM_TOKEN` and the like). The rest of those
+  families still passes. A registry that needs a login reads it from an `.npmrc` file.
 
 ### F-143 and F-144: secrets off the command line, and `.env` files read as the kit reads them
 
@@ -796,10 +835,12 @@ rules — the migration policy, the config sanity checks — so they can be asse
 `src/lib/env-spec.ts` is the environment contract for both targets, and the one to edit when the
 kit's `src/lib/env.ts` or a satellite's changes. `src/lib/env-presence.ts` decides what counts as set
 for a target and what is wrong with a stored value; every command that asks goes through it.
-`src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/lib/vercel-project.ts` builds the environment
-of every `vercel` child and checks the checkout's `.vercel/project.json` (F-48): nothing else sets
-`VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`, and `test/release.test.ts` asserts that from the source. It
-also holds the rule that a satellite config never acts on the SSO issuer's own project (F-50).
+`src/lib/vercel-client.ts` wraps `@vercel/sdk`. `src/lib/exec.ts` spawns every child process and
+decides what each inherits from the shell (F-139). `src/lib/vercel-project.ts` builds the
+environment of every `vercel` child and checks the checkout's `.vercel/project.json` (F-48):
+nothing else sets `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID`, and `test/release.test.ts` asserts that
+from the source. It also holds the rule that a satellite config never acts on the SSO issuer's own
+project (F-50).
 `src/lib/config.ts` reads and writes the deployment's config file, the one `--config` or
 `DRK_DEPLOY_CONFIG` names (F-50). `src/lib/config-file.ts` holds which file that is, and
 `commandFor`, which every `drk-deploy` command a message prints goes through, so that it carries the
@@ -846,9 +887,13 @@ and a run with no migrate step is asserted never to parse it. `src/lib/migration
 those rules as pure functions, table-tested in the same file. The runner's `migrate` step is also
 called for real, and both of its refusals are asserted: a satellite on the kit's database, and a
 satellite that would inherit the kit's `PRODUCTION_DIRECT_DATABASE_URL` from the shell. Each refuses
-before anything connects or spawns. `applyMigrations` runs for real once, against kit scripts that
+before anything connects or spawns. `applyMigrations` runs for real, against kit scripts that
 are a probe, to assert that the runner is handed the URL and the schema and none of the shell's
-`PG*` fallbacks.
+`PG*` fallbacks, and keeps the rest of the shell but never the Vercel token (F-139). The real
+`build`, `link`, `pull`, `deploy` and rollback steps run against a stub Vercel CLI that records its
+environment, to show that `build` is the one without the token and that none of them sees a secret
+exported in the shell. A source check pins the migration runners as the only children that keep
+the shell.
 
 The required keys in `src/lib/env-spec.ts` are checked against the kit's own schema by the kit's
 suite, not this one (`tests/unit/drk-deploy-required-keys.test.ts`, which can import both): a key

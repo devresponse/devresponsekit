@@ -41,6 +41,14 @@ Because the migration and seed scripts (`pnpm db:*`, which use `tsx`) are
 **not** in the runtime image, this container **never runs migrations on
 start**. Migrations are a deliberate, separate step — see §4.
 
+Your `.env` files and Vercel's pulled secrets never reach the build stage
+either: `.dockerignore` keeps every `.env*` file but `.env.example` out of
+the build context at any depth, along with `.vercel/` (where `vercel pull`
+writes production's secrets in plain text) and the deploy CLI in
+`vercel-cli/` (F-140). The Dockerfile's `COPY . .` would otherwise put them
+in the builder stage's layer and the build cache, even though the runner
+stage copies none of them.
+
 ---
 
 ## 2. Build

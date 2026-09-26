@@ -48,8 +48,9 @@ export function projectOwner(config: Pick<ProjectConfig, "orgId" | "teamId">): s
 /** What {@link vercelEnvFor} hands every `vercel` child. */
 export interface VercelEnv {
   /**
-   * Layered over the shell's environment for the child (`RunOptions.env`).
-   * An `undefined` value removes the shell's variable from the child.
+   * Layered over the allow-listed part of the shell's environment that `run`
+   * passes every child (`RunOptions.env`, F-139). An `undefined` value
+   * removes the variable from the child.
    */
   env: Record<string, string | undefined>;
   /** The owner the environment names, or null when the checkout's link decides. */
@@ -59,8 +60,9 @@ export interface VercelEnv {
 }
 
 /**
- * The environment every `vercel` child runs with: the token, and the project
- * named by the pair VERCEL_ORG_ID + VERCEL_PROJECT_ID, or by neither.
+ * The environment every `vercel` child runs with: the token (except `build`,
+ * see {@link buildEnv}), and the project named by the pair VERCEL_ORG_ID +
+ * VERCEL_PROJECT_ID, or by neither.
  *
  * With an owner recorded, both are set from the config, so the checkout's link
  * cannot pick another project. Without one, both are REMOVED, so the Vercel
@@ -68,13 +70,13 @@ export interface VercelEnv {
  * against the config before and after linking.
  *
  * The shell's own values are never passed on, however they are spelled: the
- * child used to inherit them (`run` layers its env over `process.env`), so an
- * exported VERCEL_PROJECT_ID could point a personal-account deploy at another
- * project. A shell value that disagrees with the config is refused rather
- * than ignored. Whoever exported it meant that project, so deploying the
- * config's one instead deploys something nobody asked for. A shell VERCEL_ORG_ID
- * that a config with no owner cannot check is dropped, and reported in
- * `ignored`.
+ * child used to inherit them (`run` layered its env over `process.env` before
+ * F-139), so an exported VERCEL_PROJECT_ID could point a personal-account
+ * deploy at another project. A shell value that disagrees with the config is
+ * refused rather than ignored. Whoever exported it meant that project, so
+ * deploying the config's one instead deploys something nobody asked for. A
+ * shell VERCEL_ORG_ID that a config with no owner cannot check is dropped, and
+ * reported in `ignored`.
  *
  * Names are scrubbed case-insensitively, as `migrationEnv` does for PG*: on
  * Windows `vercel_project_id` IS VERCEL_PROJECT_ID to the child. They are
@@ -125,6 +127,22 @@ export function vercelEnvFor(
     ...(orgId ? { VERCEL_ORG_ID: orgId, VERCEL_PROJECT_ID: config.projectId } : {}),
   };
   return { env, orgId, ignored };
+}
+
+/**
+ * The environment of `vercel build`: the invocation's, without the token
+ * (F-139).
+ *
+ * `build` needs none. It reads the project settings and production's
+ * variables `vercel pull` has just written under `.vercel/` (the pinned CLI
+ * lists `build` among the commands that run without a token). And it is the
+ * one `vercel` child that runs third-party code: the checkout's `next build`,
+ * every dependency included, which inherits whatever the Vercel CLI was
+ * given. The token is account-wide, so a compromised build dependency holding
+ * it could decrypt and deploy every project the account reaches.
+ */
+export function buildEnv(env: VercelEnv["env"]): VercelEnv["env"] {
+  return { ...env, VERCEL_TOKEN: undefined };
 }
 
 /** Where `vercel link` records the project a checkout is linked to. */

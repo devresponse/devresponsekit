@@ -43,6 +43,19 @@ Secrets never need to be arguments at all:
 [Secrets stay off the command line](#secrets-stay-off-the-command-line). On macOS or Linux use
 `node dist/index.js` (or `npm link`).
 
+### Rebuild after a pull
+
+`dist/` is gitignored, so a `git pull` never updates it. Before I-14 a pull that fixed a release
+guard left `drk-deploy up` running the old build, old checks and all, until someone remembered
+`pnpm build`. Now `pnpm build` ends by writing `dist/build-stamp.json`, a hash of every `.ts` file
+under `src/` and of `tsconfig.json`, and every run recomputes it before it parses a command. A build
+of source that has changed since is refused with exit code 2, naming the `pnpm build` to run, and
+nothing else happens. So is a build with no stamp: one made by `pnpm dev` (a watch build writes
+none) or before stamps existed. The `.cmd` wrapper refuses an unstamped `dist/` itself, without
+running it, because a build that old has none of this check. The stamp hashes `src/` once `tsc` has
+finished, so a file saved while `pnpm build` runs counts as built even when `tsc` compiled the
+version before it: after such an edit, build again.
+
 ### Secrets stay off the command line
 
 An argument lands in shell history (PowerShell's PSReadLine keeps every line in
@@ -66,10 +79,10 @@ use them, but they are deprecated and every use prints a warning naming the flag
 
 ## Two targets
 
-Every command reads one field — `target` in the deployment's config file (`.drk-deploy.json`
-unless `--config` names another) — and behaves accordingly. **A config with no `target` is the
-kit**, which is what every config written before satellites existed looks like, so nothing about
-the kit path changed.
+Every command but `login` reads one field — `target` in the deployment's config file
+(`.drk-deploy.json` unless `--config` names another) — and behaves accordingly. **A config with no
+`target` is the kit**, which is what every config written before satellites existed looks like, so
+nothing about the kit path changed.
 
 |                      | **kit** (devresponsekit)        | **satellite** (app-standalone / app-handoff / app-shared)  |
 | -------------------- | ------------------------------- | ---------------------------------------------------------- |
@@ -244,9 +257,13 @@ reported the issuer's real signing key under "must NOT be set on this satellite"
 | `deploy`       | Pull → migrate (checked) → build → promote → verify (no migrate step when the target does not own a schema).         |
 | `up`           | `env:sync` then `deploy`. The whole thing.                                                                           |
 
-Every command accepts `--dry-run`, every command is safe to re-run, and every command reads the
-recorded target first. Every command also takes `--config <file>`, the deployment's config file
-(default: `DRK_DEPLOY_CONFIG`, else `.drk-deploy.json`; a relative path is beside the CLI).
+Every command is safe to re-run, and every command but `login` reads the recorded target first.
+Six of them take `--dry-run`, which shows the plan and changes nothing: `env:sync`, `env:prune`,
+`db:provision`, `migrate`, `deploy` and `up`. The rest have no such flag (I-14): `doctor`,
+`status`, `env:check` and `db:status` only read, `login` saves the token it has verified, and `init`
+writes the config file (and, with `--create`, creates the project). Every command also takes
+`--config <file>`, the deployment's config file (default: `DRK_DEPLOY_CONFIG`, else
+`.drk-deploy.json`; a relative path is beside the CLI).
 
 ---
 
@@ -667,6 +684,17 @@ delete it — nothing reads it.
 
 ## Upgrading
 
+### I-14: a build older than its source is refused
+
+After the pull that brings this change, run `pnpm build` in `vercel-cli/` once (after
+`pnpm install` when the pull changed `pnpm-lock.yaml`). Until then the `.cmd` wrapper refuses the
+old `dist/`, which has no stamp, while `node dist/index.js` (or an npm-linked `drk-deploy`) keeps
+running that old build unchecked, every time, until you run `pnpm build`. From then on every run
+refuses a `dist/` that is not a build of the `src/` beside it
+([Rebuild after a pull](#rebuild-after-a-pull)). A CI job that builds before it runs, as
+[Using it from CI](#using-it-from-ci) does, is unaffected. `pnpm dev` writes no stamp, so run the
+CLI from a `pnpm build`.
+
 ### F-137, F-141 and F-146: `up` refuses more, and migrates auth first
 
 1. **`env:sync`, and so `up`, refuses a project that holds a variable no deployment may hold**
@@ -995,6 +1023,11 @@ same `--config`.
 `src/lib/release-tree.ts` reads a checkout's git state (`inspectTree`) and holds the rules for what
 may be released and whether Vercel's git integration also deploys production, as pure functions
 (F-49). `src/commands/` is one file per command group.
+`src/lib/build-stamp.ts` holds the stamp `pnpm build` writes (through `src/write-build-stamp.ts`)
+and the check the entry point runs before it parses a command (I-14). `test/unit.test.ts` runs that
+check against a copy of the built package under `dist/`, whose source a test changes, and runs the
+`.cmd` wrapper on the same copy under `cmd.exe` on Windows. It also reads every command's `--help`
+and holds this README and `drk-deploy --help` to the commands that declare `--dry-run`.
 `test/env-presence.test.ts` runs `env:check`, `env:sync` and the `deploy` preflight for real against a
 fake Vercel API (`fetch` is replaced), so those tests never reach Vercel either. Like Vercel, the
 fake refuses a create for a key already set on its target unless it carries `upsert`, which is how

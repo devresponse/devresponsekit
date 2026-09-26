@@ -1377,3 +1377,245 @@ test("F-139: run hands a child the allow-list plus what the caller names, never 
     }
   }
 });
+
+/* ================================================================== */
+/*  I-14: a build older than its source is refused, and --dry-run is   */
+/*  claimed only for the commands that declare it                      */
+/* ================================================================== */
+
+import { execFile, spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import { promisify } from "node:util";
+
+import {
+  BUILD_STAMP,
+  assertFreshBuild,
+  sourceHash,
+  staleBuild,
+  writeBuildStamp,
+} from "../dist/lib/build-stamp.js";
+import { CliError } from "../dist/lib/log.js";
+
+/** This package: `test/` → `..`. */
+const CLI_ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
+
+const OUT_OF_DATE = /out of date: src\/ changed after `pnpm build`/;
+const UNSTAMPED = /carries no build stamp/;
+
+/**
+ * A copy of this package under dist/ (gitignored, rebuilt by every test run),
+ * so a test can change ITS source and stamp and not this checkout's, while the
+ * copy's imports still resolve this package's node_modules, as they do from a
+ * real checkout.
+ */
+function packageCopy(name: string): string {
+  const copy = join(CLI_ROOT, "dist", `.i14-${name}-${process.pid}`);
+  mkdirSync(join(copy, "dist"), { recursive: true });
+  for (const entry of readdirSync(join(CLI_ROOT, "dist"))) {
+    if (entry.startsWith(".i14-")) continue;
+    cpSync(join(CLI_ROOT, "dist", entry), join(copy, "dist", entry), { recursive: true });
+  }
+  for (const entry of ["src", "tsconfig.json", "drk-deploy.cmd"]) {
+    cpSync(join(CLI_ROOT, entry), join(copy, entry), { recursive: true });
+  }
+  mkdirSync(join(copy, "home"), { recursive: true });
+  return copy;
+}
+
+/**
+ * What a copy's CLI runs with, as the F-50 entry-point test does: no
+ * VERCEL_TOKEN, no DRK_DEPLOY_CONFIG and a profile inside the copy, so no saved
+ * credential and no config (none is beside the copy). Were the stale check to
+ * regress, `up` would stop at "not configured" and never reach Vercel.
+ */
+function copyEnv(copy: string): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !["VERCEL_TOKEN", "DRK_DEPLOY_CONFIG"].includes(key.toUpperCase()),
+    ),
+  );
+  const home = join(copy, "home");
+  return { ...env, HOME: home, USERPROFILE: home, NO_COLOR: "1" };
+}
+
+test("I-14: a build is current only while src/ and tsconfig.json hold what it was stamped from", () => {
+  const root = mkdtempSync(join(tmpdir(), "drk-deploy-stamp-"));
+  try {
+    mkdirSync(join(root, "src", "lib"), { recursive: true });
+    mkdirSync(join(root, "dist"));
+    const guard = join(root, "src", "lib", "guard.ts");
+    const tsconfig = join(root, "tsconfig.json");
+    writeFileSync(join(root, "src", "index.ts"), "export {};\n");
+    writeFileSync(guard, "export const refused = true;\n");
+    writeFileSync(tsconfig, "{}\n");
+
+    // A bare tsc (or `pnpm dev`), or a build from before stamps existed.
+    assert.match(staleBuild(root) ?? "", UNSTAMPED);
+    writeBuildStamp(root);
+    assert.equal(staleBuild(root), null, "what `pnpm build` just stamped is current");
+    assert.equal(JSON.parse(readFileSync(join(root, BUILD_STAMP), "utf8")).sourceHash, sourceHash(root));
+
+    // What a pull does to the build's inputs. Each is refused, and putting the
+    // content back is current again: the stamp is content, not mtimes.
+    const added = join(root, "src", "lib", "new-rule.ts");
+    const pulls: [string, () => void, () => void][] = [
+      [
+        "a changed guard",
+        () => writeFileSync(guard, "export const refused = false;\n"),
+        () => writeFileSync(guard, "export const refused = true;\n"),
+      ],
+      ["a new file", () => writeFileSync(added, "export {};\n"), () => unlinkSync(added)],
+      [
+        "a changed tsconfig.json",
+        () => writeFileSync(tsconfig, '{ "compilerOptions": { "target": "ES2020" } }\n'),
+        () => writeFileSync(tsconfig, "{}\n"),
+      ],
+    ];
+    for (const [name, pull, undo] of pulls) {
+      pull();
+      assert.match(staleBuild(root) ?? "", OUT_OF_DATE, name);
+      undo();
+      assert.equal(staleBuild(root), null, `${name}, undone`);
+    }
+    // Only what tsc compiles is an input.
+    writeFileSync(join(root, "src", "NOTES.md"), "not compiled\n");
+    assert.equal(staleBuild(root), null);
+
+    // An unreadable stamp shows nothing, so it counts as none.
+    writeFileSync(join(root, BUILD_STAMP), "{ not json");
+    assert.match(staleBuild(root) ?? "", UNSTAMPED);
+    assert.throws(
+      () => assertFreshBuild(root),
+      (err: unknown) =>
+        err instanceof CliError &&
+        err.exitCode === 2 &&
+        (err.hint ?? "").includes(`pnpm --dir "${root}" build`),
+      "refused with exit 2, naming the build that fixes it",
+    );
+
+    // A build with no source beside it has nothing to be stale against.
+    rmSync(join(root, "src"), { recursive: true });
+    assert.equal(sourceHash(root), null);
+    assert.equal(staleBuild(root), null);
+    assert.doesNotThrow(() => assertFreshBuild(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("I-14: the built CLI refuses to run once its source changes, until it is rebuilt", () => {
+  // This suite runs against a build `pnpm build` has just stamped.
+  assert.equal(staleBuild(CLI_ROOT), null, "`pnpm build` stamps what it builds");
+
+  const copy = packageCopy("entry");
+  try {
+    const cli = (...args: string[]) => {
+      const result = spawnSync(process.execPath, [join(copy, "dist", "index.js"), ...args], {
+        encoding: "utf8",
+        env: copyEnv(copy),
+      });
+      return { status: result.status, out: `${result.stdout}${result.stderr}` };
+    };
+
+    // A pull that fixes a release guard, over a dist/ built before it.
+    const guard = join(copy, "src", "lib", "release-tree.ts");
+    writeFileSync(guard, `${readFileSync(guard, "utf8")}\n// a fix pulled after the last build\n`);
+    const stale = cli("up", "--dry-run");
+    assert.equal(stale.status, 2, stale.out);
+    assert.match(stale.out, OUT_OF_DATE);
+    assert.ok(stale.out.includes(`pnpm --dir "${copy}" build`), stale.out);
+    assert.doesNotMatch(stale.out, /\[dry-run\]|not configured/, "no command ran");
+
+    // `pnpm build` ends by stamping: the rebuilt copy runs.
+    const stamp = spawnSync(process.execPath, [join(copy, "dist", "write-build-stamp.js")], {
+      encoding: "utf8",
+    });
+    assert.equal(stamp.status, 0, stamp.stderr);
+    assert.deepEqual(cli("--version"), { status: 0, out: "1.0.0\n" });
+
+    // A build from before stamps existed.
+    unlinkSync(join(copy, BUILD_STAMP));
+    const unstamped = cli("--version");
+    assert.equal(unstamped.status, 2, unstamped.out);
+    assert.match(unstamped.out, UNSTAMPED);
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
+});
+
+test(
+  "I-14: the .cmd wrapper runs a stamped build, and refuses one without a stamp without running it",
+  { skip: process.platform !== "win32" && "the .cmd wrapper runs under cmd.exe" },
+  () => {
+    // The unstamped case is the pull that brings this check: the old dist/
+    // has none of it, so only the wrapper can refuse it.
+    const copy = packageCopy("wrapper");
+    try {
+      const wrapper = () => {
+        const result = spawnSync(
+          process.env.ComSpec ?? "cmd.exe",
+          ["/d", "/s", "/c", `""${join(copy, "drk-deploy.cmd")}" --version"`],
+          { encoding: "utf8", windowsVerbatimArguments: true, env: copyEnv(copy) },
+        );
+        return { status: result.status, out: `${result.stdout}${result.stderr}` };
+      };
+      assert.deepEqual(wrapper(), { status: 0, out: "1.0.0\n" });
+
+      unlinkSync(join(copy, BUILD_STAMP));
+      const unstamped = wrapper();
+      assert.equal(unstamped.status, 1, unstamped.out);
+      assert.match(unstamped.out, /not built yet, or was built before builds were stamped/);
+      assert.match(unstamped.out, /pnpm build/);
+      assert.doesNotMatch(unstamped.out, UNSTAMPED, "the wrapper refused it: the build never ran");
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+    }
+  },
+);
+
+test("I-14: --dry-run is claimed for exactly the commands whose --help declares it", async () => {
+  const entry = join(CLI_ROOT, "dist", "index.js");
+  const help = async (...args: string[]) =>
+    (
+      await promisify(execFile)(process.execPath, [entry, ...args, "--help"], {
+        env: { ...process.env, NO_COLOR: "1" },
+      })
+    ).stdout;
+  const top = await help();
+  const commands = [...top.slice(top.indexOf("\nCommands:\n")).matchAll(/^ {2}([a-z][\w:]*)/gm)]
+    .map((match) => match[1]!)
+    .filter((command) => command !== "help");
+  assert.ok(commands.length >= 12, `every command is listed: ${commands.join(" ")}`);
+  const declared = (
+    await Promise.all(
+      commands.map(async (command) => {
+        const text = await help(command);
+        return /^ {2}--dry-run\b/m.test(text.slice(text.indexOf("\nOptions:\n"))) ? [command] : [];
+      }),
+    )
+  )
+    .flat()
+    .sort();
+  assert.deepEqual(declared, ["db:provision", "deploy", "env:prune", "env:sync", "migrate", "up"]);
+
+  // The names after `lead`, up to the full stop: "a, b and c", however it wraps.
+  const listed = (text: string, lead: RegExp): string[] => {
+    const flat = text.replace(/\s+/g, " ");
+    const match = lead.exec(flat);
+    assert.ok(match, `${lead} is still in the text`);
+    return flat
+      .slice(match.index + match[0].length)
+      .split(".")[0]!
+      .split(/, | and /)
+      .map((name) => name.replace(/`/g, "").trim())
+      .sort();
+  };
+  assert.deepEqual(listed(top, /These also take --dry-run: /), declared, "drk-deploy --help");
+  const readme = readFileSync(join(CLI_ROOT, "README.md"), "utf8");
+  assert.deepEqual(
+    listed(readme, /take `--dry-run`, which shows the plan and changes nothing: /),
+    declared,
+    "README.md",
+  );
+  assert.doesNotMatch(readme.replace(/\s+/g, " "), /every command accepts `--dry-run`/i);
+});

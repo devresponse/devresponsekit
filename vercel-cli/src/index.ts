@@ -7,6 +7,7 @@ import { doctor } from "./commands/doctor.js";
 import { envCheck, envPrune, envSync } from "./commands/env.js";
 import { init, login } from "./commands/init.js";
 import { deploy, migrateCommand, status, up } from "./commands/release.js";
+import { assertFreshBuild } from "./lib/build-stamp.js";
 import { configFileFrom, useConfigFile } from "./lib/config.js";
 import { CliError, dim, fail, info, setQuiet, warn } from "./lib/log.js";
 import { withRollbackOptions } from "./lib/rollback-options.js";
@@ -87,7 +88,10 @@ program
       "                  --app-root <path> --issuer <the kit's url>",
       "",
       "One config file per deployment: --config (or DRK_DEPLOY_CONFIG) picks it.",
-      "Every command is idempotent and takes --dry-run.",
+      // I-14: not every command takes --dry-run. test/unit.test.ts pins this
+      // list against the flag each command's --help declares.
+      "Every command is idempotent. These also take --dry-run: env:sync, env:prune,",
+      "db:provision, migrate, deploy and up.",
     ].join("\n"),
   )
   .version("1.0.0")
@@ -294,6 +298,10 @@ withRollbackOptions(
 program.showHelpAfterError("(run `drk-deploy --help` for usage)");
 
 try {
+  // I-14: dist/ is gitignored, so a `git pull` never updates it. Refuse to run
+  // a build of source that has since changed, before any command (or its
+  // --help) is parsed, rather than deploy with the checks it lacks.
+  assertFreshBuild(CLI_ROOT);
   await program.parseAsync(process.argv);
 } catch (err) {
   if (err instanceof CliError) {

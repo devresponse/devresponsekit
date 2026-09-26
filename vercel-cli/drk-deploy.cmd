@@ -18,15 +18,22 @@ rem  as PRODUCTION_DIRECT_DATABASE_URL (a satellite:
 rem  SATELLITE_DIRECT_DATABASE_URL), in the environment or the --from-env file.
 rem ---------------------------------------------------------------------------
 
-if not exist "%~dp0dist\index.js" (
-  echo drk-deploy is not built yet.
-  echo.
-  echo   cd /d "%~dp0"
-  echo   pnpm install
-  echo   pnpm build
-  echo.
-  exit /b 1
-)
+rem  dist\ is gitignored, so a git pull never updates it (I-14). `pnpm build`
+rem  ends by writing dist\build-stamp.json, and the CLI refuses to run once
+rem  src\ no longer matches it. A dist\ with no stamp was built before that
+rem  check existed, so none of its code would refuse: it is refused here.
+
+if not exist "%~dp0dist\index.js" goto build
+if not exist "%~dp0dist\build-stamp.json" goto build
 
 node "%~dp0dist\index.js" %*
 exit /b %ERRORLEVEL%
+
+:build
+echo drk-deploy is not built yet, or was built before builds were stamped.
+echo.
+echo   cd /d "%~dp0"
+echo   pnpm install
+echo   pnpm build
+echo.
+exit /b 1

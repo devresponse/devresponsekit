@@ -392,7 +392,7 @@ User stories
     | # | Step (what to do) | Expected result |
     |---|---|---|
     | 1 | On an existing active key, click **Rotate**. | A confirmation dialog **Rotate API key** appears naming the key. |
-    | 2 | Confirm. | A **Copy your key now** dialog reveals a NEW secret (same scopes/expiry); the key remains **Active**. |
+    | 2 | Confirm, then click **Done**. | A **Copy your key now** dialog reveals a NEW secret (same scopes/expiry); the key remains **Active**. Only **Done** closes the dialog. |
     | 3 | Click **Revoke** on that key. | A destructive confirmation **Revoke API key** appears naming the key. |
     | 4 | Confirm. | The key's badge changes to **Revoked**; the **Rotate** and **Revoke** buttons disappear for that row. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -415,7 +415,7 @@ Negative & edge cases
 - Rotating a non-active key returns 409 "Key is not active and cannot be rotated." (`src/app/api/v1/me/api-keys/[id]/rotate/route.ts:51`); the panel only offers Rotate on active keys, so this is an edge/tamper case.
 - Rate limit: create / rotate / revoke share a per-principal token bucket; exceeding it returns 429 with `Retry-After` (`src/app/api/v1/me/api-keys/route.ts:64`). `TODO: verify` the exact UI message on a client-side 429 (the panel maps non-OK create to the generic `create.error`).
 
-Accessibility: The create form has labelled inputs and a `<fieldset>`/`<legend>` for scopes; the reveal and confirm dialogs are managed by the dialog manager (focus-trap + Esc — `TODO: verify` Esc closes each). Status is a labelled badge, not color alone.
+Accessibility: The create form has labelled inputs and a `<fieldset>`/`<legend>` for scopes; the confirm dialogs are managed by the dialog manager (focus-trap + Esc — `TODO: verify` Esc closes each). The reveal dialog traps focus too, but on purpose only its **Done** button closes it: Esc, a click outside it and a corner close button would lose the one-time secret, so Esc and an outside click leave it open and it has no corner button (F-122, `src/components/api-keys/api-key-reveal.tsx`). Status is a labelled badge, not color alone.
 i18n: All labels/messages are under `account.apiKeys.*`; run in `uk`/`ja` and confirm the create form, list metadata (Created/Last used/Expires, Never/No expiry), status badges, and both dialogs localize; dates go through the app formatter (`useAppFormatter`, `_api-keys-panel.tsx:53`), so they follow the saved time zone and date format.
 
 ---
@@ -559,7 +559,7 @@ Legend: **See** = can load the screen; **Act** = has a meaningful action (edit/c
 - `TODO: verify` how an unknown top-level locale segment (`/qq/app`) is handled by the locale router before the redirect page runs.
 - `TODO: verify` a UI-reachable way to trigger the profile 502 (Better Auth name-update failure).
 - `TODO: verify` the exact client-side message shown when an API-key create/rotate/revoke hits the 429 rate limit (the panel maps non-OK create to the generic `create.error`).
-- `TODO: verify` the API-key reveal and confirm dialogs trap focus and close on Esc.
+- `TODO: verify` the API-key confirm dialogs trap focus and close on Esc, and the reveal dialog traps focus and stays open on Esc (only **Done** closes it, F-122).
 - `TODO: verify` whether the docs catalog/titles are localized per-locale or always render in the document's source language (catalog cache is permission-keyed, not locale-keyed).
 - `TODO: verify` a fixture doc containing a `<script>` renders inert through the sanitizing pipeline; and no axe violations on a representative article.
 - `TODO: verify` the two hardcoded English strings (dashboard welcome line, workspace description) are intended to remain non-localized.

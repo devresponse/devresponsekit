@@ -17,7 +17,8 @@ import {
  * surfaces (P2-6 — previously two byte-identical copies). The plaintext is
  * returned by create / rotate exactly once and never recoverable: this
  * modal is the only place it is shown — a read-only field plus copy, with
- * an explicit warning. `secret === null` keeps it closed.
+ * an explicit warning — and only its Done button closes it (F-122).
+ * `secret === null` keeps it closed.
  *
  * The two surfaces differ only by their translation namespace, which the
  * caller passes; both namespaces expose the same `reveal.*` keys.
@@ -61,7 +62,14 @@ export function ApiKeyRevealDialog({
 
   return (
     <Dialog open={secret !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
+      {/* Closing loses the secret for good, so only Done closes this (F-122).
+          Escape, a click beside the dialog (easy while switching to a terminal
+          to paste) and the corner X each dismissed it in one stray gesture. */}
+      <DialogContent
+        showCloseButton={false}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{t("title")}</DialogTitle>
           <DialogDescription>{t("description")}</DialogDescription>

@@ -4,7 +4,9 @@ import { screen } from "@testing-library/react";
 import fr from "@/messages/fr.json";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { FlexSidebar, SidebarContent, SidebarProvider } from "@/components/ui/flexsidebar";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { SidebarRail, SidebarTrigger } from "@/components/ui/sidebar";
 import { renderWithIntl } from "../helpers/render-with-intl";
 
@@ -49,6 +51,51 @@ describe("localized accessible names", () => {
     );
     const named = screen.getAllByRole("button", { name: fr.shell.regions.toggleSidebar });
     expect(named).toHaveLength(2);
+  });
+
+  // F-117: the primitives defaulted to the English "Close", and ten call sites
+  // (the Administrator detail sheets, the member/role/group dialogs, the
+  // API-key reveal, the docs lightbox) never passed a label.
+  it("labels the Dialog close button from the catalog when the caller passes none", async () => {
+    renderFr(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>t</DialogTitle>
+          <DialogDescription>d</DialogDescription>
+        </DialogContent>
+      </Dialog>,
+    );
+    expect(
+      await screen.findByRole("button", { name: fr.common.dialogs.close }),
+    ).toBeInTheDocument();
+    expect(fr.common.dialogs.close).not.toBe("Close");
+  });
+
+  it("labels the Sheet close button from the catalog when the caller passes none", async () => {
+    renderFr(
+      <Sheet open>
+        <SheetContent>
+          <SheetTitle>t</SheetTitle>
+          <SheetDescription>d</SheetDescription>
+        </SheetContent>
+      </Sheet>,
+    );
+    expect(
+      await screen.findByRole("button", { name: fr.common.dialogs.close }),
+    ).toBeInTheDocument();
+  });
+
+  it("still lets a caller name the close button more specifically", async () => {
+    renderFr(
+      <Sheet open>
+        <SheetContent closeLabel={fr.common.closeMenu}>
+          <SheetTitle>t</SheetTitle>
+          <SheetDescription>d</SheetDescription>
+        </SheetContent>
+      </Sheet>,
+    );
+    expect(await screen.findByRole("button", { name: fr.common.closeMenu })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: fr.common.dialogs.close })).not.toBeInTheDocument();
   });
 
   describe("mobile sheet", () => {

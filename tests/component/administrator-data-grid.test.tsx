@@ -143,6 +143,32 @@ describe("DataGrid", () => {
     const prev = screen.getByRole("button", { name: "Previous page" });
     expect(prev).toBeDisabled();
   });
+
+  it("gives each row its position in the whole result, header row included (F-120)", async () => {
+    // Page 3 of 1,250 at 25 per page. Without aria-rowindex a screen reader
+    // numbers rows from the page ("row 1 of 1250"); ARIA also counts the
+    // header row, so it is row 1 and the first body row here is 1 + 50 + 1.
+    currentSearch = "page=3&pageSize=25";
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          { id: "u51", name: "Ada" },
+          { id: "u52", name: "Grace" },
+        ],
+        total: 1250,
+      }),
+    });
+    renderWithIntl(<DataGrid<Row> name="t" endpoint="/api/test" columns={COLUMNS} />);
+    await screen.findByText("Ada");
+
+    expect(screen.getByRole("table")).toHaveAttribute("aria-rowcount", "1251");
+    const [header, first, second] = screen.getAllByRole("row");
+    expect(header).toHaveAttribute("aria-rowindex", "1");
+    expect(first).toHaveAttribute("aria-rowindex", "52");
+    expect(within(first!).getByText("Ada")).toBeInTheDocument();
+    expect(second).toHaveAttribute("aria-rowindex", "53");
+  });
 });
 
 /**

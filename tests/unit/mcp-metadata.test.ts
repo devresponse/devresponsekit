@@ -17,7 +17,21 @@ describe("MCP discovery metadata", () => {
       "https://app.example.com/api/mcp",
     );
     expect(protectedResourceMetadataUrl(BASE)).toBe(
-      "https://app.example.com/.well-known/oauth-protected-resource",
+      "https://app.example.com/.well-known/oauth-protected-resource/api/mcp",
+    );
+  });
+
+  /**
+   * I-04: RFC 9728 §3.1 inserts the well-known prefix BEFORE the resource's
+   * path, so the document for `<origin>/api/mcp` is path-suffixed. The
+   * challenge pointed at the bare root one, which a strict client cannot
+   * validate against the resource it asked about, and no path-suffixed one
+   * was served.
+   */
+  it("places the metadata at the RFC 9728 §3.1 location derived from the resource identifier", () => {
+    const resource = new URL(mcpResourceIdentifier(`${BASE}/`));
+    expect(protectedResourceMetadataUrl(`${BASE}/`)).toBe(
+      `${resource.origin}/.well-known/oauth-protected-resource${resource.pathname}`,
     );
   });
 
@@ -41,7 +55,7 @@ describe("MCP discovery metadata", () => {
 
   it("builds a WWW-Authenticate header that points at the resource metadata", () => {
     expect(mcpWwwAuthenticate(BASE)).toContain(
-      'resource_metadata="https://app.example.com/.well-known/oauth-protected-resource"',
+      'resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/api/mcp"',
     );
     expect(mcpWwwAuthenticate(BASE)).not.toContain("error=");
   });

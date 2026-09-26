@@ -8,11 +8,32 @@
  * trivially unit-testable against the real spec. Dispatch (self-fetch) lives
  * in `tools.server.ts`. See docs/design-mcp-agent-gateway.md §11.
  */
+import { isAccountScope, scopesAuthorize } from "@/lib/api-auth/scopes";
 import type { McpInputSchema } from "./protocol";
 
 /** Public/special operations that are never exposed as agent tools. */
 const EXCLUDED_OPERATION_IDS = new Set(["issueToken", "getJwks", "getOpenApi"]);
 const METHODS = ["get", "post", "put", "patch", "delete"] as const;
+
+/**
+ * Operations whose success response carries a newly minted plaintext secret
+ * (I-04). They stay tools, since an operator may want an agent to rotate a
+ * credential, but a tool result lands in the model's context and in whatever
+ * transcript the MCP host or model provider keeps, so their descriptions say
+ * so ({@link SECRET_IN_RESULT_NOTE}). tests/unit/mcp-openapi-tools.test.ts
+ * fails when an operation that returns a secret is missing from this set.
+ */
+export const SECRET_MINTING_OPERATION_IDS: ReadonlySet<string> = new Set([
+  "createMyApiKey",
+  "rotateMyApiKey",
+  "createOauthClient",
+  "rotateOauthClientSecret",
+]);
+
+const SECRET_IN_RESULT_NOTE =
+  " The result contains a newly minted plaintext secret, which enters this conversation's " +
+  "context and any transcript the MCP host or model provider keeps; prefer minting long-lived " +
+  "credentials outside an agent session, and rotate a secret that was exposed.";
 
 export interface GeneratedTool {
   name: string;
@@ -29,6 +50,13 @@ export interface GeneratedTool {
   /** Argument names sent in the JSON request body. */
   bodyProps: string[];
   readOnly: boolean;
+  /**
+   * The operation's bearer scope requirements, as OpenAPI states them: the
+   * outer list holds alternatives (any one suffices), each inner list scopes
+   * that are all required. Empty when the operation names no requirement.
+   * `tools/list` filters on it ({@link isToolAvailable}, I-04).
+   */
+  scopeSets: string[][];
 }
 
 interface OpenApiParam {
@@ -219,6 +247,37 @@ export function validateToolArguments(
   return null;
 }
 
+/**
+ * True when a caller who can exercise exactly the scopes `holdsScope` admits
+ * satisfies one of the tool's scope alternatives (I-04). `tools/list` used to
+ * return every tool to every caller, so a zero-scope agent was offered the
+ * whole admin surface and learned only by 403s what it could not do. This is
+ * advisory: the v1 route stays the authority on every `tools/call`.
+ */
+export function isToolAvailable(
+  tool: Pick<GeneratedTool, "scopeSets">,
+  holdsScope: (scope: string) => boolean,
+): boolean {
+  if (tool.scopeSets.length === 0) return true;
+  return tool.scopeSets.some((scopes) => scopes.every(holdsScope));
+}
+
+/**
+ * The scope predicate {@link isToolAvailable} is given: the rule the v1
+ * guards apply to the call itself, so the list offers what the call would
+ * admit. An `account.*` scope needs only the credential's grant
+ * (`decideAccountAccess`); any other scope is an admin permission, which the
+ * principal must also hold (`requireApiPermission`, permission ∩ scope).
+ */
+export function effectiveScopeHolder(caller: {
+  permissions: ReadonlyArray<string>;
+  grantedScopes: ReadonlyArray<string> | null;
+}): (scope: string) => boolean {
+  return (scope) =>
+    scopesAuthorize(caller.grantedScopes, scope) &&
+    (isAccountScope(scope) || caller.permissions.includes(scope));
+}
+
 /** Builds the MCP tool for every scoped operation in the document. */
 export function deriveMcpTools(document: Record<string, unknown>): GeneratedTool[] {
   const doc = document as OpenApiDoc;
@@ -341,7 +400,9 @@ function buildTool(
   // The operation's own description (F-480: `createUser` states there what its
   // security cannot, e.g. the extra scope an `active` user needs).
   const detail = op.description ? ` ${op.description}` : "";
-  const description = (scopes ? `${summary} (${scopes}).` : `${summary}.`) + detail + headerNote;
+  const secretNote = SECRET_MINTING_OPERATION_IDS.has(op.operationId!) ? SECRET_IN_RESULT_NOTE : "";
+  const description =
+    (scopes ? `${summary} (${scopes}).` : `${summary}.`) + detail + headerNote + secretNote;
 
   const inputSchema: McpInputSchema = { type: "object", properties, additionalProperties: false };
   if (required.size > 0) inputSchema.required = [...required];
@@ -357,5 +418,6 @@ function buildTool(
     queryParams,
     bodyProps,
     readOnly: method === "get",
+    scopeSets: (op.security ?? []).map((requirement) => requirement.bearerAuth ?? []),
   };
 }

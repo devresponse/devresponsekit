@@ -152,8 +152,26 @@ describe("v1 self-service routes answer application/problem+json (#45)", () => {
   it("401 carries the RFC 6750 bearer challenge, like the v1 permission guard", async () => {
     resolveCaller.mockResolvedValue(null);
     const { GET } = await import("@/app/api/v1/me/route");
-    const res = await GET(makeReq("/api/v1/me", "GET", true));
+    const res = await GET(makeReq("/api/v1/me", "GET", false));
+    expect(res.status).toBe(401);
     expect(res.headers.get("WWW-Authenticate")).toBe('Bearer realm="devresponse-api"');
+  });
+
+  /**
+   * I-04 (the family of the MCP gateway's bare challenge): a token that was
+   * presented and refused (expired, revoked, unknown) is `invalid_token` per
+   * RFC 6750 §3.1, so a strict client knows to fetch a new one. It got the
+   * bare realm a request with no token gets.
+   */
+  it("401 for a presented token that did not resolve says invalid_token", async () => {
+    resolveCaller.mockResolvedValue(null);
+    const { GET } = await import("@/app/api/v1/me/route");
+    const res = await GET(makeReq("/api/v1/me", "GET", true));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("WWW-Authenticate")).toBe(
+      'Bearer realm="devresponse-api", error="invalid_token"',
+    );
+    expect(((await res.json()) as { code: string }).code).toBe("unauthorized");
   });
 
   it.each([

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
-import { deriveMcpTools, pathParamRejection, validateToolArguments } from "@/lib/mcp/openapi-tools";
+import {
+  SECRET_MINTING_OPERATION_IDS,
+  deriveMcpTools,
+  effectiveScopeHolder,
+  isToolAvailable,
+  pathParamRejection,
+  validateToolArguments,
+} from "@/lib/mcp/openapi-tools";
 
 /**
  * Validates the tool deriver against the REAL OpenAPI document — the same
@@ -320,5 +327,128 @@ describe("validateToolArguments — arrays and enums (F-34)", () => {
     expect(byName("setUserStatus")!.description).toMatch(
       /^Apply a status transition \(supports `If-Match`\) \(requires the `admin\.users\.manage` scope\)\. `approve` or `reactivate` of an MCP agent's service account .*`admin\.clients\.manage`/,
     );
+  });
+});
+
+/**
+ * `tools/list` offers only what the caller can call (I-04). It returned every
+ * tool to every caller, so a zero-scope agent was shown the whole admin
+ * surface and learned what it could not do one 403 at a time.
+ */
+describe("tool availability by scope (I-04)", () => {
+  const names = (holds: (scope: string) => boolean) =>
+    tools.filter((tool) => isToolAvailable(tool, holds)).map((tool) => tool.name);
+
+  it("records each operation's scope alternatives", () => {
+    expect(byName("listUsers")!.scopeSets).toEqual([["admin.users.read"]]);
+    expect(byName("createUser")!.scopeSets).toEqual([
+      ["admin.users.create", "admin.users.update"],
+      ["admin.users.create", "admin.orgs.update"],
+    ]);
+  });
+
+  it("needs every scope of ONE alternative, and a tool naming none is always offered", () => {
+    const createUser = byName("createUser")!;
+    const holding =
+      (...held: string[]) =>
+      (scope: string) =>
+        held.includes(scope);
+    expect(isToolAvailable(createUser, holding("admin.users.create"))).toBe(false);
+    expect(isToolAvailable(createUser, holding("admin.users.create", "admin.orgs.update"))).toBe(
+      true,
+    );
+    expect(isToolAvailable({ scopeSets: [] }, () => false)).toBe(true);
+    expect(isToolAvailable({ scopeSets: [[]] }, () => false)).toBe(true);
+  });
+
+  it("offers a zero-scope credential nothing, and an account.read one only its reads", () => {
+    const admin = ["admin.users.read", "admin.audit.read"];
+    expect(names(effectiveScopeHolder({ permissions: admin, grantedScopes: [] }))).toEqual([]);
+    expect(
+      names(effectiveScopeHolder({ permissions: admin, grantedScopes: ["account.read"] })),
+    ).toEqual(["getMe", "listMyApiKeys"]);
+  });
+
+  it("applies permission ∩ scope to admin scopes, as requireApiPermission does", () => {
+    // Scoped for users.read but the principal lost the permission: not offered.
+    const scopeOnly = effectiveScopeHolder({ permissions: [], grantedScopes: ["admin.users.*"] });
+    expect(scopeOnly("admin.users.read")).toBe(false);
+    // An account scope needs only the grant (decideAccountAccess).
+    expect(scopeOnly("account.read")).toBe(false);
+    const both = effectiveScopeHolder({
+      permissions: ["admin.users.read"],
+      grantedScopes: ["admin.users.*", "account.read"],
+    });
+    expect(both("admin.users.read")).toBe(true);
+    expect(both("admin.users.manage")).toBe(false);
+    expect(both("account.read")).toBe(true);
+    // A cookie-like null grant is the principal's full authority.
+    expect(names(effectiveScopeHolder({ permissions: [], grantedScopes: null }))).toEqual(
+      expect.arrayContaining(["getMe", "createMyApiKey"]),
+    );
+  });
+});
+
+/**
+ * Tools whose result carries a newly minted secret say so (I-04): the secret
+ * lands in the model's context and the host's transcript. The set is named by
+ * hand, so this guard derives the same set from the spec's response schemas
+ * and fails when a new secret-returning operation is not marked.
+ */
+describe("secret-minting tools are marked (I-04)", () => {
+  const document = buildOpenApiDocument("https://x.example") as {
+    paths: Record<string, Record<string, { operationId?: string; responses?: object }>>;
+    components: { schemas: Record<string, unknown> };
+  };
+
+  /** True when `schema` (following `$ref`s) has a property that is a secret. */
+  function carriesSecret(schema: unknown, seen = new Set<string>()): boolean {
+    if (typeof schema !== "object" || schema === null) return false;
+    const { $ref, properties, items } = schema as {
+      $ref?: string;
+      properties?: Record<string, unknown>;
+      items?: unknown;
+    };
+    if ($ref) {
+      const name = $ref.split("/").pop()!;
+      if (seen.has(name)) return false;
+      seen.add(name);
+      return carriesSecret(document.components.schemas[name], seen);
+    }
+    for (const [key, value] of Object.entries(properties ?? {})) {
+      if (key === "key" || /secret/i.test(key) || carriesSecret(value, seen)) return true;
+    }
+    return carriesSecret(items, seen);
+  }
+
+  it("marks exactly the operations whose success response returns a secret", () => {
+    const toolNames = new Set(tools.map((tool) => tool.name));
+    const returningSecrets = Object.values(document.paths)
+      .flatMap((pathItem) => Object.values(pathItem))
+      .filter((op) => op.operationId && toolNames.has(op.operationId))
+      .filter((op) =>
+        Object.entries(op.responses ?? {}).some(
+          ([status, response]) =>
+            status.startsWith("2") &&
+            carriesSecret(
+              (response as { content?: Record<string, { schema?: unknown }> }).content?.[
+                "application/json"
+              ]?.schema,
+            ),
+        ),
+      )
+      .map((op) => op.operationId!)
+      .sort();
+    expect(returningSecrets).toEqual([...SECRET_MINTING_OPERATION_IDS].sort());
+  });
+
+  it("says in the description that the result enters the conversation", () => {
+    for (const name of SECRET_MINTING_OPERATION_IDS) {
+      expect(byName(name)!.description, name).toContain(
+        "The result contains a newly minted plaintext secret",
+      );
+    }
+    expect(byName("listMyApiKeys")!.description).not.toContain("secret");
+    expect(byName("revokeMyApiKey")!.description).not.toContain("plaintext secret");
   });
 });

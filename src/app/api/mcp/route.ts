@@ -1,14 +1,22 @@
 import type { NextRequest } from "next/server";
+import { consumeToken, rateLimitKey, type RateLimitOptions } from "@/lib/admin/rate-limit.server";
 import { mintAccessToken } from "@/lib/api-auth/jwt.server";
-import { resolveCallerDetailed, type ResolvedCaller } from "@/lib/api-auth/resolve-caller.server";
+import {
+  resolveCallerDetailed,
+  type CallerRejectReason,
+  type ResolvedCaller,
+} from "@/lib/api-auth/resolve-caller.server";
 import { mcpAudience } from "@/lib/api-auth/resources";
 import { getServerEnv } from "@/lib/env";
 import { handleMcpRequest } from "@/lib/mcp/dispatch.server";
 import { mcpWwwAuthenticate } from "@/lib/mcp/metadata";
+import { effectiveScopeHolder } from "@/lib/mcp/openapi-tools";
+import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import {
   type JsonRpcResponse,
   RPC_INVALID_REQUEST,
   RPC_PARSE_ERROR,
+  RPC_RATE_LIMITED,
   RPC_UNAUTHORIZED,
   checkProtocolVersionHeader,
   isNotification,
@@ -28,6 +36,13 @@ export const dynamic = "force-dynamic";
 const EXCHANGE_TTL_SECONDS = 60;
 
 /**
+ * Tool-call budget per source credential (F-76): a 60-call burst, then one a
+ * second. An agent is paced by its model, so a real session stays far below
+ * it; a loop exporting data through read tools does not.
+ */
+const TOOL_CALLS: RateLimitOptions = { capacity: 60, refillPerSec: 1 };
+
+/**
  * POST /api/mcp — Phase 0 Model Context Protocol endpoint (design
  * docs/design-mcp-agent-gateway.md §8). Stateless Streamable HTTP: one
  * JSON-RPC request in, one JSON response out. DARK unless `MCP_ENABLED`.
@@ -35,8 +50,8 @@ const EXCHANGE_TTL_SECONDS = 60;
  * Auth: a bearer credential — a `drk_…` API key, or a JWT minted for THIS
  * resource (`resource=<origin>/api/mcp` at the token endpoint, RFC 8707).
  * No valid credential → 401 with `WWW-Authenticate` naming the protected-
- * resource metadata (RFC 9728 §5.1) and, for a wrong-audience token, the
- * RFC 6750 `invalid_token` challenge.
+ * resource metadata (RFC 9728 §5.1) and, for a presented token that was
+ * refused, the RFC 6750 `invalid_token` error ({@link bearerChallenge}).
  */
 export async function POST(request: NextRequest): Promise<Response> {
   const env = getServerEnv();
@@ -58,8 +73,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     return jsonRpc(rpcError(null, RPC_INVALID_REQUEST, "JSON-RPC batching is not supported"), 400);
   }
   // Full JSON-RPC 2.0 envelope check: `jsonrpc` must be exactly "2.0" and a
-  // present `id` must be a string / integer / null (review #205). A malformed
-  // id is never echoed — the error carries `id: null`.
+  // present `id` must be a string or an integer (review #205; MCP forbids a
+  // null request id, I-04). A malformed id is never echoed — the error
+  // carries `id: null`.
   const envelope = validateJsonRpcEnvelope(payload);
   if (!envelope.ok) {
     return jsonRpc(rpcError(null, RPC_INVALID_REQUEST, envelope.reason), 400);
@@ -90,17 +106,14 @@ export async function POST(request: NextRequest): Promise<Response> {
   const expectedAudience = env.MCP_AUDIENCE_GRACE ? [mcpAud, env.API_JWT_AUDIENCE] : [mcpAud];
   const resolution = await resolveCallerDetailed(request, { expectedAudience });
   if (!resolution.ok || !resolution.caller.isBearer) {
-    const challenge =
-      !resolution.ok && resolution.reason === "audience_mismatch"
-        ? {
-            error: "invalid_token",
-            description: `The token was not issued for this resource; request it with resource=${mcpAud}`,
-          }
-        : undefined;
     return jsonRpc(rpcError(messageId, RPC_UNAUTHORIZED, "Unauthorized"), 401, {
-      "WWW-Authenticate": mcpWwwAuthenticate(env.BETTER_AUTH_URL, challenge),
+      "WWW-Authenticate": mcpWwwAuthenticate(
+        env.BETTER_AUTH_URL,
+        resolution.ok ? undefined : bearerChallenge(resolution.reason, mcpAud),
+      ),
     });
   }
+  const caller = resolution.caller;
 
   // Notifications carry no data access and receive no response — but they are
   // still requests to a PROTECTED resource, so the bearer check comes first
@@ -108,10 +121,70 @@ export async function POST(request: NextRequest): Promise<Response> {
   // 202 that pretends the server accepted its message.
   if (isNotification(message)) return new Response(null, { status: 202 });
 
+  // F-76: every tool call is charged to the credential's bucket BEFORE it is
+  // dispatched. v1 limits only its mutations, so an agent could otherwise
+  // page through the user directory and the audit log as fast as it liked.
+  if (message.method === "tools/call") {
+    const bucket = consumeToken(rateLimitKey("mcp.tools.call", toolCallActor(caller)), TOOL_CALLS);
+    if (!bucket.ok) {
+      rateLimitDenialsTotal.inc({ scope: "mcp.tools.call" });
+      const retryAfter = bucket.retryAfterSeconds;
+      return jsonRpc(rpcError(messageId, RPC_RATE_LIMITED, "Rate limited", { retryAfter }), 429, {
+        "Retry-After": String(retryAfter),
+      });
+    }
+  }
+
   return jsonRpc(
-    await handleMcpRequest(message, { headers: await forwardHeaders(request, resolution.caller) }),
+    await handleMcpRequest(message, {
+      holdsScope: effectiveScopeHolder({
+        permissions: caller.access.permissions,
+        grantedScopes: caller.grantedScopes,
+      }),
+      forwardHeaders: () => forwardHeaders(request, caller),
+    }),
     200,
   );
+}
+
+/**
+ * The RFC 6750 §3 attributes of the 401 challenge. A request that presented
+ * no token gets none (RFC 6750 §3.1: it "SHOULD NOT include an error
+ * code"). One whose token was refused gets `invalid_token` whatever the
+ * reason (I-04): before, only a wrong audience did, so a client whose token
+ * had expired, or whose key or client was revoked, got a bare challenge and
+ * a strict one never knew to fetch a new token. The reasons are not told
+ * apart (a bad token, a disabled path and a banned owner read the same),
+ * except that the audience case names the resource to request.
+ */
+function bearerChallenge(
+  reason: CallerRejectReason,
+  mcpAud: string,
+): { error: string; description: string } | undefined {
+  if (reason === "no_credential") return undefined;
+  if (reason === "audience_mismatch") {
+    return {
+      error: "invalid_token",
+      description: `The token was not issued for this resource; request it with resource=${mcpAud}`,
+    };
+  }
+  return {
+    error: "invalid_token",
+    description: "The access token is invalid, expired or revoked",
+  };
+}
+
+/**
+ * The bucket a tool call is charged to: the credential the token was minted
+ * FROM, not `credentialId`. A JWT's `credentialId` is its `jti`, fresh on
+ * every mint, so keying on it would hand an agent a full budget each time it
+ * re-minted (F-76). The source id is the key's row id for a key-minted token,
+ * so it shares the bucket of the key used directly. A legacy token without a
+ * `cid` falls back to its `jti`, and only a caller with neither to its
+ * principal.
+ */
+function toolCallActor(caller: ResolvedCaller): string {
+  return caller.jwt?.credential?.id ?? caller.credentialId ?? caller.betterAuthUserId;
 }
 
 /**

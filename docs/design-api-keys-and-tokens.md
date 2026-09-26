@@ -57,7 +57,7 @@ _Source: `src/lib/api-auth/resolve-caller.server.ts`._
 `resolveCaller(request)` is the single entry point that understands every credential kind and returns a normalized `ResolvedCaller` (or `null`). It only answers _"who is this?"_ — status/membership and permission∩scope decisions belong to the guard (§8). Resolution order, first match wins:
 
 1. `Authorization: Bearer drk_…` → **API key** (detected by `looksLikeApiKey`, the `drk_` product prefix). Gated on `API_KEYS_ENABLED`; verified by hash lookup; usage stamped best-effort.
-2. `Authorization: Bearer eyJ…` → **JWT** (anything bearer that is not an API key). Gated on `API_JWT_ENABLED`; verified via JWKS against the resource's expected audience (§6.1), then the source-credential check (`cid`, §6.5). `resolveCallerDetailed` also reports *why* a bearer failed so the v1 guard can answer `401 credential_revoked` / `401 invalid_token` (audience) instead of a generic 401.
+2. `Authorization: Bearer eyJ…` → **JWT** (anything bearer that is not an API key). Gated on `API_JWT_ENABLED`; verified via JWKS against the resource's expected audience (§6.1), then the source-credential check (`cid`, §6.5). `resolveCallerDetailed` also reports *why* a bearer failed so the v1 guard can answer `401 credential_revoked` / `401 invalid_token` (audience) instead of a generic 401. Any other refused bearer is the generic `401 unauthorized`, but its `WWW-Authenticate` challenge still carries RFC 6750's `error="invalid_token"`, so a strict client knows to fetch a new token (I-04); only a request with no credential gets the bare realm.
 3. No bearer → **session cookie** via the existing `getCurrentSession()`.
 
 The resolved shape:
@@ -277,7 +277,7 @@ Optimistic concurrency uses **weak ETags** derived from a row's `updated_at`: `u
 
 _Source: `src/lib/api-auth/v1-guard.server.ts`._
 
-Mirrors `requireAdminPermission` but speaks problem+json and exposes the resolved caller for audit + per-credential rate limiting. The authorization decision is identical to the cookie surface: same status/membership gate (`decideSecureAccess`), same **permission ∩ scope** rule. The CSRF/origin guard runs only for **ambient** (cookie) credentials — bearer credentials are non-ambient (`isBearer`), so it does not apply. A denied request emits an `api.access.denied` audit event and a `403` carrying `detail: "The credential lacks the required permission or scope."`. `requireAccountUser` (`src/lib/account/guard.server.ts`) is the parallel guard for the `account.*` self-service surface.
+Mirrors `requireAdminPermission` but speaks problem+json and exposes the resolved caller for audit + per-credential rate limiting. The authorization decision is identical to the cookie surface: same status/membership gate (`decideSecureAccess`), same **permission ∩ scope** rule. The CSRF/origin guard runs only for **ambient** (cookie) credentials — bearer credentials are non-ambient (`isBearer`), so it does not apply. A permission/scope denial emits an `api.access.denied` audit event and a `403` carrying `detail: "The credential lacks the required permission or scope."`. `requireAccountUser` (`src/lib/account/guard.server.ts`) is the parallel guard for the `account.*` self-service surface.
 
 ---
 
@@ -328,7 +328,7 @@ Both paths default **OFF**. With neither flag set, a bearer token on `/api/v1` r
 - **Tenant isolation** — credentials act in their bound org, not the active-org cookie (MACHINE-1).
 - **Revocation completeness** — keys/clients via `status`; a Better Auth ban immediately stops all of a user's machine credentials **including outstanding JWTs** (AUTH-1), and `unban` restores them. The `jti` denylist is enforced at resolution but has no writer wired yet (§6.5) — until it does, ban-the-owner is the per-token kill switch.
 - **Side-channel resistance** — constant-time secret comparison (P2-3).
-- **Auditability** — every issuance/denial writes an audit event with a `requestId` that matches the response `x-request-id` header.
+- **Auditability** — every issuance, admin permission/scope denial (`api.access.denied`) and mutation writes an audit event with a `requestId` that matches the response `x-request-id` header. A successful read, a refused token, an `account.*` scope denial, a status or membership refusal and a `429` write none (F-76).
 
 ---
 

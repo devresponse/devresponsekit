@@ -2,7 +2,12 @@ import "server-only";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
 import { clientIpForwardHeader, getClientIp } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
-import { deriveMcpTools, validateToolArguments, type GeneratedTool } from "./openapi-tools";
+import {
+  deriveMcpTools,
+  isToolAvailable,
+  validateToolArguments,
+  type GeneratedTool,
+} from "./openapi-tools";
 import {
   type McpToolDefinition,
   type McpToolResult,
@@ -22,6 +27,8 @@ import {
 const GENERATED: GeneratedTool[] = deriveMcpTools(buildOpenApiDocument("https://mcp.internal"));
 
 export interface McpTool extends McpToolDefinition {
+  /** Scope alternatives the operation requires (see `GeneratedTool.scopeSets`). */
+  scopeSets: string[][];
   /**
    * Argument validation against this tool's own `inputSchema` (review #54).
    * Returns a message when the call must be refused with
@@ -39,6 +46,7 @@ const TOOLS: McpTool[] = GENERATED.map((tool) => ({
   description: tool.description,
   inputSchema: tool.inputSchema,
   annotations: { readOnlyHint: tool.readOnly, openWorldHint: false },
+  scopeSets: tool.scopeSets,
   validate: (args) => validateToolArguments(tool, args),
   run: (request, args) => dispatch(tool, request, args),
 }));
@@ -176,9 +184,12 @@ export function findTool(name: string): McpTool | undefined {
   return TOOLS.find((tool) => tool.name === name);
 }
 
-/** Public tool definitions for `tools/list` (without the `run` closure). */
-export function toolDefinitions(): McpToolDefinition[] {
-  return TOOLS.map((tool) => ({
+/**
+ * Public tool definitions for `tools/list` (without the `run` closure),
+ * limited to the tools whose scopes the caller holds (I-04).
+ */
+export function toolDefinitions(holdsScope: (scope: string) => boolean): McpToolDefinition[] {
+  return TOOLS.filter((tool) => isToolAvailable(tool, holdsScope)).map((tool) => ({
     name: tool.name,
     title: tool.title,
     description: tool.description,

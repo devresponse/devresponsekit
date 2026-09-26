@@ -8,6 +8,10 @@ export const dynamic = "force-dynamic";
  * client which authorization server protects `/api/mcp` and what scopes it
  * understands. Public, but DARK unless `MCP_ENABLED` (nothing is advertised
  * while the gateway is off). See docs/design-mcp-agent-gateway.md §9.
+ *
+ * The RFC 9728 §3.1 location for the `<origin>/api/mcp` resource is the
+ * path-suffixed `./api/mcp/route.ts`, which serves this same handler (I-04);
+ * this root copy stays for clients of older MCP revisions that look only here.
  */
 export async function GET(): Promise<Response> {
   const env = getServerEnv();

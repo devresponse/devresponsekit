@@ -11,18 +11,33 @@ import {
 } from "./protocol";
 import { findTool, toolDefinitions } from "./tools.server";
 
+/** What the route knows about the resolved caller, as the methods below need it. */
+export interface McpCallerContext {
+  /**
+   * Whether the calling credential can exercise `scope`, by the rule the v1
+   * guards apply (`effectiveScopeHolder`). `tools/list` offers only the tools
+   * this admits (I-04).
+   */
+  holdsScope: (scope: string) => boolean;
+  /**
+   * Builds the headers tools send to the v1 routes: the caller's bearer
+   * credential (or the v1-audience token the route exchanges it for, review
+   * #50/#53) and the trusted client-IP hop. Only the headers are needed, so
+   * the route hands over a rebuilt header set rather than the NextRequest.
+   * A function, called only by `tools/call`, so `initialize`, `ping` and
+   * `tools/list` mint no exchange token they would never use (I-04).
+   */
+  forwardHeaders: () => Promise<Headers>;
+}
+
 /**
- * Routes one JSON-RPC request to its MCP method handler. `forward` carries
- * the headers tools send to the v1 routes — the caller's bearer credential
- * (or the v1-audience token the route exchanged it for, review #50/#53) and
- * the trusted client-IP hop. Only the headers are needed, so the route can
- * hand over a rebuilt header set rather than the original NextRequest. Only
- * invoked for id-bearing requests (notifications get no response and are
- * handled by the route).
+ * Routes one JSON-RPC request to its MCP method handler. Only invoked for
+ * id-bearing requests (notifications get no response and are handled by the
+ * route).
  */
 export async function handleMcpRequest(
   message: JsonRpcMessage & { method: string },
-  forward: { headers: Headers },
+  caller: McpCallerContext,
 ): Promise<JsonRpcResponse> {
   const id = message.id ?? null;
 
@@ -34,7 +49,7 @@ export async function handleMcpRequest(
     case "ping":
       return rpcResult(id, {});
     case "tools/list":
-      return rpcResult(id, { tools: toolDefinitions() });
+      return rpcResult(id, { tools: toolDefinitions(caller.holdsScope) });
     case "tools/call": {
       const params = (message.params ?? {}) as { name?: unknown; arguments?: unknown };
       const name = typeof params.name === "string" ? params.name : "";
@@ -54,6 +69,9 @@ export async function handleMcpRequest(
       if (invalid) {
         return rpcError(id, RPC_INVALID_PARAMS, `Invalid arguments for ${name}: ${invalid}`);
       }
+      // Outside the try: a failure to mint the exchange token is the server's
+      // own fault and must end in a logged 500, not read as a tool error.
+      const forward = { headers: await caller.forwardHeaders() };
       try {
         return rpcResult(id, await tool.run(forward, args));
       } catch (error) {

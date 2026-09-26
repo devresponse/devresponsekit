@@ -74,9 +74,23 @@ describe("JSON-RPC 2.0 envelope validation", () => {
 
   it("accepts a notification (no id) and every legal id type", () => {
     expect(validateJsonRpcEnvelope({ jsonrpc: "2.0", method: "notifications/x" }).ok).toBe(true);
-    for (const id of ["abc", 0, -5, null]) {
+    for (const id of ["abc", "", 0, -5]) {
       expect(validateJsonRpcEnvelope({ jsonrpc: "2.0", id, method: "ping" }).ok).toBe(true);
     }
+  });
+
+  /**
+   * I-04: base JSON-RPC 2.0 tolerates a null request id, MCP does not ("MUST
+   * NOT be null" in every revision this server negotiates). It was accepted,
+   * so a request and a malformed message both came back as `id: null`.
+   */
+  it("rejects a null request id, which MCP forbids, while a response may still carry one", () => {
+    const check = validateJsonRpcEnvelope({ jsonrpc: "2.0", id: null, method: "ping" });
+    expect(check.ok).toBe(false);
+    if (!check.ok)
+      expect(check.reason).toBe('Invalid Request: "id" must be a string or an integer');
+    expect(isValidJsonRpcId(null)).toBe(true);
+    expect(rpcError(null, -32600, "bad").id).toBeNull();
   });
 
   it('rejects a missing or wrong "jsonrpc" member', () => {
@@ -214,5 +228,13 @@ describe("MCP initialize instructions", () => {
     );
     expect(named.length).toBeGreaterThan(0);
     for (const name of named) expect(toolNames.has(name), `tool ${name} exists`).toBe(true);
+  });
+
+  it("say tools/list is scope-filtered and that getMe needs account.read (I-04)", () => {
+    // tools/list only offers what the credential's scopes allow, so an agent
+    // told to call getMe unconditionally would chase a tool it was not shown.
+    const { instructions } = buildInitializeResult("2025-06-18");
+    expect(instructions).toContain("tools/list returns only the tools");
+    expect(instructions).toContain("account.read");
   });
 });

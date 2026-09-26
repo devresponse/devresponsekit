@@ -86,7 +86,8 @@ describe("requireApiPermission", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.response.status).toBe(401);
-      expect(res.response.headers.get("WWW-Authenticate")).toContain("Bearer");
+      // No credential at all: the bare challenge, no error code (RFC 6750 §3.1).
+      expect(res.response.headers.get("WWW-Authenticate")).toBe('Bearer realm="devresponse-api"');
       expect(((await res.response.json()) as { code: string }).code).toBe("unauthorized");
     }
   });
@@ -124,8 +125,13 @@ describe("requireApiPermission", () => {
       expect(res.ok).toBe(false);
       if (!res.ok) {
         expect(((await res.response.json()) as { code: string }).code).toBe("unauthorized");
-        // No hint distinguishes a bad credential from a disabled path or a ban.
-        expect(res.response.headers.get("WWW-Authenticate")).toBe('Bearer realm="devresponse-api"');
+        // A refused token is `invalid_token` (RFC 6750 §3.1, I-04): an expired
+        // one used to get the bare realm, which a strict client does not read
+        // as "fetch a new token". No hint distinguishes a bad credential from
+        // a disabled path or a ban.
+        expect(res.response.headers.get("WWW-Authenticate"), reason).toBe(
+          'Bearer realm="devresponse-api", error="invalid_token"',
+        );
       }
     }
   });

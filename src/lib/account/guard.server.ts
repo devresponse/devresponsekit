@@ -203,7 +203,13 @@ async function decideAccountAccess(
         adminCode: "unauthenticated",
         problemCode: "unauthorized",
         status: 401,
-        headers: { "WWW-Authenticate": BEARER_REALM },
+        // A presented token that did not resolve is `invalid_token` (RFC 6750
+        // §3.1), as in the v1 permission guard (I-04); no token, a bare realm.
+        headers: {
+          "WWW-Authenticate": hasBearerCredential(request.headers)
+            ? `${BEARER_REALM}, error="invalid_token"`
+            : BEARER_REALM,
+        },
       },
     };
   }

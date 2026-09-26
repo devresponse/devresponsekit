@@ -61,9 +61,51 @@ docker build -t devresponsekit:latest .
 
 No secrets are needed at build time. `next build` runs with
 `NEXT_PHASE=phase-production-build`, so `src/lib/env.ts` substitutes
-placeholder values and nothing real is baked into the image. (Sentry
-source-map upload stays disabled unless you pass `SENTRY_AUTH_TOKEN` as a
-build arg — see [configuration.md](configuration.md).)
+placeholder values and nothing real is baked into the image.
+
+### Browser-side Sentry values are build arguments
+
+`next build` copies every `NEXT_PUBLIC_*` variable set while it runs into the
+JavaScript it emits, and the browser has no other way to read one. So in an
+image built without them, Sentry captures on the server only (with
+`SENTRY_DSN` at run time, §8): no browser errors, Web Vitals or session
+replay, however the container is configured (F-108). Pass the public Sentry
+values to the build instead:
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project> \
+  --build-arg NEXT_PUBLIC_SENTRY_ENVIRONMENT=production \
+  --build-arg NEXT_PUBLIC_SENTRY_RELEASE="$GIT_SHA" \
+  -t devresponsekit:$GIT_SHA .
+```
+
+The builder stage also takes `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE`,
+`NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE` and
+`NEXT_PUBLIC_SENTRY_REPLAYS_ERROR_SAMPLE_RATE`, which default to `0.1`, `0`
+and `1`: a tenth of browser transactions traced, no clean session replayed,
+every session that errors replayed (the other Sentry settings are in
+[configuration.md](configuration.md#observability-opt-in)). A value passed this
+way is fixed in the image, in the server bundle as well as the browser's, so
+changing one means rebuilding. An argument passed empty counts as not passed.
+
+The other public variables (`NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_APP_NAME`,
+`NEXT_PUBLIC_PRODUCTION_HOST`) are deliberately **not** build arguments: the
+server reads them at run time (§3), so one image serves every environment.
+
+**Source-map upload** needs `SENTRY_ORG`, `SENTRY_PROJECT` and
+`SENTRY_AUTH_TOKEN`, and runs only when `NEXT_PUBLIC_SENTRY_DSN` is passed
+too. The token is a secret, so pass it as a BuildKit secret, never a
+`--build-arg`: build arguments are recorded in the image history, and the
+Dockerfile declares none for the token.
+
+```bash
+SENTRY_AUTH_TOKEN=... docker build \
+  --secret id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+  --build-arg SENTRY_ORG=acme --build-arg SENTRY_PROJECT=devresponsekit \
+  --build-arg NEXT_PUBLIC_SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project> \
+  -t devresponsekit:$GIT_SHA .
+```
 
 ---
 
@@ -144,6 +186,21 @@ required variables of §3 in the shell or the checkout's `.env`; the Better
 Auth schema does not depend on their values, which is why
 `.github/workflows/deploy.yml` runs it with CI placeholders.
 
+No source checkout where the migration runs? The Dockerfile's `builder`
+stage has the whole toolchain. Build it with the same `--build-arg`s as the
+runtime image, so it comes from that build's cache, and run the migrators
+from it (this is how CI migrates the database it boots the image against,
+§7):
+
+```bash
+docker build --target builder -t devresponsekit-migrate .
+docker run --rm --env-file .env.docker devresponsekit-migrate \
+  sh -c "pnpm db:auth:migrate && pnpm db:app:migrate"
+```
+
+It holds the full source and dev dependencies, so use it for this one-off
+step only, never as the web container.
+
 ---
 
 ## 5. Run
@@ -187,9 +244,10 @@ services:
   migrate:
     build: .
     # The runtime image has no migration tooling, so run migrations from a
-    # source checkout / CI step instead, OR build a separate image whose
-    # CMD is `pnpm db:auth:migrate && pnpm db:app:migrate`. Shown here as a
-    # reminder that this is a distinct, run-once step gating `app`.
+    # source checkout / CI step instead, OR from the Dockerfile's `builder`
+    # stage (section 4) with `pnpm db:auth:migrate && pnpm db:app:migrate`.
+    # Shown here as a reminder that this is a distinct, run-once step gating
+    # `app`.
     profiles: ["tools"]
 
   app:
@@ -238,6 +296,14 @@ volumes:
   (`.github/workflows/docker-scan.yml`, a required check) goes red when a
   stale base image accumulates fixable HIGH/CRITICAL CVEs, so a digest bump is
   the usual fix for a base-OS finding.
+- **CI boots the image it scans.** A module or native file the standalone
+  trace drops still builds and scans clean, then answers 500 at run time. So
+  the same `trivy` job migrates and seeds a throwaway Postgres from the
+  `builder` stage (§4), starts the scanned image with runtime configuration
+  only, and fails unless `/api/health/ready`, `/api/health` and `/en/sign-in`
+  answer, a wrong password gets Better Auth's `401`, the seeded admin can open
+  a docs page whose code blocks Shiki highlighted, and a `NEXT_PUBLIC_*` build
+  argument (§2) reached the browser bundle (F-108).
 - **No package-manager CLIs in the runtime image.** The runner stage deletes
   the `npm`, `npx`, `corepack`, and `yarn` binaries (and npm's vendored
   `node_modules`) that the Node base image bundles. The container only ever
@@ -305,8 +371,11 @@ volumes:
   the per-actor UX limit is best-effort there. See
   [Deployment → Operations & gotchas](deployment.md#5-operations--gotchas) and
   [troubleshooting.md](troubleshooting.md).
-- **Observability is opt-in.** Sentry only initializes when
-  `NEXT_PUBLIC_SENTRY_DSN` is set; the image is unchanged otherwise. See
+- **Observability is opt-in, and half of it is build-time.** Server-side
+  Sentry initializes when `SENTRY_DSN` (or `NEXT_PUBLIC_SENTRY_DSN`) is set at
+  run time. Browser-side Sentry exists only in an image built with
+  `--build-arg NEXT_PUBLIC_SENTRY_DSN=…` (§2); setting it on the container
+  does not reach the browser. Without either, the image captures nothing. See
   [configuration.md](configuration.md).
 - **In-app docs + help viewers.** `docs/` and `help/` are copied into the
   image so both viewers work out of the box (they default to `<cwd>/docs`

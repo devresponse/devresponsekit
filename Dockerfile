@@ -8,6 +8,7 @@
 # not the full repo or dev dependencies.
 #
 # Build:   docker build -t devresponsekit .
+#          (browser-side Sentry values are --build-arg; see docs/docker.md §2)
 # Run:     see docs/docker.md (env vars + run/deploy + migrations)
 #
 # NOTE: database migrations are NOT run by this image's CMD. They are a
@@ -42,9 +43,37 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # Build the standalone server. `next build` sets
 # NEXT_PHASE=phase-production-build, so src/lib/env.ts substitutes
 # placeholders — NO real secrets are needed or baked in at build time.
-# Sentry source-map upload stays off unless SENTRY_AUTH_TOKEN is provided.
 COPY . .
-RUN pnpm build
+
+# F-108: the browser's Sentry values are BUILD arguments. `next build` copies
+# every NEXT_PUBLIC_* variable set while it runs into the bundles it emits,
+# and the browser has no other way to read one, so a DSN given only to
+# `docker run` got server-side capture and no browser errors, Web Vitals or
+# replay. These are the variables src/instrumentation-client.ts reads (pass
+# them with --build-arg, docs/docker.md §2). ARG and not ENV on purpose: an
+# ARG nobody passes stays unset, while `ENV X=$X` would set it to "" and Next
+# would inline that empty string over the value the server reads at run time.
+# NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_APP_NAME and NEXT_PUBLIC_PRODUCTION_HOST
+# are deliberately absent: the server reads them at run time, and a build
+# value would freeze them into the server bundle too, tying the image to one
+# environment.
+ARG NEXT_PUBLIC_SENTRY_DSN
+ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT
+ARG NEXT_PUBLIC_SENTRY_RELEASE
+ARG NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+ARG NEXT_PUBLIC_SENTRY_REPLAYS_SESSION_SAMPLE_RATE
+ARG NEXT_PUBLIC_SENTRY_REPLAYS_ERROR_SAMPLE_RATE
+# Source-map upload: the Sentry build plugin runs only with the DSN above and
+# uploads only with SENTRY_AUTH_TOKEN. The token is a secret, so it arrives as
+# a BuildKit secret (`--secret id=sentry_auth_token,env=SENTRY_AUTH_TOKEN`),
+# never as an ARG: build arguments are recorded in the image history.
+ARG SENTRY_ORG
+ARG SENTRY_PROJECT
+# An argument passed EMPTY (`--build-arg X=` from a script whose variable was
+# unset) is set to "", so it is unset here for the same reason as above.
+RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+    for name in $(env | sed -n 's/^\(NEXT_PUBLIC_[A-Za-z0-9_]*\)=$/\1/p'); do unset "$name"; done \
+ && pnpm build
 
 # ─────────────────────────────────────────────────────────────────────
 # Stage 2 — runner: copy only the standalone server + static assets and

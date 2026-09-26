@@ -41,7 +41,8 @@ nothing else. The full Sentry variable set lives in the Observability section of
 [configuration.md](./configuration.md). The essentials:
 
 - `NEXT_PUBLIC_SENTRY_DSN` — **presence enables** client + server monitoring and the
-  build-time plugin.
+  build-time plugin. The client half needs it at **build** time; for the Docker image
+  that means a `--build-arg` ([docker.md §2](./docker.md#browser-side-sentry-values-are-build-arguments)).
 - `SENTRY_DSN` — server DSN (defaults to the public DSN).
 - `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` — **build/CI only**, for source-map
   upload. Never expose `SENTRY_AUTH_TOKEN` to the client.

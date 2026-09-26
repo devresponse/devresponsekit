@@ -300,3 +300,51 @@ describe("administrator/users/[userId] page — per-tab permission gating (revie
     );
   });
 });
+
+/**
+ * F-148 — the impersonate route refuses a target the secure shell would not
+ * admit (403 `target_not_active`): a borrowed session for a blocked or pending
+ * account lands on /blocked or /pending-approval instead of the target's shell.
+ * The button used to render whatever the account's status, inviting exactly
+ * that click, so it is now offered for an ACTIVE account only.
+ */
+describe("administrator/users/[userId] page — Impersonate button (F-148)", () => {
+  /** Depth-first search for the props handed to ImpersonateUserButton. */
+  function findImpersonateProps(node: unknown): Record<string, unknown> | undefined {
+    if (!node || typeof node !== "object") return undefined;
+    const el = node as { props?: Record<string, unknown> };
+    if (el.props && "isSelf" in el.props) return el.props;
+    const children = el.props?.children;
+    for (const child of Array.isArray(children) ? children : [children]) {
+      const found = findImpersonateProps(child);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  beforeEach(() => {
+    checkAdminPermissionServer.mockResolvedValue({
+      betterAuthUserId: "ba-admin",
+      access: { ...ACCESS, permissions: ["admin.users.read", "admin.users.impersonate"] },
+    });
+    canAccessUser.mockResolvedValue(true);
+  });
+
+  it("offers it for an active account", async () => {
+    const props = findImpersonateProps(await Page(params(USER_ID)));
+    expect(props).toMatchObject({ userId: USER_ID, email: "target@x.com", isSelf: false });
+  });
+
+  it.each(["blocked", "suspended", "deactivated", "pending_approval"])(
+    "does not offer it for a %s account",
+    async (status) => {
+      executeTakeFirst.mockResolvedValue({ ...USER_ROW, status });
+      expect(findImpersonateProps(await Page(params(USER_ID)))).toBeUndefined();
+    },
+  );
+
+  it("still requires admin.users.impersonate", async () => {
+    checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-admin", access: ACCESS });
+    expect(findImpersonateProps(await Page(params(USER_ID)))).toBeUndefined();
+  });
+});

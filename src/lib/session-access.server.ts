@@ -67,9 +67,30 @@ const impersonationMarker = cache(function impersonationMarker(
 
 export function getSessionAccessContext(session: SessionLike): Promise<UserAccessContext> {
   const impersonatorId = readImpersonatorId(session);
+  return impersonatorId
+    ? getImpersonatedAccessContext(session.user.id, impersonatorId)
+    : getUserAccessContext(session.user.id, undefined, undefined);
+}
+
+/**
+ * The context of a session in which `impersonatorBetterAuthUserId` has
+ * BORROWED `targetBetterAuthUserId`: exactly what {@link getSessionAccessContext}
+ * resolves once Better Auth has stamped `impersonatedBy` on it, because that
+ * function calls this one for every impersonated session.
+ *
+ * F-148: the impersonate route asks it BEFORE the session exists, and refuses a
+ * target the borrowed session could not use: one that is blocked or pending, or
+ * that has no active membership inside the impersonator's reach. The secure
+ * guard would send such a session to /blocked or /pending-approval, and the
+ * admin would land there instead of in the target's shell.
+ */
+export function getImpersonatedAccessContext(
+  targetBetterAuthUserId: string,
+  impersonatorBetterAuthUserId: string,
+): Promise<UserAccessContext> {
   return getUserAccessContext(
-    session.user.id,
+    targetBetterAuthUserId,
     undefined,
-    impersonatorId ? impersonationMarker(impersonatorId) : undefined,
+    impersonationMarker(impersonatorBetterAuthUserId),
   );
 }

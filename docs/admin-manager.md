@@ -1696,6 +1696,21 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   session Better Auth will act on to be the very principal the guards
   evaluated, on an ordinary session (`session_principal_mismatch` otherwise).
   Stop the current impersonation first.
+- **The target must be able to use the session (F-148).** Before handing off to
+  Better Auth, the route resolves the target the way the borrowed session will
+  (`getImpersonatedAccessContext`, the session path confined to the
+  impersonator's reach below) and refuses anything `decideSecureAccess` does not
+  allow: a blocked, suspended, deactivated or pending account, or an active one
+  with no active membership inside the impersonator's reach. The answer is 403
+  `forbidden` with `reason: "target_not_active"`, audited as
+  `admin.user.impersonation_failed` (outcome `denied`, `metadata.decision`).
+  Such a session used to be sent straight to `/blocked` or `/pending-approval`,
+  and the admin had to sign in again. The user detail page offers
+  **Impersonate** for an active account only. A session that becomes unusable
+  after it started (the target is blocked mid-session, or the impersonator's
+  reach shrinks) still lands on those two pages, so both render the
+  impersonation banner and its **Stop impersonating** control. A target banned
+  in Better Auth is refused by the vendor instead (502 `auth_impersonate_failed`).
 - **Tenant confinement (IMP-1/IMP-2).** An impersonated session may only
   resolve an organization the **impersonator could already reach as
   themselves** — applied in `getUserAccessContext`, in the WHERE of the one
@@ -1705,7 +1720,11 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   impersonator shares resolves to that suspended row. An empty intersection
   resolves no membership at all (fail closed). Every cookie caller therefore
   resolves its context through `getSessionAccessContext`, which is enforced by
-  a source scan (`tests/unit/session-access-context-invariant.test.ts`).
+  a source scan (`tests/unit/session-access-context-invariant.test.ts`). What
+  the borrowed shell *lists* is confined the same way: the org switcher and the
+  memberships and roles on **Account → Overview** show only the organizations
+  in the impersonator's reach (F-65), so the target's footprint in other
+  tenants stays out of view.
 
   "Could reach as themselves" is **reach, not membership**
   (`src/lib/impersonation-reach.server.ts`). For every principal but one the
@@ -1715,8 +1734,9 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   a customer tenant the superadmin does not belong to is the *normal* case.
   Measured by membership rows it produced an empty intersection, i.e. a
   borrowed session with no org, no permissions and not even `shell.view`:
-  `pending_approval` everywhere, and a redirect to a page outside the `(secure)`
-  group that renders neither the Stop control nor a sign-out button. A
+  `pending_approval` everywhere, and a redirect to `/pending-approval`, a page
+  outside the `(secure)` group that then offered no Stop control (it renders
+  one since F-148, above). A
   superadmin impersonator is therefore **unconfined**, which cannot reopen the
   pivot — the attack needs a non-superadmin actor, since a superadmin already
   holds every permission in every organization. Everyone else keeps the

@@ -94,8 +94,22 @@ export async function getAccountPreferences(appUserId: string): Promise<AccountP
   };
 }
 
-/** Read-only summary of the caller's account, scoped to self. */
-export async function getAccountOverview(appUserId: string): Promise<AccountOverview | null> {
+/**
+ * Read-only summary of the caller's account, scoped to self.
+ *
+ * `visibleOrgIds` limits the memberships and roles to those organizations;
+ * `null` shows all of them. F-65: during an IMPERSONATION "self" is the
+ * borrowed identity, whose memberships can include tenants the admin cannot
+ * reach. The shell never resolves those (IMP-1), but this summary listed them
+ * anyway, with the org names, the membership statuses and the role names held
+ * there. The page passes the impersonator's reach here, the same list the org
+ * switcher is filtered to. It is a required argument, so no caller can leave
+ * the filter out by accident.
+ */
+export async function getAccountOverview(
+  appUserId: string,
+  visibleOrgIds: readonly string[] | null,
+): Promise<AccountOverview | null> {
   const user = await db
     .selectFrom("app_users")
     .select([
@@ -110,7 +124,7 @@ export async function getAccountOverview(appUserId: string): Promise<AccountOver
     .executeTakeFirst();
   if (!user) return null;
 
-  const memberships = await db
+  let membershipQuery = db
     .selectFrom("app_organization_memberships as m")
     .innerJoin("app_organizations as o", "o.id", "m.organization_id")
     .select([
@@ -119,17 +133,21 @@ export async function getAccountOverview(appUserId: string): Promise<AccountOver
       "o.slug as organization_slug",
       "m.status",
     ])
-    .where("m.app_user_id", "=", appUserId)
-    .orderBy("o.name", "asc")
-    .execute();
-
-  const roleRows = await db
+    .where("m.app_user_id", "=", appUserId);
+  let roleQuery = db
     .selectFrom("app_user_roles as ur")
     .innerJoin("app_roles as r", "r.id", "ur.role_id")
     .select(["r.name as name"])
-    .where("ur.app_user_id", "=", appUserId)
-    .orderBy("r.name", "asc")
-    .execute();
+    .where("ur.app_user_id", "=", appUserId);
+  if (visibleOrgIds !== null) {
+    membershipQuery = membershipQuery.where("m.organization_id", "in", visibleOrgIds);
+    roleQuery = roleQuery.where("ur.organization_id", "in", visibleOrgIds);
+  }
+
+  // An empty list shows nothing, and keeps an empty `in ()` out of the SQL.
+  const noneVisible = visibleOrgIds !== null && visibleOrgIds.length === 0;
+  const memberships = noneVisible ? [] : await membershipQuery.orderBy("o.name", "asc").execute();
+  const roleRows = noneVisible ? [] : await roleQuery.orderBy("r.name", "asc").execute();
 
   return {
     displayName: user.display_name,

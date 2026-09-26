@@ -3,8 +3,9 @@ import { getTranslations } from "next-intl/server";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isSupportedLocale, type SupportedLocale } from "@/config/i18n-config";
-import { requireSecureSession } from "@/lib/auth-guard";
+import { getImpersonatorId, requireSecureSession } from "@/lib/auth-guard";
 import { getAppFormatter } from "@/lib/format/viewer-format.server";
+import { listImpersonationReachableOrgIds } from "@/lib/impersonation-reach.server";
 import { PermissionsCard } from "./_components/permissions-card";
 import { getAccountOverview } from "./_data.server";
 
@@ -34,10 +35,17 @@ export default async function AccountOverviewPage({
 }) {
   const { locale: rawLocale } = await params;
   const locale: SupportedLocale = isSupportedLocale(rawLocale) ? rawLocale : "en";
-  const { access } = await requireSecureSession(locale, `/${locale}/app/account`);
+  const { session, access } = await requireSecureSession(locale, `/${locale}/app/account`);
 
   if (!access.appUserId) notFound();
-  const overview = await getAccountOverview(access.appUserId);
+  // F-65: an impersonated session shows only the organizations its session can
+  // resolve, the impersonator's reach (IMP-1), as the org switcher does. A
+  // `null` reach (a superadmin impersonator) and an ordinary session show all.
+  const impersonatorId = getImpersonatorId(session);
+  const visibleOrgIds = impersonatorId
+    ? await listImpersonationReachableOrgIds(impersonatorId)
+    : null;
+  const overview = await getAccountOverview(access.appUserId, visibleOrgIds);
   if (!overview) notFound();
 
   const t = await getTranslations({ locale, namespace: "account" });

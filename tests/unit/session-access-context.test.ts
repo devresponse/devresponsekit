@@ -61,3 +61,20 @@ describe("getSessionAccessContext", () => {
     expect(getUserAccessContext).toHaveBeenLastCalledWith("ba-1", undefined, undefined);
   });
 });
+
+describe("getImpersonatedAccessContext (F-148)", () => {
+  it("resolves a target exactly as the session impersonating it will be resolved", async () => {
+    // The impersonate route asks this BEFORE the session exists, to refuse a
+    // target the secure shell would send to /blocked or /pending-approval. The
+    // answer is only a prediction if it is the very call the session makes.
+    await expect(mod.getImpersonatedAccessContext("ba-target", "ba-admin")).resolves.toBe(CONTEXT);
+    await mod.getSessionAccessContext({
+      user: { id: "ba-target" },
+      session: { impersonatedBy: "ba-admin" },
+    });
+
+    const [predicted, actual] = getUserAccessContext.mock.calls;
+    expect(predicted).toEqual(["ba-target", undefined, { betterAuthUserId: "ba-admin" }]);
+    expect(actual).toEqual(predicted);
+  });
+});

@@ -313,6 +313,16 @@ export function satelliteConfigProblems(input: SatelliteCheckInput): ConfigProbl
         why: `this deployment's host is not under \`${domain}\`, so the browser discards the cookie outright`,
         hint: "Use a domain both the kit and this app sit under.",
       });
+    } else if (issuer !== null && !hostSitsUnder(hostOf(issuer), domain)) {
+      // F-146: the other of the two hosts. The session cookie is the KIT's:
+      // it is issued on the kit's host, and a domain that covers only this
+      // app is one the kit cannot scope it to (the kit refuses to boot on
+      // it, and a browser would discard it), so it never reaches this app.
+      problems.push({
+        what: "COOKIE_DOMAIN",
+        why: `the kit's host (${hostOf(issuer)}, the SSO issuer) is not under \`${domain}\`, so the kit's session cookie never reaches this app and the shared session silently does not work`,
+        hint: "Use a domain both the kit and this app sit under, and set the same COOKIE_DOMAIN on the kit.",
+      });
     } else if (!isCookieDomainShaped(domain)) {
       problems.push({
         what: "COOKIE_DOMAIN",

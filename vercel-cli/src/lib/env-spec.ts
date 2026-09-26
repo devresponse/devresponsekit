@@ -545,6 +545,7 @@ export function satelliteEnvSpecs(context: DeploymentContext & { profile: Satell
    */
   const usesKitDatabase = profile.database === "shared-with-kit";
   const ownOrigin = originOf(context.origin);
+  const issuerOrigin = originOf(profile.issuerOrigin);
 
   const specs: EnvVarSpec[] = [
     {
@@ -638,6 +639,12 @@ export function satelliteEnvSpecs(context: DeploymentContext & { profile: Satell
         }
         if (ownOrigin !== null && !hostSitsUnder(new URL(ownOrigin).host, value)) {
           return `this deployment's host does not sit under \`${value}\`, so the browser would discard the cookie`;
+        }
+        // F-146: and the kit's, which issues the cookie. A domain covering
+        // this app alone is one the kit cannot scope its cookie to, so the
+        // shared session never arrives here.
+        if (issuerOrigin !== null && !hostSitsUnder(new URL(issuerOrigin).host, value)) {
+          return `the kit's host (${new URL(issuerOrigin).host}, the SSO issuer) does not sit under \`${value}\`, so the kit's session cookie never reaches this app`;
         }
         return null;
       },

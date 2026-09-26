@@ -112,8 +112,8 @@ With neither variable set, the run stops and asks for `DATABASE_TEST_URL`. Every
 
 ```bash
 docker compose exec postgres createdb -U devresponse devresponse_db_test
-DATABASE_URL=postgresql://devresponse:devresponse@localhost:5444/devresponse_db_test pnpm db:app:migrate
 DATABASE_URL=postgresql://devresponse:devresponse@localhost:5444/devresponse_db_test pnpm db:auth:migrate
+DATABASE_URL=postgresql://devresponse:devresponse@localhost:5444/devresponse_db_test pnpm db:app:migrate
 ```
 
 A variable already in the shell beats `.env` (dotenv never overrides one), which is what points the two migrate commands at the test database. Without `DATABASE_TEST_URL`, the suites run against your development database. On a seeded one, two `organization-auth-settings` tests fail, because they expect the platform default the migrations create (`admin_approval`) and `pnpm db:seed` changes it to `auto_active`.

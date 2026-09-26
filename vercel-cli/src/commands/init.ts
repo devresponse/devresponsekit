@@ -377,7 +377,10 @@ export async function init(cliRoot: string, options: InitOptions): Promise<void>
         if (problem.hint) info(`    ${dim(problem.hint)}`);
       }
       info("");
-      warn("The config was saved, but `env:check` will report these until they are fixed.");
+      // `up` runs env:sync, which refuses on these, --yes or not (F-137).
+      warn(
+        "The config was saved, but `env:check` reports these, and `env:sync` and `up` refuse, until they are fixed.",
+      );
     }
     // Where the topology is chosen, so where it is first said (F-24).
     reportContainment(profile, config.origin);

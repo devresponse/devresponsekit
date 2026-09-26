@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runPnpm } from "./exec.js";
 import { CliError, step } from "./log.js";
+import { authMigrationEnv, migrationEnv } from "./migration-env.js";
 
 /**
  * The devresponsekit checkout that OWNS the database schema.
@@ -133,38 +134,6 @@ export function coreMigrations(kitRoot: string): string[] {
     .sort();
 }
 
-/**
- * The libpq variables `pg` falls back to for any part a connection string
- * leaves out: a URL with no port connects to PGPORT, one with no database to
- * PGDATABASE, and so on.
- */
-const LIBPQ_TARGET_FALLBACKS = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER"];
-
-/**
- * What the migration runners are handed, layered over the shell's
- * environment less the Vercel token (F-139): the URL and the schema, with
- * every libpq fallback that could pick a different server removed (an
- * `undefined` value drops the variable from the child).
- *
- * The URL was checked against production from what it says alone (F-47):
- * no port is 5432, no database is the user's name. A shell's PGPORT=5433 would
- * otherwise send a portless URL to a server the check never saw. Names are
- * matched case-insensitively, because on Windows `pgport` IS `PGPORT` to the
- * child.
- */
-export function migrationEnv(
-  databaseUrl: string,
-  schema: string,
-  inherited: NodeJS.ProcessEnv = process.env,
-): Record<string, string | undefined> {
-  const spelled = Object.keys(inherited).filter((key) => LIBPQ_TARGET_FALLBACKS.includes(key.toUpperCase()));
-  return {
-    ...Object.fromEntries([...LIBPQ_TARGET_FALLBACKS, ...spelled].map((key) => [key, undefined])),
-    DATABASE_URL: databaseUrl,
-    DB_SCHEMA: schema,
-  };
-}
-
 export interface MigrateOptions {
   kitRoot: string;
   /** The DIRECT (non-pooled) connection string. */
@@ -174,45 +143,51 @@ export interface MigrateOptions {
 }
 
 /**
- * Applies the application migrations and then the Better Auth ones.
+ * Applies the Better Auth migrations and then the application ones.
  *
  * Order matters and so does the direction: DDL and the advisory lock must not
  * travel through a transaction pooler, which is why this insists on the direct
  * endpoint. Both runners are idempotent and ledgered, so re-running a deploy
  * that changed no migrations is a no-op.
+ *
+ * Better Auth's tables come first (F-141), as in `pnpm db:provision`,
+ * deploy.yml and CI. This ran the application migrations first, so an auth
+ * step that failed (as it did on every CI run, for want of the server
+ * environment) left production with the application's schema changes
+ * applied and the release that needed them unpromoted.
  */
 export async function applyMigrations(options: MigrateOptions): Promise<void> {
   assertKitRoot(options.kitRoot);
 
   if (options.dryRun) {
-    step(`[dry-run] would run \`pnpm db:app:migrate\` then \`pnpm db:auth:migrate\` in ${options.kitRoot}`);
+    step(`[dry-run] would run \`pnpm db:auth:migrate\` then \`pnpm db:app:migrate\` in ${options.kitRoot}`);
     return;
   }
 
-  const env = migrationEnv(options.databaseUrl, options.schema);
   // The one kind of child that keeps the shell's environment (F-139). The
   // runners are the kit's own scripts, and they read the kit's configuration
-  // from it: DB_MIGRATE_LOCALES, and the whole server environment
-  // `@/lib/auth` validates when the auth runner imports it (deploy.yml hands
-  // that placeholders; an operator's shell or the kit's `.env` does here).
-  // Which variables that is, is the kit's to say, so no allow-list here
-  // could keep up with it. They still never see the Vercel token.
+  // from it: DB_MIGRATE_LOCALES, and the server environment `@/lib/auth`
+  // validates when the auth runner imports it, where a placeholder stands in
+  // for each required value the shell does not set (F-141). Which variables
+  // the runners read is the kit's to say, so no allow-list here could keep up
+  // with it. They still never see the Vercel token.
   const inheritShell = true;
-
-  step("Applying application migrations (pnpm db:app:migrate)");
-  await runPnpm(["db:app:migrate"], {
-    cwd: options.kitRoot,
-    env,
-    inheritShell,
-    failureMessage: "Application migrations failed — production was NOT promoted",
-  });
 
   step("Applying Better Auth migrations (pnpm db:auth:migrate)");
   await runPnpm(["db:auth:migrate"], {
     cwd: options.kitRoot,
-    env,
+    env: authMigrationEnv(options.databaseUrl, options.schema),
     inheritShell,
-    failureMessage: "Better Auth migrations failed — production was NOT promoted",
+    failureMessage:
+      "Better Auth migrations failed — the application migrations did not run, and production was NOT promoted",
+  });
+
+  step("Applying application migrations (pnpm db:app:migrate)");
+  await runPnpm(["db:app:migrate"], {
+    cwd: options.kitRoot,
+    env: migrationEnv(options.databaseUrl, options.schema),
+    inheritShell,
+    failureMessage: "Application migrations failed — production was NOT promoted",
   });
 }
 

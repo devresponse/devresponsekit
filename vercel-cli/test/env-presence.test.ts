@@ -611,6 +611,34 @@ test("env:sync: a stored httsp:// issuer stops the sync, and so up, before anyth
   assert.deepEqual(vercel.writes, []);
 });
 
+test("F-137: env:sync refuses a project holding a variable no deployment may hold, before anything is written, --yes or not", async () => {
+  // `up` runs no env:check, so this sync is its preflight. CRON_SECRET is
+  // missing, so a sync that went on would write it.
+  const listing = () =>
+    replace(healthy(), raw("SEED_ADMIN_PASSWORD", "encrypted", CIPHERTEXT)).filter(
+      (e) => e.key !== "CRON_SECRET",
+    );
+  for (const options of [{}, { yes: true }, { force: true, yes: true }]) {
+    const vercel = fakeVercel(listing());
+    const { error, out } = await run(() => envSync(kitCli(), { ...options, fromEnv: databaseUrlFile() }));
+    assert.ok(error instanceof CliError, `${JSON.stringify(options)}: ${out}`);
+    assert.equal(error.message, "1 variable(s) must never be set on a deployment.");
+    assert.match(out, /SEED_ADMIN_PASSWORD\s+present — seed-script only/);
+    assert.deepEqual(vercel.writes, [], `${JSON.stringify(options)}: nothing is written`);
+  }
+
+  // Supplied rather than set, it is harmless: this command never writes one,
+  // and a --from-env file that also feeds the seed is common.
+  const supplied = fakeVercel(listing().filter((e) => e.key !== "SEED_ADMIN_PASSWORD"));
+  const written = await run(() =>
+    envSync(kitCli(), { fromEnv: databaseUrlFile({ SEED_ADMIN_PASSWORD: "for-the-seed-only" }) }),
+  );
+  assert.equal(written.error, undefined, written.out);
+  const keys = supplied.writes.map((w) => w.key);
+  assert.ok(keys.includes("CRON_SECRET"), keys.join(", "));
+  assert.ok(!keys.includes("SEED_ADMIN_PASSWORD"), "and the supplied one is not written");
+});
+
 test("env:sync --force: a secret set only for Development is not a rotation; one set for Production is", async () => {
   const devOnly = fakeVercel([raw("BETTER_AUTH_SECRET", "sensitive", "", ["development"])]);
   const quiet = await run(() => envSync(kitCli(), { force: true, fromEnv: databaseUrlFile() }));

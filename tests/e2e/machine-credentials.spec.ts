@@ -171,7 +171,15 @@ test("a client-credentials bearer creates, approves, bans and unbans a user (F-1
   const org = await findDefaultOrg(api);
   const client = await registerClient(api, {
     name: `e2e-cc-mutate-${suffix}`,
-    scopes: ["admin.users.read", "admin.users.create", "admin.users.manage", "admin.users.ban"],
+    // F-480: the create enrols the user in the client's org, so the client
+    // also needs a membership scope (admin.users.update).
+    scopes: [
+      "admin.users.read",
+      "admin.users.create",
+      "admin.users.update",
+      "admin.users.manage",
+      "admin.users.ban",
+    ],
     serviceAppUserId: await readAppUserId(api),
     organizationId: org.id,
   });
@@ -241,7 +249,9 @@ test("API key: mint, list and create users with it, rotate, old key refused", as
   test.skip(isMobile, API_ONLY);
   const api = page.request;
   const suffix = uniqueSuffix(testInfo);
-  const scopes = ["admin.users.read", "admin.users.create"];
+  // F-480: creating enrols the user in the key's org, which takes a membership
+  // scope as well; admin.users.create alone is refused with 403.
+  const scopes = ["admin.users.read", "admin.users.create", "admin.users.update"];
 
   // MINT from the cookie session: an ambient credential, so the mutation
   // carries an Origin like a browser would.

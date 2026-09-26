@@ -42,6 +42,7 @@ interface OpenApiParam {
 interface OpenApiOperation {
   operationId?: string;
   summary?: string;
+  description?: string;
   security?: Array<Record<string, string[]>>;
   parameters?: OpenApiParam[];
   requestBody?: { content?: { "application/json"?: { schema?: Record<string, unknown> } } };
@@ -240,6 +241,26 @@ export function deriveMcpTools(document: Record<string, unknown>): GeneratedTool
   return tools.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * The "requires …" clause of a tool's description, naming EVERY scope the
+ * operation's `security` demands. Per OpenAPI, the requirement objects are
+ * alternatives (any one suffices) and the scopes within one are all required,
+ * so `[{ bearerAuth: [a, b] }, { bearerAuth: [a, c] }]` reads "a and b, or a
+ * and c". Naming only the first scope of the first requirement (as this used
+ * to) advertised `createUser` as needing `admin.users.create` alone, and an
+ * agent granted just that got 403 on every call (F-480). `null` when the
+ * operation names no bearer scope.
+ */
+function scopeClause(security: OpenApiOperation["security"]): string | null {
+  const alternatives = (security ?? [])
+    .map((requirement) => requirement.bearerAuth ?? [])
+    .filter((scopes) => scopes.length > 0);
+  if (alternatives.length === 0) return null;
+  const all = (scopes: string[]) => scopes.map((scope) => `\`${scope}\``).join(" and ");
+  const noun = alternatives.length === 1 && alternatives[0]!.length === 1 ? "scope" : "scopes";
+  return `requires the ${alternatives.map(all).join(", or ")} ${noun}`;
+}
+
 function buildTool(
   doc: OpenApiDoc,
   method: string,
@@ -305,7 +326,7 @@ function buildTool(
     for (const name of schema.required ?? []) required.add(name);
   }
 
-  const scope = op.security?.[0]?.bearerAuth?.[0];
+  const scopes = scopeClause(op.security);
   const summary = op.summary ?? op.operationId!;
   // Header parameters are NOT tool arguments (F-34): `If-Match` on
   // `setUserStatus` needs the ETag `getUser` returns as a response HEADER,
@@ -317,8 +338,10 @@ function buildTool(
       ? ` The ${headerParams.map((name) => `\`${name}\``).join(", ")} header cannot be sent ` +
         `through this tool; the call is made without it.`
       : "";
-  const description =
-    (scope ? `${summary} (requires the \`${scope}\` scope).` : `${summary}.`) + headerNote;
+  // The operation's own description (F-480: `createUser` states there what its
+  // security cannot, e.g. the extra scope an `active` user needs).
+  const detail = op.description ? ` ${op.description}` : "";
+  const description = (scopes ? `${summary} (${scopes}).` : `${summary}.`) + detail + headerNote;
 
   const inputSchema: McpInputSchema = { type: "object", properties, additionalProperties: false };
   if (required.size > 0) inputSchema.required = [...required];

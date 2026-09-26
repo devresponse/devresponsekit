@@ -11,7 +11,12 @@ import type * as PageModule from "@/app/[locale]/(secure)/app/administrator/user
  * offered a choice whose every submit answers 403. The component suite
  * (tests/component/new-user-form.test.tsx) pins what the form does with the
  * prop; this suite pins the prop the page passes. `hasCrossOrgReach` is the
- * real one.
+ * real one. The initial status follows the same rule (F-480): a confined
+ * creator's user joins its org, so the API refuses every create from one
+ * without `admin.users.update` or `admin.orgs.update`, and an Active one
+ * without `admin.users.manage` as well. The page asks the API's own predicate
+ * (`mayCreateUser`, real here): it shows a notice in place of a form whose
+ * every submit would answer 403, and offers Active only when it may.
  */
 const NOT_FOUND = "__NOT_FOUND_SENTINEL__";
 const notFoundMock = vi.fn(() => {
@@ -36,6 +41,7 @@ vi.mock("@/app/[locale]/(secure)/app/administrator/users/new/_new-user-form", ()
   },
 }));
 
+/** An org admin who may create users: its create is a membership add (F-480). */
 const ORG_ADMIN = {
   appUserId: "admin-app-1",
   primaryEmail: "admin@x.com",
@@ -43,7 +49,7 @@ const ORG_ADMIN = {
   organizationId: "o-1",
   membershipStatus: "active",
   preferredLocale: "en",
-  permissions: ["admin.users.read", "admin.users.create"],
+  permissions: ["admin.users.read", "admin.users.create", "admin.users.update"],
   orgBound: false,
 };
 const SUPERADMIN = { ...ORG_ADMIN, permissions: [...ORG_ADMIN.permissions, "superuser"] };
@@ -72,16 +78,32 @@ function formProps(node: unknown): Record<string, unknown> | null {
   return null;
 }
 
+/** Every string rendered in the tree (the mocked translator returns the key). */
+function texts(node: unknown): string[] {
+  if (typeof node === "string") return [node];
+  if (!node || typeof node !== "object") return [];
+  const children = (node as { props?: { children?: unknown } }).props?.children;
+  return (Array.isArray(children) ? children.flat(Infinity) : [children]).flatMap(texts);
+}
+
 describe("new-user page — the platform role is offered with the API's predicate (F-13)", () => {
   it("does not offer it to an org admin", async () => {
     checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-1", access: ORG_ADMIN });
-    expect(formProps(await Page(params))).toEqual({ locale: "en", canGrantPlatformAdmin: false });
+    expect(formProps(await Page(params))).toEqual({
+      locale: "en",
+      canGrantPlatformAdmin: false,
+      canCreateActive: false,
+    });
     expect(checkAdminPermissionServer).toHaveBeenCalledWith("admin.users.create");
   });
 
   it("offers it to a superadmin", async () => {
     checkAdminPermissionServer.mockResolvedValue({ betterAuthUserId: "ba-1", access: SUPERADMIN });
-    expect(formProps(await Page(params))).toEqual({ locale: "en", canGrantPlatformAdmin: true });
+    expect(formProps(await Page(params))).toEqual({
+      locale: "en",
+      canGrantPlatformAdmin: true,
+      canCreateActive: true,
+    });
   });
 
   it("does not offer it to an org-bound superuser context (MACHINE-2)", async () => {
@@ -90,6 +112,65 @@ describe("new-user page — the platform role is offered with the API's predicat
       access: { ...SUPERADMIN, orgBound: true },
     });
     expect(formProps(await Page(params))).toMatchObject({ canGrantPlatformAdmin: false });
+  });
+
+  // F-480: an org admin's user joins the org, so Active is an approval; the
+  // page offers it with the API's predicate (`mayCreateUser`, real here).
+  it("offers Active to an org admin who may enrol and approve (update + manage)", async () => {
+    checkAdminPermissionServer.mockResolvedValue({
+      betterAuthUserId: "ba-1",
+      access: { ...ORG_ADMIN, permissions: [...ORG_ADMIN.permissions, "admin.users.manage"] },
+    });
+    expect(formProps(await Page(params))).toMatchObject({ canCreateActive: true });
+  });
+
+  it("offers the form (Pending only) with admin.orgs.update as the membership permission", async () => {
+    checkAdminPermissionServer.mockResolvedValue({
+      betterAuthUserId: "ba-1",
+      access: { ...ORG_ADMIN, permissions: ["admin.users.create", "admin.orgs.update"] },
+    });
+    expect(formProps(await Page(params))).toMatchObject({ canCreateActive: false });
+  });
+
+  // F-480: the API refuses EVERY create from a confined caller with no
+  // membership permission, Pending and Active alike, so the form is not
+  // offered at all; the notice says what is missing. Approval alone does not
+  // stand in for it.
+  it.each([
+    ["create only", ["admin.users.read", "admin.users.create"]],
+    ["create and approve, no membership permission", ["admin.users.create", "admin.users.manage"]],
+  ])(
+    "shows a notice instead of the form to an org admin holding %s",
+    async (_label, permissions) => {
+      checkAdminPermissionServer.mockResolvedValue({
+        betterAuthUserId: "ba-1",
+        access: { ...ORG_ADMIN, permissions },
+      });
+      const tree = await Page(params);
+      expect(formProps(tree)).toBeNull();
+      expect(texts(tree)).toContain("new.enrolmentNotPermitted");
+      // The page itself still answers: its guard key is the nav link's.
+      expect(checkAdminPermissionServer).toHaveBeenCalledWith("admin.users.create");
+      expect(notFoundMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("offers the whole form to a superadmin with no membership permission (it enrols nobody)", async () => {
+    checkAdminPermissionServer.mockResolvedValue({
+      betterAuthUserId: "ba-1",
+      access: { ...ORG_ADMIN, permissions: ["admin.users.create", "superuser"] },
+    });
+    const tree = await Page(params);
+    expect(formProps(tree)).toMatchObject({ canCreateActive: true });
+    expect(texts(tree)).not.toContain("new.enrolmentNotPermitted");
+  });
+
+  it("does not offer Active to an org-bound context without the approval permission", async () => {
+    checkAdminPermissionServer.mockResolvedValue({
+      betterAuthUserId: "ba-1",
+      access: { ...ORG_ADMIN, orgBound: true },
+    });
+    expect(formProps(await Page(params))).toMatchObject({ canCreateActive: false });
   });
 
   it("still 404s when the permission guard denies", async () => {

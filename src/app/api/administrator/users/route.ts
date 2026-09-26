@@ -25,7 +25,9 @@ import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { isAuthEmailTakenError } from "@/lib/admin/auth-email-taken";
 import {
   auditCreationMembership,
+  auditCreationRefusal,
   insertCreatedUser,
+  refuseConfinedCreation,
   type CreatedAppUser,
 } from "@/lib/admin/user-create.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
@@ -177,12 +179,18 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *     distinct from app roles managed by `app_user_roles`. `admin` needs
  *     cross-org reach (403 otherwise), as on `POST /users/[id]/role` (F-13).
  *   - Initial app status defaults to `pending_approval` so admin
- *     approval is still required even when an admin creates the user.
+ *     approval is still required even when an admin creates the user. The
+ *     org's sign-up policy does not activate it at sign-in either (F-480).
  *   - A caller without cross-org reach (an org admin, any bearer credential)
  *     enrols the user in its own org, with a membership of that same status,
  *     in the transaction that inserts the `app_users` row; otherwise it could
  *     not reach the user it just created. A superadmin's cookie session
  *     creates the user in no org (`insertCreatedUser`).
+ *   - F-480: that enrolment also needs `admin.users.update` or
+ *     `admin.orgs.update`, and an `active` user needs `admin.users.manage`,
+ *     each held as a permission and, for a bearer credential, as a scope. An
+ *     address on an email domain bound to another org is refused too. Each is
+ *     a 403 before anything is written (`refuseConfinedCreation`).
  *   - The new password is forwarded to Better Auth and never logged or
  *     returned in the response or audit metadata.
  *
@@ -228,6 +236,8 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // The new user joins the org a confined caller acts in (`insertCreatedUser`).
   // A confined caller with no org would create a user it cannot reach, so it is
   // refused before anything is written, as a null scope is everywhere else.
+  // Defence in depth: the guard admits only an active member, whose context
+  // always names an org, so no caller the real guard admits reaches this.
   const scope = resolveOrgScope(guard.access);
   if (!scope) {
     return adminErrorResponse("forbidden", 403, request);
@@ -239,6 +249,27 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // form keeps the stored value consistent and avoids surprising the
   // SSO/OAuth lookup paths that compare case-sensitively.
   const normalisedEmail = input.email.toLowerCase();
+
+  // F-480: the enrolment is a membership add (and, for `active`, an approval),
+  // so a confined caller needs those permissions as well. Checked before the
+  // duplicate check, so a caller that may not create learns nothing about
+  // which addresses exist, and before anything is written.
+  const refusal = await refuseConfinedCreation({
+    scope,
+    caller: guard,
+    email: normalisedEmail,
+    status: input.initialAppStatus,
+  });
+  if (refusal) {
+    await auditCreationRefusal(refusal, {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      organizationId: scopeOrganizationId(scope),
+      email: normalisedEmail,
+      requestId: guard.requestId,
+    });
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   // Reject duplicate emails up-front with a clean error. Best-effort only:
   // `app_users` has NO unique index on the email (its one unique key is

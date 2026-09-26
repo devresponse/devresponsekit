@@ -597,6 +597,9 @@ describe("/api/v1/users", () => {
             organizationId: "o1",
             orgBound: true,
           },
+          // F-480: the create enrols the user in the key's org, which the
+          // key's scopes must allow too.
+          grantedScopes: ["admin.users.create", "admin.users.update"],
         },
         requestId: "r1",
       },
@@ -627,7 +630,12 @@ describe("/api/v1/users", () => {
       grant: {
         caller: {
           betterAuthUserId: "ba1",
-          access: { permissions: ["admin.users.create"], organizationId: "o1" },
+          // F-480: plus the membership permission its enrolment needs.
+          access: {
+            permissions: ["admin.users.create", "admin.users.update"],
+            organizationId: "o1",
+          },
+          grantedScopes: null,
         },
         requestId: "r1",
       },

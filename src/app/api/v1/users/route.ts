@@ -9,7 +9,10 @@ import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { isAuthEmailTakenError } from "@/lib/admin/auth-email-taken";
 import {
   auditCreationMembership,
+  auditCreationRefusal,
+  CREATION_REFUSAL_DETAIL,
   insertCreatedUser,
+  refuseConfinedCreation,
   type CreatedAppUser,
 } from "@/lib/admin/user-create.server";
 import {
@@ -130,7 +133,11 @@ export const GET = withV1Route(async function GET(request: NextRequest) {
  * Defaults to `pending_approval`. A caller without cross-org reach (every
  * bearer, an org admin's session) enrols the user in its own org with that
  * same status, so it can act on the user it created; a superadmin's cookie
- * session creates the user in no org (`insertCreatedUser`). The password is
+ * session creates the user in no org (`insertCreatedUser`). F-480: that
+ * enrolment also needs `admin.users.update` or `admin.orgs.update`, and an
+ * `active` user `admin.users.manage`, each as permission AND scope; an address
+ * on an email domain bound to another org is refused too. Each is a 403 with a
+ * `detail` saying which, before anything is written. The password is
  * forwarded to Better Auth and never logged or echoed. An address that already
  * has an account is a 409, including one Better Auth holds with no `app_users`
  * row and the loser of a concurrent create (F-30); a failure to store the new
@@ -184,9 +191,36 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
   // The new user joins the org a confined caller acts in (`insertCreatedUser`).
   // A confined caller with no org would create a user it cannot reach, so it is
   // refused before anything is written, as a null scope is everywhere else.
+  // Defence in depth: the guard admits only an active member, whose context
+  // always names an org, so no caller the real guard admits reaches this.
   const scope = resolveOrgScope(grant.caller.access);
   if (!scope) {
     return problemResponse("forbidden", 403, request, { requestId: grant.requestId });
+  }
+
+  // F-480: the enrolment is a membership add (and, for `active`, an approval),
+  // so a confined caller needs those permissions as well, as its scopes too: a
+  // key scoped to `admin.users.create` alone must not mint an active member.
+  // Checked before the duplicate check and before anything is written.
+  const refusal = await refuseConfinedCreation({
+    scope,
+    caller: grant.caller,
+    email,
+    status: input.initialAppStatus,
+  });
+  if (refusal) {
+    await auditCreationRefusal(refusal, {
+      request,
+      actorBetterAuthUserId: grant.caller.betterAuthUserId,
+      organizationId: scopeOrganizationId(scope),
+      email,
+      requestId: grant.requestId,
+      metadata: { via: "api.v1" },
+    });
+    return problemResponse("forbidden", 403, request, {
+      detail: CREATION_REFUSAL_DETAIL[refusal.reason],
+      requestId: grant.requestId,
+    });
   }
 
   // Best-effort, as on the admin twin: `app_users` has no unique key on the

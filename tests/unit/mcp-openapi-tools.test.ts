@@ -52,7 +52,60 @@ describe("deriveMcpTools (from the real OpenAPI document)", () => {
   });
 
   it("notes the required scope in the description when present", () => {
-    expect(byName("listUsers")!.description).toContain("admin.users.read");
+    expect(byName("listUsers")!.description).toBe(
+      "List users (requires the `admin.users.read` scope).",
+    );
+  });
+
+  // F-480: the create enrols the user in the credential's org, so it needs a
+  // membership scope besides `admin.users.create`, and `admin.users.manage`
+  // for an active user. The tool used to advertise `admin.users.create` alone
+  // (the first scope of the first requirement), and an agent granted what it
+  // advertised got 403 on every call.
+  it("names every scope createUser needs, and what its security cannot say", () => {
+    const description = byName("createUser")!.description;
+    expect(description).toMatch(
+      /^Create a user \(requires the `admin\.users\.create` and `admin\.users\.update`, or `admin\.users\.create` and `admin\.orgs\.update` scopes\)\. /,
+    );
+    expect(description).toContain("`admin.users.manage`");
+    expect(description).toContain("bound to another organization");
+  });
+});
+
+describe("deriveMcpTools: the scope clause reads the whole security requirement (F-480)", () => {
+  const derive = (security: Array<Record<string, string[]>>, description?: string) =>
+    deriveMcpTools({
+      paths: {
+        "/things": {
+          get: { operationId: "listThings", summary: "List things", security, description },
+        },
+      },
+    })[0]!.description;
+
+  it("one requirement with one scope: unchanged wording", () => {
+    expect(derive([{ bearerAuth: ["a.read"] }])).toBe("List things (requires the `a.read` scope).");
+  });
+
+  it("scopes within one requirement are all required", () => {
+    expect(derive([{ bearerAuth: ["a.read", "b.read"] }])).toBe(
+      "List things (requires the `a.read` and `b.read` scopes).",
+    );
+  });
+
+  it("requirement objects are alternatives", () => {
+    expect(derive([{ bearerAuth: ["a.read"] }, { bearerAuth: ["b.read", "c.read"] }])).toBe(
+      "List things (requires the `a.read`, or `b.read` and `c.read` scopes).",
+    );
+  });
+
+  it("appends the operation's description after the scope clause", () => {
+    expect(derive([{ bearerAuth: ["a.read"] }], "Only yours.")).toBe(
+      "List things (requires the `a.read` scope). Only yours.",
+    );
+  });
+
+  it("a requirement naming no bearer scope adds no clause", () => {
+    expect(derive([{ oauth2ClientCredentials: [] }])).toBe("List things.");
   });
 });
 

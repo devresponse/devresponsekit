@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
 import { API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
+import { ACTIVATION_PERMISSION, ENROLMENT_PERMISSIONS } from "@/lib/admin/user-create.server";
+
+// user-create.server imports the database module; nothing here queries it.
+vi.mock("@/db/database", () => ({ db: {} }));
 
 describe("openapi document", () => {
   const doc = buildOpenApiDocument("https://app.devresponse.com") as Record<string, unknown>;
@@ -72,5 +76,26 @@ describe("openapi document", () => {
     expect(listUsers.get.responses["200"].content["application/json"]!.schema.$ref).toBe(
       "#/components/schemas/UserList",
     );
+  });
+
+  // F-480: every bearer credential is confined to one org, so `createUser`
+  // enrols the new user there and the route refuses it without a membership
+  // permission (`refuseConfinedCreation`). The published contract must say so:
+  // clients and the MCP tool list read the scopes from here. Pinned to the
+  // constants the route enforces, so the two cannot drift.
+  it("createUser's security demands a membership scope, as the route enforces", () => {
+    const paths = doc.paths as Record<
+      string,
+      Record<string, { security?: unknown; description?: string }>
+    >;
+    const createUser = paths["/users"]!.post!;
+    expect(createUser.security).toEqual(
+      ENROLMENT_PERMISSIONS.map((permission) => ({
+        bearerAuth: ["admin.users.create", permission],
+      })),
+    );
+    // The status-dependent half cannot be a security requirement.
+    expect(createUser.description).toContain(`\`${ACTIVATION_PERMISSION}\``);
+    expect(createUser.description).toContain('`initialAppStatus: "active"`');
   });
 });

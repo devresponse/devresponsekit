@@ -103,9 +103,25 @@ function makeChain(): unknown {
   return new Proxy({}, handler);
 }
 
+// F-480: the create routes look up an email-domain binding for a confined
+// creator's address. None exists in these tests, and the lookup must not use
+// up a `dbMock` answer meant for a statement a test sequences.
+function noRowChain(): unknown {
+  return new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        if (prop === "executeTakeFirst") return () => Promise.resolve(undefined);
+        return () => noRowChain();
+      },
+    },
+  );
+}
+
 vi.mock("@/db/database", () => ({
   db: {
-    selectFrom: () => makeChain(),
+    selectFrom: (table: string) =>
+      table === "app_provider_organizations" ? noRowChain() : makeChain(),
     updateTable: () => makeChain(),
     insertInto: () => makeChain(),
     transaction: () => ({
@@ -234,10 +250,16 @@ describe("POST /api/administrator/users (create)", () => {
     ...grantedAccess("admin.users.create"),
     permissions: ["admin.users.create", "superuser"],
   });
+  // F-480: an org admin's create enrols the user in its org, which needs a
+  // membership permission as well (tests/integration/user-create-enrolment.test.ts).
+  const orgCreatorAccess = () => ({
+    ...grantedAccess("admin.users.create"),
+    permissions: ["admin.users.create", "admin.users.update"],
+  });
 
   describe("F-03: only a creator with cross-org reach vouches for the address", () => {
     it("an ORG admin's creation carries no mailbox proof", async () => {
-      const res = await create(grantedAccess("admin.users.create"));
+      const res = await create(orgCreatorAccess());
       expect(res.status).toBe(201);
       // F-13: and no caller credentials reach the wrapper (a trusted call).
       expect(authCreateUser).toHaveBeenCalledWith(expect.objectContaining({ emailUnproven: true }));
@@ -276,7 +298,7 @@ describe("POST /api/administrator/users (create)", () => {
     });
 
     it("an ORG admin still creates ordinary users", async () => {
-      const res = await create(grantedAccess("admin.users.create"), { role: "user" });
+      const res = await create(orgCreatorAccess(), { role: "user" });
       expect(res.status).toBe(201);
       expect(authCreateUser).toHaveBeenCalledWith(expect.objectContaining({ role: "user" }));
     });
@@ -306,7 +328,7 @@ describe("POST /api/administrator/users (create)", () => {
   describe("F-30: failure audits name no user; a held address is a 409", () => {
     async function failingCreate(fail: { create?: unknown; insert?: unknown; returned?: unknown }) {
       sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
-      accessGetter.mockResolvedValue(grantedAccess("admin.users.create"));
+      accessGetter.mockResolvedValue(orgCreatorAccess());
       dbMock.mockResolvedValueOnce(undefined); // the up-front email check passes
       if (fail.insert !== undefined) dbMock.mockRejectedValueOnce(fail.insert);
       if (fail.create !== undefined) authCreateUser.mockRejectedValue(fail.create);

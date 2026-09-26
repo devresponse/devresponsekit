@@ -570,7 +570,23 @@ export function buildOpenApiDocument(baseUrl: string): Record<string, unknown> {
           operationId: "createUser",
           tags: ["Users"],
           summary: "Create a user",
-          security: [{ bearerAuth: ["admin.users.create"] }],
+          description:
+            "Every bearer credential is bound to one organization, and the new user is enrolled " +
+            "there with a membership whose status is `initialAppStatus`. That enrolment is a " +
+            "membership add, so besides `admin.users.create` the credential needs " +
+            "`admin.users.update` or `admin.orgs.update` (the two security alternatives); " +
+            '`initialAppStatus: "active"` is an approval as well and also needs ' +
+            "`admin.users.manage`. Each counts only when the credential's owner holds the " +
+            "permission and the credential carries the scope. An address whose email domain is " +
+            'bound to another organization is refused too, and so is `role: "admin"` (it needs ' +
+            "cross-org reach, which no bearer credential has). Each refusal is a `403` before " +
+            "anything is created, and all but the `role` one carry a `detail` saying why.",
+          // F-480: every scope set a bearer caller needs. Alternatives are OR'd;
+          // the scopes within one are all required.
+          security: [
+            { bearerAuth: ["admin.users.create", "admin.users.update"] },
+            { bearerAuth: ["admin.users.create", "admin.orgs.update"] },
+          ],
           requestBody: { required: true, ...json(ref("CreateUserRequest")) },
           responses: {
             "201": { description: "Created", ...json(ref("UserCreated")) },

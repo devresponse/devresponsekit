@@ -387,6 +387,16 @@ export async function provisionUserFromAuth(
  *     suspended / deactivated are explicit admin denials and are NEVER
  *     touched. The UPDATEs re-assert the pending status in their WHERE
  *     clauses, so a concurrent admin action wins.
+ *   - Only a membership a SIGN-UP created is re-decided: one whose
+ *     `source_provider` is an auth method, which is what provisioning stamps
+ *     (F-480). The policy re-decides what the policy decided. A membership an
+ *     administrator placed pending carries none (the confined create in
+ *     `user-create.server.ts`, `POST /users/{id}/memberships`,
+ *     `POST /organizations/{id}/members`), and pending there is that admin's
+ *     decision, which only an approval lifts. This used to fall back to the
+ *     sign-in's provider for such a row, so a user a confined creator made
+ *     pending in an `auto_active` org activated itself at its first sign-in,
+ *     with nobody approving it.
  *   - A user-level activation requires at least one membership to activate.
  */
 export async function reevaluatePendingActivation(input: {
@@ -423,13 +433,15 @@ export async function reevaluatePendingActivation(input: {
   const activatedOrgIds: string[] = [];
   let primaryReason: SignupDecisionReason | null = null;
   for (const membership of memberships) {
+    // F-480: an admin-placed membership (no sign-up source) waits for an
+    // approver; the sign-up policy governs sign-ups only (see the doc above).
+    if (!isAuthMethod(membership.source_provider)) {
+      continue;
+    }
     const policy = await getAuthPolicyForOrg(membership.organization_id);
     const decision = decideInitialStatus(policy, {
-      // Judge the membership by how it was created; fall back to the
-      // current sign-in's provider for legacy rows without a source.
-      provider: isAuthMethod(membership.source_provider)
-        ? membership.source_provider
-        : input.provider,
+      // Judge the membership by how it was created, not by this sign-in.
+      provider: membership.source_provider,
       email: input.email,
       emailVerified: input.emailVerified,
       emailVerificationWaived: input.emailVerificationWaived === true,

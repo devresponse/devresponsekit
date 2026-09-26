@@ -205,22 +205,23 @@ So bundle a role whose permissions include a `*.read` key (the **Administrator**
 
 ## UAT-JOURNEY-8 — Org lifecycle as Superadmin: create, add members, assign roles, scope
 
-- **Screens:** (superadmin) Organizations → New → New user (into the new org) → User → **Roles** tab → then an Org Admin of the new org signs in and sees only it.
+- **Screens:** (superadmin) Organizations → New → New user → place the user in the new org (`POST …/organizations/:id/members`) → User → **Roles** tab → then an Org Admin of the new org signs in and sees only it.
 - **Personas:** **Superadmin** (`superuser@orga.local`) — the only persona that can create an org; then the org admin you promote inside the new org.
 - **Preconditions:** app seeded; the Superadmin is signed in.
-- **Code:** create-org guard `admin.orgs.create` on the page (`src/app/[locale]/(secure)/app/administrator/organizations/new/page.tsx:20`) and an explicit `isSuperadmin` gate in the API — a non-superadmin gets 403 (`src/app/api/administrator/organizations/route.ts:152-159`); create-org fields `slug`/`name`/`isDefault` (`.../organizations/new/_new-organization-form.tsx:36-38`); new user is created into a chosen org via `admin.users.create` (`src/app/[locale]/(secure)/app/administrator/users/new/page.tsx:23`, `POST /api/administrator/users`); direct role assignment on the User → Roles tab requires `admin.roles.assign` (`src/app/api/administrator/users/[id]/app-roles/route.ts:92`); org-scoping — an org admin (no marker) is confined to their org by `canAccessOrg` / `canAccessUser`, superadmin bypasses (`src/lib/admin/access-scope.server.ts:37-40,65-70,96-100`).
+- **Code:** create-org guard `admin.orgs.create` on the page (`src/app/[locale]/(secure)/app/administrator/organizations/new/page.tsx:20`) and an explicit `isSuperadmin` gate in the API — a non-superadmin gets 403 (`src/app/api/administrator/organizations/route.ts:152-159`); create-org fields `slug`/`name`/`isDefault` (`.../organizations/new/_new-organization-form.tsx:36-38`); a Superadmin's **New user** creates the user in **no** org: the form has no organization field, and only a creator confined to one org enrols the user there (`insertCreatedUser`, `src/lib/admin/user-create.server.ts`; `POST /api/administrator/users`), so the membership is added with `POST /api/administrator/organizations/:id/members` (`admin.orgs.update`); direct role assignment on the User → Roles tab requires `admin.roles.assign` (`src/app/api/administrator/users/[id]/app-roles/route.ts:92`); org-scoping — an org admin (no marker) is confined to their org by `canAccessOrg` / `canAccessUser`, superadmin bypasses (`src/lib/admin/access-scope.server.ts:37-40,65-70,96-100`).
 
-**Note (adding members to an org):** the org **detail → Members** tab currently exposes remove (`DELETE .../members`) in its grid (`.../organizations/[orgId]/_organization-members-grid.tsx:57-61`). Adding a member is done either by creating the user into that org via **New user**, or via `POST /api/administrator/organizations/:id/members` (guard `admin.orgs.update`, body `{ appUserId, status }` — `src/app/api/administrator/organizations/[id]/members/route.ts:104-124`). `TODO: verify` whether the Members tab renders an explicit **Add member** button in the UI, or whether add is New-user-only from the console.
+**Note (adding members to an org):** the org **detail → Members** tab has no **Add member** button: its grid offers remove (`DELETE .../members`, `.../organizations/[orgId]/_organization-members-grid.tsx`), and the invitations panel below it offers **Invite member**. A member is added in one of three ways: `POST /api/administrator/organizations/:id/members` (guard `admin.orgs.update`, body `{ appUserId, status }`, `src/app/api/administrator/organizations/[id]/members/route.ts`); an invitation the person accepts; or **New user** by an admin **of that org**, whose create enrols the user in the org it acts in (that takes `admin.users.update` or `admin.orgs.update` besides `admin.users.create`, and `admin.users.manage` for an Active user; F-480). A Superadmin's **New user** enrols nobody, which is why step 4 adds the membership.
 
 | # | Step (what to do) | Expected result |
 |---|---|---|
 | 1 | As the Superadmin, open Administrator → **Organizations** → **New organization**. | The form shows **Slug**, **Name** and a **default** toggle. |
 | 2 | Enter slug `uat-org`, name `UAT Org`, leave default off, and submit. | The org is created and appears in the organizations list. |
-| 3 | Open Administrator → **Users** → **New user**; create `uatadmin@uat-org.local`, selecting **UAT Org** as the organization. | The user is created with an active membership in **UAT Org**. |
-| 4 | Open that user's detail → **Roles** tab and assign the **Platform Administrator** (`admin.platform`) role. | **Platform Administrator** now appears in the user's role list. |
-| 5 | In a second browser, sign in as `uatadmin@uat-org.local`. | Sign-in succeeds; the Administrator area is available (this user is now an Org Admin of UAT Org). |
-| 6 | As `uatadmin`, open Administrator → **Organizations**. | Only **UAT Org** is visible — the other seeded orgs are not listed (org-scoped). |
-| 7 | As `uatadmin`, try to open one of ORG A's resources by URL (e.g. an ORG A user detail id). | It returns Not Found (404, not 403) — cross-org existence is not leaked. |
+| 3 | Open Administrator → **Users** → **New user**; create `uatadmin@uat-org.local` with Initial status **Active**. | The user is created and its detail page opens. Its **Memberships** tab is empty: a Superadmin's create places the user in no org. |
+| 4 | Note the user's id (from its detail URL) and UAT Org's id (from its detail URL). In the browser devtools console on the Administrator page, run `await fetch("/api/administrator/organizations/<UAT Org id>/members", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ appUserId: "<user id>", status: "active" }) }).then((r) => r.status)`. | It prints `201`. Reload the user's detail: the **Memberships** tab lists **UAT Org**, Active. |
+| 5 | Open that user's detail → **Roles** tab and assign the **Platform Administrator** (`admin.platform`) role. | **Platform Administrator** now appears in the user's role list. |
+| 6 | In a second browser, sign in as `uatadmin@uat-org.local`. | Sign-in succeeds; the Administrator area is available (this user is now an Org Admin of UAT Org). |
+| 7 | As `uatadmin`, open Administrator → **Organizations**. | Only **UAT Org** is visible — the other seeded orgs are not listed (org-scoped). |
+| 8 | As `uatadmin`, try to open one of ORG A's resources by URL (e.g. an ORG A user detail id). | It returns Not Found (404, not 403) — cross-org existence is not leaked. |
 
 - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
@@ -280,13 +281,13 @@ So bundle a role whose permissions include a `*.read` key (the **Administrator**
 | 5 | SSO handoff | Applications hub, `/sso/confirm` | `/api/sso/launch` → `/api/sso/consume`, one-time JWT |
 | 6 | API-key lifecycle | Account API keys, `/api/v1/me` | Bearer `drk_…`; rotate revokes old → 401 |
 | 7 | Password reset | forgot, outbox, reset, sign-in | `password_reset` template, outbox-first |
-| 8 | Org lifecycle | Organizations new, New user, Roles | `isSuperadmin` create; `canAccessOrg` scope (404) |
+| 8 | Org lifecycle | Organizations new, New user, org members API, Roles | `isSuperadmin` create; `canAccessOrg` scope (404) |
 | 9 | Email | Templates, template edit, outbox test | `admin.email.manage`; `(key, locale)` rows; `test_email` |
 | 10 | Locale switch | Preferences, shell, outbox | `PUT /api/account/preferences`; recipient-locale email |
 
 **`TODO: verify` items:**
 
 1. **Journey 5** — the cross-subdomain hop needs a satellite origin plus the handoff env (`SSO_HANDOFF_ISSUER` pointing at the primary, `SSO_HANDOFF_AUDIENCE_PREFIX`, `SSO_HANDOFF_APPLICATION_ID`, and `SSO_HANDOFF_PRIVATE_KEY` on the primary); confirm the satellite is provisioned in your test setup, otherwise the confirm page shows the invalid-token screen.
-2. **Journey 8** — confirm whether the org detail **Members** tab renders an explicit **Add member** button in the UI (the grid read exposes only remove/`DELETE`); adding is otherwise via **New user** into the org or `POST /api/administrator/organizations/:id/members`.
+2. **Journey 8** — resolved: the org detail **Members** tab has no **Add member** button (the grid offers remove, the invitations panel offers **Invite member**), and a Superadmin's **New user** enrols nobody, so step 4 adds the membership with `POST /api/administrator/organizations/:id/members`. An admin of the org itself would enrol the user by creating it (F-480).
 3. **Journey 9** — confirm whether the template editor offers a preview or test-send of the exact edited template row; the outbox **Send test email** action sends the fixed `test_email` template, so editing and test-sending are asserted independently here.
 4. **Journey 1** — noted, not blocking: approval is a **Users-list bulk action** (select the pending row → **Approve**); the user detail page shows a read-only status badge with no per-user approve control.

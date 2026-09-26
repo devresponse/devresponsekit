@@ -34,6 +34,7 @@ const SELECT_CLASS =
 export function NewUserForm({
   locale,
   canGrantPlatformAdmin = false,
+  canCreateActive = false,
 }: {
   locale: string;
   /**
@@ -42,6 +43,13 @@ export function NewUserForm({
    * them. Defaults to false: the page passes the real answer.
    */
   canGrantPlatformAdmin?: boolean;
+  /**
+   * Whether the Active initial status may be chosen. For a caller confined to
+   * one org it enrols the user as an active member, which is an approval, so
+   * the API refuses it (403) without `admin.users.manage` (F-480). Defaults to
+   * false (Pending approval only): the page passes the real answer.
+   */
+  canCreateActive?: boolean;
 }) {
   const t = useTranslations("administrator.users");
   const tErr = useTranslations("administrator.errors");
@@ -183,7 +191,7 @@ export function NewUserForm({
                 <FormControl>
                   <select className={SELECT_CLASS} {...field}>
                     <option value="pending_approval">{t("status.pending_approval")}</option>
-                    <option value="active">{t("status.active")}</option>
+                    {canCreateActive ? <option value="active">{t("status.active")}</option> : null}
                   </select>
                 </FormControl>
                 <FormMessage />

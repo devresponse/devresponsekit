@@ -82,7 +82,8 @@ export async function register() {
  * id is memoised on its own request object, which this hook cannot reach, so
  * the only id it can know is an inbound one it honours below. That id matches
  * the audit rows too, because `getOrCreateRequestId` honours the same header by
- * the same rule. Without one, the line and the event carry no request id.
+ * the same rule. Without one, the line and the event carry no request id, and
+ * the line's join key is Next's digest instead (F-110, below).
  *
  * Review #99: this hook used to tag Sentry and stdout with the RAW inbound
  * header — no UUID check, no provenance check — while every other producer
@@ -104,7 +105,7 @@ export async function register() {
 export const onRequestError = async (
   ...args: Parameters<typeof Sentry.captureRequestError>
 ): Promise<void> => {
-  const [error, request] = args;
+  const [error, request, context] = args;
   const requestId = normalizeInboundRequestId(
     headerValueFromRecord(request.headers, REQUEST_ID_HEADER),
     headerValueFromRecord(request.headers, "x-forwarded-for"),
@@ -119,10 +120,22 @@ export const onRequestError = async (
   // pino (node-only) and is `server-only`, while this hook also fires in the
   // edge runtime — so guard on the runtime and import lazily, mirroring
   // `register()`. Logging must never mask the original error.
+  //
+  // F-110: a page render mints no request id, so the line usually has none. The
+  // key a user can quote is Next's digest (the error boundary's Support ID when
+  // Sentry is off, the root boundary's Reference), which `logServerError` keeps
+  // as `err.digest`. `routePath` / `routeType` say where it failed. The route
+  // path is the file pattern (`/[locale]/…/page`), never the concrete URL, so no
+  // id or query value reaches the line; the raw `request.path` stays out.
   if (process.env.NEXT_RUNTIME === "nodejs") {
     try {
       const { logServerError } = await import("@/lib/observability/logger.server");
-      logServerError("route.unhandled_error", { requestId, err: error });
+      logServerError("route.unhandled_error", {
+        requestId,
+        err: error,
+        routePath: context.routePath,
+        routeType: context.routeType,
+      });
     } catch {
       /* swallow — observability must not throw out of the error hook */
     }

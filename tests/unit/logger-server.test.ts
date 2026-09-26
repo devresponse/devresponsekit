@@ -60,3 +60,45 @@ describe("logServerError", () => {
     expect((obj.err as { value: string }).value).toBe("token [redacted-token] leaked");
   });
 });
+
+/**
+ * F-110: Next stamps a `digest` on every error a page or server-component
+ * render throws, and the error boundary shows it to the user as the Support ID
+ * (Sentry off) or the Reference (root boundary). The line used to drop it, so
+ * an operator had nothing to grep the log stream for.
+ */
+describe("logServerError keeps Next's digest (F-110)", () => {
+  const withDigest = (digest: unknown) =>
+    Object.assign(new Error("render failed"), { digest }) as Error & { digest?: unknown };
+
+  it("carries the digest of a thrown Error", () => {
+    logServerError("route.unhandled_error", { err: withDigest("2436375093") });
+    const [obj] = errorCalls[0] as [Record<string, unknown>];
+    expect(obj.err).toMatchObject({
+      name: "Error",
+      message: "render failed",
+      digest: "2436375093",
+    });
+  });
+
+  it("carries the digest of a thrown non-Error object too", () => {
+    logServerError("route.unhandled_error", { err: { digest: "1234567890@E394" } });
+    const [obj] = errorCalls[0] as [Record<string, unknown>];
+    expect(obj.err).toMatchObject({ digest: "1234567890@E394" });
+  });
+
+  it("adds no digest when there is none, or it is not a non-empty string", () => {
+    for (const err of [new Error("x"), withDigest(""), withDigest(42), withDigest({}), "s"]) {
+      errorCalls.length = 0;
+      logServerError("e", { err });
+      const [obj] = errorCalls[0] as [Record<string, unknown>];
+      expect((obj.err as { digest?: unknown }).digest).toBeUndefined();
+    }
+  });
+
+  it("scrubs a digest application code set to free text", () => {
+    logServerError("e", { err: withDigest("a@b.com drk_live_ABC123") });
+    const [obj] = errorCalls[0] as [Record<string, unknown>];
+    expect((obj.err as { digest: string }).digest).toBe("[redacted-email] [redacted-token]");
+  });
+});

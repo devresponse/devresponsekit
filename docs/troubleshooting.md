@@ -47,8 +47,9 @@ warrant a comms channel and an owner before deep debugging.
    error envelopes, and the `500 internal_error` a failing handler answers
    (the body's `requestId` is the same value). A page render does not; for a
    page error the user can quote the Support ID instead, which is the Sentry
-   event id when Sentry is enabled (otherwise Next's error digest), not a
-   request id.
+   event id when the browser SDK is enabled (`NEXT_PUBLIC_SENTRY_DSN` set;
+   otherwise Next's error digest), not a request id. A digest is in the log
+   stream: the `route.unhandled_error` line carries it as `err.digest` (F-110).
 3. **Scope the blast radius.** One route, one tenant, one actor — or everything?
    The audit table and the log stream answer this fast (queries below).
 4. **Recent change?** Check the last deploy and the last migration. Most SEV1/2
@@ -56,8 +57,9 @@ warrant a comms channel and an owner before deep debugging.
 
 ## 3. Triage by signal
 
-- **Logs (structured, stdout):** grep the log stream for the `x-request-id` to
-  get the server-side stack + fields. Redaction is automatic (no secrets in logs).
+- **Logs (structured, stdout):** grep the log stream for the `x-request-id` (or,
+  for a page error, the digest) to get the server-side stack + fields.
+  Redaction is automatic (no secrets in logs).
 - **`app_audit_events`:** the durable, append-only record of security-relevant
   actions. Outcomes are `success` / `denied` / `error` (`failure` is a
   deprecated alias). Useful event types: `auth.session.created` (a login),
@@ -152,8 +154,10 @@ warrant a comms channel and an owner before deep debugging.
   `500` response carries (F-29). A fault outside them (a page render, a server
   action, an exempt route) goes through `onRequestError` → `logServerError`,
   tagged with a request id only when the caller sent one that was honoured.
-  Pull a few and
-  find the common stack.
+  That `route.unhandled_error` line names the failing route's file pattern
+  and type (`routePath`, `routeType`) and, for a render error, Next's digest
+  (`err.digest`), so group by `routePath` to see which pages fail (F-110).
+  Pull a few and find the common stack.
 - If it started at a deploy, **roll back first, debug second** (§5).
 - **Every** route 5xx-ing at once, with `Invalid server environment variables:`
   in the log, is a variable `getServerEnv()` refuses. Since F-26 the boot hook

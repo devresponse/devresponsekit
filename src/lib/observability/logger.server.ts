@@ -53,23 +53,39 @@ export const logger: Logger = pino({
  * in an exception message (e.g. `resend 4xx: … a@b.com … drk_live_…`) never
  * reaches the always-on stdout stream either. pino's `redact` only masks known
  * structured field PATHS, not free text inside a message/stack. (audit #20)
+ *
+ * F-110: it also keeps Next's `digest`. Next stamps one on every error a page or
+ * server-component render throws, and the error boundaries show that same value
+ * to the user (the Support ID when Sentry is off, and the root boundary's
+ * Reference). Dropping it left a deployment without Sentry no way to find the
+ * user's report in its own log stream except by timestamp. Scrubbed like the
+ * other free text, because application code may set its own `digest`.
  */
 function serializeError(err: unknown): Record<string, unknown> | undefined {
   if (err === undefined) return undefined;
+  const digest = digestOf(err);
   if (err instanceof Error) {
     return {
       name: err.name,
       message: redactText(err.message),
       stack: err.stack ? redactText(err.stack) : undefined,
+      digest,
     };
   }
-  return { value: redactText(String(err)) };
+  return { value: redactText(String(err)), digest };
+}
+
+/** Next's `digest` on a thrown value, when it carries a non-empty string one (F-110). */
+function digestOf(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const digest = (err as { digest?: unknown }).digest;
+  return typeof digest === "string" && digest !== "" ? redactText(digest) : undefined;
 }
 
 export interface ServerErrorFields {
   /** Correlation id shared with the audit row and any Sentry issue. */
   requestId?: string | null;
-  /** The thrown value, if any (serialized to name/message/stack). */
+  /** The thrown value, if any (serialized to name/message/stack, plus Next's digest). */
   err?: unknown;
   /** Additional structured context. MUST NOT contain secrets. */
   [key: string]: unknown;

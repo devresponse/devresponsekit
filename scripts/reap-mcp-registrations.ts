@@ -10,7 +10,7 @@ import { expireStalePendingMcpRegistrations } from "@/lib/mcp/reaper.server";
  * counterpart of `GET /api/internal/mcp-registration-reap`. Designed to run on
  * a schedule — a cron job, a Kubernetes CronJob, or any periodic init task:
  *
- *   pnpm mcp:reap        # one pass; safe to run concurrently (row predicates)
+ *   pnpm mcp:reap        # one pass; safe to run concurrently (SKIP LOCKED batches)
  *
  * Exits non-zero only on an unexpected error.
  */

@@ -233,6 +233,14 @@ warrant a comms channel and an owner before deep debugging.
   schedule `pnpm mcp:reap`. `MCP_REGISTRATION_PENDING_TTL_DAYS=0` disables the
   sweep. Expired agents move to the **Revoked** filter; the **Pending** filter
   (and its badge) shows only what still needs a decision.
+- The backlog is bigger than one tick: the cron route stops starting batches
+  after 40 seconds and logs `drained: false`, and the next daily tick continues
+  (F-75). To clear it at once, run `pnpm mcp:reap`, which has no time limit;
+  it is safe beside a running tick, since each pass skips the rows the other
+  has locked and takes the next ones.
+- Each expired agent has an `mcp.client.expired` audit row (no actor, `reason`
+  `mcp_registration_expired`), which tells an expiry apart from an admin's
+  `admin.mcp_agent.revoked` (F-79).
 
 ### Abuse / rate-limit storm
 - Rate-limit denials return `429` + `Retry-After` and are recorded (flood-safely,

@@ -4,6 +4,7 @@ import { APIError } from "better-auth/api";
 import { revokeBearerCredentialsOf } from "@/lib/api-auth/credential-eviction.server";
 import { auth } from "@/lib/auth";
 import { EMAIL_VERIFICATION_WAIVED_FIELD } from "@/lib/auth-verification-waiver";
+import { isBanActive } from "@/lib/ban-status";
 import { withTrustedClientIp } from "@/lib/client-ip";
 import { revokeSessionsImpersonatedBy } from "@/lib/impersonation-sessions.server";
 
@@ -322,13 +323,41 @@ export interface BanUserParams {
 }
 
 /**
+ * A Better Auth ban in force when it was read (F-57): its reason, and its
+ * expiry, `null` for an indefinite ban.
+ */
+export interface BanSnapshot {
+  reason: string | null;
+  expiresAt: Date | null;
+}
+
+/** The ban in force on a Better Auth user row, or `null` (an elapsed ban is none). */
+function banInForce(user: object): BanSnapshot | null {
+  const row = user as {
+    banned?: boolean | null;
+    banReason?: string | null;
+    banExpires?: Date | string | null;
+  };
+  if (!isBanActive(row)) return null;
+  return {
+    reason: row.banReason ?? null,
+    expiresAt: row.banExpires ? new Date(row.banExpires) : null,
+  };
+}
+
+/**
  * Bans a user in Better Auth, deletes their own sessions, and ends the
  * sessions they opened as someone else (F-08). Used by `POST …/ban`, the
  * soft-delete of `DELETE /users/[id]` and both through `POST /users/bulk`.
+ *
+ * Returns the ban it replaced as `previousBan` (F-57). A caller that has to
+ * undo this ban (the soft-delete saga, a ban REVOKE-2 refuses) puts that back
+ * with {@link restoreBetterAuthBan}; lifting every ban erased an earlier one,
+ * such as a ban for abuse on an account that was then soft-deleted.
  */
 export async function banBetterAuthUser(params: BanUserParams) {
   const ctx = await authContext();
-  await requireBetterAuthUser(ctx, params.userId);
+  const before = await requireBetterAuthUser(ctx, params.userId);
   if (params.userId === params.actorBetterAuthUserId) {
     throw new APIError("BAD_REQUEST", {
       message: "You cannot ban yourself",
@@ -344,7 +373,7 @@ export async function banBetterAuthUser(params: BanUserParams) {
   });
   await ctx.internalAdapter.deleteUserSessions(params.userId);
   await revokeSessionsImpersonatedBy(params.userId);
-  return { user };
+  return { user, previousBan: banInForce(before) };
 }
 
 export async function unbanBetterAuthUser(userId: string) {
@@ -357,6 +386,35 @@ export async function unbanBetterAuthUser(userId: string) {
     updatedAt: new Date(),
   });
   return { user };
+}
+
+/**
+ * Sets a user's Better Auth ban back to `ban` (F-57): the ban one of the app's
+ * own writes replaced (`banBetterAuthUser`'s `previousBan`), or the one a
+ * soft-delete recorded for restore. `null`, or a ban whose expiry has passed
+ * since, lifts the ban as {@link unbanBetterAuthUser} does. An administrator's
+ * explicit unban still lifts every ban.
+ *
+ * It ends no sessions: the user has been banned from the ban it undoes until
+ * now, so none can have been opened. Returns whether a ban is in force after it.
+ */
+export async function restoreBetterAuthBan(
+  userId: string,
+  ban: BanSnapshot | null,
+): Promise<{ banned: boolean }> {
+  if (!ban || !isBanActive({ banned: true, banExpires: ban.expiresAt })) {
+    await unbanBetterAuthUser(userId);
+    return { banned: false };
+  }
+  const ctx = await authContext();
+  await requireBetterAuthUser(ctx, userId);
+  await ctx.internalAdapter.updateUser(userId, {
+    banned: true,
+    banReason: ban.reason,
+    banExpires: ban.expiresAt,
+    updatedAt: new Date(),
+  });
+  return { banned: true };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -510,7 +510,7 @@
         },
         "softDelete": {
           "title": "Eliminar usuario (suave)",
-          "description": "La eliminación suave banea al usuario en Better Auth y marca el registro de la aplicación como desactivado. La acción Restaurar revierte esta operación."
+          "description": "La eliminación suave banea al usuario en Better Auth, marca el registro de la aplicación como desactivado y revoca sus claves de API y clientes OAuth. La acción Restaurar revierte el baneo y la desactivación; las credenciales revocadas siguen revocadas."
         },
         "setPassword": {
           "title": "Establecer contraseña",
@@ -569,7 +569,7 @@
         "ban": "Banear selección…",
         "softDelete": "Eliminar selección (suave)…",
         "reasonPrompt": "Motivo (registrado en auditoría):",
-        "confirmDelete": "¿Eliminar de forma suave los usuarios seleccionados? Se les baneará en Better Auth y se desactivará el registro de la aplicación.",
+        "confirmDelete": "¿Eliminar de forma suave los usuarios seleccionados? Se les baneará en Better Auth, se desactivará el registro de la aplicación y se revocarán sus claves de API y clientes OAuth. Restaurar no recupera las credenciales revocadas.",
         "successToast": "{action} aplicado a {succeeded} usuario(s).",
         "partialFailureToast": "{action} aplicado a {succeeded}/{attempted} usuario(s); {failed} fallaron.",
         "errorToast": "La acción masiva falló.",
@@ -1306,6 +1306,7 @@
     "membership_not_found": "Membresía no encontrada.",
     "no_changes": "No se proporcionaron cambios.",
     "not_deactivated": "El usuario no está desactivado.",
+    "use_restore": "Este usuario tiene una eliminación suave. Restáuralo primero.",
     "not_found": "No encontrado.",
     "organization_not_found": "Organización no encontrada.",
     "permission_in_use": "Este permiso está en uso.",

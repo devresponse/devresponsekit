@@ -7,10 +7,12 @@ import {
   resolveOrgScope,
 } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
-import { unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import { restoreBetterAuthBan } from "@/lib/admin/auth-admin.server";
+import { mustUseRestore } from "@/lib/admin/deactivated-user";
 import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { recordedPriorBan } from "@/lib/admin/user-actions.server";
 import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
@@ -26,7 +28,9 @@ type RouteContext = { params: Promise<{ id: string }> };
  * POST /api/administrator/users/[id]/restore
  *
  * Inverse of the soft-delete (docs/admin-manager.md §8.1):
- *   1. Unban the Better Auth user.
+ *   1. Lift the soft-delete's Better Auth ban, or put back the earlier ban it
+ *      replaced (F-57). The API keys and OAuth clients the soft-delete revoked
+ *      stay revoked (I-19).
  *   2. Set `app_users.status` back to `pending_approval` and clear the
  *      `deactivated_*` columns. We deliberately do NOT auto-restore to
  *      `active` — an admin should re-approve via the status endpoint so
@@ -73,14 +77,22 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
   }
 
-  if (target.status !== "deactivated") {
+  if (!mustUseRestore(target)) {
     return adminErrorResponse("not_deactivated", 409, request, {
       requestId: guard.requestId,
     });
   }
 
+  // F-57: put back the ban the soft-delete replaced (a ban for abuse, say), or
+  // lift its ban when there was none. Undoing a delete (`admin.users.delete`)
+  // must not lift a ban its holder may not lift (`admin.users.ban`). The
+  // soft-delete's audit row records that ban; reading it is a database read,
+  // so it stays outside the `auth_unban_failed` handling and a failure is the
+  // generic 500.
+  const priorBan = await recordedPriorBan(target.appUserId);
+  let banned: boolean;
   try {
-    await unbanBetterAuthUser(target.betterAuthUserId);
+    ({ banned } = await restoreBetterAuthBan(target.betterAuthUserId, priorBan));
   } catch (err) {
     await auditUserAction("admin.user.restore_failed", "error", {
       request,
@@ -131,6 +143,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     organizationId: actingOrganizationId(guard.access),
     email: target.primaryEmail,
     requestId: guard.requestId,
+    metadata: { banReinstated: banned },
   });
 
   return adminJsonResponse({ ok: true, status: "pending_approval" }, request, {

@@ -18,6 +18,11 @@ const auditMock = vi.fn();
 const dbMock = vi.fn();
 const authBan = vi.fn();
 const authUnban = vi.fn();
+// F-57: undoing a ban the app applied, and restore, put back the ban it
+// replaced instead of lifting every ban.
+const authRestoreBan = vi.fn();
+// I-19: the soft-delete revokes the user's API keys and OAuth clients.
+const revokeCredentialsMock = vi.fn();
 const authSetPassword = vi.fn();
 const authForget = vi.fn();
 const authSetRole = vi.fn();
@@ -72,6 +77,7 @@ vi.mock("@/lib/audit.server", () => ({
 vi.mock("@/lib/admin/auth-admin.server", () => ({
   banBetterAuthUser: (...a: unknown[]) => authBan(...a),
   unbanBetterAuthUser: (...a: unknown[]) => authUnban(...a),
+  restoreBetterAuthBan: (...a: unknown[]) => authRestoreBan(...a),
   setBetterAuthUserPassword: (...a: unknown[]) => authSetPassword(...a),
   sendBetterAuthPasswordResetEmail: (...a: unknown[]) => authForget(...a),
   setBetterAuthUserRole: (...a: unknown[]) => authSetRole(...a),
@@ -80,6 +86,10 @@ vi.mock("@/lib/admin/auth-admin.server", () => ({
   revokeAllBetterAuthUserSessions: (...a: unknown[]) => authRevokeSessions(...a),
   createBetterAuthUser: (...a: unknown[]) => authCreateUser(...a),
   updateBetterAuthUser: (...a: unknown[]) => authUpdateUser(...a),
+}));
+
+vi.mock("@/lib/api-auth/credential-eviction.server", () => ({
+  revokeBearerCredentialsOf: (...a: unknown[]) => revokeCredentialsMock(...a),
 }));
 
 // Stub the DB. The handlers call:
@@ -181,6 +191,10 @@ beforeEach(() => {
   dbMock.mockReset();
   authBan.mockReset();
   authUnban.mockReset();
+  authRestoreBan.mockReset();
+  authRestoreBan.mockResolvedValue({ banned: false });
+  revokeCredentialsMock.mockReset();
+  revokeCredentialsMock.mockResolvedValue({ apiKeyIds: [], oauthClientIds: [] });
   authSetPassword.mockReset();
   authForget.mockReset();
   authSetRole.mockReset();
@@ -496,7 +510,7 @@ describe("POST /api/administrator/users/[id]/ban", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.ban"));
     dbMock.mockResolvedValue(targetRow);
-    authBan.mockResolvedValue({ ok: true });
+    authBan.mockResolvedValue({ previousBan: null });
     const { POST } = await import("@/app/api/administrator/users/[id]/ban/route");
     const res = await POST(
       makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/ban`, {
@@ -551,7 +565,7 @@ describe("POST /api/administrator/users/[id]/ban", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.ban"));
     dbMock.mockResolvedValue(targetRow);
-    authBan.mockResolvedValue({ ok: true });
+    authBan.mockResolvedValue({ previousBan: null });
     banStripsLastMock.mockResolvedValue(true);
     const { POST } = await import("@/app/api/administrator/users/[id]/ban/route");
     const res = await POST(
@@ -567,7 +581,8 @@ describe("POST /api/administrator/users/[id]/ban", () => {
       expect.objectContaining({ appUserId: TARGET_ID, betterAuthUserId: "ba-target" }),
       expect.anything(),
     );
-    expect(authUnban).toHaveBeenCalledWith("ba-target");
+    // F-57: back to the ban it replaced (none here), not a blanket unban.
+    expect(authRestoreBan).toHaveBeenCalledWith("ba-target", null);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.superuser.revocation_denied",
@@ -585,7 +600,7 @@ describe("POST /api/administrator/users/[id]/ban", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.ban"));
     dbMock.mockResolvedValue(targetRow);
-    authBan.mockResolvedValue({ ok: true });
+    authBan.mockResolvedValue({ previousBan: null });
     banStripsLastMock.mockRejectedValue(new Error("deadlock detected"));
     const { POST } = await import("@/app/api/administrator/users/[id]/ban/route");
     const res = await POST(
@@ -597,7 +612,8 @@ describe("POST /api/administrator/users/[id]/ban", () => {
     );
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual(expect.objectContaining({ error: "internal_error" }));
-    expect(authUnban).toHaveBeenCalledWith("ba-target");
+    // F-57: back to the ban it replaced (none here), not a blanket unban.
+    expect(authRestoreBan).toHaveBeenCalledWith("ba-target", null);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.ban_failed",
@@ -887,7 +903,7 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
     dbMock.mockResolvedValue(targetRow);
-    authBan.mockResolvedValue({ ok: true });
+    authBan.mockResolvedValue({ previousBan: null });
     const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
     const res = await DELETE(
       makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
@@ -925,7 +941,7 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
     dbMock.mockResolvedValue(targetRow);
-    authBan.mockResolvedValue({ ok: true });
+    authBan.mockResolvedValue({ previousBan: null });
     banStripsLastMock.mockResolvedValue(true);
     const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
     const res = await DELETE(
@@ -939,7 +955,7 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
     expect(await res.json()).toEqual(expect.objectContaining({ error: "last_superadmin" }));
     // The ban was already applied when the refusal fired, so the saga must have
     // compensated it — the account has to be left exactly as it was.
-    expect(authUnban).toHaveBeenCalled();
+    expect(authRestoreBan).toHaveBeenCalledWith("ba-target", null);
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.superuser.revocation_denied",
@@ -1249,7 +1265,7 @@ const guardedRoutes: GuardedRoute[] = [
   {
     name: "POST /users/[id]/restore",
     perm: "admin.users.delete",
-    effect: () => authUnban,
+    effect: () => authRestoreBan,
     row: { ...targetRow, status: "deactivated" },
     invoke: async () => {
       const { POST } = await import("@/app/api/administrator/users/[id]/restore/route");
@@ -1328,7 +1344,7 @@ const withSuperuser = (perm: string) => ({
 function armEffects() {
   authSetPassword.mockResolvedValue({ ok: true });
   authForget.mockResolvedValue({ ok: true });
-  authBan.mockResolvedValue({ ok: true });
+  authBan.mockResolvedValue({ previousBan: null });
   authUnban.mockResolvedValue({ ok: true });
   // The single-session revoke resolves SESSION_ID → token through this list.
   authListSessions.mockResolvedValue([RAW_SESSION]);
@@ -1489,5 +1505,222 @@ describe("POST /api/administrator/users/[id]/status — last superadmin (REVOKE-
     statusChangeMock.mockResolvedValue({ ok: false, error: "not_found" });
     const res = await postStatus();
     expect(res.status).toBe(404);
+  });
+});
+
+/**
+ * F-57 — a soft-deleted account leaves `deactivated` only through restore, and
+ * an earlier ban survives the soft-delete. I-19 — the soft-delete revokes the
+ * user's bearer credentials, which restore does not bring back.
+ */
+describe("soft-deleted users: one precondition, earlier bans kept, credentials revoked (F-57, I-19)", () => {
+  const deletedRow = { ...targetRow, status: "deactivated" };
+  const abuse = { reason: "abuse", expiresAt: new Date("2999-01-01T00:00:00.000Z") };
+  const superadmin = () => withSuperuser("admin.users.delete");
+
+  beforeEach(() => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    authBan.mockResolvedValue({ previousBan: null });
+    authUnban.mockResolvedValue({ ok: true });
+  });
+
+  const banRoutes = {
+    ban: () => import("@/app/api/administrator/users/[id]/ban/route"),
+    unban: () => import("@/app/api/administrator/users/[id]/unban/route"),
+  };
+
+  it.each([
+    ["ban", { reason: "spam" }],
+    ["unban", undefined],
+  ] as const)(
+    "POST …/%s on a soft-deleted user is 409 use_restore and changes nothing",
+    async (action, body) => {
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.ban"));
+      dbMock.mockResolvedValue(deletedRow);
+      const { POST } = await banRoutes[action]();
+      const res = await POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/${action}`, {
+          method: "POST",
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual(
+        expect.objectContaining({ error: "use_restore", message: "errors.use_restore" }),
+      );
+      expect(authBan).not.toHaveBeenCalled();
+      expect(authUnban).not.toHaveBeenCalled();
+      expect(authRestoreBan).not.toHaveBeenCalled();
+    },
+  );
+
+  it("POST …/status answers 409 use_restore when the core refuses a soft-deleted user", async () => {
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.manage"));
+    dbMock.mockResolvedValue(deletedRow);
+    statusChangeMock.mockResolvedValue({ ok: false, error: "use_restore" });
+    const { POST } = await import("@/app/api/administrator/users/[id]/status/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/status`, {
+        method: "POST",
+        body: JSON.stringify({ action: "approve" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "use_restore" }));
+  });
+
+  async function softDelete() {
+    const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
+    return DELETE(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+        method: "DELETE",
+        body: JSON.stringify({ reason: "left the company" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+  }
+
+  it("DELETE revokes the user's API keys and OAuth clients in the admin's name, and records the ban it replaced", async () => {
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
+    dbMock.mockResolvedValue(targetRow);
+    authBan.mockResolvedValue({ previousBan: abuse });
+    revokeCredentialsMock.mockResolvedValue({ apiKeyIds: ["k1"], oauthClientIds: ["c1", "c2"] });
+
+    const res = await softDelete();
+
+    expect(res.status).toBe(200);
+    expect(revokeCredentialsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        betterAuthUserId: "ba-target",
+        trigger: "owner_deleted",
+        actorBetterAuthUserId: "ba-1",
+        revokedByAppUserId: "u-self",
+      }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.soft_deleted",
+        outcome: "success",
+        reason: "left the company",
+        metadata: {
+          priorBan: { reason: "abuse", expiresAt: "2999-01-01T00:00:00.000Z" },
+          revokedApiKeys: 1,
+          revokedOauthClients: 2,
+        },
+      }),
+    );
+  });
+
+  it("DELETE refused by REVOKE-2 revokes nothing and puts the earlier ban back", async () => {
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
+    dbMock.mockResolvedValue(targetRow);
+    authBan.mockResolvedValue({ previousBan: abuse });
+    banStripsLastMock.mockResolvedValue(true);
+
+    const res = await softDelete();
+
+    expect(res.status).toBe(409);
+    expect(revokeCredentialsMock).not.toHaveBeenCalled();
+    expect(authRestoreBan).toHaveBeenCalledWith("ba-target", abuse);
+    expect(authUnban).not.toHaveBeenCalled();
+  });
+
+  it("DELETE whose credential revocation fails is a 500 to retry, with the deletion still recorded", async () => {
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
+    dbMock.mockResolvedValue(targetRow);
+    revokeCredentialsMock.mockRejectedValue(new Error("still minting"));
+
+    const res = await softDelete();
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "soft_delete_failed" }));
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.soft_deleted",
+        outcome: "success",
+        metadata: { priorBan: null, credentialRevocationFailed: true },
+      }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.soft_delete_failed",
+        reason: "credential_revocation_failed",
+      }),
+    );
+  });
+
+  it("POST …/restore puts back the ban its soft-delete recorded instead of lifting it", async () => {
+    accessGetter.mockResolvedValue(superadmin());
+    dbMock
+      .mockResolvedValueOnce(deletedRow) // resolveTargetUser
+      .mockResolvedValueOnce({
+        // recordedPriorBan: the latest `admin.user.soft_deleted` row
+        metadata: { priorBan: { reason: "abuse", expiresAt: "2999-01-01T00:00:00.000Z" } },
+      });
+    authRestoreBan.mockResolvedValue({ banned: true });
+    const { POST } = await import("@/app/api/administrator/users/[id]/restore/route");
+
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/restore`, {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+
+    expect(res.status).toBe(200);
+    expect(authRestoreBan).toHaveBeenCalledWith("ba-target", abuse);
+    expect(authUnban).not.toHaveBeenCalled();
+    // Restore re-arms no credential; it never touches them.
+    expect(revokeCredentialsMock).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.restored",
+        outcome: "success",
+        metadata: { banReinstated: true },
+      }),
+    );
+  });
+
+  // Reading the soft-delete's audit record is a database read. A failure there
+  // is the generic 500, never reported or audited as the authentication
+  // service refusing the (un)ban (502 auth_ban_failed / auth_unban_failed).
+  it("POST …/restore whose read of the recorded ban fails is the generic 500, not a Better Auth 502", async () => {
+    accessGetter.mockResolvedValue(superadmin());
+    dbMock
+      .mockResolvedValueOnce(deletedRow) // resolveTargetUser
+      .mockRejectedValueOnce(new Error("audit read failed")); // recordedPriorBan
+    const { POST } = await import("@/app/api/administrator/users/[id]/restore/route");
+
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/restore`, {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "internal_error" }));
+    expect(authRestoreBan).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.restore_failed" }),
+    );
+  });
+
+  it("DELETE of a soft-deleted user whose read of the recorded ban fails is the generic 500, and bans nothing", async () => {
+    accessGetter.mockResolvedValue(superadmin());
+    dbMock
+      .mockResolvedValueOnce(deletedRow) // resolveTargetUser
+      .mockRejectedValueOnce(new Error("audit read failed")); // carriedPriorBan
+
+    const res = await softDelete();
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "internal_error" }));
+    expect(authBan).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.soft_delete_failed" }),
+    );
   });
 });

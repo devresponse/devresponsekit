@@ -109,6 +109,7 @@ vi.mock("@/lib/admin/user-target.server", async () => {
 vi.mock("@/lib/admin/auth-admin.server", () => ({
   banBetterAuthUser: (...a: unknown[]) => authBan(...a),
   unbanBetterAuthUser: vi.fn(),
+  restoreBetterAuthBan: vi.fn(),
   updateBetterAuthUser: vi.fn(),
 }));
 vi.mock("@/lib/auth", () => ({
@@ -246,7 +247,8 @@ beforeEach(() => {
     revokeApiKey,
   ])
     m.mockReset();
-  authBan.mockResolvedValue(undefined);
+  // F-57: the ban reports the ban it replaced; none here.
+  authBan.mockResolvedValue({ previousBan: null });
   authUpdateUser.mockResolvedValue({});
 });
 afterEach(() => vi.resetModules());

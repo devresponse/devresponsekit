@@ -13,9 +13,16 @@ import {
   type OrgScope,
 } from "@/lib/admin/access-scope.server";
 import { auditUserAction, type UserAuditContext } from "@/lib/admin/audit-helpers.server";
-import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
+import {
+  banBetterAuthUser,
+  restoreBetterAuthBan,
+  unbanBetterAuthUser,
+  type BanSnapshot,
+} from "@/lib/admin/auth-admin.server";
+import { mustUseRestore, USE_RESTORE_ERROR } from "@/lib/admin/deactivated-user";
 import { targetOutranksActor } from "@/lib/admin/user-target.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
+import { revokeBearerCredentialsOf } from "@/lib/api-auth/credential-eviction.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 
 /**
@@ -41,6 +48,12 @@ export interface BulkUserActor {
    * help: `auditEvent` attributes them from `request`.
    */
   impersonatorId?: string | null;
+  /**
+   * The actor's `app_users` id (`guard.access.appUserId`), written to
+   * `revoked_by` on the credentials a soft-delete revokes (I-19). Omitted or
+   * `null` records the account itself, as `revokeBearerCredentialsOf` does.
+   */
+  appUserId?: string | null;
   request: { headers: Headers };
   /**
    * The actor's tenant scope (AUTHZ-1/2). Status actions are confined to this
@@ -186,7 +199,9 @@ export type AppliedBanGuard =
  * FOLLOW the ban (see `banStripsLastGlobalSuperuser`), so a refusal is a saga
  * like the soft-delete's: the ban is undone and the refusal audited here, and
  * the caller only answers it. A check that fails outright is undone the same
- * way, so a ban nobody could verify is never left in place.
+ * way, so a ban nobody could verify is never left in place. Undoing puts back
+ * `previousBan`, the ban the new one replaced (`banBetterAuthUser`), rather
+ * than lifting every ban (F-57).
  */
 export async function guardAppliedBan(
   target: { appUserId: string; betterAuthUserId: string; primaryEmail: string },
@@ -194,6 +209,7 @@ export async function guardAppliedBan(
     requestId?: string | null;
     bulk?: boolean;
   },
+  previousBan: BanSnapshot | null,
 ): Promise<AppliedBanGuard> {
   let failure: { cause: unknown } | null = null;
   let stripsLast = false;
@@ -214,7 +230,7 @@ export async function guardAppliedBan(
     requestId: audit.requestId ?? null,
   };
   try {
-    await unbanBetterAuthUser(target.betterAuthUserId);
+    await restoreBetterAuthBan(target.betterAuthUserId, previousBan);
   } catch (unbanErr) {
     await auditUserAction("admin.user.ban_compensation_failed", "error", {
       ...context,
@@ -254,13 +270,14 @@ async function performBan(
   }
   const refused = await refuseSharedAccountGlobal(target, actor);
   if (refused) return refused;
+  let previousBan: BanSnapshot | null;
   try {
-    await banBetterAuthUser({
+    ({ previousBan } = await banBetterAuthUser({
       userId: target.betterAuthUserId,
       banReason: options.reason,
       banExpiresIn: options.expiresInSeconds,
       actorBetterAuthUserId: actor.betterAuthUserId,
-    });
+    }));
   } catch (err) {
     await auditUserAction("admin.user.ban_failed", "error", {
       request: actor.request,
@@ -275,13 +292,17 @@ async function performBan(
   }
   // REVOKE-2 (F-56): the same guard as the single-row route, so the bulk path
   // is no way around its 409; the row fails and the batch goes on.
-  const guarded = await guardAppliedBan(target, {
-    request: actor.request,
-    actorBetterAuthUserId: actor.betterAuthUserId,
-    organizationId: scopeOrganizationId(actor.scope),
-    requestId: actor.requestId,
-    bulk: true,
-  });
+  const guarded = await guardAppliedBan(
+    target,
+    {
+      request: actor.request,
+      actorBetterAuthUserId: actor.betterAuthUserId,
+      organizationId: scopeOrganizationId(actor.scope),
+      requestId: actor.requestId,
+      bulk: true,
+    },
+    previousBan,
+  );
   if (!guarded.ok) return { ok: false, appUserId: target.appUserId, error: guarded.error };
   await auditUserAction("admin.user.banned", "success", {
     request: actor.request,
@@ -326,6 +347,187 @@ async function performUnban(
   return { ok: true, appUserId: target.appUserId };
 }
 
+/*
+ * F-57 — A SOFT-DELETE KEEPS AN EARLIER BAN, AND RESTORE PUTS IT BACK.
+ *
+ * A soft-delete bans the account indefinitely over whatever ban it already
+ * had, and restore used to lift the ban outright. A user banned for abuse and
+ * then soft-deleted came back from restore with no ban at all, so undoing a
+ * delete (`admin.users.delete`) lifted a ban its holder may not lift
+ * (`admin.users.ban`). The saga's own undo, after a failed or REVOKE-2-refused
+ * cascade, erased the earlier ban the same way.
+ *
+ * So the ban a soft-delete replaced (reason and expiry) is recorded in
+ * `metadata.priorBan` of its `admin.user.soft_deleted` row, and restore reads
+ * the latest such row back and puts that ban in place again, or lifts the ban
+ * when there was none or it has expired since (`restoreBetterAuthBan`). The
+ * audit row is the record because it is append-only, already describes the
+ * deletion, and needs no schema change; the impersonation stop reads its start
+ * row the same way (F-32). Retention bounds it: once the row has been pruned
+ * (`AUDIT_RETENTION_DAYS`, 365 days by default and never under 30), restore
+ * lifts the ban as it used to. The saga undoes its own ban from the ban it
+ * replaced, held in memory.
+ */
+
+/** The audit event of a completed soft-delete; restore reads its `metadata.priorBan`. */
+export const SOFT_DELETED_EVENT = "admin.user.soft_deleted";
+
+/** The ban as the soft-delete's audit metadata stores it. */
+function banRecord(
+  ban: BanSnapshot | null,
+): { reason: string | null; expiresAt: string | null } | null {
+  return ban ? { reason: ban.reason, expiresAt: ban.expiresAt?.toISOString() ?? null } : null;
+}
+
+/**
+ * The ban the latest soft-delete of `appUserId` replaced, as its audit row
+ * recorded it, or `null` (none, or no such row: a soft-delete from before
+ * F-57, or one retention has pruned).
+ */
+export async function recordedPriorBan(appUserId: string): Promise<BanSnapshot | null> {
+  const row = await db
+    .selectFrom("app_audit_events")
+    .select("metadata")
+    .where("app_user_id", "=", appUserId)
+    .where("event_type", "=", SOFT_DELETED_EVENT)
+    .where("outcome", "=", "success")
+    .orderBy("created_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  const prior = (row?.metadata as { priorBan?: unknown } | undefined)?.priorBan;
+  if (!prior || typeof prior !== "object") return null;
+  const { reason, expiresAt } = prior as { reason?: unknown; expiresAt?: unknown };
+  return {
+    reason: typeof reason === "string" ? reason : null,
+    expiresAt: typeof expiresAt === "string" ? new Date(expiresAt) : null,
+  };
+}
+
+/**
+ * What a soft-delete of `target` carries forward (F-57): for an account that is
+ * already soft-deleted, the ban its latest soft-delete recorded, because the
+ * ban this one replaces is that soft-delete's own; `undefined` for any other
+ * account, whose current ban is the one to keep. Callers read it before
+ * `banForSoftDelete` and outside its failure handling, as they read the record
+ * before restore's ban step, so a failed read is the database fault it is (a
+ * 500) and is never reported or audited as a Better Auth failure.
+ */
+export async function carriedPriorBan(target: {
+  appUserId: string;
+  status: string;
+}): Promise<BanSnapshot | null | undefined> {
+  return mustUseRestore(target) ? recordedPriorBan(target.appUserId) : undefined;
+}
+
+/**
+ * Step 1 of a soft-delete, shared by `DELETE /users/[id]` and the
+ * `soft_delete` bulk action: the indefinite Better Auth ban. Returns the ban it
+ * replaced (`previousBan`, what the saga puts back if the cascade fails or is
+ * refused) and the ban restore must put back (`priorBan`, F-57): `carried`
+ * (`carriedPriorBan`) when set, since for an account that is already
+ * soft-deleted the ban replaced is the first soft-delete's own.
+ */
+export async function banForSoftDelete(
+  target: { betterAuthUserId: string },
+  params: { banReason: string; actorBetterAuthUserId: string },
+  carried: BanSnapshot | null | undefined,
+): Promise<{ previousBan: BanSnapshot | null; priorBan: BanSnapshot | null }> {
+  const { previousBan } = await banBetterAuthUser({
+    userId: target.betterAuthUserId,
+    banReason: params.banReason,
+    // Omit `banExpiresIn` for indefinite per Better Auth semantics. A caller
+    // soft-deleting themselves is refused here, before anything app-side
+    // changes.
+    actorBetterAuthUserId: params.actorBetterAuthUserId,
+  });
+  return { previousBan, priorBan: carried === undefined ? previousBan : carried };
+}
+
+/**
+ * I-19 — A SOFT-DELETE REVOKES THE ACCOUNT'S BEARER CREDENTIALS.
+ *
+ * The last step of a soft-delete whose cascade has committed, shared by
+ * `DELETE /users/[id]` and the `soft_delete` bulk action. A soft-delete used
+ * to leave every API key the user owns, and every OAuth client acting as
+ * them, `active`. They stopped working only while the owner stayed banned and
+ * deactivated, so restore and then approve re-armed all of them, keys that
+ * never expire included, with no rotation, even one that had leaked while the
+ * account was deleted. So this revokes them with `revokeBearerCredentialsOf`,
+ * the F-10 cut-off of a password reset (the ban has already ended the
+ * sessions, which it requires first), with reason `owner_deleted`. Revoked is
+ * final: restore leaves them revoked, and a restored user needs new
+ * credentials. It runs only after the cascade commits, because a refused
+ * (REVOKE-2) or failed soft-delete must leave the account as it was, and a
+ * revoke cannot be undone.
+ *
+ * Then it writes the `admin.user.soft_deleted` row with the ban to keep
+ * (F-57) and the revoked counts. That row is written even when the revocation
+ * fails, because the deletion has committed and restore needs the record. The
+ * failure is audited as `admin.user.soft_delete_failed`
+ * (`credential_revocation_failed`) and returned, so the caller reports failure
+ * and the operator retries: a repeated soft-delete revokes again.
+ */
+export async function finishSoftDelete(
+  target: { appUserId: string; betterAuthUserId: string; primaryEmail: string },
+  priorBan: BanSnapshot | null,
+  audit: Pick<UserAuditContext, "request" | "actorBetterAuthUserId" | "organizationId"> & {
+    /** Written to the revoked credentials' `revoked_by`; `null` records the account itself. */
+    revokedByAppUserId: string | null;
+    requestId?: string | null;
+    reason: string | null;
+    bulk?: boolean;
+  },
+): Promise<{ ok: true } | { ok: false; cause: unknown }> {
+  const bulk = audit.bulk ? { bulk: true } : {};
+  let revoked: { apiKeyIds: string[]; oauthClientIds: string[] } | null = null;
+  let failure: { cause: unknown } | null = null;
+  try {
+    revoked = await revokeBearerCredentialsOf({
+      betterAuthUserId: target.betterAuthUserId,
+      trigger: "owner_deleted",
+      actorBetterAuthUserId: audit.actorBetterAuthUserId,
+      revokedByAppUserId: audit.revokedByAppUserId,
+      request: audit.request,
+      requestId: audit.requestId,
+    });
+  } catch (err) {
+    failure = { cause: err };
+  }
+  const context = {
+    request: audit.request,
+    actorBetterAuthUserId: audit.actorBetterAuthUserId,
+    appUserId: target.appUserId,
+    email: target.primaryEmail,
+    requestId: audit.requestId ?? null,
+  };
+  await auditUserAction(SOFT_DELETED_EVENT, "success", {
+    ...context,
+    organizationId: audit.organizationId,
+    reason: audit.reason,
+    metadata: {
+      priorBan: banRecord(priorBan),
+      ...(revoked
+        ? {
+            revokedApiKeys: revoked.apiKeyIds.length,
+            revokedOauthClients: revoked.oauthClientIds.length,
+          }
+        : { credentialRevocationFailed: true }),
+      ...bulk,
+    },
+  });
+  if (failure === null) return { ok: true };
+  await auditUserAction("admin.user.soft_delete_failed", "error", {
+    ...context,
+    organizationId: audit.organizationId,
+    reason: "credential_revocation_failed",
+    metadata: {
+      message: failure.cause instanceof Error ? failure.cause.message : "unknown",
+      ...bulk,
+    },
+  });
+  return { ok: false, cause: failure.cause };
+}
+
 async function performSoftDelete(
   target: BulkUserTarget,
   actor: BulkUserActor,
@@ -334,12 +536,16 @@ async function performSoftDelete(
   const refused = await refuseSharedAccountGlobal(target, actor);
   if (refused) return refused;
   const reason = options.reason ?? null;
+  // A database read, so outside the ban's `auth_ban_failed` handling: it fails
+  // as the shared-target read above does.
+  const carried = await carriedPriorBan(target);
+  let bans: { previousBan: BanSnapshot | null; priorBan: BanSnapshot | null };
   try {
-    await banBetterAuthUser({
-      userId: target.betterAuthUserId,
-      banReason: reason ?? "deleted",
-      actorBetterAuthUserId: actor.betterAuthUserId,
-    });
+    bans = await banForSoftDelete(
+      target,
+      { banReason: reason ?? "deleted", actorBetterAuthUserId: actor.betterAuthUserId },
+      carried,
+    );
   } catch (err) {
     await auditUserAction("admin.user.soft_delete_failed", "error", {
       request: actor.request,
@@ -394,9 +600,10 @@ async function performSoftDelete(
     });
   } catch (err) {
     // Compensate the Better Auth ban so the two systems stay in sync
-    // when the application bookkeeping fails (#B6).
+    // when the application bookkeeping fails (#B6): back to the ban it
+    // replaced, not to no ban at all (F-57).
     try {
-      await unbanBetterAuthUser(target.betterAuthUserId);
+      await restoreBetterAuthBan(target.betterAuthUserId, bans.previousBan);
     } catch (unbanErr) {
       await auditUserAction("admin.user.soft_delete_compensation_failed", "error", {
         request: actor.request,
@@ -441,15 +648,18 @@ async function performSoftDelete(
     return { ok: false, appUserId: target.appUserId, error: "db_cascade_failed" };
   }
 
-  await auditUserAction("admin.user.soft_deleted", "success", {
+  const finished = await finishSoftDelete(target, bans.priorBan, {
     request: actor.request,
     actorBetterAuthUserId: actor.betterAuthUserId,
-    appUserId: target.appUserId,
     organizationId: scopeOrganizationId(actor.scope),
-    email: target.primaryEmail,
+    revokedByAppUserId: actor.appUserId ?? null,
+    requestId: actor.requestId,
     reason,
-    metadata: { bulk: true },
+    bulk: true,
   });
+  if (!finished.ok) {
+    return { ok: false, appUserId: target.appUserId, error: "credential_revocation_failed" };
+  }
   return { ok: true, appUserId: target.appUserId };
 }
 
@@ -465,11 +675,15 @@ async function performRestore(
   // real restore never needs it: a soft-deleted account's grants do not
   // count), so the last superadmin could "restore" themselves out of the
   // console through this path.
-  if (target.status !== "deactivated") {
+  if (!mustUseRestore(target)) {
     return { ok: false, appUserId: target.appUserId, error: "not_deactivated" };
   }
+  // F-57: an earlier ban the soft-delete replaced comes back. The record is a
+  // database read, so it is outside the `auth_unban_failed` handling below.
+  const priorBan = await recordedPriorBan(target.appUserId);
+  let banned: boolean;
   try {
-    await unbanBetterAuthUser(target.betterAuthUserId);
+    ({ banned } = await restoreBetterAuthBan(target.betterAuthUserId, priorBan));
   } catch (err) {
     await auditUserAction("admin.user.restore_failed", "error", {
       request: actor.request,
@@ -517,7 +731,7 @@ async function performRestore(
     appUserId: target.appUserId,
     organizationId: scopeOrganizationId(actor.scope),
     email: target.primaryEmail,
-    metadata: { bulk: true },
+    metadata: { banReinstated: banned, bulk: true },
   });
   return { ok: true, appUserId: target.appUserId };
 }
@@ -551,6 +765,13 @@ export async function executeBulkUserAction(
       metadata: { action, targetBetterAuthUserId: target.betterAuthUserId, bulk: true },
     });
     return { ok: false, appUserId: target.appUserId, error: "forbidden_target_outranks_actor" };
+  }
+  // F-57: a soft-deleted account leaves `deactivated` only through `restore`
+  // (`deactivated-user.ts`). The status actions are refused again inside
+  // `performAdminStatusChange`, against the row it locks; ban and unban have
+  // no other check.
+  if (action !== "soft_delete" && action !== "restore" && mustUseRestore(target)) {
+    return { ok: false, appUserId: target.appUserId, error: USE_RESTORE_ERROR };
   }
   switch (action) {
     case "approve":

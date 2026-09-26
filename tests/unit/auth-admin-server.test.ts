@@ -198,6 +198,63 @@ describe("F-13: user administration is a trusted server call, whoever the caller
     );
   });
 
+  it("banBetterAuthUser reports the ban in force that it replaced, and none for a lapsed one (F-57)", async () => {
+    const expiresAt = new Date("2999-01-01T00:00:00.000Z");
+    adapter.findUserById.mockResolvedValue({
+      ...TARGET,
+      banned: true,
+      banReason: "abuse",
+      banExpires: expiresAt,
+    });
+    await expect(M.banBetterAuthUser({ ...ban, banReason: "deleted" })).resolves.toMatchObject({
+      previousBan: { reason: "abuse", expiresAt },
+    });
+
+    adapter.findUserById.mockResolvedValue({ ...TARGET, banned: true, banReason: "x" });
+    await expect(M.banBetterAuthUser(ban)).resolves.toMatchObject({
+      previousBan: { reason: "x", expiresAt: null },
+    });
+
+    adapter.findUserById.mockResolvedValue({
+      ...TARGET,
+      banned: true,
+      banReason: "old",
+      banExpires: new Date("2000-01-01T00:00:00.000Z"),
+    });
+    await expect(M.banBetterAuthUser(ban)).resolves.toMatchObject({ previousBan: null });
+
+    adapter.findUserById.mockResolvedValue(TARGET);
+    await expect(M.banBetterAuthUser(ban)).resolves.toMatchObject({ previousBan: null });
+  });
+
+  it("restoreBetterAuthBan puts a ban back with its reason and expiry, and ends no session (F-57)", async () => {
+    const expiresAt = new Date("2999-01-01T00:00:00.000Z");
+    await expect(M.restoreBetterAuthBan("u1", { reason: "abuse", expiresAt })).resolves.toEqual({
+      banned: true,
+    });
+    expect(adapter.updateUser).toHaveBeenCalledWith(
+      "u1",
+      expect.objectContaining({ banned: true, banReason: "abuse", banExpires: expiresAt }),
+    );
+    // Nobody could sign in under the ban it replaces, so there is nothing to end.
+    expect(adapter.deleteUserSessions).not.toHaveBeenCalled();
+    expect(revokeSessionsImpersonatedBy).not.toHaveBeenCalled();
+  });
+
+  it("restoreBetterAuthBan lifts the ban when there was none, or it has lapsed since (F-57)", async () => {
+    await expect(M.restoreBetterAuthBan("u1", null)).resolves.toEqual({ banned: false });
+    await expect(
+      M.restoreBetterAuthBan("u1", {
+        reason: "old",
+        expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+      }),
+    ).resolves.toEqual({ banned: false });
+    expect(adapter.updateUser).toHaveBeenCalledTimes(2);
+    for (const [, data] of adapter.updateUser.mock.calls) {
+      expect(data).toMatchObject({ banned: false, banReason: null, banExpires: null });
+    }
+  });
+
   it("every write to a user refuses a missing one (USER_NOT_FOUND) and writes nothing", async () => {
     adapter.findUserById.mockResolvedValue(null);
     const writes = [
@@ -205,6 +262,7 @@ describe("F-13: user administration is a trusted server call, whoever the caller
       () => M.setBetterAuthUserRole({ userId: "u1", role: "user" }),
       () => M.banBetterAuthUser(ban),
       () => M.unbanBetterAuthUser("u1"),
+      () => M.restoreBetterAuthBan("u1", { reason: "abuse", expiresAt: null }),
       () => M.setBetterAuthUserPassword({ userId: "u1", newPassword: "secret-long", setBy }),
     ];
     for (const write of writes) await expect(write()).rejects.toThrow("User not found");
@@ -523,10 +581,12 @@ describe("F-10: set-password ends everything that authenticated with the old pas
   it("no other wrapper revokes bearer credentials", async () => {
     // A ban already stops them at resolution (AUTH-1) and an unban restores
     // them; "revoke all sessions" is about sessions. Only a new password is a
-    // statement that the old credential is compromised.
+    // statement that the old credential is compromised. (A soft-delete revokes
+    // them too, I-19, but in its own saga, not through the ban wrapper.)
     await M.banBetterAuthUser(ban);
     await M.revokeAllBetterAuthUserSessions("u1");
     await M.unbanBetterAuthUser("u1");
+    await M.restoreBetterAuthBan("u1", { reason: "abuse", expiresAt: null });
 
     expect(revokeBearerCredentialsOf).not.toHaveBeenCalled();
   });

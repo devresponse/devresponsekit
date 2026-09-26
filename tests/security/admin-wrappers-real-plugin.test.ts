@@ -396,6 +396,42 @@ describe("F-13: the vendor checks that were more than authorization are kept", (
     ).resolves.toMatchObject({ user: { id: user.id } });
   });
 
+  it("F-57: undoing a ban puts back the ban it replaced, which still refuses the sign-in", async () => {
+    const w = await world();
+    const M = await wrappers();
+    const expires = Date.now() + 86_400_000;
+
+    // A ban for abuse, then the soft-delete's indefinite ban over it.
+    await M.banBetterAuthUser({
+      userId: w.target,
+      banReason: "abuse",
+      banExpiresIn: 86_400,
+      actorBetterAuthUserId: w.baAdmin,
+    });
+    const { previousBan } = await M.banBetterAuthUser({
+      userId: w.target,
+      banReason: "deleted",
+      actorBetterAuthUserId: w.baAdmin,
+    });
+    expect(previousBan).toMatchObject({ reason: "abuse" });
+    expect(Math.abs(previousBan!.expiresAt!.getTime() - expires)).toBeLessThan(60_000);
+
+    await expect(M.restoreBetterAuthBan(w.target, previousBan)).resolves.toEqual({ banned: true });
+
+    const row = (await userRow(w, w.target))!;
+    expect(row).toMatchObject({ banned: true, banReason: "abuse" });
+    expect((row.banExpires as Date).getTime()).toBe(previousBan!.expiresAt!.getTime());
+    await expect(
+      w.auth.api.signInEmail({ body: { email: w.emails.target, password: PASSWORD } }),
+    ).rejects.toThrow();
+
+    // With no earlier ban, the undo lets the user back in.
+    await expect(M.restoreBetterAuthBan(w.target, null)).resolves.toEqual({ banned: false });
+    await expect(
+      w.auth.api.signInEmail({ body: { email: w.emails.target, password: PASSWORD } }),
+    ).resolves.toMatchObject({ user: { id: w.target } });
+  });
+
   it("createBetterAuthUser still refuses an address that already exists", async () => {
     const w = await world();
     const M = await wrappers();

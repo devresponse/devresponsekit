@@ -510,7 +510,7 @@
         },
         "softDelete": {
           "title": "Supprimer l'utilisateur (soft)",
-          "description": "La suppression douce bannit l'utilisateur dans Better Auth et marque l'enregistrement applicatif comme désactivé. L'action Restaurer inverse cette opération."
+          "description": "La suppression douce bannit l'utilisateur dans Better Auth, marque l'enregistrement applicatif comme désactivé et révoque ses clés d'API et clients OAuth. L'action Restaurer annule le bannissement et la désactivation ; les identifiants révoqués restent révoqués."
         },
         "setPassword": {
           "title": "Définir le mot de passe",
@@ -569,7 +569,7 @@
         "ban": "Bannir la sélection…",
         "softDelete": "Supprimer la sélection (en douceur)…",
         "reasonPrompt": "Motif (enregistré dans l’audit) :",
-        "confirmDelete": "Supprimer en douceur les utilisateurs sélectionnés ? Cela les bannit dans Better Auth et désactive l’enregistrement applicatif.",
+        "confirmDelete": "Supprimer en douceur les utilisateurs sélectionnés ? Cela les bannit dans Better Auth, désactive l’enregistrement applicatif et révoque leurs clés d’API et clients OAuth. La restauration ne rétablit pas les identifiants révoqués.",
         "successToast": "{action} appliqué à {succeeded} utilisateur(s).",
         "partialFailureToast": "{action} appliqué à {succeeded}/{attempted} utilisateur(s) ; {failed} en échec.",
         "errorToast": "L’action en masse a échoué.",
@@ -1306,6 +1306,7 @@
     "membership_not_found": "Adhésion introuvable.",
     "no_changes": "Aucune modification fournie.",
     "not_deactivated": "L’utilisateur n’est pas désactivé.",
+    "use_restore": "Cet utilisateur a fait l’objet d’une suppression douce. Restaurez-le d’abord.",
     "not_found": "Introuvable.",
     "organization_not_found": "Organisation introuvable.",
     "permission_in_use": "Cette permission est utilisée.",

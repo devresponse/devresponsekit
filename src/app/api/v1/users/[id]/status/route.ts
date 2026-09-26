@@ -11,6 +11,7 @@ import {
   LAST_SUPERADMIN_STATUS,
 } from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { USE_RESTORE_ERROR, USE_RESTORE_STATUS } from "@/lib/admin/deactivated-user";
 import {
   isUuid,
   TARGET_OUTRANKS_ACTOR_EVENT,
@@ -37,6 +38,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  * precondition is enforced as a compare-and-swap inside the mutation's own
  * transaction (review #44), so of two writers racing on the same tag exactly
  * one commits and the loser gets the `412` — not both.
+ *
+ * `409` for a change the platform's state refuses: `last_superadmin`
+ * (REVOKE-2), or `use_restore` for a soft-deleted user, which only the
+ * console's restore brings back (F-57).
  *
  * Target authorization mirrors the administrator route (review #7): after
  * ADR-0001 scoping (`canAccessUser` → 404), a non-superadmin principal may
@@ -181,6 +186,14 @@ export const POST = withV1Route(async function POST(request: NextRequest, ctx: R
       return problemResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
         detail:
           "This is the last global superadmin; the change would leave the platform without one.",
+        requestId: grant.requestId,
+      });
+    }
+    // F-57: the same refusal as the console's; only restore moves a
+    // soft-deleted user.
+    if (result.error === USE_RESTORE_ERROR) {
+      return problemResponse(USE_RESTORE_ERROR, USE_RESTORE_STATUS, request, {
+        detail: "The user is soft-deleted; restore it before changing its status.",
         requestId: grant.requestId,
       });
     }

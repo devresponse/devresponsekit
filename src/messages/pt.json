@@ -509,7 +509,7 @@
         "ban": "Banir selecionados…",
         "softDelete": "Eliminar selecionados (suave)…",
         "reasonPrompt": "Motivo (registado no registo de auditoria):",
-        "confirmDelete": "Eliminar de forma suave os utilizadores selecionados? Isto bane-os no Better Auth e desativa o registo na aplicação.",
+        "confirmDelete": "Eliminar de forma suave os utilizadores selecionados? Isto bane-os no Better Auth, desativa o registo na aplicação e revoga as suas chaves de API e clientes OAuth. Restaurar não recupera as credenciais revogadas.",
         "successToast": "{action} aplicada a {succeeded} utilizador(es).",
         "partialFailureToast": "{action} aplicada a {succeeded}/{attempted} utilizador(es); {failed} falharam.",
         "errorToast": "A ação em massa falhou.",
@@ -536,7 +536,7 @@
         },
         "softDelete": {
           "title": "Eliminar utilizador (suave)",
-          "description": "A eliminação suave bane o utilizador no Better Auth e marca o registo na aplicação como desativado. A ação Restaurar reverte esta operação."
+          "description": "A eliminação suave bane o utilizador no Better Auth, marca o registo na aplicação como desativado e revoga as chaves de API e os clientes OAuth do utilizador. A ação Restaurar reverte o banimento e a desativação; as credenciais revogadas continuam revogadas."
         },
         "setPassword": {
           "title": "Definir palavra-passe",
@@ -1306,6 +1306,7 @@
     "membership_not_found": "Adesão não encontrada.",
     "no_changes": "Não foram fornecidas alterações.",
     "not_deactivated": "O utilizador não está desativado.",
+    "use_restore": "Este utilizador foi eliminado de forma suave. Restaure-o primeiro.",
     "not_found": "Não encontrado.",
     "organization_not_found": "Organização não encontrada.",
     "permission_in_use": "Esta permissão está em utilização.",

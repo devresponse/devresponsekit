@@ -7,6 +7,7 @@ import {
   LAST_SUPERADMIN_ERROR,
   LAST_SUPERADMIN_STATUS,
 } from "@/lib/admin/access-scope.server";
+import { USE_RESTORE_ERROR, USE_RESTORE_STATUS } from "@/lib/admin/deactivated-user";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -28,7 +29,7 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `suspend` | `reactivate`) to the target user via the shared
  * `performAdminStatusChange` core (docs/admin-manager.md §8.1, §13),
  * which also backs the bulk endpoint so both paths emit identical audit
- * events.
+ * events. A soft-deleted target is 409 `use_restore` (F-57).
  */
 const statusSchema = z
   .object({
@@ -128,6 +129,12 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     // revocation routes refuse. The core audits the denial.
     if (result.error === "last_superadmin") {
       return adminErrorResponse(LAST_SUPERADMIN_ERROR, LAST_SUPERADMIN_STATUS, request, {
+        requestId: guard.requestId,
+      });
+    }
+    // F-57: the target is soft-deleted; only restore may move it.
+    if (result.error === USE_RESTORE_ERROR) {
+      return adminErrorResponse(USE_RESTORE_ERROR, USE_RESTORE_STATUS, request, {
         requestId: guard.requestId,
       });
     }

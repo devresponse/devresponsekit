@@ -41,6 +41,8 @@ const TITLES: Record<string, string> = {
   // REVOKE-2: the request is well-formed and the caller is entitled — the
   // platform's CURRENT state is what conflicts, so 409 rather than 403.
   last_superadmin: "Last global superadmin",
+  // F-57: a soft-deleted user leaves that state only through restore.
+  use_restore: "Restore required",
   rate_limited: "Too many requests",
   precondition_failed: "Precondition failed",
   unsupported_grant_type: "Unsupported grant type",

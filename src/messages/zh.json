@@ -509,7 +509,7 @@
         "ban": "封禁所选…",
         "softDelete": "删除所选（软删除）…",
         "reasonPrompt": "原因（记录在审计日志中）：",
-        "confirmDelete": "对所选用户执行软删除？此操作会在 Better Auth 中封禁他们并停用其应用记录。",
+        "confirmDelete": "对所选用户执行软删除？此操作会在 Better Auth 中封禁他们、停用其应用记录，并吊销其 API 密钥和 OAuth 客户端。恢复不会找回已吊销的凭据。",
         "successToast": "已对 {succeeded} 名用户执行“{action}”。",
         "partialFailureToast": "已对 {succeeded}/{attempted} 名用户执行“{action}”；{failed} 个失败。",
         "errorToast": "批量操作失败。",
@@ -536,7 +536,7 @@
         },
         "softDelete": {
           "title": "删除用户（软删除）",
-          "description": "软删除会在 Better Auth 中封禁该用户，并将应用记录标记为已停用。“恢复”操作可撤销此操作。"
+          "description": "软删除会在 Better Auth 中封禁该用户，将应用记录标记为已停用，并吊销该用户的 API 密钥和 OAuth 客户端。“恢复”操作可撤销封禁和停用；已吊销的凭据仍保持吊销状态。"
         },
         "setPassword": {
           "title": "设置密码",
@@ -1306,6 +1306,7 @@
     "membership_not_found": "未找到成员关系。",
     "no_changes": "未提供任何更改。",
     "not_deactivated": "该用户未被停用。",
+    "use_restore": "该用户已被软删除。请先恢复该用户。",
     "not_found": "未找到。",
     "organization_not_found": "未找到组织。",
     "permission_in_use": "此权限正在使用中。",

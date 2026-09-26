@@ -141,10 +141,10 @@ export function coreMigrations(kitRoot: string): string[] {
 const LIBPQ_TARGET_FALLBACKS = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER"];
 
 /**
- * What the migration runners are handed, layered over the inherited
- * environment: the URL and the schema, with every libpq fallback that could
- * pick a different server removed (an `undefined` value drops the variable
- * from the child).
+ * What the migration runners are handed, layered over the shell's
+ * environment less the Vercel token (F-139): the URL and the schema, with
+ * every libpq fallback that could pick a different server removed (an
+ * `undefined` value drops the variable from the child).
  *
  * The URL was checked against production from what it says alone (F-47):
  * no port is 5432, no database is the user's name. A shell's PGPORT=5433 would
@@ -190,11 +190,20 @@ export async function applyMigrations(options: MigrateOptions): Promise<void> {
   }
 
   const env = migrationEnv(options.databaseUrl, options.schema);
+  // The one kind of child that keeps the shell's environment (F-139). The
+  // runners are the kit's own scripts, and they read the kit's configuration
+  // from it: DB_MIGRATE_LOCALES, and the whole server environment
+  // `@/lib/auth` validates when the auth runner imports it (deploy.yml hands
+  // that placeholders; an operator's shell or the kit's `.env` does here).
+  // Which variables that is, is the kit's to say, so no allow-list here
+  // could keep up with it. They still never see the Vercel token.
+  const inheritShell = true;
 
   step("Applying application migrations (pnpm db:app:migrate)");
   await runPnpm(["db:app:migrate"], {
     cwd: options.kitRoot,
     env,
+    inheritShell,
     failureMessage: "Application migrations failed — production was NOT promoted",
   });
 
@@ -202,6 +211,7 @@ export async function applyMigrations(options: MigrateOptions): Promise<void> {
   await runPnpm(["db:auth:migrate"], {
     cwd: options.kitRoot,
     env,
+    inheritShell,
     failureMessage: "Better Auth migrations failed — production was NOT promoted",
   });
 }

@@ -19,6 +19,10 @@ export default tseslint.config(
       // `Deploy CLI (drk-deploy)` job typechecks, tests and format-checks it
       // (F-45); it has no ESLint setup of its own.
       "vercel-cli/**",
+      // Vercel CLI state (F-140): `vercel build` output and `vercel pull`'s
+      // env file. Flat config does not read .gitignore, so `pnpm lint` used
+      // to crawl `.vercel/output` after a local `drk-deploy` run.
+      "**/.vercel/**",
       "coverage/**",
       "playwright-report/**",
       "test-results/**",

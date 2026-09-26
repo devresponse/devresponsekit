@@ -53,6 +53,7 @@ import type { ProjectGit, ProjectSummary, ServingDeployment } from "../lib/verce
 import {
   assertCheckoutLink,
   assertNotIssuerProject,
+  buildEnv,
   issuerProjectProblem,
   projectLinkFile,
   vercelEnvFor,
@@ -472,7 +473,7 @@ export interface ReleaseRunner {
   pull(vercel: VercelInvocation): Promise<void>;
   /** The migrations, on a target already checked against production. */
   migrate: typeof migrate;
-  /** `vercel build --prod`. */
+  /** `vercel build --prod`, the one `vercel` child run without the token (F-139). */
   build(vercel: VercelInvocation): Promise<void>;
   /** `vercel deploy --prebuilt --prod`: the promotion. */
   promote(vercel: VercelInvocation): Promise<void>;
@@ -539,7 +540,13 @@ export const releaseRunner: ReleaseRunner = {
   link: ensureLinked,
   pull: (vercel) => runVercel(vercel, ["pull", "--yes", "--environment=production"], "vercel pull failed"),
   migrate,
-  build: (vercel) => runVercel(vercel, ["build", "--prod"], "vercel build failed — nothing was promoted"),
+  // Without the token: `build` runs the checkout's own build (F-139).
+  build: (vercel) =>
+    runVercel(
+      { ...vercel, env: buildEnv(vercel.env) },
+      ["build", "--prod"],
+      "vercel build failed — nothing was promoted",
+    ),
   promote: (vercel) => runVercel(vercel, ["deploy", "--prebuilt", "--prod"], "vercel deploy failed"),
   verify,
   rollback: (vercel, to) =>
@@ -549,7 +556,7 @@ export const releaseRunner: ReleaseRunner = {
 /**
  * Runs the pinned Vercel CLI in the deployed checkout. A non-zero exit throws.
  * The one place a `vercel` child is spawned, always with the invocation's
- * `env` (F-48).
+ * `env` (F-48), less the token for `build` (F-139).
  */
 async function runVercel(
   { vercelJs, root, env }: VercelInvocation,

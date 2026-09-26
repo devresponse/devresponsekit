@@ -188,3 +188,18 @@ describe("Administrator overview — the viewer's formats (F-37)", () => {
     ]);
   });
 });
+
+/**
+ * F-116: the "Recent registrations" list printed the user's raw status enum
+ * (`pending_approval`) in a plain Badge, in every locale. It now goes through
+ * the shared StatusBadge, which translates it (tests/component/status-badge.test.tsx).
+ */
+describe("Administrator overview — registration status (F-116)", () => {
+  it("renders the status through the shared, translating StatusBadge", async () => {
+    const [registrations] = findAll(await renderPage(), "OverviewListCard");
+    const rows = registrations?.props.rows as { cells: AnyElement[] }[];
+    const status = rows[0]!.cells[1]!;
+    expect((status.type as { name?: string }).name).toBe("StatusBadge");
+    expect(status.props.status).toBe("active");
+  });
+});

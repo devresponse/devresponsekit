@@ -57,6 +57,7 @@ function render(user: UserDetailJson, overrides: Partial<TabPermissions> = {}) {
       canManageGroups={false}
       canUpdateMemberships={false}
       canReadAudit={false}
+      isSelf={false}
       {...overrides}
     />,
   );

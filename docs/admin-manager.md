@@ -600,12 +600,12 @@ returns 404 (§6.2). The committed
 request/response shapes.
 
 **Detail-page saves send only what changed (F-39).** The organization, role
-and group detail pages are tabbed, and a tab panel unmounts when another tab
-opens, so each Settings form remounts from the props the page was rendered
-with. A save used to re-send every field and leave those props as they were,
-so after a tab switch the form showed the values from before the save, and the
-next save wrote them back: fixing a typo in a suspended org's name reactivated
-it. Each Settings form now sends only the fields that differ from the last
+and group detail pages are tabbed, and a tab panel used to unmount when another
+tab opened, so each Settings form remounted from the props the page was
+rendered with. A save used to re-send every field and leave those props as they
+were, so after a tab switch the form showed the values from before the save,
+and the next save wrote them back: fixing a typo in a suspended org's name
+reactivated it. Each Settings form now sends only the fields that differ from the last
 saved state. The org, role and group PATCH routes all take a partial body, so
 untouched fields are never written, and the audit row names only the fields
 the admin changed (the group row's `fields` also carries its `updated_at`
@@ -618,6 +618,16 @@ way; after a Reset, the refresh returns the Authentication tab to the inherit
 view unless the admin has already opened Customize again. The sign-up policy
 PATCH still carries the complete policy. See
 [Form Validation](./form-validation.md#settings-forms-seeded-from-server-props-f-39).
+
+**A tab switch keeps unsaved edits (F-158).** The panels that hold edits (the
+org **Authentication** and **Settings** tabs, the role **Permissions** editor
+and **Settings** tab, the group **Roles** editor and **Settings** tab) now stay
+mounted, hidden, while another tab is open (`useKeptTabs`,
+`src/components/ui/tabs.tsx`). Before, staging permission moves on a role and
+opening **Members** to see who they would affect discarded the moves without a
+word, and a half-typed form went the same way. The **Members** and
+**Providers** grids still unmount and reload each time they open. Leaving the
+page (a sidebar link, a reload) still drops unsaved edits without a prompt.
 
 Known limitation: the org, role and group PATCH routes have no optimistic
 concurrency. When two admins, or two browser tabs, edit the same record,

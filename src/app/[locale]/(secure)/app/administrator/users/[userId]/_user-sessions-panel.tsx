@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-manager";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
@@ -18,6 +19,11 @@ import { Skeleton } from "@/components/ui/skeleton";
  * `DELETE .../sessions`. Both refresh the list on success and surface API
  * errors inline (no toast dependency is added here — the existing UI surface
  * intentionally keeps the dependency footprint of this slice small).
+ *
+ * F-158: both ask first, as the invitation and member revokes do. "Revoke all"
+ * ran on a single click, and on the admin's OWN user page (`isSelf`) it signed
+ * them out of the browser they were using with no warning; the dialog says so
+ * when the target is the viewer.
  */
 interface RawSession {
   id?: string;
@@ -26,9 +32,10 @@ interface RawSession {
   userAgent?: string | null;
 }
 
-export function UserSessionsPanel({ userId }: { userId: string }) {
+export function UserSessionsPanel({ userId, isSelf }: { userId: string; isSelf: boolean }) {
   const t = useTranslations("administrator.users");
   const tGrid = useTranslations("administrator.grid");
+  const dialogs = useDialogs();
   // F-37: the viewer's zone and date format.
   const format = useAppFormatter();
 
@@ -75,8 +82,18 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
     };
   }, [userId, tGrid, reloadToken]);
 
-  const revokeOne = async (sessionId: string | undefined) => {
+  const revokeOne = async (session: RawSession) => {
+    const sessionId = session.id;
     if (!sessionId) return;
+    const ok = await dialogs.confirm({
+      title: t("sessions.revokeOneConfirm"),
+      description: isSelf
+        ? t("sessions.revokeOneSelfDescription")
+        : t("sessions.expiresAt", { value: formatExpires(session.expiresAt) }),
+      confirmLabel: t("sessions.revokeOne"),
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -93,6 +110,15 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
   };
 
   const revokeAll = async () => {
+    const ok = await dialogs.confirm({
+      title: t("sessions.revokeAllConfirm"),
+      description: isSelf
+        ? t("sessions.revokeAllSelfDescription")
+        : t("sessions.revokeAllDescription"),
+      confirmLabel: t("sessions.revokeAll"),
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -160,7 +186,7 @@ export function UserSessionsPanel({ userId }: { userId: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => revokeOne(sessionId)}
+                  onClick={() => revokeOne(s)}
                   disabled={busy || !sessionId}
                 >
                   {t("sessions.revokeOne")}

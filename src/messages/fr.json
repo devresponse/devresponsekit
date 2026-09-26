@@ -25,7 +25,21 @@
       "close": "Fermer"
     },
     "switchToLightTheme": "Passer au thème clair",
-    "switchToDarkTheme": "Passer au thème sombre"
+    "switchToDarkTheme": "Passer au thème sombre",
+    "status": {
+      "active": "Actif",
+      "pending": "En attente",
+      "pending_approval": "En attente d’approbation",
+      "blocked": "Bloqué",
+      "suspended": "Suspendu",
+      "deactivated": "Désactivé",
+      "archived": "Archivé",
+      "available": "Disponible",
+      "disabled": "Désactivé",
+      "accepted": "Accepté",
+      "revoked": "Révoqué",
+      "expired": "Expiré"
+    }
   },
   "auth": {
     "verifyEmailTitle": "Vérifiez votre e-mail",
@@ -524,7 +538,12 @@
         "revokeAll": "Révoquer toutes les sessions",
         "expiresAt": "Expire {value}",
         "ipAddress": "IP",
-        "userAgent": "Agent utilisateur"
+        "userAgent": "Agent utilisateur",
+        "revokeOneConfirm": "Révoquer cette session ?",
+        "revokeOneSelfDescription": "Il s’agit de votre propre compte. Si c’est la session que vous utilisez, vous serez déconnecté.",
+        "revokeAllConfirm": "Révoquer toutes les sessions de cet utilisateur ?",
+        "revokeAllDescription": "Il sera déconnecté sur tous ses appareils et devra se reconnecter.",
+        "revokeAllSelfDescription": "Il s’agit de votre propre compte : vous serez déconnecté ici et sur tous vos autres appareils."
       },
       "memberships": {
         "columns": {

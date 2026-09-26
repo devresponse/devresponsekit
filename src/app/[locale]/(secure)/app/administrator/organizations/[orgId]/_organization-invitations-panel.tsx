@@ -54,6 +54,12 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  * which needs `admin.roles.read`, a permission the organization page does not
  * check, so without it the select is left out and the invitation carries no
  * role (F-67). The request used to fail with a 403 and an access-denied row.
+ *
+ * F-156: a refusal shows the reason the envelope's `error` code names, not
+ * the generic "Could not send / resend / revoke" text, which read the same
+ * for a role the admin may not confer (403 `forbidden`, AUTHZ-3), a deleted
+ * role, the rate limit and an invitation that is already gone. See
+ * `refusalMessage`.
  */
 interface InvitationRow {
   id: string;
@@ -70,6 +76,25 @@ interface RoleOption {
 }
 
 const NO_ROLE = "__none__";
+
+type ErrorBody = { error?: string } | null;
+type ErrorTranslator = { (key: string): string; has(key: string): boolean };
+
+/**
+ * The message for a refused request (F-156): `errors.<code>`, the catalog
+ * entry every admin error code has (`adminErrorResponse`), for a 4xx whose
+ * code the catalog knows; otherwise the action's generic text. A 5xx keeps the
+ * generic text: it is a fault, not a refusal with a reason worth naming.
+ */
+function refusalMessage(
+  tApiErr: ErrorTranslator,
+  res: Response,
+  body: ErrorBody,
+  fallback: string,
+): string {
+  const code = body?.error;
+  return res.status < 500 && code && tApiErr.has(code) ? tApiErr(code) : fallback;
+}
 
 export function OrganizationInvitationsPanel({
   orgId,
@@ -140,7 +165,7 @@ export function OrganizationInvitationsPanel({
         setReloadKey((k) => k + 1);
         return;
       }
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      const body = (await res.json().catch(() => null)) as ErrorBody;
       if (body?.error === "member_exists") {
         form.setError("email", { type: "server", message: tErr("memberExists") });
         return;
@@ -158,11 +183,27 @@ export function OrganizationInvitationsPanel({
         form.setError("root", { type: "server", message: tApiErr("rate_limited") });
         return;
       }
-      form.setError("root", { type: "server", message: t("sendError") });
+      // F-156: the role was deleted after the dialog listed it; say so on the
+      // field that holds it.
+      if (body?.error === "role_not_found") {
+        form.setError("roleId", { type: "server", message: tApiErr("role_not_found") });
+        return;
+      }
+      form.setError("root", {
+        type: "server",
+        message: refusalMessage(tApiErr, res, body, t("sendError")),
+      });
     } catch {
       form.setError("root", { type: "server", message: t("sendError") });
     }
   };
+
+  // F-156: resend and revoke answer 404 `invitation_not_found` for a row that
+  // is no longer pending (accepted, revoked or expired since the list loaded),
+  // so the row on screen is stale: reload the list along with the message.
+  const reloadIfGone = useCallback((body: ErrorBody) => {
+    if (body?.error === "invitation_not_found") setReloadKey((k) => k + 1);
+  }, []);
 
   const onResend = useCallback(
     async (invitationId: string, email: string) => {
@@ -175,12 +216,20 @@ export function OrganizationInvitationsPanel({
       });
       if (!ok) return;
       setRowNotice(null);
-      const res = await fetch(
-        `/api/administrator/organizations/${orgId}/invitations/${invitationId}/resend`,
-        { method: "POST", credentials: "same-origin" },
-      );
+      let res: Response;
+      try {
+        res = await fetch(
+          `/api/administrator/organizations/${orgId}/invitations/${invitationId}/resend`,
+          { method: "POST", credentials: "same-origin" },
+        );
+      } catch {
+        // F-156: a dropped connection rejected the click handler unhandled,
+        // and nothing appeared.
+        setRowNotice({ kind: "error", text: t("resendError") });
+        return;
+      }
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        const body = (await res.json().catch(() => null)) as ErrorBody;
         if (body?.error === "invitation_inviter_lacks_standing") {
           // F-149: the server voided it; reload so the row reads Revoked.
           setRowNotice({ kind: "error", text: tApiErr("invitation_inviter_lacks_standing") });
@@ -195,14 +244,15 @@ export function OrganizationInvitationsPanel({
               : // F-64: resent in the last 10 minutes, or a spent mail budget.
                 body?.error === "rate_limited"
                 ? tApiErr("rate_limited")
-                : t("resendError"),
+                : refusalMessage(tApiErr, res, body, t("resendError")),
         });
+        reloadIfGone(body);
         return;
       }
       setRowNotice({ kind: "success", text: t("resent") });
       setReloadKey((k) => k + 1);
     },
-    [dialogs, orgId, t, tErr, tApiErr],
+    [dialogs, orgId, t, tErr, tApiErr, reloadIfGone],
   );
 
   const onRevoke = useCallback(
@@ -214,17 +264,28 @@ export function OrganizationInvitationsPanel({
       });
       if (!ok) return;
       setRowNotice(null);
-      const res = await fetch(
-        `/api/administrator/organizations/${orgId}/invitations/${invitationId}`,
-        { method: "DELETE", credentials: "same-origin" },
-      );
-      if (!res.ok) {
+      let res: Response;
+      try {
+        res = await fetch(`/api/administrator/organizations/${orgId}/invitations/${invitationId}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
+      } catch {
         setRowNotice({ kind: "error", text: t("revokeError") });
+        return;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as ErrorBody;
+        setRowNotice({
+          kind: "error",
+          text: refusalMessage(tApiErr, res, body, t("revokeError")),
+        });
+        reloadIfGone(body);
         return;
       }
       setReloadKey((k) => k + 1);
     },
-    [dialogs, orgId, t],
+    [dialogs, orgId, t, tApiErr, reloadIfGone],
   );
 
   const columns = useMemo<GridColumnDef<InvitationRow>[]>(

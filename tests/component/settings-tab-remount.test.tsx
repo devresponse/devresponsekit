@@ -15,12 +15,14 @@ import { renderWithIntl } from "../helpers/render-with-intl";
  * an org that had just been given its own sign-up policy, and the role
  * Permissions editor re-showed the pre-save set.
  *
- * These drive the REAL tab containers: a tab switch really unmounts and
- * remounts the panel. `rerender` with new props models the `router.refresh()`
- * landing (the RSC re-rendering the page with the saved state); a switch
- * WITHOUT a rerender models a remount that happens before it lands. The
- * sibling panels (grids, invitations) are stubbed; they fetch their own data
- * and are not under test.
+ * These drive the REAL tab containers. `rerender` with new props models the
+ * `router.refresh()` landing (the RSC re-rendering the page with the saved
+ * state); a switch WITHOUT a rerender happens before it lands. Since F-158 the
+ * panels that hold edits stay mounted across a tab switch (`useKeptTabs`), so
+ * a switch no longer re-seeds them from the stale props: it keeps the saved
+ * state and any unsaved edit. The grids (Members) still unmount. The sibling
+ * panels (grids, invitations) are stubbed; they fetch their own data and are
+ * not under test.
  */
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -99,7 +101,7 @@ async function switchAwayAndBack(
   back: string,
 ): Promise<void> {
   await user.click(screen.getByRole("tab", { name: away }));
-  expect(await screen.findByText(/panel$/)).toBeInTheDocument();
+  expect(await screen.findByText("members panel")).toBeInTheDocument();
   await user.click(screen.getByRole("tab", { name: back }));
 }
 
@@ -148,12 +150,13 @@ describe("organization Settings tab (F-39)", () => {
     expect(bodies("PATCH")).toEqual([{ status: "suspended" }]);
     expect(refresh).toHaveBeenCalledTimes(1);
 
-    // Back to Settings before the refresh has landed: the remount seeds from
-    // the stale props, so the select reads Active again...
+    // Back to Settings before the refresh has landed: the form stayed mounted
+    // (F-158), so it still reads Suspended instead of re-seeding from the
+    // stale props...
     await switchAwayAndBack(user, "Members", "Settings");
-    expect(status()).toHaveTextContent("Active");
+    expect(status()).toHaveTextContent("Suspended");
 
-    // ...but fixing the typo sends the name ONLY, so the suspension stands.
+    // ...and fixing the typo sends the name ONLY, so the suspension stands.
     await user.clear(name());
     await user.type(name(), "Acme Corp");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
@@ -198,6 +201,19 @@ describe("organization Settings tab (F-39)", () => {
 
     await waitFor(() => expect(status()).toHaveTextContent("Archived"));
     expect(name()).toHaveValue("Acme Corp");
+  });
+
+  it("keeps an unsaved edit across a tab switch (F-158)", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(renderOrg(ORG));
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+    await user.clear(name());
+    await user.type(name(), "Acme Corp");
+    await switchAwayAndBack(user, "Members", "Settings");
+
+    expect(name()).toHaveValue("Acme Corp");
+    expect(bodies("PATCH")).toEqual([]);
   });
 });
 
@@ -329,15 +345,18 @@ describe("organization Authentication tab (F-39)", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   }
 
-  it("Reset, then a tab switch before the refresh lands: the refresh puts the tab back on the inherit view", async () => {
+  it("Reset, then a tab switch before the refresh lands: the tab stays on the inherit view", async () => {
     const user = userEvent.setup();
     const { rerender } = renderWithIntl(renderOrg(SAVED));
 
     await resetOverride(user);
-    // The remount seeds from the stale props: the removed override is back.
+    // The form stayed mounted (F-158): the removed override does not come back
+    // from the stale props...
     await switchAwayAndBack(user, "Members", "Authentication");
-    expect(screen.getByRole("button", { name: /reset to platform defaults/i })).toBeInTheDocument();
+    expect(screen.getByText(/inherits the platform sign-up defaults/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reset to platform defaults/i })).toBeNull();
 
+    // ...and the refresh landing keeps it there.
     rerender(renderOrg(null));
     expect(screen.getByText(/inherits the platform sign-up defaults/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /reset to platform defaults/i })).toBeNull();
@@ -363,6 +382,20 @@ describe("organization Authentication tab (F-39)", () => {
     await user.click(screen.getByRole("button", { name: /save policy/i }));
     await waitFor(() => expect(bodies("PATCH")).toHaveLength(1));
     expect(bodies("PATCH")[0]).toMatchObject({ requireEmailVerification: false });
+  });
+
+  it("keeps an unsaved Customize edit across a tab switch (F-158)", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(renderOrg(null));
+    await user.click(screen.getByRole("tab", { name: "Authentication" }));
+    await user.click(screen.getByRole("button", { name: /customize/i }));
+    await user.click(verification());
+
+    await switchAwayAndBack(user, "Members", "Authentication");
+
+    expect(screen.getByRole("button", { name: /save policy/i })).toBeInTheDocument();
+    expect(verification()).not.toBeChecked();
+    expect(bodies("PATCH")).toEqual([]);
   });
 });
 
@@ -415,7 +448,8 @@ describe.each([
     expect(refresh).toHaveBeenCalledTimes(1);
 
     await switchAwayAndBack(user, "Members", "Settings");
-    expect(name()).toHaveValue("Support"); // stale props: the refresh has not landed
+    // The refresh has not landed, but the form stayed mounted (F-158).
+    expect(name()).toHaveValue("Support Team");
     await user.type(description(), "Front line");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -486,6 +520,18 @@ describe.each([
     await waitFor(() => expect(bodies("PATCH")).toHaveLength(2));
     // The name this form saved earlier is not written back over the newer one.
     expect(bodies("PATCH")[1]).toEqual({ description: "Front line" });
+  });
+
+  it("keeps an unsaved edit across a tab switch (F-158)", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(render("Support", null));
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    await user.type(name(), " Team");
+    await switchAwayAndBack(user, "Members", "Settings");
+
+    expect(name()).toHaveValue("Support Team");
+    expect(bodies("PATCH")).toEqual([]);
   });
 
   it("a failed save's error and its edit stay when an earlier save's refresh lands", async () => {
@@ -584,7 +630,8 @@ describe("role Permissions tab (F-39)", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
 
     await switchAwayAndBack(user, "Members", "Permissions");
-    await ready();
+    // The editor stayed mounted (F-158): the saved set, before the refresh lands.
+    expect(values(lists().assigned)).toEqual(SAVED);
     rerender(<RoleDetailTabs role={role(SAVED)} canUpdate canReadUsers />);
 
     await waitFor(() => expect(values(lists().assigned)).toEqual(SAVED));
@@ -607,6 +654,21 @@ describe("role Permissions tab (F-39)", () => {
 
     expect(values(lists().assigned)).toEqual(["admin.users.ban"]);
     expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  });
+
+  it("keeps staged moves across a look at Members (F-158)", async () => {
+    serve();
+    const user = userEvent.setup();
+    renderWithIntl(<RoleDetailTabs role={role(INITIAL)} canUpdate canReadUsers />);
+    await ready();
+
+    await user.selectOptions(lists().available, "admin.users.update");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await switchAwayAndBack(user, "Members", "Permissions");
+
+    expect(values(lists().assigned)).toEqual([...INITIAL, "admin.users.update"].sort());
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(bodies("POST")).toEqual([]);
   });
 });
 

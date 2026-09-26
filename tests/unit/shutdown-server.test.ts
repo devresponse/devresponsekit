@@ -117,6 +117,47 @@ describe("gracefulShutdown", () => {
   });
 });
 
+describe("SHUTDOWN_TIMEOUT_MS (F-109)", () => {
+  const ORIGINAL_TIMEOUT = process.env.SHUTDOWN_TIMEOUT_MS;
+  afterEach(() => {
+    if (ORIGINAL_TIMEOUT === undefined) delete process.env.SHUTDOWN_TIMEOUT_MS;
+    else process.env.SHUTDOWN_TIMEOUT_MS = ORIGINAL_TIMEOUT;
+  });
+
+  /** The budget is read at module load, so each case loads a fresh copy. */
+  async function loadWith(value: string): Promise<typeof ShutdownModule> {
+    process.env.SHUTDOWN_TIMEOUT_MS = value;
+    vi.resetModules();
+    return import("@/lib/shutdown.server");
+  }
+
+  it("honours a configured budget", async () => {
+    const fresh = await loadWith("2500");
+    const exit = vi.fn();
+    fresh.gracefulShutdown("SIGTERM", exit);
+    await vi.advanceTimersByTimeAsync(2_499);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exit).toHaveBeenCalledWith(143);
+  });
+
+  // A raw Number() made a blank value 0 and `10s` NaN, and a timer runs both
+  // after 1 ms: the watchdog ended the pool while Next was still draining.
+  it.each(["", "10s", "-5", "1.5", "0"])(
+    "keeps the 10s default for a malformed value (%j), never a near-instant watchdog",
+    async (value) => {
+      const fresh = await loadWith(value);
+      const exit = vi.fn();
+      fresh.gracefulShutdown("SIGTERM", exit);
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(poolEnd).not.toHaveBeenCalled();
+      expect(exit).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(exit).toHaveBeenCalledWith(143);
+    },
+  );
+});
+
 describe("registerGracefulShutdown", () => {
   it("registers SIGTERM + SIGINT exactly once (idempotent)", () => {
     const once = vi.spyOn(process, "once").mockImplementation((() => process) as never);

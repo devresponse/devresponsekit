@@ -101,6 +101,20 @@ function operatorSecret(name: string) {
     });
 }
 
+/**
+ * An OPTIONAL positive integer that its module reads at load through
+ * {@link intFromEnv} with the same `fallback` (F-109). A blank value means
+ * unset, exactly as intFromEnv reads it; any other value that is not a positive
+ * integer (`10s`, `-1`, `2.5`, `0`) fails at boot, where intFromEnv alone would
+ * quietly fall back to the default.
+ */
+function positiveIntWithDefault(fallback: number) {
+  return z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.coerce.number().int().positive().default(fallback),
+  );
+}
+
 const serverEnvSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -139,6 +153,18 @@ const serverEnvSchema = z
     PG_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
     PG_STATEMENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
     PG_IDLE_IN_TX_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    /**
+     * The graceful-shutdown watchdog budget in ms (`src/lib/shutdown.server.ts`)
+     * and the row cap of one administrator CSV export
+     * (`src/app/api/administrator/export/[resource]/route.ts`). Both modules
+     * read them at load through {@link intFromEnv} with these defaults; keep
+     * the two in sync. They used to be read with a raw `Number()` and declared
+     * nowhere (F-109): `SHUTDOWN_TIMEOUT_MS=10s` armed a 1 ms watchdog that
+     * ended the pool while Next was still draining, and a negative
+     * `ADMIN_EXPORT_MAX_ROWS` became a negative LIMIT that failed every export.
+     */
+    SHUTDOWN_TIMEOUT_MS: positiveIntWithDefault(10_000),
+    ADMIN_EXPORT_MAX_ROWS: positiveIntWithDefault(100_000),
     /**
      * Opt-in ("1"/"true") fail-fast on `uncaughtException` (review #23). Next
      * 16 treats both `uncaughtException` and `unhandledRejection` as

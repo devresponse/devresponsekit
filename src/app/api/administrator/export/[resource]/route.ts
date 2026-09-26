@@ -21,6 +21,7 @@ import {
   type OrgScope,
 } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_EXPORT_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { intFromEnv } from "@/lib/env";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -65,8 +66,11 @@ export const dynamic = "force-dynamic";
  *     so platform ops can answer "who exported the user list at 11:42".
  */
 // Hard row cap for a single export (§20.1). Operator-tunable via
-// ADMIN_EXPORT_MAX_ROWS; defaults to 100k. Read at module load.
-const MAX_EXPORT_ROWS = Number(process.env.ADMIN_EXPORT_MAX_ROWS) || 100_000;
+// ADMIN_EXPORT_MAX_ROWS; defaults to 100k. Read at module load. F-109: through
+// intFromEnv, because `Number(x) || 100_000` let a negative or fractional cap
+// through as the first page's LIMIT, which failed every export; the schema in
+// src/lib/env.ts (same default) fails boot on such a value.
+const MAX_EXPORT_ROWS = intFromEnv("ADMIN_EXPORT_MAX_ROWS", 100_000);
 const PAGE_SIZE = 1_000;
 
 // Single source of truth for the exportable resources: the list below derives

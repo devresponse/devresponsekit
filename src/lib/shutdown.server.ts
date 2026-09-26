@@ -1,5 +1,6 @@
 import "server-only";
 import { pgPool } from "@/db/database";
+import { intFromEnv } from "@/lib/env";
 import { logger } from "@/lib/observability/logger.server";
 
 /**
@@ -44,7 +45,12 @@ import { logger } from "@/lib/observability/logger.server";
  * normal freeze/teardown path; registration is skipped outright when the
  * platform's `VERCEL` variable is set so nothing here can ever run there.
  */
-const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 10_000);
+// F-109: this used to be a raw `Number()` of the variable `?? 10_000`, which
+// turned a blank value into 0 and `10s` into NaN, and `setTimeout` runs both
+// after 1 ms: the watchdog ended the pool mid-drain, which is what this module
+// exists to prevent. intFromEnv falls back to the default instead, and the
+// schema in src/lib/env.ts (same default) fails boot on a malformed value.
+const SHUTDOWN_TIMEOUT_MS = intFromEnv("SHUTDOWN_TIMEOUT_MS", 10_000);
 
 export type ShutdownSignal = "SIGTERM" | "SIGINT";
 

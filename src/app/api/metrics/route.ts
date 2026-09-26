@@ -1,7 +1,7 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getServerEnv } from "@/lib/env";
 import { registry, startDefaultMetrics } from "@/lib/observability/metrics.server";
+import { isOperatorBearerAuthorized } from "@/lib/operator-bearer.server";
 
 // Reads the prom-client registry (Node-only) and node:crypto.
 export const runtime = "nodejs";
@@ -17,21 +17,12 @@ export const dynamic = "force-dynamic";
  * counts, and timing). Point your scraper at it with
  * `Authorization: Bearer <METRICS_TOKEN>`. The token is read through the
  * validated env (`src/lib/env.ts`: optional, ≥32 chars when set, empty =
- * unset) so a short guessable value fails at boot (review #222).
+ * unset) so a short guessable value fails at boot (review #222). The check is
+ * the one the cron routes use (`src/lib/operator-bearer.server.ts`), not a
+ * copy of it (I-08).
  */
-function isAuthorized(request: Request): boolean {
-  const expected = getServerEnv().METRICS_TOKEN;
-  if (!expected) return false; // fail closed: no token configured ⇒ endpoint disabled
-  const header = request.headers.get("authorization") ?? "";
-  const prefix = "Bearer ";
-  if (!header.startsWith(prefix)) return false;
-  const presented = Buffer.from(header.slice(prefix.length));
-  const secret = Buffer.from(expected);
-  return presented.length === secret.length && timingSafeEqual(presented, secret);
-}
-
 export async function GET(request: Request): Promise<Response> {
-  if (!isAuthorized(request)) {
+  if (!isOperatorBearerAuthorized(request, getServerEnv().METRICS_TOKEN)) {
     return new NextResponse("unauthorized", {
       status: 401,
       headers: { "cache-control": "no-store" },

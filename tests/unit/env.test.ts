@@ -1,4 +1,7 @@
 import { generateKeyPairSync } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as EnvModule from "@/lib/env";
 import { getServerEnv, intFromEnv, invalidServerEnvKeys } from "@/lib/env";
@@ -76,6 +79,8 @@ const TOUCHED_KEYS = [
   "ADMIN_TRUSTED_ORIGINS",
   "COOKIE_DOMAIN",
   "PGPOOL_MAX",
+  "SHUTDOWN_TIMEOUT_MS",
+  "ADMIN_EXPORT_MAX_ROWS",
   "CRON_SECRET",
   "METRICS_TOKEN",
   "SSO_ALLOWED_ORIGIN_SUFFIXES",
@@ -626,6 +631,60 @@ describe("pool/proxy env validation (P2-12)", () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe("SHUTDOWN_TIMEOUT_MS / ADMIN_EXPORT_MAX_ROWS (F-109)", () => {
+  it("defaults to what their modules fall back to, and reads a blank value as unset", async () => {
+    for (const unset of [undefined, ""]) {
+      const { mod, restore } = await loadEnvWith({
+        SHUTDOWN_TIMEOUT_MS: unset,
+        ADMIN_EXPORT_MAX_ROWS: unset,
+      });
+      try {
+        const env = mod.getServerEnv();
+        expect(env.SHUTDOWN_TIMEOUT_MS).toBe(10_000);
+        expect(env.ADMIN_EXPORT_MAX_ROWS).toBe(100_000);
+      } finally {
+        restore();
+      }
+    }
+  });
+
+  it("coerces a configured value", async () => {
+    const { mod, restore } = await loadEnvWith({
+      SHUTDOWN_TIMEOUT_MS: "25000",
+      ADMIN_EXPORT_MAX_ROWS: "5000",
+    });
+    try {
+      expect(mod.getServerEnv().SHUTDOWN_TIMEOUT_MS).toBe(25_000);
+      expect(mod.getServerEnv().ADMIN_EXPORT_MAX_ROWS).toBe(5_000);
+    } finally {
+      restore();
+    }
+  });
+
+  it.each(["10s", "-1", "2.5", "0"])("fails boot on a malformed value (%s)", (value) => {
+    expect(
+      invalidServerEnvKeys({
+        ...process.env,
+        SHUTDOWN_TIMEOUT_MS: value,
+        ADMIN_EXPORT_MAX_ROWS: value,
+      }),
+    ).toEqual(["ADMIN_EXPORT_MAX_ROWS", "SHUTDOWN_TIMEOUT_MS"]);
+  });
+
+  // The family: a numeric env var read with a raw Number()/parseInt() turns a
+  // typo into NaN or 0 where the code expects a count or a delay. Read it
+  // through intFromEnv (or the schema) instead; env.ts itself is exempt.
+  it("no module under src/ parses an env var with a raw Number() or parseInt()", () => {
+    const srcDir = fileURLToPath(new URL("../../src", import.meta.url));
+    const rawRead = /\b(?:Number(?:\.parse(?:Int|Float))?|parseInt|parseFloat)\(\s*process\.env\b/;
+    const offenders = readdirSync(srcDir, { recursive: true })
+      .map((entry) => String(entry).replace(/\\/g, "/"))
+      .filter((path) => /\.tsx?$/.test(path) && path !== "lib/env.ts")
+      .filter((path) => rawRead.test(readFileSync(join(srcDir, path), "utf8")));
+    expect(offenders).toEqual([]);
   });
 });
 

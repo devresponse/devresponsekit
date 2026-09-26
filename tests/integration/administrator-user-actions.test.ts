@@ -750,6 +750,54 @@ describe("F-21: the admin user writes refuse a name that breaks the rule", () =>
   });
 });
 
+/**
+ * F-61 / AUTHZ-2: the display name (mirrored to Better Auth `name`) and the
+ * preferred locale are account-global, so a non-superadmin may not edit a user
+ * shared with other orgs. The refusal comes before the body is read, so
+ * nothing is written. (The rank guard is pinned with its siblings below.)
+ */
+describe("PATCH /api/administrator/users/[id] — shared target (F-61, AUTHZ-2)", () => {
+  async function patchAsOrgAdmin() {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.update"));
+    dbMock.mockResolvedValue(targetRow);
+    authUpdateUser.mockResolvedValue({});
+    const { PATCH } = await import("@/app/api/administrator/users/[id]/route");
+    const request = makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+      method: "PATCH",
+      body: JSON.stringify({ displayName: "Former employee", preferredLocale: "fr" }),
+    });
+    const jsonSpy = vi.spyOn(request, "json");
+    const res = await PATCH(request, { params: Promise.resolve({ id: TARGET_ID }) });
+    return { res, jsonSpy };
+  }
+
+  it("returns 403 when a non-superadmin edits a user shared with other orgs; nothing is written", async () => {
+    requiresSuperadminMock.mockResolvedValue(true); // target shared across orgs
+    const { res, jsonSpy } = await patchAsOrgAdmin();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "forbidden" }));
+    expect(requiresSuperadminMock).toHaveBeenCalledWith(
+      { kind: "org", organizationId: "o-1" },
+      TARGET_ID,
+    );
+    expect(jsonSpy).not.toHaveBeenCalled();
+    expect(authUpdateUser).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.updated" }),
+    );
+  });
+
+  it("the same edit of a user confined to the actor's org goes through", async () => {
+    const { res } = await patchAsOrgAdmin();
+    expect(res.status).toBe(200);
+    expect(authUpdateUser).toHaveBeenCalledWith({
+      userId: "ba-target",
+      data: { name: "Former employee" },
+    });
+  });
+});
+
 describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
   it("requires admin.users.delete (403 + audit otherwise)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
@@ -954,6 +1002,25 @@ describe("DELETE /api/administrator/users/[id]/sessions/[sessionId] (revoke by i
     expect(authRevokeSession).not.toHaveBeenCalled();
   });
 
+  // F-60: one session is as account-global as all of them, and revoking them
+  // one by one must not be a way round revoke-all's AUTHZ-2 refusal.
+  it("returns 403 when a non-superadmin revokes a session of a shared user (AUTHZ-2), before Better Auth is asked", async () => {
+    requiresSuperadminMock.mockResolvedValue(true); // target shared across orgs
+    authListSessions.mockResolvedValue([RAW_SESSION]);
+    const res = await revoke(SESSION_ID);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "forbidden" }));
+    expect(requiresSuperadminMock).toHaveBeenCalledWith(
+      { kind: "org", organizationId: "o-1" },
+      TARGET_ID,
+    );
+    expect(authListSessions).not.toHaveBeenCalled();
+    expect(authRevokeSession).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.session_revoked" }),
+    );
+  });
+
   it("a failed session lookup is a 502 with an audited failure, before any revoke", async () => {
     authListSessions.mockRejectedValue(new Error("auth down"));
     const res = await revoke(SESSION_ID);
@@ -1094,6 +1161,23 @@ const guardedRoutes: GuardedRoute[] = [
     },
   },
   {
+    // F-61: the display name (mirrored to Better Auth) and the email language
+    // are the target's in every tenant, so renaming a superadmin is refused too.
+    name: "PATCH /users/[id] (profile edit)",
+    perm: "admin.users.update",
+    effect: () => authUpdateUser,
+    invoke: async () => {
+      const { PATCH } = await import("@/app/api/administrator/users/[id]/route");
+      return PATCH(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {
+          method: "PATCH",
+          body: JSON.stringify({ displayName: "Former employee - do not trust" }),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    },
+  },
+  {
     name: "POST /users/[id]/restore",
     perm: "admin.users.delete",
     effect: () => authUnban,
@@ -1181,6 +1265,7 @@ function armEffects() {
   authListSessions.mockResolvedValue([RAW_SESSION]);
   authRevokeSessions.mockResolvedValue({ ok: true });
   authRevokeSession.mockResolvedValue({ ok: true });
+  authUpdateUser.mockResolvedValue({});
 }
 
 describe.each(guardedRoutes)("$name — target-outranks-actor guard (review #7)", (route) => {

@@ -1,6 +1,10 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { actingOrganizationId } from "@/lib/admin/access-scope.server";
+import {
+  actingOrganizationId,
+  requiresSuperadminForSharedTarget,
+  resolveOrgScope,
+} from "@/lib/admin/access-scope.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import {
   listBetterAuthUserSessions,
@@ -60,6 +64,17 @@ export const DELETE = withAdminRoute(async function DELETE(
   // who outranks them (a superadmin, or a more-privileged peer) — 403 + audit.
   const outranked = await refuseOutrankingTarget(guard, target, request, "session_revoke");
   if (outranked) return outranked;
+
+  // F-60 / AUTHZ-2: a Better Auth session is not tied to an org, so revoking
+  // one ends it in every tenant, and revoking them one by one is revoke-all by
+  // another route. The same rule as `DELETE …/sessions`: a user
+  // shared with other orgs is SUPERADMIN-only. Checked before the session list
+  // is read, so a refused request never reaches Better Auth.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return adminErrorResponse("not_found", 404, request);
+  if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   let sessionToken: string | null;
   try {

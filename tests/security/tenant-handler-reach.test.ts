@@ -77,7 +77,8 @@ interface BuilderCall {
  * `app_organization_memberships` is the one table that has to ANSWER
  * truthfully, because `canAccessUser` derives its 404 from it: a membership
  * row exists only when the query names a user AND an org that user belongs to
- * in `state.memberships`. Every other `executeTakeFirst` returns the first
+ * in `state.memberships` (or, for a `!=` org predicate, any other org that
+ * user belongs to). Every other `executeTakeFirst` returns the first
  * row primed for its table, and an update reports one row changed.
  */
 const state: {
@@ -115,8 +116,14 @@ function builderFor(table: string, verb: Verb): unknown {
   const first = (): unknown => {
     if (verb === "update") return { numUpdatedRows: BigInt(1) };
     if (table === "app_organization_memberships") {
+      // AUTHZ-2's `userHasMembershipOutsideOrg` asks for a membership in any
+      // org OTHER than the one after `"!="` (F-61 put it on PATCH /users/[id]).
+      const notIn = values.indexOf("!=");
+      const excluded = notIn >= 0 ? values[notIn + 1] : undefined;
       const member = Object.entries(state.memberships).some(
-        ([user, orgs]) => values.includes(user) && orgs.some((org) => values.includes(org)),
+        ([user, orgs]) =>
+          values.includes(user) &&
+          orgs.some((org) => (excluded === undefined ? values.includes(org) : org !== excluded)),
       );
       return member ? { id: "membership-row" } : undefined;
     }
@@ -723,6 +730,18 @@ describe("/api/administrator/users/[id] — GET and PATCH stay inside the caller
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.user.updated", organizationId: ORG_A }),
     );
+  });
+
+  it("PATCH: 403 for a member org A shares with org B (F-61, AUTHZ-2), with no write and no mirror", async () => {
+    primeUser(USER_IN_A);
+    state.memberships[USER_IN_A] = [ORG_A, ORG_B];
+    caller.value = orgAdminSession(["admin.users.update"]);
+    const { PATCH } = await import("@/app/api/administrator/users/[id]/route");
+    const res = await PATCH(patch(USER_IN_A), idCtx(USER_IN_A));
+
+    expect(res.status).toBe(403);
+    expect(wrote("app_users")).toBe(false);
+    expect(updateBetterAuthUser).not.toHaveBeenCalled();
   });
 
   it("CONTROL: a superadmin at a browser edits another org's member (200)", async () => {

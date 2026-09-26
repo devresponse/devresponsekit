@@ -93,6 +93,12 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, ctx: 
  * their own dedicated endpoints (docs/admin-manager.md §8.1). We
  * deliberately do NOT allow editing `primary_email` here in v1 — email
  * changes need a verification flow, which is not yet built.
+ *
+ * Both fields are account-global: every tenant's console, the invitation
+ * emails that quote the name and the language of every transactional email
+ * read them. So the edit takes the same target guards as the other
+ * account-level actions (F-61): the rank guard, then the AUTHZ-2 shared-target
+ * rule.
  */
 const patchSchema = z
   .object({
@@ -122,6 +128,22 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
   const { id } = await ctx.params;
   const target = await resolveTargetUser(id, guard.access);
   if (isResolvedUserResponse(target)) return target;
+
+  // F-61: privilege ordering (review #7). Without it an org admin holding
+  // `admin.users.update` could rename a superadmin who shares their org, or
+  // switch that superadmin's email language — 403 + audit, as on DELETE.
+  const outranked = await refuseOutrankingTarget(guard, target, request, "update");
+  if (outranked) return outranked;
+
+  // F-61 / AUTHZ-2: the display name (mirrored to Better Auth `name`) and the
+  // preferred locale have no per-tenant copy, so an edit to a user shared with
+  // other orgs changes what those tenants see too. That is SUPERADMIN-only; an
+  // org admin may edit a user confined to their own org.
+  const scope = resolveOrgScope(guard.access);
+  if (!scope) return adminErrorResponse("not_found", 404, request);
+  if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
+    return adminErrorResponse("forbidden", 403, request);
+  }
 
   let json: unknown;
   try {

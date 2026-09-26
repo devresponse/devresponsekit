@@ -11,6 +11,7 @@ import { getBrand } from "@/config/brand";
 import { DialogManagerProvider } from "@/components/ui/dialog-manager";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/flexsidebar";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { ClientMessagesProvider } from "@/components/i18n/client-messages-provider";
 import { LocaleSwitcher } from "@/components/i18n/locale-switcher";
 import { OrganizationSwitcher } from "@/components/app-shell/organization-switcher";
 import { SignOutButton } from "@/components/auth/sign-out-button";
@@ -92,7 +93,7 @@ export default async function SecureLayout({
   const tRegions = await getTranslations("shell.regions");
   const brand = getBrand();
 
-  return (
+  const shell = (
     <CompactDensityWrapper density="compact" className="h-screen">
       <SidebarProvider defaultOpen={sidebarDefaultOpen} className="h-full">
         <ShellSkipLinks />
@@ -131,5 +132,15 @@ export default async function SecureLayout({
         </ShellContainer>
       </SidebarProvider>
     </CompactDensityWrapper>
+  );
+
+  // F-123: the secure tree's client messages (shell, account, docs, help, the
+  // Administrator console) ride this group's provider, not the locale layout's,
+  // so the public and sign-in pages never carry them. It wraps the whole shell:
+  // the brand bar's switchers and the sidebar are client components too.
+  return (
+    <ClientMessagesProvider locale={safeLocale} scope="secure">
+      {shell}
+    </ClientMessagesProvider>
   );
 }

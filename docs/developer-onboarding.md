@@ -164,7 +164,7 @@ src/
 │   ├── seeds/                      # seed-local.ts, dev-init.ts
 │   └── reset-database.ts           # destructive reset tooling
 ├── components/                     # shadcn/ui, app shell, data grid, navigation
-├── i18n/                           # next-intl request config
+├── i18n/                           # next-intl request config, client message scopes
 └── messages/                       # en.json, fr.json, es.json, uk.json, pt.json, zh.json, hi.json, ja.json
 
 tests/                              # unit, component, integration, security, e2e, accessibility
@@ -208,7 +208,7 @@ A typical admin feature (mirror an existing one such as Roles or Groups):
 2. **Permissions:** add keys to `ADMIN_PERMISSION_CATALOG` in `src/lib/admin/permissions.ts` (they flow into the `admin.platform`/`superuser` roles automatically). Update the catalog-count test.
 3. **API:** add a route handler under `src/app/api/administrator/<feature>/...`. Use `requireAdminPermission`, `resolveOrgScope`/`canAccessOrg`, `enforceRateLimit`, Zod validation, the list-query helper, the error envelope, and an audit call.
 4. **UI:** add pages under `src/app/[locale]/(secure)/app/administrator/<feature>/` and a nav entry in `administrator-navigation.ts` with a `requires` permission. Reuse the shared `DataGrid` and form patterns.
-5. **i18n:** add strings to all 8 `src/messages/*.json` files (en, fr, es, uk, pt, zh, hi, ja).
+5. **i18n:** add strings to all 8 `src/messages/*.json` files (en, fr, es, uk, pt, zh, hi, ja). A client component gets only its route group's namespaces (F-123): one that reads a top-level namespace its scope leaves out needs it added to that scope in `src/i18n/client-messages.ts`, and `tests/unit/client-message-scopes.test.ts` names the component until it is.
 6. **Tests:** integration tests for the routes, component tests for client UI, and update the invariant/coverage tests as needed.
 7. **Docs:** update the relevant file in `/docs`.
 

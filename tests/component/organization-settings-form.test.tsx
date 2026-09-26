@@ -150,6 +150,9 @@ describe("OrganizationSettingsForm", () => {
       const note = screen.getByRole("note");
       expect(note).toHaveTextContent("/sign-in/acme links");
       expect(note).toHaveTextContent("MCP_REGISTRATION_DEFAULT_ORG");
+      // F-121: readable warning callout, not the ~2.1:1 amber `text-warning`.
+      expect(note).toHaveClass("text-warning-foreground");
+      expect(note).not.toHaveClass("text-warning");
 
       // Back to the saved slug: nothing to warn about.
       await user.clear(slug);

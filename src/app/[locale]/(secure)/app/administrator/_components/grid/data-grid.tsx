@@ -175,6 +175,14 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
   const filters = props.filters;
   const showFilterBar = !!props.searchable || (filters && filters.length > 0);
 
+  // Row position for assistive technology (F-120; prior review E8). The table
+  // holds one page of a larger result, so without `aria-rowindex` a screen
+  // reader numbers rows from the page, and the first row of page 3 is "row 1
+  // of 1,250". ARIA counts header rows too: they are rows 1..n of the whole
+  // grid, and a body row's index is offset by them and by the earlier pages.
+  const headerRowCount = table.getHeaderGroups().length;
+  const firstBodyRowIndex = headerRowCount + (state.page - 1) * state.pageSize + 1;
+
   return (
     <div data-grid={props.name} className="flex flex-col gap-3">
       {/* All controls — search, filters, selection summary, and the action
@@ -252,10 +260,10 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
         </div>
       ) : (
         <div className="border-border rounded-md border">
-          <Table aria-rowcount={total}>
+          <Table aria-rowcount={total + headerRowCount}>
             <TableHeader className="bg-muted/50">
-              {table.getHeaderGroups().map((hg) => (
-                <TableRow key={hg.id} className="hover:bg-transparent">
+              {table.getHeaderGroups().map((hg, hgIndex) => (
+                <TableRow key={hg.id} aria-rowindex={hgIndex + 1} className="hover:bg-transparent">
                   {hg.headers.map((h) => (
                     <TableHead
                       key={h.id}
@@ -286,8 +294,8 @@ export function DataGrid<TItem>(props: DataGridProps<TItem>) {
               ))}
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map((row) => (
-                <TableRow key={row.id}>
+              {table.getRowModel().rows.map((row, rowIndex) => (
+                <TableRow key={row.id} aria-rowindex={firstBodyRowIndex + rowIndex}>
                   {row.getVisibleCells().map((cell) => (
                     <TableCell
                       key={cell.id}

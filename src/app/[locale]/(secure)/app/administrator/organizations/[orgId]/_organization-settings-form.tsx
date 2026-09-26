@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -175,9 +176,12 @@ export function OrganizationSettingsForm({
               </FormControl>
               <FormDescription>{tFields("slugHelp")}</FormDescription>
               {canUpdate && slugChanged ? (
-                <p className="text-warning text-sm" role="note">
-                  {t("slugChangeWarning", { slug: initialSlug })}
-                </p>
+                // Warning callout for contrast, as on the auth-policy form (F-121).
+                <Alert variant="warning" role="note">
+                  <AlertDescription>
+                    {t("slugChangeWarning", { slug: initialSlug })}
+                  </AlertDescription>
+                </Alert>
               ) : null}
               <FormMessage />
             </FormItem>

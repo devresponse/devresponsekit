@@ -8,6 +8,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/flexsidebar";
@@ -112,5 +115,44 @@ describe("FlexSidebar", () => {
     expect(root.getAttribute("data-state")).toBe("expanded");
     await userEvent.setup().keyboard("{Control>}b{/Control}");
     expect(root.getAttribute("data-state")).toBe("expanded");
+  });
+
+  it("marks the active menu and sub-menu entries as the current page (F-120)", () => {
+    // `data-active` only styles an entry; `aria-current` is what a screen
+    // reader announces. Both buttons pass it through `asChild` to the link.
+    renderWithIntl(
+      <SidebarProvider>
+        <FlexSidebar>
+          <SidebarContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive>
+                  <a href="#here">Here</a>
+                </SidebarMenuButton>
+                <SidebarMenuSub>
+                  <SidebarMenuSubItem>
+                    <SidebarMenuSubButton asChild isActive>
+                      <a href="#here-sub">Sub here</a>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                  <SidebarMenuSubItem>
+                    <SidebarMenuSubButton href="#here-other">Sub other</SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                </SidebarMenuSub>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <a href="#elsewhere">Elsewhere</a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarContent>
+        </FlexSidebar>
+      </SidebarProvider>,
+    );
+    expect(screen.getByRole("link", { name: "Here" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Sub here" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Sub other" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "Elsewhere" })).not.toHaveAttribute("aria-current");
   });
 });

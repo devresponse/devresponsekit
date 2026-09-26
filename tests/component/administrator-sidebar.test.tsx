@@ -100,6 +100,9 @@ describe("AdministratorSidebar", () => {
     // Active item from the mocked pathname (/app/administrator/users).
     expect(users.getAttribute("data-active")).toBe("true");
     expect(screen.getByRole("link", { name: "Roles" }).getAttribute("data-active")).toBe("false");
+    // ...and announced as the current page, not only styled as one (F-120).
+    expect(users).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Roles" })).not.toHaveAttribute("aria-current");
 
     // FlexSidebar contract: no fixed positioning / viewport-height classes.
     const offenders = [...container.querySelectorAll("[class]")].filter((el) => {

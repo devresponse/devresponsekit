@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compile, type Config } from "tailwindcss";
 import ts from "typescript";
 import { DESKTOP_MEDIA_QUERY, MD_BREAKPOINT, MOBILE_MEDIA_QUERY } from "@/lib/breakpoints";
 import {
@@ -13,6 +11,7 @@ import {
   readShellBreakpoints,
   type Viewport,
 } from "../helpers/media-query";
+import { compileGlobals } from "../helpers/tailwind";
 
 /**
  * F-36: ONE mobile/desktop breakpoint, everywhere.
@@ -41,8 +40,6 @@ import {
  */
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
 const BREAKPOINTS_FILE = join(SRC_DIR, "lib", "breakpoints.ts");
-const GLOBALS_CSS = join(SRC_DIR, "app", "globals.css");
-const require = createRequire(import.meta.url);
 
 const BREAKPOINT_QUERIES = new Set([MOBILE_MEDIA_QUERY, DESKTOP_MEDIA_QUERY]);
 
@@ -109,27 +106,6 @@ function widthQueryLiterals(fileName: string, source: string): string[] {
   };
   visit(sf);
   return found;
-}
-
-/** Compiles the project's real globals.css with Tailwind, as the build does. */
-async function compileGlobals(candidates: string[]): Promise<string> {
-  const compiler = await compile(readFileSync(GLOBALS_CSS, "utf8"), {
-    base: dirname(GLOBALS_CSS),
-    from: GLOBALS_CSS,
-    loadStylesheet: async (id, base) => {
-      const file = id.startsWith(".")
-        ? resolve(base, id)
-        : require.resolve(id === "tailwindcss" ? "tailwindcss/index.css" : id);
-      return { path: file, base: dirname(file), content: readFileSync(file, "utf8") };
-    },
-    loadModule: async (id, base) => {
-      const file = require.resolve(id, { paths: [base] });
-      const mod = (await import(id)) as { default?: unknown };
-      // The only module globals.css loads is the typography plugin.
-      return { path: file, base: dirname(file), module: (mod.default ?? mod) as Config };
-    },
-  });
-  return compiler.build(candidates);
 }
 
 describe("the shared breakpoint (F-36)", () => {

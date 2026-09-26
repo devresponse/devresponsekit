@@ -792,11 +792,14 @@ i18n: title, labels, and messages from `auth` / `validation`; run in `uk`.
 
 ### AUTH-PENDING — Pending approval
 
-- Route: `/pending-approval`  ·  Example URL: `/en/pending-approval`  ·  Code: `src/app/[locale]/(auth)/pending-approval/page.tsx:12`
+- Route: `/pending-approval`  ·  Example URL: `/en/pending-approval`  ·  Code: `src/app/[locale]/(auth)/pending-approval/page.tsx:24`
 - Purpose: Landing page for a signed-in user whose account (or membership) is
   `pending_approval`. Renders `PendingApprovalPanel` — an informational alert
   plus a local "Sign out" button. Guaranteed not to mount the secure shell or
   call secure menu APIs (`src/components/auth/pending-approval-panel.tsx:12-22`).
+  For an **impersonated** session it also renders the impersonation banner with
+  **Stop impersonating** above the panel, the admin's way back to their own
+  session (F-148); for anyone else the banner renders nothing.
 - Guard / who can access: None on the page itself; it is the **destination** of
   `requireSecureSession` when `decideSecureAccess` returns `pending_approval`
   (`src/lib/auth-guard.ts:67-69`; decision logic
@@ -834,7 +837,8 @@ Negative & edge cases
   shown. `TODO: verify` this specific sub-case with a user that has no membership
   row.
 - The panel deliberately shows only generic copy — no admin/operational detail.
-- No form fields; the only control is "Sign out". No validation states.
+- No form fields; the only control is "Sign out" (plus **Stop impersonating**
+  for an impersonated session, F-148). No validation states.
 
 Accessibility: the message is an `Alert` with a titled region; "Sign out" is a
 labelled `<button>`; keyboard reaches it with a visible focus ring.
@@ -843,11 +847,14 @@ i18n: title/description from `auth`, button label from `common.signOut`
 
 ### AUTH-BLOCKED — Blocked / suspended / deactivated
 
-- Route: `/blocked`  ·  Example URL: `/en/blocked`  ·  Code: `src/app/[locale]/(auth)/blocked/page.tsx:12`
+- Route: `/blocked`  ·  Example URL: `/en/blocked`  ·  Code: `src/app/[locale]/(auth)/blocked/page.tsx:23`
 - Purpose: Landing page when the user's application status forbids secure access
   (`blocked`, `suspended`, or `deactivated`). Renders `BlockedAccountPanel` — a
   destructive-variant alert with generic copy plus a "Sign out" button; never
   reveals who/why (`src/components/auth/blocked-account-panel.tsx:12-24`).
+  For an **impersonated** session it also renders the impersonation banner with
+  **Stop impersonating** above the panel (F-148); for anyone else the banner
+  renders nothing.
 - Guard / who can access: None on the page; it is the destination of
   `requireSecureSession` when `decideSecureAccess` returns `blocked`
   (`src/lib/auth-guard.ts:71-73`). The shell appends `?reason=<status>` to the
@@ -885,7 +892,8 @@ Negative & edge cases
 - Unknown/corrupt DB status: fails closed to `deactivated` -> `blocked` decision
   (`src/lib/auth-status.ts:48-52`, `:70`), so a bad row can never grant access.
   `TODO: verify` behavior with a deliberately corrupted status row.
-- No form fields; only "Sign out". No validation states.
+- No form fields; only "Sign out" (plus **Stop impersonating** for an
+  impersonated session, F-148). No validation states.
 
 Accessibility: destructive `Alert` with a titled region; "Sign out" is a labelled
 `<button>`, keyboard-focusable with visible focus.

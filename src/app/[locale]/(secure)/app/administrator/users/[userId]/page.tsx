@@ -87,7 +87,12 @@ export default async function AdministratorUserDetailPage({
   const canAssignRoles = guard.access.permissions.includes("admin.roles.assign");
   const canManageGroups = guard.access.permissions.includes("admin.groups.assign");
   const canUpdateMemberships = guard.access.permissions.includes("admin.users.update");
-  const canImpersonate = guard.access.permissions.includes("admin.users.impersonate");
+  // F-148: the start route refuses a target the secure shell would not admit
+  // (403 `target_not_active`), so the button is not offered for an account that
+  // is not active. An active account whose memberships in the admin's reach are
+  // all inactive is left to the route, which resolves them as the session would.
+  const canImpersonate =
+    guard.access.permissions.includes("admin.users.impersonate") && user.status === "active";
   const canReadAudit = guard.access.permissions.includes("admin.audit.read");
   // Review #76: the Sessions and Groups tabs each fetch an API that requires
   // MORE than `admin.users.read` — `admin.users.sessions` and

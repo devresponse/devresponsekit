@@ -55,7 +55,9 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return {
     ...actual,
-    getUserAccessContext: (id: string) => accessGetter(id),
+    // Every argument is forwarded: F-148's target check is told apart from the
+    // guard's own resolution by its impersonation marker (the third one).
+    getUserAccessContext: (...a: unknown[]) => accessGetter(...a),
   };
 });
 vi.mock("@/lib/admin/grantable-permissions.server", async () => {
@@ -684,6 +686,85 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     // …and the per-tenant bound with it: a superadmin holds every permission
     // in every org, so there is no rank to escalate to (IMP-2).
     expect(heldByOrg).not.toHaveBeenCalled();
+  });
+
+  /**
+   * F-148 — the target must be able to USE the session it is handed. Nothing
+   * checked the target's standing, so a blocked, suspended or pending target,
+   * or one whose only membership in the admin's reach was not active, got a
+   * session that `requireSecureSession` sent straight to /blocked or
+   * /pending-approval, and the audit trail showed an impersonation that was
+   * never stopped. The route now resolves the target as the borrowed session
+   * will and refuses anything `decideSecureAccess` does not allow.
+   */
+  describe("F-148: refuses a target the borrowed session could not use", () => {
+    /** The guard's caller resolves as the admin; the target as `targetAccess`. */
+    function targetResolvesTo(targetAccess: Record<string, unknown>) {
+      accessGetter.mockImplementation(async (id: string) =>
+        id === "ba-target"
+          ? { ...grantedAccess("shell.view"), appUserId: TARGET_ID, ...targetAccess }
+          : grantedAccess("admin.users.impersonate"),
+      );
+    }
+
+    it.each([
+      ["a blocked account", { status: "blocked" }, "blocked"],
+      ["a suspended account", { status: "suspended" }, "blocked"],
+      ["an account pending approval", { status: "pending_approval" }, "pending_approval"],
+      [
+        "an active account whose only membership in reach is suspended",
+        { membershipStatus: "suspended" },
+        "blocked",
+      ],
+      [
+        "an active account with no membership in reach",
+        { organizationId: null, membershipStatus: null, permissions: [] },
+        "pending_approval",
+      ],
+    ])("refuses %s (403 + denied audit)", async (_label, targetAccess, decision) => {
+      sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+      targetResolvesTo(targetAccess);
+      dbMock.mockResolvedValue(targetRow);
+      const { POST } = await importRoute();
+      const res = await POST(makeRequest(url, { method: "POST" }), {
+        params: Promise.resolve({ id: TARGET_ID }),
+      });
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "forbidden", reason: "target_not_active" });
+      expect(authImpersonate).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.user.impersonation_failed",
+          outcome: "denied",
+          reason: "target_not_active",
+          appUserId: TARGET_ID,
+          organizationId: "o-1",
+          metadata: { targetBetterAuthUserId: "ba-target", decision },
+        }),
+      );
+      expect(auditMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: "admin.user.impersonation_started" }),
+      );
+    });
+
+    it("resolves the target as the BORROWED session will, confined to the impersonator's reach", async () => {
+      sessionGetter.mockResolvedValue({ user: { id: ACTOR_ID } });
+      targetResolvesTo({});
+      dbMock.mockResolvedValue(targetRow);
+      authImpersonate.mockResolvedValue({ user: { id: "ba-target" } });
+      const { POST } = await importRoute();
+      const res = await POST(makeRequest(url, { method: "POST" }), {
+        params: Promise.resolve({ id: TARGET_ID }),
+      });
+
+      expect(res.status).toBe(200);
+      // The impersonated-session path: no bound org, and the marker naming the
+      // admin Better Auth will stamp as `impersonatedBy` (IMP-1 confinement).
+      expect(accessGetter).toHaveBeenCalledWith("ba-target", undefined, {
+        betterAuthUserId: ACTOR_ID,
+      });
+    });
   });
 });
 

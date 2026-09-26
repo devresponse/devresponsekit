@@ -25,8 +25,8 @@ import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
  * resolve NOTHING: no org, no permissions, not even `shell.view`, so
  * `decideSecureAccess` answered `pending_approval`, every API route answered
  * 403, and `requireSecureSession` redirected to `/[locale]/pending-approval` —
- * a page outside the `(secure)` group, so it renders neither the impersonation
- * banner's Stop control nor a sign-out button. The admin was stranded in a
+ * a page outside the `(secure)` group, which then rendered no impersonation
+ * banner and so no Stop control (F-148 added one). The admin was stranded in a
  * borrowed identity recoverable only by hand-calling
  * `DELETE …/impersonate` or clearing cookies.
  *

@@ -168,9 +168,9 @@ All Account pages live under `/[locale]/app/account/**`, each guarded by `requir
 
 ### UAT-ACCOUNT-OVERVIEW — Account overview
 
-- Route: `/app/account`  ·  Example URL: `/en/app/account`  ·  Code: `src/app/[locale]/(secure)/app/account/page.tsx:30`
-- Purpose: A read-only summary of the caller's account: identity (display name, email, status, member-since), organization memberships, roles, and the full effective permission list. Editable areas live in the sub-sections; status/memberships/roles are admin-controlled and display-only here (`src/app/[locale]/(secure)/app/account/page.tsx:13`).
-- Guard / who can access: `requireSecureSession(locale, "/{locale}/app/account")`. Additionally `notFound()` if the session has no provisioned `appUserId` or the overview row is missing (`src/app/[locale]/(secure)/app/account/page.tsx:39`).
+- Route: `/app/account`  ·  Example URL: `/en/app/account`  ·  Code: `src/app/[locale]/(secure)/app/account/page.tsx:31`
+- Purpose: A read-only summary of the caller's account: identity (display name, email, status, member-since), organization memberships, roles, and the full effective permission list. Editable areas live in the sub-sections; status/memberships/roles are admin-controlled and display-only here (`src/app/[locale]/(secure)/app/account/page.tsx:14`).
+- Guard / who can access: `requireSecureSession(locale, "/{locale}/app/account")`. Additionally `notFound()` if the session has no provisioned `appUserId` or the overview row is missing (`src/app/[locale]/(secure)/app/account/page.tsx:40`, `:49`).
 - Access matrix:
   - Visitor / Pending / Blocked: redirected away — cannot see.
   - Member / Limited Admin / Org Admin / Superadmin: each sees **their own** overview only (data is keyed on `access.appUserId`). No cross-account view exists.
@@ -202,12 +202,13 @@ User stories
 
 Negative & edge cases
 - Out-of-scope access: there is no id in the URL, so cross-account viewing is impossible by construction; the page is always the caller's own record.
-- Not-provisioned session (no `appUserId`) → `notFound()` (404), not an error page (`src/app/[locale]/(secure)/app/account/page.tsx:39`).
-- The status badge color varies: `active` is neutral; `blocked`/`suspended`/`deactivated` are destructive (`src/app/[locale]/(secure)/app/account/page.tsx:22`) — though a blocked user cannot reach this page, so this mainly affects a per-org membership status.
+- While an admin is **impersonating** the user, the Organizations card and the Roles block list only the organizations the admin can reach, as the org switcher does (F-65). As `orgadmin@orga.local` (ORG A only), impersonate `multi1@shared.local` (a member of all three orgs) and open `/en/app/account`: only **ORG A** and the roles held there are listed. Signed in as `multi1` themselves, the same page lists all three. A Superadmin impersonator sees every org, since their reach is not confined.
+- Not-provisioned session (no `appUserId`) → `notFound()` (404), not an error page (`src/app/[locale]/(secure)/app/account/page.tsx:40`).
+- The status badge color varies: `active` is neutral; `blocked`/`suspended`/`deactivated` are destructive (`src/app/[locale]/(secure)/app/account/page.tsx:23`) — though a blocked user cannot reach this page, so this mainly affects a per-org membership status.
 - No loading skeleton (server-rendered); no inline error (read-only).
 
 Accessibility: Content is a set of definition lists (`<dl>`/`<dt>`/`<dd>`) and cards; status is conveyed by badge text, not color alone. Keyboard users can read top-to-bottom; no interactive controls to trap.
-i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the status badge, the "Member since" date (the app formatter's long date, `src/app/[locale]/(secure)/app/account/page.tsx:69`; a date format saved in Preferences replaces it, see UAT-ACCOUNT-PREFERENCES-S2), and every card title localize; no raw keys.
+i18n: Status labels use `account.status.*`; run in `uk`/`ja` and confirm the status badge, the "Member since" date (the app formatter's long date, `src/app/[locale]/(secure)/app/account/page.tsx:77`; a date format saved in Preferences replaces it, see UAT-ACCOUNT-PREFERENCES-S2), and every card title localize; no raw keys.
 
 ### UAT-ACCOUNT-PROFILE — Profile
 

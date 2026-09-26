@@ -384,6 +384,9 @@ beforeAll(async () => {
   // Plain members, as the profile edit's rank guard resolves them in org A.
   contexts.set(BA.member, context(BA.member, ids.member, ids.orgA, []));
   contexts.set(BA.localMember, context(BA.localMember, ids.localMember, ids.orgA, []));
+  // F-148: the impersonation start resolves its target as the borrowed session
+  // will, and refuses one the shell would not admit; this one is active in A.
+  contexts.set(BA.impTarget, context(BA.impTarget, ids.impTarget, ids.orgA, []));
   accessGetter.mockImplementation(async (ba: string) => {
     const found = contexts.get(ba);
     if (!found) throw new Error(`no access context stubbed for ${ba}`);

@@ -21,6 +21,8 @@ import {
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
+import { decideSecureAccess } from "@/lib/auth-status";
+import { getImpersonatedAccessContext } from "@/lib/session-access.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { logPreAuthRefusal } from "@/lib/observability/pre-auth-refusal.server";
 import { isResolvedUserResponse, isUuid, resolveTargetUser } from "@/lib/admin/user-target.server";
@@ -56,6 +58,9 @@ type RouteContext = { params: Promise<{ id: string }> };
  *     not the admin, and impersonating FROM it re-bases the tenant
  *     confinement on the borrowed identity's reach instead of the human's.
  *     Refused with 403, audited against the human impersonator.
+ *   - The target MUST be able to use the session (F-148): resolved as the
+ *     borrowed session will resolve it, it must get `decideSecureAccess`
+ *     "allow". Otherwise 403 with `reason: "target_not_active"`, audited.
  *   - The UI MUST present a double-confirm before calling this
  *     endpoint. The server cannot enforce that, but it does cap the
  *     call rate via the shared in-memory token bucket so a missing
@@ -334,6 +339,42 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
           requestId: guard.requestId,
           extra: { reason: "session_principal_mismatch" },
         });
+  }
+
+  // F-148 — THE BORROWED SESSION MUST BE ONE THE SECURE SHELL ADMITS. Nothing
+  // above looks at the target's standing, so a target an admin had blocked or
+  // suspended, one still pending approval, or one whose only membership inside
+  // the impersonator's reach was not active, got a session that
+  // `requireSecureSession` sent straight to /blocked or /pending-approval. The
+  // audit trail showed an impersonation that was never stopped, and the admin
+  // had to sign out and sign in again to get their own session back.
+  //
+  // So resolve the target now exactly as that session will resolve it: through
+  // the impersonated-session path, confined to the reach of the principal
+  // Better Auth will stamp as `impersonatedBy` (the check above has just
+  // proved that is `guard.betterAuthUserId`). Refuse unless the answer is
+  // "allow". A Better Auth ban is not an app status, so it is not seen here;
+  // the vendor's own session hook refuses a banned target below (502).
+  const borrowed = await getImpersonatedAccessContext(
+    target.betterAuthUserId,
+    guard.betterAuthUserId,
+  );
+  const decision = decideSecureAccess(borrowed.status, borrowed.membershipStatus);
+  if (decision !== "allow") {
+    await auditUserAction("admin.user.impersonation_failed", "denied", {
+      request,
+      actorBetterAuthUserId: guard.betterAuthUserId,
+      appUserId: target.appUserId,
+      organizationId: actingOrganizationId(guard.access),
+      email: target.primaryEmail,
+      reason: "target_not_active",
+      requestId: guard.requestId,
+      metadata: { targetBetterAuthUserId: target.betterAuthUserId, decision },
+    });
+    return adminErrorResponse("forbidden", 403, request, {
+      requestId: guard.requestId,
+      extra: { reason: "target_not_active" },
+    });
   }
 
   try {

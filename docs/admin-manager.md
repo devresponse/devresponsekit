@@ -1586,6 +1586,13 @@ at `/app/administrator/agents`; nav-gated on `admin.clients.read`.
 | `PATCH /mcp-agents/[id]` | `admin.clients.manage` | Set the client's scope **ceiling**, validated against the admin's own authority — and, for a bearer caller, against the calling credential's own scopes, so a narrowly-scoped key or agent token can never lift a ceiling beyond itself (`422` on over-grant). A lowered ceiling also binds the agent's outstanding tokens from their next request (F-71); `admin.mcp_agent.scopes_updated` |
 | `DELETE /mcp-agents/[id]` | `admin.clients.manage` | Revoke the client (idempotent — leaves the service account for the audit trail); `admin.mcp_agent.revoked` |
 
+The scheduled reaper also revokes: it expires any registration still pending
+after `MCP_REGISTRATION_PENDING_TTL_DAYS`, and the console files that agent under
+**Revoked** too. To tell the two apart, read the agent's audit trail. An admin
+revocation is `admin.mcp_agent.revoked` with the admin as actor. An expiry is
+`mcp.client.expired`, with no actor and `reason` `mcp_registration_expired`
+(F-79).
+
 **Approving an agent (I-03).** A registration is unauthenticated and its
 `client_name` is whatever the caller typed, so a look-alike ("Acme CI Agent"
 beside the real one) is cheap. Each console row therefore also shows the

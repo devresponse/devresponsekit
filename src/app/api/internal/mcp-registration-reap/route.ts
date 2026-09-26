@@ -7,8 +7,15 @@ import { logServerError, logger } from "@/lib/observability/logger.server";
 // Touches the pg pool + node:crypto, so it must run on the Node runtime.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Three bounded UPDATEs; well inside every plan's ceiling.
+// Within every plan's ceiling. The reaper works in batches and is handed a
+// deadline well inside this (F-75), so a backlog bigger than one tick can
+// drain is finished by the next tick instead of timing the function out.
 export const maxDuration = 60;
+/**
+ * How long one tick keeps starting batches (F-75). Leaves `maxDuration` room
+ * for a cold start and for the batch in hand to commit and write its audit rows.
+ */
+const REAP_TIME_BUDGET_MS = 40_000;
 
 /**
  * GET /api/internal/mcp-registration-reap — scheduler entrypoint for the MCP
@@ -37,7 +44,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const result = await expireStalePendingMcpRegistrations(env.MCP_REGISTRATION_PENDING_TTL_DAYS);
+    const result = await expireStalePendingMcpRegistrations(env.MCP_REGISTRATION_PENDING_TTL_DAYS, {
+      deadline: Date.now() + REAP_TIME_BUDGET_MS,
+    });
     logger.info({ kind: "mcp-registration-reap", ...result }, "mcp registration reap tick");
     return noStore({ ok: true, ...result }, 200);
   } catch (err) {

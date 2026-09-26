@@ -113,9 +113,10 @@
         "schema": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 1000000,
           "default": 1
         },
-        "description": "1-indexed page number."
+        "description": "1-indexed page number, at most 1,000,000."
       },
       "PageSize": {
         "name": "pageSize",

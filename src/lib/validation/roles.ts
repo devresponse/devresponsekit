@@ -11,7 +11,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const createRoleSchema = z
   .object({
     key: z.string().min(1, "required").max(120, "max").regex(ROLE_KEY_RE, "key"),
-    name: z.string().min(1, "required").max(200, "max"),
+    // Trimmed BEFORE the required check (F-157): the forms trimmed only after
+    // validating, so a name of spaces passed the form, and the server, which
+    // did not trim at all, stored a blank-looking role name.
+    name: z.string().trim().min(1, "required").max(200, "max"),
     description: z.string().max(1000, "max").optional(),
     organizationId: z.string().regex(UUID_RE, "uuid").nullable().optional(),
   })
@@ -27,7 +30,7 @@ export type CreateRoleInput = z.input<typeof createRoleSchema>;
  */
 export const updateRoleSchema = z
   .object({
-    name: z.string().min(1, "required").max(200, "max").optional(),
+    name: z.string().trim().min(1, "required").max(200, "max").optional(),
     description: z.string().max(1000, "max").nullable().optional(),
   })
   .strict();

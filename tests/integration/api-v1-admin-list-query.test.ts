@@ -201,6 +201,22 @@ describe.each([
     });
     expect(repo()).not.toHaveBeenCalled();
   });
+
+  /**
+   * F-63: a page past MAX_PAGE made an OFFSET Postgres rejects (`bigint` out
+   * of range, or `2.4…e+24` as text), so the listing answered a bare 500.
+   */
+  it("a page past 1,000,000 is a 400 problem that never reaches the repo (F-63)", async () => {
+    for (const page of ["1000001", "99999999999999999999"]) {
+      const res = await (await load())(req(path, `page=${page}`));
+      expect(res.status, page).toBe(400);
+      expect((await res.json()) as { code: string; detail: string }).toMatchObject({
+        code: "invalid_request",
+        detail: "`page` must be at most 1000000.",
+      });
+    }
+    expect(repo()).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/v1/admin/api-keys — appUserId is a single UUID (F-34)", () => {

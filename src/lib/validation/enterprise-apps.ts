@@ -25,7 +25,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const createEnterpriseAppSchema = z
   .object({
     id: z.string().min(1, "required").max(128, "max").regex(APP_ID_RE, "appId"),
-    label: z.string().min(1, "required").max(200, "max"),
+    // Trimmed before the required check, so a label of spaces is empty (F-157).
+    label: z.string().trim().min(1, "required").max(200, "max"),
     description: z.string().max(1000, "max").nullable().optional(),
     origin: z.string().min(1, "required").max(500, "max"),
     subdomain: z.string().min(1, "required").max(63, "max").regex(SUBDOMAIN_RE, "subdomain"),
@@ -49,7 +50,7 @@ export type CreateEnterpriseAppInput = z.input<typeof createEnterpriseAppSchema>
  */
 export const updateEnterpriseAppSchema = z
   .object({
-    label: z.string().min(1, "required").max(200, "max").optional(),
+    label: z.string().trim().min(1, "required").max(200, "max").optional(),
     description: z.string().max(1000, "max").nullable().optional(),
     origin: z.string().min(1, "required").max(500, "max").optional(),
     subdomain: z

@@ -1298,6 +1298,7 @@
     "audience_taken": "Cette audience SSO est déjà utilisée.",
     "invalid_body": "Le corps de la requête est invalide.",
     "invalid_id": "L’identifiant fourni n’est pas un UUID valide.",
+    "invalid_query": "Les paramètres de la requête sont invalides.",
     "invalid_origin": "L’origine de la requête n’est pas autorisée.",
     "invalid_session_id": "L’identifiant de session est invalide.",
     "key_taken": "Cette clé est déjà utilisée.",

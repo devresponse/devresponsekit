@@ -19,6 +19,7 @@ vi.mock("@/lib/observability/server", () => ({ captureServerError: vi.fn() }));
 
 import { withAdminRoute, withV1Route } from "@/lib/route-handler.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
+import { InvalidListQueryError, parseListQuery } from "@/lib/admin/list-query.server";
 import { logServerError } from "@/lib/observability/logger.server";
 import { captureServerError } from "@/lib/observability/server";
 
@@ -159,6 +160,65 @@ describe("withAdminRoute: a throw becomes an id-stamped 500 envelope", () => {
       digest: expect.stringMatching(/^NEXT_HTTP_ERROR_FALLBACK;404/),
     });
     expect(log).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * F-63: `parseListQuery` refuses a page past MAX_PAGE or a malformed id filter
+ * by throwing `InvalidListQueryError`. The wrapper answers it as the surface's
+ * 400 with the parser's `detail`, where any other throw is a logged 500.
+ */
+describe("InvalidListQueryError becomes the surface's 400, not a 500", () => {
+  const detail = "`filter[app_user_id]` must be a UUID.";
+
+  it("withAdminRoute: 400 invalid_query with the detail, the id, and no log line", async () => {
+    let seen = "";
+    const GET = withAdminRoute(async function GET(req: NextRequest) {
+      seen = getOrCreateRequestId(req);
+      throw new InvalidListQueryError(detail);
+    });
+    const res = await GET(request());
+    expect(res.status).toBe(400);
+    expect(res.headers.get("x-request-id")).toBe(seen);
+    expect(await res.json()).toEqual({
+      detail,
+      error: "invalid_query",
+      message: "errors.invalid_query",
+      requestId: seen,
+    });
+    expect(log).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it("withV1Route: the 400 invalid_request problem every other v1 query refusal is", async () => {
+    let seen = "";
+    const GET = withV1Route(async function GET(req: NextRequest) {
+      seen = getOrCreateRequestId(req);
+      throw new InvalidListQueryError(detail);
+    });
+    const res = await GET(request());
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    expect(res.headers.get("x-request-id")).toBe(seen);
+    expect(await res.json()).toMatchObject({
+      status: 400,
+      code: "invalid_request",
+      detail,
+      requestId: seen,
+    });
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("a real handler: a page past MAX_PAGE is refused before the handler reads the database", async () => {
+    const query = vi.fn();
+    const GET = withAdminRoute(async function GET(req: NextRequest) {
+      parseListQuery(req.nextUrl.searchParams, { allowedSortFields: [] });
+      query();
+      return NextResponse.json({});
+    });
+    const res = await GET(new NextRequest("http://test.local/api/x?page=99999999999999999999"));
+    expect(res.status).toBe(400);
+    expect(query).not.toHaveBeenCalled();
   });
 });
 

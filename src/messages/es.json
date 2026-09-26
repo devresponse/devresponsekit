@@ -1298,6 +1298,7 @@
     "audience_taken": "Esta audiencia SSO ya está en uso.",
     "invalid_body": "El cuerpo de la solicitud no es válido.",
     "invalid_id": "El id no es un UUID válido.",
+    "invalid_query": "Los parámetros de la consulta no son válidos.",
     "invalid_origin": "El origen de la solicitud no está permitido.",
     "invalid_session_id": "El id de sesión no es válido.",
     "key_taken": "Esta clave ya está en uso.",

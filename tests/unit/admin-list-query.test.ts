@@ -10,7 +10,9 @@ import {
   applySortAndPagination,
   buildListResponse,
   executeListWithTotal,
+  InvalidListQueryError,
   likeContains,
+  MAX_PAGE,
   offsetFor,
   parseListQuery,
   parseListQueryStrict,
@@ -133,6 +135,93 @@ describe("parseListQuery", () => {
 });
 
 /**
+ * F-63: what the lenient parser cannot normalize, it refuses. Both inputs
+ * used to reach Postgres: a huge `page` as an OFFSET past `bigint` (every
+ * OFFSET list answered 500) and a non-UUID id filter as a failed `uuid` cast
+ * (500 on the list, 502 on the export). The route wrappers turn the throw into
+ * a 400 (tests/unit/route-handler.test.ts; the routes themselves in
+ * tests/db/admin-list-query-bounds.db.test.ts).
+ */
+describe("parseListQuery bounds (F-63)", () => {
+  const refusal = (qs: string, options: Parameters<typeof parseListQuery>[1]) => {
+    try {
+      parseListQuery(p(qs), options);
+    } catch (err) {
+      expect(err).toBeInstanceOf(InvalidListQueryError);
+      return (err as InvalidListQueryError).detail;
+    }
+    throw new Error(`expected ${qs} to be refused`);
+  };
+
+  it("refuses a page above MAX_PAGE, including one too long to parse as a finite number", () => {
+    const opts = { allowedSortFields: [], maxPageSize: 200 };
+    for (const page of [
+      String(MAX_PAGE + 1),
+      "99999999999999999999", // an offset past bigint (22003)
+      "100000000000000000000000", // an offset rendered `2.4999999999999997e+24` (22P02)
+      "9".repeat(400), // parses to Infinity, which must not read as page 1
+    ]) {
+      expect(refusal(`page=${page}`, opts), page).toBe(`\`page\` must be at most ${MAX_PAGE}.`);
+    }
+  });
+
+  it("serves MAX_PAGE itself at the largest page size with a safe-integer offset", () => {
+    const q = parseListQuery(p(`page=${MAX_PAGE}&pageSize=1000`), {
+      allowedSortFields: [],
+      maxPageSize: 1000,
+    });
+    expect(q.page).toBe(MAX_PAGE);
+    expect(Number.isSafeInteger(offsetFor(q))).toBe(true);
+    expect(offsetFor(q)).toBeLessThan(2 ** 31);
+  });
+
+  it("still reads NaN, fractions, exponents and non-positive pages as page 1 (review #47)", () => {
+    for (const page of ["abc", "1.5", "1e400", "0", "-3", ""]) {
+      expect(parseListQuery(p(`page=${page}`), { allowedSortFields: [] }).page, page).toBe(1);
+    }
+  });
+
+  const UUID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+  const OPTS = {
+    allowedSortFields: [],
+    allowedFilters: ["organization", "app_user_id", "status"],
+    uuidFilters: { organization: ["global"], app_user_id: [] },
+  };
+
+  it("refuses a uuid filter value that is neither a UUID nor one of its keywords", () => {
+    expect(refusal("filter[app_user_id]=abc", OPTS)).toBe("`filter[app_user_id]` must be a UUID.");
+    expect(refusal("filter[organization]=null", OPTS)).toBe(
+      "`filter[organization]` must be a UUID or `global`.",
+    );
+    // Every repeated value is checked, and so is a value under an unknown
+    // suffix, which the parser stores as the filter itself.
+    expect(refusal(`filter[app_user_id]=${UUID}&filter[app_user_id]=x`, OPTS)).toMatch(/UUID/);
+    expect(refusal("filter[app_user_id][eq]=abc", OPTS)).toMatch(/UUID/);
+  });
+
+  it("keeps a UUID (any case) and a declared keyword, and drops an empty value", () => {
+    const q = parseListQuery(
+      p(`filter[app_user_id]=${UUID.toUpperCase()}&filter[organization]=global&filter[status]=`),
+      OPTS,
+    );
+    expect(q.filters).toEqual({
+      app_user_id: UUID.toUpperCase(),
+      organization: "global",
+      status: "",
+    });
+    expect(parseListQuery(p("filter[app_user_id]="), OPTS).filters).toEqual({});
+  });
+
+  it("leaves filters it was not told about alone, and drops an unknown one before checking it", () => {
+    expect(parseListQuery(p("filter[status]=abc"), OPTS).filters).toEqual({ status: "abc" });
+    expect(
+      parseListQuery(p("filter[organization]=abc"), { ...OPTS, allowedFilters: ["status"] })
+        .filters,
+    ).toEqual({});
+  });
+});
+
+/**
  * The `/api/v1` parser (F-34). The lenient contract above drops what it
  * cannot apply; on v1 a dropped filter answered "which users are blocked?"
  * with EVERY user, so each of those inputs is a failure the route returns as
@@ -249,6 +338,14 @@ describe("parseListQueryStrict", () => {
       expect(result, qs).toEqual({ ok: false, detail: "This endpoint does not accept `q`." });
     }
     expect(parseListQueryStrict(p("page=2"), noSearch).ok).toBe(true);
+  });
+
+  it("refuses a page above MAX_PAGE as a result, not a throw (F-63)", () => {
+    expect(strict(`page=${MAX_PAGE + 1}`)).toEqual({
+      ok: false,
+      detail: `\`page\` must be at most ${MAX_PAGE}.`,
+    });
+    expect(strict(`page=${MAX_PAGE}`)).toMatchObject({ ok: true, query: { page: MAX_PAGE } });
   });
 
   it("refuses a repeated page, pageSize or q instead of keeping the first", () => {

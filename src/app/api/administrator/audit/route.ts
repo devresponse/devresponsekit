@@ -51,8 +51,8 @@ function parseIsoDate(value: string | undefined): Date | null {
  *   - `filter[event_type]` — single string match
  *   - `filter[outcome]`    — `success` | `failure` | `denied`
  *   - `filter[actor]`      — Better Auth actor user id (text)
- *   - `filter[app_user_id]`            — UUID
- *   - `filter[organization_id]`        — UUID
+ *   - `filter[app_user_id]`            — UUID (anything else is a 400, F-63)
+ *   - `filter[organization_id]`        — UUID (likewise)
  *   - `filter[target_application_id]`  — text
  *   - `filter[created_at][from|to]`    — ISO-8601 range
  *
@@ -78,6 +78,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       "target_application_id",
       "created_at",
     ],
+    uuidFilters: { app_user_id: [], organization_id: [] },
     defaultSort: [{ field: "created_at", direction: "desc" }],
     defaultPageSize: 50,
     maxPageSize: 200,

@@ -18,8 +18,6 @@ import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * GET /api/administrator/groups
  *
@@ -30,9 +28,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * for roles (F-41): every org may hold an `engineering` group, and searching
  * `engineering` cannot single out one org's, but typing the org's name can.
  * `filter[organization]` takes an org UUID and may be repeated (the
- * documented `explode` form); a value that is not a UUID is dropped. The
- * user-detail group picker lists the target user's orgs' groups this way. A
- * repeated value used to be ignored as a whole, which listed every org's.
+ * documented `explode` form); a value that is not a UUID is a 400 (F-63). It
+ * used to be dropped, which listed every org's groups, as did a repeated value
+ * before that. The user-detail group picker lists the target user's orgs'
+ * groups this way.
  *
  * ADR-0001: an org admin sees only their org's groups; a null scope yields
  * an empty page (groups are always tenant-scoped, so there is no global set).
@@ -44,6 +43,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const query = parseListQuery(request.nextUrl.searchParams, {
     allowedSortFields: ["key", "name", "created_at", "role_count", "member_count"],
     allowedFilters: ["organization"],
+    uuidFilters: { organization: [] },
     defaultSort: [{ field: "key", direction: "asc" }],
     defaultPageSize: 25,
     maxPageSize: 200,
@@ -63,9 +63,8 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     base = base.where("g.organization_id", "=", scope.organizationId);
   }
   const orgFilter = query.filters.organization;
-  const orgIds = (
-    typeof orgFilter === "string" ? [orgFilter] : Array.isArray(orgFilter) ? orgFilter : []
-  ).filter((v) => UUID_RE.test(v));
+  const orgIds =
+    typeof orgFilter === "string" ? [orgFilter] : Array.isArray(orgFilter) ? orgFilter : [];
   if (orgIds.length > 0) {
     base = base.where("g.organization_id", "in", orgIds);
   }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
 import { API_SCOPE_CATALOG } from "@/lib/api-auth/scopes";
 import { ACTIVATION_PERMISSION, ENROLMENT_PERMISSIONS } from "@/lib/admin/user-create.server";
+import { MAX_PAGE } from "@/lib/admin/list-query.server";
 
 // user-create.server imports the database module; nothing here queries it.
 vi.mock("@/db/database", () => ({ db: {} }));
@@ -25,6 +26,13 @@ describe("openapi document", () => {
     for (const key of API_SCOPE_CATALOG) {
       expect(scopes[key]).toBe(key);
     }
+  });
+
+  it("publishes the page bound the routes enforce (F-63)", () => {
+    // A literal in the pure builder, which cannot import the server parser.
+    const params = (doc.components as { parameters: Record<string, { schema: object }> })
+      .parameters;
+    expect(params.Page!.schema).toMatchObject({ minimum: 1, maximum: MAX_PAGE });
   });
 
   it("documents the token, key-management, and user paths", () => {

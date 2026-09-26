@@ -369,7 +369,11 @@ call `notFound()`; API handlers return `adminErrorResponse("not_found", 404,
 `parseListQuery` (`src/lib/admin/list-query.server.ts`) normalizes the query
 string for every list endpoint into `{ page, pageSize, sort, q, filters }`:
 
-- **`page`** — defaults to 1, clamped to ≥ 1.
+- **`page`** — defaults to 1, clamped to ≥ 1, and at most `MAX_PAGE`
+  (1,000,000). A deeper page is a **400** whose `detail` names the bound
+  (`invalid_query` here, the `invalid_request` problem on `/api/v1`): it used
+  to reach Postgres as an OFFSET past `bigint` and answer 500 on every list
+  (F-63). The agents console page answers it with its 404.
 - **`pageSize`** — per-endpoint default (commonly 25; audit 50), clamped to
   `[1, maxPageSize]` (commonly 200). The clamp is silent (the envelope echoes
   the clamped `pageSize`), so one request is never "the whole list": see
@@ -391,6 +395,13 @@ string for every list endpoint into `{ page, pageSize, sort, q, filters }`:
   each endpoint's documented columns.
 - **`filter[name]=v`** → `filters.name`; repeated values become an array;
   `filter[name][from]` / `[to]` produce a range. **Unknown filters are dropped.**
+  A filter compared with a `uuid` column is declared in `uuidFilters` with the
+  keywords it also takes (`filter[organization]=global` on roles,
+  `filter[organization_id]=null` on enterprise apps): any other value that is
+  not a UUID is a **400** `invalid_query`, on the list and on its CSV export
+  alike, and an empty one means no filter. Postgres used to refuse the cast
+  and the list answered 500 (the export 502), and the groups and roles lists
+  dropped the value, which listed every org's rows (F-63).
 
 All four versioned `/api/v1` lists parse through `parseListQueryStrict`
 instead (F-34): each input above that would be dropped is a `400

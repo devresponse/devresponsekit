@@ -1298,6 +1298,7 @@
     "audience_taken": "此 SSO 受众已被使用。",
     "invalid_body": "请求正文无效。",
     "invalid_id": "提供的 id 不是有效的 UUID。",
+    "invalid_query": "查询参数无效。",
     "invalid_origin": "请求来源不被允许。",
     "invalid_session_id": "会话 id 无效。",
     "key_taken": "此键已被使用。",

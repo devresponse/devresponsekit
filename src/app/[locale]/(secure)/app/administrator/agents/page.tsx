@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
+import { InvalidListQueryError, type ListQuery } from "@/lib/admin/list-query.server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
 import {
   listMcpAgents,
@@ -45,7 +46,16 @@ export default async function AdministratorAgentsPage({
   const urlParams = new URLSearchParams();
   if (requested.page) urlParams.set("page", requested.page);
   if (requested.status) urlParams.set("filter[status]", requested.status);
-  const query = parseMcpAgentListQuery(urlParams);
+  let query: ListQuery;
+  try {
+    query = parseMcpAgentListQuery(urlParams);
+  } catch (err) {
+    // F-63: a `?page=` past MAX_PAGE, which used to reach Postgres as an
+    // OFFSET it cannot hold and render the error boundary. The API route
+    // answers it 400; a page has no 400, and no such page exists.
+    if (err instanceof InvalidListQueryError) notFound();
+    throw err;
+  }
   const result = await listMcpAgents(guard.access, query);
   const activeStatus = mcpAgentStatusFilter(query);
 

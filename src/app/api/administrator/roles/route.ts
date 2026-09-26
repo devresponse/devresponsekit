@@ -28,7 +28,8 @@ export const dynamic = "force-dynamic";
  *
  * Filters:
  *   - `organization` — UUID of organization (use the literal "global"
- *     to filter to roles where `organization_id IS NULL`).
+ *     to filter to roles where `organization_id IS NULL`). Any other value
+ *     is a 400 (F-63); it used to be dropped, which listed every org's roles.
  *   - `scope` — `global` or `org`.
  *   - `permission` — permission key; returns roles holding that key.
  *
@@ -41,7 +42,6 @@ export const dynamic = "force-dynamic";
  * Caller MUST hold `admin.roles.read`.
  */
 const SCOPE_GLOBAL = "global";
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
@@ -57,6 +57,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       "organization_name",
     ],
     allowedFilters: ["organization", "scope", "permission"],
+    uuidFilters: { organization: [SCOPE_GLOBAL] },
     defaultSort: [{ field: "key", direction: "asc" }],
     defaultPageSize: 25,
     maxPageSize: 200,
@@ -73,7 +74,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   if (typeof orgFilter === "string") {
     if (orgFilter === SCOPE_GLOBAL) {
       base = base.where("r.organization_id", "is", null);
-    } else if (UUID_RE.test(orgFilter)) {
+    } else {
       base = base.where("r.organization_id", "=", orgFilter);
     }
   }
@@ -191,6 +192,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
  *   - Global keys (`organization_id IS NULL`) must additionally be
  *     globally unique — we enforce this in code because the SQL unique
  *     index treats NULLs as distinct.
+ *   - An `organizationId` that names no org is a 404 `organization_not_found`.
  */
 
 export const POST = withAdminRoute(async function POST(request: NextRequest) {
@@ -259,6 +261,12 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     const message = err instanceof Error ? err.message : "unknown";
     if (/duplicate key|unique constraint/i.test(message)) {
       return adminErrorResponse("key_taken", 409, request);
+    }
+    // F-63 (#95): organization_id is app_roles' only foreign key, so this is
+    // an organizationId naming no org (a deleted one, say). It was a 500; the
+    // groups create answers the same 404.
+    if (/foreign key/i.test(message)) {
+      return adminErrorResponse("organization_not_found", 404, request);
     }
     throw err;
   }

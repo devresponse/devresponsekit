@@ -4,9 +4,10 @@ import { RouteError } from "@/components/observability/route-error";
 
 /**
  * Error boundary for the (public) route group (landing, status pages, …).
- * Without it, a render error here escapes to the English-only root
- * global-error.tsx; this keeps the failure localized and captured to Sentry
- * with a quotable Support ID, inside the locale shell (P2-13).
+ * It keeps a render error here localized and captured to Sentry with a
+ * quotable Support ID, inside the locale shell and the group's layout
+ * (P2-13). A throw from (public)/layout.tsx itself is caught one level up,
+ * by [locale]/error.tsx (F-68).
  */
 export default function PublicError(props: {
   error: Error & { digest?: string };

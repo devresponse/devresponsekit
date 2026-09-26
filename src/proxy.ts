@@ -5,7 +5,7 @@ import { routing } from "@/i18n/routing";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { isLocalizedSecurePath } from "@/config/route-regions";
 import { applyClientIpHeader } from "@/lib/client-ip";
-import { REQUEST_PATH_HEADER } from "@/lib/request-id";
+import { REQUEST_PATH_HEADER, REQUEST_TARGET_HEADER } from "@/lib/request-id";
 import { ORG_SIGNUP_HINT_COOKIE } from "@/lib/scoped-auth";
 
 const intlMiddleware = createIntlMiddleware(routing);
@@ -174,8 +174,10 @@ export function proxy(request: NextRequest) {
   // `/api/*` early return below, which stamps nothing — can carry a
   // client-chosen value into `headers()`. The follow-up review to #74 found
   // the original code set it on the localized branch only, which left every
-  // other forwarded request believing the browser.
+  // other forwarded request believing the browser. Its query-carrying
+  // sibling (F-70) gets the same treatment.
   requestHeaders.delete(REQUEST_PATH_HEADER);
+  requestHeaders.delete(REQUEST_TARGET_HEADER);
 
   // Only `/api/auth/*` is matched (Better Auth needs the client-IP header);
   // other API routes are excluded by the matcher, but defend in depth.
@@ -185,7 +187,8 @@ export function proxy(request: NextRequest) {
     return response;
   }
 
-  if (isLocalizedSecurePath(pathname)) {
+  const isSecurePage = isLocalizedSecurePath(pathname);
+  if (isSecurePage) {
     const sessionCookie = getSessionCookie(request);
     if (!sessionCookie) {
       const locale = getLocaleFromPath(pathname);
@@ -211,6 +214,12 @@ export function proxy(request: NextRequest) {
   // consumers still normalize it (`normalizeRequestPath`) and treat it as a
   // hint rather than evidence.
   requestHeaders.set(REQUEST_PATH_HEADER, pathname);
+  // F-70: a cookie that is present but no longer names a live session gets
+  // past the branch above, so the sign-in bounce happens later, in
+  // `requireSecureSession`. Hand it the same `returnTo` the branch above would
+  // have used, query included. Secure pages only: nothing else reads it, and
+  // other pages' queries can carry invite and reset tokens.
+  if (isSecurePage) requestHeaders.set(REQUEST_TARGET_HEADER, `${pathname}${search}`);
   const response = intlMiddleware(new NextRequest(request, { headers: requestHeaders }));
   response.headers.set("Content-Security-Policy", csp);
   applyOrgSignupHint(request, response);

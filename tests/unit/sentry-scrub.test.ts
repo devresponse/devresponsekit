@@ -181,6 +181,8 @@ describe("scrubTransaction", () => {
           cookie: "better-auth.session_token=sess",
           authorization: `Bearer ${JWT}`,
           referer: "https://app/sign-in?returnTo=/admin&email=eve@x.com",
+          // F-70: the proxy-stamped request target carries the page's query.
+          "x-drk-request-target": "/en/app/administrator/users?q=eve@x.com",
           accept: "text/html",
         },
       },
@@ -200,6 +202,7 @@ describe("scrubTransaction", () => {
             "http.request.header.authorization": `Bearer ${JWT}`,
             "http.request.header.proxy_authorization": `Basic ${JWT}`,
             "http.request.header.referer": "https://app/sign-in?returnTo=/admin",
+            "http.request.header.x_drk_request_target": "/en/app/administrator/users?q=eve",
             "http.request.header.x_forwarded_for": "203.0.113.9, 10.0.0.1",
             "http.request.header.x_real_ip": "203.0.113.9",
             "http.request.header.user_agent": "ua",
@@ -252,6 +255,7 @@ describe("scrubTransaction", () => {
     expect(headers.cookie).toBeUndefined();
     expect(headers.authorization).toBeUndefined();
     expect(headers.referer).toBeUndefined();
+    expect(headers["x-drk-request-target"]).toBeUndefined();
     expect(headers.accept).toBe("text/html");
     const user = out.user as Record<string, unknown>;
     expect(user).toEqual({ id: "u1" });
@@ -271,6 +275,7 @@ describe("scrubTransaction", () => {
     expect(data["http.request.header.authorization"]).toBeUndefined();
     expect(data["http.request.header.proxy_authorization"]).toBeUndefined();
     expect(data["http.request.header.referer"]).toBeUndefined();
+    expect(data["http.request.header.x_drk_request_target"]).toBeUndefined();
     expect(data["http.request.header.x_forwarded_for"]).toBeUndefined();
     expect(data["http.request.header.x_real_ip"]).toBeUndefined();
     expect(data["http.response.header.set_cookie"]).toBeUndefined();
@@ -466,6 +471,7 @@ describe("SDK parity: real @sentry/core writer + SENTRY_DATA_COLLECTION", () => 
     "proxy-authorization": `Basic ${JWT}`,
     "x-api-key": "drk_live_AbC123",
     referer: "https://app/sign-in?returnTo=/admin&email=eve@x.com",
+    "x-drk-request-target": "/en/app/administrator/users?q=eve@x.com",
     "user-agent": "ua",
     accept: "text/html",
     "accept-language": "en-CA",
@@ -555,6 +561,8 @@ describe("SDK parity: real @sentry/core writer + SENTRY_DATA_COLLECTION", () => 
       "cookie",
       "x-api-key",
       "referer",
+      // F-70: the proxy-stamped request target carries the page's query.
+      "x-drk-request-target",
       // the SDK's own `ipHeaderNames` (vendor/getIpAddress)
       "x-client-ip",
       "x-forwarded-for",
@@ -595,6 +603,7 @@ describe("SDK parity: real @sentry/core writer + SENTRY_DATA_COLLECTION", () => 
     expect(ours["http.request.header.x_forwarded_user"]).toBe("[Filtered]");
     expect(ours["http.request.header.x_vercel_forwarded_for"]).toBe("[Filtered]");
     expect(ours["http.request.header.referer"]).toBe("[Filtered]");
+    expect(ours["http.request.header.x_drk_request_target"]).toBe("[Filtered]");
     expect(ours["http.request.header.x_api_key"]).toBe("[Filtered]");
     expect(ours["http.request.header.cookie.better_auth.session_token"]).toBeUndefined();
     expect(ours["http.request.header.cookie.theme"]).toBeUndefined();

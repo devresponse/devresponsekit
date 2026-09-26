@@ -11,9 +11,8 @@ import { RouteError } from "@/components/observability/route-error";
  *
  * NOTE (review #31): a segment's error.tsx cannot catch throws from its OWN
  * segment's layout. (secure)/layout.tsx fetches the session + the user's
- * organizations, and a failure there still lands on global-error.tsx —
- * catching it would need an error.tsx in the parent [locale] segment, which
- * does not exist today.
+ * organizations, and a failure there is caught one level up, by
+ * [locale]/error.tsx (F-68), which renders the same localized RouteError.
  */
 export default function SecureError(props: {
   error: Error & { digest?: string };

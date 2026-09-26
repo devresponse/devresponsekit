@@ -69,6 +69,22 @@ export const REQUEST_ID_HEADER = "x-request-id";
 export const REQUEST_PATH_HEADER = "x-drk-pathname";
 
 /**
+ * REQUEST-ONLY header carrying the page's request target — pathname AND
+ * query, exactly what `proxy.ts` puts in `returnTo` when the session cookie
+ * is missing — so `requireSecureSession` can send a present-but-invalid
+ * session (revoked, past the absolute-lifetime cap) back to the page it
+ * asked for (F-70). `REQUEST_PATH_HEADER` stays path-only on purpose: it is
+ * recorded in audit rows, and a query can carry search terms.
+ *
+ * Same provenance rules as `REQUEST_PATH_HEADER`: stamped by the proxy on
+ * localized secure pages only, any inbound copy deleted on every request. It
+ * is a hint, and its one consumer runs it through `getSafeReturnTo`. Because
+ * it carries the query, the Sentry header deny list names it
+ * (`lib/observability/sentry-shared.ts`).
+ */
+export const REQUEST_TARGET_HEADER = "x-drk-request-target";
+
+/**
  * Upper bound on a recorded pathname. Real routes are far shorter; the cap
  * exists because an unmatched path lets a client choose this string and it
  * lands in `app_audit_events.metadata` — an append-only, trigger-protected

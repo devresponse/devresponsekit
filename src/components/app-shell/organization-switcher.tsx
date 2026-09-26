@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   Select,
@@ -24,28 +23,38 @@ export interface OrganizationSwitcherProps {
  *
  * Switches the caller's active organization for a multi-org account. The
  * selection is a cookie (set by `/api/preferences/active-org`, which
- * validates membership), so there is no URL change — we just refresh so the
- * server re-resolves `getUserAccessContext` with the new active org. The
- * parent only mounts this when the user belongs to more than one org.
+ * validates membership), so there is no URL change — we reload the current
+ * page so the server re-resolves `getUserAccessContext` with the new active
+ * org. The parent only mounts this when the user belongs to more than one org.
  */
 export function OrganizationSwitcher({ current, organizations }: OrganizationSwitcherProps) {
   const t = useTranslations("common");
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   const handleChange = (next: string) => {
     if (next === current || !organizations.some((o) => o.id === next)) return;
     startTransition(async () => {
-      const res = await fetch("/api/preferences/active-org", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ organizationId: next }),
-      });
-      // Re-render server components so the new active org takes effect
-      // everywhere (menus, pages, admin scope). Ignore failures — the UI
-      // stays on the current org.
-      if (res.ok) router.refresh();
+      try {
+        const res = await fetch("/api/preferences/active-org", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ organizationId: next }),
+        });
+        // F-68: a FULL reload, like the impersonation start/stop flows. The
+        // old `router.refresh()` re-rendered only the server components, so
+        // every client-fetched, org-scoped view kept the previous org: the
+        // primary sidebar menu (fetched once in an effect), every admin
+        // DataGrid's rows and its bulk selection. The sidebar kept offering
+        // the old org's admin entries (each a 404), and a grid kept listing
+        // the old org's rows under the new org's header.
+        if (res.ok) window.location.reload();
+      } catch {
+        // F-68: a network failure is a failed switch, handled like a non-2xx
+        // (the UI stays on the current org). Thrown out of the transition, it
+        // reached the error boundary above the secure layout and replaced the
+        // whole app with an error page.
+      }
     });
   };
 

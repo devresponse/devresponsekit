@@ -55,7 +55,9 @@ Two layers, both fail-safe (redact-by-default):
   covering session tokens, API-key secrets, and the Better Auth secret. Never log a
   plaintext credential; the audit log records **metadata only**.
 - **Sentry** — `sentry-shared.ts` strips cookies, query strings, URL fragments, request
-  bodies, the `referer` header, emails, bearer/API tokens, and secret-like values from
+  bodies, the `referer` header and the proxy's `x-drk-request-target` (which carries the
+  page's query for the sign-in `returnTo`, F-70), emails, bearer/API tokens, and
+  secret-like values from
   **every channel an event leaves by**:
   - **error events** (`beforeSend`): the request, user, message, exception values,
     breadcrumbs, the transaction name, and every context value whose key ends in `path` or

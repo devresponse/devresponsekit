@@ -71,7 +71,7 @@ flowchart TB
 | **SSO handoff** | `src/lib/sso*` / `src/lib/jwt-handoff.server.ts` | One-time signed token issue/verify for cross-subdomain SSO. |
 | **Email** | `src/lib/email/**` (outbox-first) | Render → record in outbox → optionally deliver via Resend/Mailgun. |
 | **Data layer** | `src/db/**` | Kysely instance + `pg` pool, schema types, migrations, seeds, reset tooling. |
-| **i18n** | `src/i18n/**`, `src/messages/*.json`, `src/lib/format/**` | next-intl request config and translations for `en`/`fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`. The URL's `/<locale>` segment is the request locale. The request config also carries the signed-in viewer's saved time zone, and the root layout the saved date and number format, to one app formatter used on both server and client (F-37). |
+| **i18n** | `src/i18n/**`, `src/messages/*.json`, `src/lib/format/**` | next-intl request config and translations for `en`/`fr`/`es`/`uk`/`pt`/`zh`/`hi`/`ja`. The URL's `/<locale>` segment is the request locale. The request config also carries the signed-in viewer's saved time zone, and the root layout the saved date and number format, to one app formatter used on both server and client (F-37). Client components get only their route group's message namespaces: the locale, `(auth)` and `(secure)` layouts each mount `ClientMessagesProvider` with a scope from `src/i18n/client-messages.ts`, so the public and sign-in pages do not carry the Administrator console's strings (F-123). |
 | **UI primitives** | `src/components/**` | shadcn/ui components, the application shell, data grid, navigation. |
 
 > See the [Data Layer section](#5-data-model) and [Developer Onboarding → Project structure](./developer-onboarding.md#5-project-structure) for a directory-level walkthrough.

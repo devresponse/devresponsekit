@@ -1,6 +1,6 @@
 import "@/app/globals.css";
-import { NextIntlClientProvider, hasLocale } from "next-intl";
-import { getMessages, setRequestLocale } from "next-intl/server";
+import { hasLocale } from "next-intl";
+import { setRequestLocale } from "next-intl/server";
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
@@ -8,6 +8,7 @@ import { routing } from "@/i18n/routing";
 import { getBrand } from "@/config/brand";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { ThemeScript } from "@/components/theme/theme-script";
+import { ClientMessagesProvider } from "@/components/i18n/client-messages-provider";
 import { FormatPreferencesProvider } from "@/components/i18n/format-preferences";
 import { getViewerFormatPreferences } from "@/lib/format/viewer-format.server";
 import type { ReactNode } from "react";
@@ -47,9 +48,15 @@ export const viewport: Viewport = {
  * has its own minimal root layout in `(root)/`.
  *
  * Minimal per §28.1: HTML scaffold, theme + locale providers only — no
- * secure-menu fetches. Validates the locale segment and provides translated
- * messages to all descendants (public, auth, and secure routes). Unknown
- * locales 404 instead of falling back so URLs remain unambiguous.
+ * secure-menu fetches. Validates the locale segment. Unknown locales 404
+ * instead of falling back so URLs remain unambiguous.
+ *
+ * Client messages (F-123): this provider carries only the `locale` scope's
+ * namespaces, what the public pages and this segment's error and not-found
+ * boundaries read. The `(auth)` and `(secure)` layouts mount their own
+ * provider with their scope, so the Administrator console's strings are no
+ * longer inlined into the landing and sign-in pages
+ * (`src/i18n/client-messages.ts`).
  *
  * The one per-user input is the viewer's display format (F-37): the saved
  * time zone, date format and number format, which the locale providers carry
@@ -75,7 +82,6 @@ export default async function LocaleLayout({
   // dynamic locale segments.
   setRequestLocale(locale);
 
-  const messages = await getMessages({ locale });
   const formatPreferences = await getViewerFormatPreferences();
 
   // Per-request CSP nonce minted in `proxy.ts`. The server `ThemeScript` renders
@@ -91,20 +97,14 @@ export default async function LocaleLayout({
       <body>
         <ThemeScript nonce={nonce} />
         <ThemeProvider>
-          {/* F-37: the same zone next-intl's request config returns, passed
-              explicitly so the client formats in the zone the server used. */}
-          <NextIntlClientProvider
-            locale={locale}
-            messages={messages}
-            timeZone={formatPreferences.timeZone}
-          >
+          <ClientMessagesProvider locale={locale} scope="locale">
             <FormatPreferencesProvider
               dateFormat={formatPreferences.dateFormat}
               numberLocale={formatPreferences.numberLocale}
             >
               <div data-locale={locale}>{children}</div>
             </FormatPreferencesProvider>
-          </NextIntlClientProvider>
+          </ClientMessagesProvider>
         </ThemeProvider>
       </body>
     </html>

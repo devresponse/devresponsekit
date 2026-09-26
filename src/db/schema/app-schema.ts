@@ -433,6 +433,13 @@ export interface BetterAuthUserTable {
    */
   emailVerificationWaived: ColumnType<boolean | null, never, never>;
   createdAt: ColumnType<Date, never, never>;
+  /**
+   * The admin plugin's ban flags, read (never written) by the REVOKE-2
+   * last-superadmin predicate so a banned account's grant stops counting
+   * (F-56). `isBanActive` (`src/lib/ban-status.ts`) states the semantics.
+   */
+  banned: ColumnType<boolean | null, never, never>;
+  banExpires: ColumnType<Date | null, never, never>;
 }
 
 export type AppOrganization = Selectable<AppOrganizationsTable>;

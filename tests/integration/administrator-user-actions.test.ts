@@ -33,9 +33,10 @@ const requiresSuperadminMock = vi.fn();
 // .test.ts); configurable so the review #7 guard tests can assert it is NOT
 // reached for an out-ranking target.
 const statusChangeMock = vi.fn();
-// REVOKE-2 last-superadmin predicate for the soft-delete cascade (review #444).
-// Default false = the platform has other superadmins.
-const cascadeStripsLastMock = vi.fn();
+// REVOKE-2 last-superadmin predicate for a ban, on its own or as the first
+// step of the soft-delete (review #444, F-56). Default false = the platform has
+// other superadmins who can sign in.
+const banStripsLastMock = vi.fn();
 // F-09 rank predicate (`userHoldsSuperuserGrant`). Default false.
 const superuserGrantMock = vi.fn();
 
@@ -47,7 +48,7 @@ vi.mock("@/lib/admin/access-scope.server", async () => {
   return {
     ...actual,
     requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
-    membershipCascadeStripsLastGlobalSuperuser: (...a: unknown[]) => cascadeStripsLastMock(...a),
+    banStripsLastGlobalSuperuser: (...a: unknown[]) => banStripsLastMock(...a),
     // F-09: the rank guard reads the target's superuser GRANT (awake or asleep
     // in a suspended org) for every non-superadmin actor. Default false = the
     // target holds none; rank then comes from the subset test below.
@@ -192,8 +193,8 @@ beforeEach(() => {
   requiresSuperadminMock.mockResolvedValue(false); // target not shared by default
   statusChangeMock.mockReset();
   statusChangeMock.mockResolvedValue({ ok: true, status: "active" });
-  cascadeStripsLastMock.mockReset();
-  cascadeStripsLastMock.mockResolvedValue(false);
+  banStripsLastMock.mockReset();
+  banStripsLastMock.mockResolvedValue(false);
   superuserGrantMock.mockReset();
   superuserGrantMock.mockResolvedValue(false);
 });
@@ -539,6 +540,74 @@ describe("POST /api/administrator/users/[id]/ban", () => {
     expect(res.status).toBe(403);
     expect(authBan).not.toHaveBeenCalled();
   });
+
+  /**
+   * REVOKE-2 (F-56). A ban locks the account out of the console, and
+   * `targetOutranksActor` exempts a superadmin actor outright, so without this a
+   * ban could leave no superadmin able to sign in. The check follows the ban,
+   * so a refusal must also undo it.
+   */
+  it("returns 409 last_superadmin and undoes the ban when no superadmin who can sign in would remain", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.ban"));
+    dbMock.mockResolvedValue(targetRow);
+    authBan.mockResolvedValue({ ok: true });
+    banStripsLastMock.mockResolvedValue(true);
+    const { POST } = await import("@/app/api/administrator/users/[id]/ban/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/ban`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "spam" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "last_superadmin" }));
+    expect(banStripsLastMock).toHaveBeenCalledWith(
+      expect.objectContaining({ appUserId: TARGET_ID, betterAuthUserId: "ba-target" }),
+      expect.anything(),
+    );
+    expect(authUnban).toHaveBeenCalledWith("ba-target");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.superuser.revocation_denied",
+        outcome: "denied",
+        reason: "last_global_superuser",
+        metadata: { action: "ban" },
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.banned" }),
+    );
+  });
+
+  it("undoes the ban and answers 500 when the REVOKE-2 check itself fails (F-56)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(grantedAccess("admin.users.ban"));
+    dbMock.mockResolvedValue(targetRow);
+    authBan.mockResolvedValue({ ok: true });
+    banStripsLastMock.mockRejectedValue(new Error("deadlock detected"));
+    const { POST } = await import("@/app/api/administrator/users/[id]/ban/route");
+    const res = await POST(
+      makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/ban`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "spam" }),
+      }),
+      { params: Promise.resolve({ id: TARGET_ID }) },
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "internal_error" }));
+    expect(authUnban).toHaveBeenCalledWith("ba-target");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.ban_failed",
+        reason: "revocation_check_failed",
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.banned" }),
+    );
+  });
 });
 
 describe("POST /api/administrator/users/[id]/password", () => {
@@ -857,7 +926,7 @@ describe("DELETE /api/administrator/users/[id] (soft delete)", () => {
     accessGetter.mockResolvedValue(grantedAccess("admin.users.delete"));
     dbMock.mockResolvedValue(targetRow);
     authBan.mockResolvedValue({ ok: true });
-    cascadeStripsLastMock.mockResolvedValue(true);
+    banStripsLastMock.mockResolvedValue(true);
     const { DELETE } = await import("@/app/api/administrator/users/[id]/route");
     const res = await DELETE(
       makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}`, {

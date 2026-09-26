@@ -89,6 +89,7 @@ vi.mock("@/lib/admin/access-scope.server", async () => {
     ...actual,
     requiresSuperadminForSharedTarget: async () => false,
     membershipCascadeStripsLastGlobalSuperuser: async () => false,
+    banStripsLastGlobalSuperuser: async () => false,
   };
 });
 vi.mock("@/lib/admin/user-target.server", async () => {

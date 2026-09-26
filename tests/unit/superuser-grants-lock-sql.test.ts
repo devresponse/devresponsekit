@@ -65,9 +65,11 @@ describe("activeGlobalSuperuserGrants — compiled SQL", () => {
     const sql = captured[0]!;
     // `app_organizations` joined the list with F-09: the grant join now reads
     // the ORGANIZATION's status, and `PATCH /organizations/[id]` is a guarded
-    // path that writes it.
-    expect(sql).toContain(
-      'for update of "app_user_roles", "app_organization_memberships", "app_organizations", "app_role_permissions"',
+    // path that writes it. `app_users` and the Better Auth `user` joined it
+    // with F-56: the join reads the account status and the ban flags, which
+    // the status cascades and a ban write.
+    expect(sql).toMatch(
+      /for update of "app_user_roles", "app_organization_memberships", "app_organizations", "app_role_permissions", "app_users", "user"$/,
     );
     // The assignment table alone is exactly the shape that does NOT deliver the
     // guarantee — pin that it is not what we emit.
@@ -91,6 +93,28 @@ describe("activeGlobalSuperuserGrants — compiled SQL", () => {
     expect(sql).toContain(
       'inner join "app_organizations" on "app_organizations"."id" = "app_organization_memberships"."organization_id" and "app_organizations"."status" = $',
     );
+  });
+
+  it("F-56: counts only grants held by an account that can sign in — active and not banned", async () => {
+    await mod.activeGlobalSuperuserGrants();
+    const sql = captured[0]!;
+    expect(sql).toContain(
+      'inner join "app_users" on "app_users"."id" = "app_user_roles"."app_user_id" and "app_users"."status" = $',
+    );
+    // An INNER join: an account with no Better Auth user cannot sign in either.
+    expect(sql).toContain('inner join "user" on "user"."id" = "app_users"."better_auth_user_id"');
+    // `isBanActive` in SQL: unbanned, or the ban's expiry has passed.
+    expect(sql).toContain('("user"."banned" is not true or "user"."banExpires" <= now())');
+  });
+
+  it("F-56: `disregardBanOf` reads that one account as if its ban were not there, and nothing else", async () => {
+    await mod.activeGlobalSuperuserGrants(undefined, { disregardBanOf: "ba-target" });
+    const sql = captured[0]!;
+    expect(sql).toContain(
+      '("user"."banned" is not true or "user"."banExpires" <= now() or "user"."id" = $',
+    );
+    // The account status still applies to it: a ban is all it disregards.
+    expect(sql).toContain('"app_users"."status" = $');
   });
 });
 

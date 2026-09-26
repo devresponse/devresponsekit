@@ -606,7 +606,7 @@ Manages the application user lifecycle and per-user administration.
 | `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). It is a membership add, and an `active` one an approval, so a confined caller also needs `admin.users.update` or `admin.orgs.update`, plus `admin.users.manage` for `initialAppStatus: "active"`, each as permission and (bearer) scope; an address whose email domain is bound to another org is refused too. Each refusal is 403 `forbidden` before anything is written, audited `admin.user.create_denied` (reason `enrolment_not_permitted`, `activation_not_permitted` or `email_domain_claimed`; F-480, below). The enrolled membership carries no sign-up source, so the org's sign-up policy never activates it at sign-in. A superadmin's cookie session creates the user in no org, as before. A context with no org is refused with 403 `forbidden` before anything is written (defence in depth: the guard admits only an active member, whose context always names an org). The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore. The edit (display name and preferred locale) is account-global, so it is rank-gated and a user shared with other orgs is superadmin-only (403 `forbidden`, F-61). The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2) |
 | `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2) |
-| `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself); `admin.user.banned` |
+| `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself). A ban that would leave no superadmin able to sign in is undone and returns 409 `last_superadmin` (REVOKE-2, F-56); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it signs the user out everywhere: their own sessions and the ones they opened by impersonating someone. It also revokes every API key they own and every OAuth client that acts as them, which ends the tokens minted from those too. The reset email changes nothing until the user completes the reset, which does the same (F-08, F-10, §19). A failed step returns 502 and is safe to retry. `admin.user.password_set` / `.password_reset_email_sent`, plus an `api_key.revoked` / `oauth_client.revoked` row per credential with `metadata.reason` `password_set` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`). Needs cross-org reach, so only a superadmin's cookie session: every API key and JWT is bound to one org (MACHINE-2, [design §3](./design-api-keys-and-tokens.md#3-caller-resolution)) and gets 403 `forbidden` |
 | `GET/DELETE /users/[id]/sessions`, `…/[sessionId]` | `admin.users.sessions` | List / revoke sessions. The list is a `SessionItem` projection (`id`, timestamps, ip, user-agent, `impersonatedBy`) — the session **token** is never returned; `[sessionId]` is the item's `id`, resolved to the token server-side (review #67/#194). A session is not tied to an org, so both revokes (all, or one by id) of a user shared with other orgs are superadmin-only (403 `forbidden`, AUTHZ-2; F-60). Revoke-all also ends the sessions the user opened by impersonating someone, which belong to the target and are not in this list (F-08, §19). `admin.user.sessions_revoked_all` / `.session_revoked` |
@@ -768,7 +768,14 @@ three revocable rows — an `app_user_roles` assignment, an
 `app_role_permissions` link carrying `superuser`, and an **active** membership
 pairing them, in an **active** organization (`userIsGlobalSuperuser`; the
 organization's status joined the conjunction with F-09) — and no org admin can
-confer it back.
+confer it back. A grant only keeps the platform administrable while its
+account can **sign in**, so the invariant counts it only then (F-56): the
+account's `app_users.status` is `active` (a pending, blocked, suspended or
+soft-deleted account does not count) and its Better Auth user is not banned, or
+the ban has expired. Before F-56 a banned co-superadmin's grant, or one left
+`pending_approval` by a soft-delete and restore, counted as a survivor, so a
+superadmin could then block or demote themselves and leave nobody able to sign
+in and administer the platform.
 `stripsLastGlobalSuperuser` / `wouldStripLastGlobalSuperuser`
 (`src/lib/admin/access-scope.server.ts`) is the single predicate: a revocation
 that would destroy **every** remaining grant is refused with **409**
@@ -788,7 +795,8 @@ in one request — including on themselves:
 | --- | --- |
 | `DELETE /users/[id]/app-roles`, `DELETE /roles/[id]/permissions`, `PATCH\|DELETE /users/[id]/memberships`, `PATCH\|DELETE /organizations/[id]/members` | the route handler |
 | `POST /users/[id]/status`, `POST /api/v1/users/[id]/status`, `block`/`suspend` via `POST /users/bulk` | `performAdminStatusChange` (`src/lib/admin-status.server.ts`) — the shared core, so a fourth caller cannot forget it |
-| `DELETE /users/[id]`, `soft_delete` via `POST /users/bulk` | inside the soft-delete transaction; the saga's compensating unban runs first, so a refusal leaves the account untouched |
+| `DELETE /users/[id]`, `soft_delete` via `POST /users/bulk` | inside the soft-delete transaction; the saga's compensating unban runs first, so a refusal leaves the account untouched. Measured as the ban the soft-delete applies first (`banStripsLastGlobalSuperuser`, F-56) |
+| `POST /users/[id]/ban`, `ban` via `POST /users/bulk` (F-56) | `guardAppliedBan` (`src/lib/admin/user-actions.server.ts`), after the ban: a refusal lifts the ban again. The check cannot run first, because Better Auth writes the ban on its own connection and the check locks the target's `user` row, so it reads the grants with that one ban disregarded. A refused ban has already signed the target out |
 | `PATCH /organizations/[id]` with `status` other than `active` (F-09) | the route handler, in the same transaction as the update. Every grant held in that org stops counting, so suspending the tenant that holds the last ones (out of the box, the default org) is refused. Reactivation is never gated. |
 
 The bulk endpoint reports it as a per-row `last_superadmin` outcome rather than a
@@ -796,17 +804,16 @@ status code; `/api/v1` returns the RFC 7807 twin.
 
 **Not covered**, stated so the wording above is not read as wider than it is:
 
-- **`ban` / `unban`.** The invariant is defined on rows, and a ban changes none
-  of them — the grant survives and `unban` restores access without re-conferring
-  anything. Banning the last superadmin still locks them out of the UI; gating
-  that needs a different predicate ("at least one superadmin can still sign in",
-  which must also read `app_users.status` and the Better Auth ban flags). Open
-  follow-up.
+- **`unban`, `approve` / `reactivate` and `restore`.** They can only add an
+  account that signs in. Restore applies only to a soft-deleted account, whose
+  grants already do not count, and leaves it `pending_approval`; the bulk
+  `restore` refuses any other account per row with `not_deactivated`, as the
+  single-row route does with 409 (F-56).
 - **Authority conferred through a GROUP.** See §8.3.
 
 **Concurrency.** The check shares the writing transaction, and the grant read
 takes `for update of app_user_roles, app_organization_memberships,
-app_organizations, app_role_permissions`. The relation list matters: under READ COMMITTED a blocked
+app_organizations, app_role_permissions, app_users, "user"`. The relation list matters: under READ COMMITTED a blocked
 `SELECT … FOR UPDATE` re-evaluates its predicate (EvalPlanQual) only for rows of
 a **locked** relation that the committing transaction actually changed. Only the
 role-assignment revoke writes `app_user_roles`; the membership paths and the
@@ -820,6 +827,21 @@ recheck drops the row and the second caller is correctly refused. The org status
 change writes `app_organizations`, which is why that relation joined the list
 with F-09: two superadmins suspending two different tenants, each holding one of
 the last two grants, must not each see the other tenant as still active.
+`app_users` and the Better Auth `user` table joined it with F-56, because the
+status cascades write the account status and a ban writes the ban flags. A read
+that meets a ban Better Auth is still writing waits for it and then drops that
+account's grants, so a status change racing a ban cannot miss it.
+
+Every guarded path runs the grant read **before** its transaction writes any of
+those relations (a ban is Better Auth's own write, committed before the check),
+because the read locks each grant's rows in list order and the account rows
+last. A path that wrote an account row first could hold it while waiting on a
+concurrent read that already held the grant's membership or the shared org row
+and was now waiting on that account row: a deadlock, and a 500 for whichever
+side Postgres aborts. The status core therefore reads the grants ahead
+of its `If-Match` claim, and does so for `approve` and `reactivate` too, which are
+never refused but write the same rows. A lost claim still answers 412 ahead of a
+409.
 
 **The Better Auth admin plugin's raw HTTP surface is closed.** Every plugin
 endpoint (`/api/auth/admin/list-users`, `/set-user-password`,
@@ -1245,7 +1267,8 @@ REVOKE-2 last-superadmin invariant is decided. On a platform whose only
 superadmin is group-conferred, REVOKE-2 sees zero grants and refuses nothing.
 **Confer `superuser` by direct role assignment.** Changing this means teaching
 `userIsGlobalSuperuser` and `activeGlobalSuperuserGrants` about
-`app_group_roles` in one change, so the two predicates stay identical; until
+`app_group_roles` in one change, so the two predicates keep counting the same
+routes (the REVOKE-2 read also drops accounts that cannot sign in, F-56); until
 then the REVOKE-1 guard above is what keeps a delegated admin from building or
 dismantling such a group.
 

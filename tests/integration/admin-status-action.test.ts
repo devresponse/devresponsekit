@@ -26,6 +26,7 @@ const sharedExecuteTakeFirst = vi.fn(); // app_organization_memberships "outside
  */
 const trxMembershipRows = vi.fn(); // app_organization_memberships rows in the trx
 const trxGrantRows = vi.fn(); // activeGlobalSuperuserGrants rows in the trx
+const trxClaim = vi.fn(); // the If-Match compare-and-swap claim (review #44)
 
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
@@ -83,12 +84,14 @@ const dbStub = {
       fn({
         selectFrom: (t: unknown) => trxSelectChain(tableKey(t)),
         updateTable: () => {
-          // Any-length .set().where()....execute() routes to trxRun.
+          // Any-length .set().where()....execute() routes to trxRun; the
+          // claim's .executeTakeFirst() routes to trxClaim.
           const p: unknown = new Proxy(
             {},
             {
               get(_t, prop) {
                 if (prop === "execute") return trxRun;
+                if (prop === "executeTakeFirst") return trxClaim;
                 return () => p;
               },
             },
@@ -118,6 +121,8 @@ beforeEach(async () => {
   trxMembershipRows.mockResolvedValue([{ organization_id: ORG_A }]);
   trxGrantRows.mockReset();
   trxGrantRows.mockResolvedValue([]); // no superuser grant to protect by default
+  trxClaim.mockReset();
+  trxClaim.mockResolvedValue({ numUpdatedRows: 1n }); // the claim wins by default
   ({ performAdminStatusChange } = await import("@/lib/admin-status.server"));
 });
 afterEach(() => vi.resetModules());
@@ -333,9 +338,47 @@ describe("performAdminStatusChange — last superadmin (REVOKE-2)", () => {
       newMembershipStatus: "active",
       eventType: "admin.user.reactivated",
     });
+    // Not refused, though the target holds the only grant…
     expect(result).toEqual({ ok: true, status: "active" });
-    // The predicate is not even consulted.
-    expect(trxGrantRows).not.toHaveBeenCalled();
+    // …but the grant read still runs, for its locks, before the first write
+    // (F-56 lock order: this writes the `app_users` and membership rows a
+    // concurrent guarded read locks, so it must not take them first).
+    expect(trxGrantRows).toHaveBeenCalledTimes(1);
+    expect(trxGrantRows.mock.invocationCallOrder[0]).toBeLessThan(
+      trxRun.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("with If-Match, reads the grants before the claim, and a lost claim still answers 412 before a 409", async () => {
+    // F-56 lock order: the claim writes the target's `app_users` row, which the
+    // grant read locks last, so claiming first could deadlock with a
+    // concurrent guarded read (tests/db/last-superadmin-sign-in.db.test.ts).
+    const input = {
+      actorBetterAuthUserId: ACTOR_ID,
+      scope: ALL,
+      targetAppUserId: TARGET_ID,
+      newStatus: "blocked",
+      newMembershipStatus: "blocked",
+      eventType: "admin.user.blocked",
+      expectedUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
+    } as const;
+    // The target holds the only grant, so this block is refused…
+    await expect(performAdminStatusChange(input)).resolves.toEqual({
+      ok: false,
+      error: "last_superadmin",
+    });
+    expect(trxGrantRows.mock.invocationCallOrder[0]).toBeLessThan(
+      trxClaim.mock.invocationCallOrder[0]!,
+    );
+    expect(trxRun).not.toHaveBeenCalled();
+
+    // …unless the version is stale: the lost claim still wins, as before.
+    trxClaim.mockResolvedValue({ numUpdatedRows: 0n });
+    await expect(performAdminStatusChange(input)).resolves.toEqual({
+      ok: false,
+      error: "precondition_failed",
+    });
+    expect(trxRun).not.toHaveBeenCalled();
   });
 
   it("an ORG-SCOPED actor measures only THEIR org's membership (AUTHZ-1)", async () => {

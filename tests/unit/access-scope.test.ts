@@ -44,6 +44,7 @@ import {
   scopeOrganizationId,
   canAccessOrg,
   requiresSuperadminForSharedTarget,
+  banStripsLastGlobalSuperuser,
   membershipCascadeStripsLastGlobalSuperuser,
   stripsLastGlobalSuperuser,
   userHasMembershipOutsideOrg,
@@ -381,6 +382,15 @@ describe("stripsLastGlobalSuperuser (REVOKE-2)", () => {
     // Suspending an org that holds no grant strips nothing.
     expect(stripsLastGlobalSuperuser([g1], { organizationIds: ["org-z"] })).toBe(false);
   });
+
+  it("F-56: an ACCOUNT losing sign-in (a ban) kills every grant it holds, in every org", () => {
+    const sameUserElsewhere: SuperuserGrant = { ...g1, organizationId: "org-b" };
+    expect(stripsLastGlobalSuperuser([g1, sameUserElsewhere], { appUserIds: ["u1"] })).toBe(true);
+    // Another account keeps a grant, so the ban may proceed.
+    expect(stripsLastGlobalSuperuser([g1, g2], { appUserIds: ["u1"] })).toBe(false);
+    // Banning an account that holds no grant strips nothing.
+    expect(stripsLastGlobalSuperuser([g1], { appUserIds: ["u9"] })).toBe(false);
+  });
 });
 
 describe("activeGlobalSuperuserGrants / wouldStripLastGlobalSuperuser (REVOKE-2)", () => {
@@ -403,10 +413,11 @@ describe("activeGlobalSuperuserGrants / wouldStripLastGlobalSuperuser (REVOKE-2)
 });
 
 /**
- * REVOKE-2 for the ACCOUNT-LIFECYCLE cascades (review #444). Soft-delete and
- * `performAdminStatusChange` do not name the rows they remove — they blanket a
- * user's memberships — so they resolve the affected (user, org) pairs and feed
- * the SAME predicate rather than growing a second, drift-prone mechanism.
+ * REVOKE-2 for the STATUS cascade (review #444). `performAdminStatusChange`
+ * does not name the rows it removes — it blankets a user's memberships — so it
+ * resolves the affected (user, org) pairs and feeds the SAME predicate rather
+ * than growing a second, drift-prone mechanism. (The soft-delete bans first and
+ * is measured by `banStripsLastGlobalSuperuser` since F-56, below.)
  */
 describe("membershipCascadeStripsLastGlobalSuperuser (REVOKE-2)", () => {
   // The helper takes NO default executor on purpose — it must run inside the
@@ -449,5 +460,37 @@ describe("membershipCascadeStripsLastGlobalSuperuser (REVOKE-2)", () => {
     membershipRowsExecute.mockResolvedValue([{ organization_id: "org-a" }]);
     grantsExecute.mockResolvedValue([]);
     await expect(membershipCascadeStripsLastGlobalSuperuser("u1", trx)).resolves.toBe(false);
+  });
+});
+
+/**
+ * REVOKE-2 for a BAN (F-56) — the single-row ban, its bulk twin and both
+ * soft-deletes. The whole account is the removal, whatever org its grants sit
+ * in. That the grant read disregards the ban the caller has just applied is
+ * SQL, pinned in superuser-grants-lock-sql.test.ts and the DB suite.
+ */
+describe("banStripsLastGlobalSuperuser (REVOKE-2, F-56)", () => {
+  const trx = mockedDb as unknown as Parameters<typeof banStripsLastGlobalSuperuser>[1];
+  const target = { appUserId: "u1", betterAuthUserId: "ba1" };
+
+  it("refuses when the banned account holds every remaining grant, in any org", async () => {
+    grantsExecute.mockResolvedValue([
+      { app_user_id: "u1", organization_id: "org-a", role_id: "r-super" },
+      { app_user_id: "u1", organization_id: "org-b", role_id: "r-super" },
+    ]);
+    await expect(banStripsLastGlobalSuperuser(target, trx)).resolves.toBe(true);
+  });
+
+  it("allows it when another account keeps a grant", async () => {
+    grantsExecute.mockResolvedValue([
+      { app_user_id: "u1", organization_id: "org-a", role_id: "r-super" },
+      { app_user_id: "u2", organization_id: "org-a", role_id: "r-super" },
+    ]);
+    await expect(banStripsLastGlobalSuperuser(target, trx)).resolves.toBe(false);
+  });
+
+  it("is a no-op on a platform with no superadmin who can sign in", async () => {
+    grantsExecute.mockResolvedValue([]);
+    await expect(banStripsLastGlobalSuperuser(target, trx)).resolves.toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import "server-only";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { db } from "@/db/database";
 import type { AppDatabase } from "@/db/schema/app-schema";
 import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
@@ -509,10 +509,19 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  * conferring a permission you do not hold). The platform could therefore be
  * left with NO superadmin and no in-app way to recover.
  *
- * The invariant this file now enforces: **at least one `app_user` must retain
- * an ACTIVE membership plus an assignment of a role carrying the `superuser`
- * permission.** An operation that would empty that set is refused (409
- * `last_superadmin`); an operation that leaves even one route intact is not.
+ * The invariant this file now enforces: **at least one `app_user` who can
+ * still SIGN IN must retain an ACTIVE membership plus an assignment of a role
+ * carrying the `superuser` permission.** An operation that would empty that
+ * set is refused (409 `last_superadmin`); an operation that leaves even one
+ * route intact is not. "Can still sign in" (F-56) means the account's
+ * `app_users.status` is `active` — the only status `decideSecureAccess`
+ * admits, so neither a pending, blocked, suspended nor soft-deleted
+ * (`deactivated`) account counts — and its Better Auth user is not banned
+ * (or the ban has expired). Before F-56 a grant held by an account in any of
+ * those states counted as a survivor, so after banning (or soft-deleting and
+ * restoring, which leaves `pending_approval`) a co-superadmin, a superadmin
+ * could strip their own grant and leave nobody able to administer the
+ * platform.
  *
  * Deliberately NOT a "you may not touch a superadmin" rule — a superadmin must
  * still be able to demote a co-superadmin, and an org admin must still manage
@@ -537,28 +546,36 @@ export async function betterAuthUserIsGlobalSuperuser(betterAuthUserId: string):
  *      this the last superadmin could block themselves in one request.
  *   6. The soft-delete cascade (review #444) — `DELETE /users/[id]` and the
  *      `soft_delete` bulk action, both of which blanket-block every membership
- *      the target holds.
+ *      the target holds (and, first, ban them: since F-56 they are measured
+ *      as the ban below).
  *   7. `PATCH /organizations/[id]` moving the org away from `active` (F-09) —
  *      since a grant counts only in an active org, suspending, archiving or
  *      un-activating the tenant that holds the last grants (by default the
  *      seeded default org) would otherwise lock the platform out in one save.
+ *   8. A Better Auth BAN (F-56) — `POST /users/[id]/ban` and the `ban` bulk
+ *      action, through `guardAppliedBan` (`user-actions.server.ts`). The ban
+ *      lands first and is compensated on a refusal, like the soft-delete; see
+ *      {@link banStripsLastGlobalSuperuser} for why the check follows it.
  *
  * NOT enforced on, stated so the wording above is not read as wider than it
- * is: `ban` / `unban` (see the note on `performBan` — they change no row this
- * invariant counts), and any authority conferred through a GROUP (see
- * {@link SuperuserGrant}).
+ * is: `unban`, `approve`/`reactivate` and `restore`, which can only ADD an
+ * account that signs in (restore applies only to a soft-deleted account, whose
+ * grants already do not count, and leaves it `pending_approval`), and any
+ * authority conferred through a GROUP (see {@link SuperuserGrant}).
  */
 
 /**
  * One surviving route by which a principal is a global superuser: the
- * (user, org, role) triple {@link userIsGlobalSuperuser} tests for.
+ * (user, org, role) triple {@link userIsGlobalSuperuser} tests for, held by an
+ * account that can still sign in (F-56).
  *
  * Group-conferred roles (`app_group_roles`, ADR-0002) are deliberately NOT
  * counted, because {@link userIsGlobalSuperuser} does not count them either:
- * this predicate protects exactly the authority that predicate reports, and
- * the two must stay identical — counting a route the platform's own superuser
+ * this predicate protects exactly the authority that predicate reports — less
+ * the accounts that cannot sign in to use it — and the two must not drift
+ * further apart than that. Counting a route the platform's own superuser
  * determination ignores would let the invariant "pass" while the real
- * superadmin set went empty, and vice versa.
+ * superadmin set went empty.
  *
  * KNOWN LIMIT, stated so nobody reads more protection into REVOKE-2 than it
  * gives (review #444): `getUserAccessContext` DOES union group-conferred roles
@@ -628,12 +645,20 @@ export interface SuperuserGrantRemoval {
    * reactivating the org brings it back.
    */
   organizationIds?: ReadonlyArray<string>;
+  /**
+   * Accounts that will no longer be able to SIGN IN (F-56) — a Better Auth
+   * ban, or the soft-delete that applies one. Every grant the account holds
+   * dies with it, whatever org it sits in, because a grant only counts for an
+   * account that can sign in (see {@link activeGlobalSuperuserGrants}).
+   */
+  appUserIds?: ReadonlyArray<string>;
 }
 
 /** Pure: would `removal` destroy this particular grant? */
 function grantIsRemoved(grant: SuperuserGrant, removal: SuperuserGrantRemoval): boolean {
   if (removal.roleIds?.includes(grant.roleId)) return true;
   if (removal.organizationIds?.includes(grant.organizationId)) return true;
+  if (removal.appUserIds?.includes(grant.appUserId)) return true;
   if (
     removal.assignments?.some(
       (a) =>
@@ -706,6 +731,25 @@ export function stripsLastGlobalSuperuser(
  * each holding one of the last two grants, would otherwise each see the other
  * org as still active.
  *
+ * F-56 counts a grant only for an account that can still SIGN IN, so the join
+ * reads `app_users.status` (the status cascades write it) and the Better Auth
+ * `user` row's ban flags (a ban writes them), and both relations are locked
+ * for the same reason again. The `user` lock is what serializes a ban against
+ * every other guarded path: Better Auth writes the ban on its own connection,
+ * so a guarded read that meets that row mid-write waits for it, and the
+ * recheck then drops the banned account's grants. That is also why the ban
+ * paths check AFTER banning, never while holding this lock (see
+ * {@link banStripsLastGlobalSuperuser}). `disregardBanOf` exists for them
+ * alone: it reads one account as if its ban were not there, which is the
+ * state just before the ban they have already applied.
+ *
+ * Lock order: the rows of each grant are locked in the list order below, the
+ * account rows last. Call this before the transaction writes any of these
+ * relations (including an `If-Match` claim on `app_users`): a write taken
+ * first can be held while this waits on a concurrent read that holds the
+ * grant's other rows and is itself waiting on the written row, which is a
+ * deadlock (see `performAdminStatusChange`).
+ *
  * Pass the enclosing transaction as `executor`; calling this on the shared
  * pool takes and releases the lock immediately and protects nothing.
  *
@@ -715,6 +759,7 @@ export function stripsLastGlobalSuperuser(
  */
 export async function activeGlobalSuperuserGrants(
   executor: Kysely<AppDatabase> = db,
+  options: { disregardBanOf?: string } = {},
 ): Promise<SuperuserGrant[]> {
   const rows = await executor
     .selectFrom("app_user_roles")
@@ -733,9 +778,30 @@ export async function activeGlobalSuperuserGrants(
         .onRef("app_organizations.id", "=", "app_organization_memberships.organization_id")
         .on("app_organizations.status", "=", ACTIVE_ORGANIZATION_STATUS),
     )
+    // F-56: only an account that can sign in. `active` is the one account
+    // status `decideSecureAccess` admits, and a soft-deleted account is
+    // `deactivated`, so this filter excludes it too.
+    .innerJoin("app_users", (join) =>
+      join
+        .onRef("app_users.id", "=", "app_user_roles.app_user_id")
+        .on("app_users.status", "=", "active"),
+    )
+    .innerJoin("user", "user.id", "app_users.better_auth_user_id")
     .innerJoin("app_role_permissions", "app_role_permissions.role_id", "app_user_roles.role_id")
     .innerJoin("app_permissions", "app_permissions.id", "app_role_permissions.permission_id")
     .where("app_permissions.key", "=", SUPERADMIN_PERMISSION)
+    // `isBanActive` in SQL: unbanned, or banned with an expiry already passed.
+    // A NULL `banExpires` on a banned row is an indefinite ban, and `<=` on
+    // NULL is not true, so it stays excluded.
+    .where((eb) =>
+      eb.or([
+        eb("user.banned", "is not", true),
+        eb("user.banExpires", "<=", sql<Date>`now()`),
+        ...(options.disregardBanOf === undefined
+          ? []
+          : [eb("user.id", "=", options.disregardBanOf)]),
+      ]),
+    )
     .select([
       "app_user_roles.app_user_id as app_user_id",
       "app_user_roles.organization_id as organization_id",
@@ -746,6 +812,8 @@ export async function activeGlobalSuperuserGrants(
       "app_organization_memberships",
       "app_organizations",
       "app_role_permissions",
+      "app_users",
+      "user",
     ])
     .execute();
   return rows.map((row) => ({
@@ -769,16 +837,16 @@ export async function wouldStripLastGlobalSuperuser(
 }
 
 /**
- * REVOKE-2 for the ACCOUNT-LIFECYCLE cascades (review #444).
+ * REVOKE-2 for the STATUS cascade (review #444).
  *
  * The four revocation routes name the rows they are about to remove, so they
- * build a {@link SuperuserGrantRemoval} literal. The lifecycle cascades do not:
- * soft-delete (`DELETE /users/[id]` and its bulk twin) blanket-blocks EVERY
- * membership of the target, and `performAdminStatusChange` moves every
- * membership in the actor's scope away from `active`. Both are still exactly
- * the `memberships` removal shape, so they take the SAME predicate instead of a
- * second mechanism that could drift from it — they just have to resolve the
- * affected (user, org) pairs first.
+ * build a {@link SuperuserGrantRemoval} literal. `performAdminStatusChange`
+ * does not: it moves every membership in the actor's scope away from `active`.
+ * That is still exactly the `memberships` removal shape, so it takes the SAME
+ * predicate instead of a second mechanism that could drift from it — it just
+ * has to resolve the affected (user, org) pairs first. (The soft-delete used
+ * this too until F-56; it bans before its cascade, so it now goes through
+ * {@link banStripsLastGlobalSuperuser}.)
  *
  * Reads those pairs through the CALLER'S transaction so the grant read below
  * takes its row locks there too; calling this on the shared pool protects
@@ -807,6 +875,39 @@ export async function membershipCascadeStripsLastGlobalSuperuser(
     },
     executor,
   );
+}
+
+/**
+ * REVOKE-2 for a Better Auth BAN (F-56): `POST /users/[id]/ban` and the `ban`
+ * bulk action (both through `guardAppliedBan`), and the soft-delete of
+ * `DELETE /users/[id]` and `soft_delete`, which ban before their cascade. The
+ * removal is the whole account: a banned account cannot sign in, so none of
+ * its grants counts any more.
+ *
+ * Call it AFTER the ban has been applied, inside a transaction, and undo the
+ * ban when it returns true. It cannot run first: Better Auth writes the ban
+ * on its own connection, and the grant read locks the target's `user` row, so
+ * banning while the lock is held would wait on a lock the caller itself holds,
+ * and releasing it first would reopen the race the lock exists to close. So
+ * the ban lands, and this reads the grants with that one ban disregarded (the
+ * state just before it) and asks whether the target's leaving empties the
+ * set. Any other guarded write meets the ban through the `user` row lock and
+ * is measured against it, and of two bans racing each other on the last two
+ * superadmins at least one sees the other's and is refused and undone.
+ *
+ * A refused ban has already signed the target out (`banBetterAuthUser` deletes
+ * their sessions), and undoing it lifts the ban whatever it replaced. Neither
+ * matters in practice: with a signed-in superadmin actor holding their own
+ * direct grant, the set cannot empty except in a race.
+ */
+export async function banStripsLastGlobalSuperuser(
+  target: { appUserId: string; betterAuthUserId: string },
+  executor: Kysely<AppDatabase>,
+): Promise<boolean> {
+  const grants = await activeGlobalSuperuserGrants(executor, {
+    disregardBanOf: target.betterAuthUserId,
+  });
+  return stripsLastGlobalSuperuser(grants, { appUserIds: [target.appUserId] });
 }
 
 /**

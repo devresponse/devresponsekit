@@ -17,9 +17,10 @@ const txRun = vi.fn();
 const requiresSuperadminMock = vi.fn();
 // Review #7 privilege-ordering guard (targetOutranksActor). Default false.
 const outranksMock = vi.fn();
-// REVOKE-2 (review #444) — would the soft-delete cascade strip the last global
-// superuser? Default false, i.e. the platform has other superadmins.
-const cascadeStripsLastMock = vi.fn();
+// REVOKE-2 (review #444, F-56) — would the ban (on its own, or the one the
+// soft-delete applies) leave no superadmin who can sign in? Default false,
+// i.e. the platform has other superadmins.
+const banStripsLastMock = vi.fn();
 
 vi.mock("@/lib/admin-status.server", () => ({
   performAdminStatusChange: (...a: unknown[]) => performStatusChange(...a),
@@ -31,7 +32,7 @@ vi.mock("@/lib/admin/access-scope.server", async () => ({
     await vi.importActual<typeof AccessScopeModule>("@/lib/admin/access-scope.server")
   ).scopeOrganizationId,
   requiresSuperadminForSharedTarget: (...a: unknown[]) => requiresSuperadminMock(...a),
-  membershipCascadeStripsLastGlobalSuperuser: (...a: unknown[]) => cascadeStripsLastMock(...a),
+  banStripsLastGlobalSuperuser: (...a: unknown[]) => banStripsLastMock(...a),
   // The real class, so `instanceof` in the module under test still matches.
   LastSuperadminCascadeError: class LastSuperadminCascadeError extends Error {},
   LAST_SUPERADMIN_ERROR: "last_superadmin",
@@ -86,6 +87,8 @@ const target = {
   primaryEmail: "u@x.com",
   status: "active",
 };
+/** A soft-deleted target: the only kind `restore` applies to. */
+const deletedTarget = { ...target, status: "deactivated" };
 const actor = {
   betterAuthUserId: "admin",
   request: { headers: new Headers() },
@@ -103,12 +106,12 @@ beforeEach(async () => {
     txRun,
     requiresSuperadminMock,
     outranksMock,
-    cascadeStripsLastMock,
+    banStripsLastMock,
   ])
     m.mockReset();
   trxSets.length = 0;
   outranksMock.mockResolvedValue(false);
-  cascadeStripsLastMock.mockResolvedValue(false);
+  banStripsLastMock.mockResolvedValue(false);
   performStatusChange.mockResolvedValue({ ok: true });
   banMock.mockResolvedValue(undefined);
   unbanMock.mockResolvedValue(undefined);
@@ -175,6 +178,61 @@ describe("ban / unban", () => {
     expect(auditMock).toHaveBeenCalledWith("admin.user.ban_failed", "error", expect.anything());
   });
 
+  it("ban runs the REVOKE-2 check after the ban, in a transaction, on the target (F-56)", async () => {
+    await executeBulkUserAction("ban", target, actor, { reason: "x" });
+    expect(txRun).toHaveBeenCalledTimes(1);
+    expect(banStripsLastMock).toHaveBeenCalledWith(target, expect.anything());
+    expect(banMock.mock.invocationCallOrder[0]).toBeLessThan(
+      banStripsLastMock.mock.invocationCallOrder[0]!,
+    );
+    expect(unbanMock).not.toHaveBeenCalled();
+  });
+
+  it("ban is REFUSED and undone when it would leave no superadmin who can sign in (F-56)", async () => {
+    banStripsLastMock.mockResolvedValue(true);
+    const out = await executeBulkUserAction("ban", target, actor, { reason: "x" });
+    // The single-row route answers 409 with the same code.
+    expect(out).toEqual({ ok: false, appUserId: "u1", error: "last_superadmin" });
+    // The ban already landed, so the saga must lift it again.
+    expect(unbanMock).toHaveBeenCalledWith("ba1");
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.superuser.revocation_denied",
+      "denied",
+      expect.objectContaining({
+        appUserId: "u1",
+        reason: "last_global_superuser",
+        requestId: "req-bulk-1",
+        metadata: { action: "ban", bulk: true },
+      }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith("admin.user.banned", "success", expect.anything());
+  });
+
+  it("ban is undone, not left in place, when the REVOKE-2 check itself fails (F-56)", async () => {
+    txRun.mockRejectedValue(new Error("deadlock"));
+    const out = await executeBulkUserAction("ban", target, actor, { reason: "x" });
+    expect(out).toEqual({ ok: false, appUserId: "u1", error: "revocation_check_failed" });
+    expect(unbanMock).toHaveBeenCalledWith("ba1");
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.ban_failed",
+      "error",
+      expect.objectContaining({ reason: "revocation_check_failed" }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith("admin.user.banned", "success", expect.anything());
+  });
+
+  it("a failed undo of a refused ban is audited, and the row still fails (F-56)", async () => {
+    banStripsLastMock.mockResolvedValue(true);
+    unbanMock.mockRejectedValue(new Error("be down"));
+    const out = await executeBulkUserAction("ban", target, actor, { reason: "x" });
+    expect(out).toEqual({ ok: false, appUserId: "u1", error: "last_superadmin" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.ban_compensation_failed",
+      "error",
+      expect.objectContaining({ reason: "compensation_unban_failed" }),
+    );
+  });
+
   it("unban calls Better Auth and audits", async () => {
     const out = await executeBulkUserAction("unban", target, actor);
     expect(out).toEqual({ ok: true, appUserId: "u1" });
@@ -233,7 +291,7 @@ describe("soft_delete / restore", () => {
   });
 
   it("soft_delete is REFUSED when the cascade would strip the last global superuser (REVOKE-2)", async () => {
-    cascadeStripsLastMock.mockResolvedValue(true);
+    banStripsLastMock.mockResolvedValue(true);
     const out = await executeBulkUserAction("soft_delete", target, actor, {});
     // Reported with the same code the single-row route answers 409 with, so
     // the bulk path cannot be used to get around it.
@@ -253,10 +311,12 @@ describe("soft_delete / restore", () => {
       "error",
       expect.anything(),
     );
+    // F-56: measured as the ban it has just applied, on the target account.
+    expect(banStripsLastMock).toHaveBeenCalledWith(target, expect.anything());
   });
 
   it("restore unbans then reverses the cascade", async () => {
-    const out = await executeBulkUserAction("restore", target, actor);
+    const out = await executeBulkUserAction("restore", deletedTarget, actor);
     expect(out).toEqual({ ok: true, appUserId: "u1" });
     expect(unbanMock).toHaveBeenCalled();
     expect(txRun).toHaveBeenCalledTimes(1);
@@ -264,10 +324,22 @@ describe("soft_delete / restore", () => {
 
   it("restore failure (unban) is structured", async () => {
     unbanMock.mockRejectedValue(new Error("nope"));
-    const out = await executeBulkUserAction("restore", target, actor);
+    const out = await executeBulkUserAction("restore", deletedTarget, actor);
     expect(out).toEqual({ ok: false, appUserId: "u1", error: "auth_unban_failed" });
     expect(txRun).not.toHaveBeenCalled();
   });
+
+  it.each(["active", "pending_approval", "blocked", "suspended"])(
+    "restore refuses a %s account, as the single-row route does, and touches nothing (F-56)",
+    async (status) => {
+      // Moving an active superadmin to `pending_approval` would be a loss of
+      // sign-in that REVOKE-2 never sees.
+      const out = await executeBulkUserAction("restore", { ...target, status }, actor);
+      expect(out).toEqual({ ok: false, appUserId: "u1", error: "not_deactivated" });
+      expect(unbanMock).not.toHaveBeenCalled();
+      expect(txRun).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("account-global actions refuse a shared target for a non-superadmin (AUTHZ-2)", () => {
@@ -372,7 +444,8 @@ describe("per-row audits carry the batch's organization (F-32)", () => {
     ["soft_delete", "admin.user.soft_deleted"],
     ["restore", "admin.user.restored"],
   ] as const)("%s by an org admin is stamped with the org", async (action, eventType) => {
-    await executeBulkUserAction(action, target, orgActor, { reason: "x" });
+    const row = action === "restore" ? deletedTarget : target;
+    await executeBulkUserAction(action, row, orgActor, { reason: "x" });
     expect(auditMock).toHaveBeenCalledWith(
       eventType,
       "success",

@@ -80,6 +80,7 @@ async function cleanup(): Promise<void> {
     await db.deleteFrom("app_users").where("id", "in", userIds).execute();
   }
   await db.deleteFrom("app_organizations").where("slug", "like", `${PREFIX}%`).execute();
+  await pgPool.query(`delete from "user" where id like $1`, [`${PREFIX}%`]);
 }
 
 async function newOrg(key: string, status: string): Promise<string> {
@@ -91,8 +92,18 @@ async function newOrg(key: string, status: string): Promise<string> {
   return row.id;
 }
 
+/**
+ * An active account WITH its Better Auth user: since F-56 the last-superadmin
+ * predicate counts a grant only for an account that can sign in, and one with
+ * no Better Auth user cannot.
+ */
 async function newUser(key: string): Promise<{ id: string; ba: string }> {
   const ba = `${PREFIX}ba_${key}`;
+  await pgPool.query(
+    `insert into "user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
+     values ($1, $2, $3, true, now(), now())`,
+    [ba, `DBTest ${key}`, `${PREFIX}${key}@dbtest.local`],
+  );
   const row = await db
     .insertInto("app_users")
     .values({

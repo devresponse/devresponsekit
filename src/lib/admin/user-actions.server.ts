@@ -4,7 +4,7 @@ import { db } from "@/db/database";
 import {
   requiresSuperadminForSharedTarget,
   scopeOrganizationId,
-  membershipCascadeStripsLastGlobalSuperuser,
+  banStripsLastGlobalSuperuser,
   LastSuperadminCascadeError,
   LAST_SUPERADMIN_ERROR,
   LAST_SUPERADMIN_EVENT,
@@ -12,7 +12,7 @@ import {
   type AccessLike,
   type OrgScope,
 } from "@/lib/admin/access-scope.server";
-import { auditUserAction } from "@/lib/admin/audit-helpers.server";
+import { auditUserAction, type UserAuditContext } from "@/lib/admin/audit-helpers.server";
 import { banBetterAuthUser, unbanBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { targetOutranksActor } from "@/lib/admin/user-target.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
@@ -167,19 +167,83 @@ async function performStatusAction(
   return { ok: false, appUserId: target.appUserId, error: result.error };
 }
 
+/** Outcome of {@link guardAppliedBan}. */
+export type AppliedBanGuard =
+  | { ok: true }
+  | { ok: false; error: typeof LAST_SUPERADMIN_ERROR }
+  | { ok: false; error: "revocation_check_failed"; cause: unknown };
+
 /**
- * REVOKE-2 scope note (review #444): `ban` / `unban` are deliberately NOT gated
- * by the last-superadmin invariant. That invariant is defined on ROWS — an
- * active membership plus an assignment of a role carrying `superuser` — and a
- * ban touches none of them: the grant survives intact, `userIsGlobalSuperuser`
- * still reports the target, and `unban` restores access without re-conferring
- * anything. Banning the last superadmin does lock them out of the UI, so it is
- * a real (if reversible-by-row-edit) lockout; gating it needs a different
- * predicate — "at least one superadmin can still SIGN IN", which would also
- * have to read `app_users.status` and the Better Auth ban flags — and that is a
- * separate change, recorded as such in docs/admin-manager.md §8.1 rather than
- * implied closed here.
+ * REVOKE-2 for a ban that `banBetterAuthUser` has JUST applied (F-56), shared
+ * by `POST /users/[id]/ban` and the `ban` bulk action so both refuse, undo and
+ * audit it identically.
+ *
+ * Before F-56 a ban was not gated at all: the invariant counted grants by their
+ * rows, a ban changes none of them, so after banning a co-superadmin a
+ * superadmin could block or demote themselves while the banned grant still
+ * "survived". The invariant now counts only accounts that can sign in, and a
+ * ban is measured as the loss of the target's whole account. The check has to
+ * FOLLOW the ban (see `banStripsLastGlobalSuperuser`), so a refusal is a saga
+ * like the soft-delete's: the ban is undone and the refusal audited here, and
+ * the caller only answers it. A check that fails outright is undone the same
+ * way, so a ban nobody could verify is never left in place.
  */
+export async function guardAppliedBan(
+  target: { appUserId: string; betterAuthUserId: string; primaryEmail: string },
+  audit: Pick<UserAuditContext, "request" | "actorBetterAuthUserId" | "organizationId"> & {
+    requestId?: string | null;
+    bulk?: boolean;
+  },
+): Promise<AppliedBanGuard> {
+  let failure: { cause: unknown } | null = null;
+  let stripsLast = false;
+  try {
+    stripsLast = await db.transaction().execute((trx) => banStripsLastGlobalSuperuser(target, trx));
+  } catch (err) {
+    failure = { cause: err };
+  }
+  if (!stripsLast && failure === null) return { ok: true };
+
+  const bulk = audit.bulk ? { bulk: true } : {};
+  // `organizationId` is named at each write, not spread from here (F-32).
+  const context = {
+    request: audit.request,
+    actorBetterAuthUserId: audit.actorBetterAuthUserId,
+    appUserId: target.appUserId,
+    email: target.primaryEmail,
+    requestId: audit.requestId ?? null,
+  };
+  try {
+    await unbanBetterAuthUser(target.betterAuthUserId);
+  } catch (unbanErr) {
+    await auditUserAction("admin.user.ban_compensation_failed", "error", {
+      ...context,
+      organizationId: audit.organizationId,
+      reason: "compensation_unban_failed",
+      metadata: { message: unbanErr instanceof Error ? unbanErr.message : "unknown", ...bulk },
+    });
+  }
+  if (failure !== null) {
+    await auditUserAction("admin.user.ban_failed", "error", {
+      ...context,
+      organizationId: audit.organizationId,
+      reason: "revocation_check_failed",
+      metadata: {
+        message: failure.cause instanceof Error ? failure.cause.message : "unknown",
+        ...bulk,
+      },
+    });
+    return { ok: false, error: "revocation_check_failed", cause: failure.cause };
+  }
+  await auditUserAction(LAST_SUPERADMIN_EVENT, "denied", {
+    ...context,
+    organizationId: audit.organizationId,
+    reason: LAST_SUPERADMIN_REASON,
+    metadata: { action: "ban", ...bulk },
+  });
+  return { ok: false, error: LAST_SUPERADMIN_ERROR };
+}
+
 async function performBan(
   target: BulkUserTarget,
   actor: BulkUserActor,
@@ -209,6 +273,16 @@ async function performBan(
     });
     return { ok: false, appUserId: target.appUserId, error: "auth_ban_failed" };
   }
+  // REVOKE-2 (F-56): the same guard as the single-row route, so the bulk path
+  // is no way around its 409; the row fails and the batch goes on.
+  const guarded = await guardAppliedBan(target, {
+    request: actor.request,
+    actorBetterAuthUserId: actor.betterAuthUserId,
+    organizationId: scopeOrganizationId(actor.scope),
+    requestId: actor.requestId,
+    bulk: true,
+  });
+  if (!guarded.ok) return { ok: false, appUserId: target.appUserId, error: guarded.error };
   await auditUserAction("admin.user.banned", "success", {
     request: actor.request,
     actorBetterAuthUserId: actor.betterAuthUserId,
@@ -285,8 +359,10 @@ async function performSoftDelete(
       // the cascade below blocks every membership the target holds, which is
       // how a `superuser` assignment stops counting. The bulk path must refuse
       // it for the same reason and by the same predicate, or `POST /users/bulk`
-      // would be the way around the single-row 409.
-      if (await membershipCascadeStripsLastGlobalSuperuser(target.appUserId, trx)) {
+      // would be the way around the single-row 409. F-56: measured as the ban
+      // applied above, which the grant read would otherwise already see as
+      // gone, emptying the set before this check could count it.
+      if (await banStripsLastGlobalSuperuser(target, trx)) {
         throw new LastSuperadminCascadeError();
       }
 
@@ -383,6 +459,15 @@ async function performRestore(
 ): Promise<BulkUserOutcome> {
   const refused = await refuseSharedAccountGlobal(target, actor);
   if (refused) return refused;
+  // F-56: restore reverses a soft-delete and nothing else, as on the single-row
+  // route (409 `not_deactivated`). Applied to any other account it moved the
+  // user to `pending_approval`, a loss of sign-in REVOKE-2 does not gate (a
+  // real restore never needs it: a soft-deleted account's grants do not
+  // count), so the last superadmin could "restore" themselves out of the
+  // console through this path.
+  if (target.status !== "deactivated") {
+    return { ok: false, appUserId: target.appUserId, error: "not_deactivated" };
+  }
   try {
     await unbanBetterAuthUser(target.betterAuthUserId);
   } catch (err) {

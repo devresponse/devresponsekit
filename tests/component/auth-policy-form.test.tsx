@@ -140,7 +140,14 @@ describe("AuthPolicyForm", () => {
         canUpdate
       />,
     );
-    expect(screen.getByText(/immediate access without proving/i)).toBeInTheDocument();
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent(/immediate access without proving/i);
+    // F-121: the warning callout (dark amber on a tint), not the ~2.1:1 amber
+    // `text-warning`; and a static note, not an `alert` re-announced on every
+    // toggle of the combination.
+    expect(note).toHaveClass("text-warning-foreground");
+    expect(note).not.toHaveClass("text-warning");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("resets to inheritance via DELETE and returns to the summary view", async () => {

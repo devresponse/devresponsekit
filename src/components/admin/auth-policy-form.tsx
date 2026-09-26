@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -315,9 +316,13 @@ export function AuthPolicyForm({
         />
 
         {openSignup ? (
-          <p className="text-warning text-sm" role="note">
-            {t("openSignupWarning")}
-          </p>
+          // The warning callout, not bare `text-warning`: amber text on the
+          // light background is ~2.1:1, so the one security warning on this
+          // form was near-unreadable (F-121). `note`, not the Alert's default
+          // `alert`: static text must not be re-announced on every toggle.
+          <Alert variant="warning" role="note">
+            <AlertDescription>{t("openSignupWarning")}</AlertDescription>
+          </Alert>
         ) : null}
 
         <FormField

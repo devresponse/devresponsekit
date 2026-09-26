@@ -3,14 +3,16 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 /**
  * Sheet primitive (Radix Dialog with side-anchored content).
  *
- * Used by the application switcher and mobile sidebar drawer. Includes
- * an accessible close button labelled with the i18n key passed by the
- * parent so the screen-reader announcement matches the active locale.
+ * Used by the application switcher, the mobile sidebar drawer and the
+ * Administrator detail sheets. Includes an accessible close button whose
+ * name defaults to the catalog's `common.dialogs.close` (F-117); a parent
+ * passes `closeLabel` only to say something more specific ("Close menu").
  */
 const Sheet = DialogPrimitive.Root;
 const SheetTrigger = DialogPrimitive.Trigger;
@@ -47,28 +49,34 @@ const SHEET_SIDE_CLASSES: Record<NonNullable<SheetContentProps["side"]>, string>
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, closeLabel = "Close", ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "bg-background border-border fixed z-50 flex flex-col gap-4 p-6 shadow-lg transition ease-in-out",
-        SHEET_SIDE_CLASSES[side],
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close
-        className="ring-offset-background focus:ring-ring absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-none disabled:pointer-events-none"
-        aria-label={closeLabel}
+>(({ side = "right", className, children, closeLabel, ...props }, ref) => {
+  // Catalog default, not a hard-coded English "Close" (F-117): the four
+  // Administrator detail sheets pass no label, and this is the icon button's
+  // only accessible name.
+  const t = useTranslations("common.dialogs");
+  return (
+    <SheetPortal>
+      <SheetOverlay />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={cn(
+          "bg-background border-border fixed z-50 flex flex-col gap-4 p-6 shadow-lg transition ease-in-out",
+          SHEET_SIDE_CLASSES[side],
+          className,
+        )}
+        {...props}
       >
-        <X className="h-4 w-4" aria-hidden="true" />
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </SheetPortal>
-));
+        {children}
+        <DialogPrimitive.Close
+          className="ring-offset-background focus:ring-ring absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:outline-none disabled:pointer-events-none"
+          aria-label={closeLabel ?? t("close")}
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </SheetPortal>
+  );
+});
 SheetContent.displayName = "SheetContent";
 
 const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (

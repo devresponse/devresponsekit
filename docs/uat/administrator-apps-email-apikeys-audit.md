@@ -418,7 +418,7 @@ User stories
     |---|---|---|
     | 1 | As Org Admin, on an **active** key row, click **Rotate** | A confirm dialog appears with the key name |
     | 2 | Confirm | A reveal dialog shows the new full secret with a copy button and a "shown only once" warning |
-    | 3 | Copy the secret and close the dialog | The grid refreshes |
+    | 3 | Copy the secret and click **Done** | The dialog closes and the grid refreshes (Esc or a click outside the dialog leaves it open) |
     | 4 | Find the original key row | Its status is now Revoked |
     | 5 | Try to Rotate the now-revoked key | The Rotate/Revoke actions are no longer offered on that row (only active keys show them) |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
@@ -458,7 +458,7 @@ Negative and edge cases
 - Secret exposure -> the reveal dialog is the only place a plaintext is shown; the list/detail never contain it or its hash.
 - Rate limit -> rotate/revoke are limited via `admin.apikeys.rotate` / `admin.apikeys.delete`; abuse yields a friendly failure. `TODO: verify` the exact 429 copy.
 
-Accessibility: the reveal dialog is a focus-trapped modal with a read-only, selectable secret field and copy button (`src/components/api-keys/api-key-reveal.tsx:62`); confirm dialogs support Esc; the row error is `role="alert"`.
+Accessibility: the reveal dialog is a focus-trapped modal with a read-only, selectable secret field and copy button (`src/components/api-keys/api-key-reveal.tsx:64`). Only its **Done** button closes it: Esc and a click outside leave it open, and it has no corner close button, so the once-only secret cannot be lost by a stray keystroke (F-122). Confirm dialogs support Esc; the row error is `role="alert"`.
 i18n: status labels, scope-count text, filter labels, and detail labels localize in `en` and `uk`.
 
 ### UAT-ADMIN-AEK-APIKEYS-NEW - Issue an API key on behalf of a user
@@ -510,7 +510,7 @@ User stories
 Negative and edge cases
 - Owner validation: bad UUID format is caught client-side by the shared schema (`src/lib/validation/api-keys.ts:18`); missing/inactive/foreign owner is caught server-side (404/409/404).
 - Ungrantable scopes: scopes are validated against the OWNER's authority, never the admin's (`route.ts:204`).
-- Once-only reveal: the secret is returned exactly once; if the tester misses it they must rotate/re-issue.
+- Once-only reveal: the secret is returned exactly once; if the tester misses it they must rotate/re-issue. The reveal dialog therefore closes only on **Done**; Esc and a click outside it do nothing (F-122).
 - Rate limit: creation is limited via `admin.apikeys.create` (`route.ts:158`). `TODO: verify` the exact 429 copy.
 
 Accessibility: scopes are a labelled `fieldset`/`legend` with checkboxes; the reveal dialog is a focus-trapped modal; root/field errors use `role="alert"` / form messages.

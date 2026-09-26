@@ -310,7 +310,8 @@ volumes:
   [configuration.md](configuration.md).
 - **In-app docs + help viewers.** `docs/` and `help/` are copied into the
   image so both viewers work out of the box (they default to `<cwd>/docs`
-  and `<cwd>/help`). Override with `DOCS_ROOT` / `HELP_ROOT` to serve a
+  and `<cwd>/help`). The build's trace for those routes holds that content
+  and nothing else of the working tree (F-88; CI checks it after the build). Override with `DOCS_ROOT` / `HELP_ROOT` to serve a
   different directory (e.g. a mounted volume). The screenshot capture tool
   beside the help content (`help/capture.mjs`) is operator tooling and is
   excluded from the build context by `.dockerignore`, so the image holds only

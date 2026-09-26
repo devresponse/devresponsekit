@@ -117,8 +117,13 @@ const OTHER_EXEMPT: Record<string, string> = {
   "api/health/ready/route.ts": "public readiness probe; a dependency ping, no tenant data",
   "api/metrics/route.ts":
     "Prometheus scrape gated by METRICS_TOKEN; platform-wide counters, no tenant rows",
-  "api/docs/asset/[...path]/route.ts": "static docs asset from the repo tree; no tenant data",
-  "api/help/asset/[...path]/route.ts": "static help asset from the repo tree; no tenant data",
+  // No tenant data, but not unauthenticated: both delegate to serveSpaceAsset,
+  // which admits only the viewers' audience (F-92,
+  // tests/unit/docs-asset-route-auth.test.ts calls both route files).
+  "api/docs/asset/[...path]/route.ts":
+    "static docs asset from the repo tree; no tenant data. Gated (session, membership, shell.view) in serveSpaceAsset",
+  "api/help/asset/[...path]/route.ts":
+    "static help asset from the repo tree; no tenant data. Gated (session, membership, shell.view) in serveSpaceAsset",
   "api/sso/jwks.json/route.ts": "public JWKS; platform-global signing keys, no tenant data",
   "api/sso/consume/route.ts":
     "consumer side of the handoff: the signed token IS the principal (jti + sub bound at launch); no session yet",

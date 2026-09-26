@@ -492,6 +492,7 @@ User stories
     | 3 | Read the top of the page. | Breadcrumbs show the Documentation home, the doc's group, and its title. |
     | 4 | Look to the right (wide screen). | An **On this page** list links to the article's headings. |
     | 5 | Scroll to the end. | A **Last updated …** line appears if the doc has an updated date. |
+    | 6 | Click an entry in **On this page**. | The article scrolls to that heading; the address ends in `#user-content-<heading>`. |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ACCOUNT-DOCS-ARTICLE-S2 — As a Member, I want a hidden or unknown document to 404, so that guessing a URL never leaks a maintainer-only doc.
@@ -510,10 +511,12 @@ Negative & edge cases
 - Traversal/missing slug → 404 via the path-safe resolver (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:40`).
 - A doc whose `visibility` or `requires` is malformed, or whose frontmatter cannot be parsed (or is fenced as anything but YAML, e.g. `---js`), is hidden from everyone → 404, and the server logs a `docs-frontmatter` warning (F-87, F-86). Two files on one slug (`guide.md` + `guide.mdx`) → neither is listed, 404, and a `docs-duplicate-slug` warning (I-18).
 - A doc with no headings shows an empty/absent table of contents; a doc with no updated date omits the "Last updated" line.
+- A relative link resolves against the article's own folder, as on GitHub: in `/en/app/docs/uat/README` (internal; `DOCS_INTERNAL_VISIBLE` on) each story link opens `/en/app/docs/uat/<area>`, and in `uat/public-auth` the `../auth-signup-policy.md` link opens `/en/app/docs/auth-signup-policy`. A link to a file the viewer does not serve (`../SECURITY.md`, `./openapi.json`) reads as plain text, never as a link to a 404 (F-90).
+- Heading and footnote ids carry a `user-content-` prefix, so a section called **Navigation** (every help page has one) never collides with the shell's `#navigation` skip-link target, and each footnote reference jumps to its note and back (F-91).
 - Rendered HTML is sanitized — embedded scripts do not execute. `TODO: verify` a fixture doc containing a `<script>` renders inert (relates to the Mermaid/DOMPurify handling noted in project memory).
 
 Accessibility: Breadcrumbs are a labelled navigation; the ToC is a list of in-page anchors with visible focus; headings give the article a logical outline. `TODO: verify` no axe violations on a representative article (tables/code blocks/diagrams).
-i18n: Page chrome (breadcrumb home `docs.breadcrumbHome`, "On this page" `docs.onThisPage`, "Last updated {date}" `docs.lastUpdated`) localizes; the updated date is the app formatter's long date (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:51`), or the date format saved in Preferences. Document body text is the source-language Markdown — same `TODO: verify` on per-locale content as the landing.
+i18n: Page chrome (breadcrumb home `docs.breadcrumbHome`, "On this page" `docs.onThisPage`, "Last updated {date}" `docs.lastUpdated`) localizes; the updated date is the app formatter's long date (`src/app/[locale]/(secure)/app/docs/[...slug]/page.tsx:53`), or the date format saved in Preferences. Document body text is the source-language Markdown — same `TODO: verify` on per-locale content as the landing.
 
 ---
 

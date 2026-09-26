@@ -198,18 +198,31 @@ export interface DocumentSource {
 
 1. `remark-parse`
 2. `remark-gfm`
-3. `remark-rehype` (`allowDangerousHtml: false` — raw author HTML never enters)
+3. `remark-rehype` (`allowDangerousHtml: false` — raw author HTML never enters;
+   no footnote id prefix of its own, see step 4)
 4. **`rehype-sanitize`** (hardened schema; baseline strips scripts/handlers, keeps
-   `language-*` classes so the highlighter can detect languages)
-5. `rehype-slug` (heading ids — trusted)
-6. `rehype-autolink-headings` (anchor links — trusted)
-7. link/image rewrite (relative `.md` links → `/{locale}/app/docs/...`; relative
-   image `src` → the asset route; external links get `rel="noopener noreferrer"`)
-8. `rehype-pretty-code` + Shiki (server-side highlighting — trusted)
-9. `rehype-stringify` → HTML string
+   `language-*` classes so the highlighter can detect languages, and prefixes
+   every id with `user-content-`)
+5. `rehype-slug` (heading ids, prefixed `user-content-` — trusted)
+6. heading collection for `docs-toc.tsx` (depths 2–4)
+7. link/image rewrite, against the document's own directory as on GitHub
+   (F-90): a relative `.md` link inside the space → `/{locale}/app/{space}/...`;
+   any other relative link (`../SECURITY.md`, `./openapi.json`) → plain text,
+   since the viewer cannot serve it; a relative image → the asset route, or its
+   alt text when it leaves the space; a `#fragment` gains the `user-content-`
+   prefix; external links get `rel="noopener noreferrer"`. It runs after steps
+   5 and 6, which read each heading as authored: a remote image's fallback link
+   would add its alt text and URL to the id and the TOC entry.
+8. `rehype-autolink-headings` (anchor links — trusted; a heading that already
+   holds a link is not wrapped in a second one)
+9. `rehype-pretty-code` + Shiki (server-side highlighting — trusted)
+10. `rehype-stringify` → HTML string
 
-Headings collected during the pass feed `docs-toc.tsx`. The page injects the
-sanitized HTML inside a `prose dark:prose-invert` container (Tailwind Typography).
+Every id in a rendered document lives under the one `user-content-` prefix
+(F-91): the article is injected into the shell's DOM, and a bare `## Navigation`
+heading became a second `id="navigation"`, so its TOC entry and the shell's
+skip link both jumped to the sidebar. The page injects the sanitized HTML
+inside a `prose dark:prose-invert` container (Tailwind Typography).
 
 `.mdx` files run through the **same** pipeline in Phase 1; JSX/expression nodes
 are dropped (no execution). Curated MDX-component rendering is a Phase-2 item.
@@ -245,6 +258,16 @@ are dropped (no execution). Curated MDX-component rendering is a Phase-2 item.
 - **Env** (`src/lib/env.ts`): `DOCS_SOURCE` (`filesystem` default), `DOCS_ROOT`
   (default repo `docs/`), `HELP_ROOT` (default repo `help/`),
   `DOCS_INTERNAL_VISIBLE` (default false).
+- **Build tracing** (F-88): the pages and the image routes read the content
+  roots at request time, so `next.config.mjs` declares them per route
+  (`outputFileTracingIncludes`: the space's `.md`/`.mdx` for the pages, its
+  images for the asset route) and `getDocsRoot` names the default roots
+  literally. A root built from a runtime value made the tracer ship the whole
+  working tree in all six functions. CI runs `scripts/check-docs-trace.mjs`
+  after `next build`: each function's trace must hold its space's content and
+  nothing from `src/`, `tests/`, local artifacts or root notes. A
+  `DOCS_ROOT`/`HELP_ROOT` outside the repo is not traced; it has to exist on
+  the server (a mounted volume in Docker).
 - **Navigation**: add a "Documentation" entry to `DEFAULT_SHELL_MENU` in
   `src/lib/navigation.server.ts` (icon `book-open`, `requiredPermissions:
   ["shell.view"]`); register the icon in `menu-icons.ts`; add the `shell`
@@ -257,10 +280,16 @@ are dropped (no execution). Curated MDX-component rendering is a Phase-2 item.
 
 ## 8. Testing (keep the §29.2 coverage ratchet green)
 
-- **Unit** — `safe-path` (traversal, symlink-escape, dotfiles, bad extension, NUL
-  all rejected); frontmatter validation; sanitize schema strips
+- **Unit** — `safe-path` (traversal, dotfiles, bad extension, NUL all
+  rejected; the `realpath` check against a symlink escape has no test yet);
+  frontmatter validation; sanitize schema strips
   `<script>`/`onclick`/`javascript:` and keeps `language-*`; catalog builder +
-  visibility filtering; link/image rewrite; `getVisibleDocsSections`-style filter.
+  visibility filtering and `canViewDoc`; link/image rewrite and heading ids;
+  `getVisibleDocsSections`-style filter; the image routes' session, status,
+  membership and `shell.view` gates (`docs-asset-route-auth`); both slug
+  pages' per-document gate (`docs-slug-pages`); every link and image rendered
+  from the shipped `docs/` and `help/` lands (`docs-shipped-links`); the
+  tracing config and `scripts/check-docs-trace.mjs` (`docs-trace`).
 - **Integration** — render pipeline over a fixture doc (headings, code block,
   links); traversal slug → null/notFound.
 - **e2e + a11y (Playwright)** — open docs, navigate the tree, render a doc, TOC

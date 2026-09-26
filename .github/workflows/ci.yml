@@ -84,6 +84,12 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # F-88: the docs and help functions read docs/ and help/ from disk at
+      # request time. Prove on this build's traces that each one carries its
+      # content, and none carries the rest of the working tree.
+      - name: Docs/help trace check
+        run: node scripts/check-docs-trace.mjs
+
       - name: Tests with coverage gate
         run: pnpm test:coverage
 

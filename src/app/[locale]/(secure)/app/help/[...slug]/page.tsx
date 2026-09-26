@@ -42,6 +42,8 @@ export default async function HelpDocPage({
 
   const { html, headings } = await renderDocument(doc.body, {
     locale,
+    // Relative links resolve against the document's own directory (F-90).
+    slug: doc.entry.slug,
     cacheKey: `${doc.entry.slug}|${doc.entry.updatedAt ?? ""}`,
     space: "help",
   });

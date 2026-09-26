@@ -31,8 +31,8 @@ describe("renderDocument", () => {
   it("assigns heading ids and collects a table of contents (depths 2–4)", async () => {
     const md = ["# Page", "", "## Section A", "text", "", "### Sub B", "text"].join("\n");
     const { html, headings } = await renderDocument(md, { locale: "en" });
-    expect(html).toContain('id="section-a"');
-    expect(headings.map((h) => h.id)).toEqual(["section-a", "sub-b"]);
+    expect(html).toContain('id="user-content-section-a"');
+    expect(headings.map((h) => h.id)).toEqual(["user-content-section-a", "user-content-sub-b"]);
     expect(headings.map((h) => h.depth)).toEqual([2, 3]);
     // h1 is excluded from the TOC.
     expect(headings.some((h) => h.depth === 1)).toBe(false);
@@ -168,6 +168,156 @@ describe("renderDocument", () => {
     const fr = await renderDocument("[a](a.md)", { locale: "fr", cacheKey: "README|1" });
     expect(en.html).toContain('href="/en/app/docs/a"');
     expect(fr.html).toContain('href="/fr/app/docs/a"');
+  });
+});
+
+const attrValues = (html: string, name: string) =>
+  [...html.matchAll(new RegExp(`\\s${name}="([^"]*)"`, "g"))].map((m) => m[1]!);
+
+/**
+ * F-90: a relative link resolves against the directory of the document it is
+ * in, as on GitHub and in CI's lychee job. The viewer used to resolve it
+ * against the space root, so every link in `docs/uat/README.md` lost its
+ * `uat/` and `../x.md` became `/{locale}/app/x`: both 404s inside the app.
+ */
+describe("renderDocument relative links (F-90)", () => {
+  beforeEach(() => clearRenderCache());
+
+  it("resolves links against the document's own directory", async () => {
+    const md = [
+      "[story](./public-auth.md) [journeys](journeys.md?tab=1)",
+      "[up](../admin-manager.md#roles) [mdx](../guide.mdx)",
+    ].join("\n\n");
+    const { html } = await renderDocument(md, { locale: "en", slug: "uat/README" });
+    expect(attrValues(html, "href")).toEqual([
+      "/en/app/docs/uat/public-auth",
+      "/en/app/docs/uat/journeys?tab=1",
+      "/en/app/docs/admin-manager#user-content-roles",
+      "/en/app/docs/guide",
+    ]);
+  });
+
+  it("turns a link the viewer cannot serve into plain text instead of an in-app 404", async () => {
+    const md = [
+      "[policy](../SECURITY.md) [ci](../.github/workflows/ci.yml)",
+      "[spec](./openapi.json) [encoded](%2e%2e/SECURITY.md)",
+    ].join("\n\n");
+    const { html } = await renderDocument(md, { locale: "en", slug: "api" });
+    expect(html).not.toContain("<a");
+    expect(attrValues(html, "data-unlinked-href")).toEqual([
+      "../SECURITY.md",
+      "../.github/workflows/ci.yml",
+      "./openapi.json",
+      "%2e%2e/SECURITY.md",
+    ]);
+    // The author's link text still reads.
+    expect(html).toContain('<span data-unlinked-href="../SECURITY.md">policy</span>');
+
+    // A non-document inside a nested directory too: it is not a route.
+    const nested = await renderDocument("[csv](./uat-stories.csv) [root](../../README.md)", {
+      locale: "en",
+      slug: "uat/README",
+    });
+    expect(nested.html).not.toContain("<a");
+  });
+
+  it("resolves images against the document's directory and drops one outside the root", async () => {
+    const md = "![a](shot.png) ![b](../screenshots/x.png) ![c](../../outside.png) ![](../../y.png)";
+    const { html } = await renderDocument(md, { locale: "en", space: "help", slug: "sub/page" });
+    expect(attrValues(html, "src")).toEqual([
+      "/api/help/asset/sub/shot.png",
+      "/api/help/asset/screenshots/x.png",
+    ]);
+    // The escaping image has no URL left to load, so it is not an <img> (the
+    // article would make a src-less one an "expand" button with nothing to
+    // show): its alt text reads in its place.
+    expect(html).toContain('<span data-unlinked-src="../../outside.png">c</span>');
+    expect(html).toContain('<span data-unlinked-src="../../y.png"></span>');
+    expect(html.match(/<img/g)).toHaveLength(2);
+  });
+
+  it("leaves other schemes and absolute in-app links alone", async () => {
+    const md = "[mail](mailto:ops@example.com) [abs](/en/app/help/README)";
+    const { html } = await renderDocument(md, { locale: "en", slug: "uat/README" });
+    expect(attrValues(html, "href")).toEqual(["mailto:ops@example.com", "/en/app/help/README"]);
+  });
+
+  it("never serves one document's cached render for another slug", async () => {
+    const a = await renderDocument("[x](x.md)", { locale: "en", slug: "a/doc", cacheKey: "k|1" });
+    const b = await renderDocument("[x](x.md)", { locale: "en", slug: "b/doc", cacheKey: "k|1" });
+    expect(a.html).toContain('href="/en/app/docs/a/x"');
+    expect(b.html).toContain('href="/en/app/docs/b/x"');
+  });
+});
+
+/**
+ * F-91: the rendered article lives inside the shell's DOM, so its ids share a
+ * namespace with the shell's. `## Navigation` (a section of all 30 help
+ * pages) became a second `id="navigation"`, and the TOC entry, the heading's
+ * own anchor and the skip link all jumped to the root sidebar. Footnote ids
+ * were prefixed twice, so no footnote link worked, and a heading holding a
+ * link was wrapped in a second anchor.
+ */
+describe("renderDocument ids (F-91)", () => {
+  beforeEach(() => clearRenderCache());
+
+  it("keeps heading ids off the shell's landmark ids, and in-document links follow", async () => {
+    const md = ["## Navigation", "", "## Main", "", "See [nav](#navigation)."].join("\n");
+    const { html, headings } = await renderDocument(md, { locale: "en", space: "help" });
+    expect(attrValues(html, "id")).toEqual(["user-content-navigation", "user-content-main"]);
+    expect(headings.map((h) => h.id)).toEqual(["user-content-navigation", "user-content-main"]);
+    // The author's link and the heading's own anchor both reach the heading.
+    expect(attrValues(html, "href")).toEqual([
+      "#user-content-navigation",
+      "#user-content-main",
+      "#user-content-navigation",
+    ]);
+  });
+
+  it("gives footnotes one prefix, so every reference and back-reference lands", async () => {
+    const md = ["A claim[^1] and another[^note].", "", "[^1]: One.", "[^note]: Two."].join("\n");
+    const { html } = await renderDocument(md, { locale: "en" });
+    const ids = new Set(attrValues(html, "id"));
+    const fragments = attrValues(html, "href").filter((href) => href.startsWith("#"));
+    expect(fragments.length).toBeGreaterThanOrEqual(4);
+    for (const href of fragments) expect(ids, href).toContain(href.slice(1));
+    expect(html).not.toContain("user-content-user-content-");
+    // aria-describedby names the (prefixed) footnote label heading.
+    for (const id of attrValues(html, "aria-describedby")) expect(ids).toContain(id);
+  });
+
+  it("does not wrap a heading that already holds a link in a second anchor", async () => {
+    const { html, headings } = await renderDocument(
+      "#### Google — [Console](https://console.example.com)",
+      { locale: "en" },
+    );
+    expect(html).toBe(
+      '<h4 id="user-content-google--console">Google — <a href="https://console.example.com" target="_blank" rel="noopener noreferrer">Console</a></h4>',
+    );
+    expect(headings.map((h) => h.id)).toEqual(["user-content-google--console"]);
+  });
+
+  it("slugs and lists a heading by its own text, not a remote image's fallback link", async () => {
+    // `#status-` is the id GitHub and lychee give `## Status ![build](…)`.
+    const md = [
+      "## Status ![build](https://img.shields.io/badge/ci-green.svg)",
+      "",
+      "## Plain ![](https://x.example/a.png)",
+      "",
+      "[jump](#status-)",
+    ].join("\n");
+    const { html, headings } = await renderDocument(md, { locale: "en" });
+    expect(headings).toEqual([
+      { depth: 2, id: "user-content-status-", text: "Status" },
+      { depth: 2, id: "user-content-plain-", text: "Plain" },
+    ]);
+    const ids = new Set(attrValues(html, "id"));
+    expect(ids).toEqual(new Set(["user-content-status-", "user-content-plain-"]));
+    expect(html).toContain('href="#user-content-status-"');
+    // The fallback link is the heading's only anchor: no second one wraps it.
+    expect(html).toContain(
+      '<h2 id="user-content-status-">Status <a href="https://img.shields.io/badge/ci-green.svg"',
+    );
   });
 });
 

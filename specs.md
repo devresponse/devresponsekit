@@ -790,7 +790,10 @@ Create `.env.example`.
 NODE_ENV=development
 NEXT_PUBLIC_APP_NAME="DevResponse Enterprise"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
-NEXT_PUBLIC_PRIMARY_HOST="localhost"
+# HISTORICAL: NEXT_PUBLIC_PRIMARY_HOST is not read by the shipped app. The two
+# locale values are not read either (the locales live in
+# src/config/i18n-config.ts); .env.example keeps them for reference only.
+# NEXT_PUBLIC_PRIMARY_HOST="localhost"
 NEXT_PUBLIC_PRODUCTION_HOST="app.devresponse.com"
 NEXT_PUBLIC_DEFAULT_LOCALE="en"
 NEXT_PUBLIC_SUPPORTED_LOCALES="en,fr,es,uk,pt,zh,hi,ja"
@@ -815,13 +818,19 @@ MICROSOFT_CLIENT_SECRET=""
 GITHUB_CLIENT_ID=""
 GITHUB_CLIENT_SECRET=""
 
-# Internal JWT handoff for subdomain SSO. ISSUER + AUDIENCE_PREFIX +
-# JWT_SECRET are REQUIRED; APPLICATION_ID is optional at boot but the
-# SSO consumer returns 500 without it, so set it per deployment.
+# Internal JWT handoff for subdomain SSO. SSO_HANDOFF_ISSUER,
+# SSO_HANDOFF_AUDIENCE_PREFIX and SSO_HANDOFF_APPLICATION_ID are REQUIRED at
+# boot on every deployment (P3-6). Only the issuer (the primary) sets
+# SSO_HANDOFF_PRIVATE_KEY, an Ed25519 private JWK; consumers verify against
+# its published JWKS (docs/configuration.md, "Single Sign-On handoff").
 SSO_HANDOFF_ISSUER="https://app.devresponse.com"
 SSO_HANDOFF_AUDIENCE_PREFIX="devresponse-app"
 SSO_HANDOFF_APPLICATION_ID="portal"
-SSO_HANDOFF_JWT_SECRET="replace-with-separate-strong-secret"
+# SSO_HANDOFF_PRIVATE_KEY=""        # issuer only: Ed25519 private JWK (JSON string)
+# HISTORICAL (V9): the fleet-wide HS256 secret below signed and verified every
+# handoff until review #5 replaced it with SSO_HANDOFF_PRIVATE_KEY. Nothing
+# reads it any more; do not set it.
+# SSO_HANDOFF_JWT_SECRET="replace-with-separate-strong-secret"
 # Accepted up to 300; the signer clamps the effective token TTL to 60s.
 SSO_HANDOFF_TTL_SECONDS=60
 
@@ -861,7 +870,9 @@ EMAIL_FROM="DevResponse <no-reply@localhost>"
 # Local seed user
 SEED_ADMIN_EMAIL="admin@devresponse.local"
 SEED_ADMIN_PASSWORD="ChangeMe-LocalOnly-123!"
-SEED_DEFAULT_ORGANIZATION_SLUG="default"
+# HISTORICAL: removed by F-40. Nothing read it; the default organization is
+# the row marked is_default.
+# SEED_DEFAULT_ORGANIZATION_SLUG="default"
 ```
 
 `.env.example` is the authoritative list and `src/lib/env.ts` is the
@@ -880,7 +891,7 @@ Production values:
 ```bash
 NEXT_PUBLIC_APP_URL="https://app.devresponse.com"
 BETTER_AUTH_URL="https://app.devresponse.com"
-NEXT_PUBLIC_PRIMARY_HOST="app.devresponse.com"
+# NEXT_PUBLIC_PRIMARY_HOST="app.devresponse.com"   # HISTORICAL: not read by the shipped app
 ```
 
 Provider redirect URLs:
@@ -2644,6 +2655,10 @@ export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectIn
     })
     .execute();
 
+  // HISTORICAL (V9 sketch): review #5 retired this shared HS256 secret. The
+  // shipped signer, src/lib/jwt-handoff.server.ts, signs EdDSA with the
+  // issuer's Ed25519 key (SSO_HANDOFF_PRIVATE_KEY), and consumers verify
+  // against its JWKS.
   const secret = new TextEncoder().encode(process.env.SSO_HANDOFF_JWT_SECRET!);
 
   const token = await new SignJWT({

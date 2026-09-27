@@ -10,14 +10,16 @@
  * Default behaviour is UNCHANGED: `SESSION_ABSOLUTE_LIFETIME_HOURS` is unset
  * out of the box, which means "no absolute cap" — exactly what shipped before
  * this knob existed. An operator opts in by setting a number of hours
- * (docs/configuration.md), after which every session-reading path
- * (`getCurrentSession`, and therefore every browser guard, server action and
- * `/api/v1` cookie caller) treats the session as gone and the user signs in
- * again.
+ * (docs/configuration.md), after which every session-reading path treats the
+ * session as gone and the user signs in again: `getCurrentSession` (and
+ * therefore every browser guard, server action and `/api/v1` cookie caller),
+ * and since F-54 Better Auth's own `/api/auth/*` endpoints, through the
+ * `hooks.before` in `auth-admin-surface.ts` ({@link isSessionPastLifetime}).
  *
- * Pure and dependency-free so the rule can be unit-tested at the boundaries
- * without standing up Better Auth.
+ * Pure (its one import is the equally pure impersonation-marker reader) so the
+ * rule can be unit-tested at the boundaries without standing up Better Auth.
  */
+import { readImpersonatorId } from "@/lib/impersonation";
 
 /** The single field of a session row this rule reads. */
 export interface SessionAgeInput {
@@ -70,7 +72,9 @@ export function isSessionPastAbsoluteLifetime(
  * cookie rides along; a holder who drops that cookie and calls `/get-session`
  * gets the row pushed to now + 8 h, every 15 minutes, indefinitely. So the
  * cap that actually holds is {@link isImpersonationSessionPastMaxAge}, applied
- * at the app's session chokepoint (`getCurrentSession`).
+ * at the app's session chokepoint (`getCurrentSession`) and, since F-54, on
+ * `/api/auth/*` too, so `/get-session` no longer extends a borrowed session
+ * past it.
  */
 export const IMPERSONATION_SESSION_MAX_AGE_SECONDS = 60 * 60;
 
@@ -94,4 +98,28 @@ export function isImpersonationSessionPastMaxAge(
   if (Number.isNaN(createdMs)) return true;
 
   return nowMs - createdMs >= IMPERSONATION_SESSION_MAX_AGE_SECONDS * 1000;
+}
+
+/**
+ * True when a resolved session (`{ session, user }`, as Better Auth returns
+ * it) has outlived either bound above: the operator's absolute lifetime, or
+ * the one-hour cap on an impersonation session.
+ *
+ * The ONE rule both enforcement points apply (F-54): `getCurrentSession` for
+ * everything the app itself serves, and the Better Auth `hooks.before`
+ * (`rejectClosedAuthEndpoints`) for the vendor's own `/api/auth/*` endpoints,
+ * which never pass through the app's guards and would otherwise keep honouring
+ * and refreshing a session the app has already declared over.
+ */
+export function isSessionPastLifetime(
+  // `impersonatedBy` (either casing) is the admin plugin's marker; see `readImpersonatorId`.
+  session: { session: SessionAgeInput & { impersonatedBy?: unknown; impersonated_by?: unknown } },
+  absoluteLifetimeHours: number | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  return (
+    isSessionPastAbsoluteLifetime(session.session, absoluteLifetimeHours, nowMs) ||
+    (readImpersonatorId(session) !== null &&
+      isImpersonationSessionPastMaxAge(session.session, nowMs))
+  );
 }

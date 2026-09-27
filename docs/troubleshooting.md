@@ -82,7 +82,8 @@ warrant a comms channel and an owner before deep debugging.
 - **Refusals before sign-in are in the logs, not the table.** A request refused
   before its caller is authenticated — a cross-site cookie mutation
   (`untrusted_origin` / `missing_origin`), an SSO consume with no token or one
-  that fails verification, a signed-out SSO launch — writes no audit row (F-15).
+  that fails verification, a signed-out SSO launch, a failed email/password
+  sign-in (`auth.sign_in.failed`, F-55) — writes no audit row (F-15).
   Grep the log stream for `"kind":"pre_auth_refusal"` (the `eventType` and
   `reason` fields match what the row used to carry); a handoff token that
   verified but was refused afterwards (`target_application_mismatch`,
@@ -176,8 +177,25 @@ warrant a comms channel and an owner before deep debugging.
 
 ### Sign-in failing for many
 - Credential **failures** are not written to `app_audit_events` (only successful
-  session creation is, as `auth.session.created`). Look in the **log stream**
-  (and Sentry, if enabled) for the auth errors, keyed by `x-request-id`.
+  session creation is, as `auth.session.created`): the caller is unverified, so
+  an anonymous loop must not grow the append-only table (F-15). Each failed
+  `/api/auth/sign-in/email` logs one `"kind":"pre_auth_refusal"` line with
+  `"eventType":"auth.sign_in.failed"` instead (F-55), counted in
+  `devresponsekit_pre_auth_refusals_total{event_type="auth.sign_in.failed"}`.
+  Its `reason` is Better Auth's code: `INVALID_EMAIL_OR_PASSWORD` (wrong
+  password or unknown address), `INVALID_EMAIL` (not an email address),
+  `EMAIL_NOT_VERIFIED`, `BANNED_USER`, `VALIDATION_ERROR` (a malformed body),
+  or `rate_limited` for the per-account budget below. A
+  spike of `INVALID_EMAIL_OR_PASSWORD` across many `emailHash` values is
+  credential stuffing; many on one `emailHash` is a run against one account.
+- The line never carries the address or the client IP. `metadata.emailHash` is
+  HMAC-SHA256 keyed with `BETTER_AUTH_SECRET` over `sign-in-email:` plus the
+  lower-cased address, so only someone holding the secret can tie it to an
+  account. To find one user's failures, compute it on a machine that has the
+  secret and grep for the result:
+  `node -e 'const c=require("crypto");console.log(c.createHmac("sha256",process.env.BETTER_AUTH_SECRET).update("sign-in-email:"+process.argv[1].toLowerCase()).digest("hex"))' user@example.com`.
+  Rotating the secret changes every digest. The source IP is in the edge's
+  access log, matched by time and path.
 - Common causes: `BETTER_AUTH_URL` not matching the public origin (cookies
   rejected), a rotated `BETTER_AUTH_SECRET` (invalidates all sessions — expected
   after rotation), or the DB being unreachable.
@@ -243,6 +261,18 @@ warrant a comms channel and an owner before deep debugging.
   `CLIENT_IP_SOURCE` names a header the edge does not set (shared
   `no-trusted-ip` bucket) — see [Deployment issues](#deployment-issues); do not
   disable the limiter (`AUTH_RATE_LIMIT_DISABLED` is refused in production).
+- Email/password sign-in also has a **per-account** budget (F-55): 10 attempts
+  per address per 15 minutes, a token back every 90 s, whatever IP they come
+  from, in the shared `app_rate_limits` table (scope `auth.signin.email`, keyed
+  on the same `emailHash` as the log line). Its 429 is identical to Better
+  Auth's per-IP one, counted in
+  `devresponsekit_rate_limit_denials_total{scope="auth.signin.email"}` and
+  logged as `auth.sign_in.failed` with reason `rate_limited`. It is a throttle,
+  not a lockout: nothing needs unlocking, and an account under attack gets its
+  full budget back within 15 minutes of the attack stopping. While a run is
+  under way its owner may see "Too many requests" too; the fix is the source
+  (block it at the edge), not the limit. It follows the same switch as Better
+  Auth's limiter.
 - CSP violations report to `POST /api/security/csp-report` (rate-limited +
   aggregated); a spike can indicate an injection attempt or a broken third-party
   asset.

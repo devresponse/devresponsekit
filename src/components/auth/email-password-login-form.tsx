@@ -30,12 +30,14 @@ export interface EmailPasswordLoginFormProps {
  * Client-side Better Auth email/password sign-in (React Hook Form + the shared
  * `signInSchema`). Credentials live only in form state. Errors surface via the
  * translated `auth.invalidCredentials` / `auth.blockedDescription` (a banned
- * account, F-153) / `auth.unexpectedError` keys on the form root, never
- * leaking Better Auth codes.
+ * account, F-153) / `errors.rate_limited` (a 429, F-55) /
+ * `auth.unexpectedError` keys on the form root, never leaking Better Auth
+ * codes.
  */
 export function EmailPasswordLoginForm({ returnTo }: EmailPasswordLoginFormProps) {
   const t = useTranslations("auth");
   const tCommon = useTranslations("common");
+  const tErrors = useTranslations("errors");
 
   // Set when Better Auth rejects sign-in with EMAIL_NOT_VERIFIED (AUTH-4).
   // Swaps the form for a verify + resend prompt, pre-filled with the address.
@@ -69,7 +71,17 @@ export function EmailPasswordLoginForm({ returnTo }: EmailPasswordLoginFormProps
         // account is restricted instead, as the blocked page does. Better Auth
         // checks the ban only after the password, so this tells nothing to
         // someone who does not know it.
-        const message = code === "BANNED_USER" ? t("blockedDescription") : t("invalidCredentials");
+        // F-55: a 429 is the per-IP limit or the per-account budget, which a
+        // guessing run against this address can spend. "Invalid email or
+        // password" would send its owner to a reset that changes nothing; say
+        // to wait instead. Both limits refuse every address alike, so this
+        // reveals no account.
+        const message =
+          result.error.status === 429
+            ? tErrors("rate_limited")
+            : code === "BANNED_USER"
+              ? t("blockedDescription")
+              : t("invalidCredentials");
         form.setError("root", { type: "server", message });
       }
     } catch {

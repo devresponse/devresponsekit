@@ -79,6 +79,23 @@ describe("EmailPasswordLoginForm", () => {
     expect(screen.queryByText(/invalid email or password/i)).toBeNull();
   });
 
+  it("says to slow down on a 429, not that the password is wrong (F-55)", async () => {
+    // The per-account budget can be spent by a guessing run against this
+    // address; "Invalid email or password" would send its owner to a reset.
+    signInEmail.mockResolvedValueOnce({
+      error: { status: 429, statusText: "Too Many Requests", message: "Too many requests." },
+    });
+    const user = userEvent.setup();
+    renderWithIntl(<EmailPasswordLoginForm returnTo="/en/app/dashboard" />);
+
+    await user.type(screen.getByLabelText(/email/i), "user@example.com");
+    await user.type(screen.getByLabelText(/password/i), "Password!1234");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/too many requests/i);
+    expect(screen.queryByText(/invalid email or password/i)).toBeNull();
+  });
+
   it("falls back to a generic message on unexpected errors", async () => {
     signInEmail.mockRejectedValueOnce(new Error("boom"));
     const user = userEvent.setup();

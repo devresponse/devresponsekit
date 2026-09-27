@@ -10,6 +10,7 @@
  * is how it used to surface.
  */
 
+import { randomUUID } from "node:crypto";
 import { commandFor } from "./config-file.js";
 
 export type ReadyStatus = "ready" | "schema_behind" | "database_unreachable" | "config_invalid" | "unknown";
@@ -55,6 +56,20 @@ function probeOrigin(origin: string): string {
  */
 const PROBE_USER_AGENT = "drk-deploy-probe (post-deploy verification)";
 
+/**
+ * The address the bad-credentials sign-in uses: a fresh one on every probe.
+ *
+ * The kit budgets `/sign-in/email` per submitted address (F-55: 10 attempts
+ * per 15 minutes, taken before the password is checked, in production). This
+ * CLI is public, so a fixed address would be a budget anyone could spend: ten
+ * wrong passwords for it, then one every 90 s, and every probe would see 429
+ * instead of 401 and roll a healthy release back. A new address per probe
+ * never shares a bucket, and the reserved `.example` domain delivers nowhere.
+ */
+export function probeSignInEmail(): string {
+  return `drk-deploy-probe-${randomUUID()}@invalid.example`;
+}
+
 /** Requests one path under an already-validated origin. Never throws. */
 async function statusOf(
   base: string,
@@ -84,10 +99,10 @@ export async function probe(origin: string): Promise<HealthReport> {
   const signIn = await statusOf(base, "/api/auth/sign-in/email", {
     method: "POST",
     // Identifiable, for the same reason as the consumer probe: this request
-    // leaves a failed-sign-in audit row behind on every run.
+    // leaves a failed-sign-in log line (`auth.sign_in.failed`) on every run.
     headers: { "Content-Type": "application/json", Origin: base, "User-Agent": PROBE_USER_AGENT },
     body: JSON.stringify({
-      email: "drk-deploy-probe@invalid.example",
+      email: probeSignInEmail(),
       password: "not-a-real-password-used-only-to-prove-401",
     }),
   });
@@ -273,6 +288,12 @@ export function describe(report: HealthReport): string[] {
     lines.push("");
     lines.push(
       "A 500 on sign-in means the deployment is serving but auth is broken — check the runtime logs.",
+    );
+  }
+  if (report.signIn === 429) {
+    lines.push("");
+    lines.push(
+      "429 means the sign-in endpoint rate-limited this probe (3 per 10 s per IP) — re-run it in a minute.",
     );
   }
   return lines;

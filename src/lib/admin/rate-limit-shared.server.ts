@@ -32,7 +32,9 @@ import { rateLimitSharedFallbacksTotal } from "@/lib/observability/metrics.serve
  * DB round trip on every admin mutation would buy little. The SSO consume
  * endpoint and the signed-out SSO launch were left behind in memory, keyed on
  * the client IP, until F-19; both now take a per-IP bucket from here, through
- * `enforceSharedRateLimit`.
+ * `enforceSharedRateLimit`. The per-account email/password sign-in budget
+ * (F-55, `src/lib/auth-sign-in-attempts.ts`) is keyed on a digest of the
+ * submitted address, which the caller also chooses, and consumes from here.
  *
  * Same contract as `consumeToken` — `(key, options, nowMs?) → RateLimitResult`
  * — but async, because the bucket lives in the database. Call sites that

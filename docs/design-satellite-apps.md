@@ -341,7 +341,7 @@ cookie is already present.)
   C2, Better Auth sets the cookie on the parent domain and `trustedOrigins` must
   span the fleet.
 - **Env:** the minimal set is app name/url, `NEXT_PUBLIC_PRODUCTION_HOST`,
-  `BETTER_AUTH_SECRET`/`URL`, `DATABASE_URL`, `DB_SCHEMA`, the four
+  `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL`, `DATABASE_URL`, `DB_SCHEMA`, the four
   `SSO_HANDOFF_*`, and `ADMIN_TRUSTED_ORIGINS` (= main app origin). Everything
   `API_*` / `MCP_*` / `EMAIL_*` / social / `SENTRY_*` / `METRICS_*` / retention
   is dropped.
@@ -503,9 +503,9 @@ P4 — DB, env, deps, deploy, CI
   that couples them to the vendor table). Pick one BEFORE writing the migration; A is
   recommended unless the app will persist zero per-user state and the IdP is the sole
   authority (accepting up-to-8h session lag on revocation).
-- src/lib/env.ts + .env.example: reduce to NEXT_PUBLIC_APP_NAME/URL, NEXT_PUBLIC_PRODUCTION_HOST,
-  BETTER_AUTH_SECRET/URL, DATABASE_URL, DB_SCHEMA, SSO_HANDOFF_ISSUER,
-  SSO_HANDOFF_AUDIENCE_PREFIX, SSO_HANDOFF_APPLICATION_ID, SSO_HANDOFF_TTL_SECONDS,
+- src/lib/env.ts + .env.example: reduce to NEXT_PUBLIC_APP_NAME, NEXT_PUBLIC_APP_URL,
+  NEXT_PUBLIC_PRODUCTION_HOST, BETTER_AUTH_SECRET, BETTER_AUTH_URL, DATABASE_URL, DB_SCHEMA,
+  SSO_HANDOFF_ISSUER, SSO_HANDOFF_AUDIENCE_PREFIX, SSO_HANDOFF_APPLICATION_ID, SSO_HANDOFF_TTL_SECONDS,
   ADMIN_TRUSTED_ORIGINS (= main app origin) — NO SSO_HANDOFF_PRIVATE_KEY (a satellite
   verifies against the main app's /api/sso/jwks.json and holds no key). Drop all
   API_*/MCP_*/EMAIL_*/social/SENTRY_*/METRICS_*/retention vars.
@@ -523,7 +523,7 @@ P5 — Validate & document
 - Smoke test the handoff manually: document the exact steps to (a) register this app as
   an enterprise app on the main devresponsekit (origin + sso_audience = devresponse-app:<app id>,
   add the subdomain to SSO_ALLOWED_ORIGIN_SUFFIXES), (b) point the satellite at the main
-  app via SSO_HANDOFF_ISSUER + AUDIENCE_PREFIX (no secret changes hands — the main app
+  app via SSO_HANDOFF_ISSUER + SSO_HANDOFF_AUDIENCE_PREFIX (no secret changes hands — the main app
   holds SSO_HANDOFF_PRIVATE_KEY, the satellite reads its JWKS), (c) hit /api/sso/launch
   on the main app → confirm you land
   signed-in in the shell.

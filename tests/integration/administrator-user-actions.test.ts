@@ -1506,6 +1506,19 @@ describe("POST /api/administrator/users/[id]/status — last superadmin (REVOKE-
     const res = await postStatus();
     expect(res.status).toBe(404);
   });
+
+  // F-147: a block that committed but could not end the user's sessions is a
+  // failure to report (the core audits it), not the catch-all 404.
+  it("returns 502 auth_revoke_all_failed when the sessions could not be ended", async () => {
+    statusChangeMock.mockResolvedValue({
+      ok: false,
+      error: "auth_revoke_all_failed",
+      cause: new Error("adapter down"),
+    });
+    const res = await postStatus();
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual(expect.objectContaining({ error: "auth_revoke_all_failed" }));
+  });
 });
 
 /**

@@ -43,6 +43,11 @@ type RouteContext = { params: Promise<{ id: string }> };
  * (REVOKE-2), or `use_restore` for a soft-deleted user, which only the
  * console's restore brings back (F-57).
  *
+ * A `block` or `suspend` that changes the account-wide status also ends the
+ * user's sessions (F-147). If that fails the status stays applied and the
+ * answer is a `502` problem. Repeating the action is safe, but the change
+ * moved the ETag, so a retry that sends `If-Match` re-reads the user first.
+ *
  * Target authorization mirrors the administrator route (review #7): after
  * ADR-0001 scoping (`canAccessUser` → 404), a non-superadmin principal may
  * not change the status of a target who outranks them (a single-org
@@ -195,6 +200,17 @@ export const POST = withV1Route(async function POST(request: NextRequest, ctx: R
       return problemResponse(USE_RESTORE_ERROR, USE_RESTORE_STATUS, request, {
         detail: "The user is soft-deleted; restore it before changing its status.",
         requestId: grant.requestId,
+      });
+    }
+    // F-147: the status committed but the user's sessions were not ended. The
+    // core audited it. The status change moved the ETag, so the detail says to
+    // re-read: the same request with its old If-Match would only get a 412.
+    if (result.error === "auth_revoke_all_failed") {
+      return problemResponse("internal_error", 502, request, {
+        detail:
+          "The status change was applied, but the user's sessions could not be ended. Re-read the user and repeat the action, with the new ETag if you send If-Match.",
+        requestId: grant.requestId,
+        cause: result.cause,
       });
     }
     return problemResponse("not_found", 404, request, { requestId: grant.requestId });

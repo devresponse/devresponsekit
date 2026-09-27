@@ -29,7 +29,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  * `suspend` | `reactivate`) to the target user via the shared
  * `performAdminStatusChange` core (docs/admin-manager.md §8.1, §13),
  * which also backs the bulk endpoint so both paths emit identical audit
- * events. A soft-deleted target is 409 `use_restore` (F-57).
+ * events. A soft-deleted target is 409 `use_restore` (F-57). A block or
+ * suspend that changes the account-wide status also ends the user's
+ * sessions; if that fails the status stays applied and the answer is 502
+ * `auth_revoke_all_failed`, safe to retry (F-147).
  */
 const statusSchema = z
   .object({
@@ -136,6 +139,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     if (result.error === USE_RESTORE_ERROR) {
       return adminErrorResponse(USE_RESTORE_ERROR, USE_RESTORE_STATUS, request, {
         requestId: guard.requestId,
+      });
+    }
+    // F-147: the status committed but the user's sessions were not ended. The
+    // core audited it; a retry is safe.
+    if (result.error === "auth_revoke_all_failed") {
+      return adminErrorResponse("auth_revoke_all_failed", 502, request, {
+        requestId: guard.requestId,
+        cause: result.cause,
       });
     }
     return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });

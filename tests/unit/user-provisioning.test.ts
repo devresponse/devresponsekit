@@ -37,9 +37,11 @@ vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMoc
 
 const findInvitationMock = vi.fn();
 const consumeInvitationMock = vi.fn();
+const inviterStandingMock = vi.fn();
 vi.mock("@/lib/invitations.server", () => ({
   findValidInvitationByToken: (...a: unknown[]) => findInvitationMock(...a),
   consumeInvitation: (...a: unknown[]) => consumeInvitationMock(...a),
+  enforceInviterStanding: (...a: unknown[]) => inviterStandingMock(...a),
 }));
 
 const resolveOrgMock = vi.fn();
@@ -186,6 +188,8 @@ beforeEach(() => {
   findInvitationMock.mockResolvedValue(null);
   consumeInvitationMock.mockReset();
   consumeInvitationMock.mockResolvedValue({ consumed: true, roleGranted: false });
+  inviterStandingMock.mockReset();
+  inviterStandingMock.mockResolvedValue(true);
   resolveOrgMock.mockReset();
   resolveOrgMock.mockResolvedValue(null);
   logErrorMock.mockReset();
@@ -591,6 +595,74 @@ describe("provisionUserFromAuth", () => {
         metadata: expect.objectContaining({ decisionReason: "invitation" }),
       }),
     );
+  });
+
+  it("treats an invitation whose inviter lost standing as uninvited: no activation, no consume (F-149)", async () => {
+    const invitation = {
+      id: "inv-1",
+      organizationId: "org-invited",
+      organizationName: "Invited Org",
+      email: "ada@example.com",
+      roleId: "role-superuser",
+      invitedByAppUserId: "admin-banned",
+      status: "pending",
+      expiresAt: new Date("2099-01-01T00:00:00Z"),
+    };
+    findInvitationMock.mockResolvedValue(invitation);
+    // enforceInviterStanding voids the invitation and says no.
+    inviterStandingMock.mockResolvedValue(false);
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-inv-lapsed",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+      invitationToken: "tok-plain",
+    });
+
+    // Asked BEFORE placement, since this path activates before it consumes.
+    expect(inviterStandingMock).toHaveBeenCalledWith(
+      expect.objectContaining({ invitation, actorBetterAuthUserId: "ba-inv-lapsed" }),
+    );
+    expect(result.organizationId).toBe("org-default");
+    expect(result.status).toBe("pending_approval");
+    expect(
+      insertCalls.find((c) => c.table === "app_organization_memberships")?.values,
+    ).toMatchObject({ organization_id: "org-default", status: "pending_approval" });
+    expect(consumeInvitationMock).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "auth.account.pending_approval",
+        metadata: expect.not.objectContaining({ decisionReason: "invitation" }),
+      }),
+    );
+  });
+
+  it("degrades to the uninvited path when the inviter-standing check throws (F-149)", async () => {
+    findInvitationMock.mockResolvedValue({
+      id: "inv-1",
+      organizationId: "org-invited",
+      organizationName: "Invited Org",
+      email: "ada@example.com",
+      roleId: null,
+      invitedByAppUserId: "admin-1",
+      status: "pending",
+      expiresAt: new Date("2099-01-01T00:00:00Z"),
+    });
+    inviterStandingMock.mockRejectedValue(new Error("auth down"));
+
+    const result = await provisionUserFromAuth({
+      betterAuthUserId: "ba-inv-err",
+      email: "ada@example.com",
+      emailVerified: true,
+      provider: "email",
+      invitationToken: "tok-plain",
+    });
+
+    expect(result.organizationId).toBe("org-default");
+    expect(result.status).toBe("pending_approval");
+    expect(consumeInvitationMock).not.toHaveBeenCalled();
+    expect(logErrorMock).toHaveBeenCalled();
   });
 
   it("treats an email-mismatched invitation as uninvited (no consume, normal policy)", async () => {

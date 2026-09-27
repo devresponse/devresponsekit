@@ -27,6 +27,7 @@ const sendEmailMock = vi.fn();
 const createInvitationMock = vi.fn();
 const revokeInvitationMock = vi.fn();
 const regenerateMock = vi.fn();
+const inviterStandingMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -46,6 +47,7 @@ vi.mock("@/lib/invitations.server", () => ({
   createInvitation: (...args: unknown[]) => createInvitationMock(...args),
   revokeInvitation: (...args: unknown[]) => revokeInvitationMock(...args),
   regenerateInvitationToken: (...args: unknown[]) => regenerateMock(...args),
+  enforceInviterStanding: (...args: unknown[]) => inviterStandingMock(...args),
   sendInvitationEmail: (...args: unknown[]) => sendInvitationEmailMock(...args),
   buildInvitationAcceptUrl: (token: string) => `http://test.local/en/invite?token=${token}`,
 }));
@@ -92,6 +94,13 @@ const BASE = `http://test.local/api/administrator/organizations/${ORG_ID}/invita
 const ORG_ROW = { id: ORG_ID, slug: "test-org", name: "Test Org", status: "active" };
 // F-09: the same org, suspended by a superadmin.
 const SUSPENDED_ORG_ROW = { ...ORG_ROW, status: "suspended" };
+// The resend route's lookup of a pending invitation (F-149: with its inviter).
+const PENDING_INVITATION = {
+  id: INVITATION_ID,
+  email: "ada@example.com",
+  role_id: ROLE_ID,
+  invited_by: "inviter-app-user",
+};
 
 function getReq(url: string): NextRequest {
   return { nextUrl: new URL(url), headers: new Headers() } as unknown as NextRequest;
@@ -140,6 +149,7 @@ beforeEach(async () => {
     createInvitationMock,
     revokeInvitationMock,
     regenerateMock,
+    inviterStandingMock,
     sendInvitationEmailMock,
   ])
     m.mockReset();
@@ -158,6 +168,7 @@ beforeEach(async () => {
     plaintextToken: "tok-rotated",
     expiresAt: new Date("2026-08-01T00:00:00Z"),
   });
+  inviterStandingMock.mockResolvedValue(true);
   ({ GET: listGET, POST: createPOST } =
     await import("@/app/api/administrator/organizations/[id]/invitations/route"));
   ({ DELETE: revokeDELETE } =
@@ -354,6 +365,8 @@ describe("F-09 — no invitations into an organization that is not active", () =
     expect(((await res.json()) as { error: string }).error).toBe("organization_not_active");
     expect(regenerateMock).not.toHaveBeenCalled();
     expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+    // Nor is it voided: it can be resent once the org is reactivated.
+    expect(inviterStandingMock).not.toHaveBeenCalled();
   });
 
   it("revoke still works in a suspended org (cleanup is always allowed)", async () => {
@@ -396,11 +409,22 @@ describe("POST .../invitations/:invitationId/resend", () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
     // org load (shared helper), then the invitation lookup. The inviter
     // lookup + render live inside the mocked sendInvitationEmail.
-    selectFirst
-      .mockResolvedValueOnce(ORG_ROW)
-      .mockResolvedValueOnce({ id: INVITATION_ID, email: "ada@example.com" });
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
     const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
     expect(res.status).toBe(200);
+    // F-149: the original inviter's standing was asked first, and held.
+    expect(inviterStandingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invitation: {
+          id: INVITATION_ID,
+          organizationId: ORG_ID,
+          email: "ada@example.com",
+          roleId: ROLE_ID,
+          invitedByAppUserId: "inviter-app-user",
+        },
+        actorBetterAuthUserId: "ba-admin",
+      }),
+    );
     expect(regenerateMock).toHaveBeenCalledWith({
       invitationId: INVITATION_ID,
       organizationId: ORG_ID,
@@ -418,6 +442,35 @@ describe("POST .../invitations/:invitationId/resend", () => {
       plaintextToken: "tok-rotated",
     });
     expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.organization.invitation_resent" }),
+    );
+  });
+
+  it("F-149: 409 invitation_inviter_lacks_standing, and no fresh link, when the original inviter can no longer invite", async () => {
+    // The inviter was banned, removed or demoted since. Acceptance would void
+    // the invitation, so the resend must not answer 200 and mail a link that
+    // cannot work: `enforceInviterStanding` voids it here and says no.
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    inviterStandingMock.mockResolvedValue(false);
+    const res = await resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: "invitation_inviter_lacks_standing",
+      message: "errors.invitation_inviter_lacks_standing",
+    });
+    expect(inviterStandingMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invitation: expect.objectContaining({
+          id: INVITATION_ID,
+          invitedByAppUserId: "inviter-app-user",
+        }),
+        actorBetterAuthUserId: "ba-admin",
+      }),
+    );
+    expect(regenerateMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.organization.invitation_resent" }),
     );
   });

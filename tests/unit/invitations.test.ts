@@ -16,10 +16,11 @@ import {
  *
  * Pins the security contract: hash-at-rest tokens (plaintext never
  * persisted), the email-match rule, the guarded single-use consume, the
- * never-elevate-a-blocked-user rule, the same-org role re-validation, and
- * the consume-time AUTHZ-3 re-check of the role against the INVITER's
- * current authority (review #6). The Kysely layer is stubbed per-table;
- * hashing is real (Web Crypto).
+ * never-elevate-a-blocked-user rule, the same-org role re-validation, the
+ * consume-time AUTHZ-3 re-check of the role against the INVITER's current
+ * authority (review #6), and the consume-time re-check of the inviter's
+ * standing, which voids the invitation of one who lost it (F-149). The
+ * Kysely layer is stubbed per-table; hashing is real (Web Crypto).
  */
 
 const auditMock = vi.fn();
@@ -27,12 +28,17 @@ vi.mock("@/lib/audit.server", () => ({ auditEvent: (...a: unknown[]) => auditMoc
 
 // Inviter-authority primitives (review #6). `unheldPermissionKeys` runs for
 // real (pure); the two DB lookups + the global-superuser probe are stubbed so
-// each test states the inviter's standing directly.
+// each test states the inviter's standing directly. So is the Better Auth ban
+// probe (F-149).
 const globalSuperuserMock = vi.fn();
 const rolePermsMock = vi.fn();
 const heldPermsMock = vi.fn();
+const bannedMock = vi.fn();
 vi.mock("@/lib/admin/access-scope.server", () => ({
   userIsGlobalSuperuser: (id: string) => globalSuperuserMock(id),
+}));
+vi.mock("@/lib/api-auth/ban-status.server", () => ({
+  isBetterAuthUserBanned: (id: string) => bannedMock(id),
 }));
 vi.mock("@/lib/admin/grantable-permissions.server", async () => {
   const actual = await vi.importActual<typeof GrantableModule>(
@@ -50,6 +56,8 @@ interface Stubs {
   invitationUpdate: () => { numUpdatedRows: bigint };
   membershipSelect: () => unknown;
   roleSelect: () => unknown;
+  /** The inviter's `app_users` row (F-149). */
+  inviterSelect: () => unknown;
 }
 
 let stubs: Stubs;
@@ -121,6 +129,7 @@ vi.mock("@/db/database", () => ({
       if (table === "app_organization_memberships")
         return makeChain({ table, first: () => stubs.membershipSelect() });
       if (table === "app_roles") return makeChain({ table, first: () => stubs.roleSelect() });
+      if (table === "app_users") return makeChain({ table, first: () => stubs.inviterSelect() });
       throw new Error(`unmocked selectFrom: ${table}`);
     },
     updateTable: (table: string) => {
@@ -149,8 +158,10 @@ const ELIGIBLE_USER = { id: "user-1", primaryEmail: "ada@example.com", status: "
 beforeEach(() => {
   auditMock.mockReset();
   globalSuperuserMock.mockReset().mockResolvedValue(false);
-  // Default inviter standing: an org admin who holds exactly what the role
-  // confers, so the legitimate grant path is the baseline.
+  // Default inviter standing: an active, unbanned org admin who holds the
+  // invite permission and exactly what the role confers, so the legitimate
+  // grant path is the baseline.
+  bannedMock.mockReset().mockResolvedValue(false);
   rolePermsMock.mockReset().mockResolvedValue(["admin.users.read"]);
   heldPermsMock.mockReset().mockResolvedValue(["admin.orgs.update", "admin.users.read"]);
   insertCalls = [];
@@ -160,6 +171,7 @@ beforeEach(() => {
     invitationUpdate: () => ({ numUpdatedRows: 1n }),
     membershipSelect: () => undefined,
     roleSelect: () => undefined,
+    inviterSelect: () => ({ better_auth_user_id: "ba-admin-1", status: "active" }),
   };
 });
 afterEach(() => vi.resetModules());
@@ -335,14 +347,14 @@ describe("consumeInvitation", () => {
       ).not.toHaveProperty("roleMissing");
     });
 
-    it("fails closed when the inviter account no longer exists (invited_by NULL)", async () => {
+    it("fails closed when the inviter account no longer exists (invited_by NULL) — nothing is created (F-149)", async () => {
       const result = await consumeInvitation({
         invitation: { ...invited, invitedByAppUserId: null },
         appUser: ELIGIBLE_USER,
         actorBetterAuthUserId: "ba-1",
       });
-      expect(result).toEqual({ consumed: true, roleGranted: false });
-      expect(insertCalls.find((c) => c.table === "app_user_roles")).toBeUndefined();
+      expect(result).toEqual({ consumed: false, reason: "inviter_lacks_standing" });
+      expect(insertCalls).toEqual([]);
       expect(rolePermsMock).not.toHaveBeenCalled();
       expect(heldPermsMock).not.toHaveBeenCalled();
     });
@@ -375,7 +387,7 @@ describe("consumeInvitation", () => {
       expect(insertCalls.find((c) => c.table === "app_user_roles")).toBeDefined();
     });
 
-    it("grants a permission-less role without consulting the inviter's held set", async () => {
+    it("grants a permission-less role without consulting the inviter's held set again", async () => {
       rolePermsMock.mockResolvedValue([]);
       const result = await consumeInvitation({
         invitation: invited,
@@ -383,7 +395,138 @@ describe("consumeInvitation", () => {
         actorBetterAuthUserId: "ba-1",
       });
       expect(result).toEqual({ consumed: true, roleGranted: true });
-      expect(heldPermsMock).not.toHaveBeenCalled();
+      // Once, for the inviter's standing (F-149); the role check skips it.
+      expect(heldPermsMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("consume-time re-check of the inviter's standing (F-149)", () => {
+    const superuserInvite = { ...INVITATION, roleId: "role-su" };
+
+    /** Nothing was granted and the only write is the void. */
+    function expectRefusedAndVoided(result: unknown): void {
+      expect(result).toEqual({ consumed: false, reason: "inviter_lacks_standing" });
+      expect(insertCalls).toEqual([]);
+      expect(updateCalls).toEqual([
+        {
+          table: "app_organization_invitations",
+          values: expect.objectContaining({ status: "revoked", revoked_by: null }),
+        },
+      ]);
+      expect(auditMock).toHaveBeenCalledTimes(1);
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "invitation.access.denied",
+          outcome: "denied",
+          reason: "inviter_lacks_standing",
+          appUserId: "user-1",
+          organizationId: "org-1",
+          email: "ada@example.com",
+          metadata: expect.objectContaining({
+            invitationId: "inv-1",
+            invitedByAppUserId: "admin-1",
+          }),
+        }),
+      );
+    }
+
+    beforeEach(() => {
+      stubs.roleSelect = () => ({ id: "role-su" });
+      rolePermsMock.mockResolvedValue(["superuser"]);
+    });
+
+    it("refuses a BANNED global superuser's invitation — no membership, no `superuser` role — and voids it", async () => {
+      globalSuperuserMock.mockResolvedValue(true);
+      bannedMock.mockResolvedValue(true);
+      const result = await consumeInvitation({
+        invitation: superuserInvite,
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expectRefusedAndVoided(result);
+      expect(bannedMock).toHaveBeenCalledWith("ba-admin-1");
+    });
+
+    it.each(["deactivated", "blocked", "suspended", "pending_approval"])(
+      "refuses when the inviter's account is %s (soft-deleted, blocked, suspended, restored)",
+      async (status) => {
+        globalSuperuserMock.mockResolvedValue(true);
+        stubs.inviterSelect = () => ({ better_auth_user_id: "ba-admin-1", status });
+        expectRefusedAndVoided(
+          await consumeInvitation({
+            invitation: superuserInvite,
+            appUser: ELIGIBLE_USER,
+            actorBetterAuthUserId: "ba-1",
+          }),
+        );
+      },
+    );
+
+    it("refuses when the inviter's account row is gone", async () => {
+      stubs.inviterSelect = () => undefined;
+      expectRefusedAndVoided(
+        await consumeInvitation({
+          invitation: INVITATION,
+          appUser: ELIGIBLE_USER,
+          actorBetterAuthUserId: "ba-1",
+        }),
+      );
+    });
+
+    it("refuses a plain invitation when the inviter no longer holds admin.orgs.update in the org (demoted or removed)", async () => {
+      for (const held of [[], ["admin.users.read"]]) {
+        insertCalls = [];
+        updateCalls = [];
+        auditMock.mockReset();
+        heldPermsMock.mockResolvedValue(held);
+        expectRefusedAndVoided(
+          await consumeInvitation({
+            invitation: INVITATION,
+            appUser: ELIGIBLE_USER,
+            actorBetterAuthUserId: "ba-1",
+          }),
+        );
+      }
+      expect(heldPermsMock).toHaveBeenCalledWith("admin-1", "org-1");
+    });
+
+    it("honours an inviter holding the superuser marker in the org itself (a group-conferred grant)", async () => {
+      heldPermsMock.mockResolvedValue(["superuser"]);
+      const result = await consumeInvitation({
+        invitation: superuserInvite,
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: true, roleGranted: true });
+    });
+
+    it("writes the refusal once: a request whose void finds the row already gone audits nothing", async () => {
+      bannedMock.mockResolvedValue(true);
+      stubs.invitationUpdate = () => ({ numUpdatedRows: 0n });
+      const result = await consumeInvitation({
+        invitation: INVITATION,
+        appUser: ELIGIBLE_USER,
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(result).toEqual({ consumed: false, reason: "inviter_lacks_standing" });
+      expect(insertCalls).toEqual([]);
+      expect(auditMock).not.toHaveBeenCalled();
+    });
+
+    it("asks nothing about the inviter for a mismatched or ineligible invitee, so only the invitee can void", async () => {
+      bannedMock.mockResolvedValue(true);
+      await consumeInvitation({
+        invitation: INVITATION,
+        appUser: { ...ELIGIBLE_USER, primaryEmail: "other@example.com" },
+        actorBetterAuthUserId: "ba-1",
+      });
+      await consumeInvitation({
+        invitation: INVITATION,
+        appUser: { ...ELIGIBLE_USER, status: "blocked" },
+        actorBetterAuthUserId: "ba-1",
+      });
+      expect(bannedMock).not.toHaveBeenCalled();
+      expect(updateCalls).toEqual([]);
     });
   });
 });

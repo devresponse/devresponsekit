@@ -133,7 +133,10 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     if (result.reason === "email_mismatch") {
       return adminErrorResponse("invitation_email_mismatch", 403, request);
     }
-    // already_consumed — the guarded flip lost a race with another accept.
+    // already_consumed — the guarded flip lost a race with another accept —
+    // or inviter_lacks_standing (F-149): the inviter can no longer invite, so
+    // the invitation was just revoked, and a revoked token answers like any
+    // other dead one.
     return adminErrorResponse("invitation_invalid", 404, request);
   }
 

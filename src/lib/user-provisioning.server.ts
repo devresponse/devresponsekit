@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth-policy.server";
 import {
   consumeInvitation,
+  enforceInviterStanding,
   findValidInvitationByToken,
   type InvitationRow,
 } from "@/lib/invitations.server";
@@ -92,7 +93,8 @@ export interface ProvisionUserResult {
  *     profile data. Activation happens only via (a) trusted seeds,
  *     (b) the org's admin-configured policy — the domain-based rule
  *     additionally requires the address to be VERIFIED — or (c) a live
- *     invitation whose email equals the authenticating email.
+ *     invitation whose email equals the authenticating email and whose
+ *     inviter still has the standing to invite (F-149).
  *   - Email-based account linking is enforced by Better Auth's
  *     `accountLinking` configuration; this function only links
  *     application records, never auth credentials.
@@ -113,11 +115,25 @@ export async function provisionUserFromAuth(
   // the token is LIVE and its email equals the authenticating email — a
   // forwarded link can never move the seat to another mailbox. Any failure
   // degrades to the uninvited path (fail closed), never blocks the sign-up.
+  //
+  // F-149: and only while its inviter still has the standing to invite. This
+  // path activates the account and its membership (steps 1-4) BEFORE it
+  // consumes the invitation, so the gate inside `consumeInvitation` comes too
+  // late to stop the admission: it has to be asked here, first. An invitation
+  // that fails it is voided, and the sign-up carries on as an uninvited one.
   let invitation: InvitationRow | null = null;
   if (input.invitationToken && !input.isSeed) {
     try {
       const candidate = await findValidInvitationByToken(input.invitationToken);
-      if (candidate && candidate.email === input.email.trim().toLowerCase()) {
+      if (
+        candidate &&
+        candidate.email === input.email.trim().toLowerCase() &&
+        (await enforceInviterStanding({
+          invitation: candidate,
+          actorBetterAuthUserId: input.betterAuthUserId,
+          provider: input.provider,
+        }))
+      ) {
         invitation = candidate;
       }
     } catch (error) {

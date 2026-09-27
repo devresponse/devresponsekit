@@ -159,6 +159,13 @@ describe("POST /api/invitations/accept", () => {
     expect(((await res.json()) as { error: string }).error).toBe("invitation_invalid");
   });
 
+  it("maps an inviter who lost standing to the generic 404 (F-149: the invitation was voided)", async () => {
+    consumeMock.mockResolvedValue({ consumed: false, reason: "inviter_lacks_standing" });
+    const res = await POST(req({ token: "t" }));
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error: string }).error).toBe("invitation_invalid");
+  });
+
   it("returns 403 when the session user has no app_users row", async () => {
     selectFirst.mockResolvedValue(undefined);
     const res = await POST(req({ token: "t" }));
@@ -223,7 +230,12 @@ describe("POST /api/invitations/accept — F-33 pins the active org to the org j
   });
 
   it("never pins when the accept itself is refused", async () => {
-    for (const reason of ["user_not_eligible", "email_mismatch", "already_consumed"]) {
+    for (const reason of [
+      "user_not_eligible",
+      "email_mismatch",
+      "already_consumed",
+      "inviter_lacks_standing",
+    ]) {
       consumeMock.mockResolvedValue({ consumed: false, reason });
       const res = await POST(req({ token: "t" }));
       expect(res.status, reason).not.toBe(200);

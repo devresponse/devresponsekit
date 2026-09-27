@@ -8,7 +8,9 @@ import {
   permissionKeysHeldInOrg,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
+import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
 import { hashSecret, randomBase62 } from "@/lib/api-auth/api-key";
+import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
 import { auditEvent } from "@/lib/audit.server";
 import { getServerEnv } from "@/lib/env";
 import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
@@ -34,12 +36,19 @@ import { ACTIVE_ORGANIZATION_STATUS } from "@/lib/validation/organizations";
  *   - Consumption NEVER elevates a blocked/suspended/deactivated user —
  *     explicit administrator denials always win (same invariant as
  *     `reevaluatePendingActivation`).
+ *   - The invitation is the INVITER's approval, deferred until someone
+ *     accepts it, so both acceptance paths re-check that the inviter still
+ *     has the standing the create route demanded (F-149,
+ *     {@link enforceInviterStanding}), and so does a resend. One who lost it
+ *     is refused, and the invitation is voided so it cannot come back with
+ *     them.
  *   - The optional role is a DEFERRED conferral (AUTHZ-3, review #6): the
  *     create route refuses a role the inviter cannot confer, and
  *     `consumeInvitation` re-checks the role against the inviter's CURRENT
- *     authority before granting it. A role that fails the re-check (inviter
- *     demoted/removed/deleted since the invite) is skipped — the membership
- *     is still created — and recorded as `roleDenied` on the audit event.
+ *     authority before granting it. A role that fails the re-check (an
+ *     inviter who still has standing but has lost a permission the role
+ *     carries) is skipped — the membership is still created — and recorded
+ *     as `roleDenied` on the audit event.
  *   - These helpers do not scope: admin routes MUST `canAccessOrg`-guard the
  *     target organization before calling in (ADR-0001).
  */
@@ -221,8 +230,124 @@ export async function findValidInvitationByToken(
 }
 
 /**
+ * The permission the create route (`POST …/organizations/:id/invitations`)
+ * requires of the inviter, and so the one an invitation still needs its
+ * inviter to hold when it is accepted (F-149).
+ */
+const INVITE_PERMISSION = "admin.orgs.update";
+
+/**
+ * Whether the inviter still has the standing the create route required when
+ * they sent the invitation (F-149): an `active` account that is not Better
+ * Auth-banned, and that still holds {@link INVITE_PERMISSION} in the inviting
+ * org, or is a global superuser.
+ *
+ * The create route admitted the inviter through `requireAdminPermission` (an
+ * active account with an active membership, holding the permission or the
+ * superuser marker) and `loadScopedOrg` (the org within their reach). This is
+ * that check again, measured from the rows because nobody is at a browser:
+ *   - `app_users.status` must be `active`. A soft-delete, block or suspension
+ *     sets something else;
+ *   - a Better Auth ban writes neither that status nor the memberships, so it
+ *     is read separately, through the predicate the bearer paths use
+ *     (`isBetterAuthUserBanned`, which honours a lapsed temporary ban). This
+ *     is the case that let a banned superadmin's invitation confer
+ *     `superuser`;
+ *   - reach and permission: a global superuser (`userIsGlobalSuperuser`: a
+ *     grant through an active membership in an active org) reaches every
+ *     org, and anyone else needs the permission, or the marker, held through
+ *     an ACTIVE membership in the inviting org (`permissionKeysHeldInOrg`), as
+ *     an org admin acting in that org would. So an admin demoted or removed
+ *     since the invite has none.
+ *
+ * No inviter on record (`invited_by` is NULL once their account is deleted)
+ * has no standing either: fail closed.
+ */
+export async function inviterHasStanding(
+  invitation: Pick<InvitationRow, "invitedByAppUserId" | "organizationId">,
+): Promise<boolean> {
+  const inviterId = invitation.invitedByAppUserId;
+  if (!inviterId) return false;
+  const inviter = await db
+    .selectFrom("app_users")
+    .select(["better_auth_user_id", "status"])
+    .where("id", "=", inviterId)
+    .executeTakeFirst();
+  if (!inviter || inviter.status !== "active") return false;
+  if (await isBetterAuthUserBanned(inviter.better_auth_user_id)) return false;
+  if (await userIsGlobalSuperuser(inviterId)) return true;
+  const held = await permissionKeysHeldInOrg(inviterId, invitation.organizationId);
+  return held.includes(INVITE_PERMISSION) || held.includes(SUPERADMIN_PERMISSION);
+}
+
+/**
+ * The acceptance-time gate on the inviter's standing (F-149), shared by both
+ * acceptance paths: `consumeInvitation` (the explicit accept endpoint, and
+ * sign-up provisioning's consume) and provisioning's placement decision,
+ * which activates an invited sign-up BEFORE it consumes the invitation. The
+ * resend route asks it too, before it mails a fresh link that acceptance
+ * would refuse. Returns true when the invitation may be honoured.
+ *
+ * Otherwise the invitation is VOIDED, flipped `pending` → `revoked` with no
+ * `revoked_by` (the system revoked it), and the refusal is audited as
+ * `invitation.access.denied` / `inviter_lacks_standing` naming the inviter.
+ * Voiding rather than leaving the row `pending` matters for a ban. An
+ * attacker holding a superadmin's session invites their own mailbox with the
+ * `superuser` role, the operators ban the superadmin and, once the account is
+ * secured, lift the ban; a merely refused invitation would work again from
+ * that moment. The explicit accept endpoint answers a voided invitation with
+ * the generic 404 `invitation_invalid` it gives every revoked one, and a
+ * sign-up that carried it proceeds as an uninvited one.
+ *
+ * The audit row is written only by the request that voided the row, so a
+ * refused invitation leaves exactly one.
+ */
+export async function enforceInviterStanding(input: {
+  invitation: Pick<
+    InvitationRow,
+    "id" | "organizationId" | "email" | "roleId" | "invitedByAppUserId"
+  >;
+  actorBetterAuthUserId: string | null;
+  appUserId?: string | null;
+  provider?: string;
+  request?: { headers: Headers };
+}): Promise<boolean> {
+  const { invitation } = input;
+  if (await inviterHasStanding(invitation)) return true;
+
+  const voided = await db
+    .updateTable("app_organization_invitations")
+    .set({ status: "revoked", revoked_at: sql`now()`, revoked_by: null, updated_at: sql`now()` })
+    .where("id", "=", invitation.id)
+    .where("status", "=", "pending")
+    .executeTakeFirst();
+  if (voided.numUpdatedRows > 0n) {
+    await auditEvent({
+      eventType: "invitation.access.denied",
+      outcome: "denied",
+      actorBetterAuthUserId: input.actorBetterAuthUserId,
+      appUserId: input.appUserId ?? null,
+      organizationId: invitation.organizationId,
+      provider: input.provider ?? null,
+      email: invitation.email,
+      reason: "inviter_lacks_standing",
+      request: input.request,
+      metadata: {
+        invitationId: invitation.id,
+        invitedByAppUserId: invitation.invitedByAppUserId,
+        roleId: invitation.roleId,
+      },
+    });
+  }
+  return false;
+}
+
+/**
  * Whether the inviter may (still) confer `roleId` in `organizationId` — the
- * consume-time half of the AUTHZ-3 guard (review #6). Fails closed:
+ * consume-time half of the AUTHZ-3 guard (review #6). `consumeInvitation`
+ * asks only once {@link enforceInviterStanding} has passed, so a banned,
+ * blocked or deleted inviter never reaches the superuser fast-path below
+ * (F-149). Fails closed:
  *   - no inviter on record (account deleted since the invite) → false;
  *   - a GLOBAL superuser inviter → true (mirrors the routes' `isSuperadmin`
  *     fast-path; a superuser holds the full catalog by definition);
@@ -244,7 +369,11 @@ export async function inviterMayConferRole(input: {
 
 export type ConsumeInvitationResult =
   | { consumed: true; roleGranted: boolean }
-  | { consumed: false; reason: "already_consumed" | "email_mismatch" | "user_not_eligible" };
+  | {
+      consumed: false;
+      reason:
+        "already_consumed" | "email_mismatch" | "user_not_eligible" | "inviter_lacks_standing";
+    };
 
 /**
  * Consumes an invitation for `appUser`: marks it accepted (guarded),
@@ -281,6 +410,23 @@ export async function consumeInvitation(input: {
   // admin can still see (and revoke) it.
   if (appUser.status !== "active" && appUser.status !== "pending_approval") {
     return { consumed: false, reason: "user_not_eligible" };
+  }
+
+  // F-149: nothing below may happen on the word of an inviter who has since
+  // lost the standing to invite: banned (which leaves their memberships
+  // active, so a banned superadmin still passed the role re-check and conferred
+  // `superuser`), soft-deleted, blocked, removed or deleted. Asked after the
+  // email match, so only the invitee can void their own invitation.
+  if (
+    !(await enforceInviterStanding({
+      invitation,
+      actorBetterAuthUserId: input.actorBetterAuthUserId,
+      appUserId: appUser.id,
+      provider: input.provider,
+      request: input.request,
+    }))
+  ) {
+    return { consumed: false, reason: "inviter_lacks_standing" };
   }
 
   // F-09: the flip re-asserts that the inviting org is still ACTIVE. The

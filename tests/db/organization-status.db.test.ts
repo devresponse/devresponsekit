@@ -325,10 +325,34 @@ describe("F-09 invitation path", () => {
   });
 
   it("a suspension that lands between lookup and accept wins: nothing is consumed or created", async () => {
+    // Sent by the tenant's own org admin, whose standing (F-149) survives the
+    // suspension: what refuses the accept here is the org status, nothing else.
+    const inviter = await newUser("inviter_race");
+    await addMembership(inviter.id, ids.suspended, "2020-01-01T00:00:00Z");
+    const invitePerm = await db
+      .selectFrom("app_permissions")
+      .select("id")
+      .where("key", "=", "admin.orgs.update")
+      .executeTakeFirstOrThrow();
+    const adminRole = await db
+      .insertInto("app_roles")
+      .values({ organization_id: ids.suspended, key: `${PREFIX}org_admin`, name: "DBTest Admin" })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto("app_role_permissions")
+      .values({ role_id: adminRole.id, permission_id: invitePerm.id })
+      .execute();
+    await db
+      .insertInto("app_user_roles")
+      .values({ app_user_id: inviter.id, organization_id: ids.suspended, role_id: adminRole.id })
+      .execute();
+
     const invitee = await newUser("invitee_race");
     const created = await createInvitation({
       organizationId: ids.suspended,
       email: `${PREFIX}invitee_race@dbtest.local`,
+      invitedByAppUserId: inviter.id,
     });
 
     // Looked up while the org was still active…

@@ -12,6 +12,10 @@ import { consumeSsoHandoffNonce } from "@/lib/sso.server";
  * the atomicity (a single conditional UPDATE … RETURNING under row locking),
  * so this runs two burns in parallel on one pool and counts the winners.
  *
+ * F-85: a missed burn now says why (`replayed` / `expired` / `unknown`) by
+ * reading the row back, so the route stops reporting an expiry as a replay.
+ * Only live SQL proves the read-back sees the row state the UPDATE missed on.
+ *
  * Fixtures use the `__dbtest_` prefix and are created/torn down here.
  */
 const PREFIX = "__dbtest_ssononce_";
@@ -97,10 +101,12 @@ describe("consumeSsoHandoffNonce (live SQL)", () => {
       consumeSsoHandoffNonce(jti, APP_ID),
       consumeSsoHandoffNonce(jti, APP_ID),
     ]);
-    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(results.filter((r) => r === "consumed")).toHaveLength(1);
+    // The loser saw the winner's burn: a replay, not an expiry.
+    expect(results.filter((r) => r === "replayed")).toHaveLength(1);
     expect(await consumedAt(jti)).toBeInstanceOf(Date);
     // A later replay is refused too.
-    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe(false);
+    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe("replayed");
   });
 
   it("a larger concurrent burst still yields exactly one winner", async () => {
@@ -109,24 +115,38 @@ describe("consumeSsoHandoffNonce (live SQL)", () => {
     const results = await Promise.all(
       Array.from({ length: 8 }, () => consumeSsoHandoffNonce(jti, APP_ID)),
     );
-    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(results.filter((r) => r === "consumed")).toHaveLength(1);
+    expect(results.filter((r) => r === "replayed")).toHaveLength(7);
   });
 
   it("refuses a nonce minted for ANOTHER application and leaves it unconsumed (review #15)", async () => {
     const jti = `${PREFIX}foreign`;
     await newNonce(jti, { app: OTHER_APP_ID });
-    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe(false);
+    // Unknown to this app: the read-back is keyed on the application id too.
+    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe("unknown");
     expect(await consumedAt(jti)).toBeNull();
     // The app it WAS minted for can still spend it — once.
-    await expect(consumeSsoHandoffNonce(jti, OTHER_APP_ID)).resolves.toBe(true);
-    await expect(consumeSsoHandoffNonce(jti, OTHER_APP_ID)).resolves.toBe(false);
+    await expect(consumeSsoHandoffNonce(jti, OTHER_APP_ID)).resolves.toBe("consumed");
+    await expect(consumeSsoHandoffNonce(jti, OTHER_APP_ID)).resolves.toBe("replayed");
   });
 
-  it("refuses an expired nonce and an unknown jti", async () => {
+  it("refuses an expired nonce as expired and an unknown jti as unknown (F-85)", async () => {
     const jti = `${PREFIX}expired`;
     await newNonce(jti, { expiresInMs: -1_000 });
-    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe(false);
+    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe("expired");
     expect(await consumedAt(jti)).toBeNull();
-    await expect(consumeSsoHandoffNonce(`${PREFIX}never_minted`, APP_ID)).resolves.toBe(false);
+    await expect(consumeSsoHandoffNonce(`${PREFIX}never_minted`, APP_ID)).resolves.toBe("unknown");
+  });
+
+  it("a nonce spent in time and replayed after its expiry is a replay, not an expiry (F-85)", async () => {
+    const jti = `${PREFIX}spent_then_expired`;
+    await newNonce(jti);
+    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe("consumed");
+    await db
+      .updateTable("app_sso_handoff_nonces")
+      .set({ expires_at: new Date(Date.now() - 1_000) })
+      .where("jti", "=", jti)
+      .execute();
+    await expect(consumeSsoHandoffNonce(jti, APP_ID)).resolves.toBe("replayed");
   });
 });

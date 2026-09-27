@@ -136,17 +136,37 @@ export async function createSsoHandoffRedirect(input: CreateSsoHandoffRedirectIn
 }
 
 /**
- * Atomically consumes a handoff `jti`, returning true exactly once per token.
+ * What {@link consumeSsoHandoffNonce} did. Only `"consumed"` lets the caller
+ * establish a session; the other three say why the burn missed (F-85).
+ */
+export type SsoNonceConsumeResult = "consumed" | "replayed" | "expired" | "unknown";
+
+/**
+ * Atomically consumes a handoff `jti`, returning `"consumed"` exactly once per
+ * token.
  *
  * The burn is predicated on `targetApplicationId` as well as `jti` (review
  * #15): the nonce row records which app the launch was FOR, so a consumer
  * can only spend nonces minted for its own application id — even if two
  * registered apps were to share an `sso_audience`.
+ *
+ * F-85: the one UPDATE misses for two different reasons, already spent or past
+ * `expires_at`, and the consume route reported both as `token_already_used`. A
+ * token can pass the verifier and still be past `expires_at`: the verifier
+ * allows 5 s past `exp` for clock skew, and `expires_at` has no such allowance.
+ * So an expiry reached satellite support as a replay. On a miss the row is
+ * read back to tell them apart. A set `consumed_at` is a replay; an unset one
+ * can only have missed on `expires_at`, since `jti` and the application id are
+ * the lookup key. No row for this application is an unknown nonce, which is
+ * what a consumer on its own database hits on every handoff
+ * (integration-satellite-apps.md §4.5). The read comes after the atomic UPDATE,
+ * so it cannot weaken the one-winner guarantee, and a concurrent winner between
+ * the two statements reads as a replay, which it is.
  */
 export async function consumeSsoHandoffNonce(
   jti: string,
   targetApplicationId: string,
-): Promise<boolean> {
+): Promise<SsoNonceConsumeResult> {
   const result = await db
     .updateTable("app_sso_handoff_nonces")
     .set({ consumed_at: new Date() })
@@ -156,6 +176,14 @@ export async function consumeSsoHandoffNonce(
     .where("expires_at", ">", new Date())
     .returning(["jti"])
     .executeTakeFirst();
+  if (result) return "consumed";
 
-  return Boolean(result);
+  const row = await db
+    .selectFrom("app_sso_handoff_nonces")
+    .select("consumed_at")
+    .where("jti", "=", jti)
+    .where("target_application_id", "=", targetApplicationId)
+    .executeTakeFirst();
+  if (!row) return "unknown";
+  return row.consumed_at === null ? "expired" : "replayed";
 }

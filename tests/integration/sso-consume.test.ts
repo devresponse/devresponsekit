@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ConsumeRouteModule from "@/app/api/sso/consume/route";
 import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
 import { NextRequest } from "next/server";
+import { errors as joseErrors } from "jose";
 import type { BetterAuthOptions } from "better-auth";
 import { getIP } from "better-auth/api";
 import { CLIENT_IP_HEADER, getClientIp } from "@/lib/client-ip";
@@ -105,10 +106,14 @@ function getRequest(url: string, headers: Record<string, string> = {}): NextRequ
  * The confirmation page's form POST, as a browser sends it: a urlencoded body
  * the route reads through its byte cap (F-78).
  */
-function postRequest(token: string | null, headers: Record<string, string> = {}): NextRequest {
+function postRequest(
+  token: string | null,
+  headers: Record<string, string> = {},
+  url = "http://localhost/api/sso/consume",
+): NextRequest {
   const form = new URLSearchParams();
   if (token !== null) form.set("token", token);
-  return new NextRequest("http://localhost/api/sso/consume", {
+  return new NextRequest(url, {
     method: "POST",
     headers,
     body: form,
@@ -222,7 +227,7 @@ describe("GET /api/sso/consume — verify + confirmation redirect (P2-2)", () =>
 describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
   it("burns the nonce, establishes the session, and 303s to the dashboard with the cookie", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     const res = await POST(postRequest("abc"));
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toContain("/fr/app/dashboard");
@@ -240,14 +245,15 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
 
   it("rejects replayed nonces with 401 and audits the reason", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(false);
+    consumeMock.mockResolvedValue("replayed");
     const res = await POST(postRequest("abc"));
     expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: "token_already_used" });
     expect(createSsoSessionMock).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "sso.consume.failure",
-        reason: "nonce_replay_or_expired",
+        reason: "nonce_replay",
       }),
     );
     // A replay of a VERIFIED token stays audited (F-15 only moves refusals
@@ -257,7 +263,7 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
 
   it("forwards EACH Set-Cookie separately when Better Auth emits more than one (AUTH-3)", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     const multi = new Headers();
     multi.append("set-cookie", "better-auth.session_token=tok.sig; Path=/; HttpOnly");
     multi.append("set-cookie", "better-auth.dont_remember=1; Path=/; HttpOnly");
@@ -272,7 +278,7 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
 
   it("returns 401 and audits when session establishment fails (e.g. banned user)", async () => {
     verifyMock.mockResolvedValue({ payload: { ...PAYLOAD, sub: "ba-banned" } });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     createSsoSessionMock.mockRejectedValue(new Error("user is banned"));
     const res = await POST(postRequest("abc"));
     expect(res.status).toBe(401);
@@ -335,7 +341,7 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
 
     it("still reads the token from a form padded to the cap, and from a multipart form", async () => {
       verifyMock.mockResolvedValue({ payload: PAYLOAD });
-      consumeMock.mockResolvedValue(true);
+      consumeMock.mockResolvedValue("consumed");
       const padded = `token=abc&pad=${"x".repeat(CAP - "token=abc&pad=".length)}`;
       expect((await POST(raw(padded))).status).toBe(303);
 
@@ -374,7 +380,7 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
     async (reason, origin) => {
       originCheck.mockReturnValue({ ok: false, reason });
       verifyMock.mockResolvedValue({ payload: PAYLOAD });
-      consumeMock.mockResolvedValue(true);
+      consumeMock.mockResolvedValue("consumed");
       const request = postRequest("abc", origin ? { origin } : {});
       const res = await POST(request);
       expect(res.status).toBe(403);
@@ -435,7 +441,7 @@ describe("application-id binding — token minted for another app (review #15)",
 
   it("POST refuses it with 401 BEFORE burning the nonce or creating a session", async () => {
     verifyMock.mockResolvedValue({ payload: FOREIGN });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     const res = await POST(postRequest("abc"));
     expect(res.status).toBe(401);
     expect(consumeMock).not.toHaveBeenCalled();
@@ -475,7 +481,7 @@ describe("trusted client IP on session creation (review #35 / #190)", () => {
 
   it("overwrites a client-injected x-drk-client-ip with the trusted hop; session IP === audit IP", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     const request = postRequest("abc", {
       [CLIENT_IP_HEADER]: "6.6.6.6",
       "x-forwarded-for": "6.6.6.6, 203.0.113.9",
@@ -500,7 +506,7 @@ describe("trusted client IP on session creation (review #35 / #190)", () => {
 
   it("an honest single-hop XFF (Vercel edge) still yields a real session IP", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     expect((await POST(postRequest("abc", { "x-forwarded-for": "203.0.113.9" }))).status).toBe(303);
     const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
     expect(passed.get(CLIENT_IP_HEADER)).toBe("203.0.113.9");
@@ -510,7 +516,7 @@ describe("trusted client IP on session creation (review #35 / #190)", () => {
   it("honors TRUSTED_PROXY_COUNT for a CDN + LB chain, like the audit row", async () => {
     vi.stubEnv("TRUSTED_PROXY_COUNT", "2");
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     const request = postRequest("abc", { "x-forwarded-for": "spoof, 203.0.113.9, 10.0.0.2" });
     expect((await POST(request)).status).toBe(303);
     const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
@@ -520,7 +526,7 @@ describe("trusted client IP on session creation (review #35 / #190)", () => {
 
   it("strips an injected header when nothing trustworthy is present (fail closed, never the client's value)", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     expect((await POST(postRequest("abc", { [CLIENT_IP_HEADER]: "6.6.6.6" }))).status).toBe(303);
     const passed = createSsoSessionMock.mock.calls[0]![0].headers as Headers;
     expect(passed.has(CLIENT_IP_HEADER)).toBe(false);
@@ -529,7 +535,7 @@ describe("trusted client IP on session creation (review #35 / #190)", () => {
 
   it("keeps the cookies / user-agent Better Auth needs on the forwarded copy", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     await POST(
       postRequest("abc", { cookie: "a=b", "user-agent": "ua", "x-real-ip": "203.0.113.9" }),
     );
@@ -609,7 +615,7 @@ describe("per-IP rate limit (review #16)", () => {
 
   it("a legitimate single handoff (GET then POST) from a fresh IP is untouched", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     expect((await GET(getRequest("http://localhost/api/sso/consume?token=abc", ipB))).status).toBe(
       307,
     );
@@ -642,7 +648,7 @@ describe("F-19: consume is limited per IP from the shared bucket, with no global
 
   it("GET and POST consult the shared limiter, keyed on the client IP alone", async () => {
     verifyMock.mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     expect((await GET(getRequest("http://localhost/api/sso/consume?token=abc", ipA))).status).toBe(
       307,
     );
@@ -694,7 +700,7 @@ describe("F-19: consume is limited per IP from the shared bucket, with no global
 
     // A real user on a different IP completes the handoff: GET, then POST.
     verifyMock.mockReset().mockResolvedValue({ payload: PAYLOAD });
-    consumeMock.mockResolvedValue(true);
+    consumeMock.mockResolvedValue("consumed");
     const victim = { "x-forwarded-for": "198.51.100.4" };
     expect(
       (await GET(getRequest("http://localhost/api/sso/consume?token=abc", victim))).status,
@@ -709,5 +715,179 @@ describe("F-19: consume is limited per IP from the shared bucket, with no global
       "sso.consume:ip:198.51.100.4",
     ];
     expect(new Set(shared.keys)).toEqual(new Set(perIp));
+  });
+});
+
+/**
+ * F-85: a failed handoff showed the person a bare JSON body, most often
+ * `token_already_used` after they read the confirm page for longer than the
+ * token lives, which was really an expiry. A browser (it names `text/html` in
+ * `Accept`) is now sent to the confirm page's failure state; every other caller
+ * keeps the JSON; and an expiry is reported as `token_expired`, from jose's
+ * `JWTExpired` or from the nonce row, never as a replay.
+ */
+describe("F-85: failures send a browser to the confirm page, and an expiry is not a replay", () => {
+  /** What a browser sends on a top-level navigation and on a form POST. */
+  const BROWSER = {
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  };
+  /** An expiry as jose raises it: signature, issuer and audience already checked out. */
+  const expired = () =>
+    new joseErrors.JWTExpired('"exp" claim timestamp check failed', {}, "exp", "check_failed");
+
+  /** Asserts the 303 to the failure page and returns where it points. */
+  function failurePage(res: Response): URL {
+    expect(res.status).toBe(303);
+    const page = new URL(res.headers.get("location")!);
+    expect(page.pathname).toMatch(/^\/[a-z]{2}\/sso\/confirm$/);
+    // The page shows the id the response header and the log line carry.
+    expect(page.searchParams.get("requestId")).toBe(res.headers.get("x-request-id"));
+    // The token never rides the failure redirect, and nothing signs in.
+    expect(page.searchParams.has("token")).toBe(false);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("set-cookie")).toBeNull();
+    return page;
+  }
+
+  it("GET: a token that fails verification sends a browser to the invalid state, logged and not audited", async () => {
+    verifyMock.mockRejectedValue(new Error("signature verification failed"));
+    const page = failurePage(
+      await GET(getRequest("http://localhost/api/sso/consume?token=abc", BROWSER)),
+    );
+    // Nothing verified names a locale, so the default one.
+    expect(page.pathname).toBe("/en/sso/confirm");
+    expect(page.searchParams.get("error")).toBe("invalid_token");
+    expect(preAuthLog).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "signature verification failed" }),
+    );
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("GET: a missing token lands in the `locale` query parameter's language", async () => {
+    const page = failurePage(
+      await GET(getRequest("http://localhost/api/sso/consume?locale=uk", BROWSER)),
+    );
+    expect(page.pathname).toBe("/uk/sso/confirm");
+    expect(page.searchParams.get("error")).toBe("missing_token");
+  });
+
+  it("GET: a verified token for another app lands in the token's own locale, still audited", async () => {
+    verifyMock.mockResolvedValue({ payload: { ...PAYLOAD, targetApplicationId: "evil" } });
+    const page = failurePage(
+      await GET(getRequest("http://localhost/api/sso/consume?token=abc", BROWSER)),
+    );
+    expect(page.pathname).toBe("/fr/sso/confirm");
+    expect(page.searchParams.get("error")).toBe("invalid_token");
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "target_application_mismatch" }),
+    );
+  });
+
+  it("GET: a browser's valid handoff still goes to the confirm step with its token", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc", BROWSER));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).searchParams.get("token")).toBe("abc");
+  });
+
+  it.each([
+    ["replayed", "token_already_used", "nonce_replay"],
+    ["expired", "token_expired", "nonce_expired"],
+    ["unknown", "invalid_token", "nonce_unknown"],
+  ] as const)(
+    "POST: a nonce burn that missed as %s answers %s and audits %s",
+    async (burn, code, reason) => {
+      verifyMock.mockResolvedValue({ payload: PAYLOAD });
+      consumeMock.mockResolvedValue(burn);
+
+      const api = await POST(postRequest("abc"));
+      expect(api.status).toBe(401);
+      expect(await api.json()).toMatchObject({ error: code });
+      expect(auditMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ eventType: "sso.consume.failure", outcome: "failure", reason }),
+      );
+
+      const page = failurePage(await POST(postRequest("abc", BROWSER)));
+      expect(page.pathname).toBe("/fr/sso/confirm");
+      expect(page.searchParams.get("error")).toBe(code);
+      expect(createSsoSessionMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("an expired token (jose JWTExpired) answers token_expired on both methods, logged and not audited", async () => {
+    verifyMock.mockRejectedValue(expired());
+    const get = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
+    expect(get.status).toBe(401);
+    expect(await get.json()).toMatchObject({ error: "token_expired" });
+    const post = await POST(postRequest("abc"));
+    expect(post.status).toBe(401);
+    expect(await post.json()).toMatchObject({ error: "token_expired" });
+    // Still refused before the token verified (F-15): a log line, no row, no burn.
+    expect(preAuthLog).toHaveBeenCalledTimes(2);
+    expect(preAuthLog).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: '"exp" claim timestamp check failed' }),
+    );
+    expect(auditMock).not.toHaveBeenCalled();
+    expect(consumeMock).not.toHaveBeenCalled();
+  });
+
+  it("any other verification failure, a failed claim check included, stays invalid_token", async () => {
+    verifyMock.mockRejectedValue(
+      new joseErrors.JWTClaimValidationFailed('unexpected "aud" claim value', {}, "aud"),
+    );
+    const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
+    expect(await res.json()).toMatchObject({ error: "invalid_token" });
+  });
+
+  it("POST: a token that expired on the confirm page comes back to it in the form's locale", async () => {
+    verifyMock.mockRejectedValue(expired());
+    const page = failurePage(
+      await POST(postRequest("abc", BROWSER, "http://localhost/api/sso/consume?locale=uk")),
+    );
+    expect(page.pathname).toBe("/uk/sso/confirm");
+    expect(page.searchParams.get("error")).toBe("token_expired");
+  });
+
+  it("POST: a failed session and a refused origin send a browser to the page too", async () => {
+    verifyMock.mockResolvedValue({ payload: PAYLOAD });
+    consumeMock.mockResolvedValue("consumed");
+    createSsoSessionMock.mockRejectedValue(new Error("user is banned"));
+    const failed = failurePage(await POST(postRequest("abc", BROWSER)));
+    expect(failed.searchParams.get("error")).toBe("session_establishment_failed");
+
+    originCheck.mockReturnValue({ ok: false, reason: "untrusted_origin" });
+    const refused = failurePage(await POST(postRequest("abc", BROWSER)));
+    expect(refused.searchParams.get("error")).toBe("forbidden");
+  });
+
+  it("a rate-limited browser goes to the page; an API client keeps the 429 and Retry-After", async () => {
+    // Freeze the clock so no token refills mid-burst.
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    verifyMock.mockRejectedValue(new Error("signature_invalid"));
+    const ip = { "x-forwarded-for": "203.0.113.77" };
+    const garbage = (headers: Record<string, string>) =>
+      getRequest("http://localhost/api/sso/consume?token=zz", headers);
+    for (let i = 0; i < 30; i += 1) expect((await GET(garbage(ip))).status).toBe(401);
+
+    const api = await GET(garbage(ip));
+    expect(api.status).toBe(429);
+    expect(api.headers.get("retry-after")).toBeTruthy();
+    const page = failurePage(await GET(garbage({ ...ip, ...BROWSER })));
+    expect(page.searchParams.get("error")).toBe("rate_limited");
+  });
+
+  it.each([
+    ["no Accept header", {}],
+    ["a wildcard (curl, Node fetch, the drk-deploy probe)", { accept: "*/*" }],
+    ["application/json", { accept: "application/json" }],
+    ["JSON named alongside HTML", { accept: "text/html, application/json" }],
+  ])("keeps the JSON body for %s", async (_label, headers) => {
+    verifyMock.mockRejectedValue(new Error("signature verification failed"));
+    const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc", headers));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.json()).toMatchObject({ error: "invalid_token" });
   });
 });

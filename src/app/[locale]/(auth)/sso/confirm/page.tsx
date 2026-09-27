@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { isSupportedLocale } from "@/config/i18n-config";
 import { verifySsoHandoff } from "@/lib/jwt-handoff.server";
+import { isValidRequestId } from "@/lib/request-id";
 import { LocaleLink } from "@/components/i18n/locale-link";
 
 export const dynamic = "force-dynamic";
@@ -36,25 +37,58 @@ async function resolveEmail(token: string | undefined): Promise<string | null> {
   }
 }
 
+/**
+ * The failure state for the `error` code `/api/sso/consume` redirects a
+ * browser here with (F-85). Every other value gets the generic invalid state:
+ * `invalid_token`, `missing_token`, a refused or misconfigured request, a
+ * hand-edited URL, or no code at all (a token that no longer verifies here).
+ */
+function failureState(error: unknown): "invalid" | "expired" | "used" | "failed" | "rateLimited" {
+  switch (error) {
+    case "token_expired":
+      return "expired";
+    case "token_already_used":
+      return "used";
+    case "session_establishment_failed":
+      return "failed";
+    case "rate_limited":
+      return "rateLimited";
+    default:
+      return "invalid";
+  }
+}
+
 export default async function SsoConfirmPage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { locale: rawLocale } = await params;
   const locale = isSupportedLocale(rawLocale) ? rawLocale : "en";
-  const { token } = await searchParams;
+  const sp = await searchParams;
+  const token = typeof sp.token === "string" ? sp.token : undefined;
   const t = await getTranslations({ locale, namespace: "sso.confirm" });
 
-  const email = await resolveEmail(token);
+  // F-85: a failed consume arrives with `?error=` and no token. It shows its
+  // failure state even if a token is present too, and nothing is verified.
+  const email = sp.error === undefined ? await resolveEmail(token) : null;
 
   if (!token || !email) {
+    const state = failureState(sp.error);
+    // The id rides the URL, so it is shown only when it is well-formed: a
+    // crafted link must not be able to put arbitrary text on this page.
+    const requestId = isValidRequestId(sp.requestId) ? sp.requestId : null;
     return (
       <main className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center gap-4 p-8 text-center">
-        <h1 className="text-lg font-semibold">{t("invalidTitle")}</h1>
-        <p className="text-muted-foreground text-sm">{t("invalidBody")}</p>
+        <h1 className="text-lg font-semibold">{t(`${state}Title`)}</h1>
+        <p className="text-muted-foreground text-sm">{t(`${state}Body`)}</p>
+        {requestId ? (
+          <p className="text-muted-foreground text-xs">
+            {t("requestId")}: <code className="select-all">{requestId}</code>
+          </p>
+        ) : null}
         <LocaleLink
           href="/sign-in"
           className="text-sm underline-offset-4 hover:underline"
@@ -74,10 +108,12 @@ export default async function SsoConfirmPage({
       </div>
       {/* Plain same-origin form POST: the browser sends the consumer's Origin,
           which the POST handler's trusted-origin check requires — a cross-site
-          page cannot auto-submit this on a victim's behalf. */}
+          page cannot auto-submit this on a victim's behalf. The locale rides
+          the action so a failure that happens before the token verifies (an
+          expired one, F-85) comes back to this page in this language. */}
       <form
         method="post"
-        action="/api/sso/consume"
+        action={`/api/sso/consume?locale=${locale}`}
         className="flex w-full flex-col items-center gap-3"
       >
         <input type="hidden" name="token" value={token} />

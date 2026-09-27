@@ -21,6 +21,8 @@ const nonceInsertValues = vi.fn();
 const nonceDeleteExecute = vi.fn().mockResolvedValue(undefined);
 const nonceUpdateExecute = vi.fn();
 const nonceUpdateWhere = vi.fn();
+const nonceSelectTakeFirst = vi.fn();
+const nonceSelectWhere = vi.fn();
 
 vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
@@ -52,6 +54,18 @@ vi.mock("@/db/database", () => ({
             }),
           }),
         };
+      }
+      if (table === "app_sso_handoff_nonces") {
+        // F-85: a missed burn reads the row back to say why it missed.
+        const chain = {
+          select: () => chain,
+          where: (...args: unknown[]) => {
+            nonceSelectWhere(...args);
+            return chain;
+          },
+          executeTakeFirst: nonceSelectTakeFirst,
+        };
+        return chain;
       }
       // Review #60: the handoff no longer queries roles — any other table
       // read from here is a regression.
@@ -102,6 +116,8 @@ beforeEach(async () => {
   nonceDeleteExecute.mockClear();
   nonceUpdateExecute.mockReset();
   nonceUpdateWhere.mockReset();
+  nonceSelectTakeFirst.mockReset();
+  nonceSelectWhere.mockReset();
   mod = await import("@/lib/sso.server");
 });
 afterEach(() => vi.resetModules());
@@ -248,12 +264,29 @@ describe("createSsoHandoffRedirect — TTL source (review #209)", () => {
 });
 
 describe("consumeSsoHandoffNonce", () => {
-  it("returns true exactly once per token (atomic update)", async () => {
+  it("returns consumed exactly once per token (atomic update), reading nothing back", async () => {
     nonceUpdateExecute.mockResolvedValueOnce({ jti: "j1" });
-    expect(await mod.consumeSsoHandoffNonce("j1", "portal")).toBe(true);
+    expect(await mod.consumeSsoHandoffNonce("j1", "portal")).toBe("consumed");
+    expect(nonceSelectTakeFirst).not.toHaveBeenCalled();
 
     nonceUpdateExecute.mockResolvedValueOnce(undefined);
-    expect(await mod.consumeSsoHandoffNonce("j1", "portal")).toBe(false);
+    nonceSelectTakeFirst.mockResolvedValueOnce({ consumed_at: new Date() });
+    expect(await mod.consumeSsoHandoffNonce("j1", "portal")).toBe("replayed");
+  });
+
+  // F-85: the one UPDATE misses for a spent nonce and an expired one alike,
+  // and both used to be reported as a replay.
+  it.each([
+    ["replayed", "a consumed row", { consumed_at: new Date() }],
+    ["expired", "an unconsumed row (only expires_at can have missed)", { consumed_at: null }],
+    ["unknown", "no row for this application", undefined],
+  ] as const)("a missed burn reports %s for %s", async (expected, _label, row) => {
+    nonceUpdateExecute.mockResolvedValueOnce(undefined);
+    nonceSelectTakeFirst.mockResolvedValueOnce(row);
+    expect(await mod.consumeSsoHandoffNonce("j1", "portal")).toBe(expected);
+    // Read back by the same key the burn used, so another app's row is unknown.
+    expect(nonceSelectWhere).toHaveBeenCalledWith("jti", "=", "j1");
+    expect(nonceSelectWhere).toHaveBeenCalledWith("target_application_id", "=", "portal");
   });
 
   it("predicates the burn on target_application_id as well as jti (review #15)", async () => {

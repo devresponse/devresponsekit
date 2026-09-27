@@ -936,14 +936,14 @@ i18n: title/description from `auth`, button from `common.signOut`; run in `uk`.
 
 ### AUTH-SSO-CONFIRM — SSO consume confirmation
 
-- Route: `/sso/confirm`  ·  Example URL: `/en/sso/confirm?token=<jwt>`  ·  Code: `src/app/[locale]/(auth)/sso/confirm/page.tsx:39`
+- Route: `/sso/confirm`  ·  Example URL: `/en/sso/confirm?token=<jwt>`  ·  Code: `src/app/[locale]/(auth)/sso/confirm/page.tsx:61`
 - Purpose: Security interstitial for the cross-subdomain SSO handoff. The GET
   `/api/sso/consume` verifies the handoff token (no nonce burn) and redirects
   here; this page **re-verifies** the signed token to display the target email
   and requires an explicit same-origin POST back to `/api/sso/consume` to
   actually establish the session — defeating login-CSRF / session fixation
-  (`src/app/[locale]/(auth)/sso/confirm/page.tsx:8-22`). `export const dynamic =
-  "force-dynamic"` (`:6`).
+  (`src/app/[locale]/(auth)/sso/confirm/page.tsx:9-23`). `export const dynamic =
+  "force-dynamic"` (`:7`).
 - Guard / who can access: None (public). The security control is the token
   re-verification + the trusted-origin-guarded POST, not a session.
 - Access matrix: Visitor arriving from an enterprise app launch -> see: yes, act:
@@ -952,14 +952,24 @@ i18n: title/description from `auth`, button from `common.signOut`; run in `uk`.
 - Controls (verified against `src/app/[locale]/(auth)/sso/confirm/page.tsx`):
   - **Valid token:** heading "Confirm sign-in" (`sso.confirm.title`); body "You're
     about to sign in as {email}." with the email from the *re-verified* token
-    (`:71-74`); a **Continue** submit button in a `method="post"` form to
-    `/api/sso/consume` carrying a hidden `token` (`:78-90`); a **Cancel** link to
-    `/sign-in` (`:91-97`).
+    (`:105-108`); a **Continue** submit button in a `method="post"` form to
+    `/api/sso/consume?locale=<locale>` carrying a hidden `token` (`:114-126`); a
+    **Cancel** link to `/sign-in` (`:127-133`).
   - **Missing/invalid token:** heading "Sign-in link invalid" (`sso.confirm.invalidTitle`),
     body `sso.confirm.invalidBody`, and a "Back to sign in" link
-    (`:53-67`). The invalid state also triggers when `SSO_HANDOFF_AUDIENCE_PREFIX`
-    / `SSO_HANDOFF_APPLICATION_ID` env are unset (`:25-27`) or verification throws
-    (`:34-36`).
+    (`:78-101`). The invalid state also triggers when `SSO_HANDOFF_AUDIENCE_PREFIX`
+    / `SSO_HANDOFF_APPLICATION_ID` env are unset (`:26-28`) or verification throws
+    (`:35-37`).
+  - **Failed handoff (F-85):** when `/api/sso/consume` refuses a browser, it
+    redirects here with `?error=<code>&requestId=<id>` instead of answering with
+    JSON, and the page shows that failure instead of verifying anything
+    (`:40-59`, `:74-101`): `token_expired` → "Sign-in link expired"
+    (`sso.confirm.expiredTitle`); `token_already_used` → "Sign-in link already
+    used" (`usedTitle`); `session_establishment_failed` → "Sign-in could not be
+    completed" (`failedTitle`); `rate_limited` → "Too many sign-in attempts"
+    (`rateLimitedTitle`); any other code → the invalid state above. Each shows a
+    "Request ID: <uuid>" line (`sso.confirm.requestId`) when the id is a
+    well-formed UUID, and the "Back to sign in" link; no Continue form renders.
 - Preconditions & test data: a valid SSO handoff token (produced by launching an
   enterprise app from the hub). `SSO_HANDOFF_AUDIENCE_PREFIX` and
   `SSO_HANDOFF_APPLICATION_ID` must be configured for the satellite. `TODO:
@@ -987,7 +997,7 @@ User stories
   clear invalid message, so that I can restart from the source app.
   - Acceptance criteria: Given a missing or invalid token, when the page loads,
     then no Continue form renders; instead the "Sign-in link invalid" message and
-    a "Back to sign in" link (`src/app/[locale]/(auth)/sso/confirm/page.tsx:53-67`).
+    a "Back to sign in" link (`src/app/[locale]/(auth)/sso/confirm/page.tsx:78-101`).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
@@ -995,27 +1005,46 @@ User stories
     | 2 | Click "Back to sign in" | You land on `/en/sign-in` |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
+- UAT-AUTH-SSO-CONFIRM-S3 — As a user whose handoff fails after I click
+  Continue, I want a page that says what went wrong in my language, not a raw
+  JSON body, so that I know whether to launch again or contact support (F-85).
+  - Acceptance criteria: Given a confirm page left open longer than the token
+    lives (≤60 s) or a token already used, when Continue is clicked, then the
+    browser lands back on `/{locale}/sso/confirm` in the page's language with
+    "Sign-in link expired" or "Sign-in link already used" respectively, a
+    "Request ID" matching the response's `x-request-id`, and no Continue form.
+  - UAT script:
+    | # | Step | Expected result |
+    |---|---|---|
+    | 1 | With your preferred language set to Ukrainian, launch an app from the hub, wait on the confirm page (`/uk/sso/confirm`) for over a minute, then click "Continue" | You land on `/uk/sso/confirm?error=token_expired&requestId=…`: "Sign-in link expired" in Ukrainian, a request ID, a "Back to sign in" link |
+    | 2 | Launch again, click "Continue" (you are signed in), then, within 60 s of that launch, press Back and click "Continue" again | "Sign-in link already used" with a request ID — the token is single-use (after 60 s the expiry check answers first: "Sign-in link expired") |
+    | 3 | Still within 60 s of step 2's launch, `curl -i -X POST <satellite>/api/sso/consume -H "Origin: <satellite>" -d token=<the used token>` | `401` with JSON `{"error":"token_already_used","requestId":…}`: an API client still gets JSON (once the 60 s have passed, the same JSON with `token_expired`) |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+
 Negative & edge cases
 
 - Cancel: clicking "Cancel" navigates to `/sign-in` without consuming the token
-  (`src/app/[locale]/(auth)/sso/confirm/page.tsx:91-97`). No session is created.
+  (`src/app/[locale]/(auth)/sso/confirm/page.tsx:127-133`). No session is created.
 - Spoofed email: the displayed email comes only from re-verifying the signed token
-  (`:33`), never a query param, so a foreign account cannot be made to look
+  (`:34`), never a query param, so a foreign account cannot be made to look
   familiar. Assert you cannot change the shown email by editing the URL.
 - Login-CSRF: because consumption requires a same-origin POST whose Origin the
-  handler checks (`:75-90`), a cross-site page cannot auto-submit it on a
+  handler checks (`:109-126`), a cross-site page cannot auto-submit it on a
   victim's behalf. `TODO: verify` the POST handler's trusted-origin rejection
   (in `/api/sso/consume`) as a separate API-level check.
 - Env misconfiguration: with `SSO_HANDOFF_*` unset, even a real token renders the
-  invalid state (`:25-27`). Expected: graceful "invalid" screen, not an error.
+  invalid state (`:26-28`). Expected: graceful "invalid" screen, not an error.
+- Crafted failure link: `/en/sso/confirm?error=token_expired&requestId=Call%20us`
+  shows the expired state but no request-ID line, because only a well-formed
+  UUID is displayed (`:80-82`).
 - No form validation fields; the token is a hidden input.
 
 Accessibility: the Continue control is a real submit `<button>`; Cancel / Back
 are links; single `<h1>` per state; centered text layout is keyboard-navigable
 with visible focus.
 i18n: all strings from the `sso.confirm` namespace with the email interpolated
-into `sso.confirm.body` (`src/app/[locale]/(auth)/sso/confirm/page.tsx:49`,
-`:73`); run in `uk`.
+into `sso.confirm.body` (`src/app/[locale]/(auth)/sso/confirm/page.tsx:72`,
+`:107`); run in `uk`.
 
 ---
 

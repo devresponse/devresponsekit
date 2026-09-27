@@ -87,7 +87,7 @@ warrant a comms channel and an owner before deep debugging.
   Grep the log stream for `"kind":"pre_auth_refusal"` (the `eventType` and
   `reason` fields match what the row used to carry); a handoff token that
   verified but was refused afterwards (`target_application_mismatch`,
-  `nonce_replay_or_expired`) is still audited.
+  `nonce_replay`, `nonce_expired`, `nonce_unknown`) is still audited.
 - **Metrics (if `METRICS_TOKEN` is set):** `devresponsekit_rate_limit_denials_total{scope}`
   is the canonical abuse signal, and `devresponsekit_pre_auth_refusals_total{event_type}`
   counts the pre-authentication refusals above — see [observability.md §5](./observability.md#5-metrics).

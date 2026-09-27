@@ -1605,7 +1605,16 @@
       "cancel": "Cancelar",
       "invalidTitle": "Enlace de inicio de sesión no válido",
       "invalidBody": "Este enlace de inicio de sesión no es válido o ha caducado. Solicita uno nuevo desde la aplicación de origen.",
-      "backToSignIn": "Volver a iniciar sesión"
+      "backToSignIn": "Volver a iniciar sesión",
+      "expiredTitle": "Enlace de inicio de sesión caducado",
+      "expiredBody": "Este enlace de inicio de sesión ha caducado. Solicita uno nuevo desde la aplicación de origen.",
+      "usedTitle": "Enlace de inicio de sesión ya utilizado",
+      "usedBody": "Este enlace de inicio de sesión ya se ha utilizado y cada enlace solo funciona una vez. Solicita uno nuevo desde la aplicación de origen.",
+      "failedTitle": "No se pudo completar el inicio de sesión",
+      "failedBody": "No se pudo iniciar sesión con tu cuenta en esta aplicación. Si el problema persiste, contacta con tu administrador.",
+      "rateLimitedTitle": "Demasiados intentos de inicio de sesión",
+      "rateLimitedBody": "Se han recibido demasiados intentos de inicio de sesión desde tu red. Espera un minuto y solicita un nuevo enlace desde la aplicación de origen.",
+      "requestId": "ID de solicitud"
     }
   }
 }

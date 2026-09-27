@@ -1605,7 +1605,16 @@
       "cancel": "Cancel",
       "invalidTitle": "Sign-in link invalid",
       "invalidBody": "This sign-in link is invalid or has expired. Request a new one from the application you came from.",
-      "backToSignIn": "Back to sign in"
+      "backToSignIn": "Back to sign in",
+      "expiredTitle": "Sign-in link expired",
+      "expiredBody": "This sign-in link has expired. Request a new one from the application you came from.",
+      "usedTitle": "Sign-in link already used",
+      "usedBody": "This sign-in link has already been used, and each link works only once. Request a new one from the application you came from.",
+      "failedTitle": "Sign-in could not be completed",
+      "failedBody": "Your account could not be signed in to this application. If this keeps happening, contact your administrator.",
+      "rateLimitedTitle": "Too many sign-in attempts",
+      "rateLimitedBody": "Too many sign-in attempts came from your network. Wait a minute, then request a new link from the application you came from.",
+      "requestId": "Request ID"
     }
   }
 }

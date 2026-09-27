@@ -1605,7 +1605,16 @@
       "cancel": "取消",
       "invalidTitle": "登录链接无效",
       "invalidBody": "此登录链接无效或已过期。请从您来自的应用中申请一个新链接。",
-      "backToSignIn": "返回登录"
+      "backToSignIn": "返回登录",
+      "expiredTitle": "登录链接已过期",
+      "expiredBody": "此登录链接已过期。请从您来自的应用中申请一个新链接。",
+      "usedTitle": "登录链接已被使用",
+      "usedBody": "此登录链接已被使用，每个链接只能使用一次。请从您来自的应用中申请一个新链接。",
+      "failedTitle": "无法完成登录",
+      "failedBody": "无法使用您的账户登录此应用。如果问题持续出现，请联系您的管理员。",
+      "rateLimitedTitle": "登录尝试次数过多",
+      "rateLimitedBody": "来自您网络的登录尝试次数过多。请等待一分钟，然后从您来自的应用中申请一个新链接。",
+      "requestId": "请求 ID"
     }
   }
 }

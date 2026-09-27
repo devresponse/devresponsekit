@@ -1605,7 +1605,16 @@
       "cancel": "Cancelar",
       "invalidTitle": "Ligação de início de sessão inválida",
       "invalidBody": "Esta ligação de início de sessão é inválida ou expirou. Solicite uma nova a partir da aplicação de onde veio.",
-      "backToSignIn": "Voltar ao início de sessão"
+      "backToSignIn": "Voltar ao início de sessão",
+      "expiredTitle": "Ligação de início de sessão expirada",
+      "expiredBody": "Esta ligação de início de sessão expirou. Solicite uma nova a partir da aplicação de onde veio.",
+      "usedTitle": "Ligação de início de sessão já utilizada",
+      "usedBody": "Esta ligação de início de sessão já foi utilizada e cada ligação só funciona uma vez. Solicite uma nova a partir da aplicação de onde veio.",
+      "failedTitle": "Não foi possível concluir o início de sessão",
+      "failedBody": "Não foi possível iniciar sessão com a sua conta nesta aplicação. Se o problema persistir, contacte o seu administrador.",
+      "rateLimitedTitle": "Demasiadas tentativas de início de sessão",
+      "rateLimitedBody": "Foram recebidas demasiadas tentativas de início de sessão a partir da sua rede. Aguarde um minuto e solicite uma nova ligação a partir da aplicação de onde veio.",
+      "requestId": "ID do pedido"
     }
   }
 }

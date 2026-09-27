@@ -4,7 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PoolClient } from "pg";
 import { createAppPool, ensureSchema } from "../schema-config";
-import { applyMigrationInTransaction } from "./apply-migration";
+import {
+  applyMigrationInTransaction,
+  resolveMigrationTimeouts,
+  RUNNER_SESSION_STATEMENTS,
+} from "./apply-migration";
 import {
   migrationChecksum,
   planMigrations,
@@ -59,7 +63,15 @@ import {
  * dedicated client (review #84: `begin`/`commit` on a pool would only be
  * atomic by accident of connection reuse) and is ledgered in that same
  * transaction — see `apply-migration.ts`, whose rollback path is proven in
- * `tests/db/migration-transaction.db.test.ts`. The planning/ordering/checksum
+ * `tests/db/migration-transaction.db.test.ts`. Each of those transactions
+ * starts with `set local lock_timeout` / `statement_timeout` (F-94;
+ * `DB_MIGRATE_LOCK_TIMEOUT_MS`, default 5 s, and
+ * `DB_MIGRATE_STATEMENT_TIMEOUT_MS`, default 10 min), so a file whose DDL
+ * waits on a lock fails and rolls back instead of queueing every query on that
+ * table behind it. The advisory-lock wait above is outside those transactions
+ * and unbounded: before taking the lock the runner clears `lock_timeout` and
+ * `statement_timeout` for its session (`RUNNER_SESSION_STATEMENTS`), so a
+ * role default cannot cancel it. The planning/ordering/checksum
  * logic lives in `migration-plan.ts` (pure + unit-tested); this module only
  * does the fs + db side effects.
  */
@@ -110,6 +122,9 @@ async function main() {
   }
 
   const includeLocales = shouldIncludeLocales(process.env.DB_MIGRATE_LOCALES);
+  // Resolved before connecting, so a malformed value fails with nothing
+  // touched (F-94).
+  const timeouts = resolveMigrationTimeouts();
   const pool = createAppPool();
   // One dedicated session for the whole run: it owns the advisory lock and
   // every migration transaction (reviews #84, #85).
@@ -122,6 +137,12 @@ async function main() {
   let locked = false;
 
   try {
+    // No inherited ceiling on this session (F-94): a role default such as
+    // deployment.md §5's `statement_timeout = '30s'` would cancel the wait
+    // below. Each file still sets its own, `set local`, in its transaction.
+    for (const statement of RUNNER_SESSION_STATEMENTS) {
+      await client.query(statement);
+    }
     await client.query(MIGRATION_LOCK_SQL);
     locked = true;
 
@@ -135,6 +156,9 @@ async function main() {
     const localeEntries = await readDirSafe(LOCALES_DIR);
     const plan = planMigrations(coreEntries, localeEntries, includeLocales);
 
+    console.log(
+      `[migrate] each file runs with lock_timeout=${timeouts.lockTimeoutMs}ms statement_timeout=${timeouts.statementTimeoutMs}ms`,
+    );
     if (!includeLocales) {
       console.log(
         "[migrate] locales EXCLUDED (DB_MIGRATE_LOCALES is off) — applying core migrations only",
@@ -173,7 +197,7 @@ async function main() {
       }
       const { sql, checksum } = sources.get(migration.id)!;
       console.log(`[migrate] apply  ${migration.id}`);
-      await applyMigrationInTransaction(client, { id: migration.id, sql, checksum });
+      await applyMigrationInTransaction(client, { id: migration.id, sql, checksum }, timeouts);
     }
 
     console.log("[migrate] done");

@@ -543,6 +543,29 @@ with an updated pin in `tests/unit/migration-checksums.test.ts`, update the
 ledger row on purpose with the `update … set checksum = …` statement the error
 prints.
 
+**`[migrate] FAILED` / `[auth:migrate] FAILED` with `canceling statement due to
+lock timeout` (SQLSTATE `55P03`).** A statement waited longer than
+`DB_MIGRATE_LOCK_TIMEOUT_MS` (default 5 s) for a lock another session holds:
+usually a long export or report reading the same table, or a transaction left
+open (F-94). The migrator gives up rather than queue every query on that table
+behind its request. The application runner rolls the file back whole and
+ledgers nothing. Find the blocker with `select pid, now() - xact_start as age,
+state, query from pg_stat_activity where xact_start is not null order by age
+desc`, let it finish or end it, and re-run. Raise the timeout only when
+queueing that table's traffic behind the migration is acceptable. `canceling
+statement due to statement timeout` is the other ceiling,
+`DB_MIGRATE_STATEMENT_TIMEOUT_MS` (default 10 minutes); raise it for a file
+that legitimately runs longer ([deployment.md §5](./deployment.md#5-operations--gotchas)).
+Each Better Auth statement commits on its own, so after either timeout from
+`[auth:migrate]` a re-run redoes a failed `create table` or `alter table`, but
+not a `create index` whose column already committed: Better Auth plans a
+column's index only in the run that adds the column or its table, so the
+re-run plans nothing, and readiness does not notice a missing index. After the
+re-run, compare the `create index` lines in
+`src/db/migrations/better-auth-schema.sql` with `select indexname from
+pg_indexes where schemaname = 'auth'` (your `DB_SCHEMA`), and create any
+missing index by hand, `concurrently` on a large table.
+
 **`[0005] refusing to apply: N row group(s) violate a constraint`.** Migration
 0005 adds CHECK/uniqueness constraints and first lists every row that would
 violate them (`table.column = value (count)`), changing nothing. Correct or

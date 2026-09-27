@@ -416,8 +416,9 @@ production's in the build either: a `NEXT_PUBLIC_APP_URL=http://localhost:3000` 
 work used to be inlined into the production client bundle. A variable the build needs belongs on the
 project, where `vercel pull` finds it. The one exception is the migration runners
 (`pnpm db:auth:migrate` and `db:app:migrate`). They are the kit's own scripts and read its
-configuration from the shell (`DB_MIGRATE_LOCALES`, and the server environment the auth runner
-validates when it loads), so they keep the shell's variables, but never the token.
+configuration from the shell (`DB_MIGRATE_LOCALES`, the `DB_MIGRATE_LOCK_TIMEOUT_MS` /
+`DB_MIGRATE_STATEMENT_TIMEOUT_MS` ceilings both runners set, and the server environment the auth
+runner validates when it loads), so they keep the shell's variables, but never the token.
 
 **Better Auth's migrations run first, and need only the migration URL (F-141).** `db:auth:migrate`
 runs before `db:app:migrate`, the order `pnpm db:provision` and the kit's deploy workflow use. It
@@ -433,7 +434,8 @@ the step also leaves out your shell's `COOKIE_DOMAIN` and `API_JWT_ISSUER`. The 
 against `BETTER_AUTH_URL`, so a real one could only fail next to the placeholder, and neither shapes
 the schema either. That step does not read the kit checkout's `.env` at all
 (dotenv is pointed at the null device), so a stale local file can no longer fail production's
-migrations. The application runner still reads it, for `DB_MIGRATE_LOCALES`.
+migrations. The application runner still reads it, for `DB_MIGRATE_LOCALES` and the two
+`DB_MIGRATE_*_TIMEOUT_MS` ceilings, so set a ceiling in the shell for it to reach both runners.
 
 **Re-running does not rotate anything.** `env:sync` leaves existing variables alone. Overwriting
 takes `--force`, and rotating a secret additionally takes `--yes`, because rotating

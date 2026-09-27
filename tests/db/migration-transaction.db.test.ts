@@ -1,7 +1,11 @@
 import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pgPool } from "@/db/database";
-import { applyMigrationInTransaction } from "@/db/migrations/apply-migration";
+import {
+  applyMigrationInTransaction,
+  createMigrationPool,
+  RUNNER_SESSION_STATEMENTS,
+} from "@/db/migrations/apply-migration";
 
 /**
  * DB-BACKED proof that a FAILING migration rolls back completely (source
@@ -26,6 +30,14 @@ import { applyMigrationInTransaction } from "@/db/migrations/apply-migration";
  * separate statement — without the explicit transaction it can fail while the
  * file's DDL stays committed, leaving a migrated database with a blind ledger.
  * Delete the `begin`/`commit` from `apply-migration.ts` and (3) fails.
+ *
+ * The last block is F-94: a file runs under `lock_timeout` /
+ * `statement_timeout`, so DDL that waits behind another session's lock fails
+ * with 55P03 and rolls back instead of queueing that table's traffic behind
+ * it; the settings end with the file's transaction; the runner's own session,
+ * cleared of any inherited ceiling, waits for the advisory lock past a role's
+ * statement_timeout; and the pool Better Auth's migrator runs on sets them for
+ * every connection.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts).
  */
@@ -153,5 +165,115 @@ describe("applyMigrationInTransaction (scratch schema)", () => {
     });
     expect(await tableExists("tx_after")).toBe(true);
     expect(await ledgerIds()).toContain("9003-after-failure.sql");
+  });
+});
+
+describe("migration lock and statement ceilings (F-94)", () => {
+  const TIMEOUTS_SQL = `select current_setting('lock_timeout') as lock_timeout,
+                               current_setting('statement_timeout') as statement_timeout`;
+
+  it("fails a file whose DDL waits on another session's lock, leaving nothing behind", async () => {
+    await client.query(`create table tx_locked (id int primary key)`);
+    const before = await ledgerIds();
+    // A long reader (an export, a report): ACCESS SHARE until it ends. The
+    // file's ALTER needs ACCESS EXCLUSIVE, and while it waited every later
+    // query on the table would queue behind it.
+    const holder = await pgPool.connect();
+    let outcome: string;
+    try {
+      await holder.query("begin");
+      await holder.query(`lock table "${SCHEMA}".tx_locked in access share mode`);
+
+      outcome = await Promise.race([
+        applyMigrationInTransaction(
+          client,
+          {
+            id: "9005-locked.sql",
+            sql: `alter table tx_locked add column blocked int;`,
+            checksum: "checksum-locked",
+          },
+          { lockTimeoutMs: 200, statementTimeoutMs: 60_000 },
+        ).then(
+          () => "applied",
+          (error: { code?: string }) => error.code ?? String(error),
+        ),
+        new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 5_000)),
+      ]);
+    } finally {
+      await holder.query("rollback").catch(() => undefined);
+      holder.release();
+    }
+
+    // 55P03 lock_not_available: "canceling statement due to lock timeout".
+    expect(outcome).toBe("55P03");
+    expect(await ledgerIds()).toEqual(before);
+    const { rows } = await client.query(
+      `select 1 from information_schema.columns
+        where table_schema = $1 and table_name = 'tx_locked' and column_name = 'blocked'`,
+      [SCHEMA],
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("runs the file under the ceilings and ends them with its transaction", async () => {
+    const outside = await client.query(TIMEOUTS_SQL);
+
+    await applyMigrationInTransaction(
+      client,
+      {
+        id: "9006-settings.sql",
+        sql: `create table tx_settings as ${TIMEOUTS_SQL};`,
+        checksum: "checksum-settings",
+      },
+      { lockTimeoutMs: 1234, statementTimeoutMs: 56789 },
+    );
+
+    const { rows } = await client.query(`select lock_timeout, statement_timeout from tx_settings`);
+    expect(rows[0]).toEqual({ lock_timeout: "1234ms", statement_timeout: "56789ms" });
+    // `set local`: the session is back to what it was, so the runner's
+    // advisory-lock wait on the same connection is never under the timeout.
+    expect((await client.query(TIMEOUTS_SQL)).rows[0]).toEqual(outside.rows[0]);
+  });
+
+  it("lets the runner's session wait for the advisory lock past a role's statement_timeout", async () => {
+    // A key of this suite's own, so a real runner on this database is never involved.
+    const KEY = "hashtext('__dbtest_migration_tx_runner_lock')";
+    const first = await pgPool.connect();
+    const second = await pgPool.connect();
+    let outcome: string;
+    try {
+      await first.query(`select pg_advisory_lock(${KEY})`);
+      // What `ALTER ROLE … SET statement_timeout = '30s'` (deployment.md §5)
+      // gives every session of the role migrations connect as, scaled down.
+      await second.query("set statement_timeout = '200ms'");
+      for (const statement of RUNNER_SESSION_STATEMENTS) {
+        await second.query(statement);
+      }
+      const waited = second.query(`select pg_advisory_lock(${KEY})`).then(
+        () => "acquired",
+        (error: { code?: string }) => error.code ?? String(error),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await first.query(`select pg_advisory_unlock(${KEY})`);
+      outcome = await waited;
+    } finally {
+      await first.query("select pg_advisory_unlock_all()").catch(() => undefined);
+      first.release();
+      // Destroyed, not returned: its session settings must not reach another test.
+      second.release(true);
+    }
+
+    // Without the session reset: 57014, "canceling statement due to statement timeout".
+    expect(outcome).toBe("acquired");
+  });
+
+  it("gives every connection of the migration pool the ceilings", async () => {
+    const pool = createMigrationPool({ lockTimeoutMs: 1234, statementTimeoutMs: 56789 });
+    try {
+      const { rows } = await pool.query(TIMEOUTS_SQL);
+      expect(rows[0]).toEqual({ lock_timeout: "1234ms", statement_timeout: "56789ms" });
+    } finally {
+      await pool.end();
+    }
   });
 });

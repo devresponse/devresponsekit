@@ -78,8 +78,9 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * request the key ever made and is referenced by usage telemetry.
  * Revocation flips `status` to `revoked` and stamps the actor/reason —
  * verification rejects revoked keys immediately. The operation is
- * idempotent: revoking an already-revoked key returns `200` without a
- * second audit row.
+ * idempotent: revoking an already-revoked key (including one a concurrent
+ * request retired after the read below) returns `200` with
+ * `alreadyRevoked: true` and no second audit row.
  */
 const deleteBodySchema = z.object({ reason: z.string().max(500).optional() }).strict();
 
@@ -134,7 +135,14 @@ export const DELETE = withAdminRoute(async function DELETE(
     return NextResponse.json({ ok: true, alreadyRevoked: true });
   }
 
-  await revokeApiKey(id, actorAppUserId, reason);
+  // The revoke re-asserts `status = 'active'`, so one that lost a race with a
+  // concurrent revoke or rotation revokes nothing. Audit only a revoke that
+  // happened and otherwise answer like the already-revoked case above (F-72):
+  // this used to write `admin.api_key.revoked` whatever the write did, so the
+  // trail showed this admin revoking a key a rotation had already replaced.
+  if (!(await revokeApiKey(id, actorAppUserId, reason))) {
+    return NextResponse.json({ ok: true, alreadyRevoked: true });
+  }
 
   await auditEvent({
     eventType: "admin.api_key.revoked",

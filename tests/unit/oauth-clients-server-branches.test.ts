@@ -14,8 +14,8 @@ import { hashSecret } from "@/lib/api-auth/api-key";
  *     undefined path, the 0-rows-false path, and the "active only" guard.
  *   - revokeOauthClient: the recorded set (status/revoked_by) + active guard
  *     + the `numUpdatedRows ?? 0` undefined path.
- *   - rotateOauthClientSecret: the "present-but-not-active" null branch (the
- *     second operand of `!existing || existing.status !== "active"`).
+ *   - rotateOauthClientSecret: the active guard lives on the UPDATE itself
+ *     (F-72) and a no-row result hands out no secret.
  *   - verifyClientCredentials: the `timingSafeHexEqual` length-mismatch
  *     branch, plus full org/scopes projection passthrough + client_id filter.
  *
@@ -214,14 +214,27 @@ describe("revokeOauthClient — set contents + guard branches", () => {
 });
 
 describe("rotateOauthClientSecret — active guard branches", () => {
-  it("returns null and writes nothing when the client exists but is not active", async () => {
-    state.takeFirst = { id: "c1", status: "revoked" };
+  it("F-72: the write itself carries the active guard, with no separate status read first", async () => {
+    state.takeFirst = { id: "c1" };
+    await mod.rotateOauthClientSecret("c1");
+    // One conditional UPDATE: a read of the status followed by an update by id
+    // alone let a revoke landing in between receive a fresh secret.
+    expect(state.wheres).toEqual([
+      ["id", "=", "c1"],
+      ["status", "=", "active"],
+    ]);
+    expect(state.updates).toHaveLength(1);
+  });
+
+  it("returns null (no secret handed out) when the conditional update matches no row", async () => {
+    // Missing, revoked, or revoked by a concurrent request after the caller's
+    // own read: the UPDATE … WHERE status = 'active' RETURNING id finds nothing.
+    state.takeFirst = undefined;
     expect(await mod.rotateOauthClientSecret("c1")).toBeNull();
-    expect(state.updates).toHaveLength(0);
   });
 
   it("writes a fresh hash for an active client and returns a distinct new secret", async () => {
-    state.takeFirst = { id: "c1", status: "active" };
+    state.takeFirst = { id: "c1" };
     const secret = await mod.rotateOauthClientSecret("c1");
     expect(secret).toMatch(/^drkcsec_[0-9A-Za-z]{40}$/);
     const written = state.updates[0]!.client_secret_hash as string;

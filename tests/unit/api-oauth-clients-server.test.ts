@@ -267,7 +267,7 @@ describe("rotateOauthClientSecret", () => {
   });
 
   it("writes a fresh hash + a rotation stamp and returns a new drkcsec_ secret", async () => {
-    state.takeFirst = { id: "c1", status: "active" };
+    state.takeFirst = { id: "c1" };
     const before = Date.now();
     const secret = await mod.rotateOauthClientSecret("c1");
     expect(secret).toMatch(/^drkcsec_/);

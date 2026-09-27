@@ -9,6 +9,7 @@ import type * as RetentionModule from "@/lib/retention.server";
  *     SECURITY DEFINER function that is the trigger's only sanctioned DELETE
  *     path (review #83) — and never issues a DELETE or sets a GUC itself
  *   - the outbox prune never touches `pending` rows
+ *   - every loop is batched and stops at the caller's deadline (F-96)
  */
 const state = vi.hoisted(() => ({
   auditDeleted: 0 as number,
@@ -17,9 +18,19 @@ const state = vi.hoisted(() => ({
   auditBatches: null as number[] | null,
   outboxDeleted: 0n as bigint,
   outboxUpdated: 0n as bigint,
+  // Per-statement queues for the batched outbox loops (F-96), like
+  // `auditBatches`; each falls back to the scalar above when null.
+  outboxDeleteBatches: null as bigint[] | null,
+  outboxUpdateBatches: null as bigint[] | null,
   revoked: 0,
   outboxWhere: [] as unknown[][],
   outboxSetWhere: [] as unknown[][],
+  /** The `id in (select … limit N)` subquery each batched outbox statement builds. */
+  subqueryFrom: [] as string[],
+  subqueryWhere: [] as unknown[][],
+  subqueryLimits: [] as number[],
+  /** Runs after every stubbed statement, so a test can move the clock. */
+  onStatement: null as (() => void) | null,
   /** Every raw statement sent through `db.executeQuery` (the audit prune calls). */
   rawQueries: [] as string[],
   /** The bound parameters of each raw statement, in order. */
@@ -35,7 +46,13 @@ function deleteChain(table: string) {
       if (table === "app_outbox") state.outboxWhere.push(args);
       return chain;
     },
-    executeTakeFirst: async () => ({ numDeletedRows: state.outboxDeleted }),
+    executeTakeFirst: async () => {
+      state.onStatement?.();
+      const n = state.outboxDeleteBatches
+        ? (state.outboxDeleteBatches.shift() ?? 0n)
+        : state.outboxDeleted;
+      return { numDeletedRows: n };
+    },
   };
   return chain;
 }
@@ -47,7 +64,29 @@ function updateChain() {
       state.outboxSetWhere.push(args);
       return chain;
     },
-    executeTakeFirst: async () => ({ numUpdatedRows: state.outboxUpdated }),
+    executeTakeFirst: async () => {
+      state.onStatement?.();
+      const n = state.outboxUpdateBatches
+        ? (state.outboxUpdateBatches.shift() ?? 0n)
+        : state.outboxUpdated;
+      return { numUpdatedRows: n };
+    },
+  };
+  return chain;
+}
+
+function subqueryChain(table: string) {
+  state.subqueryFrom.push(table);
+  const chain = {
+    select: () => chain,
+    where: (...args: unknown[]) => {
+      state.subqueryWhere.push(args);
+      return chain;
+    },
+    limit: (n: number) => {
+      state.subqueryLimits.push(n);
+      return chain;
+    },
   };
   return chain;
 }
@@ -60,11 +99,13 @@ const dbStub = {
   executeQuery: async (q: { sql: string; parameters: readonly unknown[] }) => {
     state.rawQueries.push(q.sql);
     state.rawParams.push([...q.parameters]);
+    state.onStatement?.();
     const n = state.auditBatches ? (state.auditBatches.shift() ?? 0) : state.auditDeleted;
     return { rows: [{ n }] };
   },
   deleteFrom: (t: string) => deleteChain(t),
   updateTable: () => updateChain(),
+  selectFrom: (t: string) => subqueryChain(t),
 };
 
 vi.mock("@/db/database", () => ({ db: dbStub }));
@@ -80,15 +121,23 @@ beforeEach(async () => {
   state.auditBatches = null;
   state.outboxDeleted = 0n;
   state.outboxUpdated = 0n;
+  state.outboxDeleteBatches = null;
+  state.outboxUpdateBatches = null;
   state.revoked = 0;
   state.outboxWhere = [];
   state.outboxSetWhere = [];
+  state.subqueryFrom = [];
+  state.subqueryWhere = [];
+  state.subqueryLimits = [];
+  state.onStatement = null;
   state.rawQueries = [];
   state.rawParams = [];
   state.deletedFrom = [];
   mod = await import("@/lib/retention.server");
 });
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.resetModules();
   delete process.env.AUDIT_RETENTION_DAYS;
   delete process.env.OUTBOX_RETENTION_DAYS;
@@ -166,6 +215,21 @@ describe("failStalePendingOutbox (audit #10)", () => {
     expect(await mod.failStalePendingOutbox(7)).toBe(3);
     expect(state.outboxSetWhere).toContainEqual(["status", "=", "pending"]);
   });
+  it("updates in batches of 1000 picked by a limited subquery, until a short batch (F-96)", async () => {
+    state.outboxUpdateBatches = [1000n, 1000n, 3n];
+    expect(await mod.failStalePendingOutbox(7)).toBe(2003);
+    // One bounded statement per batch, never one UPDATE over every orphan.
+    expect(state.subqueryLimits).toEqual([1000, 1000, 1000]);
+    expect(state.subqueryFrom).toEqual(["app_outbox", "app_outbox", "app_outbox"]);
+    // `pending` is checked in the subquery AND on the outer statement, so a
+    // row the drain sent meanwhile is never marked failed.
+    expect(state.subqueryWhere).toContainEqual(["status", "=", "pending"]);
+    expect(state.outboxSetWhere.filter((w) => w[0] === "status")).toEqual([
+      ["status", "=", "pending"],
+      ["status", "=", "pending"],
+      ["status", "=", "pending"],
+    ]);
+  });
 });
 
 describe("pruneOutbox", () => {
@@ -177,6 +241,66 @@ describe("pruneOutbox", () => {
     state.outboxDeleted = 7n;
     expect(await mod.pruneOutbox(30)).toBe(7);
     expect(state.outboxWhere).toContainEqual(["status", "!=", "pending"]);
+  });
+  it("deletes in batches of 1000 picked by a limited subquery, until a short batch (F-96)", async () => {
+    state.outboxDeleteBatches = [1000n, 1000n, 1000n, 0n];
+    expect(await mod.pruneOutbox(90)).toBe(3000);
+    expect(state.deletedFrom).toEqual(["app_outbox", "app_outbox", "app_outbox", "app_outbox"]);
+    expect(state.subqueryLimits).toEqual([1000, 1000, 1000, 1000]);
+    expect(state.subqueryWhere).toContainEqual(["status", "!=", "pending"]);
+    expect(state.outboxWhere.filter((w) => w[0] === "status")).toHaveLength(4);
+    expect(state.outboxWhere).toContainEqual(["status", "!=", "pending"]);
+  });
+  it("honours an explicit batch size", async () => {
+    state.outboxDeleteBatches = [2n, 1n];
+    expect(await mod.pruneOutbox(90, 2)).toBe(3);
+    expect(state.subqueryLimits).toEqual([2, 2]);
+  });
+});
+
+describe("the deadline (F-96)", () => {
+  it("starts no batch once the deadline has passed, and says so", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const past = Date.now() - 1;
+    expect(await mod.pruneOutbox(90, 1000, past)).toBe(0);
+    expect(await mod.failStalePendingOutbox(7, 1000, past)).toBe(0);
+    expect(await mod.pruneAuditEvents(365, 5000, past)).toBe(0);
+    expect(state.deletedFrom).toHaveLength(0);
+    expect(state.outboxSetWhere).toHaveLength(0);
+    expect(state.rawQueries).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/stopped at the time budget/));
+  });
+
+  it("stops between batches when the clock crosses it, keeping what it deleted", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+    // Each statement takes 1s; the deadline at 1.5s admits exactly two.
+    state.onStatement = () => vi.setSystemTime(Date.now() + 1000);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    state.outboxDeleteBatches = [1000n, 1000n, 1000n, 1000n];
+    expect(await mod.pruneOutbox(90, 1000, 1500)).toBe(2000);
+    expect(state.deletedFrom).toHaveLength(2);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/outbox: stopped at the time budget after 2000 rows/),
+    );
+  });
+
+  it("stops the audit loop the same way", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+    state.onStatement = () => vi.setSystemTime(Date.now() + 1000);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    state.auditBatches = [2, 2, 2, 2];
+    expect(await mod.pruneAuditEvents(30, 2, 2500)).toBe(6);
+    expect(state.rawQueries).toHaveLength(3);
+  });
+
+  it("runs to completion when no deadline is given", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+    state.onStatement = () => vi.setSystemTime(Date.now() + 60_000);
+    state.outboxDeleteBatches = [2n, 2n, 2n, 1n];
+    expect(await mod.pruneOutbox(90, 2)).toBe(7);
   });
 });
 
@@ -195,5 +319,25 @@ describe("pruneAll", () => {
       outbox: 7,
       staleOutboxFailed: 1,
     });
+  });
+
+  it("hands its deadline to every batched loop (F-96)", async () => {
+    // Past deadline: only the single revocation statement runs; the audit,
+    // stale-pending and outbox loops each stop before their first batch.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    state.revoked = 2;
+    state.auditDeleted = 4;
+    state.outboxDeleted = 7n;
+    state.outboxUpdated = 1n;
+    expect(await mod.pruneAll({ deadline: Date.now() - 1 })).toEqual({
+      revocations: 2,
+      auditEvents: 0,
+      outbox: 0,
+      staleOutboxFailed: 0,
+    });
+    expect(state.rawQueries).toHaveLength(0);
+    expect(state.deletedFrom).toHaveLength(0);
+    expect(state.outboxSetWhere).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(3);
   });
 });

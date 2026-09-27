@@ -399,7 +399,10 @@ volumes:
   scheduler call `GET /api/internal/outbox-drain` on the app instead, with
   `CRON_SECRET` set on the app and sent as `Authorization: Bearer …` (50 rows
   per call, no dev toolchain needed). See
-  [observability.md §5](observability.md#5-metrics).
+  [observability.md §5](observability.md#5-metrics). That route also runs the
+  data-retention prune after each drain (F-96); with `pnpm outbox:drain`
+  instead, schedule **`pnpm db:prune`** too, or the audit and outbox tables
+  grow without bound.
 - **MCP self-registration needs a scheduled reaper** (only if
   `MCP_REGISTRATION_ENABLED`). Run **`pnpm mcp:reap`** periodically the same
   way to expire registrations still pending after

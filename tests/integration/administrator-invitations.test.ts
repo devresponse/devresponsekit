@@ -6,6 +6,7 @@ import type * as InvitationByIdRoute from "@/app/api/administrator/organizations
 import type * as ResendRoute from "@/app/api/administrator/organizations/[id]/invitations/[invitationId]/resend/route";
 import type * as MailBudgetModule from "@/lib/admin/admin-mail-budget.server";
 import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
+import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * Integration tests for the invitation admin endpoints (0008):
@@ -353,13 +354,29 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
     expect(((await res.json()) as { error: string }).error).toBe("member_exists");
   });
 
-  it("returns 409 invitation_exists on the pending-unique violation", async () => {
+  it("returns 409 invitation_exists on the pending-unique violation, whatever the server's message language (F-132)", async () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
     selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
-    createInvitationMock.mockRejectedValue(new Error("duplicate key value violates unique"));
+    createInvitationMock.mockRejectedValue(
+      pgUniqueViolation("idx_app_org_invitations_pending_unique"),
+    );
     const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe("invitation_exists");
+  });
+
+  it("does not report a 23505 on the table's other unique key as invitation_exists (F-132)", async () => {
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    // A token-hash collision says nothing about a pending invitation for this
+    // address. In English, which the old message match claimed as invitation_exists.
+    createInvitationMock.mockRejectedValue(
+      pgUniqueViolation("app_organization_invitations_token_hash_key", "en"),
+    );
+    const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { error: string }).error).toBe("internal_error");
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it("creates, sends the invitation email, and audits", async () => {

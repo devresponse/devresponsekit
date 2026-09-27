@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as UserTargetModule from "@/lib/admin/user-target.server";
 import type * as Route from "@/app/api/administrator/users/[id]/memberships/route";
+import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * ADR-0001 — a user's memberships, org-scoped (P0-4, 0% covered before).
@@ -32,7 +33,9 @@ const state: {
    * platform with nothing to protect behaves exactly as before.
    */
   superuserGrants: Array<{ app_user_id: string; organization_id: string; role_id: string }>;
-} = { org: undefined, memberships: [], superuserGrants: [] };
+  /** Thrown by the enrolment insert's `executeTakeFirstOrThrow`, when set. */
+  insertError: Error | undefined;
+} = { org: undefined, memberships: [], superuserGrants: [], insertError: undefined };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -91,7 +94,11 @@ function makeChain(table: string): unknown {
     {
       get(_t, prop) {
         if (prop === "executeTakeFirst") return async () => firstFor(table);
-        if (prop === "executeTakeFirstOrThrow") return async () => ({ id: "m-new" });
+        if (prop === "executeTakeFirstOrThrow")
+          return async () => {
+            if (state.insertError) throw state.insertError;
+            return { id: "m-new" };
+          };
         if (prop === "execute") return async () => execFor(table);
         return (...args: unknown[]) => {
           const cb = args[0];
@@ -169,6 +176,7 @@ beforeEach(async () => {
   state.org = { id: ORG_A, slug: "org-a" };
   state.memberships = [{ id: M1, organization_id: ORG_A, slug: "org-a" }];
   state.superuserGrants = [];
+  state.insertError = undefined;
   sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
   ({ GET, POST, PATCH, DELETE } =
     await import("@/app/api/administrator/users/[id]/memberships/route"));
@@ -202,6 +210,17 @@ describe("POST /users/[id]/memberships — enroll into an org", () => {
     state.org = { id: ORG_B, slug: "org-b" };
     accessGetter.mockResolvedValue(superadmin(["admin.users.update"]));
     expect((await POST(jsonReq({ organizationId: ORG_B }), ctx)).status).toBe(201);
+  });
+
+  it("409 membership_exists on the (organization_id, app_user_id) unique, whatever the server's message language (F-132)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.users.update"]));
+    state.insertError = pgUniqueViolation(
+      "app_organization_memberships_organization_id_app_user_id_key",
+    );
+    const res = await POST(jsonReq({ organizationId: ORG_A }), ctx);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "membership_exists" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
+import { isForeignKeyViolation } from "@/db/pg-errors";
 import { updateEnterpriseAppSchema } from "@/lib/validation/enterprise-apps";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
@@ -169,8 +170,8 @@ export const PATCH = withAdminRoute(async function PATCH(
     if (isSsoAudienceUniqueViolation(err)) {
       return adminErrorResponse("audience_taken", 409, request);
     }
-    const message = err instanceof Error ? err.message : "unknown";
-    if (/foreign key/i.test(message)) {
+    // F-132: by SQLSTATE and constraint, never by the (translatable) message.
+    if (isForeignKeyViolation(err, "app_enterprise_applications_organization_id_fkey")) {
       return adminErrorResponse("organization_not_found", 409, request);
     }
     throw err;
@@ -242,8 +243,9 @@ export const DELETE = withAdminRoute(async function DELETE(
   try {
     await db.deleteFrom("app_enterprise_applications").where("id", "=", id).execute();
   } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown";
-    if (/foreign key/i.test(message)) {
+    // F-132: any 23503 on this DELETE is a row still pointing at the app,
+    // whichever referencing table holds it (see `isForeignKeyViolation`).
+    if (isForeignKeyViolation(err)) {
       await auditEvent({
         eventType: "admin.app.delete_blocked",
         outcome: "denied",

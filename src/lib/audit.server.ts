@@ -2,6 +2,11 @@ import "server-only";
 import type { Insertable, Kysely } from "kysely";
 import type { NextRequest } from "next/server";
 import { db } from "@/db/database";
+import {
+  FOREIGN_KEY_VIOLATION,
+  type ForeignKeyConstraint,
+  violatedConstraint,
+} from "@/db/pg-errors";
 import type { AppAuditEventsTable, AppDatabase } from "@/db/schema/app-schema";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { getClientIp } from "@/lib/client-ip";
@@ -212,14 +217,14 @@ const AUDIT_REFERENCES = {
     column: "organization_id",
     metadataKey: "unresolvedOrganizationId",
   },
-} as const;
+} as const satisfies Partial<Record<ForeignKeyConstraint, unknown>>;
 
 type AuditReference = (typeof AUDIT_REFERENCES)[keyof typeof AUDIT_REFERENCES];
 
 function unresolvedReference(err: unknown): AuditReference | null {
-  if (typeof err !== "object" || err === null) return null;
-  const { code, constraint } = err as { code?: unknown; constraint?: unknown };
-  if (code !== "23503" || typeof constraint !== "string") return null;
+  // F-132: the shared reader of the pg error's SQLSTATE and constraint.
+  const constraint = violatedConstraint(err, FOREIGN_KEY_VIOLATION);
+  if (constraint === null) return null;
   return Object.hasOwn(AUDIT_REFERENCES, constraint)
     ? AUDIT_REFERENCES[constraint as keyof typeof AUDIT_REFERENCES]
     : null;

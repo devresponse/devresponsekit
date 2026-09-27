@@ -7,6 +7,7 @@ import type * as RolesRoute from "@/app/api/administrator/groups/[id]/roles/rout
 import type * as MembersRoute from "@/app/api/administrator/groups/[id]/members/route";
 import type * as UserGroupsRoute from "@/app/api/administrator/users/[id]/groups/route";
 import type * as UserTargetModule from "@/lib/admin/user-target.server";
+import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * ADR-0002 organization groups — handler contract + ADR-0001 tenant
@@ -35,6 +36,8 @@ const state: {
   groupRolesDeleted: { role_id: string }[];
   /** Every `.values(...)` payload an insert was given. */
   insertedValues: unknown[];
+  /** Thrown by the group insert's `executeTakeFirstOrThrow`, when set. */
+  insertError: Error | undefined;
 } = {
   group: undefined,
   org: undefined,
@@ -46,6 +49,7 @@ const state: {
   groupRolesInserted: [],
   groupRolesDeleted: [],
   insertedValues: [],
+  insertError: undefined,
 };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
@@ -99,7 +103,11 @@ function makeChain(table: string): unknown {
     {
       get(_t, prop) {
         if (prop === "executeTakeFirst") return async () => firstFor(table);
-        if (prop === "executeTakeFirstOrThrow") return async () => ({ id: "g-new", key: "new" });
+        if (prop === "executeTakeFirstOrThrow")
+          return async () => {
+            if (state.insertError) throw state.insertError;
+            return { id: "g-new", key: "new" };
+          };
         if (prop === "execute") return async () => execFor(table);
         return (...args: unknown[]) => {
           if (prop === "values") state.insertedValues.push(args[0]);
@@ -218,6 +226,7 @@ beforeEach(async () => {
   state.groupRolesInserted = [];
   state.groupRolesDeleted = [];
   state.insertedValues = [];
+  state.insertError = undefined;
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   list = await import("@/app/api/administrator/groups/route");
   byId = await import("@/app/api/administrator/groups/[id]/route");
@@ -250,6 +259,17 @@ describe("groups list + create", () => {
       req("groups", { method: "POST", body: { key: "team.x", name: "Team X" } }),
     );
     expect(res.status).toBe(201);
+  });
+
+  it("409 key_taken on the (organization_id, key) unique, whatever the server's message language (F-132)", async () => {
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.create"]));
+    state.insertError = pgUniqueViolation("app_groups_organization_id_key_key");
+    const res = await list.POST(
+      req("groups", { method: "POST", body: { key: "team.x", name: "Team X" } }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "key_taken" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("SUPERADMIN must name a target org (400 when omitted)", async () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as Route from "@/app/api/administrator/organizations/[id]/provider-bindings/route";
+import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * ADR-0001 — organization provider bindings, org-scoped (P0-5).
@@ -18,7 +19,9 @@ const state: {
   bindings: Array<{ id: string; provider: string; provider_organization_key: string }>;
   /** Rows passed to `insertInto(...).values(...)`, so a test can read what was stored. */
   inserted: unknown[];
-} = { org: undefined, bindings: [], inserted: [] };
+  /** Thrown by the insert's `executeTakeFirstOrThrow`, when set. */
+  insertError: Error | undefined;
+} = { org: undefined, bindings: [], inserted: [], insertError: undefined };
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -44,7 +47,11 @@ function makeChain(table: string): unknown {
     {
       get(_t, prop) {
         if (prop === "executeTakeFirst") return async () => firstFor(table);
-        if (prop === "executeTakeFirstOrThrow") return async () => ({ id: "b-new" });
+        if (prop === "executeTakeFirstOrThrow")
+          return async () => {
+            if (state.insertError) throw state.insertError;
+            return { id: "b-new" };
+          };
         if (prop === "values")
           return (row: unknown) => {
             state.inserted.push(row);
@@ -115,6 +122,7 @@ beforeEach(async () => {
   state.org = { id: ORG_A, slug: "org-a" };
   state.bindings = [{ id: BIND, provider: "google", provider_organization_key: "g-1" }];
   state.inserted = [];
+  state.insertError = undefined;
   sessionGetter.mockResolvedValue({ user: { id: "ba-actor" } });
   ({ GET, POST, DELETE } =
     await import("@/app/api/administrator/organizations/[id]/provider-bindings/route"));
@@ -174,6 +182,17 @@ describe("provider-bindings — POST", () => {
   it("SUPERADMIN binds (201)", async () => {
     accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
     expect((await post(ORG_A, body)).status).toBe(201);
+  });
+
+  it("409 binding_exists when another org holds the key, whatever the server's message language (F-132)", async () => {
+    accessGetter.mockResolvedValue(superadmin(["admin.orgs.update"]));
+    state.insertError = pgUniqueViolation(
+      "app_provider_organizations_provider_provider_organization_k_key",
+    );
+    const res = await post(ORG_A, body);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "binding_exists" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("F-04: an email binding is stored LOWERCASED, the way sign-up routing looks it up", async () => {

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db/database";
+import { isForeignKeyViolation, isUniqueViolation } from "@/db/pg-errors";
 import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -202,8 +203,8 @@ export const PATCH = withAdminRoute(async function PATCH(
       return "updated" as const;
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown";
-    if (/duplicate key|unique constraint/i.test(message)) {
+    // F-132: by SQLSTATE and constraint, never by the (translatable) message.
+    if (isUniqueViolation(err, "app_organizations_slug_key")) {
       return adminErrorResponse("slug_taken", 409, request);
     }
     throw err;
@@ -383,16 +384,18 @@ export const DELETE = withAdminRoute(async function DELETE(
         // row happens to be missing a moment sooner. Flag it so the outer catch
         // gives that documented answer instead.
         //
-        // Matched on the CONSTRAINT NAME rather than the sibling branch's
-        // generic /foreign key/i: `app_audit_events_organization_id_fkey` is
-        // pinned by migration 0001 (it drops whatever constraint is present and
-        // re-adds it under exactly this name), and it is the only FK on this
-        // INSERT that a missing org can break. The looser pattern would also
-        // catch the row's `app_user_id` FK and report an unrelated fault as a
-        // missing tenant. If the name ever stops matching, this falls through
-        // to the rethrow — the pre-DB-5 behaviour, never a wrong answer.
-        const message = err instanceof Error ? err.message : "unknown";
-        if (/app_audit_events_organization_id_fkey/i.test(message)) vanishedMidRequest = true;
+        // Matched on the CONSTRAINT NAME rather than on any FK violation, as
+        // the sibling branch below does: `app_audit_events_organization_id_fkey`
+        // is pinned by migration 0001 (it drops whatever constraint is present
+        // and re-adds it under exactly this name), and it is the only FK on
+        // this INSERT that a missing org can break. Any 23503 would also catch
+        // the row's `app_user_id` FK and report an unrelated fault as a missing
+        // tenant. If the name ever stops matching, this falls through to the
+        // rethrow — the pre-DB-5 behaviour, never a wrong answer. F-132: read
+        // from the error's SQLSTATE and constraint, not its message.
+        if (isForeignKeyViolation(err, "app_audit_events_organization_id_fkey")) {
+          vanishedMidRequest = true;
+        }
         throw err;
       }
 
@@ -405,9 +408,10 @@ export const DELETE = withAdminRoute(async function DELETE(
         // documented 409 (DB-1) instead of letting it surface as a raw 500.
         // The flag is set HERE, on the delete statement alone, so an FK error
         // from any other statement in the transaction still surfaces as itself
-        // rather than being mislabelled `organization_in_use`.
-        const message = err instanceof Error ? err.message : "unknown";
-        if (/foreign key/i.test(message)) blockedByForeignKey = true;
+        // rather than being mislabelled `organization_in_use`. F-132: any 23503
+        // on this DELETE is a referencing row, whichever table holds it, so no
+        // constraint is named (see `isForeignKeyViolation`).
+        if (isForeignKeyViolation(err)) blockedByForeignKey = true;
         // Rethrow regardless: the failed statement has already aborted the
         // transaction, and rolling back is what discards the success audit.
         throw err;

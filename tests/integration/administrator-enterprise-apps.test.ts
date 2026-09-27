@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as AppsRouteModule from "@/app/api/administrator/enterprise-apps/route";
 import type * as AppByIdRouteModule from "@/app/api/administrator/enterprise-apps/[id]/route";
+import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * Integration tests for the enterprise-apps endpoints (docs/admin-manager.md
@@ -279,11 +280,11 @@ describe("POST /api/administrator/enterprise-apps", () => {
     expect(await res.json()).toMatchObject({ error: "invalid_origin" });
   });
 
-  it("returns 409 id_taken when the row already exists", async () => {
+  it("returns 409 id_taken when the row already exists, whatever the server's message language (F-132)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
     selectFirst.mockResolvedValue(null); // audience not taken
-    insertExecute.mockRejectedValue(new Error("duplicate key value violates unique constraint"));
+    insertExecute.mockRejectedValue(pgUniqueViolation("app_enterprise_applications_pkey"));
     const res = await POST(
       jsonReq({
         id: "docs",
@@ -344,6 +345,50 @@ describe("POST /api/administrator/enterprise-apps", () => {
     );
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ error: "id_taken" });
+  });
+
+  it("does not report a 23505 on any other unique index as id_taken (F-132)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue(null);
+    // An index a later migration might add: its conflict is not an id conflict.
+    // In English, which the old message match claimed as id_taken.
+    insertExecute.mockRejectedValue(
+      pgUniqueViolation("app_enterprise_applications_label_key", "en"),
+    );
+    const res = await POST(
+      jsonReq({
+        id: "docs",
+        label: "Docs",
+        origin: "https://docs.example.com",
+        subdomain: "docs",
+        sso_audience: "audience",
+      }),
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "internal_error" });
+  });
+
+  it("maps a 23503 on the organization FK to 409 organization_not_found (F-132)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue(null);
+    insertExecute.mockRejectedValue(
+      pgForeignKeyViolation("app_enterprise_applications_organization_id_fkey"),
+    );
+    const res = await POST(
+      jsonReq({
+        id: "docs",
+        label: "Docs",
+        origin: "https://docs.example.com",
+        subdomain: "docs",
+        sso_audience: "audience",
+        organization_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "organization_not_found" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("returns 201 on successful creation and writes an audit row", async () => {
@@ -491,6 +536,22 @@ describe("PATCH /api/administrator/enterprise-apps/:id", () => {
     expect(auditMock).not.toHaveBeenCalled();
   });
 
+  it("maps a 23503 on the organization FK on UPDATE to 409 organization_not_found (F-132)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValueOnce({ id: "docs", organization_id: null }); // existing row
+    updateExecute.mockRejectedValue(
+      pgForeignKeyViolation("app_enterprise_applications_organization_id_fkey"),
+    );
+    const res = await PATCH(
+      idReq("docs", { organization_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
+      { params: Promise.resolve({ id: "docs" }) },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "organization_not_found" });
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
   it("returns 409 audience_taken when moving sso_audience onto another app's value (review #15)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
@@ -542,12 +603,12 @@ describe("DELETE /api/administrator/enterprise-apps/:id", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 409 application_in_use when an FK constraint blocks delete", async () => {
+  it("returns 409 application_in_use when an FK constraint blocks delete, whatever the server's message language (F-132)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
     selectFirst.mockResolvedValue({ id: "docs", label: "Docs" });
     deleteExecute.mockRejectedValue(
-      new Error("update or delete on table violates foreign key constraint"),
+      pgForeignKeyViolation("app_sso_handoff_nonces_target_application_id_fkey"),
     );
     const res = await DELETE(idReq("docs"), {
       params: Promise.resolve({ id: "docs" }),

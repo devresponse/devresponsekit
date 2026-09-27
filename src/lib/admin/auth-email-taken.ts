@@ -1,3 +1,5 @@
+import { UNIQUE_VIOLATION, violatedConstraint } from "@/db/pg-errors";
+
 /**
  * F-30 — "Better Auth already holds this email", in both shapes the create
  * path raises it.
@@ -38,14 +40,14 @@ const EMAIL_TAKEN_CODES: ReadonlySet<string> = new Set([
 
 export function isAuthEmailTakenError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
-  const { body, code, constraint } = err as {
-    body?: unknown;
-    code?: unknown;
-    constraint?: unknown;
-  };
+  const { body } = err as { body?: unknown };
   if (typeof body === "object" && body !== null) {
     const bodyCode = (body as { code?: unknown }).code;
     if (typeof bodyCode === "string" && EMAIL_TAKEN_CODES.has(bodyCode)) return true;
   }
-  return code === "23505" && typeof constraint === "string" && /email/i.test(constraint);
+  // F-132: the shared reader of the pg error's SQLSTATE and constraint. The
+  // name is matched loosely because the `"user"` table and its email key come
+  // from Better Auth's schema, not a migration here (`user_email_key` by default).
+  const constraint = violatedConstraint(err, UNIQUE_VIOLATION);
+  return constraint !== null && /email/i.test(constraint);
 }

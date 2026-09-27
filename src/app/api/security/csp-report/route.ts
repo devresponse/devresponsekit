@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/observability/logger.server";
 import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
+import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
 import { redactText, stripQuery } from "@/lib/observability/sentry-shared";
 
@@ -51,7 +52,10 @@ export const dynamic = "force-dynamic";
  * directive (with a count) instead of one per violation.
  */
 
-/** A CSP report is < 2 KiB; anything larger is hostile bulk — drop it unread. */
+/**
+ * A CSP report is < 2 KiB; anything larger is hostile bulk. A declared larger
+ * body is dropped unread and a streamed one is abandoned at the cap (F-78).
+ */
 const MAX_BODY_BYTES = 64 * 1024;
 /** Bound a single URL/field so one report can't flood the log. */
 const MAX_FIELD_LEN = 2048;
@@ -133,17 +137,15 @@ export async function POST(request: Request): Promise<NextResponse> {
   });
   if (!floorCheck.ok) return noContent();
 
-  let raw: string;
-  try {
-    raw = await request.text();
-  } catch {
-    return noContent();
-  }
-  if (raw.length === 0 || raw.length > MAX_BODY_BYTES) return noContent();
+  // F-78: `request.text()` buffered the whole body and only then compared its
+  // length with the cap, so the cap limited nothing. The bounded read refuses
+  // a declared oversize body unread and stops a streamed one at the cap.
+  const raw = await readBoundedText(request, MAX_BODY_BYTES);
+  if (!raw.ok || raw.text.length === 0) return noContent();
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(raw.text);
   } catch {
     return noContent();
   }

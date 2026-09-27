@@ -628,8 +628,8 @@ keys on, written out in full) and the audit row the full address.
 guard (mutations, bulk, export, a signed-in SSO launch) is in-process per
 instance, so under horizontal scaling its budget multiplies by the instance
 count — expected, and best-effort by design. The **pre-auth floors** (token
-endpoint, MCP registration, CSP sink, SSO consume, a signed-out SSO launch,
-invitation acceptance) and Better Auth's sign-in limiter are Postgres-backed and
+endpoint, the MCP endpoint and MCP registration, CSP sink, SSO consume, a
+signed-out SSO launch, invitation acceptance) and Better Auth's sign-in limiter are Postgres-backed and
 MUST be consistent; if they are not, check
 `devresponsekit_rate_limit_shared_fallbacks_total` on `/api/metrics` and the log
 stream for `shared rate-limit backend unavailable` — the app floors fall back to

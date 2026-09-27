@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as RouteModule from "@/app/api/security/csp-report/route";
+import { meteredBody } from "../helpers/request-body";
 
 /**
  * Contract for the CSP violation sink `POST /api/security/csp-report` (A7).
@@ -106,6 +107,38 @@ describe("POST /api/security/csp-report", () => {
     const body = JSON.stringify({ "csp-report": { "blocked-uri": "x".repeat(70 * 1024) } });
     const res = await POST(post(body, "application/csp-report"));
     expect(res.status).toBe(204);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("F-78: still logs a report padded to exactly the 64 KiB cap", async () => {
+    const report = JSON.stringify({ "csp-report": { "effective-directive": "img-src" } });
+    await POST(post(report.padEnd(64 * 1024, " "), "application/csp-report"));
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("F-78: drops a declared oversize body UNREAD (it used to buffer it, then compare)", async () => {
+    const body = " ".repeat(64 * 1024 + 1);
+    const request = new Request(URL, {
+      method: "POST",
+      headers: { "content-type": "application/csp-report", "content-length": String(body.length) },
+      body,
+    });
+    expect((await POST(request)).status).toBe(204);
+    expect(request.bodyUsed).toBe(false);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("F-78: abandons an undeclared (chunked) body at the 64 KiB cap", async () => {
+    const metered = meteredBody(16 * 1024, 64);
+    const request = new Request(URL, {
+      method: "POST",
+      headers: { "content-type": "application/csp-report" },
+      body: metered.stream,
+      duplex: "half",
+    } as RequestInit);
+    expect((await POST(request)).status).toBe(204);
+    expect(metered.pulled).toBe(5);
+    expect(metered.cancelled).toBe(true);
     expect(warnSpy).not.toHaveBeenCalled();
   });
 

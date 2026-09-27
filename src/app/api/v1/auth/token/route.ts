@@ -5,6 +5,7 @@ import { getServerEnv } from "@/lib/env";
 import { consumeToken, rateLimitKey } from "@/lib/admin/rate-limit.server";
 import type { RateLimitResult } from "@/lib/admin/rate-limit.server";
 import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
+import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
@@ -56,6 +57,10 @@ const TOKEN_CREDENTIAL_LIMIT = { capacity: 10, refillPerSec: 0.5 };
 // Postgres bucket (review #98): in memory they were per lambda, so
 // "deployment-wide" really meant "per invocation".
 const TOKEN_GLOBAL_LIMIT = { capacity: 300, refillPerSec: 5 };
+// F-78: the largest body read. A token request is a grant type, a credential,
+// a scope list and a resource URI; asking for every scope in the catalog is
+// about 2 KiB. A larger body is refused with 413 without being buffered.
+const MAX_BODY_BYTES = 16 * 1024;
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /**
@@ -75,16 +80,30 @@ function rateLimitedResponse(
   });
 }
 
-async function parseBody(request: NextRequest): Promise<Record<string, string>> {
+/**
+ * The request's string fields, or `null` when the body passes
+ * {@link MAX_BODY_BYTES} (F-78). A body that cannot be read or parsed reads as
+ * empty, which the grant check then refuses, as before.
+ */
+async function parseBody(request: NextRequest): Promise<Record<string, string> | null> {
+  const raw = await readBoundedText(request, MAX_BODY_BYTES);
+  if (!raw.ok && raw.reason === "too_large") return null;
+  const text = raw.ok ? raw.text : "";
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
-    const json = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    let json: unknown = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // Malformed JSON: no fields.
+    }
     const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(json)) if (typeof v === "string") out[k] = v;
+    if (typeof json === "object" && json !== null) {
+      for (const [k, v] of Object.entries(json)) if (typeof v === "string") out[k] = v;
+    }
     return out;
   }
   // Default to form-encoded per the OAuth2 spec.
-  const text = await request.text().catch(() => "");
   const params = new URLSearchParams(text);
   return Object.fromEntries(params.entries());
 }
@@ -114,6 +133,12 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
   if (!preAuthCheck.ok) return rateLimitedResponse(request, preAuthCheck);
 
   const body = await parseBody(request);
+  if (!body) {
+    return problemResponse("payload_too_large", 413, request, {
+      detail: `The request body exceeds ${MAX_BODY_BYTES} bytes.`,
+      headers: NO_STORE,
+    });
+  }
   const grantType = body.grant_type;
 
   let principalBetterAuthUserId: string;

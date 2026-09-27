@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import { meteredBody } from "../helpers/request-body";
 
 /**
  * POST /api/v1/auth/token — limiter KEYING (review #11).
@@ -93,17 +94,14 @@ function freshIp(i: number): string {
   return `10.${(i >> 16) & 255}.${(i >> 8) & 255}.${i & 255}`;
 }
 
-function req(ip: string, body: Record<string, string>): NextRequest {
-  const url = new URL("http://test.local/api/v1/auth/token");
-  return {
-    nextUrl: url,
-    url: url.toString(),
+function req(ip: string, body: Record<string, string> | ReadableStream<Uint8Array>): NextRequest {
+  return new NextRequest("http://test.local/api/v1/auth/token", {
     method: "POST",
     // Default TRUSTED_PROXY_COUNT=1 → the rightmost XFF entry is the trusted hop.
-    headers: new Headers({ "content-type": "application/json", "x-forwarded-for": ip }),
-    json: async () => body,
-    text: async () => "",
-  } as unknown as NextRequest;
+    headers: { "content-type": "application/json", "x-forwarded-for": ip },
+    body: body instanceof ReadableStream ? body : JSON.stringify(body),
+    duplex: "half",
+  } as ConstructorParameters<typeof NextRequest>[1]);
 }
 
 function mint(ip: string, clientId = VICTIM_ID, secret = VICTIM_SECRET): Promise<Response> {
@@ -305,11 +303,8 @@ describe("POST /api/v1/auth/token limiter keying (review #11)", () => {
     for (let i = 0; i < 10; i++) expect((await mint(IP_A, "drkc_other", "x")).status).toBe(401);
     // The limiter keys on nothing from the body (review #11), so it runs
     // first: a request over its IP budget is refused unread.
-    const json = vi.fn(async () => ({ grant_type: "client_credentials" }));
-    const text = vi.fn(async () => "");
-    const throttled = { ...req(IP_A, {}), json, text } as unknown as NextRequest;
-    expect((await POST(throttled)).status).toBe(429);
-    expect(json).not.toHaveBeenCalled();
-    expect(text).not.toHaveBeenCalled();
+    const body = meteredBody(1024, 4);
+    expect((await POST(req(IP_A, body.stream))).status).toBe(429);
+    expect(body.pulled).toBe(0);
   });
 });

@@ -141,6 +141,11 @@ function req(
     headers: new Headers({ "content-type": init?.contentType ?? "application/json" }),
     json: async () => init?.body,
     text: async () => (typeof init?.body === "string" ? init.body : ""),
+    // The token route reads the raw stream through its byte cap (F-78).
+    body:
+      init?.body === undefined
+        ? null
+        : new Response(typeof init.body === "string" ? init.body : JSON.stringify(init.body)).body,
   } as unknown as NextRequest;
 }
 

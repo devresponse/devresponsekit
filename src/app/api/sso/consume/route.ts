@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { auth } from "@/lib/auth";
+import { readBoundedBody } from "@/lib/bounded-body";
 import { clientIpKey, withTrustedClientIp } from "@/lib/client-ip";
 import { consumeSsoHandoffNonce } from "@/lib/sso.server";
 import { verifySsoHandoff, type VerifiedSsoHandoff } from "@/lib/jwt-handoff.server";
@@ -15,6 +16,12 @@ import { captureServerError } from "@/lib/observability/server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Largest confirmation form the POST reads (F-78). It holds one hidden `token`
+ * field, a handoff JWT of about 1 KiB; a larger body is refused with 413.
+ */
+const MAX_FORM_BYTES = 16 * 1024;
 
 /**
  * Error JSON for the SSO consume endpoint. Echoes the correlation id in both
@@ -37,8 +44,8 @@ function ssoErrorResponse(code: string, status: number, requestId: string): Next
  *
  * F-15: the ceiling alone still let each IP add ~86k append-only audit rows a
  * day, one per garbage token. A refusal decided BEFORE the token verifies (no
- * token, bad signature/claims, untrusted origin on the POST) is therefore
- * logged + counted via `logPreAuthRefusal`, not audited. Once the token HAS
+ * token, bad signature/claims, untrusted origin or an oversize body on the
+ * POST) is therefore logged + counted via `logPreAuthRefusal`, not audited. Once the token HAS
  * verified — a foreign `targetApplicationId`, a replayed nonce, a failed
  * session — the row is written as before: the issuer minted that token for a
  * signed-in launch and it lives ≤60 s, so those rows are tied to real
@@ -254,11 +261,29 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     return ssoErrorResponse("forbidden", 403, requestId);
   }
 
+  // F-78: `request.formData()` buffered whatever arrived before the token was
+  // looked at. The form carries one handoff JWT, so it is read through a byte
+  // cap and parsed from those bytes by the same parser.
+  const raw = await readBoundedBody(request, MAX_FORM_BYTES);
+  if (!raw.ok && raw.reason === "too_large") {
+    logPreAuthRefusal({
+      eventType: "sso.consume.failure",
+      outcome: "failure",
+      reason: "payload_too_large",
+      request,
+      requestId,
+    });
+    return ssoErrorResponse("payload_too_large", 413, requestId);
+  }
   let token: string | null = null;
   try {
-    const form = await request.formData();
-    const value = form.get("token");
-    token = typeof value === "string" ? value : null;
+    if (raw.ok) {
+      const form = await new Response(raw.bytes, {
+        headers: { "content-type": request.headers.get("content-type") ?? "" },
+      }).formData();
+      const value = form.get("token");
+      token = typeof value === "string" ? value : null;
+    }
   } catch {
     token = null;
   }

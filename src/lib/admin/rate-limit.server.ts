@@ -30,13 +30,13 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
  *     first has to authenticate, so the fan-out an attacker controls is
  *     bounded by the credentials they hold, and the limit is a UX guard on
  *     top of authorization, not the security floor. It is NOT acceptable
- *     for the PRE-AUTH floors (token endpoint, MCP registration, the CSP
- *     sink, invitation acceptance, SSO consume, a signed-out SSO launch and
- *     the per-account sign-in budget of F-55), where the attacker chooses
- *     the fan-out and a per-lambda bucket
- *     multiplies by the instance count (review #98, F-19): those consume
- *     from the Postgres-backed bucket in `rate-limit-shared.server.ts`
- *     instead. The invariant test
+ *     for the PRE-AUTH floors (token endpoint, the MCP endpoint, MCP
+ *     registration, the CSP sink, invitation acceptance, SSO consume, a
+ *     signed-out SSO launch and the per-account sign-in budget of F-55),
+ *     where the attacker chooses the fan-out and a per-lambda bucket
+ *     multiplies by the instance count (review #98, F-19, F-78): those
+ *     consume from the Postgres-backed bucket in
+ *     `rate-limit-shared.server.ts` instead. The invariant test
  *     `tests/unit/rate-limit-shared-floors-invariant.test.ts` scans every
  *     call to this module's limiter under `src/` and fails on one keyed on
  *     the client's address, so nothing pre-auth can come back here. See

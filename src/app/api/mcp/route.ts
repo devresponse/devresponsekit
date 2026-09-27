@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { consumeToken, rateLimitKey, type RateLimitOptions } from "@/lib/admin/rate-limit.server";
+import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
 import { mintAccessToken } from "@/lib/api-auth/jwt.server";
 import {
   resolveCallerDetailed,
@@ -7,6 +8,8 @@ import {
   type ResolvedCaller,
 } from "@/lib/api-auth/resolve-caller.server";
 import { mcpAudience } from "@/lib/api-auth/resources";
+import { readBoundedText } from "@/lib/bounded-body";
+import { clientIpKey } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import { handleMcpRequest } from "@/lib/mcp/dispatch.server";
 import { mcpWwwAuthenticate } from "@/lib/mcp/metadata";
@@ -43,6 +46,26 @@ const EXCHANGE_TTL_SECONDS = 60;
 const TOOL_CALLS: RateLimitOptions = { capacity: 60, refillPerSec: 1 };
 
 /**
+ * Pre-auth floor per trusted client IP (F-78), taken from the SHARED bucket
+ * before the body is read or a credential is looked up. It bounds what one
+ * address can make the route parse and resolve, not what an agent may do
+ * (that is {@link TOOL_CALLS}, per credential), so it is generous: a hosted
+ * MCP client brings many users' agents from one egress pool. There is no
+ * deployment-wide floor behind it, for the SSO consume endpoint's reason: it
+ * would answer before the credential is checked, so a few sources sending at
+ * the per-IP rate could hold it at zero and lock every agent out.
+ */
+const MCP_IP_LIMIT: RateLimitOptions = { capacity: 300, refillPerSec: 5 };
+
+/**
+ * Largest JSON-RPC request read (F-78). A request is one method and its
+ * arguments, and the biggest tool input is a small v1 request body, so 1 MiB
+ * is two orders of magnitude of headroom. A larger body is refused with 413
+ * without being buffered.
+ */
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
  * POST /api/mcp — Phase 0 Model Context Protocol endpoint (design
  * docs/design-mcp-agent-gateway.md §8). Stateless Streamable HTTP: one
  * JSON-RPC request in, one JSON response out. DARK unless `MCP_ENABLED`.
@@ -57,9 +80,32 @@ export async function POST(request: NextRequest): Promise<Response> {
   const env = getServerEnv();
   if (!env.MCP_ENABLED) return notFound();
 
+  // F-78: the body is parsed before the bearer check below, whose 401 echoes
+  // the request's id, so an anonymous caller got an unbounded `request.json()`
+  // with no limiter in front of it. The per-IP floor now runs first (one
+  // shared-bucket round trip, before a credential lookup that costs one
+  // anyway), and the body is read through a byte cap.
+  const floor = await consumeSharedToken(
+    rateLimitKey("mcp.request", clientIpKey(request.headers)),
+    MCP_IP_LIMIT,
+  );
+  if (!floor.ok) {
+    rateLimitDenialsTotal.inc({ scope: "mcp.request" });
+    const retryAfter = floor.retryAfterSeconds;
+    return jsonRpc(rpcError(null, RPC_RATE_LIMITED, "Rate limited", { retryAfter }), 429, {
+      "Retry-After": String(retryAfter),
+    });
+  }
+
+  const body = await readBoundedText(request, MAX_BODY_BYTES);
+  if (!body.ok) {
+    return body.reason === "too_large"
+      ? jsonRpc(rpcError(null, RPC_INVALID_REQUEST, "Request body too large"), 413)
+      : jsonRpc(rpcError(null, RPC_PARSE_ERROR, "Parse error"), 400);
+  }
   let payload: unknown;
   try {
-    payload = await request.json();
+    payload = JSON.parse(body.text);
   } catch {
     return jsonRpc(rpcError(null, RPC_PARSE_ERROR, "Parse error"), 400);
   }

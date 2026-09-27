@@ -44,7 +44,9 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  * `/api/administrator/organizations/:id/invitations`; the header hosts the
  * "Invite member" dialog (email + optional org-scoped role). Row actions:
  * resend (rotates the token + expiry in place — the old link dies) and
- * revoke, both pending-only.
+ * revoke, both pending-only. A resend the server refuses because the original
+ * inviter can no longer invite (F-149) has voided the invitation, so the grid
+ * reloads and the notice says to send a new one.
  *
  * The role select lists EVERY role of the org (`fetchAllPages`, F-41); it
  * read one `pageSize=100` page, so an org with more roles could not invite
@@ -75,6 +77,7 @@ export function OrganizationInvitationsPanel({
 }) {
   const t = useTranslations("administrator.orgs.invitations");
   const tErr = useTranslations("administrator.errors");
+  const tApiErr = useTranslations("errors");
   const dialogs = useDialogs();
   // F-37: the viewer's zone and date format.
   const format = useAppFormatter();
@@ -167,6 +170,12 @@ export function OrganizationInvitationsPanel({
       );
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        if (body?.error === "invitation_inviter_lacks_standing") {
+          // F-149: the server voided it; reload so the row reads Revoked.
+          setRowNotice({ kind: "error", text: tApiErr("invitation_inviter_lacks_standing") });
+          setReloadKey((k) => k + 1);
+          return;
+        }
         setRowNotice({
           kind: "error",
           text:
@@ -179,7 +188,7 @@ export function OrganizationInvitationsPanel({
       setRowNotice({ kind: "success", text: t("resent") });
       setReloadKey((k) => k + 1);
     },
-    [dialogs, orgId, t, tErr],
+    [dialogs, orgId, t, tErr, tApiErr],
   );
 
   const onRevoke = useCallback(

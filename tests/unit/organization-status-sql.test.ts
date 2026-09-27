@@ -77,10 +77,14 @@ vi.mock("@/lib/active-org.server", () => ({
   readActiveOrgId: () => readActiveOrgId(),
 }));
 // The superuser probe and the impersonation reach have their own SQL pins
-// (superuser-grants-lock-sql, active-org-server); here they are inert.
+// (superuser-grants-lock-sql, active-org-server); here they are inert. The
+// invitation consume turns the probe on, so its inviter-standing check (F-149)
+// passes in one statement, and nobody is banned.
+const probe = vi.hoisted(() => ({ superuser: false }));
 vi.mock("@/lib/admin/access-scope.server", () => ({
-  userIsGlobalSuperuser: async () => false,
+  userIsGlobalSuperuser: async () => probe.superuser,
 }));
+vi.mock("@/lib/api-auth/ban-status.server", () => ({ isBetterAuthUserBanned: async () => false }));
 const reach = vi.hoisted(() => ({ orgIds: null as string[] | null }));
 vi.mock("@/lib/impersonation-reach.server", () => ({
   listImpersonationReachableOrgIds: async () => reach.orgIds,
@@ -127,6 +131,7 @@ beforeEach(() => {
   readActiveOrgId.mockReset();
   readActiveOrgId.mockResolvedValue(null);
   reach.orgIds = null;
+  probe.superuser = false;
 });
 afterEach(() => vi.resetModules());
 
@@ -303,8 +308,13 @@ describe("invitations — a suspended org's invitation is dead (F-09)", () => {
 
   it("consumeInvitation's guarded flip re-asserts it, so a suspension racing the accept wins", async () => {
     // The org was suspended between lookup and consume: the flip matches no
-    // row, and the invitation is reported as no longer consumable.
-    script.respond = () => ({ rows: [], numAffectedRows: 0n });
+    // row, and the invitation is reported as no longer consumable. The inviter
+    // (an active superadmin) still has standing, so it is the flip that refuses.
+    probe.superuser = true;
+    script.respond = (sql) =>
+      sql.includes('from "app_users"')
+        ? { rows: [{ better_auth_user_id: "ba-admin", status: "active" }] }
+        : { rows: [], numAffectedRows: 0n };
 
     const result = await invitations.consumeInvitation({
       invitation: {
@@ -313,7 +323,7 @@ describe("invitations — a suspended org's invitation is dead (F-09)", () => {
         organizationName: "Suspended Co",
         email: "member@example.test",
         roleId: null,
-        invitedByAppUserId: null,
+        invitedByAppUserId: "admin-1",
         status: "pending",
         expiresAt: new Date(Date.now() + 60_000),
       },
@@ -322,9 +332,11 @@ describe("invitations — a suspended org's invitation is dead (F-09)", () => {
     });
 
     expect(result).toEqual({ consumed: false, reason: "already_consumed" });
-    // Nothing after the flip ran: no membership, no activation, no role.
-    expect(script.captured).toHaveLength(1);
-    const flip = script.captured[0]!;
+    // Past the inviter's account read, nothing but the flip ran: no
+    // membership, no activation, no role.
+    const writes = script.captured.filter((q) => !q.sql.includes('from "app_users"'));
+    expect(writes).toHaveLength(1);
+    const flip = writes[0]!;
     expect(flip.sql).toMatch(/^update "app_organization_invitations"/);
     const match =
       /"organization_id" in \(select "id" from "app_organizations" where "status" = \$(\d+)\)/.exec(

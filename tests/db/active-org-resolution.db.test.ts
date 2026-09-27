@@ -46,8 +46,9 @@ vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: async () => sessionGette
 vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
   enforceSharedRateLimit: async () => null,
 }));
-// The impersonation reach asks Better Auth whether the impersonator is banned;
-// nobody is here, and it keeps the Better Auth instance out of this suite.
+// The impersonation reach asks Better Auth whether the impersonator is banned,
+// and so does the accept's check of the inviter's standing (F-149); nobody is
+// here, and it keeps the Better Auth instance out of this suite.
 vi.mock("@/lib/api-auth/ban-status.server", () => ({ isBetterAuthUserBanned: async () => false }));
 
 const { db, pgPool } = await import("@/db/database");
@@ -76,6 +77,13 @@ async function cleanup(): Promise<void> {
       .where("app_user_id", "in", userIds)
       .execute();
   }
+  await db
+    .deleteFrom("app_role_permissions")
+    .where("role_id", "in", (eb) =>
+      eb.selectFrom("app_roles").select("id").where("key", "like", `${PREFIX}%`),
+    )
+    .execute();
+  await db.deleteFrom("app_roles").where("key", "like", `${PREFIX}%`).execute();
   await db
     .deleteFrom("app_organization_invitations")
     .where("email", "like", `${PREFIX}%`)
@@ -165,6 +173,7 @@ const u = {} as Record<
   | "pendingAndSuspended"
   | "twins"
   | "admin"
+  | "inviter"
   | "invitee"
   | "inviteeSuspended",
   Fixture
@@ -182,6 +191,7 @@ beforeAll(async () => {
     "pendingAndSuspended",
     "twins",
     "admin",
+    "inviter",
     "invitee",
     "inviteeSuspended",
   ] as const) {
@@ -221,6 +231,27 @@ beforeAll(async () => {
   await addMembership(u.invitee.id, org.a, "active", "2020-01-01T00:00:00Z");
   await addMembership(u.inviteeSuspended.id, org.a, "active", "2020-01-01T00:00:00Z");
   await addMembership(u.inviteeSuspended.id, org.y, "suspended", "2021-01-01T00:00:00Z");
+  // Y's org admin sends both invitations: the standing an invitation needs its
+  // inviter to keep until it is accepted (F-149).
+  await addMembership(u.inviter.id, org.y, "active", "2020-01-01T00:00:00Z");
+  const invitePerm = await db
+    .selectFrom("app_permissions")
+    .select("id")
+    .where("key", "=", "admin.orgs.update")
+    .executeTakeFirstOrThrow();
+  const adminRole = await db
+    .insertInto("app_roles")
+    .values({ organization_id: org.y, key: `${PREFIX}org_admin`, name: "DBTest F33 admin" })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  await db
+    .insertInto("app_role_permissions")
+    .values({ role_id: adminRole.id, permission_id: invitePerm.id })
+    .execute();
+  await db
+    .insertInto("app_user_roles")
+    .values({ app_user_id: u.inviter.id, organization_id: org.y, role_id: adminRole.id })
+    .execute();
 });
 
 afterAll(async () => {
@@ -401,7 +432,11 @@ function acceptRequest(token: string): NextRequest {
 
 describe("F-33 invitation accept pins active_org to the org just joined", () => {
   it("an active member of A who accepts an invitation into Y lands in Y", async () => {
-    const invitation = await createInvitation({ organizationId: org.y, email: u.invitee.email });
+    const invitation = await createInvitation({
+      organizationId: org.y,
+      email: u.invitee.email,
+      invitedByAppUserId: u.inviter.id,
+    });
     sessionGetter.current = { user: { id: u.invitee.ba, email: u.invitee.email } };
 
     // Before: the resolver puts them in A, the only org they are in.
@@ -439,6 +474,7 @@ describe("F-33 invitation accept pins active_org to the org just joined", () => 
     const invitation = await createInvitation({
       organizationId: org.y,
       email: u.inviteeSuspended.email,
+      invitedByAppUserId: u.inviter.id,
     });
     sessionGetter.current = {
       user: { id: u.inviteeSuspended.ba, email: u.inviteeSuspended.email },

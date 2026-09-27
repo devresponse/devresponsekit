@@ -118,6 +118,8 @@ vi.mock("@/lib/auth", () => ({
     $context: Promise.resolve({ internalAdapter: { updateUser: vi.fn() } }),
   },
 }));
+// Invitation acceptance asks whether the inviter is banned (F-149); nobody is.
+vi.mock("@/lib/api-auth/ban-status.server", () => ({ isBetterAuthUserBanned: async () => false }));
 vi.mock("@/lib/api-auth/api-keys.server", () => ({
   getApiKeyById: (...a: unknown[]) => getApiKeyById(...a),
   revokeApiKey: (...a: unknown[]) => revokeApiKey(...a),
@@ -492,11 +494,21 @@ describe("invitation acceptance — POST /api/invitations/accept (reads the sess
         organization_name: "Org A",
         email: INVITEE_EMAIL,
         role_id: null,
-        invited_by: null,
+        invited_by: "u-inviter",
         status: "pending",
         expires_at: new Date("2099-01-01T00:00:00Z"),
       };
-      reads.first["select:app_users"] = { id: "u-invitee", status: "pending_approval" };
+      // The route reads the invitee's account, then the inviter-standing check
+      // (F-149) reads the inviter's: an active superadmin, so the accept goes on.
+      const accounts = [
+        { id: "u-invitee", status: "pending_approval" },
+        { better_auth_user_id: "ba-inviter", status: "active" },
+      ];
+      Object.defineProperty(reads.first, "select:app_users", {
+        get: () => accounts.shift(),
+        enumerable: true,
+      });
+      reads.first["select:app_user_roles as ur"] = { id: "perm-superuser" };
       reads.first["update:app_organization_invitations"] = { numUpdatedRows: 1n };
 
       const { POST } = await import("@/app/api/invitations/accept/route");

@@ -1326,6 +1326,7 @@
     "invitation_not_found": "招待が見つかりません。",
     "invitation_invalid": "この招待は無効か、有効期限が切れています。",
     "invitation_email_mismatch": "この招待は別のメールアドレス宛てに発行されています。",
+    "invitation_inviter_lacks_standing": "この招待を送信した管理者は招待できなくなったため、招待は取り消されました。新しい招待を送信してください。",
     "auth_settings_not_found": "削除するサインアップポリシーの上書きがありません。",
     "not_provisioned": "アカウントのセットアップがまだ完了していません。管理者にお問い合わせください。",
     "insufficient_scope": "この資格情報はその操作を許可されていません。",

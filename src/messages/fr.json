@@ -1326,6 +1326,7 @@
     "invitation_not_found": "Invitation introuvable.",
     "invitation_invalid": "Cette invitation est invalide ou a expiré.",
     "invitation_email_mismatch": "Cette invitation a été émise pour une autre adresse e-mail.",
+    "invitation_inviter_lacks_standing": "L'administrateur qui a envoyé cette invitation ne peut plus inviter : l'invitation a donc été révoquée. Envoyez-en une nouvelle.",
     "auth_settings_not_found": "Aucune configuration d'inscription à supprimer.",
     "not_provisioned": "Votre compte n'est pas encore entièrement configuré. Contactez un administrateur.",
     "insufficient_scope": "Cette autorisation ne couvre pas cette action.",

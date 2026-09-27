@@ -63,7 +63,16 @@ const ALL = { kind: "all" } as const;
  * activate a pending sign-up membership there. The member belongs to A (a
  * membership a sign-up created) and to B.
  */
-const w = { orgA: "", orgB: "", memberId: "", memberBa: "", membershipA: "", membershipB: "" };
+const w = {
+  orgA: "",
+  orgB: "",
+  memberId: "",
+  memberBa: "",
+  membershipA: "",
+  membershipB: "",
+  /** An org admin of both A and B: the invitations' sender, who keeps the standing (F-149). */
+  inviterId: "",
+};
 
 async function cleanup(): Promise<void> {
   const users = await db
@@ -92,12 +101,20 @@ async function cleanup(): Promise<void> {
     .where("email", "like", `${PREFIX}%`)
     .execute();
   if (userIds.length > 0) {
+    await db.deleteFrom("app_user_roles").where("app_user_id", "in", userIds).execute();
     await db
       .deleteFrom("app_organization_memberships")
       .where("app_user_id", "in", userIds)
       .execute();
     await db.deleteFrom("app_users").where("id", "in", userIds).execute();
   }
+  await db
+    .deleteFrom("app_role_permissions")
+    .where("role_id", "in", (eb) =>
+      eb.selectFrom("app_roles").select("id").where("key", "like", `${PREFIX}%`),
+    )
+    .execute();
+  await db.deleteFrom("app_roles").where("key", "like", `${PREFIX}%`).execute();
   await pgPool.query(`delete from "session" where "userId" like $1`, [`${PREFIX}%`]);
   await pgPool.query(`delete from "user" where id like $1`, [`${PREFIX}%`]);
   // The orgs' sign-up policy rows cascade with them.
@@ -235,7 +252,11 @@ async function restoreViaBulk(): Promise<void> {
 
 /** Accepts an invitation from `organizationId` as the member, as either acceptance path does. */
 async function acceptInvitationFrom(organizationId: string): Promise<void> {
-  const { plaintextToken } = await createInvitation({ organizationId, email: EMAIL });
+  const { plaintextToken } = await createInvitation({
+    organizationId,
+    email: EMAIL,
+    invitedByAppUserId: w.inviterId,
+  });
   const invitation = await findValidInvitationByToken(plaintextToken);
   expect(invitation).not.toBeNull();
   await expect(
@@ -280,6 +301,48 @@ beforeAll(async () => {
     .returning("id")
     .executeTakeFirstOrThrow();
   w.memberId = user.id;
+
+  const inviter = await db
+    .insertInto("app_users")
+    .values({
+      better_auth_user_id: `${PREFIX}ba_inviter_${RUN}`,
+      primary_email: `${PREFIX}inviter_${RUN}@dbtest.local`,
+      status: "active",
+    })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  w.inviterId = inviter.id;
+  const invitePerm = await db
+    .selectFrom("app_permissions")
+    .select("id")
+    .where("key", "=", "admin.orgs.update")
+    .executeTakeFirstOrThrow();
+  for (const [key, organizationId] of [
+    ["admin_a", w.orgA],
+    ["admin_b", w.orgB],
+  ] as const) {
+    const role = await db
+      .insertInto("app_roles")
+      .values({
+        organization_id: organizationId,
+        key: `${PREFIX}${key}_${RUN}`,
+        name: `F152 ${key}`,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto("app_role_permissions")
+      .values({ role_id: role.id, permission_id: invitePerm.id })
+      .execute();
+    await db
+      .insertInto("app_organization_memberships")
+      .values({ organization_id: organizationId, app_user_id: w.inviterId, status: "active" })
+      .execute();
+    await db
+      .insertInto("app_user_roles")
+      .values({ app_user_id: w.inviterId, organization_id: organizationId, role_id: role.id })
+      .execute();
+  }
 });
 
 // Every case starts from an active, unbanned member of A (joined by sign-up)

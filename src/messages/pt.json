@@ -1326,6 +1326,7 @@
     "invitation_not_found": "Convite não encontrado.",
     "invitation_invalid": "Este convite é inválido ou expirou.",
     "invitation_email_mismatch": "Este convite foi emitido para outro endereço de e-mail.",
+    "invitation_inviter_lacks_standing": "O administrador que enviou este convite não pode mais convidar, por isso o convite foi revogado. Envie um novo convite.",
     "auth_settings_not_found": "Nenhuma configuração de cadastro para remover.",
     "not_provisioned": "Sua conta ainda não está totalmente configurada. Contate um administrador.",
     "insufficient_scope": "Esta credencial não está autorizada para essa ação.",

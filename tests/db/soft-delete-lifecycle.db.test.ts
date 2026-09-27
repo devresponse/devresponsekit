@@ -249,7 +249,8 @@ describe("F-57: an earlier ban survives the soft-delete and its restore", () => 
     expect(ban).toMatchObject({ banned: true, banReason: "abuse" });
     expect(ban.banExpires?.toISOString()).toBe(expires);
     expect(await accountStatus()).toBe("pending_approval");
-    expect(await membershipStatus()).toBe("active");
+    // F-152: the active membership comes back for its org to approve again.
+    expect(await membershipStatus()).toBe("pending_approval");
   });
 
   it("restore lifts the soft-delete's ban when there was none before it", async () => {

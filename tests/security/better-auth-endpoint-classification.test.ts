@@ -57,7 +57,8 @@ const OPEN_ENDPOINTS: Record<string, string> = {
   "/revoke-session": "account security: revoke one session",
   "/revoke-other-sessions": "account security: revoke every other session",
   "/ok": "a sessionless liveness probe that exposes nothing",
-  "/error": "Better Auth's OAuth error page (no errorCallbackURL is configured)",
+  "/error":
+    "Better Auth's error endpoint: it redirects to the app's sign-in page (`onAPIError.errorURL`, F-153)",
 };
 
 const auditMock = vi.fn();

@@ -439,9 +439,11 @@ export const PATCH = withAdminRoute(async function PATCH(
     ) {
       return "last_superadmin" as const;
     }
+    // F-152: the snapshot goes with the write, as on the user-centric twin, so
+    // a later restore cannot put the pre-deletion status back over it.
     await trx
       .updateTable("app_organization_memberships")
-      .set({ status: input.status })
+      .set({ status: input.status, pre_deactivation_status: null })
       .where("id", "in", input.membershipIds)
       .where("organization_id", "=", id)
       .execute();

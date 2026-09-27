@@ -1,6 +1,7 @@
 import "server-only";
-import { sql } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 import {
   requiresSuperadminForSharedTarget,
   scopeOrganizationId,
@@ -663,6 +664,51 @@ async function performSoftDelete(
   return { ok: true, appUserId: target.appUserId };
 }
 
+/**
+ * F-152 — RESTORE HANDS EACH MEMBERSHIP BACK FOR RE-APPROVAL.
+ *
+ * Step 3 of a restore, shared by `POST /users/[id]/restore` and the `restore`
+ * bulk action: every membership the soft-delete cascade snapshotted gets its
+ * `pre_deactivation_status` back, except that an `active` one comes back
+ * `pending_approval`. Restore used to revive `active` memberships behind
+ * the account-level `pending_approval` alone, and any tenant could lift that:
+ * another org's accepted invitation, or its admin's approval of a shared user,
+ * made the account `active`, and every restored membership and its roles then
+ * counted in orgs that had approved nothing. Now each org approves its own
+ * membership again: the status actions, `PATCH …/memberships` or `…/members`,
+ * or that org's own invitation.
+ *
+ * A membership this brings back `pending_approval` keeps its snapshot, the
+ * marker that restore held it back, until the next write that sets its status
+ * clears it. Sign-in re-evaluation skips a membership carrying it
+ * (`reevaluatePendingActivation`), so an org's sign-up policy (`auto_active`,
+ * an auto-approve domain) cannot activate what restore left for an approver,
+ * as it may not for a user an administrator created pending (F-480). A
+ * `blocked` or `suspended` membership comes back as it was, with no marker.
+ *
+ * The snapshot restore reads is the one the cascade took, or none: every write
+ * that sets a membership's status clears it, so a decision an org made while
+ * the account was deleted stands over it.
+ */
+export async function restoreSnapshottedMemberships(
+  appUserId: string,
+  executor: Kysely<AppDatabase>,
+): Promise<void> {
+  await executor
+    .updateTable("app_organization_memberships")
+    .set({
+      // Both expressions read the row as it was before this UPDATE.
+      status: sql<string>`case when pre_deactivation_status = 'active' then 'pending_approval' else pre_deactivation_status end`,
+      pre_deactivation_status: sql<
+        string | null
+      >`case when pre_deactivation_status in ('active', 'pending_approval') then pre_deactivation_status end`,
+      updated_at: sql`now()`,
+    })
+    .where("app_user_id", "=", appUserId)
+    .where("pre_deactivation_status", "is not", null)
+    .execute();
+}
+
 async function performRestore(
   target: BulkUserTarget,
   actor: BulkUserActor,
@@ -696,11 +742,10 @@ async function performRestore(
     });
     return { ok: false, appUserId: target.appUserId, error: "auth_unban_failed" };
   }
-  // Reverse the cascade applied by performSoftDelete: any membership
-  // that still carries a `pre_deactivation_status` snapshot is
-  // returned to that prior status, then the snapshot column cleared.
-  // Memberships without a snapshot were either never cascaded or
-  // already reversed — leave them alone.
+  // Reverse the cascade applied by performSoftDelete: any membership that
+  // still carries a `pre_deactivation_status` snapshot gets it back, an
+  // `active` one as `pending_approval` (F-152). Memberships without a snapshot
+  // were never cascaded, or an org has decided them since — leave them alone.
   await db.transaction().execute(async (trx) => {
     await trx
       .updateTable("app_users")
@@ -714,16 +759,7 @@ async function performRestore(
       })
       .where("id", "=", target.appUserId)
       .execute();
-    await trx
-      .updateTable("app_organization_memberships")
-      .set({
-        status: sql`coalesce(pre_deactivation_status, status)`,
-        pre_deactivation_status: null,
-        updated_at: sql`now()`,
-      })
-      .where("app_user_id", "=", target.appUserId)
-      .where("pre_deactivation_status", "is not", null)
-      .execute();
+    await restoreSnapshottedMemberships(target.appUserId, trx);
   });
   await auditUserAction("admin.user.restored", "success", {
     request: actor.request,

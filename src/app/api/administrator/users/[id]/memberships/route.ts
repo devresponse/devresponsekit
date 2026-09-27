@@ -341,9 +341,14 @@ export const PATCH = withAdminRoute(async function PATCH(
     ) {
       return "last_superadmin" as const;
     }
+    // F-152: the snapshot goes with the write. Left in place, a restore of a
+    // soft-deleted user put the pre-deletion status back over this decision
+    // (an org's suspension made while the account was deleted came back
+    // `active`), and a membership restore held back for re-approval stayed
+    // marked as held after it was decided.
     await trx
       .updateTable("app_organization_memberships")
-      .set({ status: input.status })
+      .set({ status: input.status, pre_deactivation_status: null })
       .where("app_user_id", "=", target.appUserId)
       .where("id", "in", allowedMembershipIds)
       .execute();

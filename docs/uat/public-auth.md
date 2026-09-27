@@ -388,14 +388,36 @@ Negative & edge cases
   whose email is not yet verified, when I submit, then instead of the generic
   error the form is replaced by a "Verify your email" prompt with a **Resend**
   button pre-filled with the address. Better Auth rejects the sign-in with
-  `EMAIL_NOT_VERIFIED`, detected by code — a banned 403 still falls through to the
-  generic message (`src/components/auth/email-password-login-form.tsx:60`, `:71-79`).
+  `EMAIL_NOT_VERIFIED`, detected by code, not status: a banned sign-in is a 403
+  too, and gets its own message (S5) (`src/components/auth/email-password-login-form.tsx`).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
     | 1 | Sign up a fresh account but do NOT verify it; open `/en/sign-in` and enter that email + its password | Fields accept input |
     | 2 | Click "Sign in" | The form is replaced by a "Verify your email" alert + a "Resend verification email" button, email pre-filled — NOT "Invalid email or password" |
     | 3 | Click "Resend verification email" | A neutral confirmation appears; a fresh verification link is in the outbox |
+  - Result: [ ] Pass  [ ] Fail  — Notes: ______
+- UAT-AUTH-SIGNIN-S5 (banned or soft-deleted account, F-153) — Given the correct
+  password for an account an administrator banned or soft-deleted, when I submit,
+  then the alert reads "Your account is currently blocked, suspended, or
+  deactivated. Contact your administrator." (`auth.blockedDescription`, the
+  blocked page's message), not "Invalid email or password.". Better Auth refuses
+  the sign-in with `BANNED_USER` only after the password verifies, so a wrong
+  password still gets S3's generic message. A refused social sign-in lands on
+  `/<locale>/sign-in?error=…` (Better Auth's `onAPIError.errorURL`, set to
+  `/sign-in` in `src/lib/auth.ts`): `BANNED_USER` shows the same message and any
+  other code "An unexpected error occurred. Please try again."; the code itself
+  is never shown. Before F-153 the password form said the password was wrong,
+  and a social sign-in went to Better Auth's error page, which in production
+  redirects to the home page with no message.
+  - UAT script:
+    | # | Step | Expected result |
+    |---|---|---|
+    | 1 | As `superuser@orga.local`, soft-delete `user5@orga.local` (Administrator → Users, tick the row, **Delete selected (soft)**); sign out | The user shows as Deactivated |
+    | 2 | Open `/en/sign-in`, enter `user5@orga.local` + `DevPassword123!`, click "Sign in" | The alert reads "Your account is currently blocked, suspended, or deactivated. Contact your administrator." |
+    | 3 | Enter `user5@orga.local` + `wrong-pass`, click "Sign in" | "Invalid email or password." (no hint that the account exists) |
+    | 4 | Open `/sign-in?error=BANNED_USER&error_description=hello` | You land on `/en/sign-in?error=…` with the blocked message above the form; "hello" appears nowhere |
+    | 5 | As `superuser@orga.local`, restore `user5` (`POST /api/administrator/users/{id}/restore`) and approve them | `user5` can sign in again |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 - Empty required fields: submitting with an empty email shows "Enter a valid
   email address." (`validation.email`); empty password shows "This field is

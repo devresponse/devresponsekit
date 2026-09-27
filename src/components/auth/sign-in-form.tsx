@@ -2,6 +2,7 @@ import { useTranslations } from "next-intl";
 import { EmailPasswordLoginForm } from "@/components/auth/email-password-login-form";
 import { SocialLoginButtons } from "@/components/auth/social-login-buttons";
 import { LocaleLink } from "@/components/i18n/locale-link";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import type { SupportedLocale } from "@/config/i18n-config";
@@ -23,6 +24,12 @@ export interface SignInFormProps {
    * the same org.
    */
   organization?: OrganizationRef | null;
+  /**
+   * The `?error=` code a refused social sign-in brought back (Better Auth's
+   * `onAPIError.errorURL`, F-153), or null. Mapped to a translated message
+   * here; the code itself and its `error_description` are never shown.
+   */
+  errorCode?: string | null;
 }
 
 /**
@@ -33,7 +40,13 @@ export interface SignInFormProps {
  * per §14.1 (a provider only appears when its credentials are set). The
  * `returnTo` value is sanitized by the parent page.
  */
-export function SignInForm({ locale, returnTo, socialProviders, organization }: SignInFormProps) {
+export function SignInForm({
+  locale,
+  returnTo,
+  socialProviders,
+  organization,
+  errorCode,
+}: SignInFormProps) {
   const t = useTranslations("auth");
 
   // Scoped sign-in: route the post-auth callback through the apply-org endpoint
@@ -54,6 +67,16 @@ export function SignInForm({ locale, returnTo, socialProviders, organization }: 
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {errorCode ? (
+          // F-153: a banned account (BANNED_USER, a soft-deleted one included)
+          // gets the blocked page's message, as the password form gives it;
+          // any other refusal the generic one.
+          <Alert variant="destructive">
+            <AlertDescription>
+              {errorCode === "BANNED_USER" ? t("blockedDescription") : t("unexpectedError")}
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <EmailPasswordLoginForm returnTo={callbackURL} />
         {socialProviders.length > 0 ? (
           <>

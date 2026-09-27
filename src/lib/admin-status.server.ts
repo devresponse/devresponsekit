@@ -235,7 +235,9 @@ export async function performAdminStatusChange(
       //    account status mirrors the action (unchanged behavior).
       //  - Shared user + org admin → only LIFT a still-pending account to
       //    active on a grant (so it becomes usable); never change it on a deny,
-      //    which would block the user in every other org too.
+      //    which would block the user in every other org too. The lift admits
+      //    the user to no other org: a restored user's memberships come back
+      //    `pending_approval`, each for its own org to approve (F-152).
       if (accountWide) {
         await trx
           .updateTable("app_users")
@@ -256,10 +258,18 @@ export async function performAdminStatusChange(
       }
 
       // Membership status: every org for a SUPERADMIN (account-global); only
-      // the actor's own org for an org admin (the AUTHZ-1 confinement).
+      // the actor's own org for an org admin (the AUTHZ-1 confinement). F-152:
+      // the write clears the snapshot restore left on a membership it held
+      // back for re-approval. Kept, a block of that membership was undone by
+      // the next soft-delete and restore (the cascade skips `blocked` rows, so
+      // the held-back snapshot survived and restore read it back).
       let membership = trx
         .updateTable("app_organization_memberships")
-        .set({ status: input.newMembershipStatus, updated_at: sql`now()` })
+        .set({
+          status: input.newMembershipStatus,
+          pre_deactivation_status: null,
+          updated_at: sql`now()`,
+        })
         .where("app_user_id", "=", target.id);
       if (input.scope.kind === "org") {
         membership = membership.where("organization_id", "=", input.scope.organizationId);

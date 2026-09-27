@@ -62,6 +62,23 @@ describe("EmailPasswordLoginForm", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/invalid email or password/i);
   });
 
+  it("says a banned account is restricted, not that the password is wrong (F-153)", async () => {
+    // A soft-deleted account is banned: its correct password is refused with
+    // BANNED_USER, which used to read as "Invalid email or password."
+    signInEmail.mockResolvedValueOnce({ error: { code: "BANNED_USER", status: 403 } });
+    const user = userEvent.setup();
+    renderWithIntl(<EmailPasswordLoginForm returnTo="/en/app/dashboard" />);
+
+    await user.type(screen.getByLabelText(/email/i), "former@example.com");
+    await user.type(screen.getByLabelText(/password/i), "Password!1234");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /blocked, suspended, or deactivated\. Contact your administrator/i,
+    );
+    expect(screen.queryByText(/invalid email or password/i)).toBeNull();
+  });
+
   it("falls back to a generic message on unexpected errors", async () => {
     signInEmail.mockRejectedValueOnce(new Error("boom"));
     const user = userEvent.setup();

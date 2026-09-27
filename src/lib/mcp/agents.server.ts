@@ -187,9 +187,11 @@ export async function activateMcpAgent(appUserId: string): Promise<boolean> {
     .executeTakeFirst();
   const activated = Number(userResult.numUpdatedRows ?? 0) > 0;
   if (!activated) return false;
+  // An approval, so it also clears the snapshot a restore leaves on a
+  // membership it held back for re-approval (F-152).
   await db
     .updateTable("app_organization_memberships")
-    .set({ status: "active", updated_at: sql`now()` })
+    .set({ status: "active", pre_deactivation_status: null, updated_at: sql`now()` })
     .where("app_user_id", "=", appUserId)
     .where("source_provider", "=", "mcp")
     .where("status", "=", "pending_approval")

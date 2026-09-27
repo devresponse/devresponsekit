@@ -330,15 +330,20 @@ export async function consumeInvitation(input: {
       })
       .execute();
   } else if (membership.status === "pending_approval") {
+    // The inviting org's approval, so it also clears the snapshot a restore
+    // leaves on a membership it held back for re-approval (F-152).
     await db
       .updateTable("app_organization_memberships")
-      .set({ status: "active", updated_at: sql`now()` })
+      .set({ status: "active", pre_deactivation_status: null, updated_at: sql`now()` })
       .where("id", "=", membership.id)
       .where("status", "=", "pending_approval")
       .execute();
   }
 
-  // User-level activation: only ever pending → active.
+  // User-level activation: only ever pending → active. The lift is
+  // account-wide, but it admits the user only where a membership is active: a
+  // restored user's memberships come back `pending_approval`, so another org's
+  // invitation no longer revives them in orgs that have not approved (F-152).
   await db
     .updateTable("app_users")
     .set({ status: "active", updated_at: sql`now()` })

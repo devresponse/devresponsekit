@@ -397,6 +397,9 @@ export async function provisionUserFromAuth(
  *     sign-in's provider for such a row, so a user a confined creator made
  *     pending in an `auto_active` org activated itself at its first sign-in,
  *     with nobody approving it.
+ *   - Likewise a membership a restore brought back pending: it keeps its
+ *     `pre_deactivation_status` snapshot until someone decides it, and waits
+ *     for an approver (F-152, `restoreSnapshottedMemberships`).
  *   - A user-level activation requires at least one membership to activate.
  */
 export async function reevaluatePendingActivation(input: {
@@ -421,6 +424,10 @@ export async function reevaluatePendingActivation(input: {
     .select(["id", "organization_id", "source_provider"])
     .where("app_user_id", "=", user.id)
     .where("status", "=", "pending_approval")
+    // F-152: a membership restore held back for re-approval keeps its
+    // snapshot until someone decides it. Pending there is the restoring
+    // admin's decision, not the policy's (see the F-480 guard above).
+    .where("pre_deactivation_status", "is", null)
     .execute();
   if (memberships.length === 0) {
     return;

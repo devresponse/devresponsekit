@@ -518,6 +518,7 @@ Most variables above are validated at boot by `src/lib/env.ts` — a missing or 
 | `LOG_LEVEL` | the Pino logger | defaults to `info` (`silent` under test) |
 | `AUDIT_RETENTION_DAYS` / `OUTBOX_RETENTION_DAYS` / `OUTBOX_MAX_PENDING_DAYS` | `pnpm db:prune`, `/api/internal/outbox-drain` | default 365 / 90 / 7; `0` disables |
 | `DB_MIGRATE_LOCALES` | `pnpm db:app:migrate` | localized email-template migrations applied unless `0`/`false`/`no`/`off` (the English base `locales/0000-email-templates-en.sql` is always applied) |
+| `DB_MIGRATE_LOCK_TIMEOUT_MS` / `DB_MIGRATE_STATEMENT_TIMEOUT_MS` | `pnpm db:app:migrate`, `pnpm db:auth:migrate` | default 5000 / 600000 (5 s / 10 min); `0` disables one. A migration statement that waits longer for a lock fails and its file rolls back instead of queueing traffic behind it (F-94, [Deployment §5](./deployment.md#5-operations--gotchas)). A value that is not a whole number of milliseconds stops the migrator before it connects |
 | `SENTRY_*` / `NEXT_PUBLIC_SENTRY_*` | Sentry build + runtime | Sentry stays off unless a DSN is present (see [Observability](./observability.md)) |
 
 ---

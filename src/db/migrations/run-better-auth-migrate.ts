@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { getMigrations } from "better-auth/db/migration";
 import { createAppPool, ensureSchema } from "@/db/schema-config";
+import { createMigrationPool, resolveMigrationTimeouts } from "@/db/migrations/apply-migration";
 
 /**
  * Better Auth migration runner.
@@ -16,8 +17,19 @@ import { createAppPool, ensureSchema } from "@/db/schema-config";
  * (which opens the shared runtime pool). This also makes a standalone
  * `pnpm db:auth:migrate` on a fresh database safe, and keeps the auth-first
  * order of `pnpm db:reset:reload` correct.
+ *
+ * The migrator runs on a pool of its own, not the runtime pool the options
+ * name (F-94). Its `alter table` / `create index` statements hit `user` and
+ * `session`, which every authenticated request reads; one of them waiting on
+ * a lock would queue all of those behind it. `createMigrationPool` gives every
+ * connection the same `lock_timeout` / `statement_timeout` the application
+ * runner sets per file, for the whole session, because each of Better Auth's
+ * statements auto-commits on its own.
  */
 async function main() {
+  // Resolved before connecting, so a malformed value fails with nothing
+  // touched (F-94).
+  const timeouts = resolveMigrationTimeouts();
   const boot = createAppPool();
   try {
     await ensureSchema(boot);
@@ -26,13 +38,21 @@ async function main() {
   }
 
   const { auth } = await import("@/lib/auth");
-  const { runMigrations } = await getMigrations(
-    auth.options as Parameters<typeof getMigrations>[0],
-  );
+  const migrationPool = createMigrationPool(timeouts);
+  try {
+    const { runMigrations } = await getMigrations({
+      ...(auth.options as Parameters<typeof getMigrations>[0]),
+      database: migrationPool,
+    });
 
-  console.log("[auth:migrate] running Better Auth migrations...");
-  await runMigrations();
-  console.log("[auth:migrate] done");
+    console.log(
+      `[auth:migrate] running Better Auth migrations (lock_timeout=${timeouts.lockTimeoutMs}ms statement_timeout=${timeouts.statementTimeoutMs}ms)...`,
+    );
+    await runMigrations();
+    console.log("[auth:migrate] done");
+  } finally {
+    await migrationPool.end();
+  }
 }
 
 main().catch((error) => {

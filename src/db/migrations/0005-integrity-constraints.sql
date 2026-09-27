@@ -44,12 +44,27 @@
 --        window to an owner-owned floor (30 days) and caps the batch, so the
 --        runtime credential cannot use it to purge recent history (see 5b).
 --
--- Rollout shape: every CHECK is added NOT VALID and then VALIDATEd (an
--- online pattern — VALIDATE takes only SHARE UPDATE EXCLUSIVE), and the
+-- Rollout shape: every CHECK is added NOT VALID and then VALIDATEd, and the
 -- PREFLIGHT block below counts violating rows for EVERY new constraint first.
 -- If any exist it raises with the full offender list (table, column, value,
 -- count) and — because the runner applies this file in one transaction —
 -- leaves the database unchanged. Nothing here edits data silently.
+--
+-- This file is NOT an online migration, and is not a pattern to copy (F-94).
+-- NOT VALID + VALIDATE is online only when the two commit separately: ADD
+-- CONSTRAINT takes ACCESS EXCLUSIVE on its table, and in one transaction that
+-- lock is held until the whole file commits, so the cheap VALIDATE buys
+-- nothing. The later sections add to it: ADD COLUMN, SET NOT NULL and DROP
+-- TRIGGER take ACCESS EXCLUSIVE too (reads wait), and the foreign keys,
+-- CREATE TRIGGER and the index builds take locks that block writes, all held
+-- to the same commit. While it runs, every request that touches a table it
+-- alters waits for it: app_users and the memberships on each access check,
+-- app_audit_events on each audited write. Since F-94 the runner sets a
+-- lock_timeout, so a file that cannot get a lock fails and rolls back instead
+-- of queueing that traffic behind its wait; once it holds the locks, traffic
+-- still waits for the rest of the file. docs/deployment.md §5 describes how
+-- to write a migration that is safe to apply to a live database. The SQL
+-- below stays as it is: it is applied and ledgered everywhere.
 --
 -- Forward-only; idempotent where cheap (`if not exists` / catalog-guarded
 -- `do` blocks) so a partially-applied manual run can be repeated.

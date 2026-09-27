@@ -10,6 +10,11 @@ import { pgPool } from "@/db/database";
  *
  *   pnpm db:prune        # one pass
  *
+ * On Vercel there is nowhere to run it, so the daily
+ * `GET /api/internal/outbox-drain` cron runs the same `pruneAll()` after each
+ * drain, bounded to its function time budget (F-96). This script sets no
+ * deadline: it runs every batch until the tables are drained.
+ *
  * Windows are AUDIT_RETENTION_DAYS (default 365), OUTBOX_RETENTION_DAYS
  * (default 90, terminal outbox rows) and OUTBOX_MAX_PENDING_DAYS (default 7:
  * `pending` rows older than this are marked `failed` — reported as

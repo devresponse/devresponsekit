@@ -300,8 +300,10 @@ export const ENV_SPECS: readonly EnvVarSpec[] = [
     level: "recommended",
     secret: true,
     source: "operator-secret",
-    comment: "Bearer token the scheduler presents to the outbox drainer and registration reaper.",
-    consequence: "Both scheduled jobs answer 401 forever — they fail closed, and silently.",
+    comment:
+      "Bearer token the scheduler presents to the outbox drainer (which also runs data retention) and registration reaper.",
+    consequence:
+      "Both scheduled jobs answer 401 forever — they fail closed, and silently: no email retries, no data retention, no registration reaping.",
     validate: atLeast(32),
   },
   {

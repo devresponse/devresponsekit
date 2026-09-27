@@ -626,7 +626,8 @@ missing or malformed. Six are required:
 
 Two more matter even though the app boots without them: `SSO_HANDOFF_PRIVATE_KEY` (an Ed25519
 JWK — without it the SSO launch endpoint answers 503 and the published key set is empty) and
-`CRON_SECRET` (without it both scheduled jobs answer 401 forever, silently). `env:sync` generates
+`CRON_SECRET` (without it both scheduled jobs answer 401 forever, silently: no email retries, no
+data retention, no registration reaping). `env:sync` generates
 both.
 
 A note worth internalising: `NEXT_PUBLIC_*` values are compiled into the client bundle at build

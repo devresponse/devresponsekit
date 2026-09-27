@@ -604,10 +604,17 @@ per-instance buckets when `app_rate_limits` is missing (migration `0006` not
 applied) or the database is unreachable. See
 [deployment.md §5](./deployment.md#5-operations--gotchas).
 
-**Audit / outbox tables growing without bound.** Schedule **`pnpm db:prune`**
-(`scripts/prune-retention.ts`) to apply `AUDIT_RETENTION_DAYS` (default 365) and
-`OUTBOX_RETENTION_DAYS` (default 90) and prune expired token revocations — see
-[Deployment](./deployment.md).
+**Audit / outbox tables growing without bound.** The retention prune applies
+`AUDIT_RETENTION_DAYS` (default 365) and `OUTBOX_RETENTION_DAYS` (default 90)
+and prunes expired token revocations. On Vercel it runs inside the daily
+`GET /api/internal/outbox-drain` cron (F-96), so confirm that cron is firing and
+`CRON_SECRET` is set. Each tick logs a `kind: "retention"` line with its counts,
+or `retention prune tick failed` with the error. A `[retention] … stopped at the
+time budget` line means a backlog larger than one tick can clear: later ticks
+finish it. If every table stops `after 0 rows`, the outbox drain used up the
+tick's budget before retention started: check its `kind: "outbox-drain"` line
+and the email provider. On any other host, schedule **`pnpm db:prune`**
+(`scripts/prune-retention.ts`). See [Deployment](./deployment.md).
 
 ## Known risks & missing information
 

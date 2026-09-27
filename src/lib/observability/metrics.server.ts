@@ -23,7 +23,8 @@ import { Counter, Registry, collectDefaultMetrics } from "prom-client";
  *     registry, which nothing scrapes and which dies with it.
  *
  * Next increments (tracked in docs/observability.md §6): request latency/status
- * by route, DB latency and auth failures.
+ * by route, DB latency and the auth failures other than a failed email/password
+ * sign-in (which F-55 counts under `…_pre_auth_refusals_total`).
  *
  * Per-instance, like the limiter: each process keeps its own counters, scraped
  * independently. That matches the single-instance 1.0 topology; a multi-instance
@@ -69,8 +70,9 @@ export const rateLimitSharedFallbacksTotal = new Counter({
 /**
  * Requests refused BEFORE the caller authenticated (F-15), by the event type
  * on the paired log line: the CSRF origin guard on every cookie surface, the
- * SSO consume refusals decided before the handoff token verifies, and the
- * signed-out SSO launch. None of these writes an `app_audit_events` row any
+ * SSO consume refusals decided before the handoff token verifies, the
+ * signed-out SSO launch, and a failed email/password sign-in (F-55). None of
+ * these writes an `app_audit_events` row any
  * more — an anonymous loop must not be able to grow the append-only table —
  * so this counter and the `pre_auth_refusal` log line are their record. The
  * label is a code literal per call site, never request data, so its

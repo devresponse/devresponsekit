@@ -31,8 +31,9 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
  *     bounded by the credentials they hold, and the limit is a UX guard on
  *     top of authorization, not the security floor. It is NOT acceptable
  *     for the PRE-AUTH floors (token endpoint, MCP registration, the CSP
- *     sink, invitation acceptance, SSO consume and a signed-out SSO launch),
- *     where the attacker chooses the fan-out and a per-lambda bucket
+ *     sink, invitation acceptance, SSO consume, a signed-out SSO launch and
+ *     the per-account sign-in budget of F-55), where the attacker chooses
+ *     the fan-out and a per-lambda bucket
  *     multiplies by the instance count (review #98, F-19): those consume
  *     from the Postgres-backed bucket in `rate-limit-shared.server.ts`
  *     instead. The invariant test

@@ -6,10 +6,7 @@ import { decideSecureAccess } from "@/lib/auth-status";
 import { getSessionAccessContext } from "@/lib/session-access.server";
 import { withTrustedClientIp } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
-import {
-  isImpersonationSessionPastMaxAge,
-  isSessionPastAbsoluteLifetime,
-} from "@/lib/session-lifetime";
+import { isSessionPastLifetime } from "@/lib/session-lifetime";
 import { readImpersonatorId } from "@/lib/impersonation";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { getSafeReturnTo } from "@/lib/safe-return-to";
@@ -61,16 +58,11 @@ async function readSession(requestHeaders: Headers) {
   // whatever the operator cap says. Better Auth's own one-hour `expiresAt` is
   // soft — the plugin skips the rolling refresh only while the signed
   // `dont_remember` cookie is present, so a holder who drops it and calls
-  // `/get-session` rolls the row forward 8 h at a time, indefinitely. The
-  // borrowed shell reaches Better Auth over HTTP only for `/get-session` and
-  // `/sign-out` (F-06); everything it can DO goes through this function, so
-  // this is where the bound holds.
-  const pastCap =
-    isSessionPastAbsoluteLifetime(
-      session.session,
-      getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS,
-    ) ||
-    (readImpersonatorId(session) !== null && isImpersonationSessionPastMaxAge(session.session));
+  // `/get-session` rolls the row forward 8 h at a time, indefinitely.
+  // Everything the borrowed shell can DO goes through this function, so this
+  // is where the bound holds for the app; F-54 applies the same rule to
+  // Better Auth's own endpoints in `rejectClosedAuthEndpoints`.
+  const pastCap = isSessionPastLifetime(session, getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS);
 
   if (!pastCap) {
     // F-07: an impersonated session is recorded against the ambient headers —
@@ -115,8 +107,10 @@ async function readSession(requestHeaders: Headers) {
  * `SESSION_ABSOLUTE_LIFETIME_HOURS`, a session older than that — measured
  * from CREATION, not last activity — is reported as absent here and revoked,
  * so every caller (browser guards, server actions, the `/api/v1` cookie path)
- * inherits the cap from this one chokepoint. The variable is UNSET by
- * default, which keeps the pre-existing "rolls forever" behaviour exactly.
+ * inherits the cap from this one chokepoint. Better Auth's own `/api/auth/*`
+ * endpoints never come through here; `rejectClosedAuthEndpoints` applies the
+ * same rule to them (F-54). The variable is UNSET by default, which keeps the
+ * pre-existing "rolls forever" behaviour exactly.
  *
  * IMPERSONATION CAP (F-08): a session carrying `impersonatedBy` is refused
  * and revoked the same way once it is an hour old

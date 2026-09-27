@@ -1536,6 +1536,7 @@ its stdout mirror had while it was still a row. The refusals it covers:
 | `POST /api/invitations/accept` | Same | `invitation.access.denied` |
 | `/api/sso/consume` | No token; a token that fails verification; a cross-site confirm POST | `sso.consume.failure` |
 | `/api/sso/launch` | Signed out (the redirect to sign-in) | `sso.launch.failure` |
+| `/api/auth/sign-in/email` | A failed attempt: wrong password, unknown address, unverified or banned account, malformed body, or the per-account budget spent (F-55). `reason` is Better Auth's error code or `rate_limited`; `metadata.emailHash` is an HMAC of the address keyed with `BETTER_AUTH_SECRET`, never the address | `auth.sign_in.failed` |
 
 The audited denials past that line are unchanged: a caller without the
 permission, an impersonated session refused by a guard, and on
@@ -1910,9 +1911,12 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   (`impersonationSessionDuration`, set to the same constant) is not a bound:
   the plugin skips the rolling refresh only while its signed `dont_remember`
   cookie is present, and a holder who drops that cookie and calls
-  `/get-session` has the row extended by 8 hours every 15 minutes. That
+  `/get-session` had the row extended by 8 hours every 15 minutes. That
   endpoint and `/sign-out` are all the borrowed session reaches in Better Auth
-  over HTTP; everything else it can do goes through `getCurrentSession`.
+  over HTTP; everything else it can do goes through `getCurrentSession`. Since
+  F-54 the Better Auth `hooks.before` applies the same cap, so `/get-session`
+  on a borrowed session over an hour old deletes it and answers 401 instead of
+  extending it; `/sign-out` still works.
 - **The self-service surface is closed while impersonating (IMP-1).** The
   account guard refuses an impersonated session by default, so
   `POST /api/v1/me/api-keys`, `DELETE …/[id]` and `POST …/[id]/rotate` answer

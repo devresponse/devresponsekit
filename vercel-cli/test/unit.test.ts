@@ -214,7 +214,13 @@ import {
   requiredKeysFor,
   satelliteEnvSpecs,
 } from "../dist/lib/env-spec.js";
-import { describeConsumer, isConsumerHealthy } from "../dist/lib/health.js";
+import {
+  describe as describeHealth,
+  describeConsumer,
+  isConsumerHealthy,
+  isHealthy,
+  probe,
+} from "../dist/lib/health.js";
 import { suggestParentDomain } from "../dist/commands/init.js";
 
 /** The config shape every `.drk-deploy.json` written before satellites has. */
@@ -539,6 +545,36 @@ test("a consumer is healthy when it REFUSES a garbage handoff token", () => {
   assert.match(
     describeConsumer({ health: 200, ready: 503, consume: 401 }).join(" "),
     /cannot reach its database/,
+  );
+});
+
+test("each kit probe signs in with its own address, so nobody can spend its per-account budget", async () => {
+  // F-55 budgets /sign-in/email per submitted address. A fixed probe address,
+  // readable in this public CLI, could be kept at 429 by anyone, and every
+  // release would then fail its probe and roll back.
+  const saved = globalThis.fetch;
+  const emails: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.pathname !== "/api/auth/sign-in/email") return new Response("", { status: 200 });
+    emails.push((JSON.parse(String(init?.body)) as { email: string }).email);
+    return new Response("", { status: 401 });
+  }) as typeof fetch;
+  try {
+    assert.equal(isHealthy(await probe("https://demo.example.com")), true);
+    await probe("https://demo.example.com");
+  } finally {
+    globalThis.fetch = saved;
+  }
+  assert.equal(emails.length, 2);
+  assert.notEqual(emails[0], emails[1]);
+  for (const email of emails) {
+    assert.match(email, /^drk-deploy-probe-[0-9a-f-]{36}@invalid\.example$/);
+  }
+
+  assert.match(
+    describeHealth({ health: 200, ready: 200, readyStatus: "ready", signIn: 429 }).join(" "),
+    /rate-limited this probe/,
   );
 });
 

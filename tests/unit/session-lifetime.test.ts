@@ -3,6 +3,7 @@ import {
   IMPERSONATION_SESSION_MAX_AGE_SECONDS,
   isImpersonationSessionPastMaxAge,
   isSessionPastAbsoluteLifetime,
+  isSessionPastLifetime,
 } from "@/lib/session-lifetime";
 
 /**
@@ -110,5 +111,38 @@ describe("isImpersonationSessionPastMaxAge", () => {
     expect(isImpersonationSessionPastMaxAge({ createdAt: "not a date" }, NOW)).toBe(true);
     expect(isImpersonationSessionPastMaxAge(null, NOW)).toBe(true);
     expect(isImpersonationSessionPastMaxAge(undefined, NOW)).toBe(true);
+  });
+});
+
+/**
+ * F-54 — the combined rule both enforcement points share: `getCurrentSession`
+ * and Better Auth's `hooks.before`. The operator cap applies to every session,
+ * the one-hour cap only to a session carrying the impersonation marker.
+ */
+describe("isSessionPastLifetime", () => {
+  const NOW = Date.UTC(2026, 8, 26, 12, 0, 0);
+  const HOUR = 60 * 60 * 1000;
+  const own = (hours: number) => ({ session: { createdAt: new Date(NOW - hours * HOUR) } });
+  const borrowed = (hours: number) => ({
+    session: { createdAt: new Date(NOW - hours * HOUR), impersonatedBy: "admin-1" },
+  });
+
+  it("applies the operator cap to an ordinary session, and nothing when it is unset", () => {
+    expect(isSessionPastLifetime(own(30), 24, NOW)).toBe(true);
+    expect(isSessionPastLifetime(own(23), 24, NOW)).toBe(false);
+    expect(isSessionPastLifetime(own(10_000), undefined, NOW)).toBe(false);
+  });
+
+  it("applies the one-hour cap to a borrowed session whatever the operator cap says", () => {
+    expect(isSessionPastLifetime(borrowed(2), undefined, NOW)).toBe(true);
+    expect(isSessionPastLifetime(borrowed(2), 24, NOW)).toBe(true);
+    expect(isSessionPastLifetime(borrowed(0.5), undefined, NOW)).toBe(false);
+  });
+
+  it("does not apply the one-hour cap to a session without the marker", () => {
+    expect(isSessionPastLifetime(own(2), undefined, NOW)).toBe(false);
+    expect(
+      isSessionPastLifetime({ session: { createdAt: new Date(NOW), impersonatedBy: "" } }, 1, NOW),
+    ).toBe(false);
   });
 });

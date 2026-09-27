@@ -375,7 +375,9 @@ plain. `env:sync --force` is not the fix: it regenerates every secret it may.
 
 **The deployment is verified, not assumed.** After promoting, the CLI probes `/api/health`,
 `/api/health/ready` and a deliberately-wrong sign-in. A 401 on that last one means auth is alive;
-a 500 means the build is up but broken. It also checks that the SSO issuer publishes a key: an
+a 500 means the build is up but broken. The sign-in uses a new address on every run, because the
+kit budgets sign-ins per address (10 per 15 minutes): a fixed one, readable here, could be kept at
+429 by anyone and would roll every release back. It also checks that the SSO issuer publishes a key: an
 empty key set means no satellite can verify a handoff, which is invisible from the dashboard. When
 production sets `SSO_HANDOFF_PRIVATE_KEY` (read from the variables `vercel pull` wrote for this
 build), an empty key set, or none served, fails the probe. When production sets no key it is a

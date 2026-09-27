@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AUTH_DISABLED_PATHS,
   IMPERSONATION_ALLOWED_PATHS,
+  SESSIONLESS_PATHS,
   isAdminPluginPath,
 } from "@/lib/auth-admin-surface";
 import { setSignupProvisioningSuppressed } from "@/lib/auth-signup-provisioning";
@@ -234,6 +235,12 @@ describe("F-06: every Better Auth endpoint on the real instance is classified", 
       ...Object.keys(OPEN_ENDPOINTS),
     ];
     expect(classified.filter((path) => !mounted.has(path))).toEqual([]);
+  });
+
+  it("lets only open endpoints proceed signed out past an over-age session (F-54)", () => {
+    // The lifetime check deletes an over-age session everywhere but lets these
+    // continue signed out; everything else, and anything unlisted, gets 401.
+    expect(SESSIONLESS_PATHS.filter((path) => !(path in OPEN_ENDPOINTS))).toEqual([]);
   });
 
   it("puts every endpoint on exactly one list", () => {

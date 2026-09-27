@@ -38,7 +38,8 @@ import ts from "typescript";
  *      is proven to catch what rule 1 claims (and to pass what it must).
  *   3. A floor keyed on a PRINCIPAL anyone can self-register cannot be told
  *      apart from an authenticated per-actor limit by its source text, so
- *      those few are named, with the reason: invitation acceptance.
+ *      those few are named, with the reason: invitation acceptance, and the
+ *      per-account sign-in budget (F-55).
  *
  * F-18 added the ORDER: a deployment-wide floor may only be charged for a
  * request its per-source (per-IP) bucket admitted, or one IP spends everyone's
@@ -85,14 +86,20 @@ const IN_MEMORY_CLIENT_KEYED_ALLOWED: Readonly<Record<string, string>> = {};
 
 /**
  * Floors keyed on a principal that anyone can obtain, which rule 1 cannot
- * derive: src/app/api-relative file → the shared primitive it must call, and why.
+ * derive: src-relative file → the shared primitive it must call, and why.
  */
 const SHARED_PRINCIPAL_FLOORS: ReadonlyArray<[file: string, primitive: string, reason: string]> = [
   [
-    "invitations/accept/route.ts",
+    "app/api/invitations/accept/route.ts",
     "enforceSharedRateLimit",
     "keyed on the session user id, but any self-registered pending_approval account has a " +
       "session, so it is a token-guessing floor whose fan-out the caller chooses (review #98)",
+  ],
+  [
+    "lib/auth-sign-in-attempts.ts",
+    "consumeSharedToken",
+    "keyed on a digest of the submitted address, which the caller chooses, and taken before " +
+      "any credential is verified: a password-guessing floor spread over many IPs (F-55)",
   ],
 ];
 
@@ -372,8 +379,13 @@ describe("F-19: the scanner catches every shape rule 1 claims (negative control)
 
 describe("review #98: principal-keyed pre-auth floors stay shared (named: not derivable)", () => {
   it.each(SHARED_PRINCIPAL_FLOORS)("%s calls %s — %s", (file, primitive) => {
-    const text = readFileSync(join(SRC_DIR, "app", "api", file), "utf8");
-    expect(text, `${file} must import ${SHARED_MODULE}`).toContain(`from "${SHARED_MODULE}"`);
+    const text = readFileSync(join(SRC_DIR, file), "utf8");
+    // A static import, or a lazy one where the limiter must stay out of the
+    // auth instance's graph (`pnpm db:auth:migrate` loads it outside Next).
+    expect(
+      text.includes(`from "${SHARED_MODULE}"`) || text.includes(`import("${SHARED_MODULE}")`),
+      `${file} must import ${SHARED_MODULE}`,
+    ).toBe(true);
     const sf = parse(file, text);
     expect(callsNamed(sf, new Set([primitive])).length).toBeGreaterThan(0);
     expect(callsNamed(sf, new Set(IN_MEMORY_LIMITERS.keys()))).toEqual([]);

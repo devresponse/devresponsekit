@@ -10,6 +10,7 @@ import {
 } from "@/lib/auth-admin-surface";
 import { authResponseFloor } from "@/lib/auth-response-floor";
 import { endBorrowedSessionsAfterOwnSweep } from "@/lib/auth-session-sweep";
+import { signInAttempts } from "@/lib/auth-sign-in-attempts";
 import { ssoSession } from "@/lib/auth-sso-session";
 import { getProvisioningProvider } from "@/lib/auth-provisioning-provider";
 import { boundedUserName, resetEmailGreetingName, userNameGuard } from "@/lib/auth-user-name";
@@ -90,6 +91,8 @@ export const auth = betterAuth({
   // (e.g. /sign-in/email at 3 req / 10 s per IP). Browser test suites
   // run against `next start` and sign in far faster than that from one
   // IP, so CI disables the limiter via this test-only env escape hatch.
+  // The per-account sign-in budget (F-55, `signInAttempts` below) follows the
+  // same switch.
   //
   // Review #199: its default store is per-process memory, so on Vercel the
   // sign-in / password-reset budgets were per lambda — the same gap as the
@@ -599,9 +602,11 @@ export const auth = betterAuth({
   // (`/api/auth/admin/*`) is closed. The app only ever reaches the plugin via
   // server-side `auth.api.*` calls (headers, never `request`), which this
   // hook lets through; real HTTP requests to `/admin/*` get 404. The same hook
-  // confines an IMPERSONATED session to `/get-session` and `/sign-out`
-  // (IMP-3, deny-by-default since F-06). Policy and rationale live in
-  // `auth-admin-surface.ts`.
+  // ends a session past `SESSION_ABSOLUTE_LIFETIME_HOURS` or the one-hour
+  // impersonation cap with a 401 before any endpoint can honour or refresh it
+  // (F-54), and confines an IMPERSONATED session to `/get-session` and
+  // `/sign-out` (IMP-3, deny-by-default since F-06). Policy and rationale live
+  // in `auth-admin-surface.ts`.
   //
   // F-10: after a successful "sign out my other sessions" (the password form's
   // `revokeOtherSessions`, `/revoke-other-sessions`), the single `after` hook
@@ -624,6 +629,12 @@ export const auth = betterAuth({
     // skips the response floor below (a before-hook throw skips every after
     // hook, whatever the order), which is safe: it depends only on the name.
     userNameGuard(),
+    // F-55: `/sign-in/email` over HTTP takes a per-account budget (10 per
+    // 15 min, in the shared Postgres bucket, alongside the per-IP limit above)
+    // and logs every failed attempt with a keyed digest of the address, never
+    // an audit row. The shape, and why it cannot lock an owner out, are in
+    // `auth-sign-in-attempts.ts`.
+    signInAttempts(),
     // F-20: sign-up, password-reset and resend-verification responses over
     // HTTP take at least a fixed minimum time, so the extra database work an
     // existing (or a new) account causes does not show in response time. The

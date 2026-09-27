@@ -452,8 +452,18 @@ Negative & edge cases
 - Unexpected transport error: the catch branch surfaces
   "An unexpected error occurred. Please try again." (`auth.unexpectedError`,
   `src/components/auth/email-password-login-form.tsx:51`).
-- Rate-limit: `TODO: verify` — no rate-limit handling is visible in the sign-in
-  form; confirm whether Better Auth applies one server-side and how it surfaces.
+- Rate-limit (production only; both are off under `AUTH_RATE_LIMIT_DISABLED`
+  and outside `NODE_ENV=production`): Better Auth allows 3 sign-ins per 10 s
+  per client IP, and the app allows 10 attempts per 15 minutes per **address**,
+  whatever IP they come from (F-55, `src/lib/auth-sign-in-attempts.ts`). Submit
+  a wrong password 10 times for one address, then the right one, at least 4 s
+  apart (or alternating two client IPs) so the per-IP limit never answers
+  first and the 429 comes from the per-address budget. Expected: the
+  11th answers 429 and the form says "Too many requests. Please slow down."
+  (`errors.rate_limited`), not "Invalid email or password.". The same happens
+  for an address with no account. About 90 seconds later the right password
+  signs in. Each failed attempt logs one `"kind":"pre_auth_refusal"` line with
+  `eventType` `auth.sign_in.failed` and `metadata.emailHash`, never the address.
 
 Accessibility: labelled email/password controls (`FormLabel` + `htmlFor`,
 `src/components/ui/form.tsx:126-155`); the error is a live `role="alert"`;
@@ -1055,9 +1065,10 @@ are gated).
    message namespace) — confirm with product whether these placeholders should be
    localized (`src/app/[locale]/(public)/about/page.tsx:8-10`,
    `src/app/[locale]/(public)/docs/page.tsx:4-5`).
-2. **Rate-limiting on sign-in / sign-up / forgot-password** — no client-side
-   rate-limit handling is visible in the forms; verify whether Better Auth
-   enforces limits server-side and how (if at all) they surface to the user.
+2. **Rate-limiting on sign-up / forgot-password** — no client-side
+   rate-limit handling is visible in those forms; verify how Better Auth's
+   per-IP limit surfaces to the user there. (Sign-in is covered: AUTH-SIGNIN
+   above, F-55.)
 3. **Sign-up duplicate-email message** — currently mapped to the generic
    `auth.unexpectedError`; confirm whether a specific "email already registered"
    message is desired (`src/components/auth/email-password-sign-up-form.tsx:50`).

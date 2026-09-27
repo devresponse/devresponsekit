@@ -296,8 +296,11 @@ const serverEnvSchema = z
      * UNSET IS THE DEFAULT AND MEANS "NO ABSOLUTE CAP", which is exactly the
      * behaviour that shipped before the knob existed; setting it is an
      * opt-in policy change. When set, `getCurrentSession()` refuses any
-     * session created more than this many hours ago (and revokes the row), so
-     * the user must sign in again. Typical values: 168 (7 days) to 336 (14).
+     * session created more than this many hours ago (and revokes the row), and
+     * so does every Better Auth `/api/auth/*` endpoint but `/sign-out`, with a
+     * 401 (F-54), so the user must sign in again; the ones that serve a
+     * signed-out caller (sign-in, emailed links) revoke it and proceed signed
+     * out. Typical values: 168 (7 days) to 336 (14).
      */
     SESSION_ABSOLUTE_LIFETIME_HOURS: z.coerce.number().int().positive().max(8760).optional(),
     /**
@@ -340,9 +343,10 @@ const serverEnvSchema = z
     /**
      * Test-only escape hatch ("1"/"true"): disables Better Auth's built-in
      * rate limiter, which production mode applies to sensitive endpoints
-     * (e.g. /sign-in/email at 3 req / 10 s per IP). Browser suites sign in
-     * far faster than that from one IP against `next start`, so the CI
-     * browser job sets it. Never set on a real deployment.
+     * (e.g. /sign-in/email at 3 req / 10 s per IP), and with it the
+     * per-account sign-in budget (F-55). Browser suites sign in far faster
+     * than that from one IP against `next start`, so the CI browser job sets
+     * it. Never set on a real deployment.
      */
     AUTH_RATE_LIMIT_DISABLED: z
       .string()

@@ -1,6 +1,10 @@
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { getServerEnv } from "@/lib/env";
 import { readImpersonatorId } from "@/lib/impersonation";
-import { IMPERSONATION_SESSION_MAX_AGE_SECONDS } from "@/lib/session-lifetime";
+import {
+  IMPERSONATION_SESSION_MAX_AGE_SECONDS,
+  isSessionPastLifetime,
+} from "@/lib/session-lifetime";
 
 /**
  * Which Better Auth HTTP endpoints this app closes, and why.
@@ -18,7 +22,9 @@ import { IMPERSONATION_SESSION_MAX_AGE_SECONDS } from "@/lib/session-lifetime";
  *
  * The first and the last are composed in {@link rejectClosedAuthEndpoints} at
  * the bottom of the file, because Better Auth accepts exactly ONE
- * `hooks.before` middleware. Every endpoint the vendor mounts is classified
+ * `hooks.before` middleware. The same hook ends a session that has outlived
+ * the app's lifetime caps before any endpoint can honour it (F-54). Every
+ * endpoint the vendor mounts is classified
  * against these lists by
  * tests/security/better-auth-endpoint-classification.test.ts, so a Better Auth
  * upgrade that adds one fails CI until someone decides where it belongs.
@@ -156,31 +162,81 @@ export function isImpersonationAllowedPath(path: string | undefined): boolean {
 }
 
 /**
- * The app's single `hooks.before` middleware. Better Auth takes one, so both
- * hook-enforced policies above live here and neither can be installed without
- * the other.
+ * The endpoint the session-lifetime check below never refuses: it deletes the
+ * session itself, whatever its age, and it is everyone's way out (see
+ * {@link IMPERSONATION_ALLOWED_PATHS}).
+ */
+const SIGN_OUT_PATH = "/sign-out";
+
+/**
+ * Endpoints that serve a signed-out caller, and so never need the session a
+ * request happens to carry: signing in or up, the forgot-password and
+ * resend-verification forms, the links in those emails, the OAuth redirect,
+ * and Better Auth's liveness and error pages.
+ *
+ * A session past its lifetime is still deleted on these, but the request then
+ * proceeds signed out instead of being refused (F-54). Refusing it answered a
+ * correct password with the form's "Invalid email or password." and an emailed
+ * link with a raw JSON 401. Every other endpoint, and any endpoint a Better
+ * Auth upgrade adds, keeps the 401: it needs the session, or it is
+ * `/get-session`, which reports on it. Each entry must stay one of
+ * tests/security/better-auth-endpoint-classification.test.ts's open endpoints.
+ */
+export const SESSIONLESS_PATHS: readonly string[] = [
+  "/sign-in/email",
+  "/sign-up/email",
+  "/sign-in/social",
+  "/callback/:id",
+  "/request-password-reset",
+  "/reset-password/:token",
+  "/reset-password",
+  "/send-verification-email",
+  "/verify-email",
+  "/ok",
+  "/error",
+];
+
+/**
+ * The app's single `hooks.before` middleware. Better Auth takes one, so every
+ * hook-enforced policy lives here and none can be installed without the
+ * others.
  *
  * Every check is conditioned on `ctx.request`, i.e. on the call arriving over
  * HTTP: the app's own server-side `auth.api.*` calls pass headers and never a
  * `request`, and they have already been through the guarded
- * `/api/administrator/*` and `/api/account/*` routes. `ctx.path` is the
- * endpoint's route PATTERN (`/callback/:id`, not `/callback/github`), because
- * Better Auth dispatches every call with the endpoint's own path, so the
- * allow-list names endpoints, not URL spellings.
+ * `/api/administrator/*` and `/api/account/*` routes (and, for the session
+ * read itself, `getCurrentSession`, which applies the same lifetime rule).
+ * `ctx.path` is the endpoint's route PATTERN (`/callback/:id`, not
+ * `/callback/github`), because Better Auth dispatches every call with the
+ * endpoint's own path, so the lists name endpoints, not URL spellings.
  *
  *   1. Admin plugin (review 2026-09-04 #3): 404, so the surface is
  *      indistinguishable from an unmounted route.
- *   2. Anything outside {@link IMPERSONATION_ALLOWED_PATHS} under impersonation
+ *   2. A session past its lifetime (F-54): the operator's
+ *      `SESSION_ABSOLUTE_LIFETIME_HOURS`, or the one-hour cap on an
+ *      impersonation session (`isSessionPastLifetime`). The app's guards
+ *      refused such a session, but Better Auth's endpoints never pass through
+ *      them, so a 30-hour-old cookie under a 24-hour cap was still served by
+ *      `/get-session` (which also rolled its expiry forward), `/change-password`,
+ *      `/list-sessions` and the revocation endpoints until something happened
+ *      to hit an app guard. It is deleted here on every endpoint but
+ *      `/sign-out`, and the call is answered 401, `/get-session` included,
+ *      except on {@link SESSIONLESS_PATHS} (a sign-in from a browser whose
+ *      over-age session is still alive, an emailed link), which proceed
+ *      signed out once the row is gone.
+ *   3. Anything outside {@link IMPERSONATION_ALLOWED_PATHS} under impersonation
  *      (IMP-3, F-06): 403, audited against the IMPERSONATOR. 403 rather than
  *      404 because these endpoints genuinely exist for the session's own
  *      owner; hiding them would be a lie the account panel's error state
  *      contradicts anyway.
  *
  * The session is read with `disableCookieCache` so the refusal is decided on
- * the authoritative session row rather than a cached copy. It is read only for
- * a path outside the allow-list, so `/get-session`, the one endpoint the shell
- * calls routinely, never pays for it. A request without a session cookie
- * resolves to "no session" without a database read.
+ * the authoritative session row rather than a cached copy. Since F-54 it is
+ * read on every path but `/sign-out`, `/get-session` included: the lifetime
+ * rule needs the row there most, because that is the endpoint that extends
+ * it. The account panel is its only caller in the app, so the extra read is
+ * small. A request without a session cookie resolves to "no session" without
+ * a database read.
  */
 export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
   if (!ctx.request) return;
@@ -189,7 +245,7 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
     throw new APIError("NOT_FOUND");
   }
 
-  if (isImpersonationAllowedPath(ctx.path)) return;
+  if (ctx.path === SIGN_OUT_PATH) return;
 
   const session = await getSessionFromCtx(ctx, {
     // Authoritative row, not a cached copy — this is a security decision.
@@ -200,14 +256,42 @@ export const rejectClosedAuthEndpoints = createAuthMiddleware(async (ctx) => {
     // request that may be about to be refused.
     disableRefresh: true,
   });
+
+  if (session && isSessionPastLifetime(session, getServerEnv().SESSION_ABSOLUTE_LIFETIME_HOURS)) {
+    // Best-effort, as in `getCurrentSession`: the 401 holds even if the delete
+    // fails, and a deleted row cannot be replayed or refreshed back to life.
+    let deleted = false;
+    try {
+      await ctx.context.internalAdapter.deleteSession(session.session.token);
+      deleted = true;
+    } catch (error) {
+      const { logServerError } = await import("@/lib/observability/logger.server");
+      logServerError("absolute-lifetime session revocation failed", {
+        err: error,
+        betterAuthUserId: session.user.id,
+        path: ctx.path,
+      });
+    }
+    // Signed out, only once the row is gone: the endpoint reads the session
+    // again itself (the resend and verify-email links use one when present),
+    // and a row the delete missed would still be alive for it.
+    if (deleted && SESSIONLESS_PATHS.includes(ctx.path)) {
+      ctx.context.session = null;
+      return;
+    }
+    throw new APIError("UNAUTHORIZED", {
+      message: "The session has expired. Sign in again.",
+      code: "SESSION_EXPIRED",
+    });
+  }
+
   const impersonatorId = readImpersonatorId(session);
-  if (!impersonatorId) {
+  if (!impersonatorId || isImpersonationAllowedPath(ctx.path)) {
     // `getSessionFromCtx` memoizes its result on `ctx.context.session`, the
     // object the endpoint's own session middleware reads first. Left in place,
-    // our no-refresh copy would be reused as is, and since F-06 this guard
-    // reads the session on every path outside the allow-list, so sessions
-    // would stop rolling forward there. Clearing it lets the endpoint read the
-    // session itself.
+    // our no-refresh copy would be reused as is, and this guard reads the
+    // session on every path but `/sign-out`, so sessions would stop rolling
+    // forward. Clearing it lets the endpoint read the session itself.
     ctx.context.session = null;
     return;
   }

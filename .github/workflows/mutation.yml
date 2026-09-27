@@ -17,6 +17,8 @@ on:
       - "src/lib/api-auth/api-key.ts"
       - "src/lib/trusted-origins.ts"
       - "src/lib/admin/origin-guard.server.ts"
+      - "src/lib/sso-launch-return.ts"
+      - "src/lib/admin/access-scope.server.ts"
       - "tests/**"
       - "stryker.config.mjs"
       - "scripts/check-mutation-floors.mjs"
@@ -40,6 +42,9 @@ jobs:
     # honest value, not extra room. The margin is for a slower runner, not for
     # further growth: a module that pushes past this is a signal to re-scope
     # (or to parallelise) rather than to raise the number again.
+    # I-11 added 149 mutants (590 in all). Measured on their own they took
+    # under 5 minutes of mutant runs locally (the dry run is shared), which
+    # puts the whole job near 50 minutes: inside this limit, with less margin.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -253,6 +253,37 @@ describe("canAccessOrg", () => {
     expect(canAccessOrg(boundSuperadminNoOrg, "org-a")).toBe(false);
     expect(canAccessOrg(boundSuperadminNoOrg, null)).toBe(false);
   });
+
+  /**
+   * I-11: the single-resource check and the list scope state ONE boundary, so
+   * they must agree for every caller and resource org. That includes an empty
+   * org id, which `resolveOrgScope` reads as "no org": Stryker found
+   * `canAccessOrg`'s own no-org guard unasserted (deleting it survived), and
+   * without it an empty caller org would match an empty resource org.
+   */
+  it("agrees with resolveOrgScope for every caller and resource org", () => {
+    const callers = [
+      superadmin,
+      orgAdmin,
+      orglessAdmin,
+      boundSuperadmin,
+      boundSuperadminNoOrg,
+      { permissions: ["admin.users.read"], organizationId: "" },
+      { permissions: [SUPERADMIN_PERMISSION], organizationId: "", orgBound: true },
+    ];
+    for (const access of callers) {
+      const scope = resolveOrgScope(access);
+      for (const resourceOrgId of ["org-a", "org-b", "", null]) {
+        const inScope =
+          scope?.kind === "all" ||
+          (scope?.kind === "org" && scope.organizationId === resourceOrgId);
+        expect(
+          canAccessOrg(access, resourceOrgId),
+          `${JSON.stringify(access)} on ${JSON.stringify(resourceOrgId)}`,
+        ).toBe(inScope);
+      }
+    }
+  });
 });
 
 describe("canAccessUser (MACHINE-2)", () => {
@@ -369,6 +400,23 @@ describe("stripsLastGlobalSuperuser (REVOKE-2)", () => {
 
   it("an empty removal never strips anything", () => {
     expect(stripsLastGlobalSuperuser([g1], {})).toBe(false);
+    // Nor do empty LISTS: a revocation that names no row removes no grant.
+    // (Stryker, I-11: `some` → `every` survived, and `[].every` is true.)
+    expect(stripsLastGlobalSuperuser([g1], { assignments: [] })).toBe(false);
+    expect(stripsLastGlobalSuperuser([g1], { memberships: [] })).toBe(false);
+  });
+
+  it("a removal list kills a grant when ANY entry matches it, not only when all do", () => {
+    // Every earlier case names one row, where `some` and `every` agree (I-11).
+    expect(stripsLastGlobalSuperuser([g1], { assignments: [g2, g1] })).toBe(true);
+    expect(
+      stripsLastGlobalSuperuser([g1], {
+        memberships: [
+          { appUserId: "u2", organizationId: "org-b" },
+          { appUserId: "u1", organizationId: "org-a" },
+        ],
+      }),
+    ).toBe(true);
   });
 
   it("F-09: an ORGANIZATION leaving `active` kills every grant held there, whoever holds it", () => {

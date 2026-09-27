@@ -23,16 +23,32 @@ const REPORT = path.join("reports", "mutation", "mutation.json");
  */
 const FLOORS = {
   // Measured 2026-09-06 (441 mutants, aggregate 89.80%), floored to a whole
-  // percent. `trusted-origins.ts` and `safe-return-to.ts` are the two real
-  // gaps: the latter's survivors are EQUIVALENT mutants (redundant
-  // defence-in-depth a later guard still catches), the former's are not —
-  // kill them and raise the floor.
+  // percent. `safe-return-to.ts` is the one real gap left: its survivors are
+  // EQUIVALENT mutants (redundant defence-in-depth a later guard still
+  // catches).
   "src/lib/api-auth/scopes.ts": 95,
   "src/lib/safe-return-to.ts": 76,
   "src/lib/admin/list-query.server.ts": 89,
   "src/lib/api-auth/api-key.ts": 97,
-  "src/lib/trusted-origins.ts": 68,
   "src/lib/admin/origin-guard.server.ts": 94,
+  // I-11, measured 2026-09-26 one file at a time (`stryker run --mutate`).
+  // trusted-origins.ts rose from 68% (15 of 22) once
+  // tests/unit/trusted-origins.test.ts covered the unparsable entries and
+  // non-ASCII padding that auth-config.test.ts's check of the built list
+  // leaves out; the 3 survivors are equivalent, because an empty, missing or
+  // unparsable value
+  // reaches `new URL`, throws and becomes null whichever guard is removed.
+  "src/lib/trusted-origins.ts": 86,
+  // 35 of 36. The survivor is equivalent: it drops the locale's `typeof`
+  // check, which `isSupportedLocale` repeats.
+  "src/lib/sso-launch-return.ts": 97,
+  // Only the functions `stryker.config.mjs` names (`functionRanges`). None of
+  // them builds SQL; two (`canAccessUser`, `requiresSuperadminForSharedTarget`)
+  // call a membership query, which the unit tests answer through a mocked DB.
+  // 112 of 113. The survivor is equivalent: `canAccessOrg`'s
+  // `resourceOrgId !== null` cannot fail once the caller's org is non-empty
+  // and equal to it.
+  "src/lib/admin/access-scope.server.ts": 99,
 };
 
 /** Detected = killed + timed out; undetected = survived + never covered. */

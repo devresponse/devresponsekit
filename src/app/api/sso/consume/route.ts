@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { errors as joseErrors } from "jose";
 import { auditEvent } from "@/lib/audit.server";
 import { auth } from "@/lib/auth";
 import { readBoundedBody } from "@/lib/bounded-body";
 import { clientIpKey, withTrustedClientIp } from "@/lib/client-ip";
-import { consumeSsoHandoffNonce } from "@/lib/sso.server";
+import { consumeSsoHandoffNonce, type SsoNonceConsumeResult } from "@/lib/sso.server";
 import { verifySsoHandoff, type VerifiedSsoHandoff } from "@/lib/jwt-handoff.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
@@ -24,16 +25,69 @@ export const dynamic = "force-dynamic";
 const MAX_FORM_BYTES = 16 * 1024;
 
 /**
- * Error JSON for the SSO consume endpoint. Echoes the correlation id in both
- * the `x-request-id` header and the body so a failed handoff can be traced to
- * the audit row / server log (OPS-OBS-4) — the admin/v1 surfaces already do.
+ * F-85: true when the caller is a browser navigation, which names `text/html`
+ * in `Accept`: the launch redirect chain landing on the GET, or the confirm
+ * page's form POST. Every other caller keeps the JSON body and its status:
+ * `fetch` with `Accept: application/json`, and a client that names no type at
+ * all (curl, and Node's fetch as the drk-deploy consumer probe uses it, send
+ * a wildcard), whose 401 is what an operator's check reads.
  */
-function ssoErrorResponse(code: string, status: number, requestId: string): NextResponse {
+function wantsPage(request: NextRequest): boolean {
+  const accept = request.headers.get("accept")?.toLowerCase() ?? "";
+  return accept.includes("text/html") && !accept.includes("application/json");
+}
+
+/**
+ * Failure response for the SSO consume endpoint. The JSON echoes the
+ * correlation id in both the `x-request-id` header and the body so a failed
+ * handoff can be traced to the audit row / server log (OPS-OBS-4) — the
+ * admin/v1 surfaces already do.
+ *
+ * F-85: a browser used to get that same bare JSON. Someone who read the confirm
+ * page for longer than the token lives, then clicked Continue, landed on
+ * `{"error":…}` with no way back. A browser is now sent (303, so the form POST
+ * becomes a GET) to the confirm page's failure state, which names the error in
+ * the user's language and shows the request id. The locale is the verified
+ * token's when there is one, else the `locale` query parameter, which the
+ * confirm form puts on its action.
+ */
+function ssoErrorResponse(
+  request: NextRequest,
+  code: string,
+  status: number,
+  requestId: string,
+  payloadLocale?: unknown,
+): NextResponse {
+  if (wantsPage(request)) {
+    const locale = landingLocale(payloadLocale, request.nextUrl.searchParams.get("locale"));
+    const page = new URL(`/${locale}/sso/confirm`, request.url);
+    page.searchParams.set("error", code);
+    page.searchParams.set("requestId", requestId);
+    const response = NextResponse.redirect(page, 303);
+    response.headers.set("Referrer-Policy", "no-referrer");
+    response.headers.set("Cache-Control", "no-store");
+    response.headers.set(REQUEST_ID_HEADER, requestId);
+    return response;
+  }
   return NextResponse.json(
     { error: code, requestId },
     { status, headers: { [REQUEST_ID_HEADER]: requestId } },
   );
 }
+
+/**
+ * F-85: why a verified token's nonce burn missed, as the audit reason and the
+ * error code. Both used to be one pair, `nonce_replay_or_expired` and
+ * `token_already_used`, so an expired token reached support as a replay.
+ */
+const NONCE_REFUSALS = {
+  replayed: { reason: "nonce_replay", code: "token_already_used" },
+  expired: { reason: "nonce_expired", code: "token_expired" },
+  unknown: { reason: "nonce_unknown", code: "invalid_token" },
+} as const satisfies Record<
+  Exclude<SsoNonceConsumeResult, "consumed">,
+  { reason: string; code: string }
+>;
 
 /**
  * Per-IP throttle for both consume methods (review #16). The endpoint is
@@ -61,14 +115,23 @@ function ssoErrorResponse(code: string, status: number, requestId: string): Next
  * and lock every user out of SSO on every satellite. After F-15 a garbage token
  * costs one signature verify and one log line, so the per-IP bucket is enough.
  */
-function rateLimitConsume(request: NextRequest, requestId: string): Promise<NextResponse | null> {
-  return enforceSharedRateLimit(
+async function rateLimitConsume(
+  request: NextRequest,
+  requestId: string,
+): Promise<NextResponse | null> {
+  const limited = await enforceSharedRateLimit(
     "sso.consume",
     clientIpKey(request.headers),
     DEFAULT_SSO_CONSUME_LIMIT,
     request,
     requestId,
   );
+  // F-85: a browser goes to the confirm page like every other failure; an API
+  // client keeps the limiter's own 429 with its Retry-After.
+  if (limited && wantsPage(request)) {
+    return ssoErrorResponse(request, "rate_limited", 429, requestId);
+  }
+  return limited;
 }
 
 /**
@@ -83,6 +146,7 @@ function rateLimitConsume(request: NextRequest, requestId: string): Promise<Next
  * satellite) and a token minted for the other app would otherwise pass here.
  */
 function resolveExpectedAudience(
+  request: NextRequest,
   requestId: string,
 ): { audience: string; applicationId: string } | { error: NextResponse } {
   const audiencePrefix = process.env.SSO_HANDOFF_AUDIENCE_PREFIX;
@@ -94,7 +158,7 @@ function resolveExpectedAudience(
       err,
     });
     captureServerError(err, { requestId, status: 500 });
-    return { error: ssoErrorResponse("audience_not_configured", 500, requestId) };
+    return { error: ssoErrorResponse(request, "audience_not_configured", 500, requestId) };
   }
   // SECURITY: do NOT derive the expected audience from the request Host
   // header — an attacker controlling DNS or a misconfigured proxy could
@@ -109,7 +173,7 @@ function resolveExpectedAudience(
       err,
     });
     captureServerError(err, { requestId, status: 500 });
-    return { error: ssoErrorResponse("audience_not_configured", 500, requestId) };
+    return { error: ssoErrorResponse(request, "audience_not_configured", 500, requestId) };
   }
   return { audience: `${audiencePrefix}:${applicationId}`, applicationId };
 }
@@ -130,18 +194,25 @@ function assertTargetApplication(
 }
 
 /**
- * Verifies the handoff token, or records the refusal and returns `null` (F-15).
- * A token that fails here proves nothing about its sender — it may be random
- * bytes — so the refusal goes to the log stream, never the audit table. The
- * reason is the verifier's error message: jose / schema text chosen by code,
- * not by the request.
+ * Verifies the handoff token, or records the refusal and returns the error code
+ * to answer with (F-15). A token that fails here proves nothing about its
+ * sender — it may be random bytes — so the refusal goes to the log stream,
+ * never the audit table. The reason is the verifier's error message: jose /
+ * schema text chosen by code, not by the request.
+ *
+ * F-85: jose raises `JWTExpired` only once the signature, issuer and audience
+ * have checked out, for an `exp` in the past or an `iat` beyond the 60 s age
+ * ceiling. That is a genuine handoff that timed out, most often one left on the
+ * confirm page too long, so it answers `token_expired` rather than
+ * `invalid_token`. It is still logged rather than audited: the line F-15 draws
+ * is "the token verified", and this one did not.
  */
 async function verifyOrRefuse(
   token: string,
   expectedAudience: string,
   request: NextRequest,
   requestId: string,
-): Promise<VerifiedSsoHandoff | null> {
+): Promise<VerifiedSsoHandoff | "invalid_token" | "token_expired"> {
   try {
     return await verifySsoHandoff({ token, expectedAudience });
   } catch (error) {
@@ -152,7 +223,7 @@ async function verifyOrRefuse(
       request,
       requestId,
     });
-    return null;
+    return error instanceof joseErrors.JWTExpired ? "token_expired" : "invalid_token";
   }
 }
 
@@ -199,14 +270,14 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       request,
       requestId,
     });
-    return ssoErrorResponse("missing_token", 400, requestId);
+    return ssoErrorResponse(request, "missing_token", 400, requestId);
   }
 
-  const aud = resolveExpectedAudience(requestId);
+  const aud = resolveExpectedAudience(request, requestId);
   if ("error" in aud) return aud.error;
 
   const verified = await verifyOrRefuse(token, aud.audience, request, requestId);
-  if (!verified) return ssoErrorResponse("invalid_token", 401, requestId);
+  if (typeof verified === "string") return ssoErrorResponse(request, verified, 401, requestId);
 
   try {
     assertTargetApplication(verified.payload, aud.applicationId);
@@ -227,7 +298,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       reason: error instanceof Error ? error.message : "unknown_error",
       request,
     });
-    return ssoErrorResponse("invalid_token", 401, requestId);
+    return ssoErrorResponse(request, "invalid_token", 401, requestId, verified.payload.locale);
   }
 });
 
@@ -258,7 +329,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       request,
       requestId,
     });
-    return ssoErrorResponse("forbidden", 403, requestId);
+    return ssoErrorResponse(request, "forbidden", 403, requestId);
   }
 
   // F-78: `request.formData()` buffered whatever arrived before the token was
@@ -273,7 +344,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       request,
       requestId,
     });
-    return ssoErrorResponse("payload_too_large", 413, requestId);
+    return ssoErrorResponse(request, "payload_too_large", 413, requestId);
   }
   let token: string | null = null;
   try {
@@ -295,14 +366,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       request,
       requestId,
     });
-    return ssoErrorResponse("missing_token", 400, requestId);
+    return ssoErrorResponse(request, "missing_token", 400, requestId);
   }
 
-  const aud = resolveExpectedAudience(requestId);
+  const aud = resolveExpectedAudience(request, requestId);
   if ("error" in aud) return aud.error;
 
   const verified = await verifyOrRefuse(token, aud.audience, request, requestId);
-  if (!verified) return ssoErrorResponse("invalid_token", 401, requestId);
+  if (typeof verified === "string") return ssoErrorResponse(request, verified, 401, requestId);
 
   try {
     assertTargetApplication(verified.payload, aud.applicationId);
@@ -310,15 +381,16 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
     // token is rejected even on concurrent requests. The burn is ALSO
     // predicated on this deployment's application id, so a nonce minted for
     // another app can never be spent here (review #15, defence in depth).
-    const consumed = await consumeSsoHandoffNonce(verified.payload.jti, aud.applicationId);
-    if (!consumed) {
+    const burn = await consumeSsoHandoffNonce(verified.payload.jti, aud.applicationId);
+    if (burn !== "consumed") {
+      const refusal = NONCE_REFUSALS[burn];
       await auditEvent({
         eventType: "sso.consume.failure",
         outcome: "failure",
-        reason: "nonce_replay_or_expired",
+        reason: refusal.reason,
         request,
       });
-      return ssoErrorResponse("token_already_used", 401, requestId);
+      return ssoErrorResponse(request, refusal.code, 401, requestId, verified.payload.locale);
     }
 
     // Establish the consumer-side session. The nonce is already burned, so a
@@ -350,7 +422,13 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
         request,
         metadata: { message: err instanceof Error ? err.message : "unknown" },
       });
-      return ssoErrorResponse("session_establishment_failed", 401, requestId);
+      return ssoErrorResponse(
+        request,
+        "session_establishment_failed",
+        401,
+        requestId,
+        verified.payload.locale,
+      );
     }
 
     await auditEvent({
@@ -387,6 +465,6 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       reason: error instanceof Error ? error.message : "unknown_error",
       request,
     });
-    return ssoErrorResponse("invalid_token", 401, requestId);
+    return ssoErrorResponse(request, "invalid_token", 401, requestId, verified.payload.locale);
   }
 });

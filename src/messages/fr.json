@@ -1605,7 +1605,16 @@
       "cancel": "Annuler",
       "invalidTitle": "Lien de connexion invalide",
       "invalidBody": "Ce lien de connexion est invalide ou a expiré. Demandez-en un nouveau depuis l’application d’origine.",
-      "backToSignIn": "Retour à la connexion"
+      "backToSignIn": "Retour à la connexion",
+      "expiredTitle": "Lien de connexion expiré",
+      "expiredBody": "Ce lien de connexion a expiré. Demandez-en un nouveau depuis l’application d’origine.",
+      "usedTitle": "Lien de connexion déjà utilisé",
+      "usedBody": "Ce lien de connexion a déjà été utilisé, et chaque lien ne fonctionne qu’une seule fois. Demandez-en un nouveau depuis l’application d’origine.",
+      "failedTitle": "Connexion impossible",
+      "failedBody": "Votre compte n’a pas pu être connecté à cette application. Si le problème persiste, contactez votre administrateur.",
+      "rateLimitedTitle": "Trop de tentatives de connexion",
+      "rateLimitedBody": "Trop de tentatives de connexion proviennent de votre réseau. Patientez une minute, puis demandez un nouveau lien depuis l’application d’origine.",
+      "requestId": "Identifiant de requête"
     }
   }
 }

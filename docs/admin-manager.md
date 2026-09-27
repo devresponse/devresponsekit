@@ -1712,7 +1712,8 @@ its stdout mirror had while it was still a row. The refusals it covers:
 The audited denials past that line are unchanged: a caller without the
 permission, an impersonated session refused by a guard, and on
 `/api/sso/consume` a token that **did** verify but names another application,
-has already been used, or cannot open a session. Their volume follows signed-in
+has already been used, whose nonce expired or is unknown, or cannot open a
+session, each with its own reason (F-85). Their volume follows signed-in
 activity (a handoff token is minted for a signed-in launch and lives ≤60 s),
 not how often an anonymous client can call. The flood-gated
 `administrator.rate_limited` row (§2.5) is unchanged too: it is written at most

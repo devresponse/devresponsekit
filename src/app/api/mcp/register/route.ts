@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
 import { auditEvent } from "@/lib/audit.server";
+import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
 import { getServerEnv } from "@/lib/env";
 import {
@@ -24,6 +25,12 @@ export const dynamic = "force-dynamic";
 // attacker fans out across invocations.
 const REG_LIMIT = { capacity: 5, refillPerSec: 0.1 }; // ~1 / 10s, burst 5
 const REG_GLOBAL_LIMIT = { capacity: 60, refillPerSec: 1 };
+/**
+ * Largest registration request read (F-78). RFC 7591 client metadata is a
+ * name, a few URIs and short strings, well under 4 KiB even with the optional
+ * members a client may add; a larger body is refused with 413 unbuffered.
+ */
+const MAX_BODY_BYTES = 64 * 1024;
 
 /**
  * POST /api/mcp/register — RFC 7591 Dynamic Client Registration for AI
@@ -59,9 +66,16 @@ export async function POST(request: NextRequest): Promise<Response> {
     return oauthError("temporarily_unavailable", "Registration is rate limited.", 429);
   }
 
+  // F-78: read through a byte cap, after the limiter, never `request.json()`.
+  const raw = await readBoundedText(request, MAX_BODY_BYTES);
+  if (!raw.ok) {
+    return raw.reason === "too_large"
+      ? oauthError("invalid_client_metadata", "Request body is too large.", 413)
+      : oauthError("invalid_client_metadata", "Request body must be JSON.", 400);
+  }
   let json: unknown;
   try {
-    json = await request.json();
+    json = JSON.parse(raw.text);
   } catch {
     return oauthError("invalid_client_metadata", "Request body must be JSON.", 400);
   }

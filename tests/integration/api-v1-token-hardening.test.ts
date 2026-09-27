@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import { meteredBody } from "../helpers/request-body";
 
 /**
  * POST /api/v1/auth/token — Wave 3 token hardening (review #43, #48,
@@ -65,15 +66,11 @@ const MCP = "https://app.example.com/api/mcp";
 const V1 = "https://app.example.com/api/v1";
 
 function req(body: Record<string, string>): NextRequest {
-  const url = new URL("http://test.local/api/v1/auth/token");
-  return {
-    nextUrl: url,
-    url: url.toString(),
+  return new NextRequest("http://test.local/api/v1/auth/token", {
     method: "POST",
-    headers: new Headers({ "content-type": "application/json", "x-forwarded-for": "203.0.113.9" }),
-    json: async () => body,
-    text: async () => "",
-  } as unknown as NextRequest;
+    headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.9" },
+    body: JSON.stringify(body),
+  });
 }
 
 /** The input the route handed to the signer on its last call. */
@@ -289,5 +286,65 @@ describe("RFC 8707 resource → audience (review #50/#53)", () => {
     const res = await mint({ resource: "https://evil.example.com/api/mcp" });
     expect(res.status).toBe(401);
     expect(((await res.json()) as { code: string }).code).toBe("invalid_client");
+  });
+});
+
+describe("request body cap (F-78)", () => {
+  const CAP = 16 * 1024;
+  const URL_ = "http://test.local/api/v1/auth/token";
+
+  function raw(
+    body: string | ReadableStream<Uint8Array>,
+    contentType = "application/json",
+    headers: Record<string, string> = {},
+  ): NextRequest {
+    return new NextRequest(URL_, {
+      method: "POST",
+      headers: { "content-type": contentType, "x-forwarded-for": "203.0.113.9", ...headers },
+      body,
+      duplex: "half",
+    } as ConstructorParameters<typeof NextRequest>[1]);
+  }
+
+  it("mints for a body padded to exactly the cap", async () => {
+    const json = JSON.stringify({ grant_type: "api_key", api_key: "drk_live_x" });
+    expect((await POST(raw(json.padEnd(CAP, " ")))).status).toBe(200);
+  });
+
+  it("413s a declared oversize body with problem+json, unread, before any credential check", async () => {
+    const request = raw(" ".repeat(CAP + 1), "application/json", {
+      "content-length": String(CAP + 1),
+    });
+    const res = await POST(request);
+    expect(res.status).toBe(413);
+    expect(res.headers.get("content-type")).toContain("application/problem+json");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(await res.json()).toMatchObject({ code: "payload_too_large", status: 413 });
+    expect(request.bodyUsed).toBe(false);
+    expect(verifyApiKey).not.toHaveBeenCalled();
+    expect(verifyClientCredentials).not.toHaveBeenCalled();
+  });
+
+  it("413s an undeclared (chunked) oversize body at the cap", async () => {
+    const body = meteredBody(4 * 1024, 64);
+    expect((await POST(raw(body.stream, "application/x-www-form-urlencoded"))).status).toBe(413);
+    expect(body.pulled).toBe(5);
+    expect(body.cancelled).toBe(true);
+    expect(verifyClientCredentials).not.toHaveBeenCalled();
+  });
+
+  it("still reads a form-encoded grant, the OAuth2 default", async () => {
+    const form = "grant_type=client_credentials&client_id=drkc_x&client_secret=s";
+    const res = await POST(raw(form, "application/x-www-form-urlencoded"));
+    expect(res.status).toBe(200);
+    expect(verifyClientCredentials).toHaveBeenCalledWith("drkc_x", "s");
+  });
+
+  it("400s malformed or non-object JSON as a missing grant (JSON null was a 500)", async () => {
+    for (const body of ["{not json", "null", '"api_key"']) {
+      const res = await POST(raw(body));
+      expect(res.status, body).toBe(400);
+      expect(((await res.json()) as { code: string }).code, body).toBe("unsupported_grant_type");
+    }
   });
 });

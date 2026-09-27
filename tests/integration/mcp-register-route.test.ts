@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import { meteredBody } from "../helpers/request-body";
 
 /**
  * Integration tests for the RFC 7591 DCR route (Phase 2). The env, rate
@@ -166,6 +167,57 @@ describe("POST /api/mcp/register (Phase 2)", () => {
     const res = await POST(post({ client_name: "A", organization: "acme" }));
     expect(res.status).toBe(429);
     expect(registerMcpAgent).not.toHaveBeenCalled();
+  });
+
+  describe("F-78: the body is read through a 64 KiB cap, after the limiter", () => {
+    const CAP = 64 * 1024;
+    const raw = (body: string | ReadableStream<Uint8Array>, headers?: Record<string, string>) =>
+      new NextRequest("https://app.test/api/mcp/register", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body,
+        duplex: "half",
+      } as ConstructorParameters<typeof NextRequest>[1]);
+
+    it("registers a request padded to exactly the cap", async () => {
+      const json = JSON.stringify({ client_name: "A", organization: "acme" });
+      expect((await POST(raw(json.padEnd(CAP, " ")))).status).toBe(201);
+    });
+
+    it("413s a declared oversize body unread, after one limiter token, before any lookup", async () => {
+      const request = raw(" ".repeat(CAP + 1), { "content-length": String(CAP + 1) });
+      const res = await POST(request);
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({
+        error: "invalid_client_metadata",
+        error_description: "Request body is too large.",
+      });
+      expect(request.bodyUsed).toBe(false);
+      expect(consumeToken).toHaveBeenCalled();
+      expect(resolveOrg).not.toHaveBeenCalled();
+      expect(registerMcpAgent).not.toHaveBeenCalled();
+    });
+
+    it("413s an undeclared (chunked) oversize body at the cap", async () => {
+      const metered = meteredBody(16 * 1024, 64);
+      expect((await POST(raw(metered.stream))).status).toBe(413);
+      expect(metered.pulled).toBe(5);
+      expect(metered.cancelled).toBe(true);
+      expect(registerMcpAgent).not.toHaveBeenCalled();
+    });
+
+    it("a throttled request is refused before its body is read", async () => {
+      consumeToken.mockReturnValue({ ok: false, retryAfterSeconds: 2 });
+      const metered = meteredBody(1024, 4);
+      expect((await POST(raw(metered.stream))).status).toBe(429);
+      expect(metered.pulled).toBe(0);
+    });
+
+    it("still 400s a body that is not JSON", async () => {
+      const res = await POST(raw("{not json"));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error_description).toBe("Request body must be JSON.");
+    });
   });
 
   it("403s when the atomic quota check refuses (nothing audited)", async () => {

@@ -59,10 +59,11 @@ const FLOORED_ADMIN_ROUTES = [
  * floor. Never add one to let a new handler in untested.
  */
 const ROUTE_FLOOR_EXCEPTIONS: Record<string, Partial<typeof ROUTE_FLOOR>> = {
-  // POST is invoked, but three inline callbacks are not: the two body-parse
-  // `.catch` fallbacks and the down-scoping filter (a request whose `scope`
-  // asks for more than the credential holds is refused with `invalid_scope`).
-  "src/app/api/v1/auth/token/route.ts": { functions: 50 },
+  // POST is invoked, but one inline callback is not: the down-scoping filter
+  // (a request whose `scope` asks for more than the credential holds is
+  // refused with `invalid_scope`). The two body-parse `.catch` fallbacks went
+  // with the byte-capped read (F-78).
+  "src/app/api/v1/auth/token/route.ts": { functions: 75 },
   // GET, PATCH and DELETE are invoked. DELETE's body-parse `.catch` fallback
   // is not, nor are most failure branches (a failed Better Auth mirror or ban,
   // a failed compensating unban, a failed cascade).

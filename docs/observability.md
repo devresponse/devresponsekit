@@ -196,11 +196,12 @@ business counter — not the full target set.
 - **`devresponsekit_pre_auth_refusals_total{event_type}`** — incremented for every request
   refused before its caller is authenticated (F-15): `administrator.access.denied`,
   `api.access.denied`, `account.access.denied` and `invitation.access.denied` for the CSRF
-  origin guard, `sso.consume.failure` for a consume without a verifiable token or a cross-site
-  confirm, `sso.launch.failure` for a signed-out launch, `auth.sign_in.failed` for a failed
-  `/api/auth/sign-in/email` (F-55; the line's `reason` says why). These refusals are not in
-  `app_audit_events`, so a spike here (with the paired `pre_auth_refusal` log lines) is where a
-  cross-origin probe, a garbage-token flood or a credential-stuffing run shows up.
+  origin guard, `sso.consume.failure` for a consume without a verifiable token, an oversize
+  confirm body (`413`, F-78) or a cross-site confirm, `sso.launch.failure` for a signed-out
+  launch, `auth.sign_in.failed` for a failed `/api/auth/sign-in/email` (F-55; the line's
+  `reason` says why). These refusals are not in `app_audit_events`, so a spike here (with the
+  paired `pre_auth_refusal` log lines) is where a cross-origin probe, a garbage-token flood or a
+  credential-stuffing run shows up.
 - **`devresponsekit_outbox_delivery_total{outcome,template}`** — incremented once per delivery
   outcome written to an `app_outbox` row (F-27). `outcome` is `sent`, `retry` (a transient failure,
   rescheduled), `failed` (terminal: the provider rejected the mail, or the worker ran out of

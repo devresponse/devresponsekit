@@ -44,6 +44,8 @@ const TITLES: Record<string, string> = {
   // F-57: a soft-deleted user leaves that state only through restore.
   use_restore: "Restore required",
   rate_limited: "Too many requests",
+  // F-78: a pre-auth endpoint refused the body at its byte cap, unread.
+  payload_too_large: "Request body too large",
   precondition_failed: "Precondition failed",
   unsupported_grant_type: "Unsupported grant type",
   invalid_client: "Invalid client",

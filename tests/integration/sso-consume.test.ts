@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ConsumeRouteModule from "@/app/api/sso/consume/route";
 import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
-import type { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import type { BetterAuthOptions } from "better-auth";
 import { getIP } from "better-auth/api";
 import { CLIENT_IP_HEADER, getClientIp } from "@/lib/client-ip";
+import { meteredBody } from "../helpers/request-body";
 
 /**
  * Route integration tests for `/api/sso/consume` (§29.6.10 + §29.7.5, P2-2).
@@ -100,17 +101,18 @@ function getRequest(url: string, headers: Record<string, string> = {}): NextRequ
   } as unknown as NextRequest;
 }
 
+/**
+ * The confirmation page's form POST, as a browser sends it: a urlencoded body
+ * the route reads through its byte cap (F-78).
+ */
 function postRequest(token: string | null, headers: Record<string, string> = {}): NextRequest {
-  const u = new URL("http://localhost/api/sso/consume");
-  const form = new FormData();
+  const form = new URLSearchParams();
   if (token !== null) form.set("token", token);
-  return {
-    nextUrl: u,
-    url: u.toString(),
+  return new NextRequest("http://localhost/api/sso/consume", {
     method: "POST",
-    headers: new Headers(headers),
-    formData: async () => form,
-  } as unknown as NextRequest;
+    headers,
+    body: form,
+  });
 }
 
 // The minimised claim set (review #60): no organizationId / appUserId / roles.
@@ -292,6 +294,59 @@ describe("POST /api/sso/consume — confirmed sign-in (P2-2)", () => {
       expect.objectContaining({ eventType: "sso.consume.failure", reason: "missing_token" }),
     );
     expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  describe("F-78: the form is read through a 16 KiB cap", () => {
+    const CAP = 16 * 1024;
+    const raw = (body: string | ReadableStream<Uint8Array>, headers?: Record<string, string>) =>
+      new NextRequest("http://localhost/api/sso/consume", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+        body,
+        duplex: "half",
+      } as ConstructorParameters<typeof NextRequest>[1]);
+
+    it("413s a declared oversize form unread: logged, not audited, nothing verified", async () => {
+      const request = raw(`token=${"a".repeat(CAP)}`, { "content-length": String(CAP + 6) });
+      const res = await POST(request);
+      expect(res.status).toBe(413);
+      const body = (await res.json()) as { error: string; requestId: string };
+      expect(body.error).toBe("payload_too_large");
+      expect(request.bodyUsed).toBe(false);
+      expect(preAuthLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "sso.consume.failure",
+          outcome: "failure",
+          reason: "payload_too_large",
+          requestId: body.requestId,
+        }),
+      );
+      expect(verifyMock).not.toHaveBeenCalled();
+      expect(auditMock).not.toHaveBeenCalled();
+    });
+
+    it("413s an undeclared (chunked) oversize form at the cap", async () => {
+      const metered = meteredBody(4 * 1024, 64);
+      expect((await POST(raw(metered.stream))).status).toBe(413);
+      expect(metered.pulled).toBe(5);
+      expect(metered.cancelled).toBe(true);
+      expect(verifyMock).not.toHaveBeenCalled();
+    });
+
+    it("still reads the token from a form padded to the cap, and from a multipart form", async () => {
+      verifyMock.mockResolvedValue({ payload: PAYLOAD });
+      consumeMock.mockResolvedValue(true);
+      const padded = `token=abc&pad=${"x".repeat(CAP - "token=abc&pad=".length)}`;
+      expect((await POST(raw(padded))).status).toBe(303);
+
+      const multipart = new FormData();
+      multipart.set("token", "abc");
+      const res = await POST(
+        new NextRequest("http://localhost/api/sso/consume", { method: "POST", body: multipart }),
+      );
+      expect(res.status).toBe(303);
+      expect(verifyMock).toHaveBeenLastCalledWith(expect.objectContaining({ token: "abc" }));
+    });
   });
 
   it("POST: a token that fails verification is logged, not audited, and burns nothing (F-15)", async () => {

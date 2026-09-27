@@ -357,8 +357,8 @@ volumes:
 
 - **Rate limiting across replicas: the security floors are shared, the
   per-actor guards are not.** The **pre-auth floors** — the token endpoint,
-  MCP registration, the CSP report sink, SSO consume and a signed-out SSO
-  launch, invitation acceptance — and Better Auth's own sign-in /
+  the MCP endpoint and MCP registration, the CSP report sink, SSO consume and
+  a signed-out SSO launch, invitation acceptance — and Better Auth's own sign-in /
   password-reset limiter keep their buckets in Postgres (`app_rate_limits`
   from migration `0006`, and Better Auth's `rateLimit` table from
   `pnpm db:auth:migrate`), so they enforce **one budget across every
@@ -371,6 +371,14 @@ volumes:
   the per-actor UX limit is best-effort there. See
   [Deployment → Operations & gotchas](deployment.md#5-operations--gotchas) and
   [troubleshooting.md](troubleshooting.md).
+- **Set a request body limit at the reverse proxy.** Nothing in front of the
+  container caps a body the way Vercel does (4.5 MB). The public endpoints that
+  read a body before authenticating cap it themselves and answer `413` (F-78,
+  see [API security §9](api-security.md#9-transport--platform-hardening)), and
+  Better Auth's routes pass through the proxy, which buffers at most 10 MB of a
+  body; every other route reads its body only after authentication, but with no
+  limit of its own. A proxy limit (nginx `client_max_body_size 1m;`, or your
+  load balancer's equivalent) bounds all of them.
 - **Observability is opt-in, and half of it is build-time.** Server-side
   Sentry initializes when `SENTRY_DSN` (or `NEXT_PUBLIC_SENTRY_DSN`) is set at
   run time. Browser-side Sentry exists only in an image built with

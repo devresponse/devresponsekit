@@ -88,10 +88,10 @@ per-actor in-memory **token bucket** (`src/lib/admin/rate-limit.server.ts`).
 Read endpoints are unbounded — paging through a grid must never be throttled.
 (The in-memory store is per process; that is deliberate for these
 authenticated per-actor limits. The unauthenticated **pre-auth floors** —
-token endpoint, MCP registration, CSP sink, SSO consume and a signed-out SSO
-launch, invitation acceptance — use the Postgres-backed bucket instead; see
-[Architecture → Rate limiting](./architecture.md#rate-limiting). So do the
-admin actions that send mail, below.)
+token endpoint, the MCP endpoint and MCP registration, CSP sink, SSO consume
+and a signed-out SSO launch, invitation acceptance — use the Postgres-backed
+bucket instead; see [Architecture → Rate limiting](./architecture.md#rate-limiting).
+So do the admin actions that send mail, below.)
 
 - The limiter is a **UX / abuse guard layered on top of** authorization, never a
   substitute for it (`requireAdminPermission` runs first).
@@ -1705,7 +1705,7 @@ its stdout mirror had while it was still a row. The refusals it covers:
 | `/api/v1` guard | Same | `api.access.denied` |
 | Account / preference guard | Same | `account.access.denied` |
 | `POST /api/invitations/accept` | Same | `invitation.access.denied` |
-| `/api/sso/consume` | No token; a token that fails verification; a cross-site confirm POST | `sso.consume.failure` |
+| `/api/sso/consume` | No token; a token that fails verification; a cross-site confirm POST; an oversize confirm POST (`413 payload_too_large`, F-78) | `sso.consume.failure` |
 | `/api/sso/launch` | Signed out (the redirect to sign-in) | `sso.launch.failure` |
 | `/api/auth/sign-in/email` | A failed attempt: wrong password, unknown address, unverified or banned account, malformed body, or the per-account budget spent (F-55). `reason` is Better Auth's error code or `rate_limited`; `metadata.emailHash` is an HMAC of the address keyed with `BETTER_AUTH_SECRET`, never the address | `auth.sign_in.failed` |
 

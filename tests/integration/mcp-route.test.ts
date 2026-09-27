@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { buildOpenApiDocument } from "@/lib/api-auth/openapi";
 import { deriveMcpTools } from "@/lib/mcp/openapi-tools";
+import { meteredBody } from "../helpers/request-body";
 
 /**
  * Integration tests for the `/api/mcp` endpoint. Env, caller resolution, and
@@ -42,6 +43,21 @@ vi.mock("@/lib/api-auth/resolve-caller.server", () => ({
 vi.mock("@/lib/api-auth/jwt.server", () => ({
   mintAccessToken: (...args: unknown[]) => mintAccessToken(...args),
 }));
+// F-78: the per-IP floor consumes from the SHARED Postgres bucket. There is no
+// database here, so it runs on the real in-memory bucket (reset per test with
+// the rest of the limiter), every key it takes is recorded, and `shared.deny`
+// makes it refuse outright.
+const shared = vi.hoisted(() => ({ keys: [] as string[], deny: false }));
+vi.mock("@/lib/admin/rate-limit-shared.server", async () => {
+  const { consumeToken } = await import("@/lib/admin/rate-limit.server");
+  return {
+    consumeSharedToken: async (key: string, options: never, nowMs?: number) => {
+      shared.keys.push(key);
+      if (shared.deny) return { ok: false, retryAfterSeconds: 7 };
+      return consumeToken(key, options, nowMs);
+    },
+  };
+});
 
 import { __resetRateLimitForTests } from "@/lib/admin/rate-limit.server";
 import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
@@ -129,6 +145,8 @@ beforeEach(() => {
   env.MCP_DISPATCH_BASE_URL = undefined;
   env.API_JWT_ENABLED = true;
   __resetRateLimitForTests();
+  shared.keys.length = 0;
+  shared.deny = false;
   resolveCaller.mockReset().mockResolvedValue(apiKeyCaller());
   mintAccessToken.mockReset().mockResolvedValue({ token: "eyJ.exchanged.v1", audience: "x" });
   fetchMock = vi.fn().mockResolvedValue(apiResponse(200, { ok: true }));
@@ -822,5 +840,88 @@ describe("/api/mcp tools/call rate limit (F-76)", () => {
     // Another credential keeps its own budget.
     resolveCaller.mockResolvedValue(apiKeyCaller({ credentialId: "key-2" }));
     expect((await callNothing(62)).status).toBe(200);
+  });
+});
+
+describe("/api/mcp pre-auth body cap and per-IP floor (F-78)", () => {
+  const MiB = 1024 * 1024;
+  const URL_ = "https://app.test/api/mcp";
+
+  /** A POST with a raw body (a string, or a stream sent without a length). */
+  function rawPost(body: string | ReadableStream<Uint8Array>, headers?: Record<string, string>) {
+    return new NextRequest(URL_, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body,
+      duplex: "half",
+    } as ConstructorParameters<typeof NextRequest>[1]);
+  }
+
+  /** The process-wide denial counter for the floor's scope. */
+  const floorDenials = async () =>
+    (await rateLimitDenialsTotal.get()).values.find((v) => v.labels.scope === "mcp.request")
+      ?.value ?? 0;
+
+  it("serves a request right at the 1 MiB cap", async () => {
+    const ping = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+    const res = await POST(rawPost(ping.padEnd(MiB, " ")));
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({});
+  });
+
+  it("413s a declared body over the cap without reading it or resolving the caller", async () => {
+    const request = rawPost(" ".repeat(MiB + 1), { "content-length": String(MiB + 1) });
+    const res = await POST(request);
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toEqual({ code: -32600, message: "Request body too large" });
+    expect(request.bodyUsed).toBe(false);
+    expect(resolveCaller).not.toHaveBeenCalled();
+  });
+
+  it("413s an undeclared (chunked) body at the cap instead of buffering all of it", async () => {
+    // 64 × 64 KiB = 4 MiB sent without a length; the cap passes on chunk 17.
+    const metered = meteredBody(64 * 1024, 64);
+    const res = await POST(rawPost(metered.stream));
+    expect(res.status).toBe(413);
+    expect(metered.pulled).toBe(17);
+    expect(metered.cancelled).toBe(true);
+    expect(resolveCaller).not.toHaveBeenCalled();
+  });
+
+  it("takes a per-IP token from the SHARED bucket before the body is read or the caller resolved", async () => {
+    shared.deny = true;
+    const before = await floorDenials();
+    const metered = meteredBody(1024, 4);
+    const res = await POST(rawPost(metered.stream, { "x-forwarded-for": "203.0.113.7" }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("7");
+    expect(await res.json()).toMatchObject({
+      id: null,
+      error: { code: -32029, message: "Rate limited", data: { retryAfter: 7 } },
+    });
+    expect(metered.pulled).toBe(0);
+    expect(resolveCaller).not.toHaveBeenCalled();
+    expect(shared.keys).toEqual(["mcp.request:ip:203.0.113.7"]);
+    expect(await floorDenials()).toBe(before + 1);
+  });
+
+  describe("budget", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-26T12:00:00Z"));
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const ping = (ip: string) =>
+      POST(post({ jsonrpc: "2.0", id: 1, method: "ping" }, { "x-forwarded-for": ip }));
+
+    it("admits a 300-request burst per IP, then 429s that IP only, with no global floor", async () => {
+      for (let i = 0; i < 300; i++) expect((await ping("198.51.100.1")).status).toBe(200);
+      expect((await ping("198.51.100.1")).status).toBe(429);
+      expect((await ping("198.51.100.2")).status).toBe(200);
+      expect(new Set(shared.keys)).toEqual(
+        new Set(["mcp.request:ip:198.51.100.1", "mcp.request:ip:198.51.100.2"]),
+      );
+    });
   });
 });

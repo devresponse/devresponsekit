@@ -638,6 +638,22 @@ describe("POST rotate-secret — status before scope (F-01)", () => {
     expect(rotateOauthClientSecret).not.toHaveBeenCalled();
     expect(auditEvent).not.toHaveBeenCalled();
   });
+
+  it("F-72: 409 and no secret_rotated audit when a revoke lands after the read", async () => {
+    // Active at the route's read; the store's status-guarded UPDATE then found
+    // the client revoked (tests/db/credential-rotation-race.db.test.ts).
+    requireApiPermission.mockResolvedValue(orgAdmin());
+    rotateOauthClientSecret.mockResolvedValue(null);
+
+    const res = await ROTATE_SECRET(req({ method: "POST" }), {
+      params: Promise.resolve({ id: CLIENT_ROW_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).not.toContain("drkcsec_");
+    expect(rotateOauthClientSecret).toHaveBeenCalledTimes(1);
+    expect(auditEvent).not.toHaveBeenCalled();
+  });
 });
 
 describe("PATCH /api/v1/admin/oauth-clients/[id] — issuance rule (F-01)", () => {

@@ -224,18 +224,27 @@ export async function revokeOauthClient(id: string, revokedByAppUserId: string):
  * minted with the OLD secret are refused by the resolver from now on
  * (review #43) — the row stays `active`, so the status check alone would
  * not retire them.
+ *
+ * Returns `null` when the client is missing or no longer active. The status
+ * check and the write are ONE statement (F-72): this used to read the status
+ * first and then update by id alone, so a revoke that committed in between
+ * still got a fresh secret written onto the revoked row, and the caller got a
+ * 200 and an `oauth_client.secret_rotated` audit row for a secret the token
+ * endpoint refuses. Postgres re-checks `status = 'active'` on the row once a
+ * concurrent revoke's lock is released, so that race now matches nothing and
+ * answers `null` (the route's 409).
  */
 export async function rotateOauthClientSecret(id: string): Promise<string | null> {
-  const existing = await getOauthClientById(id);
-  if (!existing || existing.status !== "active") return null;
   const clientSecret = `${CLIENT_ID_PREFIX}sec_${randomBase62(40)}`;
   const secretHash = await hashSecret(clientSecret);
-  await db
+  const rotated = await db
     .updateTable("app_oauth_clients")
     .set({ client_secret_hash: secretHash, secret_rotated_at: new Date() })
     .where("id", "=", id)
-    .execute();
-  return clientSecret;
+    .where("status", "=", "active")
+    .returning("id")
+    .executeTakeFirst();
+  return rotated ? clientSecret : null;
 }
 
 export interface VerifiedClient {

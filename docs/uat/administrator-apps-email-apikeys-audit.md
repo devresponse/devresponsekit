@@ -424,7 +424,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-APIKEYS-LIST-S3 — As an Org Admin, I want to revoke a key, so that I can cut off access immediately.
-  - Acceptance criteria: Given an active key, when I confirm Revoke, then the row becomes Revoked; revoking an already-revoked key is a no-op success (`_api-keys-grid.tsx:77`; DELETE idempotent at `src/app/api/administrator/api-keys/[id]/route.ts:128`).
+  - Acceptance criteria: Given an active key, when I confirm Revoke, then the row becomes Revoked; revoking an already-revoked key is a no-op success (`_api-keys-grid.tsx:77`; DELETE idempotent at `src/app/api/administrator/api-keys/[id]/route.ts:133`).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -452,8 +452,8 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative and edge cases
-- Out-of-scope -> org-scoped list; an Org Admin never sees other orgs' keys, and a detail/rotate/revoke by id for a foreign key returns Not Found (404), not 403 (`route.ts:63`; rotate `rotate/route.ts:58`; delete `[id]/route.ts:127`).
-- Idempotent revoke -> revoking an already-revoked key returns success with `alreadyRevoked` and writes no duplicate audit row (`[id]/route.ts:131`).
+- Out-of-scope -> org-scoped list; an Org Admin never sees other orgs' keys, and a detail/rotate/revoke by id for a foreign key returns Not Found (404), not 403 (`route.ts:63`; rotate `rotate/route.ts:58`; delete `[id]/route.ts:130`).
+- Idempotent revoke -> revoking an already-revoked key returns success with `alreadyRevoked` and writes no duplicate audit row (`[id]/route.ts:133`). The same holds for a revoke that loses a race: a key a concurrent rotation or revoke retired after the route's read answers `alreadyRevoked`, and no `admin.api_key.revoked` row names this admin (`[id]/route.ts:143`, F-72).
 - Rotate a non-active key -> 409 `api_key_inactive` (`rotate/route.ts:61`); a lost race also yields 409 (`rotate/route.ts:66`); the grid shows a rotate-error alert.
 - Secret exposure -> the reveal dialog is the only place a plaintext is shown; the list/detail never contain it or its hash.
 - Rate limit -> rotate/revoke are limited via `admin.apikeys.rotate` / `admin.apikeys.delete`; abuse yields a friendly failure. `TODO: verify` the exact 429 copy.

@@ -159,7 +159,12 @@ export const DELETE = withAdminRoute(async function DELETE(
     return NextResponse.json({ ok: true, alreadyRevoked: true });
   }
 
-  await revokeOauthClient(id, actorAppUserId);
+  // As in the PATCH above: the revoke re-asserts `status = 'active'`, so one
+  // that lost a race with a concurrent revoke (or the reaper) revokes nothing,
+  // and is not audited as a revoke (F-72).
+  if (!(await revokeOauthClient(id, actorAppUserId))) {
+    return NextResponse.json({ ok: true, alreadyRevoked: true });
+  }
   await auditEvent({
     eventType: "admin.mcp_agent.revoked",
     outcome: "success",

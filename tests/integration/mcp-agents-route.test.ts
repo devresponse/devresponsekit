@@ -298,6 +298,17 @@ describe("/api/administrator/mcp-agents", () => {
     expect(revokeOauthClient).not.toHaveBeenCalled();
   });
 
+  it("F-72: a revoke that loses a race answers alreadyRevoked and is not audited as a revoke", async () => {
+    // Active at the read; a concurrent revoke (or the reaper) committed first,
+    // so the status-guarded UPDATE matched nothing.
+    revokeOauthClient.mockResolvedValue(false);
+    const res = await DELETE(req(), ctx());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, alreadyRevoked: true });
+    expect(revokeOauthClient).toHaveBeenCalledWith(UUID, "actor-1");
+    expect(auditEvent).not.toHaveBeenCalled();
+  });
+
   it("404s when the id is not an MCP agent", async () => {
     getMcpAgent.mockResolvedValue(undefined);
     expect((await APPROVE(req(), ctx())).status).toBe(404);

@@ -33,6 +33,7 @@ interface CapturedOptions {
     };
   };
   session?: { expiresIn?: number; updateAge?: number };
+  onAPIError?: { errorURL?: string };
   user?: { additionalFields?: Record<string, Record<string, unknown>> };
   advanced?: {
     ipAddress?: { ipAddressHeaders?: string[]; disableIpTracking?: boolean };
@@ -146,6 +147,13 @@ describe("Better Auth security subtree (review #121)", () => {
     const opts = await capture();
     expect(opts.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-drk-client-ip"]);
     expect(CLIENT_IP_HEADER).toBe("x-drk-client-ip");
+  });
+
+  it("sends a refused social sign-in to the app's sign-in page, not Better Auth's error page (F-153)", async () => {
+    // Root-relative, so the locale routing adds the visitor's locale and keeps
+    // the `?error=` the page maps (a ban is BANNED_USER).
+    const opts = await capture();
+    expect(opts.onAPIError).toEqual({ errorURL: "/sign-in" });
   });
 });
 

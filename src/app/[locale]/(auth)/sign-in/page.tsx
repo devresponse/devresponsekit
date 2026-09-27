@@ -31,6 +31,10 @@ export default async function SignInPage({
   const rawOrg = typeof sp.org === "string" ? sp.org : null;
   const organization = rawOrg ? await resolveOrganizationByIdentifier(rawOrg) : null;
 
+  // F-153: a refused social sign-in lands here with `?error=<code>` (Better
+  // Auth's `onAPIError.errorURL`). The form maps the code to a message.
+  const errorCode = typeof sp.error === "string" && sp.error.length > 0 ? sp.error : null;
+
   return (
     <main className="mx-auto flex min-h-[80vh] max-w-md flex-col items-center justify-center gap-4 p-8">
       <div className="self-end">
@@ -41,6 +45,7 @@ export default async function SignInPage({
         returnTo={returnTo}
         socialProviders={enabledSocialProviders}
         organization={organization}
+        errorCode={errorCode}
       />
     </main>
   );

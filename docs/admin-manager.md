@@ -901,7 +901,8 @@ that adds an endpoint fails CI until someone decides where it belongs.
 A soft-delete writes two stores: an indefinite Better Auth ban, and
 `app_users.status = 'deactivated'` with the membership snapshot restore reads
 back (`pre_deactivation_status`). Restore undoes both together and leaves the
-user `pending_approval`, to be approved again.
+user `pending_approval`, to be approved again, in each of their organizations
+(F-152).
 
 - **A soft-deleted user leaves `deactivated` only through restore.** Every
   other transition answers **409** `use_restore`
@@ -916,6 +917,28 @@ user `pending_approval`, to be approved again.
   Auth issue sessions to an account the app still read as deleted. Restore
   refuses any other user with `not_deactivated`, single-row and bulk alike. A
   repeated soft-delete is still accepted.
+- **Restore hands each membership back for re-approval (F-152).** A membership
+  the soft-delete found `active` comes back `pending_approval`; one that was
+  `blocked`, `suspended` or `pending_approval` comes back as it was. Each
+  organization approves its own again: an approve or reactivate (confined to
+  the org admin's own org), a membership `PATCH` to `active`, or an invitation
+  from that org that the user accepts. Before F-152 restore revived `active`
+  memberships behind the account-level `pending_approval` alone, and any tenant
+  could lift that: another org's accepted invitation, or its admin's approval
+  of a shared user, made the account `active`, and every restored membership
+  and its roles counted at once in orgs that had approved nothing. A
+  membership restore brings back pending keeps its snapshot as a marker until
+  someone decides it, so sign-in re-evaluation does not activate it under an
+  `auto_active` or auto-approve-domain policy, as for a user an administrator
+  created pending (F-480).
+- **A decision made while the user is deleted stands (F-152).**
+  `PATCH /users/[id]/memberships` and `PATCH /organizations/[id]/members`
+  still apply to a soft-deleted user's memberships, and every write that sets
+  a membership's status clears its snapshot: those two routes, the status
+  actions, an accepted invitation and an MCP agent's approval. Before F-152
+  the snapshot stayed, so restore put the pre-deletion status back over the
+  decision, and an org that suspended the member while they were deleted saw
+  them come back `active`.
 - **An earlier ban survives.** The soft-delete bans indefinitely over whatever
   ban the user already had, and records that ban (reason and expiry) in
   `metadata.priorBan` of its `admin.user.soft_deleted` audit row. Restore reads

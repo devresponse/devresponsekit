@@ -49,6 +49,40 @@ describe("SignInForm", () => {
     );
   });
 
+  it("says a banned account is restricted when a social sign-in comes back with BANNED_USER (F-153)", () => {
+    renderWithIntl(
+      <SignInForm
+        locale="en"
+        returnTo="/en/app/dashboard"
+        socialProviders={SOCIAL_PROVIDERS}
+        errorCode="BANNED_USER"
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /blocked, suspended, or deactivated\. Contact your administrator/i,
+    );
+    expect(screen.queryByText(/BANNED_USER/)).toBeNull();
+  });
+
+  it("gives any other refused social sign-in the generic message, and no alert without one", () => {
+    const { unmount } = renderWithIntl(
+      <SignInForm
+        locale="en"
+        returnTo="/en/app/dashboard"
+        socialProviders={SOCIAL_PROVIDERS}
+        errorCode="state_mismatch"
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/unexpected error/i);
+    expect(screen.queryByText(/state_mismatch/)).toBeNull();
+    unmount();
+
+    renderWithIntl(
+      <SignInForm locale="en" returnTo="/en/app/dashboard" socialProviders={SOCIAL_PROVIDERS} />,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("brands the screen, keeps social buttons, and scopes the create-account link", () => {
     renderWithIntl(
       <SignInForm

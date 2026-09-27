@@ -337,6 +337,15 @@ export const auth = betterAuth({
 
   socialProviders,
 
+  // F-153: a social sign-in Better Auth refuses (a banned account, a soft-
+  // deleted one included, is `BANNED_USER`) redirects here with `?error=`. It
+  // went to Better Auth's own error page, which in production redirects to
+  // `/?error=…`, so the person landed on the home page with no explanation.
+  // The sign-in page maps the code to its own message and never renders the
+  // `error_description` that rides along. Root-relative, so the locale routing
+  // sends it to `/<locale>/sign-in` with the query kept.
+  onAPIError: { errorURL: "/sign-in" },
+
   account: {
     accountLinking: {
       enabled: true,

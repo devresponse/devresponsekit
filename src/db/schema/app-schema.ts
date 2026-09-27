@@ -110,8 +110,11 @@ export interface AppOrganizationMembershipsTable {
   /**
    * Snapshot of the membership status taken when an admin soft-deleted
    * the owning user (docs/admin-manager.md §8.1). Set by the cascade in DELETE
-   * `/api/administrator/users/[id]` and cleared by `/restore`. NULL
-   * outside that lifecycle.
+   * `/api/administrator/users/[id]` and read back by `/restore`, which keeps
+   * it only on a membership it brings back `pending_approval`, as the marker
+   * that sign-in re-evaluation leaves that one to an approver (F-152). Every
+   * write that sets the membership's status clears it. NULL outside that
+   * lifecycle.
    */
   pre_deactivation_status: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: Generated<Timestamp>;

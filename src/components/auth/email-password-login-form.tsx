@@ -29,8 +29,9 @@ export interface EmailPasswordLoginFormProps {
  *
  * Client-side Better Auth email/password sign-in (React Hook Form + the shared
  * `signInSchema`). Credentials live only in form state. Errors surface via the
- * translated `auth.invalidCredentials` / `auth.unexpectedError` keys on the
- * form root, never leaking Better Auth codes.
+ * translated `auth.invalidCredentials` / `auth.blockedDescription` (a banned
+ * account, F-153) / `auth.unexpectedError` keys on the form root, never
+ * leaking Better Auth codes.
  */
 export function EmailPasswordLoginForm({ returnTo }: EmailPasswordLoginFormProps) {
   const t = useTranslations("auth");
@@ -53,15 +54,23 @@ export function EmailPasswordLoginForm({ returnTo }: EmailPasswordLoginFormProps
         callbackURL: returnTo,
       });
       if (result.error) {
+        const code = "code" in result.error ? result.error.code : undefined;
         // EMAIL_NOT_VERIFIED (403) means the credentials were correct but the
         // address is unverified — route to the resend prompt rather than the
         // generic "invalid credentials", which would be misleading. Matched by
-        // code (not status) so a banned 403 still falls through to the default.
-        if ("code" in result.error && result.error.code === "EMAIL_NOT_VERIFIED") {
+        // code (not status): a banned sign-in is a 403 too.
+        if (code === "EMAIL_NOT_VERIFIED") {
           setUnverifiedEmail(values.email);
           return;
         }
-        form.setError("root", { type: "server", message: t("invalidCredentials") });
+        // F-153: BANNED_USER (403) is a correct password on a banned account,
+        // a soft-deleted one included. It said "Invalid email or password.",
+        // so a password reset looked like the fix and changed nothing. Say the
+        // account is restricted instead, as the blocked page does. Better Auth
+        // checks the ban only after the password, so this tells nothing to
+        // someone who does not know it.
+        const message = code === "BANNED_USER" ? t("blockedDescription") : t("invalidCredentials");
+        form.setError("root", { type: "server", message });
       }
     } catch {
       form.setError("root", { type: "server", message: t("unexpectedError") });

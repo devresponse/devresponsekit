@@ -116,3 +116,19 @@ describe("auth pages re-point returnTo at the page's locale (F-35)", () => {
     });
   });
 });
+
+/**
+ * F-153: Better Auth sends a refused social sign-in to `/sign-in?error=<code>`
+ * (`onAPIError.errorURL`). The page hands the code to the form, which maps it.
+ */
+describe("sign-in hands a refused social sign-in's error code to the form (F-153)", () => {
+  it("passes ?error= through, and null without one", async () => {
+    const banned = await SignInPage(
+      route("en", { error: "BANNED_USER", error_description: "You have been banned" }),
+    );
+    expect(propsOf(banned, "SignInForm")?.errorCode).toBe("BANNED_USER");
+
+    const plain = await SignInPage(route("en", {}));
+    expect(propsOf(plain, "SignInForm")?.errorCode).toBeNull();
+  });
+});

@@ -12,7 +12,7 @@ import { mustUseRestore } from "@/lib/admin/deactivated-user";
 import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
-import { recordedPriorBan } from "@/lib/admin/user-actions.server";
+import { recordedPriorBan, restoreSnapshottedMemberships } from "@/lib/admin/user-actions.server";
 import {
   isResolvedUserResponse,
   refuseOutrankingTarget,
@@ -36,8 +36,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  *      `active` — an admin should re-approve via the status endpoint so
  *      the approval intent is captured in audit.
  *   3. Restore each membership to the status snapshotted in
- *      `pre_deactivation_status` when the soft-delete cascade ran, then
- *      clear the snapshot column. Without this step a restored user
+ *      `pre_deactivation_status` when the soft-delete cascade ran, except
+ *      that an `active` one comes back `pending_approval`, so each org
+ *      approves its own membership again (F-152,
+ *      `restoreSnapshottedMemberships`). Without this step a restored user
  *      would have all org memberships permanently `'blocked'` and could
  *      not access anything.
  *
@@ -124,16 +126,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       .where("id", "=", target.appUserId)
       .execute();
 
-    await trx
-      .updateTable("app_organization_memberships")
-      .set({
-        status: sql`coalesce(pre_deactivation_status, status)`,
-        pre_deactivation_status: null,
-        updated_at: sql`now()`,
-      })
-      .where("app_user_id", "=", target.appUserId)
-      .where("pre_deactivation_status", "is not", null)
-      .execute();
+    await restoreSnapshottedMemberships(target.appUserId, trx);
   });
 
   await auditUserAction("admin.user.restored", "success", {

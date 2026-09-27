@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -18,34 +19,34 @@ import { describe, expect, it } from "vitest";
  *     missing here does not even trigger the advisory job when it changes.
  *  4. `docs/testing.md`'s scope list — what a human is told is covered.
  *
- * These are parsed as TEXT rather than imported: `tsconfig.json` sets
- * `allowJs: false`, so a `.ts` test cannot import the `.mjs` config without
- * pulling it into the root `tsc` program.
+ * The other three are parsed as TEXT. The config is IMPORTED, because since
+ * I-11 part of its `mutate` list is computed (`functionRanges` turns function
+ * names into `file:start-end` targets). The specifier is built at run time, so
+ * the `.mjs` never enters the root `tsc` program (`tsconfig.json` sets
+ * `allowJs: false`).
  */
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const read = (rel: string) => readFileSync(path.join(REPO_ROOT, rel), "utf8");
 
-/**
- * The string literals inside `mutate: [ … ]`, one per line. Comment lines are
- * skipped rather than regex-matched away: the `//` notes inside the array
- * contain apostrophes ("a route's requirement"), which a naive quote match
- * would read as literals.
- */
-function strykerMutateTargets(): string[] {
-  const source = read("stryker.config.mjs");
-  const start = source.indexOf("mutate: [");
-  expect(start, "stryker.config.mjs declares a `mutate: [` array").toBeGreaterThan(-1);
-  const end = source.indexOf("\n  ],", start);
-  expect(end, "the `mutate` array is closed").toBeGreaterThan(start);
-  const out: string[] = [];
-  for (const line of source.slice(start, end).split("\n").slice(1)) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("//")) continue;
-    const m = trimmed.match(/^["']([^"']+)["'],?$/);
-    expect(m, `unexpected line in stryker.config.mjs's mutate array: ${line}`).not.toBeNull();
-    out.push(m![1]!);
-  }
-  return out;
+/** `stryker.config.mjs`'s `mutate`, exactly as Stryker receives it. */
+const strykerConfig = (await import(
+  pathToFileURL(path.join(REPO_ROOT, "stryker.config.mjs")).href
+)) as { default: { mutate: string[] } };
+
+/** A mutate target: a whole file, or `file:start-end` for a line range. */
+const TARGET_RE = /^(src\/[^:]+\.ts)(?::(\d+)-(\d+))?$/;
+
+function parseTarget(target: string): { file: string; range?: [number, number] } {
+  const m = TARGET_RE.exec(target);
+  expect(m, `unexpected mutate target in stryker.config.mjs: ${target}`).not.toBeNull();
+  return m![2] === undefined
+    ? { file: m![1]! }
+    : { file: m![1]!, range: [Number(m![2]), Number(m![3])] };
+}
+
+/** The FILES Stryker mutates, whether whole or by line range. */
+function strykerMutatedFiles(): string[] {
+  return [...new Set(strykerConfig.default.mutate.map((target) => parseTarget(target).file))];
 }
 
 /** The keys of `FLOORS` in the per-file floor script. */
@@ -99,29 +100,90 @@ function documentedScope(): string[] {
  */
 const EXCLUDED = "src/lib/jwt-handoff.server.ts";
 
+/**
+ * The tenant-boundary predicates the 2026-09-22 review found unmeasured (I-11):
+ * the ones every org-scoping decision goes through, and the pure REVOKE-2 rule.
+ * Named here so dropping one from the config fails a required check, not just
+ * the advisory mutation job.
+ */
+const ACCESS_SCOPE = "src/lib/admin/access-scope.server.ts";
+const REQUIRED_ACCESS_SCOPE_FUNCTIONS = [
+  "isSuperadmin",
+  "isOrgBound",
+  "hasCrossOrgReach",
+  "ownerOutranksActor",
+  "resolveOrgScope",
+  "canAccessOrg",
+  "canAccessUser",
+  "stripsLastGlobalSuperuser",
+];
+
+/** The name a line-range target's first line declares, or null. */
+function declaredFunction(line: string | undefined): string | null {
+  return /^(?:export )?(?:async )?function (\w+)/.exec(line ?? "")?.[1] ?? null;
+}
+
 describe("mutation-testing scope stays consistent across config, script, workflow and docs", () => {
-  const mutate = strykerMutateTargets();
+  const mutate = strykerConfig.default.mutate;
+  const files = strykerMutatedFiles();
 
   it("stryker.config.mjs mutates a non-empty set of source files", () => {
     expect(mutate.length).toBeGreaterThan(0);
-    for (const target of mutate) expect(target).toMatch(/^src\/.+\.ts$/);
+    for (const target of mutate) parseTarget(target);
   });
 
   it("docs/testing.md lists exactly the mutated files", () => {
-    expect(new Set(documentedScope())).toEqual(new Set(mutate));
+    expect(new Set(documentedScope())).toEqual(new Set(files));
   });
 
   it("every mutated file has a per-file floor", () => {
-    expect(new Set(mutationFloorFiles())).toEqual(new Set(mutate));
+    expect(new Set(mutationFloorFiles())).toEqual(new Set(files));
   });
 
   it("every mutated file triggers the advisory workflow", () => {
     const paths = workflowPathFilters();
-    for (const target of mutate) expect(paths, target).toContain(target);
+    for (const file of files) expect(paths, file).toContain(file);
+  });
+
+  /**
+   * I-11: a module that also holds SQL builders joins by FUNCTION. Each ranged
+   * target must be one whole top-level function, from its declaration to the
+   * `}` that closes it, so a range can never start or stop mid-function; and
+   * the function must build no SQL, the scope rule in stryker.config.mjs (a SQL
+   * builder's mutants run against a mocked DB and cannot be killed there).
+   */
+  it("a line-range target is one whole top-level function that builds no SQL", () => {
+    const ranged = mutate.map(parseTarget).filter((target) => target.range !== undefined);
+    expect(ranged.length).toBeGreaterThan(0);
+    for (const { file, range } of ranged) {
+      const [start, end] = range!;
+      const lines = read(file)
+        .split(/\r?\n/)
+        .slice(start - 1, end);
+      const where = `${file}:${start}-${end}`;
+      expect(declaredFunction(lines[0]), where).not.toBeNull();
+      expect(lines.at(-1), where).toBe("}");
+      expect(lines.slice(0, -1), `${where} spans more than one function`).not.toContain("}");
+      expect(lines.join("\n"), `${where} builds SQL`).not.toMatch(
+        /\b(?:db|executor|selectFrom|sql)\b/,
+      );
+    }
+  });
+
+  it("the tenant-boundary predicates and the SSO launch return builder stay in scope (I-11)", () => {
+    const names = mutate
+      .map(parseTarget)
+      .filter((target) => target.file === ACCESS_SCOPE && target.range !== undefined)
+      .map(({ range }) => declaredFunction(read(ACCESS_SCOPE).split(/\r?\n/)[range![0] - 1]));
+    expect(names).toEqual(expect.arrayContaining(REQUIRED_ACCESS_SCOPE_FUNCTIONS));
+    // The file itself is never mutated whole: its membership and grant queries
+    // are SQL builders.
+    expect(mutate).not.toContain(ACCESS_SCOPE);
+    expect(mutate).toContain("src/lib/sso-launch-return.ts");
   });
 
   it("the SSO handoff codec is out of scope everywhere, and documented as such", () => {
-    expect(mutate).not.toContain(EXCLUDED);
+    expect(files).not.toContain(EXCLUDED);
     expect(mutationFloorFiles()).not.toContain(EXCLUDED);
     expect(documentedScope()).not.toContain(EXCLUDED);
     // Named as a deliberate exclusion in both the config and the doc, so a

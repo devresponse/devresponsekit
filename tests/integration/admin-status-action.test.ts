@@ -14,6 +14,8 @@ import type * as AdminStatusModule from "@/lib/admin-status.server";
 
 const auditMock = vi.fn();
 const trxRun = vi.fn(); // counts UPDATE executes inside the transaction
+/** Called once the transaction callback resolves: the stub's COMMIT (F-147). */
+const txCommitted = vi.fn();
 const userExecuteTakeFirst = vi.fn(); // app_users target lookup
 const sharedExecuteTakeFirst = vi.fn(); // app_organization_memberships "outside org" probe (AUTHZ-1)
 /**
@@ -37,6 +39,16 @@ const trxAccountCalls: string[] = [];
 
 vi.mock("@/lib/audit.server", () => ({
   auditEvent: (...args: unknown[]) => auditMock(...args),
+}));
+/**
+ * F-147: the session revocation a block or suspend runs after its commit —
+ * Better Auth's `deleteUserSessions` plus the `impersonatedBy` sweep, behind
+ * the revoke-all wrapper. Its real behaviour against Postgres is pinned in
+ * tests/db/status-session-revocation.db.test.ts.
+ */
+const revokeAllSessions = vi.fn();
+vi.mock("@/lib/admin/auth-admin.server", () => ({
+  revokeAllBetterAuthUserSessions: (...args: unknown[]) => revokeAllSessions(...args),
 }));
 
 function tableKey(t: unknown): string {
@@ -104,8 +116,8 @@ function trxSelectChain(table: string): unknown {
 const dbStub = {
   selectFrom: (t: unknown) => selectChain(tableKey(t)),
   transaction: () => ({
-    execute: (fn: (trx: unknown) => unknown) =>
-      fn({
+    execute: async (fn: (trx: unknown) => unknown) => {
+      const result = await fn({
         selectFrom: (t: unknown) => trxSelectChain(tableKey(t)),
         updateTable: () => {
           // Any-length .set().where()....execute() routes to trxRun; the
@@ -122,7 +134,10 @@ const dbStub = {
           );
           return p;
         },
-      }),
+      });
+      txCommitted();
+      return result;
+    },
   }),
 };
 vi.mock("@/db/database", () => ({ db: dbStub }));
@@ -138,6 +153,7 @@ beforeEach(async () => {
   auditMock.mockReset();
   trxRun.mockReset();
   trxRun.mockResolvedValue(undefined);
+  txCommitted.mockReset();
   userExecuteTakeFirst.mockReset();
   sharedExecuteTakeFirst.mockReset();
   sharedExecuteTakeFirst.mockResolvedValue(undefined); // not shared by default
@@ -150,6 +166,8 @@ beforeEach(async () => {
   trxAccountRow.mockReset();
   trxAccountRow.mockResolvedValue({ status: "active" });
   trxAccountCalls.length = 0;
+  revokeAllSessions.mockReset();
+  revokeAllSessions.mockResolvedValue({ success: true });
   ({ performAdminStatusChange } = await import("@/lib/admin-status.server"));
 });
 afterEach(() => vi.resetModules());
@@ -521,5 +539,147 @@ describe("performAdminStatusChange — a soft-deleted target (F-57)", () => {
       expectedUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
     });
     expect(result).toEqual({ ok: false, error: "precondition_failed" });
+  });
+});
+
+/**
+ * F-147 — block and suspend end the account's Better Auth sessions. They used
+ * to write only the app's rows, so the sessions stayed valid to Better Auth:
+ * `/get-session` kept refreshing them, and reactivating the account brought
+ * every one back. The revocation runs after the commit and only when the
+ * ACCOUNT-GLOBAL status leaves `active`; a change confined to one org of a
+ * shared user, a grant and every refusal end nothing.
+ */
+describe("performAdminStatusChange — ends the account's sessions (F-147)", () => {
+  const TARGET_BA = "ba-target";
+  const ORG_SCOPE = { kind: "org", organizationId: ORG_A } as const;
+
+  beforeEach(() => {
+    userExecuteTakeFirst.mockResolvedValue({
+      id: TARGET_ID,
+      primary_email: "target@x.com",
+      better_auth_user_id: TARGET_BA,
+    });
+  });
+
+  const change = (
+    newStatus: "active" | "blocked" | "suspended",
+    eventType: string,
+    scope: AdminStatusModule.AdminStatusChangeInput["scope"] = ALL,
+  ) =>
+    performAdminStatusChange({
+      actorBetterAuthUserId: ACTOR_ID,
+      scope,
+      targetAppUserId: TARGET_ID,
+      newStatus,
+      newMembershipStatus: newStatus,
+      eventType,
+    });
+
+  it.each([
+    ["blocked", "admin.user.blocked"],
+    ["suspended", "admin.user.suspended"],
+  ] as const)("a move to %s ends them, after the commit, and says so", async (status, event) => {
+    const result = await change(status, event);
+    expect(result).toEqual({ ok: true, status });
+    expect(revokeAllSessions).toHaveBeenCalledTimes(1);
+    expect(revokeAllSessions).toHaveBeenCalledWith(TARGET_BA);
+    // After the commit, not inside the transaction: a refused or rolled-back
+    // change signs nobody out.
+    expect(txCommitted).toHaveBeenCalledTimes(1);
+    expect(revokeAllSessions.mock.invocationCallOrder[0]).toBeGreaterThan(
+      txCommitted.mock.invocationCallOrder[0]!,
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: event,
+        outcome: "success",
+        metadata: { sessionsRevoked: true },
+      }),
+    );
+  });
+
+  it("a single-org user blocked by their org admin is account-wide, so theirs end too", async () => {
+    sharedExecuteTakeFirst.mockResolvedValue(undefined);
+    await expect(change("blocked", "admin.user.blocked", ORG_SCOPE)).resolves.toEqual({
+      ok: true,
+      status: "blocked",
+    });
+    expect(revokeAllSessions).toHaveBeenCalledWith(TARGET_BA);
+  });
+
+  it("a block confined to one org of a SHARED user ends nothing (still active elsewhere)", async () => {
+    sharedExecuteTakeFirst.mockResolvedValue({ id: "m-other-org" });
+    await expect(change("blocked", "admin.user.blocked", ORG_SCOPE)).resolves.toEqual({
+      ok: true,
+      status: "blocked",
+    });
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ metadata: expect.anything() }),
+    );
+  });
+
+  it.each(["admin.user.approved", "admin.user.reactivated"])("%s ends nothing", async (event) => {
+    await expect(change("active", event)).resolves.toEqual({ ok: true, status: "active" });
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+  });
+
+  it("a refused change ends nothing (last superadmin, soft-deleted, stale version)", async () => {
+    trxGrantRows.mockResolvedValue([
+      { app_user_id: TARGET_ID, organization_id: ORG_A, role_id: "r" },
+    ]);
+    await expect(change("blocked", "admin.user.blocked")).resolves.toMatchObject({
+      error: "last_superadmin",
+    });
+    trxGrantRows.mockResolvedValue([]);
+    trxAccountRow.mockResolvedValue({ status: "deactivated" });
+    await expect(change("suspended", "admin.user.suspended")).resolves.toMatchObject({
+      error: "use_restore",
+    });
+    trxAccountRow.mockResolvedValue({ status: "active" });
+    trxClaim.mockResolvedValue({ numUpdatedRows: 0n });
+    await expect(
+      performAdminStatusChange({
+        actorBetterAuthUserId: ACTOR_ID,
+        scope: ALL,
+        targetAppUserId: TARGET_ID,
+        newStatus: "blocked",
+        newMembershipStatus: "blocked",
+        eventType: "admin.user.blocked",
+        expectedUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
+      }),
+    ).resolves.toMatchObject({ error: "precondition_failed" });
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+  });
+
+  it("a failed revocation keeps the status, audits both, and answers auth_revoke_all_failed", async () => {
+    const boom = new Error("adapter down");
+    revokeAllSessions.mockRejectedValue(boom);
+    const result = await change("blocked", "admin.user.blocked");
+    expect(result).toEqual({ ok: false, error: "auth_revoke_all_failed", cause: boom });
+    // The status is applied: both writes ran, and its success row records it,
+    // without claiming the sessions ended.
+    expect(trxRun).toHaveBeenCalledTimes(2);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "admin.user.blocked", outcome: "success" }),
+    );
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { sessionsRevoked: true } }),
+    );
+    // Revoke-all's own failure event, so one filter lists every failed sweep.
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "admin.user.sessions_revoke_all_failed",
+        outcome: "failure",
+        appUserId: TARGET_ID,
+        reason: "auth_revoke_all_failed",
+        metadata: {
+          action: "status_change",
+          statusEvent: "admin.user.blocked",
+          message: "adapter down",
+        },
+      }),
+    );
   });
 });

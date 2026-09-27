@@ -186,7 +186,7 @@ Combined with pointing `DATABASE_URL` + `DB_SCHEMA` + `BETTER_AUTH_SECRET` at th
 - **Trust boundary:** one cookie + one secret across the fleet means an XSS or subdomain takeover on *any* app impersonates the user on *all* of them. First-party, co-trusted apps only ([API Security §8](./api-security.md#8-third-party-and-satellite-web-apps)).
 - **Coupling:** the satellite tracks the primary's `auth` schema shape and Better Auth version — pin and upgrade them together.
 - **DB grants:** rolling-session refresh **writes** to `session`, so a strictly read-only role on the primary's schema breaks refresh; scope the grant deliberately (read-mostly + `session` write).
-- **Revocation:** instant and central — revoke the session/user on the primary and every satellite sees it on the next request.
+- **Revocation:** instant and central for everything that deletes the session on the primary: a ban, **Revoke all sessions** or a single session revoke, a soft-delete, a new password, and (F-147) a block or suspend that changes the account-wide status. Every satellite sees it on the next request. A block by a caller confined to one org (an org admin, or any API key or JWT, a superadmin's included) of a user who also belongs to other orgs changes only that membership and deletes no session, so the user stays signed in; only the kit's stock `app_users` guard, which a C satellite keeps, turns them away in that org.
 - Because the reference fork keeps the kit's stock access-context code, a C satellite reads the primary's `app_users`/RBAC too — users carry the same permissions they have on the primary.
 
 ## 6. Deployment scenarios

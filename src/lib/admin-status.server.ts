@@ -11,6 +11,7 @@ import {
   LAST_SUPERADMIN_REASON,
   type OrgScope,
 } from "@/lib/admin/access-scope.server";
+import { revokeAllBetterAuthUserSessions } from "@/lib/admin/auth-admin.server";
 import { mustUseRestore, USE_RESTORE_ERROR } from "@/lib/admin/deactivated-user";
 import { auditEvent } from "@/lib/audit.server";
 
@@ -48,6 +49,11 @@ import { auditEvent } from "@/lib/audit.server";
  *   - It refuses every transition of a soft-deleted (`deactivated`) target
  *     with `use_restore` (F-57): only restore undoes a soft-delete's ban and
  *     deactivation together. The callers answer 409.
+ *   - When it moves the ACCOUNT-GLOBAL status away from `active` (block,
+ *     suspend), it ends every Better Auth session the account holds, and the
+ *     ones it opened as someone else (F-147). If that fails after the status
+ *     committed, it answers `auth_revoke_all_failed`; the callers report 502
+ *     and a retry is safe.
  *   - The `reason` field is optional and surfaces in audit metadata so
  *     ops teams can answer "who blocked this user and why". Callers
  *     validate its length (max 500) at the route schema.
@@ -98,7 +104,13 @@ export type AdminStatusChangeResult =
   | {
       ok: false;
       error: "not_found" | "precondition_failed" | "last_superadmin" | typeof USE_RESTORE_ERROR;
-    };
+    }
+  /**
+   * F-147: the status change COMMITTED, but ending the account's sessions
+   * failed. The revoke-all route's own code, so its localized `errors.*`
+   * message applies; `cause` is for the route's 5xx capture.
+   */
+  | { ok: false; error: "auth_revoke_all_failed"; cause: unknown };
 
 /** Internal signal used to roll the transaction back on a lost CAS (#44). */
 class PreconditionFailedError extends Error {}
@@ -118,7 +130,7 @@ export async function performAdminStatusChange(
 ): Promise<AdminStatusChangeResult> {
   const target = await db
     .selectFrom("app_users")
-    .select(["id", "primary_email"])
+    .select(["id", "primary_email", "better_auth_user_id"])
     .where("id", "=", input.targetAppUserId)
     .executeTakeFirst();
   if (!target) {
@@ -133,6 +145,10 @@ export async function performAdminStatusChange(
       ? await userHasMembershipOutsideOrg(target.id, input.scope.organizationId)
       : false;
   const isGrant = input.newStatus === "active";
+  // Whether the account-global status mirrors the action. One definition for
+  // the write below and the session revocation after it (F-147), so the two
+  // cannot disagree about which changes are account-wide.
+  const accountWide = !orgScoped || !shared;
 
   try {
     await db.transaction().execute(async (trx) => {
@@ -220,12 +236,7 @@ export async function performAdminStatusChange(
       //  - Shared user + org admin → only LIFT a still-pending account to
       //    active on a grant (so it becomes usable); never change it on a deny,
       //    which would block the user in every other org too.
-      //  - SUPERADMIN, or a single-org user managed by their org admin → the
-      //    account status mirrors the action (unchanged behavior).
-      //  - Shared user + org admin → only LIFT a still-pending account to
-      //    active on a grant (so it becomes usable); never change it on a deny,
-      //    which would block the user in every other org too.
-      if (!orgScoped || !shared) {
+      if (accountWide) {
         await trx
           .updateTable("app_users")
           .set({
@@ -289,6 +300,27 @@ export async function performAdminStatusChange(
     throw err;
   }
 
+  // F-147: block and suspend used to write only the app's own rows. The app
+  // guard turned the account away, but Better Auth still honoured its
+  // sessions: `/get-session` kept rolling them forward, `/api/auth/*`
+  // self-service stayed open to them, and reactivating the account brought
+  // every one back, a stolen cookie included. So a change that shuts the
+  // ACCOUNT out ends its sessions, and the ones it opened as someone else
+  // (F-08), with the helper revoke-all uses. It runs after the commit, so a
+  // refused or rolled-back change signs nobody out. A change confined to one
+  // org of a shared user leaves them: a session is not tied to an org, and
+  // the user is still active in the others (AUTHZ-2, as on revoke-all).
+  // Reactivation needs nothing: no session outlives the block to return.
+  const endsSessions = accountWide && input.newStatus !== "active";
+  let revocationFailure: { cause: unknown } | null = null;
+  if (endsSessions) {
+    try {
+      await revokeAllBetterAuthUserSessions(target.better_auth_user_id);
+    } catch (cause) {
+      revocationFailure = { cause };
+    }
+  }
+
   await auditEvent({
     eventType: input.eventType,
     outcome: "success",
@@ -301,7 +333,34 @@ export async function performAdminStatusChange(
     reason: input.reason,
     request: input.request,
     requestId: input.requestId,
+    ...(endsSessions && !revocationFailure ? { metadata: { sessionsRevoked: true } } : {}),
   });
+
+  // The status is applied either way, and its row above says so. A failed
+  // revocation is reported as a failure, as the ban and revoke-all wrappers
+  // report theirs (F-08): the operator retries, which is safe, rather than
+  // being told the account is shut out while its sessions live on. The row
+  // carries revoke-all's own failure event, so one filter lists both.
+  if (revocationFailure) {
+    const { cause } = revocationFailure;
+    await auditEvent({
+      eventType: "admin.user.sessions_revoke_all_failed",
+      outcome: "failure",
+      actorBetterAuthUserId: input.actorBetterAuthUserId,
+      appUserId: target.id,
+      organizationId: scopeOrganizationId(input.scope),
+      email: target.primary_email,
+      reason: "auth_revoke_all_failed",
+      request: input.request,
+      requestId: input.requestId,
+      metadata: {
+        action: "status_change",
+        statusEvent: input.eventType,
+        message: cause instanceof Error ? cause.message : "unknown",
+      },
+    });
+    return { ok: false, error: "auth_revoke_all_failed", cause };
+  }
 
   return { ok: true, status: input.newStatus };
 }

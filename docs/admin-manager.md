@@ -605,7 +605,7 @@ Manages the application user lifecycle and per-user administration.
 | `GET /users` | `admin.users.read` | List; org-scoped to the actor's org |
 | `POST /users` | `admin.users.create` | Create; status defaults to `pending_approval`. A caller without cross-org reach (an org admin, any API key or JWT) enrols the user in the org it acts in, in the same transaction, with a membership of that same status; approving the user activates both. Otherwise `canAccessUser` would 404 every follow-up on the user it just created. The enrolment is audited like `POST …/memberships` (`admin.user.membership_added` + `admin.organization.member_added`). It is a membership add, and an `active` one an approval, so a confined caller also needs `admin.users.update` or `admin.orgs.update`, plus `admin.users.manage` for `initialAppStatus: "active"`, each as permission and (bearer) scope; an address whose email domain is bound to another org is refused too. Each refusal is 403 `forbidden` before anything is written, audited `admin.user.create_denied` (reason `enrolment_not_permitted`, `activation_not_permitted` or `email_domain_claimed`; F-480, below). The enrolled membership carries no sign-up source, so the org's sign-up policy never activates it at sign-in. A superadmin's cookie session creates the user in no org, as before. A context with no org is refused with 403 `forbidden` before anything is written (defence in depth: the guard admits only an active member, whose context always names an org). The Better Auth `role: "admin"` needs cross-org reach, like `POST /users/[id]/role`: a superadmin's cookie session (403 `forbidden` otherwise, F-13). An address that already has an account is 409 `email_taken`, including one Better Auth holds with no `app_users` row and the loser of two concurrent creates (F-30); `admin.user.created`, or `admin.user.create_failed` on any failure past the up-front check (reason `auth_user_exists`, `auth_create_user_failed`, `auth_create_no_id` or `db_insert_failed`) |
 | `GET/PATCH/DELETE /users/[id]` | `.read` / `.update` / `.delete` | Detail, edit, soft-delete / restore (`POST /users/[id]/restore`). The edit (display name and preferred locale) is account-global, so it is rank-gated and a user shared with other orgs is superadmin-only (403 `forbidden`, F-61). The soft-delete cascade may return 409 `last_superadmin` (REVOKE-2). The soft-delete revokes the user's API keys and OAuth clients, and restore puts back a ban the soft-delete replaced; restoring a user who is not soft-deleted is 409 `not_deactivated` (see [Soft-delete and restore](#soft-delete-and-restore-f-57-i-19)) |
-| `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2). A soft-deleted user is 409 `use_restore` (F-57) |
+| `POST /users/[id]/status` | `admin.users.manage` | `approve` \| `block` \| `suspend` \| `reactivate`; events `admin.user.approved` / `.blocked` / `.suspended` / `.reactivated`. `block` / `suspend` may return 409 `last_superadmin` (REVOKE-2). A soft-deleted user is 409 `use_restore` (F-57). A `block` / `suspend` that changes the account-wide status (a superadmin's cookie session, or any caller on a user in no org but the one it acts in) also ends every session the user holds and the ones they opened by impersonating someone, so `reactivate` brings none back; the event's `metadata.sessionsRevoked` is `true`. A caller confined to one org, meaning an org admin or any API key or JWT, a superadmin's included (MACHINE-2), changes only that membership of a user shared with other orgs and ends no session. If ending the sessions fails, the status stays applied and the call returns 502 `auth_revoke_all_failed` with an `admin.user.sessions_revoke_all_failed` row; a retry is safe (F-147) |
 | `POST /users/[id]/ban`, `/unban` | `admin.users.ban` | Better Auth ban (account-global). A ban also ends the sessions the user opened by impersonating someone (F-08, §19). Banning oneself is refused (502 `auth_ban_failed`, as is a soft-delete of oneself). A ban that would leave no superadmin able to sign in is undone and returns 409 `last_superadmin` (REVOKE-2, F-56). A soft-deleted user is 409 `use_restore` (F-57); `admin.user.banned` |
 | `POST /users/[id]/password` | `admin.users.setPassword` | Set directly or send reset email. Setting it signs the user out everywhere: their own sessions and the ones they opened by impersonating someone. It also revokes every API key they own and every OAuth client that acts as them, which ends the tokens minted from those too. The reset email changes nothing until the user completes the reset, which does the same (F-08, F-10, §19). A failed step returns 502 and is safe to retry. `admin.user.password_set` / `.password_reset_email_sent`, plus an `api_key.revoked` / `oauth_client.revoked` row per credential with `metadata.reason` `password_set` |
 | `POST /users/[id]/role` | `admin.users.setRole` | Set the Better Auth role (`user`/`admin`). Needs cross-org reach, so only a superadmin's cookie session: every API key and JWT is bound to one org (MACHINE-2, [design §3](./design-api-keys-and-tokens.md#3-caller-resolution)) and gets 403 `forbidden` |
@@ -1701,7 +1701,9 @@ restore`, and `ids` is either an explicit UUID array **or** the literal `"*"`
   any other user with `not_deactivated`, as the single-row routes do with 409
   (§8.1, [Soft-delete and restore](#soft-delete-and-restore-f-57-i-19)). A
   `soft_delete` row whose credential revocation failed reports
-  `credential_revocation_failed`.
+  `credential_revocation_failed`, and a `block` / `suspend` row whose session
+  revocation failed reports `auth_revoke_all_failed` with its status applied
+  (F-147).
 - **Partial failure.** Each row's outcome is captured; one row failing does not
   abort the batch, and an id that matches no user in scope is a `not_found` row.
   A summary `admin.users.bulk_action` row is written alongside the per-row
@@ -1789,9 +1791,11 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   Such a session used to be sent straight to `/blocked` or `/pending-approval`,
   and the admin had to sign in again. The user detail page offers
   **Impersonate** for an active account only. A session that becomes unusable
-  after it started (the target is blocked mid-session, or the impersonator's
-  reach shrinks) still lands on those two pages, so both render the
-  impersonation banner and its **Stop impersonating** control. A target banned
+  after it started (the target's membership is suspended mid-session, or the
+  impersonator's reach shrinks) still lands on those two pages, so both render
+  the impersonation banner and its **Stop impersonating** control. An
+  account-wide block or suspend of the target ends the borrowed session with
+  the target's own (F-147), so the admin is signed out instead. A target banned
   in Better Auth is refused by the vendor instead (502 `auth_impersonate_failed`).
 - **Tenant confinement (IMP-1/IMP-2).** An impersonated session may only
   resolve an organization the **impersonator could already reach as
@@ -1844,9 +1848,10 @@ impersonation session as the target user. Cookies are delivered by Better Auth's
   (the route's 502 and failure audit row, or a failed row in a bulk batch) so
   the operator retries; every one of these actions is safe to repeat. A
   password reset or a self-service sweep has already done its own work, so
-  there the failure is logged instead. Suspending or blocking an admin deletes no sessions, theirs
-  or borrowed ones; the reach check above already confines a non-active
-  impersonator to nothing.
+  there the failure is logged instead. An account-wide block or suspend of the
+  admin ends both kinds too, the same way (F-147, §8.1); should that delete
+  fail, the reach check above still confines a non-active impersonator to
+  nothing.
 - **A new password ends everything that used the old one (F-10).**
   Better Auth's `setUserPassword` deletes no session, so `POST …/password`
   with `mode: "set"` used to leave a browser already signed in as the admin

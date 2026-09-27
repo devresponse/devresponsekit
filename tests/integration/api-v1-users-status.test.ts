@@ -336,3 +336,29 @@ describe("POST /api/v1/users/[id]/status — a soft-deleted user (F-57)", () => 
     expect(body.title).toBe("Restore required");
   });
 });
+
+/**
+ * F-147: a block or suspend also ends the user's sessions. When that fails the
+ * status has already committed (the core audits the failure), so the machine
+ * surface reports a 5xx the client can retry, not the catch-all 404.
+ */
+describe("POST /api/v1/users/[id]/status — sessions not ended (F-147)", () => {
+  it("maps auth_revoke_all_failed to a 502 problem document", async () => {
+    requireApiPermission.mockResolvedValue(superadmin());
+    performAdminStatusChange.mockResolvedValue({
+      ok: false,
+      error: "auth_revoke_all_failed",
+      cause: new Error("adapter down"),
+    });
+    const res = await POST(req(USER), ctx(USER));
+    expect(res.status).toBe(502);
+    expect(res.headers.get("content-type")).toBe("application/problem+json");
+    const body = (await res.json()) as { code?: string; detail?: string };
+    expect(body.code).toBe("internal_error");
+    // The backend's message never reaches the client.
+    expect(body.detail).not.toContain("adapter down");
+    // The change moved the ETag, so the same request with its old If-Match
+    // would only get a 412: the detail says to re-read first.
+    expect(body.detail).toMatch(/re-read the user/i);
+  });
+});

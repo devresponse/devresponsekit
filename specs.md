@@ -139,6 +139,8 @@ Blocked, suspended, and deactivated users are redirected to:
 
 Sensitive API routes return `403` for authenticated users who are blocked, suspended, deactivated, or unauthorized.
 
+Blocking or suspending an account also ends its existing sessions, so reactivating it restores the account but no earlier session. A block confined to one organization of a user who belongs to others ends none; an organization administrator's block is confined that way, and so is any made with an API key or JWT, a superadmin's included.
+
 ### 3.7 SSO handoff
 
 The handoff token is JWT-based, one-time-use, maximum 60 seconds, and transmitted only through a server-controlled redirect. The target app must consume the token immediately and redirect to a clean URL.

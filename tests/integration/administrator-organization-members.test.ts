@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as MembersRouteModule from "@/app/api/administrator/organizations/[id]/members/route";
+import { pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * Integration tests for the organization members endpoints (docs/admin-manager.md
@@ -309,6 +310,20 @@ describe("POST /api/administrator/organizations/:id/members", () => {
       params: Promise.resolve({ id: ORG_ID }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it("returns 409 membership_exists on the (organization_id, app_user_id) unique, whatever the server's message language (F-132)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    insertExecute.mockRejectedValue(
+      pgUniqueViolation("app_organization_memberships_organization_id_app_user_id_key"),
+    );
+    const res = await POST(jsonReq({ appUserId: "33333333-3333-4333-8333-333333333333" }), {
+      params: Promise.resolve({ id: ORG_ID }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "membership_exists" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });
 

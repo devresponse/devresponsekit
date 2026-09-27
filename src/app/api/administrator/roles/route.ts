@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { createRoleSchema } from "@/lib/validation/roles";
 import { db } from "@/db/database";
+import { isForeignKeyViolation, isUniqueViolation } from "@/db/pg-errors";
 import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -270,14 +271,14 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
       .executeTakeFirstOrThrow();
   } catch (err) {
     // Catches the org-scoped (organization_id, key) uniqueness violation.
-    const message = err instanceof Error ? err.message : "unknown";
-    if (/duplicate key|unique constraint/i.test(message)) {
+    // F-132: both checks read the SQLSTATE and constraint, never the
+    // (translatable) message.
+    if (isUniqueViolation(err, "app_roles_organization_id_key_key")) {
       return adminErrorResponse("key_taken", 409, request);
     }
-    // F-63 (#95): organization_id is app_roles' only foreign key, so this is
-    // an organizationId naming no org (a deleted one, say). It was a 500; the
-    // groups create answers the same 404.
-    if (/foreign key/i.test(message)) {
+    // F-63 (#95): an organizationId naming no org (a deleted one, say). It was
+    // a 500; the groups create answers the same 404.
+    if (isForeignKeyViolation(err, "app_roles_organization_id_fkey")) {
       return adminErrorResponse("organization_not_found", 404, request);
     }
     throw err;

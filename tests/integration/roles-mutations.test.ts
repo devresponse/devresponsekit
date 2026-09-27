@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as ListRoute from "@/app/api/administrator/roles/route";
 import type * as IdRoute from "@/app/api/administrator/roles/[id]/route";
+import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * ADR-0001 — role create/edit/delete scoping (P0-7).
@@ -157,16 +158,22 @@ describe("POST /roles — create scoping", () => {
   // failed the insert's foreign key, a 500. It is the groups create's 404.
   it("F-63: 404 organization_not_found when a SUPERADMIN names an org that does not exist", async () => {
     state.role = undefined;
-    state.insertError = Object.assign(
-      new Error(
-        'insert or update on table "app_roles" violates foreign key constraint "app_roles_organization_id_fkey"',
-      ),
-      { code: "23503" },
-    );
+    // F-132: recognised by SQLSTATE and constraint, so a non-English message maps too.
+    state.insertError = pgForeignKeyViolation("app_roles_organization_id_fkey");
     accessGetter.mockResolvedValue(superadmin(["admin.roles.create"]));
     const res = await POST(req("", { method: "POST", body: mk(ORG_B) }));
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: "organization_not_found" });
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("F-132: 409 key_taken on the (organization_id, key) unique, whatever the server's message language", async () => {
+    state.role = undefined;
+    state.insertError = pgUniqueViolation("app_roles_organization_id_key_key");
+    accessGetter.mockResolvedValue(orgAdmin(["admin.roles.create"]));
+    const res = await POST(req("", { method: "POST", body: mk(ORG_A) }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "key_taken" });
     expect(auditMock).not.toHaveBeenCalled();
   });
 });

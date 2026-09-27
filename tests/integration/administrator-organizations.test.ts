@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as OrgsRouteModule from "@/app/api/administrator/organizations/route";
 import type * as OrgByIdRouteModule from "@/app/api/administrator/organizations/[id]/route";
+import { pgForeignKeyViolation, pgUniqueViolation } from "../helpers/pg-errors";
 
 /**
  * Integration tests for the organizations endpoints (docs/admin-manager.md
@@ -86,6 +87,8 @@ vi.mock("@/db/database", () => {
   // call inside the transaction goes through the mocked `@/lib/audit.server`,
   // never through this handle.
   const trx = {
+    // The PATCH's update runs on the handle too (F-40), answering updateExecute.
+    updateTable: () => ({ set: () => ({ where: () => ({ execute: () => updateExecute() }) }) }),
     deleteFrom: () => ({
       where: () => ({
         execute: itemsExecute,
@@ -262,11 +265,11 @@ describe("POST /api/administrator/organizations", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 409 slug_taken when slug already exists", async () => {
+  it("returns 409 slug_taken when slug already exists, whatever the server's message language (F-132)", async () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.create"]));
     // The route uses try/catch on executeTakeFirstOrThrow which will throw on conflict
-    insertExecute.mockRejectedValue(new Error("duplicate key value violates unique constraint"));
+    insertExecute.mockRejectedValue(pgUniqueViolation("app_organizations_slug_key"));
     const res = await POST(jsonReq({ slug: "taken", name: "Taken Org" }));
     expect(res.status).toBe(409);
     const body = await res.json();
@@ -317,6 +320,20 @@ describe("PATCH /api/administrator/organizations/:id", () => {
       { params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }) },
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 409 slug_taken when the new slug is taken, whatever the server's message language (F-132)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.update"]));
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme" });
+    updateExecute.mockRejectedValue(pgUniqueViolation("app_organizations_slug_key"));
+    const res = await PATCH(
+      idReq("PATCH", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", { slug: "taken" }),
+      { params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }) },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "slug_taken" });
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });
 
@@ -400,9 +417,8 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
     selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
     // The org still owns roles/apps/credentials → Postgres raises a FK violation.
-    itemsExecute.mockRejectedValue(
-      new Error('update or delete on table "app_organizations" violates foreign key constraint'),
-    );
+    // F-132: recognised by its SQLSTATE, so a non-English message maps too.
+    itemsExecute.mockRejectedValue(pgForeignKeyViolation("app_roles_organization_id_fkey"));
     const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
       params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
     });
@@ -423,13 +439,10 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
     // ...but a second superadmin commits its own delete before this request
     // opens its transaction, so the success audit — the FIRST statement in it
-    // (DB-3) — is what finds the parent gone. This is the exact error node-pg
-    // raises for that FK.
-    auditMock.mockRejectedValueOnce(
-      new Error(
-        'insert or update on table "app_audit_events" violates foreign key constraint "app_audit_events_organization_id_fkey"',
-      ),
-    );
+    // (DB-3) — is what finds the parent gone. Shaped as node-pg raises it for
+    // that FK: SQLSTATE 23503 and the constraint name, which F-132 reads
+    // instead of the (translatable) message.
+    auditMock.mockRejectedValueOnce(pgForeignKeyViolation("app_audit_events_organization_id_fkey"));
     const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
       params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
     });
@@ -440,5 +453,18 @@ describe("DELETE /api/administrator/organizations/:id", () => {
     // gone, and the rolled-back success row is already discarded.
     expect(itemsExecute).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not take an FK violation of the audit row's actor for a vanished tenant (DB-5, F-132)", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.orgs.delete"]));
+    selectFirst.mockResolvedValue({ id: "o-1", slug: "acme", is_default: false, count: "0" });
+    auditMock.mockRejectedValueOnce(pgForeignKeyViolation("app_audit_events_app_user_id_fkey"));
+    const res = await DELETE(idReq("DELETE", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"), {
+      params: Promise.resolve({ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }),
+    });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "internal_error" });
+    expect(itemsExecute).not.toHaveBeenCalled();
   });
 });

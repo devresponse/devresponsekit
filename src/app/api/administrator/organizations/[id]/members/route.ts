@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { sql } from "kysely";
 import { z } from "zod";
 import { db } from "@/db/database";
+import { isUniqueViolation } from "@/db/pg-errors";
 import { auditOrgAction, auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import {
@@ -304,8 +305,8 @@ export const POST = withAdminRoute(async function POST(
       .returning(["id"])
       .executeTakeFirstOrThrow();
   } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown";
-    if (/duplicate key|unique constraint/i.test(message)) {
+    // F-132: by SQLSTATE and constraint, never by the (translatable) message.
+    if (isUniqueViolation(err, "app_organization_memberships_organization_id_app_user_id_key")) {
       return adminErrorResponse("membership_exists", 409, request);
     }
     throw err;

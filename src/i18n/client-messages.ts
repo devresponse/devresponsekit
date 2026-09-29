@@ -16,7 +16,8 @@ import type { AbstractIntlMessages } from "next-intl";
  *     `error.tsx` and `not-found.tsx`, which render inside this layout's
  *     provider only, wherever the throw or `notFound()` came from.
  *   - `auth`: `(auth)/layout.tsx`. Sign-in, sign-up, password reset,
- *     invitation acceptance and email verification.
+ *     invitation acceptance and email verification. It carries `errors` for
+ *     the sign-in form's `errors.rate_limited` refusal (F-55).
  *   - `secure`: `(secure)/layout.tsx`. The signed-in shell, account, docs,
  *     help and the Administrator console.
  *
@@ -32,7 +33,7 @@ const LOCALE_SCOPE = ["common", "errorBoundary", "notFound"] as const;
 
 export const CLIENT_MESSAGE_SCOPES = {
   locale: LOCALE_SCOPE,
-  auth: [...LOCALE_SCOPE, "auth", "validation"],
+  auth: [...LOCALE_SCOPE, "auth", "validation", "errors"],
   secure: [
     ...LOCALE_SCOPE,
     "shell",

@@ -14,8 +14,11 @@ import { renderWithIntl } from "../helpers/render-with-intl";
  * `[locale]/layout.tsx`'s providers, so the fallback is localized.
  */
 const captureException = vi.fn((_error: unknown) => "evt-123");
+// `captureClientError` keeps the event id only while the SDK is enabled
+// (F-110); with it on, the Support ID is that id rather than the digest.
 vi.mock("@sentry/nextjs", () => ({
   captureException: (error: unknown) => captureException(error),
+  isEnabled: () => true,
 }));
 
 beforeEach(() => captureException.mockClear());

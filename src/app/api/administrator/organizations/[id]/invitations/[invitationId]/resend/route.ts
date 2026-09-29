@@ -5,7 +5,13 @@ import { auditOrgAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { loadScopedOrg, ORGANIZATION_NOT_ACTIVE_ERROR } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import {
+  ADMIN_MAIL_EVENTS,
+  enforceOrgAdminMailBudget,
+  enforceRecipientCooldown,
+} from "@/lib/admin/admin-mail-budget.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import {
   enforceInviterStanding,
@@ -32,6 +38,11 @@ interface RouteContext {
  * `invitation_inviter_lacks_standing` when the original inviter can no longer
  * invite, after voiding the invitation (F-149).
  *
+ * F-64: 429 `rate_limited` when this invitation was resent in the last
+ * 10 minutes (by anyone), or when an org-confined caller's organization has
+ * spent its daily admin-mail budget. The per-actor budget is the create
+ * route's, from the shared bucket.
+ *
  * Caller MUST hold `admin.orgs.update`.
  */
 export const POST = withAdminRoute(async function POST(
@@ -41,7 +52,9 @@ export const POST = withAdminRoute(async function POST(
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit(
+  // F-64: from the SHARED bucket, the create route's: kept per process, it
+  // multiplied by the instance count, and every token here mails someone.
+  const limited = await enforceSharedRateLimit(
     "admin.orgs.invitations",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
@@ -77,6 +90,19 @@ export const POST = withAdminRoute(async function POST(
   if (!invitation) {
     return adminErrorResponse("invitation_not_found", 404, request);
   }
+
+  // F-64: a resend loop mailed one invitee at the mutation rate. The daily
+  // budget is only read, so it goes first; the cooldown spends this
+  // invitation's token, shared by every admin and every instance.
+  const overBudget = await enforceOrgAdminMailBudget(guard, org.id, request);
+  if (overBudget) return overBudget;
+  const cooling = await enforceRecipientCooldown(
+    "admin.orgs.invitations.resend",
+    invitation.id,
+    guard,
+    request,
+  );
+  if (cooling) return cooling;
 
   // F-149: rotating the token leaves `invited_by` alone, and acceptance
   // refuses (and voids) an invitation whose inviter can no longer invite, so a
@@ -115,7 +141,7 @@ export const POST = withAdminRoute(async function POST(
     plaintextToken: rotated.plaintextToken,
   });
 
-  await auditOrgAction("admin.organization.invitation_resent", "success", {
+  await auditOrgAction(ADMIN_MAIL_EVENTS.invitationResent, "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     organizationId: org.id,

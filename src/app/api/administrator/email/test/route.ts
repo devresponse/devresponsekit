@@ -4,8 +4,14 @@ import { z } from "zod";
 import { auditEvent } from "@/lib/audit.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { resolveOrgScope } from "@/lib/admin/access-scope.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
+import {
+  ADMIN_MAIL_EVENTS,
+  ADMIN_TEST_EMAIL_LIMIT,
+  enforceOrgAdminMailBudget,
+} from "@/lib/admin/admin-mail-budget.server";
+import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { sendAppEmail } from "@/lib/email/send.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import { getBrand } from "@/config/brand";
@@ -23,6 +29,12 @@ export const dynamic = "force-dynamic";
  *
  * Caller MUST hold `admin.email.manage`. Audited with the outcome of
  * the delivery attempt.
+ *
+ * F-64: only a caller with cross-org reach (a superadmin session) picks the
+ * recipient. Anyone else may mail only their own account's address (403
+ * `forbidden` and a denied row otherwise), and their test emails count toward
+ * their organization's daily admin-mail budget. The per-actor budget
+ * (`ADMIN_TEST_EMAIL_LIMIT`, 10 an hour) comes from the shared bucket.
  */
 const testSchema = z
   .object({
@@ -42,10 +54,12 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   }
   const organizationId = scope.kind === "org" ? scope.organizationId : null;
 
-  const limited = enforceRateLimit(
+  // F-64: from the SHARED bucket. Kept per process, the budget multiplied by
+  // the instance count, and every token here is a mail from the platform.
+  const limited = await enforceSharedRateLimit(
     "admin.email.test",
     guard.betterAuthUserId,
-    DEFAULT_ADMIN_MUTATION_LIMIT,
+    ADMIN_TEST_EMAIL_LIMIT,
     request,
     guard.requestId,
   );
@@ -61,6 +75,23 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   if (!parsed.success) {
     return adminErrorResponse("invalid_body", 400, request);
   }
+
+  // F-64: choosing the recipient is a platform-operator capability. An org
+  // admin (or an org-bound credential) sends to the address its own account
+  // signs in with, which nobody can edit afterwards, so the test email can
+  // prove their tenant's mail works without mailing a stranger.
+  const ownAddress = guard.access.primaryEmail?.trim().toLowerCase() ?? null;
+  if (!hasCrossOrgReach(guard.access) && parsed.data.to.trim().toLowerCase() !== ownAddress) {
+    return refuseWithoutCrossOrgReach(
+      guard,
+      request,
+      "email_test_recipient",
+      undefined,
+      parsed.data.to,
+    );
+  }
+  const overBudget = await enforceOrgAdminMailBudget(guard, organizationId, request);
+  if (overBudget) return overBudget;
 
   const result = await sendAppEmail({
     to: parsed.data.to,
@@ -80,7 +111,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // an error of this request. (Before #219 `failed` was unreachable and these
   // branches were dead — review #235.)
   await auditEvent({
-    eventType: "admin.email.test_sent",
+    eventType: ADMIN_MAIL_EVENTS.testEmail,
     outcome: result.status === "failed" ? "error" : "success",
     actorBetterAuthUserId: guard.betterAuthUserId,
     // F-32: the same tenant the outbox row is attributed to above.

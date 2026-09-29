@@ -288,8 +288,10 @@ volumes:
   password-reset limiter keep their buckets in Postgres (`app_rate_limits`
   from migration `0006`, and Better Auth's `rateLimit` table from
   `pnpm db:auth:migrate`), so they enforce **one budget across every
-  container**. The **admin per-actor** abuse guard (mutations, bulk, export,
-  a signed-in SSO launch) is still per process: under horizontal scaling its
+  container**, and so do the budgets on the admin actions that send mail
+  (the test email, invitations, an admin's reset email; F-64). The **admin
+  per-actor** abuse guard on the other mutations, bulk, export and a signed-in
+  SSO launch is still per process: under horizontal scaling its
   budget multiplies by the number of containers and resets on restart. That
   guard layers on top of authorization, so multi-instance is supported; only
   the per-actor UX limit is best-effort there. See

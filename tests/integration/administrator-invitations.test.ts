@@ -4,6 +4,8 @@ import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as InvitationsRoute from "@/app/api/administrator/organizations/[id]/invitations/route";
 import type * as InvitationByIdRoute from "@/app/api/administrator/organizations/[id]/invitations/[invitationId]/route";
 import type * as ResendRoute from "@/app/api/administrator/organizations/[id]/invitations/[invitationId]/resend/route";
+import type * as MailBudgetModule from "@/lib/admin/admin-mail-budget.server";
+import type * as InMemoryLimiter from "@/lib/admin/rate-limit.server";
 
 /**
  * Integration tests for the invitation admin endpoints (0008):
@@ -28,6 +30,14 @@ const createInvitationMock = vi.fn();
 const revokeInvitationMock = vi.fn();
 const regenerateMock = vi.fn();
 const inviterStandingMock = vi.fn();
+// F-64: create and resend take their per-actor budget from the SHARED bucket,
+// and spend the org's daily admin-mail budget; a resend also spends the
+// invitation's cooldown. Those budgets are pinned in
+// tests/unit/admin-mail-budget.test.ts and tests/db/admin-mail-budget.db.test.ts;
+// here, that the routes ask them, with what, and in which order.
+const sharedLimitMock = vi.fn();
+const orgMailBudgetMock = vi.fn();
+const recipientCooldownMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -42,6 +52,24 @@ vi.mock("@/lib/audit.server", () => ({
 vi.mock("@/lib/email/send.server", () => ({
   sendAppEmail: (...args: unknown[]) => sendEmailMock(...args),
 }));
+// No database here: the shared bucket is answered by the in-memory limiter
+// (the same 429 envelope), after recording the call.
+vi.mock("@/lib/admin/rate-limit-shared.server", () => ({
+  enforceSharedRateLimit: async (...a: Parameters<typeof InMemoryLimiter.enforceRateLimit>) => {
+    sharedLimitMock(...a);
+    return (await import("@/lib/admin/rate-limit.server")).enforceRateLimit(...a);
+  },
+}));
+vi.mock("@/lib/admin/admin-mail-budget.server", async () => {
+  const actual = await vi.importActual<typeof MailBudgetModule>(
+    "@/lib/admin/admin-mail-budget.server",
+  );
+  return {
+    ...actual,
+    enforceOrgAdminMailBudget: (...a: unknown[]) => orgMailBudgetMock(...a),
+    enforceRecipientCooldown: (...a: unknown[]) => recipientCooldownMock(...a),
+  };
+});
 const sendInvitationEmailMock = vi.fn();
 vi.mock("@/lib/invitations.server", () => ({
   createInvitation: (...args: unknown[]) => createInvitationMock(...args),
@@ -151,8 +179,13 @@ beforeEach(async () => {
     regenerateMock,
     inviterStandingMock,
     sendInvitationEmailMock,
+    sharedLimitMock,
+    orgMailBudgetMock,
+    recipientCooldownMock,
   ])
     m.mockReset();
+  orgMailBudgetMock.mockResolvedValue(null);
+  recipientCooldownMock.mockResolvedValue(null);
   sessionGetter.mockResolvedValue({ user: { id: "ba-admin" } });
   selectFirst.mockResolvedValue(ORG_ROW);
   executeMock.mockResolvedValue([]);
@@ -499,5 +532,81 @@ describe("POST .../invitations/:invitationId/resend", () => {
     expect(auditMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.organization.invitation_resent" }),
     );
+  });
+});
+
+describe("F-64: invitation mail is budgeted across instances", () => {
+  const tooMany = () => new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 });
+  const resend = () => resendPOST(getReq(`${BASE}/${INVITATION_ID}/resend`), itemCtx());
+
+  it("create and resend take the per-actor budget from the SHARED bucket", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    expect((await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx())).status).toBe(
+      201,
+    );
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    expect((await resend()).status).toBe(200);
+    expect(sharedLimitMock).toHaveBeenCalledTimes(2);
+    for (const call of sharedLimitMock.mock.calls) {
+      expect(call.slice(0, 3)).toEqual([
+        "admin.orgs.invitations",
+        "ba-admin",
+        { capacity: 30, refillPerSec: 1 },
+      ]);
+    }
+  });
+
+  it("create: an org admin spends the org's daily budget, and a spent one creates and mails nothing", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    orgMailBudgetMock.mockResolvedValue(tooMany());
+    const res = await createPOST(jsonReq(BASE, { email: "ada@example.com" }), listCtx());
+    expect(res.status).toBe(429);
+    expect(orgMailBudgetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ betterAuthUserId: "ba-admin" }),
+      ORG_ID,
+      expect.anything(),
+    );
+    expect(createInvitationMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("resend: the invitation's cooldown is asked after the budget, and a cooling one is neither rotated nor mailed", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    recipientCooldownMock.mockResolvedValue(tooMany());
+    const res = await resend();
+    expect(res.status).toBe(429);
+    expect(orgMailBudgetMock).toHaveBeenCalledWith(expect.anything(), ORG_ID, expect.anything());
+    expect(recipientCooldownMock).toHaveBeenCalledWith(
+      "admin.orgs.invitations.resend",
+      INVITATION_ID,
+      expect.objectContaining({ betterAuthUserId: "ba-admin" }),
+      expect.anything(),
+    );
+    expect(inviterStandingMock).not.toHaveBeenCalled();
+    expect(regenerateMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("resend: a spent org budget refuses before the cooldown token is spent", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(PENDING_INVITATION);
+    orgMailBudgetMock.mockResolvedValue(tooMany());
+    const res = await resend();
+    expect(res.status).toBe(429);
+    expect(recipientCooldownMock).not.toHaveBeenCalled();
+    expect(regenerateMock).not.toHaveBeenCalled();
+    expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("resend: an unknown invitation 404s without touching either budget", async () => {
+    accessGetter.mockResolvedValue(ORG_ADMIN(["admin.orgs.update"]));
+    selectFirst.mockResolvedValueOnce(ORG_ROW).mockResolvedValueOnce(undefined);
+    expect((await resend()).status).toBe(404);
+    expect(orgMailBudgetMock).not.toHaveBeenCalled();
+    expect(recipientCooldownMock).not.toHaveBeenCalled();
   });
 });

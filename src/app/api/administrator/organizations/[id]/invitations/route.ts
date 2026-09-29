@@ -20,7 +20,9 @@ import {
 } from "@/lib/admin/list-query.server";
 import { loadScopedOrg, ORGANIZATION_NOT_ACTIVE_ERROR } from "@/lib/admin/org-route.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
-import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { DEFAULT_ADMIN_MUTATION_LIMIT } from "@/lib/admin/rate-limit.server";
+import { enforceSharedRateLimit } from "@/lib/admin/rate-limit-shared.server";
+import { ADMIN_MAIL_EVENTS, enforceOrgAdminMailBudget } from "@/lib/admin/admin-mail-budget.server";
 import { refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { createInvitation, sendInvitationEmail } from "@/lib/invitations.server";
 import { createInvitationSchema } from "@/lib/validation/invitations";
@@ -126,6 +128,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest, conte
  * subset of what they can confer themselves — 403 `forbidden` and an
  * `admin.permission.conferral_denied` row otherwise (F-58).
  *
+ * F-64: the invitation is a mail to an address the caller chooses, so its
+ * per-actor budget comes from the shared bucket, and an org-confined caller
+ * spends the org's daily admin-mail budget (429 `rate_limited` once spent).
+ *
  * Caller MUST hold `admin.orgs.update`.
  */
 export const POST = withAdminRoute(async function POST(
@@ -135,7 +141,9 @@ export const POST = withAdminRoute(async function POST(
   const guard = await requireAdminPermission(request, "admin.orgs.update");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
-  const limited = enforceRateLimit(
+  // F-64: from the SHARED bucket, shared with resend: kept per process, it
+  // multiplied by the instance count, and every token here mails someone.
+  const limited = await enforceSharedRateLimit(
     "admin.orgs.invitations",
     guard.betterAuthUserId,
     DEFAULT_ADMIN_MUTATION_LIMIT,
@@ -220,6 +228,11 @@ export const POST = withAdminRoute(async function POST(
     return adminErrorResponse("member_exists", 409, request);
   }
 
+  // F-64: checked last, just before anything is written or sent, so a request
+  // the checks above refuse neither waits on nor reports the budget.
+  const overBudget = await enforceOrgAdminMailBudget(guard, org.id, request);
+  if (overBudget) return overBudget;
+
   let created: { id: string; plaintextToken: string; expiresAt: Date };
   try {
     created = await createInvitation({
@@ -248,7 +261,7 @@ export const POST = withAdminRoute(async function POST(
     plaintextToken: created.plaintextToken,
   });
 
-  await auditOrgAction("admin.organization.invitation_created", "success", {
+  await auditOrgAction(ADMIN_MAIL_EVENTS.invitationCreated, "success", {
     request,
     actorBetterAuthUserId: guard.betterAuthUserId,
     organizationId: org.id,

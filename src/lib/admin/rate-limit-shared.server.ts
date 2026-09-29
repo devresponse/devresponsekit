@@ -29,7 +29,10 @@ import { rateLimitSharedFallbacksTotal } from "@/lib/observability/metrics.serve
  * every instance shares: one row per key in `app_rate_limits` (migration
  * 0006). Authenticated per-actor limits stay in memory: an actor first has
  * to hold a credential, so the fan-out is bounded by what they hold, and a
- * DB round trip on every admin mutation would buy little. The SSO consume
+ * DB round trip on every admin mutation would buy little. The admin actions
+ * that mail someone are the exception (F-64, `admin-mail-budget.server.ts`):
+ * every token they spend is a mail from the platform, so their per-actor
+ * budget and a per-recipient cooldown come from here. The SSO consume
  * endpoint and the signed-out SSO launch were left behind in memory, keyed on
  * the client IP, until F-19; both now take a per-IP bucket from here, through
  * `enforceSharedRateLimit`. The per-account email/password sign-in budget

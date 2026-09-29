@@ -41,6 +41,12 @@ import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
  *     call to this module's limiter under `src/` and fails on one keyed on
  *     the client's address, so nothing pre-auth can come back here. See
  *     docs/deployment.md §5 for the topology statement.
+ *   - F-64: the admin actions that MAIL someone (the test email, invitation
+ *     create and resend) are the one authenticated exception. Each token is
+ *     a mail from the platform's domain, spending a provider quota and a
+ *     sending reputation every tenant shares, so they take their per-actor
+ *     budget from the shared bucket, with a per-recipient cooldown and a
+ *     per-org daily budget on top (`admin-mail-budget.server.ts`).
  *   - Deny responses include a `Retry-After` header (seconds) and a
  *     standard error envelope `{ error: "rate_limited", retryAfter }`.
  */

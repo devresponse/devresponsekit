@@ -13,6 +13,9 @@ import { Pool } from "pg";
  * job owns the Postgres service; locally `.env` is loaded via dotenv, which
  * never overrides variables already in the environment).
  *
+ * It also resets a shared rate-limit bucket a spec spends as the seeded admin
+ * ({@link resetSharedRateLimitBucket}).
+ *
  * Mirrors `src/db/schema-config.ts`: every table lives in `DB_SCHEMA`
  * (default `auth`), applied through the libpq `search_path` option.
  */
@@ -70,4 +73,23 @@ export async function readOutboxDeliveryLink(input: {
     if (match) return match[1] ?? match[0];
   }
   return undefined;
+}
+
+/**
+ * Deletes the SHARED rate-limit bucket `<scope>:<Better Auth user id>` of the
+ * account that signs in with `email` (the key `enforceSharedRateLimit` spends).
+ * A shared bucket is a row in `app_rate_limits`, so it outlives the dev server
+ * and is spent by every run and checkout on this database; a spec that spends
+ * a slow budget (the test email's 10 an hour, F-64) starts from a full bucket
+ * instead of what earlier runs left. A missing row IS a full bucket.
+ */
+export async function resetSharedRateLimitBucket(input: {
+  scope: string;
+  email: string;
+}): Promise<void> {
+  await getPool().query(
+    `delete from app_rate_limits
+      where key in (select $1::text || ':' || id from "user" where lower(email) = lower($2))`,
+    [input.scope, input.email],
+  );
 }

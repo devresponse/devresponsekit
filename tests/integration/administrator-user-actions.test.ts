@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AccessScopeModule from "@/lib/admin/access-scope.server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as MailBudgetModule from "@/lib/admin/admin-mail-budget.server";
 
 /**
  * Integration tests for the user-mutation endpoints under
@@ -44,6 +45,11 @@ const statusChangeMock = vi.fn();
 const banStripsLastMock = vi.fn();
 // F-09 rank predicate (`userHoldsSuperuserGrant`). Default false.
 const superuserGrantMock = vi.fn();
+// F-64: a reset email spends the org's daily admin-mail budget and the
+// target's cooldown (both pinned in tests/unit/admin-mail-budget.test.ts and
+// tests/db/admin-mail-budget.db.test.ts). Default: neither refuses.
+const orgMailBudgetMock = vi.fn();
+const recipientCooldownMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -87,6 +93,17 @@ vi.mock("@/lib/admin/auth-admin.server", () => ({
   createBetterAuthUser: (...a: unknown[]) => authCreateUser(...a),
   updateBetterAuthUser: (...a: unknown[]) => authUpdateUser(...a),
 }));
+
+vi.mock("@/lib/admin/admin-mail-budget.server", async () => {
+  const actual = await vi.importActual<typeof MailBudgetModule>(
+    "@/lib/admin/admin-mail-budget.server",
+  );
+  return {
+    ...actual,
+    enforceOrgAdminMailBudget: (...a: unknown[]) => orgMailBudgetMock(...a),
+    enforceRecipientCooldown: (...a: unknown[]) => recipientCooldownMock(...a),
+  };
+});
 
 vi.mock("@/lib/api-auth/credential-eviction.server", () => ({
   revokeBearerCredentialsOf: (...a: unknown[]) => revokeCredentialsMock(...a),
@@ -211,6 +228,10 @@ beforeEach(() => {
   banStripsLastMock.mockResolvedValue(false);
   superuserGrantMock.mockReset();
   superuserGrantMock.mockResolvedValue(false);
+  orgMailBudgetMock.mockReset();
+  orgMailBudgetMock.mockResolvedValue(null);
+  recipientCooldownMock.mockReset();
+  recipientCooldownMock.mockResolvedValue(null);
 });
 afterEach(() => vi.resetModules());
 
@@ -741,6 +762,64 @@ describe("POST /api/administrator/users/[id]/password", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.user.password_reset_email_sent" }),
     );
+  });
+
+  describe("F-64: a reset email is budgeted like the other admin mail", () => {
+    const tooMany = () => new Response(JSON.stringify({ error: "rate_limited" }), { status: 429 });
+    async function post(body: object) {
+      sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+      accessGetter.mockResolvedValue(grantedAccess("admin.users.setPassword"));
+      dbMock.mockResolvedValue(targetRow);
+      authForget.mockResolvedValue({ ok: true });
+      authSetPassword.mockResolvedValue({ status: true });
+      const { POST } = await import("@/app/api/administrator/users/[id]/password/route");
+      return POST(
+        makeRequest(`http://test.local/api/administrator/users/${TARGET_ID}/password`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+        { params: Promise.resolve({ id: TARGET_ID }) },
+      );
+    }
+
+    it("spends the acting org's daily budget, then this user's cooldown", async () => {
+      expect((await post({ mode: "reset_email" })).status).toBe(200);
+      expect(orgMailBudgetMock).toHaveBeenCalledWith(
+        expect.objectContaining({ betterAuthUserId: "ba-1" }),
+        "o-1",
+        expect.anything(),
+      );
+      expect(recipientCooldownMock).toHaveBeenCalledWith(
+        "admin.users.password.reset_email",
+        TARGET_ID,
+        expect.objectContaining({ betterAuthUserId: "ba-1" }),
+        expect.anything(),
+      );
+    });
+
+    it("sends no second reset email to a user still cooling down", async () => {
+      recipientCooldownMock.mockResolvedValue(tooMany());
+      const res = await post({ mode: "reset_email" });
+      expect(res.status).toBe(429);
+      expect(authForget).not.toHaveBeenCalled();
+      expect(auditMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: "admin.user.password_reset_email_sent" }),
+      );
+    });
+
+    it("refuses on a spent org budget before the user's cooldown token is spent", async () => {
+      orgMailBudgetMock.mockResolvedValue(tooMany());
+      const res = await post({ mode: "reset_email" });
+      expect(res.status).toBe(429);
+      expect(recipientCooldownMock).not.toHaveBeenCalled();
+      expect(authForget).not.toHaveBeenCalled();
+    });
+
+    it("setting a password mails nobody, so it spends neither budget", async () => {
+      expect((await post({ mode: "set", password: "supersecret-pw-123" })).status).toBe(200);
+      expect(orgMailBudgetMock).not.toHaveBeenCalled();
+      expect(recipientCooldownMock).not.toHaveBeenCalled();
+    });
   });
 
   it("returns 403 when a non-superadmin sets the password of a shared user (AUTHZ-2)", async () => {

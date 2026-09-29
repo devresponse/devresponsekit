@@ -86,3 +86,52 @@ describe("OrganizationInvitationsPanel resend (F-149)", () => {
     expect(listReads()).toBe(2);
   });
 });
+
+describe("OrganizationInvitationsPanel budgets (F-64)", () => {
+  const tooMany = () => json({ error: "rate_limited", retryAfter: 420 }, 429);
+
+  it("says so when a resend is refused by the cooldown or the org's mail budget", async () => {
+    fetchMock.mockImplementation(async (input: unknown, init?: { method?: string }) => {
+      const url = new URL(String(input), "http://test.local");
+      if (url.pathname.endsWith("/resend") && init?.method === "POST") return tooMany();
+      return json({
+        items: [{ ...ROW, status: "pending" }],
+        page: 1,
+        pageSize: 10,
+        total: 1,
+        sort: [],
+      });
+    });
+    const user = userEvent.setup();
+    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate />);
+
+    await user.click(await screen.findByRole("button", { name: "Resend" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many requests. Please slow down.",
+    );
+  });
+
+  it("says so when an invitation is refused by the org's mail budget", async () => {
+    fetchMock.mockImplementation(async (input: unknown, init?: { method?: string }) => {
+      const url = new URL(String(input), "http://test.local");
+      if (
+        url.pathname === "/api/administrator/organizations/o1/invitations" &&
+        init?.method === "POST"
+      ) {
+        return tooMany();
+      }
+      return json({ items: [], page: 1, pageSize: 10, total: 0, sort: [] });
+    });
+    const user = userEvent.setup();
+    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate />);
+
+    await user.click(await screen.findByRole("button", { name: "Invite member" }));
+    await user.type(await screen.findByRole("textbox", { name: /Email address/ }), "ada@corp.test");
+    await user.click(screen.getByRole("button", { name: "Send invitation" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many requests. Please slow down.",
+    );
+  });
+});

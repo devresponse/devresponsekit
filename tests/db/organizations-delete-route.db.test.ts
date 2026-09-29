@@ -22,7 +22,10 @@ import type * as AuthStatusModule from "@/lib/auth-status";
  *   1. a clean delete returns 2xx, the org is gone, and the
  *      `admin.organization.deleted` row is actually there; and
  *   2. a delete blocked by another FK rolls the success row back, so no audit
- *      row ever claims a deletion that did not happen.
+ *      row ever claims a deletion that did not happen;
+ *   3. F-98: the org's REVOKED API keys and OAuth clients go with it, while an
+ *      ACTIVE one still refuses the delete (409) and the revoked ones then
+ *      roll back with everything else.
  *
  * Driven by `pnpm test:db` (vitest.db.config.ts). Fixtures use `__dbtest_` and
  * self-clean, leaving no residue.
@@ -78,8 +81,11 @@ async function cleanup(): Promise<void> {
       .where("actor_better_auth_user_id", "=", ACTOR)
       .execute();
   });
+  await db.deleteFrom("app_api_keys").where("name", "like", `${PREFIX}%`).execute();
+  await db.deleteFrom("app_oauth_clients").where("name", "like", `${PREFIX}%`).execute();
   await db.deleteFrom("app_roles").where("key", "like", `${PREFIX}%`).execute();
   await db.deleteFrom("app_organizations").where("slug", "like", `${PREFIX}%`).execute();
+  await db.deleteFrom("app_users").where("better_auth_user_id", "like", `${PREFIX}%`).execute();
 }
 
 async function newOrg(slug: string): Promise<string> {
@@ -89,6 +95,74 @@ async function newOrg(slug: string): Promise<string> {
     .returning("id")
     .executeTakeFirstOrThrow();
   return row.id;
+}
+
+/** The user every credential fixture acts as (both tables require one). */
+async function credentialOwner(): Promise<string> {
+  const row = await db
+    .insertInto("app_users")
+    .values({
+      better_auth_user_id: `${PREFIX}owner`,
+      primary_email: `${PREFIX}owner@dbtest.local`,
+      status: "active",
+    })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  return row.id;
+}
+
+type CredentialKind = "api_key" | "oauth_client";
+type CredentialStatus = "active" | "revoked";
+
+let credentialSeq = 0;
+/** Inserts a key or client for `orgId` and returns its row id. */
+async function newCredential(
+  kind: CredentialKind,
+  orgId: string,
+  ownerId: string,
+  status: CredentialStatus,
+): Promise<string> {
+  credentialSeq += 1;
+  const name = `${PREFIX}${kind}_${status}_${credentialSeq}`;
+  const revoked = status === "revoked" ? { revoked_at: new Date() } : {};
+  const row =
+    kind === "api_key"
+      ? await db
+          .insertInto("app_api_keys")
+          .values({
+            app_user_id: ownerId,
+            organization_id: orgId,
+            name,
+            key_prefix: "dbt",
+            key_hash: `${name}_hash`,
+            status,
+            ...revoked,
+          })
+          .returning("id")
+          .executeTakeFirstOrThrow()
+      : await db
+          .insertInto("app_oauth_clients")
+          .values({
+            client_id: `${name}_client`,
+            client_secret_hash: `${name}_hash`,
+            app_user_id: ownerId,
+            organization_id: orgId,
+            name,
+            status,
+            ...revoked,
+          })
+          .returning("id")
+          .executeTakeFirstOrThrow();
+  return row.id;
+}
+
+/** The ids, among `ids`, whose credential rows still exist. */
+async function survivingCredentials(ids: string[]): Promise<string[]> {
+  const [keys, clients] = await Promise.all([
+    db.selectFrom("app_api_keys").select("id").where("id", "in", ids).execute(),
+    db.selectFrom("app_oauth_clients").select("id").where("id", "in", ids).execute(),
+  ]);
+  return [...keys, ...clients].map((r) => r.id).sort();
 }
 
 interface AuditRow {
@@ -192,4 +266,71 @@ describe("DELETE /api/administrator/organizations/:id (DB-backed, DB-3)", () => 
     // The org survives, so this row keeps a real tenant link.
     expect(blocked.organization_id).toBe(orgId);
   });
+
+  it("F-98: deletes an org whose API keys and OAuth clients are all revoked, taking them with it", async () => {
+    const owner = await credentialOwner();
+    const orgId = await newOrg("revoked");
+    const otherOrgId = await newOrg("bystander");
+    const revoked = [
+      await newCredential("api_key", orgId, owner, "revoked"),
+      await newCredential("oauth_client", orgId, owner, "revoked"),
+    ];
+    // Another tenant's revoked credentials are not this delete's to take.
+    const bystanders = [
+      await newCredential("api_key", otherOrgId, owner, "revoked"),
+      await newCredential("oauth_client", otherOrgId, owner, "revoked"),
+    ];
+
+    const res = await DELETE(deleteReq(orgId), { params: Promise.resolve({ id: orgId }) });
+
+    // Before F-98 this was 409 organization_in_use, for good: a revoke keeps
+    // the row and nothing ever deletes one.
+    expect(res.status, await res.text()).toBe(200);
+    const org = await db
+      .selectFrom("app_organizations")
+      .select("id")
+      .where("id", "=", orgId)
+      .executeTakeFirst();
+    expect(org).toBeUndefined();
+    expect(await survivingCredentials([...revoked, ...bystanders])).toEqual([...bystanders].sort());
+    expectOne(await auditRows(), "admin.organization.deleted");
+  });
+
+  it.each([
+    ["api_key", "app_api_keys_organization_id_fkey"],
+    ["oauth_client", "app_oauth_clients_organization_id_fkey"],
+  ] as const)(
+    "F-98: an ACTIVE %s still refuses the delete (409), and the revoked ones roll back with it",
+    async (kind, constraint) => {
+      const owner = await credentialOwner();
+      const orgId = await newOrg(`active_${kind}`);
+      const active = await newCredential(kind, orgId, owner, "active");
+      const revoked = [
+        await newCredential("api_key", orgId, owner, "revoked"),
+        await newCredential("oauth_client", orgId, owner, "revoked"),
+      ];
+
+      const res = await DELETE(deleteReq(orgId), { params: Promise.resolve({ id: orgId }) });
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ error: "organization_in_use" });
+      const org = await db
+        .selectFrom("app_organizations")
+        .select("id")
+        .where("id", "=", orgId)
+        .executeTakeFirst();
+      expect(org?.id).toBe(orgId);
+      // The revoked rows were deleted inside the transaction the refusal
+      // rolled back, so the tenant is exactly as it was.
+      expect(await survivingCredentials([active, ...revoked])).toEqual([active, ...revoked].sort());
+      const rows = await auditRows();
+      expect(rows.map((r) => r.event_type)).toEqual(["admin.organization.delete_blocked"]);
+      // The denial names the table still holding the org: what an admin
+      // must revoke before the delete can go through.
+      expect(metadataOf(expectOne(rows, "admin.organization.delete_blocked"))).toMatchObject({
+        reason: "organization_in_use",
+        blockedBy: constraint,
+      });
+    },
+  );
 });

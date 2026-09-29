@@ -10,6 +10,7 @@ import type * as RetentionModule from "@/lib/retention.server";
  *     path (review #83) — and never issues a DELETE or sets a GUC itself
  *   - the outbox prune never touches `pending` rows
  *   - every loop is batched and stops at the caller's deadline (F-96)
+ *   - SSO handoff nonces expired over an hour ago are pruned too (F-84)
  */
 const state = vi.hoisted(() => ({
   auditDeleted: 0 as number,
@@ -37,6 +38,9 @@ const state = vi.hoisted(() => ({
   rawParams: [] as unknown[][],
   /** Every table a DELETE was built against. */
   deletedFrom: [] as string[],
+  /** F-84: what the nonce prune deletes, and the WHERE it builds. */
+  ssoNoncesDeleted: 0n as bigint,
+  nonceWhere: [] as unknown[][],
 }));
 
 function deleteChain(table: string) {
@@ -44,10 +48,12 @@ function deleteChain(table: string) {
   const chain = {
     where: (...args: unknown[]) => {
       if (table === "app_outbox") state.outboxWhere.push(args);
+      if (table === "app_sso_handoff_nonces") state.nonceWhere.push(args);
       return chain;
     },
     executeTakeFirst: async () => {
       state.onStatement?.();
+      if (table === "app_sso_handoff_nonces") return { numDeletedRows: state.ssoNoncesDeleted };
       const n = state.outboxDeleteBatches
         ? (state.outboxDeleteBatches.shift() ?? 0n)
         : state.outboxDeleted;
@@ -133,6 +139,8 @@ beforeEach(async () => {
   state.rawQueries = [];
   state.rawParams = [];
   state.deletedFrom = [];
+  state.ssoNoncesDeleted = 0n;
+  state.nonceWhere = [];
   mod = await import("@/lib/retention.server");
 });
 afterEach(() => {
@@ -304,6 +312,19 @@ describe("the deadline (F-96)", () => {
   });
 });
 
+describe("pruneExpiredSsoNonces (F-84)", () => {
+  it("deletes, in one statement, the nonces that expired over an hour ago", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-29T12:00:00Z"));
+    state.ssoNoncesDeleted = 5n;
+    expect(await mod.pruneExpiredSsoNonces()).toBe(5);
+    expect(state.deletedFrom).toEqual(["app_sso_handoff_nonces"]);
+    // A token lives at most 60 s, so an hour past expiry no nonce is usable:
+    // the same grace the launch-time purge in sso.server.ts applies.
+    expect(state.nonceWhere).toEqual([["expires_at", "<", new Date("2026-09-29T11:00:00Z")]]);
+  });
+});
+
 describe("pruneAll", () => {
   it("runs every prune/sweep with the env-configured windows", async () => {
     process.env.AUDIT_RETENTION_DAYS = "30";
@@ -313,30 +334,35 @@ describe("pruneAll", () => {
     state.auditDeleted = 4;
     state.outboxDeleted = 7n;
     state.outboxUpdated = 1n;
+    state.ssoNoncesDeleted = 3n;
     expect(await mod.pruneAll()).toEqual({
       revocations: 2,
       auditEvents: 4,
       outbox: 7,
       staleOutboxFailed: 1,
+      ssoNonces: 3,
     });
   });
 
   it("hands its deadline to every batched loop (F-96)", async () => {
-    // Past deadline: only the single revocation statement runs; the audit,
-    // stale-pending and outbox loops each stop before their first batch.
+    // Past deadline: only the single revocation and nonce statements run;
+    // the audit, stale-pending and outbox loops each stop before their first
+    // batch.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     state.revoked = 2;
     state.auditDeleted = 4;
     state.outboxDeleted = 7n;
     state.outboxUpdated = 1n;
+    state.ssoNoncesDeleted = 3n;
     expect(await mod.pruneAll({ deadline: Date.now() - 1 })).toEqual({
       revocations: 2,
       auditEvents: 0,
       outbox: 0,
       staleOutboxFailed: 0,
+      ssoNonces: 3,
     });
     expect(state.rawQueries).toHaveLength(0);
-    expect(state.deletedFrom).toHaveLength(0);
+    expect(state.deletedFrom).toEqual(["app_sso_handoff_nonces"]);
     expect(state.outboxSetWhere).toHaveLength(0);
     expect(warn).toHaveBeenCalledTimes(3);
   });

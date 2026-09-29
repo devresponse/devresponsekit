@@ -1,6 +1,7 @@
 import "server-only";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import { db } from "@/db/database";
+import type { AppDatabase } from "@/db/schema/app-schema";
 
 /**
  * Shared server module for the Organizations & Memberships endpoints
@@ -17,6 +18,8 @@ import { db } from "@/db/database";
  *     handlers MUST call it before mutating, and they MUST translate
  *     the {@link AdminError} it throws into the §5.1 error envelope.
  *   - `assertOrgNotDefault` guards against deleting the default org.
+ *   - `deleteRevokedOrgCredentials` clears the org's revoked API keys and
+ *     OAuth clients inside the DELETE's transaction (F-98).
  *   - `loadOrgOrThrow` deliberately performs extra round-trips for the
  *     correlated counts so the detail page shows accurate member/role/
  *     binding counts on first paint.
@@ -110,6 +113,38 @@ export async function assertOrgEmpty(id: string): Promise<void> {
   if (Number(row?.count ?? 0) > 0) {
     throw new AdminError("organization_not_empty");
   }
+}
+
+/**
+ * F-98: deletes the org's REVOKED API keys and OAuth clients. The DELETE
+ * handler calls it inside its deleting transaction, just before the org row
+ * goes.
+ *
+ * Both tables reference the org with no ON DELETE action, and a revoke only
+ * flips `status` (no path ever hard-deletes a credential), so a tenant that
+ * had ever held a key or a client, however long ago it was revoked, answered
+ * 409 `organization_in_use` forever. Only manual SQL could offboard it. A
+ * revoked row can never authorise anything again (there is no un-revoke, and
+ * the token check treats a missing row as inactive), and nothing references
+ * either table, so it goes with its org. An ACTIVE credential is still "in
+ * use": it stays, its foreign key still refuses the delete, and the handler
+ * still answers `organization_in_use`, so an admin revokes it first. The
+ * revocation itself remains in the audit log.
+ */
+export async function deleteRevokedOrgCredentials(
+  trx: Transaction<AppDatabase>,
+  id: string,
+): Promise<void> {
+  await trx
+    .deleteFrom("app_api_keys")
+    .where("organization_id", "=", id)
+    .where("status", "=", "revoked")
+    .execute();
+  await trx
+    .deleteFrom("app_oauth_clients")
+    .where("organization_id", "=", id)
+    .where("status", "=", "revoked")
+    .execute();
 }
 
 /**

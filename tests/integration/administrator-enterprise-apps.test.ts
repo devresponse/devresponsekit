@@ -20,6 +20,8 @@ const selectFirst = vi.fn();
 const insertExecute = vi.fn();
 const updateExecute = vi.fn();
 const deleteExecute = vi.fn();
+/** F-84: the DELETE's statements on its transaction handle, by table. */
+const trxDeletes = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({
   getCurrentSession: () => sessionGetter(),
@@ -71,8 +73,27 @@ vi.mock("@/db/database", () => {
     );
     return proxy;
   }
+  // F-84: the app DELETE runs in a transaction: it locks the app row (answered
+  // by `selectFirst`, like every other read here), deletes the app's handoff
+  // nonces, then the app. Every DELETE on the handle is recorded in
+  // `trxDeletes` by table; the app's own also answers `deleteExecute`, so a
+  // rejection staged there models that statement's FK violation.
+  const trx = {
+    selectFrom: () => makeChain(),
+    deleteFrom: (table: string) => ({
+      where: () => ({
+        execute: async () => {
+          trxDeletes(table);
+          return table === "app_enterprise_applications" ? deleteExecute() : [];
+        },
+      }),
+    }),
+  };
   return {
     db: {
+      transaction: () => ({
+        execute: (cb: (handle: unknown) => Promise<unknown>) => cb(trx),
+      }),
       selectFrom: () => makeChain(),
       insertInto: () => ({
         values: () => ({
@@ -158,6 +179,7 @@ beforeEach(async () => {
     insertExecute,
     updateExecute,
     deleteExecute,
+    trxDeletes,
   ])
     m.mockReset();
   itemsExecute.mockResolvedValue([]);
@@ -688,9 +710,9 @@ describe("DELETE /api/administrator/enterprise-apps/:id", () => {
     sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
     accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
     selectFirst.mockResolvedValue({ id: "docs", label: "Docs" });
-    deleteExecute.mockRejectedValue(
-      pgForeignKeyViolation("app_sso_handoff_nonces_target_application_id_fkey"),
-    );
+    // Nothing but its nonces references an app today, and those go first
+    // (F-84); this is a table a later migration might point at it.
+    deleteExecute.mockRejectedValue(pgForeignKeyViolation("app_example_application_id_fkey"));
     const res = await DELETE(idReq("docs"), {
       params: Promise.resolve({ id: "docs" }),
     });
@@ -716,5 +738,38 @@ describe("DELETE /api/administrator/enterprise-apps/:id", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: "admin.app.deleted", outcome: "success" }),
     );
+  });
+
+  it("F-84: deletes the app's handoff nonces first, on the same transaction", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    selectFirst.mockResolvedValue({ id: "docs", label: "Docs" });
+    deleteExecute.mockResolvedValue(undefined);
+    const res = await DELETE(idReq("docs"), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(200);
+    // Before F-84 the app was deleted on its own, and any nonce a launch had
+    // left answered 409 (tests/db/enterprise-app-delete-route.db.test.ts).
+    expect(trxDeletes.mock.calls.map(([table]) => table)).toEqual([
+      "app_sso_handoff_nonces",
+      "app_enterprise_applications",
+    ]);
+  });
+
+  it("F-84: answers 404 and audits nothing when the app is gone by the time the transaction locks it", async () => {
+    sessionGetter.mockResolvedValue({ user: { id: "ba-1" } });
+    accessGetter.mockResolvedValue(OK_ACCESS(["admin.apps.manage"]));
+    // The lookup still sees the app; the lock inside the transaction does not.
+    selectFirst
+      .mockResolvedValueOnce({ id: "docs", label: "Docs", organization_id: null })
+      .mockResolvedValueOnce(undefined);
+    const res = await DELETE(idReq("docs"), {
+      params: Promise.resolve({ id: "docs" }),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "application_not_found" });
+    expect(trxDeletes).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });

@@ -631,15 +631,16 @@ applied) or the database is unreachable. See
 
 **Audit / outbox tables growing without bound.** The retention prune applies
 `AUDIT_RETENTION_DAYS` (default 365) and `OUTBOX_RETENTION_DAYS` (default 90)
-and prunes expired token revocations. On Vercel it runs inside the daily
-`GET /api/internal/outbox-drain` cron (F-96), so confirm that cron is firing and
-`CRON_SECRET` is set. Each tick logs a `kind: "retention"` line with its counts,
-or `retention prune tick failed` with the error. A `[retention] … stopped at the
-time budget` line means a backlog larger than one tick can clear: later ticks
-finish it. If every table stops `after 0 rows`, the outbox drain used up the
-tick's budget before retention started: check its `kind: "outbox-drain"` line
-and the email provider. On any other host, schedule **`pnpm db:prune`**
-(`scripts/prune-retention.ts`). See [Deployment](./deployment.md).
+and prunes expired token revocations and SSO handoff nonces. On Vercel it runs
+inside the daily `GET /api/internal/outbox-drain` cron (F-96), so confirm that
+cron is firing and `CRON_SECRET` is set. Each tick logs a `kind: "retention"`
+line with its counts, or `retention prune tick failed` with the error. A
+`[retention] … stopped at the time budget` line means a backlog larger than one
+tick can clear: later ticks finish it. If every table stops `after 0 rows`, the
+outbox drain used up the tick's budget before retention started: check its
+`kind: "outbox-drain"` line and the email provider. On any other host, schedule
+**`pnpm db:prune`** (`scripts/prune-retention.ts`). See
+[Deployment](./deployment.md).
 
 ## Known risks & missing information
 

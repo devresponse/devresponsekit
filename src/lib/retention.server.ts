@@ -4,7 +4,7 @@ import { db } from "@/db/database";
 import { pruneExpiredRevocations } from "@/lib/api-auth/revocation.server";
 
 /**
- * Data-retention pruning (review D3). Three tables grow without bound under
+ * Data-retention pruning (review D3). These tables grow without bound under
  * normal operation; this is the maintenance path that keeps them in check.
  * Two schedulers call {@link pruneAll}, the same "no new scheduler infra"
  * approach as the outbox drainer: the daily `GET /api/internal/outbox-drain`
@@ -25,6 +25,8 @@ import { pruneExpiredRevocations } from "@/lib/api-auth/revocation.server";
  *     provider is never claimed, so a hard OUTBOX_MAX_PENDING_DAYS sweep
  *     (default 7, well past the retry budget) fails such orphans so they can
  *     then be pruned (audit #10).
+ *   - `app_sso_handoff_nonces` → rows expired over an hour ago (F-84). Each
+ *     SSO launch purges these too, so this only matters when launches stop.
  *
  * Every time-based prune and sweep runs in BATCHES (audit #21 for the audit
  * log, F-96 for the outbox), each batch its own short statement, so the first
@@ -59,6 +61,14 @@ const OUTBOX_BATCH = 1000;
  * lock-step (a new migration re-creates the function).
  */
 export const AUDIT_RETENTION_FLOOR_DAYS = 30;
+
+/**
+ * How long past its expiry an SSO handoff nonce is kept. A handoff token lives
+ * at most 60 s and the consume burn needs an unexpired row, so an hour is far
+ * past any use; it is the same grace the launch-time purge applies
+ * (`createSsoHandoffRedirect`, src/lib/sso.server.ts).
+ */
+const SSO_NONCE_GRACE_MS = 60 * 60 * 1000;
 
 /** Parses a non-negative integer day-count env var, falling back when unset/invalid. */
 export function retentionDays(value: string | undefined, fallback: number): number {
@@ -227,11 +237,31 @@ export async function failStalePendingOutbox(
   });
 }
 
+/**
+ * Deletes SSO handoff nonces that expired more than {@link SSO_NONCE_GRACE_MS}
+ * ago (F-84).
+ *
+ * The only purge used to be the one each SSO launch runs before it inserts its
+ * own nonce, so the table shrank only while someone launched an available app:
+ * after the last launch its rows stayed forever. This scheduled prune makes
+ * the table's size independent of launch traffic. One statement, on the
+ * `expires_at` index: the launch-time purge keeps the table to about an hour
+ * of launches, so there is no backlog to batch.
+ */
+export async function pruneExpiredSsoNonces(): Promise<number> {
+  const result = await db
+    .deleteFrom("app_sso_handoff_nonces")
+    .where("expires_at", "<", new Date(Date.now() - SSO_NONCE_GRACE_MS))
+    .executeTakeFirst();
+  return Number(result.numDeletedRows ?? 0);
+}
+
 export interface RetentionResult {
   revocations: number;
   auditEvents: number;
   outbox: number;
   staleOutboxFailed: number;
+  ssoNonces: number;
 }
 
 export interface PruneAllOptions {
@@ -263,5 +293,7 @@ export async function pruneAll(options: PruneAllOptions = {}): Promise<Retention
   // reclaimed in the same run.
   const staleOutboxFailed = await failStalePendingOutbox(maxPendingDays, OUTBOX_BATCH, deadline);
   const outbox = await pruneOutbox(outboxDays, OUTBOX_BATCH, deadline);
-  return { revocations, auditEvents, outbox, staleOutboxFailed };
+  // Like the revocation prune: one short statement, so no deadline check.
+  const ssoNonces = await pruneExpiredSsoNonces();
+  return { revocations, auditEvents, outbox, staleOutboxFailed, ssoNonces };
 }

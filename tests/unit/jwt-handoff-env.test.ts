@@ -19,6 +19,7 @@ const TOUCHED = [
   "SSO_HANDOFF_PRIVATE_KEY",
   "SSO_HANDOFF_PREVIOUS_PRIVATE_KEY",
   "SSO_HANDOFF_ISSUER",
+  "BETTER_AUTH_URL",
 ] as const;
 const snapshot: Record<string, string | undefined> = {};
 
@@ -79,6 +80,8 @@ describe("jwt-handoff.server env guards", () => {
 
   it("signs under an exact origin and stamps it verbatim as iss", async () => {
     process.env.SSO_HANDOFF_ISSUER = "https://demo.devresponse.ca";
+    // Only the issuer itself signs (F-80).
+    process.env.BETTER_AUTH_URL = "https://demo.devresponse.ca";
     const token = await signSsoHandoff(baseInput);
     const payload = JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as {
       iss: string;

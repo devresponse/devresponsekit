@@ -1472,6 +1472,17 @@ satellite accept another's tokens. A UNIQUE index is scheduled for a later core
 migration; until then the check is route-level (a concurrent create could still
 race it).
 
+The catalog never registers this deployment as a target of itself (F-83). Its
+own `/api/sso/consume` accepts a handoff for its own `SSO_HANDOFF_APPLICATION_ID`
+under `<prefix>:<id>`, so such a row would let any member launch a fresh session
+past the absolute-lifetime cap, or send someone a one-click link that swaps their
+session for the sender's account. `POST` refuses the deployment's own id with
+`409 id_taken`; `POST` and `PATCH` refuse its own audience with
+`409 audience_taken` and its own origin (`BETTER_AUTH_URL`) with
+`400 origin_not_allowed`. A row written before this check, or straight into the
+database, is not removed: look for one whose `sso_audience` is the deployment's
+own audience.
+
 ### 8.8 API keys
 
 The cookie-session governance console for API keys across all users and orgs.

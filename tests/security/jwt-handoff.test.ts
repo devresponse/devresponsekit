@@ -11,6 +11,7 @@ import {
 } from "jose";
 import {
   __resetSsoHandoffKeyCacheForTests,
+  assertSsoHandoffSignerIsIssuer,
   getSsoHandoffJwks,
   isSsoHandoffSelfIssuer,
   isSsoHandoffSignerConfigured,
@@ -261,5 +262,35 @@ describe("jwt handoff — EdDSA signer/verifier (review #5)", () => {
     process.env.BETTER_AUTH_URL = "https://satellite.test";
     expect(isSsoHandoffSignerConfigured()).toBe(true);
     expect(isSsoHandoffSelfIssuer()).toBe(false);
+  });
+});
+
+/**
+ * F-80: a satellite that holds the key (an env copied from the kit's) used to
+ * sign with `iss` = the primary, and every sibling accepted the token. The
+ * signer now refuses unless this deployment IS the issuer, and the same check
+ * fails the kit's boot (tests/unit/instrumentation-env-boot.test.ts).
+ */
+describe("jwt handoff — only the issuer signs as the issuer (F-80)", () => {
+  const NOT_THE_ISSUER = /SSO_HANDOFF_PRIVATE_KEY is set, but this deployment is not the issuer/;
+
+  it("refuses to sign on a key-holding deployment that is not the issuer", async () => {
+    process.env.BETTER_AUTH_URL = "https://satellite.test";
+    await expect(sign("f80-satellite")).rejects.toThrow(NOT_THE_ISSUER);
+    expect(() => assertSsoHandoffSignerIsIssuer()).toThrow(NOT_THE_ISSUER);
+  });
+
+  it("still signs on the issuer, where the check passes", async () => {
+    expect(() => assertSsoHandoffSignerIsIssuer()).not.toThrow();
+    const token = await sign("f80-issuer");
+    expect(decodeJwt(token).iss).toBe(ISSUER);
+  });
+
+  it("asks nothing of a consumer that holds no key", async () => {
+    delete process.env.SSO_HANDOFF_PRIVATE_KEY;
+    process.env.BETTER_AUTH_URL = "https://satellite.test";
+    expect(() => assertSsoHandoffSignerIsIssuer()).not.toThrow();
+    // Signing still fails for the reason that applies: there is no key.
+    await expect(sign("f80-consumer")).rejects.toThrow(/SSO_HANDOFF_PRIVATE_KEY is not configured/);
   });
 });

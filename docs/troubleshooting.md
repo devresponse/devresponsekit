@@ -486,6 +486,8 @@ lift a co-member's live one-time link. Locally, read the DB-only
   [] }` means the hub has no `SSO_HANDOFF_PRIVATE_KEY`).
 - Launch answers `503 sso_not_configured` (audit reason
   `signing_key_not_configured`): the hub has no `SSO_HANDOFF_PRIVATE_KEY`.
+  Audit reason `not_the_issuer`: the key is set, but `SSO_HANDOFF_ISSUER` is
+  not this deployment's own origin. Such a deployment fails to boot (F-80).
 - The token is rejected as too old even though `exp` is in the future: the
   receiver enforces `maxTokenAge` 60s from `iat` — check the clocks on both
   hosts (5s tolerance).

@@ -3,7 +3,7 @@ import { auditEvent } from "@/lib/audit.server";
 import { getCurrentSession, getImpersonatorId } from "@/lib/auth-guard";
 import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server";
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
-import { isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
+import { isSsoHandoffSelfIssuer, isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
@@ -49,7 +49,10 @@ export const dynamic = "force-dynamic";
  *   4. Signing key (review #5): `SSO_HANDOFF_PRIVATE_KEY` is OPTIONAL at boot
  *      (a consumer-only satellite never issues), so a deployment that tries
  *      to LAUNCH without one fails closed here — `503 sso_not_configured`,
- *      audited + logged — before any nonce/purge write.
+ *      audited + logged — before any nonce/purge write. So does one that holds
+ *      a key but is not the issuer `SSO_HANDOFF_ISSUER` names (F-80, reason
+ *      `not_the_issuer`): what it signed would carry the issuer's `iss`. Such a
+ *      deployment normally fails to boot; `signSsoHandoff` refuses it too.
  *
  * Signed-out continuation: the redirect to sign-in carries a `returnTo` so the
  * launch survives authentication. Without it a user arriving from a satellite's
@@ -135,21 +138,30 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
     return NextResponse.json({ error: "forbidden_while_impersonating" }, { status: 403 });
   }
 
-  if (!isSsoHandoffSignerConfigured()) {
-    const err = new Error("SSO_HANDOFF_PRIVATE_KEY is not configured");
+  const configError = !isSsoHandoffSignerConfigured()
+    ? "signing_key_not_configured"
+    : !isSsoHandoffSelfIssuer()
+      ? "not_the_issuer"
+      : null;
+  if (configError) {
+    const err = new Error(
+      configError === "not_the_issuer"
+        ? "SSO_HANDOFF_PRIVATE_KEY is set, but this deployment is not SSO_HANDOFF_ISSUER"
+        : "SSO_HANDOFF_PRIVATE_KEY is not configured",
+    );
     // The id `withAdminRoute` memoised and stamps on this 503, so the log line,
     // the Sentry event and the audit row below join to the response.
     const requestId = getOrCreateRequestId(request);
     logServerError("sso.launch.config_error", {
       requestId,
-      reason: "signing_key_not_configured",
+      reason: configError,
       err,
     });
     captureServerError(err, { requestId, status: 503 });
     await auditEvent({
       eventType: "sso.launch.failure",
       outcome: "error",
-      reason: "signing_key_not_configured",
+      reason: configError,
       actorBetterAuthUserId: session.user.id,
       targetApplicationId: applicationId,
       request,

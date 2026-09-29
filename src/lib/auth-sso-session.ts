@@ -15,6 +15,15 @@ import { isBanActive } from "@/lib/ban-status";
  *     endpoint on the HTTP router — it is exclusively callable through
  *     `auth.api.createSsoSession(...)` from server code. There is no
  *     URL that reaches it.
+ *   - That flag is vendor metadata, honoured only because better-auth copies
+ *     `options` through to better-call's router, and a bump of either could
+ *     drop it (F-81). The handler therefore refuses, with the same 404 an
+ *     unmounted route gives, any call that arrives with `ctx.request`: the
+ *     router sets it from the incoming `Request`, and a server-side
+ *     `auth.api.*` call (the consume route passes `headers`) never carries
+ *     one — the same test `rejectClosedAuthEndpoints` applies. Without it,
+ *     a mounted `POST /api/auth/sso-session/create {"userId": …}` would be an
+ *     unauthenticated sign-in as any user.
  *   - The caller MUST have verified the handoff token AND consumed its
  *     nonce atomically BEFORE calling this. This endpoint only re-checks
  *     user-level state (exists, not banned) — it cannot see the token.
@@ -44,6 +53,10 @@ export const ssoSession = () => {
           },
         },
         async (ctx) => {
+          // F-81: server-only in fact, not just in vendor metadata (above).
+          if (ctx.request) {
+            throw new APIError("NOT_FOUND");
+          }
           const user = await ctx.context.internalAdapter.findUserById(ctx.body.userId);
           if (!user) {
             throw new APIError("UNAUTHORIZED", { message: "unknown user" });

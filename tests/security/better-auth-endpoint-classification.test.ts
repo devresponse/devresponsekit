@@ -268,6 +268,35 @@ describe("F-06: every Better Auth endpoint on the real instance is classified", 
     const res = await call({ path: "/sso-session/create", method: "POST" });
     expect(res.status).toBe(404);
   });
+
+  it("refuses sso-session/create in its own handler when a call carries a Request (F-81)", async () => {
+    // The router dispatches a mounted endpoint with the incoming Request as
+    // `request`; passing one here is that dispatch, as it would run if a
+    // Better Auth or better-call change stopped honouring SERVER_ONLY. The
+    // endpoint signs in whichever user id it is sent.
+    seq += 1;
+    const userId = await seedUser(`classify-sso-${seq}@example.com`, "user");
+    const body = { userId };
+    const overHttp = (await auth.api.createSsoSession({
+      body,
+      request: new Request(`${BASE_URL}/api/auth/sso-session/create`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE_URL },
+        body: JSON.stringify(body),
+      }),
+    })) as unknown as Response;
+    expect(overHttp.status).toBe(404);
+    expect(overHttp.headers.getSetCookie()).toEqual([]);
+
+    // Control: the consume route's own call (headers, no request) signs in.
+    const served = await auth.api.createSsoSession({
+      body,
+      headers: new Headers(),
+      returnHeaders: true,
+    });
+    expect(served.response).toEqual({ ok: true });
+    expect(served.headers.getSetCookie().join("; ")).toMatch(/session_token=[^;]+/);
+  });
 });
 
 describe("F-06: the real instance closes the unused vendor surface for everyone", () => {

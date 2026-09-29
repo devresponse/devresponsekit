@@ -54,7 +54,8 @@ vi.mock("@/lib/api-auth/resolve-caller.server", () => ({
       credentialId: "key-f34",
       boundOrganizationId: null,
       grantedScopes: ["admin.users.read", "admin.audit.read"],
-      access: { organizationId: null },
+      // Allowed through the gateway's status gate (I-15).
+      access: { status: "active", membershipStatus: "active", organizationId: null },
     },
   }),
 }));

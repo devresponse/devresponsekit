@@ -19,10 +19,12 @@ import { SUPERUSER_PERMISSIONS } from "@/lib/admin/permissions";
  * /api/v1/admin/oauth-clients/[id]` ran only behind a mocked guard, `PATCH
  * /api/administrator/users/[id]` only for input validation, and `DELETE
  * /api/v1/admin/api-keys/[id]` only for the caller's own org. What watched
- * them was `tests/unit/admin-route-scope-invariant.test.ts`, which checks that
- * each route FILE imports a scope helper. It still passes when a handler drops
- * its `canAccessOrg` check or its org predicate, because the import stays
- * behind for the sibling methods.
+ * them was `tests/unit/admin-route-scope-invariant.test.ts`, which then checked
+ * only that each route FILE imported a scope helper, so it passed when a
+ * handler dropped its `canAccessOrg` check, because the import stayed behind
+ * for the sibling methods. Since F-127 it checks that each handler CALLS a
+ * primitive, but a call is not the right predicate: it still passes when a
+ * handler keeps the call and drops the org filter it feeds.
  *
  * This file calls each of those methods. It drives the REAL guards
  * (`requireApiPermission`, `requireAdminPermission`), the REAL access-scope
@@ -39,11 +41,12 @@ import { SUPERUSER_PERMISSIONS } from "@/lib/admin/permissions";
  * cross-org 404 and the MACHINE-2 bound-key case; a tenant list gets the org
  * predicate in SQL; the two platform catalogs (email templates, permissions)
  * have no tenant column, so their boundary is the read permission (a 403 that
- * never queries). Each 404 / 403 / predicate case fails when the guard line it
- * pins is removed (checked one guard at a time for F-42). The 200 cases (the
- * caller's own org or a holder of the read permission, and for most tenant
- * methods a superadmin at a browser) must succeed, so the file cannot pass by
- * denying everyone.
+ * never queries), except that the permission catalog's usage count is over
+ * tenant roles and carries the caller's org predicate (F-127). Each 404 / 403
+ * / predicate case fails when the guard line it pins is removed (checked one
+ * guard at a time for F-42). The 200 cases (the caller's own org or a holder
+ * of the read permission, and for most tenant methods a superadmin at a
+ * browser) must succeed, so the file cannot pass by denying everyone.
  * `vitest.config.ts` also gives every `/api/v1` route file, and each
  * administrator file here, a coverage floor of its own, so a handler method
  * that no test invokes fails CI even when this file is not updated.
@@ -960,5 +963,36 @@ describe("GET /api/administrator/permissions — the read permission is the boun
       .map((c) => c.args);
     expect(predicates).toContainEqual(["p.key", "ilike", "%users%"]);
     expect(predicates).toContainEqual(["p.description", "ilike", "%users%"]);
+  });
+
+  // F-127: the catalog has no tenant column, but its usage count is over
+  // tenant ROLES, so it counts only the roles the caller can list at GET
+  // /roles. It used to count every tenant's. Postgres proves the numbers in
+  // tests/db/admin-list-counts.db.test.ts; this pins the predicate per caller.
+  const countPredicates = () =>
+    state.calls
+      .filter((c) => c.table === "app_permissions" && c.method === "where")
+      .map((c) => c.args)
+      .filter((args) => args[0] === "r.organization_id");
+
+  it.each([
+    ["an org admin at a browser", () => orgAdminSession(["admin.roles.read"])],
+    ["a superuser's key bound to org A (MACHINE-2)", () => boundSuperuserKey(["admin.roles.read"])],
+  ])("%s gets a usage count confined to org A (F-127)", async (_who, makeCaller) => {
+    caller.value = makeCaller();
+    const { GET } = await import("@/app/api/administrator/permissions/route");
+    const res = await GET(req("/api/administrator/permissions"));
+
+    expect(res.status).toBe(200);
+    expect(countPredicates()).toEqual([["r.organization_id", "=", ORG_A]]);
+  });
+
+  it("a superadmin at a browser counts every tenant's roles", async () => {
+    caller.value = cookieSuperadmin();
+    const { GET } = await import("@/app/api/administrator/permissions/route");
+    const res = await GET(req("/api/administrator/permissions"));
+
+    expect(res.status).toBe(200);
+    expect(countPredicates()).toEqual([]);
   });
 });

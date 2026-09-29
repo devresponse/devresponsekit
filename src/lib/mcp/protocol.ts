@@ -83,6 +83,12 @@ export const RPC_INVALID_PARAMS = -32602;
 /** Server-reserved range (-32000..-32099): unauthenticated caller. */
 export const RPC_UNAUTHORIZED = -32001;
 /**
+ * Server-reserved range: the credential authenticated, but its principal may
+ * not act — a user or membership that is blocked, suspended or still pending
+ * (I-15). The last two digits echo the HTTP 403 the transport answers with.
+ */
+export const RPC_FORBIDDEN = -32003;
+/**
  * Server-reserved range: the caller's `tools/call` budget is spent (F-76).
  * The last two digits echo the HTTP 429 the transport answers with.
  */

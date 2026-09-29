@@ -481,13 +481,13 @@ i18n: labels + messages localize.
 User stories
 
 - UAT-ADMIN-RGP-PERMISSIONS-LIST-S1 — As an Org Admin, I want to read the permission catalog and see which roles use a permission, so that I understand the RBAC vocabulary.
-  - Acceptance criteria: Given `admin.roles.read`, when I open the page, then a grid lists Key, Description, and "Used by N roles"; clicking the count opens a slide-over listing the roles, each linking to its detail.
+  - Acceptance criteria: Given `admin.roles.read`, when I open the page, then a grid lists Key, Description, and "Used by N roles"; clicking the count opens a slide-over listing the roles, each linking to its detail. N counts only the roles I can see (my own org's; a Superadmin sees every role), so it equals the number of roles the slide-over lists (F-127).
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
     | 1 | Sign in as `orgadmin@orga.local`; open `/en/app/administrator/permissions` | The catalog grid renders |
     | 2 | Type `roles` into search | The list filters to keys/descriptions containing "roles" |
-    | 3 | Click the "Used by N roles" number on a row | A slide-over panel lists the roles holding that permission |
+    | 3 | Click the "Used by N roles" number on a row | A slide-over panel lists the roles holding that permission, N of them, all in ORG A (before F-127 the count also included other tenants' roles) |
     | 4 | Click **View role** on one | You navigate to that role's detail page |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 

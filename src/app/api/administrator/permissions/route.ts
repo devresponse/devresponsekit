@@ -17,7 +17,7 @@ import {
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
 import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
-import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
+import { hasCrossOrgReach, resolveOrgScope } from "@/lib/admin/access-scope.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +37,15 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const guard = await requireAdminPermission(request, "admin.roles.read");
   if (isAdminPermissionDenial(guard)) return guard.response;
 
+  // ADR-0001 (F-127): the catalog is platform-global, but the ROLES that
+  // hold a permission are tenant data. Count only the roles this caller can
+  // list at GET /roles: their own org's (global roles are SUPERADMIN-only
+  // there), every role for a cross-org reader, none for an org admin with no
+  // resolvable org. The count used to span every tenant, so it disagreed with
+  // the "Roles using this" panel that lists the roles, and told an org admin
+  // how many roles other tenants had built with each permission.
+  const scope = resolveOrgScope(guard.access);
+
   const query = parseListQuery(request.nextUrl.searchParams, {
     allowedSortFields: ["key", "description", "used_by_role_count"],
     defaultSort: [{ field: "key", direction: "asc" }],
@@ -53,16 +62,19 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   }
 
   const itemsQuery = applySortAndPagination(
-    base.select((eb) => [
-      "p.id",
-      "p.key",
-      "p.description",
-      eb
+    base.select((eb) => {
+      let rolesUsing = eb
         .selectFrom("app_role_permissions as rp")
+        .innerJoin("app_roles as r", "r.id", "rp.role_id")
         .select(sql<string>`count(*)`.as("c"))
-        .whereRef("rp.permission_id", "=", "p.id")
-        .as("used_by_role_count"),
-    ]),
+        .whereRef("rp.permission_id", "=", "p.id");
+      if (scope === null) {
+        rolesUsing = rolesUsing.where(sql<boolean>`false`);
+      } else if (scope.kind === "org") {
+        rolesUsing = rolesUsing.where("r.organization_id", "=", scope.organizationId);
+      }
+      return ["p.id", "p.key", "p.description", rolesUsing.as("used_by_role_count")] as const;
+    }),
     query,
   );
 

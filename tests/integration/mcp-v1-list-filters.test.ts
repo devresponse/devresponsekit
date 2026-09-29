@@ -59,7 +59,8 @@ vi.mock("@/lib/api-auth/resolve-caller.server", () => ({
       credentialId: "key-1",
       boundOrganizationId: "org-1",
       grantedScopes: ["admin.users.read", "admin.audit.read"],
-      access: { organizationId: "org-1" },
+      // Allowed through the gateway's status gate (I-15).
+      access: { status: "active", membershipStatus: "active", organizationId: "org-1" },
     },
   }),
 }));

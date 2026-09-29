@@ -80,6 +80,13 @@ function apiResponse(status: number, body: unknown): Response {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
+/**
+ * The statuses a principal needs to use the gateway at all: the route applies
+ * `decideSecureAccess` before any method (I-15), so every caller below that
+ * is meant to get through carries them.
+ */
+const ALLOWED = { status: "active", membershipStatus: "active" } as const;
+
 /** A resolved API-key caller, as resolveCallerDetailed returns it. */
 function apiKeyCaller(over: Record<string, unknown> = {}) {
   return {
@@ -89,7 +96,7 @@ function apiKeyCaller(over: Record<string, unknown> = {}) {
     credentialId: "key-1",
     boundOrganizationId: "org-1",
     grantedScopes: ["account.read"],
-    access: { organizationId: "org-1", permissions: [] },
+    access: { ...ALLOWED, organizationId: "org-1", permissions: [] },
     ...over,
   };
 }
@@ -109,7 +116,7 @@ function adminKeyCaller() {
   ];
   return apiKeyCaller({
     grantedScopes: everything,
-    access: { organizationId: "org-1", permissions: everything },
+    access: { ...ALLOWED, organizationId: "org-1", permissions: everything },
   });
 }
 
@@ -121,7 +128,7 @@ function jwtCaller(audience: string[], over: Record<string, unknown> = {}) {
     isBearer: true,
     credentialId: "jti-1",
     grantedScopes: ["account.read"],
-    access: { organizationId: "org-1", permissions: [] },
+    access: { ...ALLOWED, organizationId: "org-1", permissions: [] },
     jwt: {
       organizationId: "org-1",
       expiresAt: new Date(Date.now() + 600_000),
@@ -309,7 +316,10 @@ describe("/api/mcp audience binding (RFC 8707, review #50/#53)", () => {
     // binding and let v1 fall back to the principal's earliest org, so the
     // exchange must carry the credential's own binding and keep failing closed.
     resolveCaller.mockResolvedValue(
-      apiKeyCaller({ boundOrganizationId: "org-bound", access: { organizationId: null } }),
+      apiKeyCaller({
+        boundOrganizationId: "org-bound",
+        access: { ...ALLOWED, organizationId: null },
+      }),
     );
     await call({ authorization: "Bearer drk_live_x" });
     expect(mintAccessToken.mock.calls[0]![0]).toMatchObject({ organizationId: "org-bound" });
@@ -355,6 +365,42 @@ describe("/api/mcp", () => {
   it("rejects a cookie session — MCP requires a bearer credential", async () => {
     resolveCaller.mockResolvedValue({ kind: "session", betterAuthUserId: "u1", isBearer: false });
     expect((await POST(post({ jsonrpc: "2.0", id: 1, method: "tools/list" }))).status).toBe(401);
+  });
+
+  /**
+   * I-15: the access context keeps a blocked principal's role permissions
+   * (review #200), so a valid key whose owner was suspended, is still pending,
+   * or was blocked in the key's org used to be offered every tool its roles
+   * grant, and its tool calls minted a v1 token before v1 refused them.
+   */
+  it.each([
+    ["a suspended user", { status: "suspended", membershipStatus: "active" }],
+    ["a user still pending approval", { status: "pending_approval", membershipStatus: "active" }],
+    ["a member blocked in the key's org", { status: "active", membershipStatus: "blocked" }],
+    [
+      "a principal with no membership in the key's org",
+      { status: "active", membershipStatus: null },
+    ],
+  ])("403s %s before serving any method (I-15)", async (_who, statuses) => {
+    const admin = adminKeyCaller();
+    resolveCaller.mockResolvedValue({ ...admin, access: { ...admin.access, ...statuses } });
+    for (const message of [
+      { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "getMe", arguments: {} } },
+      { jsonrpc: "2.0", id: 3, method: "initialize", params: {} },
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+    ]) {
+      const res = await POST(post(message, { authorization: "Bearer drk_live_x" }));
+      expect(res.status, message.method).toBe(403);
+      expect(res.headers.get("WWW-Authenticate"), message.method).toBeNull();
+      expect(await res.json()).toEqual({
+        jsonrpc: "2.0",
+        id: message.id ?? null,
+        error: { code: -32003, message: "Forbidden" },
+      });
+    }
+    expect(mintAccessToken).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("handles initialize", async () => {
@@ -410,7 +456,7 @@ describe("/api/mcp", () => {
     resolveCaller.mockResolvedValue(
       apiKeyCaller({
         grantedScopes: ["account.read", "admin.users.read"],
-        access: { organizationId: "org-1", permissions: ["admin.users.read"] },
+        access: { ...ALLOWED, organizationId: "org-1", permissions: ["admin.users.read"] },
       }),
     );
     expect(await list()).toEqual(["getMe", "getUser", "listMyApiKeys", "listUsers"]);

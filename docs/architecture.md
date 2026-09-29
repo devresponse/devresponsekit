@@ -189,7 +189,7 @@ sequenceDiagram
 Two layers, two jobs:
 
 1. **`src/proxy.ts`** — a cheap edge check that redirects unauthenticated users away from secure paths and handles locale routing. It does **not** read the database and is **not** the security boundary.
-2. **Server guards** — the real boundary. `(secure)/layout.tsx` loads the access context and applies `decideSecureAccess`; admin route handlers call `requireAdminPermission(request, "admin.x.y")`, which additionally runs an **origin (CSRF) guard**, resolves the caller (cookie session or bearer credential), checks status and permission/scope, and writes an audit row on a permission denial. An origin refusal comes before the caller is known, so it is logged and counted rather than audited (F-15 — see [Admin Manager §12](./admin-manager.md#12-audit-model)).
+2. **Server guards** — the real boundary. `(secure)/layout.tsx` loads the access context and applies `decideSecureAccess`; admin route handlers call `requireAdminPermission(request, "admin.x.y")`, which additionally runs an **origin (CSRF) guard**, resolves the caller (cookie session or bearer credential), checks status and permission/scope, and writes an audit row on a permission denial. An origin refusal comes before the caller is known, so it is logged and counted rather than audited (F-15 — see [Admin Manager §12](./admin-manager.md#12-audit-model)). The access context keeps a blocked principal's role permissions, so every code path that loads one must apply `decideSecureAccess` itself; `tests/unit/access-status-gate-invariant.test.ts` fails one that does not (I-15).
 
 ### Rate limiting
 
@@ -364,7 +364,7 @@ The application tables link to Better Auth's `user` table logically via `app_use
 
 | Pattern | Where | Why |
 | --- | --- | --- |
-| **Single source of truth for scope** | `access-scope.server.ts` | One place decides tenant boundaries; enforced by a CI invariant test (`tests/unit/admin-route-scope-invariant.test.ts`) that fails the build if an admin route doesn't reference a scope primitive. |
+| **Single source of truth for scope** | `access-scope.server.ts` | One place decides tenant boundaries; enforced by a CI invariant test (`tests/unit/admin-route-scope-invariant.test.ts`) that fails the build if an admin route handler doesn't call a scope primitive (checked per exported method, F-127). |
 | **Permissions as data** | `src/lib/admin/permissions.ts` | The catalog is defined once and shared by seed and runtime, so it cannot drift. |
 | **404-not-403** | `canAccessOrg` / handlers | Out-of-scope resources are indistinguishable from non-existent ones. |
 | **Outbox-first email** | `src/lib/email/**` | Every message is recorded before delivery; delivery failures never break the calling flow. |

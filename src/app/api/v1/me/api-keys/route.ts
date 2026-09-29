@@ -5,6 +5,7 @@ import { requireApiAccount, tenantConfinement } from "@/lib/account/guard.server
 import {
   consumeToken,
   rateLimitKey,
+  rateLimitedProblemResponse,
   DEFAULT_ADMIN_MUTATION_LIMIT,
 } from "@/lib/admin/rate-limit.server";
 import { getServerEnv } from "@/lib/env";
@@ -88,12 +89,16 @@ export const POST = withV1Route(async function POST(request: NextRequest) {
 
   // Throttle credential minting per principal (sec-2): this is a sensitive
   // credential-issuing operation. Reuses the per-actor mutation token bucket.
+  // Per PRINCIPAL, not per credential as `enforceApiRateLimit` keys: each key
+  // minted here would otherwise bring a fresh bucket to mint the next one
+  // with. The 429 is the v1 one, counted and with the bucket's own
+  // `Retry-After` (F-130; it was a fixed "2" and never counted).
   const limit = consumeToken(
     rateLimitKey("api.me.apikeys", actor.betterAuthUserId),
     DEFAULT_ADMIN_MUTATION_LIMIT,
   );
   if (!limit.ok) {
-    return problemResponse("rate_limited", 429, request, { headers: { "Retry-After": "2" } });
+    return rateLimitedProblemResponse("api.me.apikeys", limit, request);
   }
 
   let json: unknown;

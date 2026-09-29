@@ -7,6 +7,7 @@ import { clientIpKey, withTrustedClientIp } from "@/lib/client-ip";
 import { consumeSsoHandoffNonce, type SsoNonceConsumeResult } from "@/lib/sso.server";
 import { verifySsoHandoff, type VerifiedSsoHandoff } from "@/lib/jwt-handoff.server";
 import { defaultLocale, isSupportedLocale } from "@/config/i18n-config";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { REQUEST_ID_HEADER, getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { checkTrustedOrigin } from "@/lib/admin/origin-guard.server";
 import { DEFAULT_SSO_CONSUME_LIMIT } from "@/lib/admin/rate-limit.server";
@@ -38,6 +39,22 @@ function wantsPage(request: NextRequest): boolean {
 }
 
 /**
+ * Every code a refused consume answers with (docs/api.md, "Consume failures").
+ * A closed union, so each is a known `errors.<code>` key:
+ * tests/unit/api-error-envelope-invariant.test.ts reads it (F-129).
+ */
+type SsoConsumeErrorCode =
+  | "missing_token"
+  | "invalid_token"
+  | "token_expired"
+  | "token_already_used"
+  | "session_establishment_failed"
+  | "forbidden"
+  | "payload_too_large"
+  | "rate_limited"
+  | "audience_not_configured";
+
+/**
  * Failure response for the SSO consume endpoint. The JSON echoes the
  * correlation id in both the `x-request-id` header and the body so a failed
  * handoff can be traced to the audit row / server log (OPS-OBS-4) — the
@@ -50,10 +67,16 @@ function wantsPage(request: NextRequest): boolean {
  * the user's language and shows the request id. The locale is the verified
  * token's when there is one, else the `locale` query parameter, which the
  * confirm form puts on its action.
+ *
+ * F-129: the JSON is the shared `{ error, message, requestId }` envelope
+ * (`adminErrorResponse`). It was a third shape, `{ error, requestId }`, with no
+ * `errors.<code>` key for a client to localize. For the `500
+ * audience_not_configured` the envelope adds its own `admin.*` log line beside
+ * the `sso.consume.config_error` one, which carries the reason.
  */
 function ssoErrorResponse(
   request: NextRequest,
-  code: string,
+  code: SsoConsumeErrorCode,
   status: number,
   requestId: string,
   payloadLocale?: unknown,
@@ -69,10 +92,7 @@ function ssoErrorResponse(
     response.headers.set(REQUEST_ID_HEADER, requestId);
     return response;
   }
-  return NextResponse.json(
-    { error: code, requestId },
-    { status, headers: { [REQUEST_ID_HEADER]: requestId } },
-  );
+  return adminErrorResponse(code, status, request, { requestId });
 }
 
 /**

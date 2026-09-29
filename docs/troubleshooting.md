@@ -152,7 +152,8 @@ warrant a comms channel and an owner before deep debugging.
 - Server faults are logged and, if enabled, sent to Sentry. On the admin, `/api/v1`
   and first-party API routes a handler that throws is logged as
   `admin.internal_error` / `v1.internal_error` under the `x-request-id` its
-  `500` response carries (F-29). A fault outside them (a page render, a server
+  `500` response carries (F-29); on the MCP transport and registration,
+  `mcp.internal_error` / `mcp.register.internal_error` (A-12). A fault outside them (a page render, a server
   action, an exempt route) goes through `onRequestError` → `logServerError`,
   tagged with a request id only when the caller sent one that was honoured.
   That `route.unhandled_error` line names the failing route's file pattern

@@ -167,7 +167,15 @@ describe("GET /api/sso/consume — verify + confirmation redirect (P2-2)", () =>
   it("rejects requests without a token and logs the refusal WITHOUT an audit row (F-15)", async () => {
     const res = await GET(getRequest("http://localhost/api/sso/consume"));
     expect(res.status).toBe(400);
-    const { requestId } = (await res.json()) as { requestId: string };
+    const body = (await res.json()) as { requestId: string };
+    const { requestId } = body;
+    // F-129: the shared envelope, whose `message` is a real errors.* key; it
+    // was a third shape, `{ error, requestId }`.
+    expect(body).toEqual({
+      error: "missing_token",
+      message: "errors.missing_token",
+      requestId: res.headers.get("x-request-id"),
+    });
     expect(preAuthLog).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "sso.consume.failure",
@@ -183,11 +191,26 @@ describe("GET /api/sso/consume — verify + confirmation redirect (P2-2)", () =>
     delete process.env.SSO_HANDOFF_APPLICATION_ID;
     const res = await GET(getRequest("http://localhost/api/sso/consume?token=abc"));
     expect(res.status).toBe(500);
-    expect(res.headers.get("x-request-id")).toMatch(/[0-9a-f-]{36}/);
+    const requestId = res.headers.get("x-request-id");
+    expect(requestId).toMatch(/[0-9a-f-]{36}/);
+    // F-129: the shared envelope, not the old `{ error, requestId }`.
+    expect(await res.json()).toEqual({
+      error: "audience_not_configured",
+      message: "errors.audience_not_configured",
+      requestId,
+    });
     expect(logErrMock).toHaveBeenCalledWith(
       "sso.consume.config_error",
-      expect.objectContaining({ reason: "application_id_not_configured" }),
+      expect.objectContaining({ reason: "application_id_not_configured", requestId }),
     );
+    // The envelope logs its own 5xx line under the same id, and is handed no
+    // `cause`, so the route's Sentry event is the only one.
+    expect(logErrMock).toHaveBeenCalledWith(
+      "admin.audience_not_configured",
+      expect.objectContaining({ requestId, status: 500 }),
+    );
+    expect(captureMock).toHaveBeenCalledTimes(1);
+    expect(captureMock).toHaveBeenCalledWith(expect.any(Error), { requestId, status: 500 });
   });
 
   it("redirects a VALID token to the localized confirmation page WITHOUT burning the nonce or signing in", async () => {

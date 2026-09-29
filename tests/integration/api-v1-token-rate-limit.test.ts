@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
 import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
+import type * as MetricsModule from "@/lib/observability/metrics.server";
 import { meteredBody } from "../helpers/request-body";
 
 /**
@@ -40,6 +41,15 @@ const env = vi.hoisted(() => ({
   API_JWT_ACCESS_TTL_SECONDS: 900,
 }));
 const consumeToken = vi.hoisted(() => vi.fn());
+/**
+ * The denial counter the limiter module increments (F-130: the route's 429 is
+ * counted there, by `rateLimitedProblemResponse`). The mocked limiter module
+ * is built once for the file, so its counter is the one loaded with it, not a
+ * fresh copy imported after `vi.resetModules()`.
+ */
+const limiterMetrics = vi.hoisted(() => ({
+  counter: undefined as undefined | typeof MetricsModule.rateLimitDenialsTotal,
+}));
 const auditEvent = vi.fn();
 const verifyClientCredentials = vi.fn();
 const verifyApiKey = vi.fn();
@@ -60,6 +70,9 @@ vi.mock("@/lib/auth-status", async () => {
 });
 vi.mock("@/lib/admin/rate-limit.server", async () => {
   const actual = await vi.importActual<typeof RateLimitModule>("@/lib/admin/rate-limit.server");
+  limiterMetrics.counter = (
+    await vi.importActual<typeof MetricsModule>("@/lib/observability/metrics.server")
+  ).rateLimitDenialsTotal;
   consumeToken.mockImplementation(actual.consumeToken);
   return { ...actual, consumeToken: (...a: unknown[]) => consumeToken(...a) };
 });
@@ -213,6 +226,10 @@ describe("POST /api/v1/auth/token limiter keying (review #11)", () => {
   });
 
   it("(c) a legitimate burst beyond the per-IP budget still 429s with problem+json + Retry-After", async () => {
+    const denials = async () =>
+      (await limiterMetrics.counter!.get()).values.find((v) => v.labels.scope === "api.token")
+        ?.value ?? 0;
+    const before = await denials();
     let last: Response | undefined;
     for (let i = 0; i < 11; i++) last = await mint(IP_A);
     expect(last?.status).toBe(429);
@@ -226,11 +243,7 @@ describe("POST /api/v1/auth/token limiter keying (review #11)", () => {
     expect(mintAccessToken).toHaveBeenCalledTimes(10);
 
     // The denial is visible to operators on the metrics scrape.
-    const { rateLimitDenialsTotal } = await import("@/lib/observability/metrics.server");
-    const denials = (await rateLimitDenialsTotal.get()).values.find(
-      (v) => v.labels.scope === "api.token",
-    );
-    expect(denials?.value).toBe(1);
+    expect(await denials()).toBe(before + 1);
   });
 
   it("(c') a VERIFIED credential gets its own bucket, shared across the networks it mints from", async () => {

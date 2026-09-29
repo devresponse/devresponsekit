@@ -2,12 +2,15 @@ import type { NextRequest } from "next/server";
 import { auditEvent } from "@/lib/audit.server";
 import { decideSecureAccess, getUserAccessContext } from "@/lib/auth-status";
 import { getServerEnv } from "@/lib/env";
-import { consumeToken, rateLimitKey } from "@/lib/admin/rate-limit.server";
-import type { RateLimitResult } from "@/lib/admin/rate-limit.server";
+import {
+  consumeToken,
+  rateLimitKey,
+  rateLimitedProblemResponse,
+  type RateLimitResult,
+} from "@/lib/admin/rate-limit.server";
 import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
 import { readBoundedText } from "@/lib/bounded-body";
 import { clientIpKey } from "@/lib/client-ip";
-import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
 import { verifyClientCredentials } from "@/lib/api-auth/oauth-clients.server";
 import { verifyApiKey } from "@/lib/api-auth/api-keys.server";
 import { isBetterAuthUserBanned } from "@/lib/api-auth/ban-status.server";
@@ -64,20 +67,16 @@ const MAX_BODY_BYTES = 16 * 1024;
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /**
- * Problem+json 429 for a denied limiter check. Counts the denial for the
- * `/api/metrics` scrape (the route calls `consumeToken` directly because
- * `enforceRateLimit` speaks the AdminError envelope, not problem+json) and
- * carries the bucket's real `Retry-After`.
+ * Problem+json 429 for a denied limiter check: the v1 surface's one 429
+ * (F-130), counted under `api.token` whichever bucket refused, with the
+ * bucket's real `Retry-After`. The route calls the bucket primitives directly
+ * because its pre-auth floors are keyed on the client IP, not on a grant.
  */
 function rateLimitedResponse(
   request: NextRequest,
   result: Extract<RateLimitResult, { ok: false }>,
 ) {
-  rateLimitDenialsTotal.inc({ scope: "api.token" });
-  return problemResponse("rate_limited", 429, request, {
-    extra: { retryAfter: result.retryAfterSeconds },
-    headers: { ...NO_STORE, "Retry-After": String(result.retryAfterSeconds) },
-  });
+  return rateLimitedProblemResponse("api.token", result, request, { headers: NO_STORE });
 }
 
 /**

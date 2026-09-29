@@ -5,6 +5,7 @@ import { getApiKeyById, revokeApiKey } from "@/lib/api-auth/api-keys.server";
 import {
   consumeToken,
   rateLimitKey,
+  rateLimitedProblemResponse,
   DEFAULT_ADMIN_MUTATION_LIMIT,
 } from "@/lib/admin/rate-limit.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -43,7 +44,7 @@ export const DELETE = withV1Route(async function DELETE(request: NextRequest, ct
     DEFAULT_ADMIN_MUTATION_LIMIT,
   );
   if (!limit.ok) {
-    return problemResponse("rate_limited", 429, request, { headers: { "Retry-After": "2" } });
+    return rateLimitedProblemResponse("api.me.apikeys", limit, request);
   }
 
   const { id } = await ctx.params;

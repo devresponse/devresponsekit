@@ -77,6 +77,12 @@ describe("GET /api/navigation/applications", () => {
     sessionGetter.mockResolvedValue(null);
     const res = await call("http://localhost/api/navigation/applications?locale=en");
     expect(res.status).toBe(401);
+    // F-129: the shared envelope, as the shell menu answers, not a bare { error }.
+    expect(await res.json()).toEqual({
+      error: "unauthenticated",
+      message: "errors.unauthenticated",
+      requestId: res.headers.get("x-request-id"),
+    });
   });
 
   it("returns 403 and audits a denied attempt for non-allowed users", async () => {
@@ -91,6 +97,14 @@ describe("GET /api/navigation/applications", () => {
         reason: "pending_approval",
       }),
     );
+    // F-129: the body names the id the denial row is written under.
+    const { getOrCreateRequestId } = await import("@/lib/admin/request-id.server");
+    const rowId = getOrCreateRequestId(auditMock.mock.calls[0]![0].request);
+    expect(await res.json()).toEqual({
+      error: "forbidden",
+      message: "errors.forbidden",
+      requestId: rowId,
+    });
   });
 
   it("returns 200 with the menu envelope for active users", async () => {

@@ -1,5 +1,11 @@
 import type { NextRequest } from "next/server";
-import { consumeToken, rateLimitKey, type RateLimitOptions } from "@/lib/admin/rate-limit.server";
+import {
+  consumeToken,
+  rateLimitKey,
+  recordRateLimitDenial,
+  type RateLimitOptions,
+  type RateLimitResult,
+} from "@/lib/admin/rate-limit.server";
 import { consumeSharedToken } from "@/lib/admin/rate-limit-shared.server";
 import { mintAccessToken } from "@/lib/api-auth/jwt.server";
 import {
@@ -15,8 +21,9 @@ import { getServerEnv } from "@/lib/env";
 import { handleMcpRequest } from "@/lib/mcp/dispatch.server";
 import { mcpWwwAuthenticate } from "@/lib/mcp/metadata";
 import { effectiveScopeHolder } from "@/lib/mcp/openapi-tools";
-import { rateLimitDenialsTotal } from "@/lib/observability/metrics.server";
+import { withMcpRoute } from "@/lib/route-handler.server";
 import {
+  type JsonRpcId,
   type JsonRpcResponse,
   RPC_FORBIDDEN,
   RPC_INVALID_REQUEST,
@@ -79,8 +86,12 @@ const MAX_BODY_BYTES = 1024 * 1024;
  * refused, the RFC 6750 `invalid_token` error ({@link bearerChallenge}). A
  * valid credential whose principal may not act (`decideSecureAccess`, I-15)
  * → 403 with JSON-RPC error `-32003`.
+ *
+ * A-12: exported through `withMcpRoute`, so every response carries an
+ * `x-request-id` and a throw answers a logged JSON-RPC `-32603` 500 under the
+ * same id, not Next's bodiless 500.
  */
-export async function POST(request: NextRequest): Promise<Response> {
+export const POST = withMcpRoute(async function POST(request: NextRequest): Promise<Response> {
   const env = getServerEnv();
   if (!env.MCP_ENABLED) return notFound();
 
@@ -93,13 +104,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     rateLimitKey("mcp.request", clientIpKey(request.headers)),
     MCP_IP_LIMIT,
   );
-  if (!floor.ok) {
-    rateLimitDenialsTotal.inc({ scope: "mcp.request" });
-    const retryAfter = floor.retryAfterSeconds;
-    return jsonRpc(rpcError(null, RPC_RATE_LIMITED, "Rate limited", { retryAfter }), 429, {
-      "Retry-After": String(retryAfter),
-    });
-  }
+  if (!floor.ok) return rateLimited("mcp.request", null, floor);
 
   const body = await readBoundedText(request, MAX_BODY_BYTES);
   if (!body.ok) {
@@ -187,13 +192,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   // page through the user directory and the audit log as fast as it liked.
   if (message.method === "tools/call") {
     const bucket = consumeToken(rateLimitKey("mcp.tools.call", toolCallActor(caller)), TOOL_CALLS);
-    if (!bucket.ok) {
-      rateLimitDenialsTotal.inc({ scope: "mcp.tools.call" });
-      const retryAfter = bucket.retryAfterSeconds;
-      return jsonRpc(rpcError(messageId, RPC_RATE_LIMITED, "Rate limited", { retryAfter }), 429, {
-        "Retry-After": String(retryAfter),
-      });
-    }
+    if (!bucket.ok) return rateLimited("mcp.tools.call", messageId, bucket);
   }
 
   return jsonRpc(
@@ -205,6 +204,24 @@ export async function POST(request: NextRequest): Promise<Response> {
       forwardHeaders: () => forwardHeaders(request, caller),
     }),
     200,
+  );
+});
+
+/**
+ * The transport's one 429 (F-130): JSON-RPC error `-32029` carrying
+ * `data.retryAfter`, with the bucket's `Retry-After`, counted under `scope`
+ * through the same `recordRateLimitDenial` every surface's 429 goes through.
+ */
+function rateLimited(
+  scope: string,
+  id: JsonRpcId,
+  result: Extract<RateLimitResult, { ok: false }>,
+): Response {
+  const retryAfter = result.retryAfterSeconds;
+  return jsonRpc(
+    rpcError(id, RPC_RATE_LIMITED, "Rate limited", { retryAfter }),
+    429,
+    recordRateLimitDenial(scope, result),
   );
 }
 
@@ -323,10 +340,10 @@ async function forwardHeaders(request: NextRequest, caller: ResolvedCaller): Pro
  * GET /api/mcp — Phase 0 offers no server-initiated SSE stream, so per the
  * Streamable HTTP spec this returns 405 (still dark when disabled).
  */
-export async function GET(): Promise<Response> {
+export const GET = withMcpRoute(async function GET(): Promise<Response> {
   if (!getServerEnv().MCP_ENABLED) return notFound();
   return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
-}
+});
 
 function notFound(): Response {
   return new Response("Not Found", { status: 404 });

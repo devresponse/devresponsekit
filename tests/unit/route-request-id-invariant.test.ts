@@ -19,6 +19,9 @@ import { fileURLToPath } from "node:url";
  *
  * Surface ⇒ wrapper, because the wrapper also renders a throw:
  *   - `api/v1/**`  → `withV1Route`    (RFC 7807 problem+json `internal_error`)
+ *   - `api/mcp/route.ts` → `withMcpRoute` (JSON-RPC 2.0 error `-32603`, A-12)
+ *   - `api/mcp/register/route.ts` → `withClientRegistrationRoute`
+ *     (RFC 7591 `{ error: "server_error", error_description }`, A-12)
  *   - everything else → `withAdminRoute` (`{ error, message, requestId }`)
  */
 
@@ -97,13 +100,19 @@ const EXEMPT: Record<string, string> = {
     "public cacheable key set (public, max-age=300): a cached x-request-id would be replayed to other callers",
   "api/v1/openapi.json/route.ts":
     "public cacheable OpenAPI document (public, max-age=300): a cached x-request-id would be replayed to other callers",
-  // Protocol-owned error shapes. Rendering a throw in the admin or v1 envelope
-  // would put a non-protocol body on the wire; they need a protocol-shaped
-  // wrapper of their own, tracked as an F-29 follow-up.
-  "api/mcp/route.ts":
-    "JSON-RPC 2.0 transport: errors are JSON-RPC error objects, not the admin/v1 envelope",
-  "api/mcp/register/route.ts":
-    "RFC 7591 registration: errors are `{ error, error_description }` (§3.2.2), not the admin/v1 envelope",
+  // (The MCP transport and its RFC 7591 registration were exempt until A-12
+  // gave each a wrapper that renders a throw in its protocol's error shape;
+  // PROTOCOL_WRAPPERS below names them.)
+};
+
+/**
+ * Routes whose protocol owns the error shape, so a throw must not render in
+ * the admin or v1 envelope (A-12). Each has its own wrapper with the same id
+ * handling.
+ */
+const PROTOCOL_WRAPPERS: Record<string, string> = {
+  "api/mcp/route.ts": "withMcpRoute",
+  "api/mcp/register/route.ts": "withClientRegistrationRoute",
 };
 
 function walk(dir: string): string[] {
@@ -121,8 +130,10 @@ function rel(full: string): string {
   return norm.slice(norm.lastIndexOf("/app/api/") + "/app/".length);
 }
 
-function wrapperFor(relPath: string): "withV1Route" | "withAdminRoute" {
-  return relPath.startsWith("api/v1/") ? "withV1Route" : "withAdminRoute";
+function wrapperFor(relPath: string): string {
+  return (
+    PROTOCOL_WRAPPERS[relPath] ?? (relPath.startsWith("api/v1/") ? "withV1Route" : "withAdminRoute")
+  );
 }
 
 /** Every exported handler and whether it is wrapped with `wrapper`. */
@@ -147,8 +158,8 @@ describe("F-29: every /api handler goes through the request-id wrapper (or is ex
     expect(routeFiles.length).toBeGreaterThan(80);
   });
 
-  it("names only real route files in the exemption map", () => {
-    for (const key of Object.keys(EXEMPT)) {
+  it("names only real route files in the exemption and protocol-wrapper maps", () => {
+    for (const key of [...Object.keys(EXEMPT), ...Object.keys(PROTOCOL_WRAPPERS)]) {
       expect(
         routeFiles.some((f) => f.rel === key),
         `EXEMPT names ${key}, which no longer exists: drop the stale entry`,

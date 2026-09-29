@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as AuthStatusModule from "@/lib/auth-status";
+import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
 import { USER_NAME_MAX_LENGTH } from "@/lib/user-name";
 
 /**
@@ -72,7 +73,10 @@ vi.mock("@/lib/auth-status", async () => {
   const actual = await vi.importActual<typeof AuthStatusModule>("@/lib/auth-status");
   return { ...actual, getUserAccessContext: (id: string) => getUserAccessContext(id) };
 });
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+// The bucket is a spy; the 429 renderers (`rateLimitedProblemResponse`, F-130)
+// are the real ones.
+vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof RateLimitModule>()),
   consumeToken: (...a: unknown[]) => consumeToken(...a),
   rateLimitKey: (s: string, id: string) => `${s}:${id}`,
   DEFAULT_ADMIN_MUTATION_LIMIT: {},

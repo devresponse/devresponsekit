@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { recordRateLimitDenial } from "@/lib/admin/rate-limit.server";
 import { consumeSourceThenGlobal } from "@/lib/admin/rate-limit-tiered.server";
 import { auditEvent } from "@/lib/audit.server";
 import { readBoundedText } from "@/lib/bounded-body";
@@ -14,6 +15,7 @@ import {
 } from "@/lib/mcp/registration";
 import { registerMcpAgent } from "@/lib/mcp/registration.server";
 import { resolveOrganizationByIdentifier } from "@/lib/org-lookup.server";
+import { withClientRegistrationRoute } from "@/lib/route-handler.server";
 
 export const dynamic = "force-dynamic";
 
@@ -50,8 +52,14 @@ const MAX_BODY_BYTES = 64 * 1024;
  * atomically with the insert under a per-org advisory lock
  * (`registerMcpAgent`); stale pending registrations are expired by the
  * scheduled reaper (`/api/internal/mcp-registration-reap`).
+ *
+ * A-12: exported through `withClientRegistrationRoute`, so every response
+ * carries an `x-request-id` and a throw answers a logged RFC 7591-shaped 500
+ * (`server_error`) under the same id, not Next's bodiless 500.
  */
-export async function POST(request: NextRequest): Promise<Response> {
+export const POST = withClientRegistrationRoute(async function POST(
+  request: NextRequest,
+): Promise<Response> {
   const env = getServerEnv();
   if (!env.MCP_REGISTRATION_ENABLED) return notFound();
 
@@ -62,8 +70,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     source: REG_LIMIT,
     global: REG_GLOBAL_LIMIT,
   });
+  // F-130: counted like every other 429 and told when to come back; this was
+  // the one limiter that answered with neither.
   if (!floorCheck.ok) {
-    return oauthError("temporarily_unavailable", "Registration is rate limited.", 429);
+    return oauthError(
+      "temporarily_unavailable",
+      "Registration is rate limited.",
+      429,
+      recordRateLimitDenial("mcp.register", floorCheck),
+    );
   }
 
   // F-78: read through a byte cap, after the limiter, never `request.json()`.
@@ -152,16 +167,21 @@ export async function POST(request: NextRequest): Promise<Response> {
     status: 201,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
-}
+});
 
 function notFound(): Response {
   return new Response("Not Found", { status: 404 });
 }
 
 /** RFC 7591 §3.2.2 registration error (`application/json`). */
-function oauthError(error: string, description: string, status: number): Response {
+function oauthError(
+  error: string,
+  description: string,
+  status: number,
+  extraHeaders?: Record<string, string>,
+): Response {
   return new Response(JSON.stringify({ error, error_description: description }), {
     status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
+    headers: { "content-type": "application/json", "cache-control": "no-store", ...extraHeaders },
   });
 }

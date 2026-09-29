@@ -172,6 +172,15 @@ describe("POST /api/v1/me/api-keys — self-ownership of scopes", () => {
     expect(last?.status).toBe(429);
     // The throttled 31st request never reached the key repository.
     expect(createApiKey).toHaveBeenCalledTimes(30);
+    // F-130: the v1 429, with the bucket's own wait (one token a second, so 1
+    // s; it was a fixed "2") in the header and the body, and counted.
+    expect(last?.headers.get("Retry-After")).toBe("1");
+    expect(await last?.json()).toMatchObject({ code: "rate_limited", retryAfter: 1 });
+    const { rateLimitDenialsTotal } = await import("@/lib/observability/metrics.server");
+    const denials = (await rateLimitDenialsTotal.get()).values.find(
+      (v) => v.labels.scope === "api.me.apikeys",
+    );
+    expect(denials?.value).toBe(1);
   });
 });
 

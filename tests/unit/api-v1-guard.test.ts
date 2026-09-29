@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 import type * as GuardModule from "@/lib/api-auth/v1-guard.server";
+import type * as RateLimitModule from "@/lib/admin/rate-limit.server";
 
 /**
  * Unit tests for the `/api/v1` authorization guard
@@ -39,7 +40,15 @@ vi.mock("@/lib/admin/request-id.server", () => ({
   getOrCreateRequestId: () => "req-1",
   REQUEST_ID_HEADER: "x-request-id",
 }));
-vi.mock("@/lib/admin/rate-limit.server", () => ({
+// The denial counter, observed through its `inc` (F-130).
+const countDenial = vi.fn();
+vi.mock("@/lib/observability/metrics.server", () => ({
+  rateLimitDenialsTotal: { inc: (...a: unknown[]) => countDenial(...a) },
+}));
+// The bucket is replaced; the 429 renderer (`rateLimitedProblemResponse`,
+// which counts the denial, F-130) is the real one.
+vi.mock("@/lib/admin/rate-limit.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof RateLimitModule>()),
   consumeToken: (...a: unknown[]) => consumeToken(...a),
   rateLimitKey: (scope: string, id: string) => `${scope}:${id}`,
   DEFAULT_ADMIN_MUTATION_LIMIT: { capacity: 10, refillPerSecond: 1 },
@@ -71,6 +80,7 @@ beforeEach(async () => {
     auditEvent,
     preAuthLog,
     consumeToken,
+    countDenial,
   ])
     m.mockReset();
   hasBearerCredential.mockReturnValue(true);
@@ -249,6 +259,20 @@ describe("enforceApiRateLimit", () => {
     const res = mod.enforceApiRateLimit("api.users.create", grant, makeReq());
     expect(res?.status).toBe(429);
     expect(res?.headers.get("Retry-After")).toBe("7");
+    expect(await res?.json()).toMatchObject({ code: "rate_limited", retryAfter: 7 });
+  });
+
+  it("counts the denial in devresponsekit_rate_limit_denials_total under its scope (F-130)", async () => {
+    consumeToken.mockReturnValue({ ok: true });
+    mod.enforceApiRateLimit("api.users.create", grant, makeReq());
+    expect(countDenial).not.toHaveBeenCalled();
+    consumeToken.mockReturnValue({ ok: false, retryAfterSeconds: 3 });
+    mod.enforceApiRateLimit("api.users.create", grant, makeReq());
+    mod.enforceApiRateLimit("api.users.create", grant, makeReq());
+    expect(countDenial.mock.calls).toEqual([
+      [{ scope: "api.users.create" }],
+      [{ scope: "api.users.create" }],
+    ]);
   });
 
   it("charges every token minted from one credential to that credential's bucket, not its jti (F-73)", async () => {

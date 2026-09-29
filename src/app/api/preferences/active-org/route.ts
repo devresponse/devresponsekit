@@ -74,9 +74,10 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   // `forbidden_while_impersonating` body clients and the e2e suite pin.
   //
   // The marker rides the resolved caller (`actor.impersonatorId`) so no second
-  // session lookup is needed (review #28).
+  // session lookup is needed (review #28). F-129: the same code, now in the
+  // envelope every other refusal here uses (it gains `message` + `requestId`).
   if (actor.impersonatorId) {
-    return NextResponse.json({ error: "forbidden_while_impersonating" }, { status: 403 });
+    return adminErrorResponse("forbidden_while_impersonating", 403, request, { requestId });
   }
 
   const limited = enforceRateLimit(

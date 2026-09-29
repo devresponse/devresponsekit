@@ -5,6 +5,7 @@ import { noteSessionImpersonation } from "@/lib/impersonation-attribution.server
 import { createSsoHandoffRedirect } from "@/lib/sso.server";
 import { isSsoHandoffSelfIssuer, isSsoHandoffSignerConfigured } from "@/lib/jwt-handoff.server";
 import { APP_ID_RE } from "@/lib/admin/enterprise-apps";
+import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { getOrCreateRequestId } from "@/lib/admin/request-id.server";
 import { buildSsoLaunchReturnPath } from "@/lib/sso-launch-return";
 import { DEFAULT_SSO_LAUNCH_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
@@ -63,6 +64,11 @@ export const dynamic = "force-dynamic";
  * (`/{locale}/sso/launch`), never this API path: `getSafeReturnTo` refuses
  * `/api/` returnTo values on purpose, and that rule stays intact. See
  * `@/lib/sso-launch-return`.
+ *
+ * Every refusal answers the shared `{ error, message, requestId }` envelope
+ * (`adminErrorResponse`, F-129); they were a bare `{ error }` with no id in
+ * the body, so a refused launch could not be tied to its audit row from the
+ * response alone.
  */
 export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const applicationId = request.nextUrl.searchParams.get("applicationId");
@@ -70,10 +76,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
   const locale = localeParam && isSupportedLocale(localeParam) ? localeParam : defaultLocale;
 
   if (!applicationId) {
-    return NextResponse.json({ error: "missing_application_id" }, { status: 400 });
+    return adminErrorResponse("missing_application_id", 400, request);
   }
   if (!APP_ID_RE.test(applicationId)) {
-    return NextResponse.json({ error: "invalid_application_id" }, { status: 400 });
+    return adminErrorResponse("invalid_application_id", 400, request);
   }
 
   const session = await getCurrentSession();
@@ -135,7 +141,7 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       request,
       metadata: { impersonatedBetterAuthUserId: session.user.id },
     });
-    return NextResponse.json({ error: "forbidden_while_impersonating" }, { status: 403 });
+    return adminErrorResponse("forbidden_while_impersonating", 403, request);
   }
 
   const configError = !isSsoHandoffSignerConfigured()
@@ -166,7 +172,10 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       targetApplicationId: applicationId,
       request,
     });
-    return NextResponse.json({ error: "sso_not_configured" }, { status: 503 });
+    // F-129: the envelope logs its own `admin.sso_not_configured` line for a
+    // 5xx (OPS-OBS-2). The line above stays because it carries the reason, and
+    // the Sentry event is captured there, so no `cause` is passed here.
+    return adminErrorResponse("sso_not_configured", 503, request, { requestId });
   }
 
   try {
@@ -196,6 +205,6 @@ export const GET = withAdminRoute(async function GET(request: NextRequest) {
       reason: error instanceof Error ? error.message : "unknown_error",
       request,
     });
-    return NextResponse.json({ error: "sso_launch_failed" }, { status: 403 });
+    return adminErrorResponse("sso_launch_failed", 403, request);
   }
 });

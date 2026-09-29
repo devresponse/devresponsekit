@@ -50,7 +50,10 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  *
  * The role select lists EVERY role of the org (`fetchAllPages`, F-41); it
  * read one `pageSize=100` page, so an org with more roles could not invite
- * into the rest, and nothing said so.
+ * into the rest, and nothing said so. It reads `GET /api/administrator/roles`,
+ * which needs `admin.roles.read`, a permission the organization page does not
+ * check, so without it the select is left out and the invitation carries no
+ * role (F-67). The request used to fail with a 403 and an access-denied row.
  */
 interface InvitationRow {
   id: string;
@@ -71,9 +74,11 @@ const NO_ROLE = "__none__";
 export function OrganizationInvitationsPanel({
   orgId,
   canUpdate,
+  canReadRoles,
 }: {
   orgId: string;
   canUpdate: boolean;
+  canReadRoles: boolean;
 }) {
   const t = useTranslations("administrator.orgs.invitations");
   const tErr = useTranslations("administrator.errors");
@@ -102,8 +107,9 @@ export function OrganizationInvitationsPanel({
     setRoles([]);
     setRolesTotal(0);
     setRolesError(false);
-    setRolesLoading(true);
     setDialogOpen(true);
+    if (!canReadRoles) return;
+    setRolesLoading(true);
     // Best-effort role options; the dialog works without them, but surface a
     // hint on failure so an empty dropdown doesn't read as "this org has none".
     try {
@@ -117,7 +123,7 @@ export function OrganizationInvitationsPanel({
     } finally {
       setRolesLoading(false);
     }
-  }, [form, orgId]);
+  }, [form, orgId, canReadRoles]);
 
   const onInvite = async (values: CreateInvitationInput) => {
     form.clearErrors("root");
@@ -341,43 +347,45 @@ export function OrganizationInvitationsPanel({
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="roleId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("roleLabel")}</FormLabel>
-                    <Select
-                      value={field.value ?? NO_ROLE}
-                      onValueChange={(v) => field.onChange(v === NO_ROLE ? null : v)}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value={NO_ROLE}>{t("noRole")}</SelectItem>
-                        {roles.map((role) => (
-                          <SelectItem key={role.id} value={role.id}>
-                            {role.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {rolesLoading ? (
-                      <FormDescription role="status">{t("rolesLoading")}</FormDescription>
-                    ) : rolesError ? (
-                      <FormDescription role="status" className="text-destructive">
-                        {t("rolesError")}
-                      </FormDescription>
-                    ) : (
-                      <ListLimitNotice shown={roles.length} total={rolesTotal} kind="catalog" />
-                    )}
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {canReadRoles ? (
+                <FormField
+                  control={form.control}
+                  name="roleId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t("roleLabel")}</FormLabel>
+                      <Select
+                        value={field.value ?? NO_ROLE}
+                        onValueChange={(v) => field.onChange(v === NO_ROLE ? null : v)}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={NO_ROLE}>{t("noRole")}</SelectItem>
+                          {roles.map((role) => (
+                            <SelectItem key={role.id} value={role.id}>
+                              {role.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {rolesLoading ? (
+                        <FormDescription role="status">{t("rolesLoading")}</FormDescription>
+                      ) : rolesError ? (
+                        <FormDescription role="status" className="text-destructive">
+                          {t("rolesError")}
+                        </FormDescription>
+                      ) : (
+                        <ListLimitNotice shown={roles.length} total={rolesTotal} kind="catalog" />
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
               {rootError ? (
                 <p className="text-destructive text-sm" role="alert">
                   {rootError}

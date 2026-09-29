@@ -333,6 +333,7 @@
         "saving": "Saving…",
         "saved": "Roles updated.",
         "noResults": "No matching roles.",
+        "catalogHidden": "The organization's role catalog isn't listed: that needs permission to read roles.",
         "errorToast": "Could not update roles.",
         "forbidden": "You can only add or remove roles whose permissions you hold yourself."
       },

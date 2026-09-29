@@ -11,7 +11,7 @@ import {
   type DualListEndpoint,
   type DualListSaveError,
 } from "@/lib/admin/dual-list-save.client";
-import { fetchAllPages } from "@/lib/admin/admin-list.client";
+import { fetchAllPages, type AllPages } from "@/lib/admin/admin-list.client";
 import { ListLimitNotice } from "../../_components/list-limit-notice";
 
 /**
@@ -35,6 +35,13 @@ import { ListLimitNotice } from "../../_components/list-limit-notice";
  * of M". The group's assigned roles are merged into the catalog, so one the
  * catalog does not hold, moved out of Assigned, stays in Available (it used
  * to vanish from both columns).
+ *
+ * F-67: the catalog is `GET /api/administrator/roles`, which needs
+ * `admin.roles.read`, and the group page checks only `admin.groups.*`. This is
+ * the default tab, so a group manager without that permission opened the group
+ * straight onto a generic error. Without `canReadRoles` the catalog is not
+ * requested and a notice says why. The assigned roles still come from the
+ * group's own endpoint, so they can be removed, and moved back until saved.
  */
 interface RoleOption {
   id: string;
@@ -54,7 +61,15 @@ function formatRoleLabel(key: string, organizationName: string | null): string {
   return organizationName ? `${key} — ${organizationName}` : key;
 }
 
-export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canAssign: boolean }) {
+export function GroupRolesEditor({
+  groupId,
+  canAssign,
+  canReadRoles,
+}: {
+  groupId: string;
+  canAssign: boolean;
+  canReadRoles: boolean;
+}) {
   const t = useTranslations("administrator.groups.rolesEditor");
   const tErr = useTranslations("administrator.errors");
 
@@ -113,9 +128,12 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
         // assignable. Scoping the list means it never shows a role that would
         // fail on save, and drops the cross-org "duplicate" noise. Server-side
         // scoping also keeps other orgs' roles from filling the pages read.
-        const all = await fetchAllPages<RoleOption>(
-          `/api/administrator/roles?filter[organization]=${groupOrgId}`,
-        );
+        // F-67: not requested at all without the permission it needs.
+        const all: AllPages<RoleOption> = canReadRoles
+          ? await fetchAllPages<RoleOption>(
+              `/api/administrator/roles?filter[organization]=${groupOrgId}`,
+            )
+          : { items: [], total: 0, truncated: false };
         if (cancelled) return;
         // An assigned role the catalog does not hold (F-41) joins it, so it
         // can be moved out of Assigned and back. It is the group's own org's
@@ -144,7 +162,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
     return () => {
       cancelled = true;
     };
-  }, [groupId, tErr]);
+  }, [groupId, tErr, canReadRoles]);
 
   const keyById = useMemo(() => {
     const m = new Map<string, string>();
@@ -297,6 +315,7 @@ export function GroupRolesEditor({ groupId, canAssign }: { groupId: string; canA
         />
       </div>
       <ListLimitNotice shown={catalogRead.shown} total={catalogRead.total} kind="catalog" />
+      {canReadRoles ? null : <p className="text-muted-foreground text-xs">{t("catalogHidden")}</p>}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

@@ -18,6 +18,13 @@ import { OrganizationSettingsForm } from "./_organization-settings-form";
  * remount from these props on every tab switch. Both save through
  * `useSavedFormBaseline` (F-39), which refreshes the page after a save and
  * follows the refreshed props; a new panel seeded from props must do the same.
+ *
+ * Every flag is a boolean the server page derives from the caller's access
+ * context. `canUpdate` (`admin.orgs.update`) governs the org-scoped writes;
+ * the Settings form writes the organization row itself, which is
+ * SUPERADMIN-only, so it has its own `canEditSettings` (F-66). `canReadRoles`
+ * and `canReadUsers` gate what reads another area's API or links to another
+ * area's page (F-67).
  */
 export interface OrganizationDetailJson {
   id: string;
@@ -34,11 +41,17 @@ export interface OrganizationDetailJson {
 export function OrganizationDetailTabs({
   org,
   canUpdate,
+  canEditSettings,
+  canReadRoles,
+  canReadUsers,
   authSettings,
   platformAuthDefaults,
 }: {
   org: OrganizationDetailJson;
   canUpdate: boolean;
+  canEditSettings: boolean;
+  canReadRoles: boolean;
+  canReadUsers: boolean;
   authSettings: AuthPolicySettingsJson | null;
   platformAuthDefaults: AuthPolicySettingsJson | null;
 }) {
@@ -55,8 +68,16 @@ export function OrganizationDetailTabs({
 
       <TabsContent value="members" className="mt-4">
         <div className="space-y-6">
-          <OrganizationMembersGrid orgId={org.id} canUpdate={canUpdate} />
-          <OrganizationInvitationsPanel orgId={org.id} canUpdate={canUpdate} />
+          <OrganizationMembersGrid
+            orgId={org.id}
+            canUpdate={canUpdate}
+            canReadUsers={canReadUsers}
+          />
+          <OrganizationInvitationsPanel
+            orgId={org.id}
+            canUpdate={canUpdate}
+            canReadRoles={canReadRoles}
+          />
         </div>
       </TabsContent>
 
@@ -85,7 +106,7 @@ export function OrganizationDetailTabs({
           initialStatus={org.status}
           initialIsDefault={org.isDefault}
           isResolvedDefault={org.isResolvedDefault}
-          canUpdate={canUpdate}
+          canUpdate={canEditSettings}
         />
       </TabsContent>
     </Tabs>

@@ -13,8 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
+import { PermittedLink } from "../../_components/permitted-link";
 import { RolePicker, type RoleOption } from "./_role-picker";
 
 /**
@@ -24,6 +24,12 @@ import { RolePicker, type RoleOption } from "./_role-picker";
  * the `/roles` endpoint. With `admin.roles.assign` the operator can also assign
  * a role (org context derived from the chosen role) and remove an assignment,
  * via `POST`/`DELETE /api/administrator/users/[id]/app-roles`.
+ *
+ * F-67: assigning also needs `admin.roles.read`, because the picker lists
+ * roles from `GET /api/administrator/roles`; removing does not. The role and
+ * organization names link to their pages only for a viewer who passes those
+ * pages' guards (`admin.roles.read`, `admin.orgs.read`), and are plain text
+ * otherwise.
  */
 interface RoleRow {
   id: string;
@@ -40,10 +46,15 @@ interface RoleRow {
 export function UserRolesPanel({
   userId,
   canAssign = false,
+  canReadRoles,
+  canReadOrgs,
 }: {
   userId: string;
   canAssign?: boolean;
+  canReadRoles: boolean;
+  canReadOrgs: boolean;
 }) {
+  const canPick = canAssign && canReadRoles;
   const t = useTranslations("administrator.users.roles");
   const tErr = useTranslations("administrator.errors");
   const locale = useLocale();
@@ -129,13 +140,14 @@ export function UserRolesPanel({
         accessorKey: "role_name",
         header: () => t("columns.role"),
         cell: ({ row }) => (
-          <LocaleLink
+          <PermittedLink
+            permitted={canReadRoles}
             locale={locale}
             href={`/app/administrator/roles/${row.original.role_id}`}
             className="text-primary underline-offset-4 hover:underline"
           >
             {row.original.role_name}
-          </LocaleLink>
+          </PermittedLink>
         ),
       },
       {
@@ -149,13 +161,14 @@ export function UserRolesPanel({
         accessorKey: "organization_name",
         header: () => t("columns.organization"),
         cell: ({ row }) => (
-          <LocaleLink
+          <PermittedLink
+            permitted={canReadOrgs}
             locale={locale}
             href={`/app/administrator/organizations/${row.original.organization_id}`}
             className="text-primary underline-offset-4 hover:underline"
           >
             {row.original.organization_name}
-          </LocaleLink>
+          </PermittedLink>
         ),
       },
       {
@@ -188,7 +201,7 @@ export function UserRolesPanel({
         ),
       } as GridColumnDef<RoleRow>,
     ];
-  }, [t, locale, format, canAssign, onRemove]);
+  }, [t, locale, format, canAssign, canReadRoles, canReadOrgs, onRemove]);
 
   return (
     <div className="space-y-2">
@@ -207,7 +220,7 @@ export function UserRolesPanel({
           defaultSort: [{ field: "created_at", direction: "desc" }],
         }}
         headerActions={
-          canAssign ? (
+          canPick ? (
             <Button
               type="button"
               size="sm"
@@ -222,7 +235,7 @@ export function UserRolesPanel({
           ) : undefined
         }
       />
-      {canAssign ? (
+      {canPick ? (
         <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
           <DialogContent>
             <DialogHeader>

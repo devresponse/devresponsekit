@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { checkAdminPermissionServer } from "@/lib/admin/permissions.server";
+import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { LocaleLink } from "@/components/i18n/locale-link";
 import { Button } from "@/components/ui/button";
 import { AdministratorPermissionsGrid } from "./_permissions-grid";
@@ -12,8 +13,9 @@ export const dynamic = "force-dynamic";
  *
  * Permission-catalog management view (docs/admin-manager.md §8.5).
  * Visible to anyone with `admin.roles.read`; mutating endpoints are
- * additionally gated on `admin.permissions.manage` and the create /
- * edit / delete buttons hide themselves when the caller lacks it.
+ * additionally gated on `admin.permissions.manage` AND cross-org reach, and
+ * the create / edit / delete buttons hide themselves when the caller lacks
+ * either.
  */
 export default async function AdministratorPermissionsPage({
   params,
@@ -25,7 +27,11 @@ export default async function AdministratorPermissionsPage({
   if (guard === "denied" || guard === "unauthenticated") {
     notFound();
   }
-  const canManage = guard.access.permissions.includes("admin.permissions.manage");
+  // F-66: the catalog is platform-global, so every write refuses a caller
+  // without cross-org reach (403) after the key check passes. The key alone
+  // offered org admins New / Edit / Delete buttons that always failed.
+  const canManage =
+    hasCrossOrgReach(guard.access) && guard.access.permissions.includes("admin.permissions.manage");
 
   const t = await getTranslations({ locale, namespace: "administrator.permissions" });
 

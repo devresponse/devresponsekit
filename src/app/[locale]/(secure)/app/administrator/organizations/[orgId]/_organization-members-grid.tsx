@@ -6,8 +6,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
+import { PermittedLink } from "../../_components/permitted-link";
 
 /**
  * Members tab for the organization detail (docs/admin-manager.md §8.2).
@@ -15,7 +15,8 @@ import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
  * Reuses the shared `DataGrid` so URL-state, pagination and a11y
  * behave identically. Each row's user is a link into the user-detail
  * page so the operator can pivot from "members of org X" to the user's
- * full surface in one click.
+ * full surface in one click, for a viewer who may open that page
+ * (`admin.users.read`); anyone else sees the name as plain text (F-67).
  */
 interface MemberRow {
   id: string;
@@ -29,9 +30,11 @@ interface MemberRow {
 export function OrganizationMembersGrid({
   orgId,
   canUpdate,
+  canReadUsers,
 }: {
   orgId: string;
   canUpdate: boolean;
+  canReadUsers: boolean;
 }) {
   const t = useTranslations("administrator.orgs.members");
   const tErr = useTranslations("administrator.errors");
@@ -81,13 +84,14 @@ export function OrganizationMembersGrid({
         accessorKey: "user_display_name",
         header: () => t("columns.user"),
         cell: ({ row }) => (
-          <LocaleLink
+          <PermittedLink
+            permitted={canReadUsers}
             locale={locale}
             href={`/app/administrator/users/${row.original.app_user_id}`}
             className="text-primary underline-offset-4 hover:underline"
           >
             {row.original.user_display_name ?? row.original.app_user_id}
-          </LocaleLink>
+          </PermittedLink>
         ),
       },
       {
@@ -130,7 +134,7 @@ export function OrganizationMembersGrid({
           ]
         : []),
     ],
-    [t, locale, format, canUpdate, onRemove],
+    [t, locale, format, canUpdate, canReadUsers, onRemove],
   );
 
   return (

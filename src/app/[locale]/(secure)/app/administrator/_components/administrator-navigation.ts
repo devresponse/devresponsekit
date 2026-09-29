@@ -1,3 +1,5 @@
+import { SUPERADMIN_PERMISSION } from "@/lib/admin/permissions";
+
 export interface AdministratorNavigationItem {
   id: string;
   href: `/${string}`;
@@ -18,6 +20,12 @@ export interface AdministratorNavigationAction {
   id: AdministratorNavigationActionId;
   href: `/${string}`;
   requires: ReadonlyArray<string>;
+  /**
+   * The destination page ALSO requires a SUPERADMIN (F-66): its mutation is
+   * platform-wide, so it `notFound()`s everyone else even when they hold the
+   * key. Nav gate and page guard must stay equal.
+   */
+  superadminOnly?: true;
 }
 
 export interface AdministratorNavigationGroup {
@@ -132,6 +140,7 @@ export const ADMINISTRATOR_NAV_GROUPS: ReadonlyArray<AdministratorNavigationGrou
         id: "new-organization",
         href: "/app/administrator/organizations/new",
         requires: ["admin.orgs.create"],
+        superadminOnly: true,
       },
     ],
   },
@@ -229,11 +238,17 @@ export function hasAdministratorPermission(
 export function getVisibleAdministratorNavigationGroups(
   permissions: ReadonlyArray<string>,
 ): AdministratorVisibleNavigationGroup[] {
+  // F-66: the layout hands over a COOKIE session's permissions, which are never
+  // org-bound, so holding the `superuser` marker is exactly the page's
+  // `hasCrossOrgReach` test.
+  const superadmin = permissions.includes(SUPERADMIN_PERMISSION);
   return ADMINISTRATOR_NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter((item) => hasAdministratorPermission(permissions, item.requires)),
-    actions: group.actions.filter((action) =>
-      hasAdministratorPermission(permissions, action.requires),
+    actions: group.actions.filter(
+      (action) =>
+        (superadmin || !action.superadminOnly) &&
+        hasAdministratorPermission(permissions, action.requires),
     ),
   })).filter((group) => group.items.length > 0 || group.actions.length > 0);
 }

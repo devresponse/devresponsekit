@@ -21,15 +21,22 @@ export interface GroupDetailJson {
  * Settings form is seeded from these props, so it saves through
  * `useSavedFormBaseline` (F-39), which refreshes the page after a save and
  * follows the refreshed props.
+ *
+ * `canReadRoles` and `canReadUsers` are the permissions of the OTHER areas
+ * these tabs read or link to (F-67); the server page derives them.
  */
 export function GroupDetailTabs({
   group,
   canUpdate,
   canAssign,
+  canReadRoles,
+  canReadUsers,
 }: {
   group: GroupDetailJson;
   canUpdate: boolean;
   canAssign: boolean;
+  canReadRoles: boolean;
+  canReadUsers: boolean;
 }) {
   const t = useTranslations("administrator.groups");
 
@@ -42,11 +49,11 @@ export function GroupDetailTabs({
       </TabsList>
 
       <TabsContent value="roles" className="mt-4">
-        <GroupRolesEditor groupId={group.id} canAssign={canAssign} />
+        <GroupRolesEditor groupId={group.id} canAssign={canAssign} canReadRoles={canReadRoles} />
       </TabsContent>
 
       <TabsContent value="members" className="mt-4">
-        <GroupMembersGrid groupId={group.id} canAssign={canAssign} />
+        <GroupMembersGrid groupId={group.id} canAssign={canAssign} canReadUsers={canReadUsers} />
       </TabsContent>
 
       <TabsContent value="settings" className="mt-4">

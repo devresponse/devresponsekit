@@ -341,6 +341,7 @@ Tabs default to **Roles** (`_group-detail-tabs.tsx:37`).
 
 - Code: `src/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-roles-editor.tsx`; route `src/app/api/administrator/groups/[id]/roles/route.ts`.
 - Purpose: Choose which roles the group confers on its members. Left = the org's role catalog (scoped to the group's own org) minus already-bundled; right = bundled.
+- Reading the catalog needs `admin.roles.read` as well as `admin.groups.read` (it is `GET /api/administrator/roles`). Without it the catalog is not requested, a note says it isn't listed, and bundled roles can still be removed (F-67).
 
 User stories
 
@@ -370,6 +371,7 @@ Negative & edge cases
 - Initial load failure → inline `role="alert"` error instead of a stuck skeleton (`_group-roles-editor.tsx`).
 - An org with more than 200 roles → Available lists all of them (every page is read, F-41); "Showing N of M" appears only if the catalog could not be read in full. A bundled role missing from the loaded catalog stays in Available when moved out.
 - Save with no change: Save button disabled until dirty.
+- A group manager holding `admin.groups.read` + `admin.groups.assign` but not `admin.roles.read` (a custom role) → the tab opens without an error, Available is empty and the note "The organization's role catalog isn't listed: that needs permission to read roles." appears; moving a bundled role out and saving removes it; the audit log shows no `administrator.access.denied` row for the visit (F-67).
 - 403 on either write → the localized "only roles whose permissions you hold" message; other failures → the generic error. Additions are sent before removals, so a refused addition removes nothing, and a refused removal leaves the addition in place, visible in the lists; after any failure the lists are reloaded from the server (F-38).
 - A failed save whose reload also fails → the error plus "Reload the page before making more changes.", and the editor stays locked until the page is reloaded.
 
@@ -380,6 +382,7 @@ i18n: labels + statuses localize; the role label uses a `key — Organization` f
 
 - Code: `src/app/[locale]/(secure)/app/administrator/groups/[groupId]/_group-members-grid.tsx`; user picker `_user-picker.tsx`; route `src/app/api/administrator/groups/[id]/members/route.ts`.
 - Purpose: Add or remove users in the group. Adds are confined to **active** members of the group's org; a non-eligible pick is reported back.
+- **Add member** needs `admin.users.read` as well as `admin.groups.assign`, because its picker searches `GET /api/administrator/users`; each email links to the user page under the same permission. Without it, only **Remove** is offered and emails are plain text (F-67).
 
 User stories
 
@@ -416,6 +419,7 @@ User stories
 Negative & edge cases
 - Add error → inline `role="alert"` in the dialog; remove error → inline alert above the grid.
 - Empty members grid state; loading skeleton.
+- A group manager holding `admin.groups.assign` but not `admin.users.read` (a custom role) → no **Add member** button, emails are plain text, **Remove** still works (F-67).
 - Rate-limit on add/remove.
 
 Accessibility: dialog focus-trap + Esc; the user picker is a labelled combobox with a live search; grid keyboard-navigable.
@@ -464,13 +468,13 @@ i18n: labels + messages localize.
 
 - Route: `/app/administrator/permissions`  ·  Example URL: `/en/app/administrator/permissions`  ·  Code: `src/app/[locale]/(secure)/app/administrator/permissions/page.tsx:18`
 - Purpose: The platform-global permission catalog. Informational for any role-reader; each row shows the key, description, and how many roles use it (with a slide-over listing them).
-- Guard / who can access: **`admin.roles.read`** opens the page (`page.tsx:24`) — note it is the *roles* read key, not a permissions key. Create/Edit/Delete buttons appear only with `admin.permissions.manage` (`page.tsx:28`).
-- Important escalation nuance: **all catalog mutations additionally require SUPERADMIN.** The POST/PATCH/DELETE routes reject a non-Superadmin with **403** even if they somehow hold `admin.permissions.manage`, because the catalog is platform-global (`src/app/api/administrator/permissions/route.ts:105`; `[id]/route.ts:46` and `:110`). The seed `admin.platform` role *does* include `admin.permissions.manage`, so an Org Admin sees the buttons but every write 403s.
+- Guard / who can access: **`admin.roles.read`** opens the page (`page.tsx:24`) — note it is the *roles* read key, not a permissions key. Create/Edit/Delete buttons appear only for a Superadmin holding `admin.permissions.manage` (`page.tsx`, F-66).
+- Important escalation nuance: **all catalog mutations additionally require SUPERADMIN.** The POST/PATCH/DELETE routes reject a non-Superadmin with **403** even if they somehow hold `admin.permissions.manage`, because the catalog is platform-global (`src/app/api/administrator/permissions/route.ts:105`; `[id]/route.ts:46` and `:110`). The seed `admin.platform` role *does* include `admin.permissions.manage`, so the page derives its buttons from the same predicate and offers them only to a Superadmin (F-66); a write an Org Admin sends through the API still gets 403.
 - Access matrix:
   - Visitor → sign-in.
   - Member → **404**.
   - Limited Admin (`admin`) → **404** (lacks `admin.roles.read`).
-  - Org Admin (`admin.platform`) → **can view** the catalog and sees the manage buttons, but Create/Edit/Delete all fail with 403 (Superadmin-only writes).
+  - Org Admin (`admin.platform`) → **can view** the catalog; no New/Edit/Delete buttons (F-66), and a write sent through the API fails with 403 (Superadmin-only writes).
   - Superadmin → full view + working create/edit/delete.
 - Preconditions & test data: catalog is seeded from `ADMIN_PERMISSION_CATALOG`.
 
@@ -488,13 +492,13 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-PERMISSIONS-LIST-S2 — As an Org Admin, I want the catalog to stay read-only for me, so that a platform-global change is reserved for a Superadmin.
-  - Acceptance criteria: Given I am not a Superadmin, when I attempt an edit or delete, then the server refuses with 403 and an inline error; when I cannot even manage, the buttons are hidden.
+  - Acceptance criteria: Given I am not a Superadmin, then the catalog shows no New, Edit or Delete controls, even though I hold `admin.permissions.manage` (F-66); an edit or delete sent through the API is refused with 403 and nothing changes.
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
-    | 1 | As `orgadmin@orga.local`, note whether Edit/Delete buttons appear | They appear (the `admin.platform` role includes `admin.permissions.manage`) |
-    | 2 | Click **Edit** on a row, change the description, submit | `TODO: verify` exact copy — the edit sheet handles 400 explicitly; a 403 falls through to the generic edit-error message. Expected: the change does not persist (reload shows the original) |
-    | 3 | Click **Delete** on a row and confirm | The delete is refused (403); the row remains |
+    | 1 | As `orgadmin@orga.local`, look for **New permission**, **Edit** and **Delete** | None appear, although the `admin.platform` role includes `admin.permissions.manage` (F-66) |
+    | 2 | Send `PATCH /api/administrator/permissions/{id}` with a new description | **403**; reload shows the original description |
+    | 3 | Send `DELETE /api/administrator/permissions/{id}` | **403**; the row remains |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-PERMISSIONS-LIST-S3 — As a Superadmin, I want to edit a permission's description and delete an unused one, so that I can curate the catalog.
@@ -521,7 +525,7 @@ User stories
 Negative & edge cases
 - Empty search result / loading skeleton in the grid.
 - Delete of an in-use permission → 409 surfaced inline as the localized "permission in use" message (`_permissions-grid.tsx:64`).
-- Non-Superadmin write → 403 (from the route; UI copy varies by control — see S2 `TODO: verify`).
+- Non-Superadmin write → 403 from the route; the UI offers a non-Superadmin no write control (F-66).
 - Rate-limit on create/edit/delete.
 
 Accessibility: grid keyboard-navigable; the edit and "roles using" panels are slide-over Sheets with focus management; confirm dialog focus-trap + Esc.
@@ -531,9 +535,9 @@ i18n: headers, sheet titles, and messages localize.
 
 - Route: `/app/administrator/permissions/new`  ·  Example URL: `/en/app/administrator/permissions/new`  ·  Code: `src/app/[locale]/(secure)/app/administrator/permissions/new/page.tsx:16`
 - Purpose: Add a new key to the platform-global permission catalog. Adding a permission alone grants no power — it must later be attached to a role.
-- Guard / who can access: the page gates on `admin.permissions.manage` (`page.tsx:23`); the POST route **additionally requires SUPERADMIN** (`permissions/route.ts:105`). So an Org Admin can open the form (they hold `admin.permissions.manage` via `admin.platform`) but the submit returns 403.
-- Access matrix: Visitor → sign-in; Member / Limited Admin → 404; Org Admin → form opens but submit 403s; Superadmin → form works.
-- Preconditions & test data: `admin.permissions.manage` to open.
+- Guard / who can access: the page gates on `admin.permissions.manage` **and** SUPERADMIN, the same authority as the POST route (`permissions/route.ts:105`, F-66). An Org Admin holds `admin.permissions.manage` via `admin.platform` but gets **404**.
+- Access matrix: Visitor → sign-in; Member / Limited Admin / Org Admin → 404; Superadmin → form works.
+- Preconditions & test data: a Superadmin to open.
 
 User stories
 
@@ -551,17 +555,17 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-RGP-PERMISSIONS-NEW-S2 — As an Org Admin, I must not be able to create a catalog permission, so that a platform-global change is Superadmin-only.
-  - Acceptance criteria: Given I am not a Superadmin, when I submit the form, then the server returns 403 and a root form error appears; no permission is created.
+  - Acceptance criteria: Given I am not a Superadmin, when I open the form's URL, then I get **Not Found** (F-66); a `POST` sent through the API returns 403 and creates nothing.
   - UAT script:
     | # | Step | Expected result |
     |---|---|---|
-    | 1 | Sign in as `orgadmin@orga.local`; open `/en/app/administrator/permissions/new` | The form opens (the role holds `admin.permissions.manage`) |
-    | 2 | Fill a valid Key, submit | A localized **forbidden** root error appears (HTTP 403); nothing is created |
+    | 1 | Sign in as `orgadmin@orga.local`; open `/en/app/administrator/permissions/new` | A **Not Found** page (404), although the role holds `admin.permissions.manage` |
+    | 2 | Send `POST /api/administrator/permissions` with a valid key | **403**; nothing is created |
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 Negative & edge cases
 - Required + pattern + length validation on Key; the `*` marker via the required legend.
-- Duplicate key → 409 on Key; non-Superadmin → 403 root error; invalid body → 400 root error.
+- Duplicate key → 409 on Key; invalid body → 400 root error. A non-Superadmin never reaches the form (404); the route's 403 would show as a root error.
 - Rate-limit on create.
 
 Accessibility: labelled inputs, required legend, keyboard submit, error tied to field.
@@ -583,8 +587,8 @@ Legend: **view** = can open/read; **act** = can perform the screen's mutations; 
 | Group detail — Roles | sign-in | 404 | 404 | act (subset-limited) | act (any) |
 | Group detail — Members | sign-in | 404 | 404 | act (subset-limited, active org members) | act (any) |
 | Group detail — Settings | sign-in | 404 | 404 | act (own org) | act (any) |
-| Permissions list | sign-in | 404 | 404 | **view only** (writes 403) | view + act |
-| Permissions / new | sign-in | 404 | 404 | form opens, **submit 403** | act |
+| Permissions list | sign-in | 404 | 404 | **view only** (no write controls, F-66; API writes 403) | view + act |
+| Permissions / new | sign-in | 404 | 404 | **404** (Superadmin-only page, F-66) | act |
 
 ## Inventory checklist
 
@@ -603,6 +607,6 @@ Legend: **view** = can open/read; **act** = can perform the screen's mutations; 
 ## TODO: verify items
 
 1. **Read-without-update personas.** The seed `admin.platform` role holds both `admin.roles.read`+`admin.roles.update` and both `admin.groups.read`+`admin.groups.update`, so the "viewer sees disabled editor/Settings" branches (`canUpdate=false`) are not exercisable by a stock persona. Confirm by minting a custom role with only the `.read` key, or drop this assertion.
-2. **Permissions catalog: exact 403 copy for a non-Superadmin.** The edit sheet (`_permissions-grid.tsx:220`) handles 400 explicitly but lets a 403 fall through to the generic `edit.errorToast`; the list delete maps 409 but not 403 specifically. Confirm the exact on-screen message a non-Superadmin sees on edit/delete (behaviorally the write is refused and nothing persists).
+2. **Permissions catalog: exact 403 copy for a non-Superadmin.** Resolved by F-66: a non-Superadmin is no longer offered Edit or Delete, so no on-screen 403 is reachable. The API refusal is covered by UAT-ADMIN-RGP-PERMISSIONS-LIST-S2.
 3. **Concurrency / stale writes.** No route in this area uses If-Match/ETag; edits are last-write-wins. Confirmed absent in code, but flag if UAT expects an optimistic-concurrency prompt anywhere here.
 4. **Limited Admin fixture.** The seed does not create a standing account with only the `admin` role assigned to a login; the `admin` role is bundled into the Engineering group. To exercise the "Limited Admin → 404" rows directly, assign the `admin` role to a test user (e.g. via the Roles tab on a user) or rely on the Engineering-group members inheriting it.

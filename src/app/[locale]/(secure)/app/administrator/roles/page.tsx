@@ -32,6 +32,8 @@ export default async function AdministratorRolesPage({
   const canCreate = guard.access.permissions.includes("admin.roles.create");
   const canDelete = guard.access.permissions.includes("admin.roles.delete");
   const canDuplicate = canCreate;
+  // F-67: a role's organization links to its page, guarded on `admin.orgs.read`.
+  const canReadOrgs = guard.access.permissions.includes("admin.orgs.read");
 
   const t = await getTranslations({ locale, namespace: "administrator.roles" });
 
@@ -42,6 +44,7 @@ export default async function AdministratorRolesPage({
         locale={locale}
         canDelete={canDelete}
         canDuplicate={canDuplicate}
+        canReadOrgs={canReadOrgs}
         headerActions={
           canCreate ? (
             <Button asChild size="sm">

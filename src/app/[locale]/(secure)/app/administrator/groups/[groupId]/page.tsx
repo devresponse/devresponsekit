@@ -38,6 +38,13 @@ export default async function AdministratorGroupDetailPage({
 
   const canUpdate = guard.access.permissions.includes("admin.groups.update");
   const canAssign = guard.access.permissions.includes("admin.groups.assign");
+  // F-67: the Roles tab reads the org's role catalog (GET /roles) and the
+  // Members tab searches users (GET /users) and links each member to the user
+  // page. Those need `admin.roles.read` and `admin.users.read`, which this
+  // page never checked: a delegated group manager landed on a generic error
+  // (Roles is the default tab) and an empty "Add member" picker.
+  const canReadRoles = guard.access.permissions.includes("admin.roles.read");
+  const canReadUsers = guard.access.permissions.includes("admin.users.read");
 
   return (
     <section className="space-y-4 p-6">
@@ -58,6 +65,8 @@ export default async function AdministratorGroupDetailPage({
         }}
         canUpdate={canUpdate}
         canAssign={canAssign}
+        canReadRoles={canReadRoles}
+        canReadUsers={canReadUsers}
       />
     </section>
   );

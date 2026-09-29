@@ -625,7 +625,7 @@ describe("GroupRolesEditor catalog (F-41)", () => {
 
   it("reads the org's whole role catalog and offers a role past position 200", async () => {
     serveGroup([]);
-    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign />);
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign canReadRoles />);
 
     await waitFor(() => expect(values(lists().available)).toContain("r250"));
     expect(values(lists().available)).toHaveLength(250);
@@ -635,7 +635,7 @@ describe("GroupRolesEditor catalog (F-41)", () => {
   it("keeps an assigned role the catalog does not hold when it is moved out", async () => {
     serveGroup([{ id: "r-outside", key: "legacy.role", name: "Legacy" }]);
     const user = userEvent.setup();
-    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign />);
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign canReadRoles />);
     await waitFor(() => expect(values(lists().available)).toContain("r250"));
 
     expect(within(lists().assigned).getByText("legacy.role — Acme")).toBeInTheDocument();
@@ -663,7 +663,7 @@ describe("Invitation role select (F-41)", () => {
       return json({ items: [], page: 1, pageSize: 10, total: 0, sort: [] });
     });
     const user = userEvent.setup();
-    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate />);
+    renderWithIntl(<OrganizationInvitationsPanel orgId="o1" canUpdate canReadRoles />);
 
     await user.click(await screen.findByRole("button", { name: "Invite member" }));
     const dialog = await screen.findByRole("dialog");

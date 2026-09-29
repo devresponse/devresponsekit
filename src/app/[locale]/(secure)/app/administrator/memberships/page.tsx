@@ -23,13 +23,15 @@ export default async function AdministratorMembershipsPage({
   if (guard === "denied" || guard === "unauthenticated") {
     notFound();
   }
+  // F-67: each member links to the user page, guarded on `admin.users.read`.
+  const canReadUsers = guard.access.permissions.includes("admin.users.read");
 
   const t = await getTranslations({ locale, namespace: "administrator.memberships" });
 
   return (
     <section className="space-y-4 p-6">
       <h1 className="text-lg font-semibold">{t("title")}</h1>
-      <AdministratorMembershipsGrid locale={locale} />
+      <AdministratorMembershipsGrid locale={locale} canReadUsers={canReadUsers} />
     </section>
   );
 }

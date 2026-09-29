@@ -115,7 +115,15 @@ describe("organization Settings tab (F-39)", () => {
     bindingCount: 0,
   };
   const renderOrg = (org: OrganizationDetailJson) => (
-    <OrganizationDetailTabs org={org} canUpdate authSettings={null} platformAuthDefaults={null} />
+    <OrganizationDetailTabs
+      org={org}
+      canUpdate
+      canEditSettings
+      canReadRoles
+      canReadUsers
+      authSettings={null}
+      platformAuthDefaults={null}
+    />
   );
   const status = () => screen.getByRole("combobox", { name: /^Status/ });
   const name = () => screen.getByRole("textbox", { name: /^Name/ }) as HTMLInputElement;
@@ -193,6 +201,45 @@ describe("organization Settings tab (F-39)", () => {
   });
 });
 
+/**
+ * F-66: the Settings form PATCHes the organization row, which only a caller
+ * with cross-org reach may change, so it follows its own `canEditSettings`
+ * flag. It used to share `canUpdate` with the org-scoped panels, which left an
+ * org admin an editable form whose every save 403'd.
+ */
+describe("organization Settings tab — SUPERADMIN-only writes (F-66)", () => {
+  it("is read-only without canEditSettings while the Authentication tab stays editable", async () => {
+    const user = userEvent.setup();
+    renderWithIntl(
+      <OrganizationDetailTabs
+        org={{
+          id: "o1",
+          slug: "acme",
+          name: "Acme",
+          status: "active",
+          isDefault: false,
+          isResolvedDefault: false,
+          memberCount: 3,
+          bindingCount: 0,
+        }}
+        canUpdate
+        canEditSettings={false}
+        canReadRoles
+        canReadUsers
+        authSettings={null}
+        platformAuthDefaults={null}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+    expect(screen.getByRole("textbox", { name: /^Name/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    await user.click(screen.getByRole("tab", { name: "Authentication" }));
+    expect(screen.getByRole("button", { name: "Customize for this organization" })).toBeEnabled();
+  });
+});
+
 describe("organization Authentication tab (F-39)", () => {
   const DEFAULTS: AuthPolicySettingsJson = {
     requireEmailVerification: true,
@@ -215,6 +262,9 @@ describe("organization Authentication tab (F-39)", () => {
     <OrganizationDetailTabs
       org={ORG}
       canUpdate
+      canEditSettings
+      canReadRoles
+      canReadUsers
       authSettings={authSettings}
       platformAuthDefaults={DEFAULTS}
     />
@@ -330,7 +380,7 @@ describe.each([
         permissionKeys: [],
         memberCount: 0,
       };
-      return <RoleDetailTabs role={role} canUpdate />;
+      return <RoleDetailTabs role={role} canUpdate canReadUsers />;
     },
   },
   {
@@ -338,7 +388,7 @@ describe.each([
     url: "/api/administrator/groups/g1",
     render: (name: string, description: string | null) => {
       const group: GroupDetailJson = { id: "g1", key: "support", name, description };
-      return <GroupDetailTabs group={group} canUpdate canAssign />;
+      return <GroupDetailTabs group={group} canUpdate canAssign canReadRoles canReadUsers />;
     },
   },
 ])("$kind Settings tab (F-39)", ({ url, render }) => {
@@ -525,7 +575,9 @@ describe("role Permissions tab (F-39)", () => {
   it("refreshes after a save, and a tab switch shows the saved set once the refresh lands", async () => {
     const server = serve();
     const user = userEvent.setup();
-    const { rerender } = renderWithIntl(<RoleDetailTabs role={role(INITIAL)} canUpdate />);
+    const { rerender } = renderWithIntl(
+      <RoleDetailTabs role={role(INITIAL)} canUpdate canReadUsers />,
+    );
 
     await stageAndSave(user);
     expect([...server].sort()).toEqual(SAVED);
@@ -533,7 +585,7 @@ describe("role Permissions tab (F-39)", () => {
 
     await switchAwayAndBack(user, "Members", "Permissions");
     await ready();
-    rerender(<RoleDetailTabs role={role(SAVED)} canUpdate />);
+    rerender(<RoleDetailTabs role={role(SAVED)} canUpdate canReadUsers />);
 
     await waitFor(() => expect(values(lists().assigned)).toEqual(SAVED));
     expect(values(lists().available)).toEqual(["admin.users.ban"]);
@@ -544,12 +596,14 @@ describe("role Permissions tab (F-39)", () => {
   it("does not overwrite unsaved moves when fresh props arrive", async () => {
     serve();
     const user = userEvent.setup();
-    const { rerender } = renderWithIntl(<RoleDetailTabs role={role(INITIAL)} canUpdate />);
+    const { rerender } = renderWithIntl(
+      <RoleDetailTabs role={role(INITIAL)} canUpdate canReadUsers />,
+    );
     await ready();
 
     await user.selectOptions(lists().assigned, "admin.users.read");
     await user.click(screen.getByRole("button", { name: "Remove" }));
-    rerender(<RoleDetailTabs role={role(SAVED)} canUpdate />);
+    rerender(<RoleDetailTabs role={role(SAVED)} canUpdate canReadUsers />);
 
     expect(values(lists().assigned)).toEqual(["admin.users.ban"]);
     expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();

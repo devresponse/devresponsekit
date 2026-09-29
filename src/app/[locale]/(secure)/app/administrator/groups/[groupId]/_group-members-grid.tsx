@@ -13,8 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
+import { PermittedLink } from "../../_components/permitted-link";
 import { UserPicker, type UserOption } from "./_user-picker";
 
 /**
@@ -24,6 +24,11 @@ import { UserPicker, type UserOption } from "./_user-picker";
  * one (confirm → DELETE) via `/api/administrator/groups/[id]/members`. The
  * server confines adds to ACTIVE members of the group's org and applies the
  * privilege-escalation guard, so a non-eligible pick is reported back here.
+ *
+ * F-67: the email link and the "Add member" picker both belong to the users
+ * area. The picker searches `GET /api/administrator/users` and the link opens
+ * the user page, and both need `admin.users.read`. Without it, the email is
+ * plain text and only Remove is offered, since removing needs no user search.
  */
 interface MemberRow {
   app_user_id: string;
@@ -36,10 +41,13 @@ interface MemberRow {
 export function GroupMembersGrid({
   groupId,
   canAssign = false,
+  canReadUsers,
 }: {
   groupId: string;
   canAssign?: boolean;
+  canReadUsers: boolean;
 }) {
+  const canAdd = canAssign && canReadUsers;
   const t = useTranslations("administrator.groups.members");
   const locale = useLocale();
   const dialogs = useDialogs();
@@ -119,13 +127,14 @@ export function GroupMembersGrid({
         accessorKey: "primary_email",
         header: () => t("columns.email"),
         cell: ({ row }) => (
-          <LocaleLink
+          <PermittedLink
+            permitted={canReadUsers}
             locale={locale}
             href={`/app/administrator/users/${row.original.app_user_id}`}
             className="text-primary underline-offset-4 hover:underline"
           >
             {row.original.primary_email}
-          </LocaleLink>
+          </PermittedLink>
         ),
       },
       {
@@ -162,7 +171,7 @@ export function GroupMembersGrid({
         ),
       } as GridColumnDef<MemberRow>,
     ];
-  }, [t, locale, format, canAssign, onRemove]);
+  }, [t, locale, format, canAssign, canReadUsers, onRemove]);
 
   return (
     <div className="space-y-2">
@@ -182,7 +191,7 @@ export function GroupMembersGrid({
         }}
         searchable
         headerActions={
-          canAssign ? (
+          canAdd ? (
             <Button
               type="button"
               size="sm"
@@ -197,7 +206,7 @@ export function GroupMembersGrid({
           ) : undefined
         }
       />
-      {canAssign ? (
+      {canAdd ? (
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogContent>
             <DialogHeader>

@@ -398,7 +398,7 @@ describe("GroupRolesEditor", () => {
   it("loads both columns and saves the diff as a POST", async () => {
     routeRoles({ assignedAfterPost: [VIEWER] });
     const user = userEvent.setup();
-    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign />);
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign canReadRoles />);
 
     // Available column populated from the catalog once the fetches resolve.
     expect(await screen.findByText(/Available/)).toBeInTheDocument();
@@ -432,18 +432,62 @@ describe("GroupRolesEditor", () => {
 
   it("shows an error when the initial load fails", async () => {
     fetchMock.mockResolvedValue(jsonOk({}, 500));
-    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign />);
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign canReadRoles />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong. Try again.");
   });
 
   it("disables the controls when canAssign is false", async () => {
     routeRoles();
-    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign={false} />);
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign={false} canReadRoles />);
 
     await screen.findByText(/Available/);
     expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+  });
+
+  /**
+   * F-67: the catalog is GET /api/administrator/roles (`admin.roles.read`),
+   * which the group page never checked. This is the default tab, so a group
+   * manager without that permission opened every group onto a generic error.
+   * Without it the catalog is not requested; the assigned roles come from the
+   * group's own endpoint and can still be removed.
+   */
+  it("does not read the role catalog without admin.roles.read, and still removes", async () => {
+    let deleted: unknown = null;
+    fetchMock.mockImplementation((url: string, init?: { method?: string; body?: string }) => {
+      const u = String(url);
+      if (/\/api\/administrator\/groups\/g1$/.test(u)) {
+        return Promise.resolve(jsonOk({ group: { id: "g1", organization_id: "o1" } }));
+      }
+      if (u.startsWith("/api/administrator/roles")) return Promise.resolve(jsonOk({}, 403));
+      if (init?.method === "DELETE") {
+        deleted = JSON.parse(init.body ?? "null");
+        return Promise.resolve(jsonOk({ ok: true }));
+      }
+      return Promise.resolve(
+        jsonOk({ roles: deleted ? [] : [{ id: "r1", key: "app.viewer", name: "Viewer" }] }),
+      );
+    });
+    const user = userEvent.setup();
+    renderWithIntl(<GroupRolesEditor groupId="g1" canAssign canReadRoles={false} />);
+
+    expect(
+      await screen.findByText(
+        "The organization's role catalog isn't listed: that needs permission to read roles.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).startsWith("/api/administrator/roles")),
+    ).toBe(false);
+
+    const assigned = screen.getAllByRole("listbox")[1]!;
+    await user.selectOptions(assigned, "r1");
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(deleted).toEqual({ roleIds: ["r1"] }));
   });
 });
 
@@ -463,7 +507,7 @@ describe("GroupMembersGrid", () => {
         total: 1,
       }),
     );
-    renderWithIntl(<GroupMembersGrid groupId="g1" />);
+    renderWithIntl(<GroupMembersGrid groupId="g1" canReadUsers />);
 
     const link = await screen.findByRole("link", { name: "ada@example.com" });
     expect(link).toHaveAttribute("href", "/app/administrator/users/u1");
@@ -516,6 +560,8 @@ describe("GroupDetailTabs", () => {
         group={{ id: "g1", key: "engineering", name: "Engineering", description: null }}
         canUpdate
         canAssign
+        canReadRoles
+        canReadUsers
       />,
     );
 
@@ -561,9 +607,27 @@ describe("GroupMembersGrid (member management)", () => {
     return { url: call?.[0], body: JSON.parse((call?.[1] as { body: string }).body) };
   }
 
+  /**
+   * F-67: the picker searches GET /api/administrator/users and the email
+   * opens the user page, both `admin.users.read`, which the group page never
+   * checked. Without it the email is plain text and only Remove is offered.
+   */
+  it("offers no user picker and no user link without admin.users.read", async () => {
+    routeMembers();
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign canReadUsers={false} />);
+
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "ada@example.com" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add member" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).startsWith("/api/administrator/users")),
+    ).toBe(false);
+  });
+
   it("shows no add/remove controls without admin.groups.assign", async () => {
     routeMembers();
-    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign={false} />);
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign={false} canReadUsers />);
     await screen.findByRole("link", { name: "ada@example.com" });
     expect(screen.queryByRole("button", { name: "Add member" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
@@ -572,7 +636,7 @@ describe("GroupMembersGrid (member management)", () => {
   it("adds a member, posting { appUserIds: [chosen] }", async () => {
     routeMembers(1);
     const user = userEvent.setup();
-    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign />);
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign canReadUsers />);
 
     await user.click(await screen.findByRole("button", { name: "Add member" }));
     await screen.findByText("Add a member"); // dialog open
@@ -587,7 +651,7 @@ describe("GroupMembersGrid (member management)", () => {
   it("surfaces the not-eligible message when the server adds nobody", async () => {
     routeMembers(0); // server dropped the pick (not an active org member)
     const user = userEvent.setup();
-    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign />);
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign canReadUsers />);
 
     await user.click(await screen.findByRole("button", { name: "Add member" }));
     await screen.findByText("Add a member");
@@ -602,7 +666,7 @@ describe("GroupMembersGrid (member management)", () => {
     routeMembers();
     confirmMock.mockResolvedValue(true);
     const user = userEvent.setup();
-    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign />);
+    renderWithIntl(<GroupMembersGrid groupId="g1" canAssign canReadUsers />);
 
     await user.click(await screen.findByRole("button", { name: "Remove" }));
 

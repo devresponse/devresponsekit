@@ -390,7 +390,7 @@ i18n: labels, the variables hint, and validation messages localize in `en` and `
 
 - Route: `/app/administrator/api-keys` · Example URL: `/en/app/administrator/api-keys` · Code: `src/app/[locale]/(secure)/app/administrator/api-keys/page.tsx:20`
 - Purpose: The cross-user, cross-org API-key inventory. Read-only admins see the full inventory with a status filter and per-row detail; managers additionally get inline Rotate / Revoke. Secrets are never in list data (`_api-keys-grid.tsx:39`; API never returns the hash, `src/lib/api-auth/api-keys.server.ts:18`).
-- Guard / who can access: `admin.apikeys.read` to view; Rotate/Revoke/Issue are gated on `admin.apikeys.manage` client-side and re-checked on every route (`api-keys/page.tsx:26`,`:30`; API `GET` at `src/app/api/administrator/api-keys/route.ts:59`).
+- Guard / who can access: `admin.apikeys.read` to view; Rotate/Revoke/Issue are gated on `admin.apikeys.manage` client-side and re-checked on every route (`api-keys/page.tsx:26`,`:30`; API `GET` at `src/app/api/administrator/api-keys/route.ts:59`). The Owner email links to the user page only for a holder of `admin.users.read`, that page's guard; an auditor holding only `admin.apikeys.read` sees it as plain text (F-67).
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
   - Org Admin -> sees only their own org's keys; can rotate/revoke within their org (`route.ts:73`).

@@ -6,13 +6,15 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-manager";
 import { useAppFormatter } from "@/components/i18n/format-preferences";
-import { LocaleLink } from "@/components/i18n/locale-link";
 import { DataGrid, type GridColumnDef } from "../../_components/grid/data-grid";
+import { PermittedLink } from "../../_components/permitted-link";
 
 /**
  * Memberships tab for the user detail (docs/admin-manager.md §8.1).
  *
- * Shows all organization memberships for a specific user.
+ * Shows all organization memberships for a specific user. The organization
+ * links to its page only for a viewer who holds `admin.orgs.read`, that
+ * page's guard; otherwise it is plain text (F-67).
  */
 interface MembershipRow {
   id: string;
@@ -27,9 +29,11 @@ interface MembershipRow {
 export function UserMembershipsPanel({
   userId,
   canUpdate,
+  canReadOrgs,
 }: {
   userId: string;
   canUpdate: boolean;
+  canReadOrgs: boolean;
 }) {
   const t = useTranslations("administrator.users.memberships");
   const tErr = useTranslations("administrator.errors");
@@ -79,13 +83,14 @@ export function UserMembershipsPanel({
         accessorKey: "organization_slug",
         header: () => t("columns.organization"),
         cell: ({ row }) => (
-          <LocaleLink
+          <PermittedLink
+            permitted={canReadOrgs}
             locale={locale}
             href={`/app/administrator/organizations/${row.original.organization_id}`}
             className="text-primary underline-offset-4 hover:underline"
           >
             <code className="text-xs">{row.original.organization_slug}</code>
-          </LocaleLink>
+          </PermittedLink>
         ),
       },
       {
@@ -134,7 +139,7 @@ export function UserMembershipsPanel({
           ]
         : []),
     ],
-    [t, locale, format, canUpdate, onRemove],
+    [t, locale, format, canUpdate, canReadOrgs, onRemove],
   );
 
   return (

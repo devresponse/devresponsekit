@@ -28,7 +28,16 @@ export interface RoleDetailJson {
   memberCount: number;
 }
 
-export function RoleDetailTabs({ role, canUpdate }: { role: RoleDetailJson; canUpdate: boolean }) {
+export function RoleDetailTabs({
+  role,
+  canUpdate,
+  canReadUsers,
+}: {
+  role: RoleDetailJson;
+  canUpdate: boolean;
+  /** Whether members link to the user page (`admin.users.read`, F-67). */
+  canReadUsers: boolean;
+}) {
   const t = useTranslations("administrator.roles");
 
   return (
@@ -48,7 +57,7 @@ export function RoleDetailTabs({ role, canUpdate }: { role: RoleDetailJson; canU
       </TabsContent>
 
       <TabsContent value="members" className="mt-4">
-        <RoleMembersGrid roleId={role.id} />
+        <RoleMembersGrid roleId={role.id} canReadUsers={canReadUsers} />
       </TabsContent>
 
       <TabsContent value="settings" className="mt-4">

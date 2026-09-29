@@ -8,6 +8,7 @@ import {
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import {
   actingOrganizationId,
   requiresSuperadminForSharedTarget,
@@ -111,7 +112,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   const scope = resolveOrgScope(guard.access);
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseSharedTarget(guard, target, request, "sessions_revoke_all");
   }
 
   try {

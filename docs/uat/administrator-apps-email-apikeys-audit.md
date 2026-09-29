@@ -330,7 +330,7 @@ i18n: headers, the empty message, and subjects localize; the Locale column shows
 
 - Route: `/app/administrator/email/templates/[templateId]` · Example URL: `/en/app/administrator/email/templates/<uuid>` · Code: `src/app/[locale]/(secure)/app/administrator/email/templates/[templateId]/page.tsx:21`
 - Purpose: Edit one template's subject, HTML body, text body, and description. `key` and `locale` are shown but immutable (flows send against the key).
-- Guard / who can access: the page requires `admin.email.manage` **and** that the caller be a **Superadmin** (`[templateId]/page.tsx:33`,`:39`) — it matches the authority of the save route it drives (`PUT /api/administrator/email/templates/[id]`, superadmin-only at `src/app/api/administrator/email/templates/[id]/route.ts:74`). Review #73: an Org Admin holding `admin.email.manage` used to reach a form whose every save 403d; the page now answers **Not Found**, the same indistinguishability the rest of the admin tree uses.
+- Guard / who can access: the page requires `admin.email.manage` **and** that the caller be a **Superadmin** (`[templateId]/page.tsx:33`,`:39`) — it matches the authority of the save route it drives (`PUT /api/administrator/email/templates/[id]`, superadmin-only at `src/app/api/administrator/email/templates/[id]/route.ts:75`). Review #73: an Org Admin holding `admin.email.manage` used to reach a form whose every save 403d; the page now answers **Not Found**, the same indistinguishability the rest of the admin tree uses.
 - Access matrix:
   - Visitor / Member / Limited Admin -> Not Found.
   - Org Admin -> **Not Found** (review #73), even holding `admin.email.manage`; the API refuses the save with `forbidden` 403 for anyone who calls it directly.
@@ -352,7 +352,7 @@ User stories
   - Result: [ ] Pass  [ ] Fail  — Notes: ______
 
 - UAT-ADMIN-AEK-EMAIL-TEMPLATE-EDIT-S2 — As an Org Admin, I want the template editor to be unreachable, so that platform config stays superadmin-controlled and I am not handed a form I can never save.
-  - Acceptance criteria: Given I am an Org Admin (no `superuser` marker), when I open a template's Edit URL, then I get Not Found, no Edit links are offered in the list, and a direct PUT is still refused with `forbidden` 403 (`[templateId]/page.tsx:39`, `[id]/route.ts:74`, review #73).
+  - Acceptance criteria: Given I am an Org Admin (no `superuser` marker), when I open a template's Edit URL, then I get Not Found, no Edit links are offered in the list, and a direct PUT is still refused with `forbidden` 403 (`[templateId]/page.tsx:39`, `[id]/route.ts:75`, review #73).
   - UAT script:
     | # | Step (what to do) | Expected result |
     |---|---|---|
@@ -607,7 +607,7 @@ Legend: `see` = can open and read · `act` = can perform the screen's mutations 
 
 Notes on the matrix:
 - **Limited Admin** (`admin` seed role) holds only `admin.users.*` + `admin.audit.read`, so of this set it can open **Audit** only; everything else is 404 (`src/db/seeds/dev-init.ts:249`).
-- **The template editor is superadmin-only** — the page guard was raised to match its superadmin-only save, so an Org Admin gets 404 rather than an unsaveable form (`[templateId]/page.tsx:39`, `src/app/api/administrator/email/templates/[id]/route.ts:74`, review #73).
+- **The template editor is superadmin-only** — the page guard was raised to match its superadmin-only save, so an Org Admin gets 404 rather than an unsaveable form (`[templateId]/page.tsx:39`, `src/app/api/administrator/email/templates/[id]/route.ts:75`, review #73).
 - Every "act" for an Org Admin is confined to their own org via ADR-0001 org-scoping; out-of-scope ids return 404, not 403.
 
 ## Inventory checklist (definition of done)

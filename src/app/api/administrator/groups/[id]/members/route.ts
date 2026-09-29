@@ -19,6 +19,7 @@ import {
   conferrablePermissions,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
+import { boundedRequestList, refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -149,12 +150,26 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // are a subset of their own. Mirrors the role-attach guard in
   // groups/[id]/roles; checked per-group, so it covers the whole batch.
   // A bearer credential is bounded by its scopes, not just its owner's
-  // permissions, and never takes the SUPERADMIN fast-path (P1-1).
+  // permissions, and never takes the SUPERADMIN fast-path (P1-1). A refusal is
+  // audited (F-58).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForGroup(group.id);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      const requested = boundedRequestList(parsed.data.appUserIds);
+      return refuseUnconferrable(guard, request, {
+        action: "group_members_add",
+        organizationId: group.organization_id,
+        unheld,
+        metadata: {
+          groupId: id,
+          key: group.key,
+          requestedAppUserIds: requested.ids,
+          requestedAppUserCount: requested.count,
+        },
+      });
+    }
   }
 
   // Confine to users who are ACTIVE members of the group's org.
@@ -193,7 +208,8 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
  * MUST hold `admin.groups.assign`.
  *
  * Carries the SAME AUTHZ-3 subset test as POST, measured against the authority
- * the removal takes away (REVOKE-1 — 403 `forbidden`).
+ * the removal takes away (REVOKE-1 — 403 `forbidden` and an
+ * `admin.permission.conferral_denied` row, F-58).
  */
 export const DELETE = withAdminRoute(async function DELETE(
   request: NextRequest,
@@ -237,12 +253,25 @@ export const DELETE = withAdminRoute(async function DELETE(
   // deployment that models administrative authority as a group, is the same
   // one-request lockout the role-detach twin above refuses. Checked per-GROUP,
   // so it covers the whole batch. A bearer credential is bounded by its scopes
-  // and never takes the SUPERADMIN fast-path (P1-1).
+  // and never takes the SUPERADMIN fast-path (P1-1). A refusal is audited (F-58).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForGroup(group.id);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      const requested = boundedRequestList(parsed.data.appUserIds);
+      return refuseUnconferrable(guard, request, {
+        action: "group_members_remove",
+        organizationId: group.organization_id,
+        unheld,
+        metadata: {
+          groupId: id,
+          key: group.key,
+          requestedAppUserIds: requested.ids,
+          requestedAppUserCount: requested.count,
+        },
+      });
+    }
   }
 
   await db

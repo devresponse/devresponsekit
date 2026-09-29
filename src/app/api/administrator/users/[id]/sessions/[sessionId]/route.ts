@@ -13,6 +13,7 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import { findSessionToken } from "@/lib/admin/session-item";
 import {
   isResolvedUserResponse,
@@ -73,7 +74,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   const scope = resolveOrgScope(guard.access);
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseSharedTarget(guard, target, request, "session_revoke");
   }
 
   let sessionToken: string | null;

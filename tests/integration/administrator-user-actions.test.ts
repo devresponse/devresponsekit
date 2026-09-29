@@ -292,9 +292,24 @@ describe("POST /api/administrator/users (create)", () => {
 
   describe("F-13: the Better Auth `admin` role needs cross-org reach, as on POST …/role", () => {
     it("an ORG admin may not create a user with it: 403, and no identity is created", async () => {
-      const res = await create(grantedAccess("admin.users.create"), { role: "admin" });
+      const res = await create(grantedAccess("admin.users.create"), {
+        role: "admin",
+        email: "New@X.com",
+      });
       expect(res.status).toBe(403);
       expect(authCreateUser).not.toHaveBeenCalled();
+      // F-58: audited like the set-role refusal, with the normalised address
+      // like the route's `create_denied` refusals.
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "administrator.access.denied",
+          outcome: "denied",
+          organizationId: "o-1",
+          email: "new@x.com",
+          reason: "cross_org_reach_required",
+          metadata: { action: "user_create", role: "admin" },
+        }),
+      );
     });
 
     it("an ORG-BOUND superuser credential may not either (MACHINE-2)", async () => {
@@ -1440,6 +1455,79 @@ describe.each(guardedRoutes)("$name — target-outranks-actor guard (review #7)"
       expect.objectContaining({ eventType: "admin.user.action_denied" }),
     );
   });
+});
+
+/**
+ * F-58 — the AUTHZ-2 shared-target refusal is audited on every account-global
+ * handler, as the rank refusal above is: the same 403, plus an
+ * `admin.user.action_denied` row (reason `shared_target_requires_superadmin`)
+ * naming the actor, the target, the actor's org and the attempted action (the
+ * name the handler gives the rank guard). It used to leave no row at all.
+ */
+const SHARED_TARGET_ACTIONS: Record<string, string> = {
+  "POST /users/[id]/password (mode=set)": "password",
+  "POST /users/[id]/ban": "ban",
+  "POST /users/[id]/unban": "unban",
+  "DELETE /users/[id] (soft delete)": "soft_delete",
+  "PATCH /users/[id] (profile edit)": "update",
+  "POST /users/[id]/restore": "restore",
+  "DELETE /users/[id]/sessions (revoke all)": "sessions_revoke_all",
+  "DELETE /users/[id]/sessions/[sessionId]": "session_revoke",
+};
+
+describe.each(guardedRoutes.filter((r) => r.name in SHARED_TARGET_ACTIONS))(
+  "$name — the shared-target refusal is audited (F-58)",
+  (route) => {
+    beforeEach(() => {
+      sessionGetter.mockResolvedValue({ user: { id: ACTOR_BA } });
+      dbMock.mockResolvedValue(route.row ?? targetRow);
+      armEffects();
+      // A plain member: the rank guard passes, so only AUTHZ-2 can refuse.
+      accessGetter.mockImplementation((id: string) =>
+        id === ACTOR_BA
+          ? { ...grantedAccess(route.perm), permissions: [route.perm, "shell.view"] }
+          : { ...grantedAccess(route.perm), permissions: ["shell.view"] },
+      );
+    });
+
+    it("org admin vs a user shared with another org → the same 403, one denied row, no side effect", async () => {
+      requiresSuperadminMock.mockResolvedValue(true);
+      const res = await route.invoke();
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual(
+        expect.objectContaining({ error: "forbidden", message: "errors.forbidden" }),
+      );
+      expect(route.effect()).not.toHaveBeenCalled();
+      expect(auditMock).toHaveBeenCalledTimes(1);
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.user.action_denied",
+          outcome: "denied",
+          reason: "shared_target_requires_superadmin",
+          actorBetterAuthUserId: ACTOR_BA,
+          appUserId: TARGET_ID,
+          organizationId: "o-1",
+          email: "target@example.com",
+          metadata: {
+            action: SHARED_TARGET_ACTIONS[route.name],
+            targetBetterAuthUserId: "ba-target",
+          },
+        }),
+      );
+    });
+
+    it("the same action on a user confined to the actor's org writes no denial", async () => {
+      const res = await route.invoke();
+      expect(res.status).toBe(200);
+      expect(auditMock).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "denied" }));
+    });
+  },
+);
+
+it("F-58: the shared-target table covers every account-global handler", () => {
+  expect(guardedRoutes.filter((r) => r.name in SHARED_TARGET_ACTIONS)).toHaveLength(
+    Object.keys(SHARED_TARGET_ACTIONS).length,
+  );
 });
 
 describe("POST /users/[id]/password — rank guard precedes body parsing", () => {

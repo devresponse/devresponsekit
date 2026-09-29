@@ -682,10 +682,26 @@ describe("/api/v1/users", () => {
       );
     }
 
+    /** F-58: the refusal is audited as the v1 guard's denial, under the caller's org. */
+    const expectReachDenied = () =>
+      expect(auditEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "api.access.denied",
+          outcome: "denied",
+          actorBetterAuthUserId: "ba1",
+          organizationId: "o1",
+          email: "new@x.com",
+          reason: "cross_org_reach_required",
+          requestId: "r1",
+          metadata: expect.objectContaining({ action: "user_create", role: "admin" }),
+        }),
+      );
+
     it("an org admin is refused with 403 and creates nothing", async () => {
       const res = await createAdmin({ permissions: ["admin.users.create"], organizationId: "o1" });
       expect(res.status).toBe(403);
       expect(createBetterAuthUser).not.toHaveBeenCalled();
+      expectReachDenied();
     });
 
     it("a superuser-owned key or JWT is refused too: every bearer credential is org-bound (MACHINE-2)", async () => {
@@ -696,6 +712,7 @@ describe("/api/v1/users", () => {
       });
       expect(res.status).toBe(403);
       expect(createBetterAuthUser).not.toHaveBeenCalled();
+      expectReachDenied();
     });
 
     it("a superadmin's cookie session (not org-bound) creates it", async () => {

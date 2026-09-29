@@ -9,6 +9,7 @@ import {
 } from "@/lib/admin/auth-admin.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import {
   actingOrganizationId,
   requiresSuperadminForSharedTarget,
@@ -106,7 +107,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     const scope = resolveOrgScope(guard.access);
     if (!scope) return adminErrorResponse("not_found", 404, request);
     if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
-      return adminErrorResponse("forbidden", 403, request);
+      return refuseSharedTarget(guard, target, request, "password");
     }
 
     // F-10: a new password also signs the user out everywhere and revokes the

@@ -12,6 +12,7 @@ import {
   conferrablePermissions,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
+import { refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -71,12 +72,20 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // clone would hand them an editable role carrying authority they lack
   // (including a `superuser`-bearing role), which they could then assign.
   // A bearer credential is bounded by its scopes, not just its owner's
-  // permissions, and never takes the SUPERADMIN fast-path (P1-1).
+  // permissions, and never takes the SUPERADMIN fast-path (P1-1). A refusal is
+  // audited (F-58).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForRoles([source.id]);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      return refuseUnconferrable(guard, request, {
+        action: "role_duplicate",
+        organizationId: source.organization_id,
+        unheld,
+        metadata: { sourceRoleId: source.id, sourceKey: source.key },
+      });
+    }
   }
 
   // Compute a unique key suffix. We collect all candidate "starts-with"

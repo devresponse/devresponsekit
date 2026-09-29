@@ -26,6 +26,8 @@ const sessionGetter = vi.fn();
 const accessGetter = vi.fn();
 const auditRoleMock = vi.fn();
 const auditOrgMock = vi.fn();
+/** F-58: a refusal writes through `auditEvent` (`refuseUnconferrable`). */
+const auditEventMock = vi.fn();
 
 vi.mock("@/lib/auth-guard", () => ({ getCurrentSession: () => sessionGetter() }));
 vi.mock("@/lib/auth-status", async () => {
@@ -39,6 +41,9 @@ vi.mock("@/lib/admin/rate-limit.server", () => ({
 vi.mock("@/lib/admin/audit-helpers.server", () => ({
   auditRoleAction: (...a: unknown[]) => auditRoleMock(...a),
   auditOrgAction: (...a: unknown[]) => auditOrgMock(...a),
+}));
+vi.mock("@/lib/audit.server", () => ({
+  auditEvent: (...a: unknown[]) => auditEventMock(...a),
 }));
 
 const { db, pgPool } = await import("@/db/database");
@@ -121,7 +126,9 @@ function lastMetadata(mock: ReturnType<typeof vi.fn>, eventType: string) {
 
 beforeEach(async () => {
   await cleanup();
-  for (const m of [sessionGetter, accessGetter, auditRoleMock, auditOrgMock]) m.mockReset();
+  for (const m of [sessionGetter, accessGetter, auditRoleMock, auditOrgMock, auditEventMock]) {
+    m.mockReset();
+  }
   sessionGetter.mockResolvedValue({ user: { id: ACTOR } });
   accessGetter.mockResolvedValue(SUPERADMIN);
 });
@@ -175,6 +182,52 @@ describe("roles/[id]/permissions audits the applied delta (DB-backed, F-38)", ()
       resulting: [],
     });
   });
+});
+
+/**
+ * F-58 / F-15: the refusal's subset test measures the raw requested keys, but
+ * its row records only the refused keys Postgres finds in `app_permissions`,
+ * and a count of the rest: 499 strings of 120 characters recorded verbatim
+ * parked about 61 KB of the caller's text in an append-only table.
+ */
+describe("roles/[id]/permissions refusal records catalog keys only (DB-backed, F-58)", () => {
+  it.each(["POST", "DELETE"] as const)(
+    "%s by an org admin naming 499 unknown keys and one real one it lacks",
+    async (method) => {
+      const orgId = await newOrg();
+      const roleId = await newRole(orgId, "role");
+      await newPermissions("lacked");
+      accessGetter.mockResolvedValue({
+        ...SUPERADMIN,
+        organizationId: orgId,
+        permissions: ["admin.roles.update"],
+      });
+      const junk = Array.from({ length: 499 }, (_, i) => `${PREFIX}${i}`.padEnd(120, "x"));
+
+      const res = await permissionsRoute[method](
+        req(`roles/${roleId}/permissions`, method, { ids: [...junk, `${PREFIX}lacked`] }),
+        ctx(roleId),
+      );
+
+      expect(res.status).toBe(403);
+      expect(auditEventMock).toHaveBeenCalledTimes(1);
+      const row = auditEventMock.mock.calls[0]![0] as {
+        eventType: string;
+        organizationId: string;
+        metadata: Record<string, unknown>;
+      };
+      expect(row.eventType).toBe("admin.permission.conferral_denied");
+      expect(row.organizationId).toBe(orgId);
+      expect(row.metadata).toEqual({
+        action: method === "POST" ? "role_permissions_add" : "role_permissions_remove",
+        roleId,
+        key: `${PREFIX}role`,
+        unknownPermissionKeyCount: 499,
+        unheldPermissions: [`${PREFIX}lacked`],
+      });
+      expect(JSON.stringify(row.metadata).length).toBeLessThan(500);
+    },
+  );
 });
 
 describe("groups/[id]/roles audits the applied delta (DB-backed, F-38)", () => {

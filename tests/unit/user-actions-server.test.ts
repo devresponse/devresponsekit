@@ -382,7 +382,7 @@ describe("account-global actions refuse a shared target for a non-superadmin (AU
   });
 
   it.each(["ban", "unban", "soft_delete", "restore"] as const)(
-    "%s is refused without touching Better Auth / the DB",
+    "%s is refused without touching Better Auth / the DB, and the row is audited (F-58)",
     async (action) => {
       const out = await executeBulkUserAction(action, target, actor, { reason: "x" });
       expect(out).toEqual({ ok: false, appUserId: "u1", error: "forbidden_shared_target" });
@@ -390,6 +390,20 @@ describe("account-global actions refuse a shared target for a non-superadmin (AU
       expect(unbanMock).not.toHaveBeenCalled();
       expect(restoreBanMock).not.toHaveBeenCalled();
       expect(txRun).not.toHaveBeenCalled();
+      // The single-row routes' row (`refuseSharedTarget`), marked `bulk`. The
+      // batch summary counts the row as failed but names neither the user nor
+      // the rule.
+      expect(auditMock).toHaveBeenCalledTimes(1);
+      expect(auditMock).toHaveBeenCalledWith("admin.user.action_denied", "denied", {
+        request: actor.request,
+        actorBetterAuthUserId: "admin",
+        appUserId: "u1",
+        organizationId: null,
+        email: "u@x.com",
+        requestId: "req-bulk-1",
+        reason: "shared_target_requires_superadmin",
+        metadata: { action, targetBetterAuthUserId: "ba1", bulk: true },
+      });
     },
   );
 
@@ -504,6 +518,19 @@ describe("per-row audits carry the batch's organization (F-32)", () => {
       "admin.user.action_denied",
       "denied",
       expect.objectContaining({ organizationId: "org-a" }),
+    );
+  });
+
+  it("the shared-target refusal is stamped the same way (F-58)", async () => {
+    requiresSuperadminMock.mockResolvedValue(true);
+    await executeBulkUserAction("soft_delete", target, orgActor, { reason: "x" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "admin.user.action_denied",
+      "denied",
+      expect.objectContaining({
+        organizationId: "org-a",
+        reason: "shared_target_requires_superadmin",
+      }),
     );
   });
 

@@ -252,6 +252,25 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
       expect(((await res.json()) as { error: string }).error).toBe("forbidden");
       expect(createInvitationMock).not.toHaveBeenCalled();
       expect(sendInvitationEmailMock).not.toHaveBeenCalled();
+      // F-58: the attempt is on record under this org, naming the address and
+      // the role it would have carried. The only row: nothing was sent.
+      expect(auditMock).toHaveBeenCalledTimes(1);
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.permission.conferral_denied",
+          outcome: "denied",
+          actorBetterAuthUserId: "ba-admin",
+          appUserId: null,
+          organizationId: ORG_ID,
+          email: "ada@example.com",
+          reason: "unheld_permissions",
+          metadata: {
+            action: "invitation_create",
+            roleId: ROLE_ID,
+            unheldPermissions: ["superuser"],
+          },
+        }),
+      );
     });
 
     it("403 forbidden when the role confers a permission the org admin does not hold", async () => {
@@ -261,6 +280,13 @@ describe("POST /api/administrator/organizations/:id/invitations", () => {
       const res = await createPOST(withRole(), listCtx());
       expect(res.status).toBe(403);
       expect(createInvitationMock).not.toHaveBeenCalled();
+      // Only what the inviter could not confer, not the whole role.
+      expect(auditMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "admin.permission.conferral_denied",
+          metadata: expect.objectContaining({ unheldPermissions: ["admin.users.delete"] }),
+        }),
+      );
     });
 
     it("201 when the role's permissions are a subset of what the org admin holds", async () => {

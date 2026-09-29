@@ -6,6 +6,7 @@ import { auditRoleAction } from "@/lib/admin/audit-helpers.server";
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { hasCrossOrgReach } from "@/lib/admin/access-scope.server";
 import { AdminError, assertPermissionNotInUse } from "@/lib/admin/roles.server";
 import { isUuid } from "@/lib/admin/user-target.server";
@@ -47,7 +48,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
   // credential never takes the SUPERADMIN bypass on a platform-wide action,
   // even when its owner is a global superuser.
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseWithoutCrossOrgReach(guard, request, "permission_update");
   }
 
   const { id } = await ctx.params;
@@ -119,7 +120,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   // credential never takes the SUPERADMIN bypass on a platform-wide action,
   // even when its owner is a global superuser.
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseWithoutCrossOrgReach(guard, request, "permission_delete");
   }
 
   const { id } = await ctx.params;

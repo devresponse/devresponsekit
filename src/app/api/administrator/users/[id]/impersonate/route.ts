@@ -67,7 +67,10 @@ type RouteContext = { params: Promise<{ id: string }> };
  *     confirm cannot turn into a runaway loop.
  *   - Both success AND failure are audited; the actor id is the
  *     ORIGINAL admin (never the impersonated user) so the audit row
- *     attributes the action correctly.
+ *     attributes the action correctly. Every refusal is outcome `denied`
+ *     (F-58): the escalation refusals used to be `failure`, which the audit
+ *     explorer's denied filter missed and the error log reported as an
+ *     incident. `failure` is left to Better Auth refusing the call itself.
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.users.impersonate");
@@ -184,7 +187,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // access-scope.server.ts. A machine credential that needs to act as a user
   // should be minted for that user.
   if (isOrgBound(guard.access)) {
-    await auditUserAction("admin.user.impersonation_failed", "failure", {
+    await auditUserAction("admin.user.impersonation_failed", "denied", {
       request,
       actorBetterAuthUserId: guard.betterAuthUserId,
       appUserId: target.appUserId,
@@ -205,7 +208,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     const actorPermissions = new Set(guard.access.permissions);
     const escalates = targetPermissions.some((perm) => !actorPermissions.has(perm));
     if (escalates) {
-      await auditUserAction("admin.user.impersonation_failed", "failure", {
+      await auditUserAction("admin.user.impersonation_failed", "denied", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
@@ -259,7 +262,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       // member, so this is unreachable — but the rank bound below is meaningless
       // without an actor to measure, and a null must never read as "no shared
       // tenant, therefore allowed".
-      await auditUserAction("admin.user.impersonation_failed", "failure", {
+      await auditUserAction("admin.user.impersonation_failed", "denied", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,
@@ -286,7 +289,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
       .map(([organizationId]) => organizationId);
 
     if (outrankedOrgIds.length > 0) {
-      await auditUserAction("admin.user.impersonation_failed", "failure", {
+      await auditUserAction("admin.user.impersonation_failed", "denied", {
         request,
         actorBetterAuthUserId: guard.betterAuthUserId,
         appUserId: target.appUserId,

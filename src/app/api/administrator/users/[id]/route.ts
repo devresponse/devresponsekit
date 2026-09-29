@@ -30,6 +30,7 @@ import {
 import { adminErrorResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import { humanActorId } from "@/lib/impersonation-attribution.server";
 import {
   isResolvedUserResponse,
@@ -147,7 +148,7 @@ export const PATCH = withAdminRoute(async function PATCH(request: NextRequest, c
   const scope = resolveOrgScope(guard.access);
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseSharedTarget(guard, target, request, "update");
   }
 
   let json: unknown;
@@ -260,7 +261,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   const scope = resolveOrgScope(guard.access);
   if (!scope) return adminErrorResponse("not_found", 404, request);
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseSharedTarget(guard, target, request, "soft_delete");
   }
 
   // Body is optional for DELETE — treat missing/empty as no reason.

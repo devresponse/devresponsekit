@@ -173,6 +173,25 @@ function req(path: string, init?: { method?: string; body?: unknown }): NextRequ
 const groupCtx = { params: Promise.resolve({ id: GROUP }) };
 const userCtx = { params: Promise.resolve({ id: USER }) };
 
+/**
+ * F-58: the row an AUTHZ-3 / REVOKE-1 refusal writes (`refuseUnconferrable`),
+ * filed under the group's org and naming the operation and the refused keys.
+ * It is the only row: nothing was granted or revoked.
+ */
+function expectConferralDenied(row: Record<string, unknown>): void {
+  expect(auditMock).toHaveBeenCalledTimes(1);
+  expect(auditMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      eventType: "admin.permission.conferral_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: "ba-actor",
+      organizationId: ORG_A,
+      reason: "unheld_permissions",
+      ...row,
+    }),
+  );
+}
+
 let list: typeof ListRoute;
 let byId: typeof IdRoute;
 let roles: typeof RolesRoute;
@@ -315,12 +334,24 @@ describe("groups/[id]/roles — same-org + superuser guards", () => {
     ).toBe(404);
   });
 
-  it("403 when a non-superadmin bundles a role granting `superuser`", async () => {
+  it("403 when a non-superadmin bundles a role granting `superuser`, audited (F-58)", async () => {
     state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     expect(
       (await roles.POST(req(`groups/${GROUP}/roles`, { method: "POST", body }), groupCtx)).status,
     ).toBe(403);
+    expect(state.insertedValues).toEqual([]);
+    expectConferralDenied({
+      appUserId: null,
+      metadata: {
+        action: "group_roles_add",
+        groupId: GROUP,
+        key: "marketing",
+        requestedRoleIds: [ROLE],
+        requestedRoleCount: 1,
+        unheldPermissions: ["superuser"],
+      },
+    });
   });
 
   it("403 when a non-superadmin bundles a role conferring a permission they lack (AUTHZ-3)", async () => {
@@ -329,6 +360,12 @@ describe("groups/[id]/roles — same-org + superuser guards", () => {
     expect(
       (await roles.POST(req(`groups/${GROUP}/roles`, { method: "POST", body }), groupCtx)).status,
     ).toBe(403);
+    expectConferralDenied({
+      metadata: expect.objectContaining({
+        action: "group_roles_add",
+        unheldPermissions: ["admin.users.delete"],
+      }),
+    });
   });
 
   it("200 when the bundled role's permissions are a subset the actor holds (AUTHZ-3)", async () => {
@@ -440,9 +477,15 @@ describe("groups/[id]/members — org-membership constraint", () => {
       groupCtx,
     );
     expect(res.status).toBe(403);
+    expectConferralDenied({
+      metadata: expect.objectContaining({
+        action: "group_members_add",
+        unheldPermissions: ["admin.users.delete"],
+      }),
+    });
   });
 
-  it("403 when the group confers `superuser` to a non-superadmin", async () => {
+  it("403 when the group confers `superuser` to a non-superadmin, audited with who was named (F-58)", async () => {
     state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     const res = await members.POST(
@@ -450,6 +493,21 @@ describe("groups/[id]/members — org-membership constraint", () => {
       groupCtx,
     );
     expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(
+      expect.objectContaining({ error: "forbidden", message: "errors.forbidden" }),
+    );
+    expect(state.insertedValues).toEqual([]);
+    expectConferralDenied({
+      appUserId: null,
+      metadata: {
+        action: "group_members_add",
+        groupId: GROUP,
+        key: "marketing",
+        requestedAppUserIds: [USER],
+        requestedAppUserCount: 1,
+        unheldPermissions: ["superuser"],
+      },
+    });
   });
 
   it("200 when the group's conferred permissions are a subset the actor holds", async () => {
@@ -592,6 +650,18 @@ describe("users/[id]/groups", () => {
       userCtx,
     );
     expect(res.status).toBe(403);
+    expect(state.insertedValues).toEqual([]);
+    // The user-centric twin names the user it resolved (F-58).
+    expectConferralDenied({
+      appUserId: "u-target",
+      email: "t@x.com",
+      metadata: {
+        action: "group_members_add",
+        groupId: GROUP,
+        key: "marketing",
+        unheldPermissions: ["admin.users.delete"],
+      },
+    });
   });
 
   it("POST 201 when the group's conferred permissions are a subset the actor holds", async () => {
@@ -639,7 +709,7 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
   const rolesBody = { roleIds: [ROLE] };
   const membersBody = { appUserIds: [USER] };
 
-  it("roles DELETE → 403 when the detached role confers `superuser`", async () => {
+  it("roles DELETE → 403 when the detached role confers `superuser`, audited (F-58)", async () => {
     state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     const res = await roles.DELETE(
@@ -647,6 +717,17 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
       groupCtx,
     );
     expect(res.status).toBe(403);
+    expect(deletedTables).toEqual([]);
+    expectConferralDenied({
+      metadata: {
+        action: "group_roles_remove",
+        groupId: GROUP,
+        key: "marketing",
+        requestedRoleIds: [ROLE],
+        requestedRoleCount: 1,
+        unheldPermissions: ["superuser"],
+      },
+    });
   });
 
   it("roles DELETE → 403 when the detached role confers a permission the actor lacks", async () => {
@@ -679,7 +760,7 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("members DELETE → 403 when the group confers a permission the actor lacks", async () => {
+  it("members DELETE → 403 when the group confers a permission the actor lacks, audited (F-58)", async () => {
     state.conferredPermKeys = [{ key: "admin.users.delete" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     const res = await members.DELETE(
@@ -687,6 +768,17 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
       groupCtx,
     );
     expect(res.status).toBe(403);
+    expect(deletedTables).toEqual([]);
+    expectConferralDenied({
+      metadata: {
+        action: "group_members_remove",
+        groupId: GROUP,
+        key: "marketing",
+        requestedAppUserIds: [USER],
+        requestedAppUserCount: 1,
+        unheldPermissions: ["admin.users.delete"],
+      },
+    });
   });
 
   it("members DELETE → 200 for a subset group, and SUPERADMIN is never gated", async () => {
@@ -713,7 +805,7 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
     ).toBe(200);
   });
 
-  it("users/[id]/groups DELETE → 403 when the group confers a permission the actor lacks", async () => {
+  it("users/[id]/groups DELETE → 403 when the group confers a permission the actor lacks, audited (F-58)", async () => {
     state.conferredPermKeys = [{ key: "admin.users.delete" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
     const res = await userGroups.DELETE(
@@ -721,6 +813,17 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
       userCtx,
     );
     expect(res.status).toBe(403);
+    expect(deletedTables).toEqual([]);
+    expectConferralDenied({
+      appUserId: "u-target",
+      email: "t@x.com",
+      metadata: {
+        action: "group_members_remove",
+        groupId: GROUP,
+        key: "marketing",
+        unheldPermissions: ["admin.users.delete"],
+      },
+    });
   });
 
   it("group DELETE → 403 when the group confers a permission the actor lacks, deletes nothing, and audits the denial (F-11)", async () => {
@@ -827,5 +930,59 @@ describe("group revocation carries the conferral guard (REVOKE-1)", () => {
         )
       ).status,
     ).toBe(200);
+  });
+});
+
+/**
+ * F-58 / F-15: a refusal row goes into an append-only table on a request the
+ * caller composed, and these bodies take up to 500 ids. The row records the
+ * first `REFUSAL_LIST_MAX` (20) distinct ids the body named and the distinct
+ * count, so one refused request cannot park kilobytes of ids.
+ */
+describe("a conferral refusal records a bounded slice of the ids the body named", () => {
+  /** 499 distinct well-formed ids, then the first again: 500 entries. */
+  const distinctIds = Array.from(
+    { length: 499 },
+    (_, i) => `${i.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`,
+  );
+  const body = [...distinctIds, distinctIds[0]!];
+
+  function refusalMetadata(): Record<string, unknown> {
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    const row = auditMock.mock.calls[0]![0] as { eventType: string; metadata: object };
+    expect(row.eventType).toBe("admin.permission.conferral_denied");
+    // A 500-id body recorded whole was about 19 KB.
+    expect(JSON.stringify(row.metadata).length).toBeLessThan(1_500);
+    return row.metadata as Record<string, unknown>;
+  }
+
+  it.each(["POST", "DELETE"] as const)("members %s", async (method) => {
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await members[method](
+      req(`groups/${GROUP}/members`, { method, body: { appUserIds: body } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(403);
+    expect(refusalMetadata()).toMatchObject({
+      requestedAppUserIds: distinctIds.slice(0, 20),
+      requestedAppUserCount: 499,
+    });
+  });
+
+  it.each(["POST", "DELETE"] as const)("roles %s", async (method) => {
+    // POST bundles only same-org roles that exist, so every id is one.
+    state.roles = distinctIds.map((id) => ({ id, organization_id: ORG_A }));
+    state.conferredPermKeys = [{ key: "superuser" }];
+    accessGetter.mockResolvedValue(orgAdmin(["admin.groups.assign"]));
+    const res = await roles[method](
+      req(`groups/${GROUP}/roles`, { method, body: { roleIds: body } }),
+      groupCtx,
+    );
+    expect(res.status).toBe(403);
+    expect(refusalMetadata()).toMatchObject({
+      requestedRoleIds: distinctIds.slice(0, 20),
+      requestedRoleCount: 499,
+    });
   });
 });

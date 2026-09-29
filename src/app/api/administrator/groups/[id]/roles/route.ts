@@ -12,6 +12,7 @@ import {
   conferrablePermissions,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
+import { boundedRequestList, refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -86,8 +87,8 @@ const idsSchema = z
  * not bundle a global or foreign-org role (404). A non-SUPERADMIN — or ANY
  * bearer credential, since scopes bound it (P1-1) — may bundle only roles
  * whose conferred permissions are a subset of their own conferrable set
- * (privilege escalation → 403, AUTHZ-3); this subsumes the old
- * `superuser`-marker check (review #138).
+ * (privilege escalation → 403 and an `admin.permission.conferral_denied` row,
+ * AUTHZ-3, F-58); this subsumes the old `superuser`-marker check (review #138).
  */
 export const POST = withAdminRoute(async function POST(request: NextRequest, ctx: RouteContext) {
   const guard = await requireAdminPermission(request, "admin.groups.assign");
@@ -143,12 +144,26 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // prevents an org admin from assembling a group that out-authorizes them.
   // Subsumes the old `superuser`-marker-only check.
   // A bearer credential is bounded by its scopes, not just its owner's
-  // permissions, and never takes the SUPERADMIN fast-path (P1-1).
+  // permissions, and never takes the SUPERADMIN fast-path (P1-1). A refusal is
+  // audited (F-58).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForRoles(roleIds);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      const requested = boundedRequestList(roleIds);
+      return refuseUnconferrable(guard, request, {
+        action: "group_roles_add",
+        organizationId: group.organization_id,
+        unheld,
+        metadata: {
+          groupId: id,
+          key: group.key,
+          requestedRoleIds: requested.ids,
+          requestedRoleCount: requested.count,
+        },
+      });
+    }
   }
 
   // Review #218: the row carries the org of both ends; the composite FKs
@@ -190,7 +205,8 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
  * hold `admin.groups.assign`.
  *
  * Carries the SAME AUTHZ-3 subset test as POST, measured against the REMOVED
- * roles (REVOKE-1 — 403 `forbidden`).
+ * roles (REVOKE-1 — 403 `forbidden` and an `admin.permission.conferral_denied`
+ * row, F-58).
  */
 export const DELETE = withAdminRoute(async function DELETE(
   request: NextRequest,
@@ -235,12 +251,26 @@ export const DELETE = withAdminRoute(async function DELETE(
   // never put it back, since AUTHZ-3 forbids conferring what you lack.
   // Measured against the roles named in the body, exactly as POST measures
   // them, so the two directions cannot drift. A bearer credential is bounded by
-  // its scopes and never takes the SUPERADMIN fast-path (P1-1).
+  // its scopes and never takes the SUPERADMIN fast-path (P1-1). A refusal is
+  // audited (F-58).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForRoles(parsed.data.roleIds);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      const requested = boundedRequestList(parsed.data.roleIds);
+      return refuseUnconferrable(guard, request, {
+        action: "group_roles_remove",
+        organizationId: group.organization_id,
+        unheld,
+        metadata: {
+          groupId: id,
+          key: group.key,
+          requestedRoleIds: requested.ids,
+          requestedRoleCount: requested.count,
+        },
+      });
+    }
   }
 
   // F-38: the audit used to record `parsed.data.roleIds` verbatim — duplicates

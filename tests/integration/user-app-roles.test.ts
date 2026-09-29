@@ -136,6 +136,26 @@ function jsonReq(body: unknown): NextRequest {
 const ctx = { params: Promise.resolve({ id: USER }) };
 const body = (organizationId: string) => ({ roleId: ROLE, organizationId });
 
+/**
+ * F-58: the refusal's row, filed under the assignment's org and naming the
+ * user, the role and the keys the actor could not confer. It is the only row.
+ */
+function expectConferralDenied(action: string, roleKey: string, unheld: string[]): void {
+  expect(auditMock).toHaveBeenCalledTimes(1);
+  expect(auditMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      eventType: "admin.permission.conferral_denied",
+      outcome: "denied",
+      actorBetterAuthUserId: "ba-actor",
+      appUserId: "u-target",
+      organizationId: ORG_A,
+      email: "target@x.com",
+      reason: "unheld_permissions",
+      metadata: { action, roleId: ROLE, roleKey, unheldPermissions: unheld },
+    }),
+  );
+}
+
 let GET: typeof Route.GET;
 let POST: typeof Route.POST;
 let DELETE: typeof Route.DELETE;
@@ -196,11 +216,12 @@ describe("POST /users/[id]/app-roles — assignment scoping", () => {
     expect(res.status).toBe(404);
   });
 
-  it("403 when a non-superadmin assigns a role granting `superuser`", async () => {
+  it("403 when a non-superadmin assigns a role granting `superuser`, audited (F-58)", async () => {
     state.conferredPermKeys = [{ key: "superuser" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
     const res = await POST(jsonReq(body(ORG_A)), ctx);
     expect(res.status).toBe(403);
+    expectConferralDenied("role_assign", "editor", ["superuser"]);
   });
 
   it("403 when a non-superadmin assigns a role conferring a permission they lack (AUTHZ-3)", async () => {
@@ -208,6 +229,7 @@ describe("POST /users/[id]/app-roles — assignment scoping", () => {
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
     const res = await POST(jsonReq(body(ORG_A)), ctx);
     expect(res.status).toBe(403);
+    expectConferralDenied("role_assign", "editor", ["admin.users.delete"]);
   });
 
   it("201 when the role's permissions are a subset the actor holds (AUTHZ-3)", async () => {
@@ -310,12 +332,15 @@ describe("DELETE /users/[id]/app-roles — conferral symmetry (REVOKE-1)", () =>
       expect.anything(),
       expect.anything(),
     );
+    // F-58: the attempt itself is on record, as the grant's refusal is.
+    expectConferralDenied("role_revoke", "superuser", ["superuser"]);
   });
 
   it("403 when an ORG ADMIN revokes a role conferring a permission they lack", async () => {
     state.conferredPermKeys = [{ key: "admin.users.delete" }];
     accessGetter.mockResolvedValue(orgAdmin(["admin.roles.assign"]));
     expect((await DELETE(jsonReq(body(ORG_A)), ctx)).status).toBe(403);
+    expectConferralDenied("role_revoke", "editor", ["admin.users.delete"]);
   });
 
   it("200 when the revoked role's permissions are a subset the actor holds", async () => {

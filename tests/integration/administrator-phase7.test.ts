@@ -402,7 +402,8 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.impersonation_failed",
-        outcome: "failure",
+        // F-58: a refusal is `denied`, which the explorer's denied filter finds.
+        outcome: "denied",
         reason: "privilege_escalation",
       }),
     );
@@ -439,7 +440,7 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.impersonation_failed",
-        outcome: "failure",
+        outcome: "denied",
         reason: "org_bound_credential",
       }),
     );
@@ -521,7 +522,7 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
     expect(auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "admin.user.impersonation_failed",
-        outcome: "failure",
+        outcome: "denied",
         reason: "privilege_escalation",
       }),
     );
@@ -593,7 +594,7 @@ describe("POST /api/administrator/users/[id]/impersonate", () => {
       .find((row) => row.reason === "privilege_escalation_in_shared_org");
     expect(refusal).toMatchObject({
       eventType: "admin.user.impersonation_failed",
-      outcome: "failure",
+      outcome: "denied",
       // A reason of its own: the union guard's `privilege_escalation` would
       // hide which of the two bounds fired.
       reason: "privilege_escalation_in_shared_org",

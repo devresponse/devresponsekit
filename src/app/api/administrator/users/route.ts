@@ -20,6 +20,7 @@ import {
   scopeOrganizationId,
 } from "@/lib/admin/access-scope.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import { auditUserAction } from "@/lib/admin/audit-helpers.server";
 import { createBetterAuthUser } from "@/lib/admin/auth-admin.server";
 import { isAuthEmailTakenError } from "@/lib/admin/auth-email-taken";
@@ -225,12 +226,27 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
 
   const input = parsed.data;
 
+  // Normalise email to lowercase for both the duplicate check AND
+  // storage. Email comparison in `app_users` is already case-folded
+  // via `lower(primary_email)` below, so persisting the lowercased
+  // form keeps the stored value consistent and avoids surprising the
+  // SSO/OAuth lookup paths that compare case-sensitively.
+  const normalisedEmail = input.email.toLowerCase();
+
   // F-13: the Better Auth `admin` role is a platform role, and minting it is
   // SUPERADMIN-only (`POST /users/[id]/role`, same predicate). The plugin used
   // to check it here against the actor's own role; `createBetterAuthUser` now
-  // runs as a trusted server call, so this route is the only check.
+  // runs as a trusted server call, so this route is the only check. The
+  // refusal is audited, as on the set-role route, under that route's event
+  // and with the address, as the `create_denied` refusals below (F-58).
   if (input.role === "admin" && !hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request);
+    return refuseWithoutCrossOrgReach(
+      guard,
+      request,
+      "user_create",
+      { role: "admin" },
+      normalisedEmail,
+    );
   }
 
   // The new user joins the org a confined caller acts in (`insertCreatedUser`).
@@ -242,13 +258,6 @@ export const POST = withAdminRoute(async function POST(request: NextRequest) {
   if (!scope) {
     return adminErrorResponse("forbidden", 403, request);
   }
-
-  // Normalise email to lowercase for both the duplicate check AND
-  // storage. Email comparison in `app_users` is already case-folded
-  // via `lower(primary_email)` below, so persisting the lowercased
-  // form keeps the stored value consistent and avoids surprising the
-  // SSO/OAuth lookup paths that compare case-sensitively.
-  const normalisedEmail = input.email.toLowerCase();
 
   // F-480: the enrolment is a membership add (and, for `active`, an approval),
   // so a confined caller needs those permissions as well. Checked before the

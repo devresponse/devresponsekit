@@ -21,6 +21,7 @@ import {
   type BanSnapshot,
 } from "@/lib/admin/auth-admin.server";
 import { mustUseRestore, USE_RESTORE_ERROR } from "@/lib/admin/deactivated-user";
+import { SHARED_TARGET_REASON, USER_ACTION_DENIED_EVENT } from "@/lib/admin/refusals.server";
 import { targetOutranksActor } from "@/lib/admin/user-target.server";
 import { performAdminStatusChange } from "@/lib/admin-status.server";
 import { revokeBearerCredentialsOf } from "@/lib/api-auth/credential-eviction.server";
@@ -86,12 +87,28 @@ export interface BulkUserActor {
  * Per-row guard for the account-global bulk actions (ban/unban/soft-delete/
  * restore): a non-SUPERADMIN may not act account-globally on a user shared
  * with other orgs (AUTHZ-2). Returns the refusal outcome, or null when allowed.
+ *
+ * F-58: a refused row is audited as the single-row routes audit it
+ * (`refuseSharedTarget`), and as the rank refusal below audits its rows: the
+ * batch's `admin.users.bulk_action` summary counts it as failed but names
+ * neither the user nor the rule.
  */
 async function refuseSharedAccountGlobal(
+  action: BulkUserAction,
   target: BulkUserTarget,
   actor: BulkUserActor,
 ): Promise<BulkUserOutcome | null> {
   if (await requiresSuperadminForSharedTarget(actor.scope, target.appUserId)) {
+    await auditUserAction(USER_ACTION_DENIED_EVENT, "denied", {
+      request: actor.request,
+      actorBetterAuthUserId: actor.betterAuthUserId,
+      appUserId: target.appUserId,
+      organizationId: scopeOrganizationId(actor.scope),
+      email: target.primaryEmail,
+      requestId: actor.requestId ?? null,
+      reason: SHARED_TARGET_REASON,
+      metadata: { action, targetBetterAuthUserId: target.betterAuthUserId, bulk: true },
+    });
     return { ok: false, appUserId: target.appUserId, error: "forbidden_shared_target" };
   }
   return null;
@@ -269,7 +286,7 @@ async function performBan(
   if (!options.reason) {
     return { ok: false, appUserId: target.appUserId, error: "reason_required" };
   }
-  const refused = await refuseSharedAccountGlobal(target, actor);
+  const refused = await refuseSharedAccountGlobal("ban", target, actor);
   if (refused) return refused;
   let previousBan: BanSnapshot | null;
   try {
@@ -321,7 +338,7 @@ async function performUnban(
   target: BulkUserTarget,
   actor: BulkUserActor,
 ): Promise<BulkUserOutcome> {
-  const refused = await refuseSharedAccountGlobal(target, actor);
+  const refused = await refuseSharedAccountGlobal("unban", target, actor);
   if (refused) return refused;
   try {
     await unbanBetterAuthUser(target.betterAuthUserId);
@@ -534,7 +551,7 @@ async function performSoftDelete(
   actor: BulkUserActor,
   options: BulkUserOptions,
 ): Promise<BulkUserOutcome> {
-  const refused = await refuseSharedAccountGlobal(target, actor);
+  const refused = await refuseSharedAccountGlobal("soft_delete", target, actor);
   if (refused) return refused;
   const reason = options.reason ?? null;
   // A database read, so outside the ban's `auth_ban_failed` handling: it fails
@@ -713,7 +730,7 @@ async function performRestore(
   target: BulkUserTarget,
   actor: BulkUserActor,
 ): Promise<BulkUserOutcome> {
-  const refused = await refuseSharedAccountGlobal(target, actor);
+  const refused = await refuseSharedAccountGlobal("restore", target, actor);
   if (refused) return refused;
   // F-56: restore reverses a soft-delete and nothing else, as on the single-row
   // route (409 `not_deactivated`). Applied to any other account it moved the

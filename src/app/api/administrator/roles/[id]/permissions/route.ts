@@ -20,6 +20,7 @@ import {
   conferrablePermissions,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
+import { refuseUnconferrable, type RefusingGuard } from "@/lib/admin/refusals.server";
 import { isUuid } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -118,6 +119,41 @@ function appliedKeys(
 }
 
 /**
+ * F-58: audit the AUTHZ-3 / REVOKE-1 refusal and return its 403. The subset
+ * test measures the raw requested keys, so a key the catalog does not know is
+ * refused (see DELETE), but the row records only the refused keys the catalog
+ * knows, and how many others the body named. `ids` are caller-chosen strings,
+ * up to 500 of 120 characters, and this table is append-only: recorded
+ * verbatim, one refused request parked about 60 KB of the caller's text in it
+ * (F-15). The success row records only catalog-resolved keys too (F-38).
+ */
+async function refuseUnheldKeys(
+  guard: RefusingGuard,
+  request: NextRequest,
+  role: { id: string; organization_id: string | null; key: string },
+  action: string,
+  unheld: string[],
+): Promise<NextResponse> {
+  const known = await db
+    .selectFrom("app_permissions")
+    .select("key")
+    .where("key", "in", unheld)
+    .execute();
+  const knownKeys = new Set(known.map((r) => r.key));
+  const recorded = unheld.filter((key) => knownKeys.has(key));
+  return refuseUnconferrable(guard, request, {
+    action,
+    organizationId: role.organization_id,
+    unheld: recorded,
+    metadata: {
+      roleId: role.id,
+      key: role.key,
+      unknownPermissionKeyCount: unheld.length - recorded.length,
+    },
+  });
+}
+
+/**
  * POST /api/administrator/roles/[id]/permissions
  *
  * Attaches the given permission keys to the role. Body: `{ ids: string[] }`.
@@ -168,11 +204,13 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // (subsumed here, since it is never in a non-superadmin's held set) — and
   // then assign that role to themselves. A bearer credential is bounded by its
   // scopes, not just its owner's permissions, and never takes the SUPERADMIN
-  // fast-path (P1-1).
+  // fast-path (P1-1). A refusal is audited (F-58, `refuseUnheldKeys`).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, parsed.data.ids);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      return refuseUnheldKeys(guard, request, role, "role_permissions_add", unheld);
+    }
   }
 
   // Resolve key -> permission_id. Keys not in the catalog are dropped.
@@ -284,11 +322,13 @@ export const DELETE = withAdminRoute(async function DELETE(
   // key; measuring against the catalog-resolved set instead would restore the
   // no-op but break the symmetry this guard exists to hold, so it stays
   // fail-closed. A client replaying a permission key retired from the catalog
-  // must drop it from the request.
+  // must drop it from the request. A refusal is audited like POST's (F-58).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, parsed.data.ids);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      return refuseUnheldKeys(guard, request, role, "role_permissions_remove", unheld);
+    }
   }
 
   const permRows = await db

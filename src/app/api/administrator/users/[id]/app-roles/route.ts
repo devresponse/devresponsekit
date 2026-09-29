@@ -21,6 +21,7 @@ import {
   conferrablePermissions,
   unheldPermissionKeys,
 } from "@/lib/admin/grantable-permissions.server";
+import { refuseUnconferrable } from "@/lib/admin/refusals.server";
 import { isResolvedUserResponse, resolveTargetUser } from "@/lib/admin/user-target.server";
 import { withAdminRoute } from "@/lib/route-handler.server";
 
@@ -166,12 +167,22 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
   // they could grant a user (including themselves) authority they lack. This
   // subsumes the old `superuser`-marker-only check.
   // A bearer credential is bounded by its scopes, not just its owner's
-  // permissions, and never takes the SUPERADMIN fast-path (P1-1).
+  // permissions, and never takes the SUPERADMIN fast-path (P1-1). A refusal is
+  // audited under the assignment's org (F-58, F-32).
   if (!(isSuperadmin(guard.access) && guard.grantedScopes === null)) {
     const conferred = await permissionKeysForRoles([role.id]);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      return refuseUnconferrable(guard, request, {
+        action: "role_assign",
+        organizationId: parsed.data.organizationId,
+        unheld,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        metadata: { roleId: role.id, roleKey: role.key },
+      });
+    }
   }
 
   await db.transaction().execute(async (trx) => {
@@ -272,7 +283,8 @@ export const DELETE = withAdminRoute(async function DELETE(
   // subset of what they could themselves confer. A bearer credential is bounded
   // by its scopes and never takes the SUPERADMIN fast-path (P1-1), identically
   // to POST above. A role that no longer exists confers nothing and the delete
-  // below is a no-op, so the guard has nothing to measure.
+  // below is a no-op, so the guard has nothing to measure. A refusal is audited
+  // like POST's (F-58).
   //
   // Accepted blast radius (review #444): the test measures the FULL set the
   // revoked role confers, so an org admin holding `admin.roles.assign` can no
@@ -287,7 +299,16 @@ export const DELETE = withAdminRoute(async function DELETE(
     const conferred = await permissionKeysForRoles([role.id]);
     const conferrable = conferrablePermissions(guard.access.permissions, guard.grantedScopes);
     const unheld = unheldPermissionKeys(conferrable, conferred);
-    if (unheld.length > 0) return adminErrorResponse("forbidden", 403, request);
+    if (unheld.length > 0) {
+      return refuseUnconferrable(guard, request, {
+        action: "role_revoke",
+        organizationId: parsed.data.organizationId,
+        unheld,
+        appUserId: target.appUserId,
+        email: target.primaryEmail,
+        metadata: { roleId: role.id, roleKey: role.key },
+      });
+    }
   }
 
   // REVOKE-2: a SUPERADMIN passes the guard above by construction, so this is

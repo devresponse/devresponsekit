@@ -140,6 +140,19 @@ describe("POST /api/administrator/users/[id]/role", () => {
     // The role was never set, and the target was never even resolved.
     expect(authSetRole).not.toHaveBeenCalled();
     expect(dbMock).not.toHaveBeenCalled();
+    // F-58: the attempt to mint a platform admin is on record, under the
+    // actor's org, naming the requested id without resolving it.
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "administrator.access.denied",
+        outcome: "denied",
+        actorBetterAuthUserId: "ba-1",
+        organizationId: "o-1",
+        reason: "cross_org_reach_required",
+        metadata: { action: "user_role_set", requestedTargetId: TARGET_ID },
+      }),
+    );
   });
 
   it("rejects an invalid id with 400 (superadmin)", async () => {

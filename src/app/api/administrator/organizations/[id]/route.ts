@@ -11,6 +11,7 @@ import {
 } from "@/lib/admin/orgs.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseWithoutCrossOrgReach } from "@/lib/admin/refusals.server";
 import {
   canAccessOrg,
   hasCrossOrgReach,
@@ -122,7 +123,7 @@ export const PATCH = withAdminRoute(async function PATCH(
   // credential never takes the SUPERADMIN bypass on a platform-wide action,
   // even when its owner is a global superuser.
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+    return refuseWithoutCrossOrgReach(guard, request, "organization_update");
   }
 
   const { id } = await context.params;
@@ -293,7 +294,7 @@ export const DELETE = withAdminRoute(async function DELETE(
   // credential never takes the SUPERADMIN bypass on a platform-wide action,
   // even when its owner is a global superuser.
   if (!hasCrossOrgReach(guard.access)) {
-    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+    return refuseWithoutCrossOrgReach(guard, request, "organization_delete");
   }
 
   const { id } = await context.params;

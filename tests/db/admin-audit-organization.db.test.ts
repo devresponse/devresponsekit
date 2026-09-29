@@ -167,6 +167,7 @@ interface AuditRow {
   organization_id: string | null;
   app_user_id: string | null;
   actor_better_auth_user_id: string | null;
+  reason?: string | null;
   metadata?: unknown;
 }
 
@@ -179,6 +180,7 @@ async function rowsBy(actorBa: string, eventType?: string): Promise<AuditRow[]> 
       "organization_id",
       "app_user_id",
       "actor_better_auth_user_id",
+      "reason",
       "metadata",
     ])
     .where("actor_better_auth_user_id", "=", actorBa);
@@ -407,7 +409,8 @@ describe("F-32: a delegated admin's actions are stamped with their org", () => {
   it("stamps the acting org on user actions and the resource's org on key, app and export events", async () => {
     as("adminA");
     // F-61: the shared member's profile is account-global, so SUPERADMIN-only
-    // (AUTHZ-2, the real shared-target lookup). Refused with no write and no row.
+    // (AUTHZ-2, the real shared-target lookup). Refused with no write; since
+    // F-58 the refusal itself leaves a denied row, filed like the rest.
     const refused = await userRoute.PATCH(
       request("PATCH", `/api/administrator/users/${ids.member}`, { preferredLocale: "fr" }),
       params({ id: ids.member }),
@@ -456,6 +459,7 @@ describe("F-32: a delegated admin's actions are stamped with their org", () => {
       "admin.api_key.revoked",
       "admin.app.updated",
       "admin.export.completed",
+      "admin.user.action_denied",
       "admin.user.role_assigned",
       "admin.user.updated",
     ]);
@@ -464,6 +468,13 @@ describe("F-32: a delegated admin's actions are stamped with their org", () => {
     }
     expect(byType["admin.user.updated"]!.app_user_id).toBe(ids.localMember);
     expect(byType["admin.user.role_assigned"]!.app_user_id).toBe(ids.member);
+    // F-58: the refused edit, against Postgres: the shared member, the rule and
+    // the action, in org A.
+    expect(byType["admin.user.action_denied"]).toMatchObject({
+      app_user_id: ids.member,
+      reason: "shared_target_requires_superadmin",
+      metadata: expect.objectContaining({ action: "update" }),
+    });
     // Exactly one edit landed: the refused one wrote nothing.
     expect(rows.filter((r) => r.event_type === "admin.user.updated")).toHaveLength(1);
     const member = await db
@@ -479,6 +490,7 @@ describe("F-32: a delegated admin's actions are stamped with their org", () => {
       "admin.api_key.revoked",
       "admin.app.updated",
       "admin.export.completed",
+      "admin.user.action_denied",
       "admin.user.role_assigned",
       "admin.user.updated",
     ];
@@ -492,6 +504,7 @@ describe("F-32: a delegated admin's actions are stamped with their org", () => {
     );
     expect(tab.map((r) => r.event_type).sort()).toEqual([
       "admin.api_key.revoked",
+      "admin.user.action_denied",
       "admin.user.role_assigned",
     ]);
     const localTab = (await userAuditTab("adminA", ids.localMember)).filter(

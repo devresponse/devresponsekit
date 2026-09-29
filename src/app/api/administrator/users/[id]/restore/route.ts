@@ -12,6 +12,7 @@ import { mustUseRestore } from "@/lib/admin/deactivated-user";
 import { adminErrorResponse, adminJsonResponse } from "@/lib/admin/errors.server";
 import { isAdminPermissionDenial, requireAdminPermission } from "@/lib/admin/permissions.server";
 import { DEFAULT_ADMIN_MUTATION_LIMIT, enforceRateLimit } from "@/lib/admin/rate-limit.server";
+import { refuseSharedTarget } from "@/lib/admin/refusals.server";
 import { recordedPriorBan, restoreSnapshottedMemberships } from "@/lib/admin/user-actions.server";
 import {
   isResolvedUserResponse,
@@ -76,7 +77,7 @@ export const POST = withAdminRoute(async function POST(request: NextRequest, ctx
     return adminErrorResponse("not_found", 404, request, { requestId: guard.requestId });
   }
   if (await requiresSuperadminForSharedTarget(scope, target.appUserId)) {
-    return adminErrorResponse("forbidden", 403, request, { requestId: guard.requestId });
+    return refuseSharedTarget(guard, target, request, "restore");
   }
 
   if (!mustUseRestore(target)) {
